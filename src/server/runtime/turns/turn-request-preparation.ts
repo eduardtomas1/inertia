@@ -33,6 +33,7 @@ import {
   sharesInterruptionEndpoint,
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
+import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
 import type {
   ActiveTurn,
   QueuedTurn,
@@ -94,12 +95,17 @@ export function prepareTurnRequest(
   }
 }
 
-function readOnlyWatcherPolicy(
+interface WatcherTurnPolicy {
+  wakeId: string | null;
+  readOnly?: ReadOnlyWatcherTurn;
+}
+
+function watcherTurnPolicy(
   store: RuntimeStore,
   conversation: Conversation,
   harnessId: string,
   request: QueueTurnRequest,
-): ReadOnlyWatcherTurn | undefined {
+): WatcherTurnPolicy | undefined {
   const policy = store.watcherLinks.policyForConversation(conversation.id);
   if (!policy || policy.status === "detached") return undefined;
   try {
@@ -109,12 +115,22 @@ function readOnlyWatcherPolicy(
       harnessId,
     });
   } catch (error) {
-    throw new RuntimeRequestError(error instanceof Error ? error.message : "A watcher stays read-only.");
+    throw new RuntimeRequestError(error instanceof Error ? error.message : "This watcher stays read-only.");
   }
   if (request.goalStart !== undefined || request.watcherNote !== undefined) {
-    throw new RuntimeRequestError("A watcher chat only runs read-only checks.");
+    throw new RuntimeRequestError("A watcher chat can't start goals or receive watcher notes.");
   }
-  return { linkId: policy.linkId, wakeId: request.authorizedWatcherWakeId ?? null, deniedApprovals: 0 };
+  const wakeId = request.authorizedWatcherWakeId ?? null;
+  if (!policy.readOnly) return { wakeId };
+  return {
+    wakeId,
+    readOnly: {
+      linkId: policy.linkId,
+      wakeId,
+      deniedApprovals: 0,
+      editsGatedBeforeStart: watcherHarnessProfile(harnessId).editsGatedBeforeStart,
+    },
+  };
 }
 
 function retireUsageLimitSnooze(
@@ -166,7 +182,8 @@ export function resolveTurnRequest(
     : routeSelection;
   const route = dependencies.providers.resolveModelRoute(routeSelection);
   dependencies.store.assertConversationProvider(conversation.id, route.providerId);
-  const readOnlyWatcher = readOnlyWatcherPolicy(dependencies.store, conversation, route.harnessId, request);
+  const watcherTurn = watcherTurnPolicy(dependencies.store, conversation, route.harnessId, request);
+  const readOnlyWatcher = watcherTurn?.readOnly;
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const capabilityContract = exactProvider?.capabilityContract;
   const hostToolBridgeAttested = capabilityContract !== undefined
@@ -178,12 +195,17 @@ export function resolveTurnRequest(
       harnessId: route.harnessId,
       backendProfile: route.backendProfile,
     });
-  const capabilityInstructions = hostToolBridgeAttested && !readOnlyWatcher
+  const capabilityInstructions = hostToolBridgeAttested && !watcherTurn
     ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
     : [];
-  const watcherInstructions = readOnlyWatcher?.wakeId === null
-    ? dependencies.hooks.watcherInstructionsForTurn?.({ conversation, hostTools: hostToolBridgeAttested }) ?? []
-    : [];
+  const roleInstructions = request.systemInstructions
+    ?? (watcherTurn?.wakeId === null
+      ? dependencies.hooks.watcherInstructionsForTurn?.({ conversation, hostTools: hostToolBridgeAttested }) ?? []
+      : []);
+  const systemInstruction = roleInstructions.length > 0 && watcherHarnessProfile(route.harnessId).systemInstruction
+    ? roleInstructions.map(({ label, text }) => `[${label}]\n${text}`).join("\n\n")
+    : undefined;
+  const watcherInstructions = systemInstruction === undefined ? roleInstructions : [];
 
   const exactModel = routeSelection.modelId === "provider-default"
     ? exactProvider?.models.find(({ isDefault }) => isDefault)
@@ -435,6 +457,7 @@ export function resolveTurnRequest(
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
     ...(readOnlyWatcher ? { readOnlyProfile: "watcher" as const } : {}),
+    ...(systemInstruction !== undefined ? { systemInstruction } : {}),
   } satisfies ActiveTurn["providerInput"];
   const harnessId = dependencies.providers.harnessIdFor(providerInput);
   if (harnessId !== route.harnessId) {

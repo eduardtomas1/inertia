@@ -167,9 +167,10 @@ function startCodexRun(
       goalContinuationExpected:
         options.input.goalContinuationExpected === true,
       ...(options.hostTools ? { hostTools: options.hostTools } : {}),
-      planMode: options.input.interactionMode === "plan",
+      planMode: options.input.interactionMode === "plan" && options.input.readOnlyProfile !== "watcher",
       access: options.input.access,
       ...(options.input.readOnlyProfile ? { readOnlyProfile: options.input.readOnlyProfile } : {}),
+      ...(options.input.systemInstruction ? { developerInstructions: options.input.systemInstruction } : {}),
       onText: emitter.text,
       onTextBoundary: emitter.textBoundary,
       onActivity: emitter.activity,
@@ -201,6 +202,7 @@ function startCodexRun(
         type: "plan",
         explanation: text,
         steps: planStepsReported ? [] : markdownPlanSteps(text, MAX_CODEX_PLAN_STEP_CHARS),
+        handoff: true,
       }),
       onGoalUpdated: emitter.goalUpdated,
       onGoalCleared: emitter.goalCleared,
@@ -520,6 +522,7 @@ function startCodexCompaction(
         const accessPolicy = codexAccessPolicy({
           access: options.input.access,
           planMode: options.input.interactionMode === "plan",
+          ...(options.input.readOnlyProfile ? { readOnlyProfile: options.input.readOnlyProfile } : {}),
         });
         const threadConfig: JsonObject = {
           cwd: options.input.cwd,

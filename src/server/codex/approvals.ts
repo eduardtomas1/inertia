@@ -31,11 +31,12 @@ export interface ParsedCodexApprovalRequest {
 export function codexAutoApprovesFileChange(
   method: string,
   params: JsonObject,
-  options: { access: "supervised" | "auto-edit" | "full"; planMode: boolean },
+  options: { access: "supervised" | "auto-edit" | "full"; planMode: boolean; readOnlyProfile?: "watcher" },
 ): boolean {
   return method === "item/fileChange/requestApproval"
     && options.access === "auto-edit"
     && !options.planMode
+    && options.readOnlyProfile !== "watcher"
     && (params.grantRoot === undefined || params.grantRoot === null);
 }
 

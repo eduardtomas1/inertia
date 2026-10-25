@@ -409,7 +409,7 @@ describe("TurnProviderEventProjector read-only watcher turns", () => {
     const active = {
       conversation: { id: "conversation-1" },
       turn: { id: "turn-1", runId: "run-1", providerId: "codex" },
-      ...(readOnly ? { readOnlyWatcher: { linkId: "link-1", wakeId: "wake-1", deniedApprovals: 0 } } : {}),
+      ...(readOnly ? { readOnlyWatcher: { linkId: "link-1", wakeId: "wake-1", deniedApprovals: 0, editsGatedBeforeStart: false } } : {}),
     } as ActiveTurn;
     const identity = { providerId: "codex" as const, conversationId: "conversation-1", runId: "run-1", turnId: "turn-1" };
     const activity = (kind: ProviderActivityEvent["kind"], label: string, phase: ProviderActivityEvent["phase"] = "started") => {

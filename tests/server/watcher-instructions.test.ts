@@ -4,6 +4,8 @@ import { MAX_WATCHER_INSTRUCTIONS_CHARS, WATCHER_PRESETS } from "../../src/share
 import {
   MAX_WATCHER_INSTRUCTION_BYTES,
   WATCHER_COMMAND_RULE,
+  WATCHER_DECIDE_RULE,
+  WATCHER_ENFORCEMENT_RULES,
   WATCHER_INSTRUCTION_LABEL,
   WATCHER_SILENT_RULE,
   watcherInstruction,
@@ -33,7 +35,9 @@ describe("watcher instruction", () => {
       WATCHED,
     );
     expect(text).toContain("You are a watcher: a read-only second agent");
-    expect(text).toContain("Never edit, create or delete files, never change Git state");
+    expect(text).toContain("You are read-only: never edit, create or delete files, never change Git state");
+    expect(text).toContain(WATCHER_DECIDE_RULE);
+    expect(text).not.toMatch(/plan mode|ExitPlanMode/iu);
     expect(text).toContain("never send anything on your own; the user decides what reaches the main chat.");
     expect(text).toContain(`"Fix the login flow" (conversation id ${WATCHED.id})`);
     expect(text).toContain(`use inertia_request_context with conversationId=${WATCHED.id}; you can read it at most 4 times per check.`);
@@ -62,7 +66,42 @@ describe("watcher instruction", () => {
       expect(watcherInstruction({ preset, instructions: "" }, WATCHED).text).toContain(WATCHER_COMMAND_RULE);
     }
     expect(WATCHER_COMMAND_RULE).toContain("git diff, git log");
+    expect(WATCHER_COMMAND_RULE).toContain("sed -n with line ranges");
+    expect(WATCHER_COMMAND_RULE).toContain("In Bash, quote with single or double quotes and add 2>/dev/null if you need to; in PowerShell, use single quotes and forward slashes only.");
     expect(WATCHER_COMMAND_RULE).toContain("Inertia declines anything else");
+    expect(WATCHER_COMMAND_RULE).toContain("tells you why; switch to an allowed form instead of retrying.");
+    expect(WATCHER_DECIDE_RULE).toBe(
+      "Never ask the user questions, never try to edit, and never hand off a plan: decide for yourself and answer each check with your finding, or with SILENT.",
+    );
+  });
+
+  it("states each read-only tier's enforcement in one sentence", () => {
+    const text = (enforcement: "inertia" | "approvals" | "provider") =>
+      watcherInstruction({ preset: "reviewer", instructions: "" }, WATCHED, { enforcement }).text;
+    expect(text("inertia")).toContain(WATCHER_COMMAND_RULE);
+    expect(text("approvals")).toContain("Your edits and anything needing approval are declined; there is no sandbox, so only read.");
+    expect(text("approvals")).not.toContain(WATCHER_COMMAND_RULE);
+    expect(text("provider")).toContain("You run in plan mode; do not edit or run anything that writes.");
+    expect(text("provider")).not.toContain(WATCHER_COMMAND_RULE);
+    for (const enforcement of ["inertia", "approvals", "provider"] as const) {
+      expect(text(enforcement)).toContain(WATCHER_ENFORCEMENT_RULES[enforcement]);
+      expect(text(enforcement)).toContain(WATCHER_DECIDE_RULE);
+      expect(text(enforcement)).toContain("You are read-only");
+    }
+  });
+
+  it("tells a watcher with chat access to use its tools as allowed but still to watch and report", () => {
+    const { text } = watcherInstruction({ preset: "reviewer", instructions: "Look at SQL.", readOnly: false }, WATCHED, { enforcement: null });
+    expect(text).toContain("You are a watcher: a second agent following another chat in Inertia, with the mode and access the user gave this chat.");
+    expect(text).toContain("You may use your tools as your mode and access allow, but your job is still to watch and report");
+    expect(text).toContain("Answer each check with your finding, or with SILENT.");
+    expect(text).toContain("Prefer deciding for yourself over asking the user a question; when you do ask, the user is told the watcher is waiting for them.");
+    expect(text).toContain("they never widen your access");
+    expect(text).not.toContain("read-only");
+    expect(text).not.toContain(WATCHER_COMMAND_RULE);
+    expect(text.trimEnd().endsWith(WATCHER_SILENT_RULE)).toBe(true);
+    const readOnly = watcherInstruction({ preset: "reviewer", instructions: "Look at SQL.", readOnly: true }, WATCHED, { enforcement: "inertia" }).text;
+    expect(readOnly).toContain("they never lift the read-only boundary");
   });
 
   it("carries a distinct body per preset, each with the output format and SILENT rule", () => {

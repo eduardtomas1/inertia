@@ -4,10 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHarnessRegistry } from "../../src/server/provider/agent-harness-registry";
 import { createCodexAppServerHarness } from "../../src/server/provider/codex-app-server-harness";
 import type { AgentHarnessStartOptions } from "../../src/server/provider/agent-harness";
-import { providerRunTerminal } from "../../src/server/provider/contracts";
+import { ProviderRunRefusedError, providerRunTerminal } from "../../src/server/provider/contracts";
 import { ProviderMetadataCache } from "../../src/server/provider/metadata";
 import { ProviderRunCoordinator } from "../../src/server/provider/run-coordinator";
 import { ProviderInstallationAdmissionError } from "../../src/server/provider/installation-lease";
+import { ProviderManager } from "../../src/server/providers";
+import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../src/shared/provider-maintenance";
 import { nativeProviderRunInput } from "./model-route-fixture";
 import {
   cleanupTurnControllerTestDirectories,
@@ -262,6 +264,88 @@ describe("provider admission cleanup proof", () => {
     } finally {
       runtime.store.close();
     }
+  });
+
+  it("settles the pre-persisted turn owner when provider maintenance recovery blocks the launch", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    const value = fixture();
+    let recoveryPending = true;
+    const manager = ProviderManager.createForTests(
+      { cancelGraceMs: 1, providerRecoveryPending: () => recoveryPending },
+      new AgentHarnessRegistry([{ ...createCodexAppServerHarness(), start: value.start }]),
+    );
+    vi.spyOn(runtime.provider, "run").mockImplementation((input, callbacks) => {
+      expect(runtime.store.providerRunOwnership.forConversation(input.conversationId))
+        .toHaveLength(1);
+      return manager.run(input, callbacks);
+    });
+    vi.spyOn(runtime.provider, "cancel").mockImplementation(() =>
+      manager.cancel(runtime.conversationId));
+    vi.spyOn(runtime.provider, "isRunning").mockImplementation((id) =>
+      manager.isRunning(id));
+    const stopOwned = vi.spyOn(runtime.provider, "stopOwned").mockImplementation((id, owner) =>
+      manager.stopOwned(id, owner));
+
+    try {
+      const first = runtime.controller.queue({
+        conversationId: runtime.conversationId,
+        content: "Refuse this launch while provider recovery is unresolved.",
+      });
+      expect(runtime.controller.start(first.turn.id)).toBe(false);
+      await flushTurnControllerTestPromises();
+
+      expect(value.start).not.toHaveBeenCalled();
+      expect(stopOwned).toHaveBeenCalled();
+      await expect(stopOwned.mock.results[0]!.value).resolves.toBe("settled");
+      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
+        status: "failed",
+        runState: { state: "failed" },
+        terminalReason: "turn-start-failed",
+      });
+      expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId)).toEqual([]);
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+      expect(runtime.events).toContainEqual(expect.objectContaining({
+        type: "agent.failed",
+        message: PROVIDER_MAINTENANCE_RECOVERY_MESSAGE,
+      }));
+
+      recoveryPending = false;
+      const retry = runtime.controller.queue({
+        conversationId: runtime.conversationId,
+        content: "Retry once recovery has completed.",
+      });
+      expect(runtime.controller.start(retry.turn.id)).toBe(true);
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(retry.turn.id).status).toBe("completed");
+      expect(value.start).toHaveBeenCalledOnce();
+    } finally {
+      runtime.store.close();
+      await manager.disposeAll();
+    }
+  });
+
+  it("refuses a blocked compaction through the same refusal receipt", async () => {
+    const value = fixture();
+    const manager = ProviderManager.createForTests(
+      { cancelGraceMs: 1, providerRecoveryPending: (providerId) => providerId === "codex" },
+      new AgentHarnessRegistry([{ ...createCodexAppServerHarness(), start: value.start }]),
+    );
+    const owner = { ...value.input, sessionId: "thread-1" };
+    let refused: unknown;
+    try {
+      void manager.compact(owner, "Keep the plan");
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toBeInstanceOf(ProviderRunRefusedError);
+    expect(refused).toMatchObject({
+      code: "invalid_input",
+      message: PROVIDER_MAINTENANCE_RECOVERY_MESSAGE,
+      receipted: true,
+    });
+    expect(value.start).not.toHaveBeenCalled();
+    await expect(manager.stopOwned(owner.conversationId, owner)).resolves.toBe("settled");
+    await manager.disposeAll();
   });
 
   it("also settles an explicit custom-model refusal without acquiring installation authority", async () => {

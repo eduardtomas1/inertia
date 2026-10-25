@@ -88,6 +88,7 @@ export function link(overrides: Partial<WatcherLinkView> = {}): WatcherLinkView 
     budgets: { ...DEFAULT_WATCHER_BUDGETS },
     privateConnect: "inherit",
     delivery: "manual",
+    readOnly: true,
     status: "watching",
     pauseReason: null,
     pauseDetail: null,

@@ -64,6 +64,7 @@ describe("watcher link coordinator", () => {
         worktreePath: f.watched.worktreePath,
         title: "Watcher · Scope guard · Fix the parser",
       });
+      expect(link.readOnly).toBe(true);
       expect(f.store.conversationTitleLocked(watcher.id)).toBe(true);
       expect(f.store.shellSnapshot().activeConversationId).not.toBe(watcher.id);
       expect(f.watcherEvents()).toContainEqual({ type: "watcher.link.updated", link: expect.objectContaining({ id: link.id }) });
@@ -76,7 +77,7 @@ describe("watcher link coordinator", () => {
   it("refuses scratch projects, archived chats, watchers, duplicates and unready or disallowed routes", async () => {
     const f = await createWatcherFixture();
     try {
-      await refused(f, { modelSelection: watcherTestSelection("cursor") }, "This agent can't run as a watcher.");
+      await refused(f, { modelSelection: { ...watcherTestSelection("codex"), harnessId: "codex-cli" } }, "can't run as a watcher");
       f.setProviderInfo(notReady("codex"));
       await refused(f, {}, "Sign in to continue.");
       f.setProviderInfo(() => WATCHER_TEST_PROVIDERS);
@@ -97,6 +98,73 @@ describe("watcher link coordinator", () => {
       expect(f.store.watcherLinks.active()).toHaveLength(1);
     } finally {
       await f.close();
+    }
+  });
+
+  it("attaches a read-only watcher by default and when asked, in Plan mode with Supervised access", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const implicit = await f.attach();
+      const second = f.store.createConversation(f.project.id, "Second chat", { modelSelection: watcherTestSelection("codex") });
+      const explicit = await f.attach({ watchedConversationId: second.id, readOnly: true });
+      await expect(f.attach({
+        linkId: implicit.id, readOnly: false, interactionMode: "build", accessMode: "full",
+      })).rejects.toThrow("This watcher already exists.");
+      await expect(f.attach({ linkId: implicit.id })).resolves.toMatchObject({ id: implicit.id, readOnly: true });
+      for (const link of [implicit, explicit]) {
+        expect(link.readOnly).toBe(true);
+        expect(f.store.conversation(link.watcherConversationId)).toMatchObject({ interactionMode: "plan", accessMode: "supervised" });
+        expect(f.store.watcherLinks.get(link.id)?.readOnly).toBe(true);
+      }
+      const third = f.store.createConversation(f.project.id, "Third chat", { modelSelection: watcherTestSelection("codex") });
+      await expect(f.command("watcher.attach", {
+        linkId: randomUUID(), watchedConversationId: third.id, modelSelection: watcherTestSelection("codex"), preset: "reviewer",
+        instructions: "", sharing: { ...DEFAULT_WATCHER_SHARING }, budgets: { ...DEFAULT_WATCHER_BUDGETS },
+        privateConnect: "inherit", initialReview: false, readOnly: true, interactionMode: "build", accessMode: "full",
+      })).rejects.toThrow("The watcher request was invalid.");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it.each([
+    ["codex", "build", "full"],
+    ["claude", "plan", "auto-edit"],
+    ["opencode", "build", "supervised"],
+    ["cursor", "build", "auto-edit"],
+    ["kimi", "plan", "supervised"],
+    ["antigravity", "build", "full"],
+  ] as const)("attaches a %s watcher with chat access in %s mode with %s access", async (providerId, interactionMode, accessMode) => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ modelSelection: watcherTestSelection(providerId), readOnly: false, interactionMode, accessMode });
+      expect(link.readOnly).toBe(false);
+      expect(f.store.conversation(link.watcherConversationId)).toMatchObject({ providerId, interactionMode, accessMode });
+      expect(f.store.watcherLinks.policyForConversation(link.watcherConversationId)).toMatchObject({ readOnly: false });
+      expect(f.watcherEvents()).toContainEqual({ type: "watcher.link.updated", link: expect.objectContaining({ id: link.id, readOnly: false }) });
+      const handler = createConversationCommandHandler({
+        store: f.store,
+        backendProfileController: { isExternalSelection: vi.fn(() => false) },
+      } as unknown as ConversationCommandDependencies);
+      await expect(handler({} as never, {
+        type: "conversation.update", requestId: randomUUID(),
+        payload: { conversationId: link.watcherConversationId, interactionMode: interactionMode === "plan" ? "build" : "plan" },
+      })).resolves.toBe("mutation");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("attaches a read-only watcher on every provider with a read-only tier", async () => {
+    for (const providerId of ["codex", "claude", "opencode", "cursor", "kimi", "antigravity"] as const) {
+      const f = await createWatcherFixture();
+      try {
+        const link = await f.attach({ modelSelection: watcherTestSelection(providerId) });
+        expect(link.readOnly).toBe(true);
+        expect(f.store.conversation(link.watcherConversationId)).toMatchObject({ providerId, interactionMode: "plan", accessMode: "supervised" });
+      } finally {
+        await f.close();
+      }
     }
   });
 

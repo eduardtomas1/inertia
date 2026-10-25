@@ -221,105 +221,167 @@ The official `antigravity-acp` server was not used: it can end a turn with
 
 ## Watcher harness gate
 
-A watcher is a read-only conversation linked to a watched chat (see
-[the user guide](user/watcher.md)). It may run only on a harness in the
-reviewed allowlist `WATCHER_HARNESS_IDS` in `src/shared/watcher.ts`, checked
-through `watcherHarnessAllowed`:
+A watcher is a conversation linked to a watched chat (see
+[the user guide](user/watcher.md)). It runs on a harness listed in
+`WATCHER_HARNESS_IDS` in `src/shared/watcher.ts`, checked through
+`watcherHarnessAllowed`; every current provider's native harness is listed.
+The person chooses its access when attaching it (`watcher.attach` payload
+`readOnly`, absent means read-only), and the choice is stored in
+`watcher_links.read_only` (schema 101, `PersistWatcherAccess`; links created
+before it stay read-only):
 
-| Harness | Read-only mechanism |
-| --- | --- |
-| `claude-agent-sdk` | `permissionMode: "plan"`, with `planModeInstructions` telling Claude to review directly and never write a plan file or call `ExitPlanMode`. Claude Code runs its own read-only tools without asking: Read, Grep and Glob inside the working directory, and the Bash commands its own classifier treats as read-only. Every other call, including Write, Edit, MultiEdit and NotebookEdit, reaches Inertia's approval broker. For a watcher turn the broker runs a Bash command that passes the read-only command allowlist below, and declines everything else. |
-| `codex-app-server` | Supervised maps to `approvalPolicy: "untrusted"` with the read-only sandbox. Codex runs its known-safe read commands inside that OS-enforced sandbox without network access; anything else surfaces as an approval, which is declined. Watcher threads, started or resumed, also disable the user's MCP servers, apps, plugins, hooks, subagents and web search through the thread's `config`. |
-| `opencode-sdk` | Plan mode with the run input `readOnlyProfile: "watcher"`, which `openCodePermissions` maps to the session ruleset `* deny`, then `read`, `glob`, `grep`, `list` and Inertia host tools `allow`, with `read` of `.env`, `*.env` and `*.env.*` denied after the read allow, since OpenCode's own default asks before reading them. The supervised ruleset alone ends in a `* ask` catch-all, so OpenCode would prompt for every read and the watcher would decline it. The profile also sets `bash` to `ask`. With the profile, reads run without a prompt. A shell command reaches OpenCode's permission request, whose metadata carries the full command text; Inertia answers `once` when that text passes the read-only command allowlist and declines it otherwise. Edit and every other native tool are denied by OpenCode itself, without an approval. OpenCode's own `bash` patterns are not used as the allowlist: OpenCode 1.19.2 matches each pattern against a command's text including its redirections, so a prefix rule such as `git diff *` would also allow `git diff > file`. |
+- **Read-only.** The watcher chat is created in Plan mode with Supervised
+  access, and turn preparation sends `readOnlyProfile: "watcher"`. How the
+  harness holds the watcher read-only is its tier,
+  `watcherReadOnlyEnforcement(harnessId)` over
+  `WATCHER_READ_ONLY_ENFORCEMENT`. A harness without a tier (`null`) can't be
+  attached read-only; the attach, the repository and every turn refuse it.
+- **Chat access.** The watcher chat is created with the requested interaction
+  mode and access mode (passed through `effectiveAccessMode`, so Supervised on
+  Antigravity becomes Auto-accept edits as for any chat). It is an ordinary
+  chat for `conversation.update`, mode, access, reasoning and fast mode;
+  only the harness must stay in the list. Its checks have no read-only
+  profile: approvals and questions become ordinary cards in the watcher
+  chat, and while one is pending the dock's live phase is `"approval"` or
+  `"question"`; checkpoints and
+  turn artifacts are taken as for any chat, the Git fingerprint guard is
+  skipped (guard state `"skipped"`) and write attempts are not counted.
+  Watcher notes and goal starts are refused in any watcher chat, and restart
+  continuation skips watcher chats.
 
-The gate is checked when a watcher is attached, when every watcher turn is
-prepared (including a message the user types into the watcher chat), and when
-`conversation.update` changes the watcher's model. The attach dialog offers
-only ready routes on these harnesses. A watcher can change its model only
-within the allowlist; its interaction mode and access mode cannot change while
-it is attached.
+| Harness | Tier | Read-only profile |
+| --- | --- | --- |
+| `claude-agent-sdk` | `inertia` | `permissionMode: "default"`, never `"plan"` and no `planModeInstructions`: Claude Code's own plan-mode wrapper tells the model to write a plan file and end with `ExitPlanMode` or `AskUserQuestion`, which a check must not do. Claude Code runs Read, Grep, Glob and LS inside the working directory without asking, and the few Bash commands it treats as read-only. Every other call reaches Inertia's permission broker, which decides it in `claude-watcher-permissions.ts`: Bash through the command allowlist with POSIX rules (Claude Code's Bash runs Git Bash on Windows), a `PowerShell` tool call with the Windows rules; Edit, Write, MultiEdit and NotebookEdit are declined as write attempts; `AskUserQuestion` is denied at once and not counted; `ExitPlanMode` (whose plan is still recorded), `EnterPlanMode`, Task, Agent, WebFetch, WebSearch, MCP and unknown tools are declined and not counted as writes; a routed read is allowed only inside the workspace's real path, and a Read, Grep or Glob whose path, Grep `glob` or `type`, or Glob pattern names an environment file is declined (a Grep or Glob that names no such file can still list or search one that ripgrep does not skip). |
+| `codex-app-server` | `inertia` | `approvalPolicy: "untrusted"` with the read-only sandbox and no network, forced by the profile whatever access the input names, and file changes are never auto-approved. No plan collaboration mode. Watcher threads, started or resumed, disable the user's MCP servers, apps, plugins, hooks, subagents, web search and `tools.experimental_request_user_input` through the thread's `config`. Codex runs its known-safe read commands in the sandbox; anything else is an approval, which is declined. |
+| `opencode-sdk` | `inertia` | The ordinary agent, not the native `plan` agent (which may edit `.opencode/plans` and call `plan_exit`), with the session ruleset `* deny`, `bash ask`, `read`, `glob`, `grep`, `list` and Inertia host tools `allow`, and `read` of `.env`, `*.env` and `*.env.*` denied. The question tool falls under `* deny`. A shell command reaches OpenCode's permission request with its full text; Inertia answers `once` when it passes the allowlist and declines it otherwise. OpenCode's own `bash` patterns are not used as the allowlist, because OpenCode 1.19.2 matches them against the text including redirections. |
+| `cursor-acp` | `approvals` | Cursor's native plan mode. Every permission request reaches Inertia, which declines it with ACP `reject_once`; edit, delete and move requests count as write attempts. `cursor/ask_question` is cancelled and `cursor/create_plan` answered `rejected` without counting, each with a status row in the watcher chat; the plan is recorded as a hand-off and becomes the finding when the reply only hands it off. An edit tool call announced as `pending` before its permission request does not stop the check; one reported `in_progress` does. |
+| `kimi-acp` | `approvals` | Kimi Code's native plan mode, with the same approval and edit handling. A question that arrives as a permission request is cancelled with a status row and not counted. A plan hand-off (`ExitPlanMode`) is recorded as a hand-off with the request's text first and then answered with its `plan_revise` reject option, with a status row and not counted. |
+| `antigravity-cli` | `provider` | `--mode plan`, never `--mode accept-edits` or `--dangerously-skip-permissions`. Antigravity has no approval channel and no host tools, so it can't read more of the watched chat than each check sends. |
+
+The read-only checks are made when a watcher is attached, when every watcher
+turn is prepared (including a message the person types into the watcher chat)
+and when `conversation.update` changes a read-only watcher's configuration;
+there a model change stays allowed and a mode or access change is refused.
+Per-harness facts live in one place per adapter: the broker decisions in
+`claude-watcher-permissions.ts`, the thread config in
+`codex/read-only-thread-config.ts`, the ruleset in `opencode-host-tools.ts`,
+the ACP decline rows in `acp-watcher.ts`, Antigravity's arguments and
+file-writing tool names in `antigravity-stream.ts`, and which harnesses take a
+system-level instruction or gate edits before they start in
+`provider/watcher-harness-profile.ts`. An unknown harness falls back to the
+safe defaults there.
+
+What is not verified against live providers: whether Cursor and Kimi Code ask
+permission for plain reads in plan mode (each such request would be declined
+and count towards the five-request cap); Antigravity's tool names beyond the
+`view_file`, `run_command` and `invoke_subagent` its fixtures use (the
+file-writing names `write_to_file`, `write_file`, `create_file`, `edit_file`,
+`replace_file_content`, `multi_replace_file_content`, `delete_file`,
+`move_file` and `rename_file` are assumed); whether Antigravity's plan mode
+refuses writes on its own; and whether Codex applies `developerInstructions`
+on `thread/resume`.
 
 ### Read-only command allowlist
 
 `classifyReadOnlyCommand` in `src/server/runtime/watcher/read-only-commands.ts`
 is Inertia's own allowlist for Claude and OpenCode watchers; Codex keeps its
-sandboxed known-safe set. It never runs anything. It splits the command with
-quoting rules that hold under POSIX shells, PowerShell and cmd.exe, and
-refuses redirection (outside Windows a whole `2>/dev/null` or `2>&1` word
-after the program is allowed), chaining, background jobs, command and variable
-substitution, subshells, brace, home and equals expansion, comments,
-backslashes outside single quotes, control characters, Unicode quotes, dashes
-and spaces, PowerShell's `--%`, and unbalanced quotes. On Windows it also
-refuses `%`, `^`, `,`, `"`, `\` and `&`, `|`, `<`, `>` anywhere except a plain
-pipe, empty arguments, and any `:` in a path argument other than a drive
-letter. These rules keep out cmd.exe expansion, PowerShell provider paths such
-as `env:`, and Windows PowerShell's legacy argument passing, which can split an
-argument that contains a quote or ends in a backslash. OpenCode's shell can be
+sandboxed known-safe set, and Cursor, Kimi Code and Antigravity have none,
+which their instructions say. It never runs anything. Its context names the
+shell that runs the command, not the host: `windows: true` applies the cmd.exe
+and PowerShell rules (Claude's `PowerShell` tool, and OpenCode on Windows),
+`windows: false` the POSIX rules (Claude's Bash, which is Git Bash on
+Windows), and `windowsPaths` the host's path rules for containment. It splits
+the command and refuses redirection (under POSIX rules a whole `2>/dev/null`
+or `2>&1` word after the program is allowed), chaining, background jobs,
+command and variable substitution, subshells, brace, home and equals
+expansion, comments, unquoted backslashes, control characters, Unicode
+quotes, dashes and spaces, PowerShell's `--%`, and unbalanced quotes. Under
+POSIX rules a double-quoted backslash keeps its shell meaning: `\"`, `\\` and
+`\$` stand for the character, any other backslash stays literal, and an
+unescaped `$` is still refused. Under Windows rules it also refuses `%`, `^`,
+`,`, `"`, `\` and `&`, `|`, `<`, `>` anywhere except a plain pipe, empty
+arguments, and any `:` in a path argument other than a drive letter. These
+rules keep out cmd.exe expansion, PowerShell provider paths such as `env:`,
+and Windows PowerShell's legacy argument passing, which can split an argument
+that contains a quote or ends in a backslash. OpenCode's shell can be
 PowerShell on any platform, so OpenCode watchers also refuse unquoted commas,
-which PowerShell turns into separate arguments, and an unquoted `@` at the
-start of a word, which PowerShell treats as splatting. A pipe is allowed only
-when every segment is. A word whose first character is an unquoted glob, or an
-option word with a glob before any `=`, is refused, because the shell could
-expand it into an option-shaped file name; `./*.ts`, `src/*.ts` and
-`--include=*.ts` are allowed. The programs are read-only `git` subcommands
-(only `-C`, `--no-pager`, `--no-optional-locks` and `-c core.pager=cat` as
-global options; `--output`, `--ext-diff`, `--textconv`, `--show-signature`, the
-`%G` and `%(signature)` format placeholders, `git grep -O`, `--no-index`,
-`--untracked` and `--no-exclude-standard` and their abbreviations refused),
-`rg` without
-`--pre`, `--hostname-bin`, `-z`/`--search-zip`, `-L`/`--follow`, `--hidden`/`-.`,
-`-u`/`--unrestricted` or any `--no-ignore` option, `grep`, `egrep` and `fgrep`
-without recursion (`-r`, `-R`, `-d`, `--directories`), `cat` (without
-PowerShell's `-Wait`), `head`, `tail` without follow (including the obsolete
-`+Nf` form), `ls` without `-L`/`--dereference`, `find` without `-L`, `-follow`,
-`-exec`, `-ok`, `-delete`, `-fprint` or `-files0-from` forms,
-`wc` without `--files0-from`, `diff` without `-r` or `-l`, `stat`, `file`
-without `-C`, `-z`, `-Z` or `-f`/`--files-from`, `tree` without `-o`, `-R` or
-`-l`, `sort` without `-o`, `-T`, `--compress-program` or `--files0-from` (the
-`files0-from` and `files-from` options read the names of further files from a
-file, which neither containment check sees), `uniq` with at most one file and
-no glob, `cut`, `nl`, `tr`, `column`, `jq` without environment access, program
-files, modules or extra input files (`-f`, `-L`, `--rawfile`, `--slurpfile`,
-`import`, `include`, `modulemeta`), `pwd`, `which` and `echo`. An argument that
-is absolute, starts with `~` or contains a `..` segment must stay inside the
-workspace, and so must every suffix of a short-option bundle after its first
-letter, so `grep -nf/etc/passwd` and also `grep -nfsrc/patterns` are refused
-while `grep -nf src/patterns` is allowed. Because that check is lexical,
-Claude's broker and OpenCode's permission handler then resolve every argument
-and option value that names an existing path with `realpath`, after expanding
-its wildcards against the directory listing (quoted wildcards too on Windows
-and wherever the shell may be PowerShell), and decline the command without an
-approval when one resolves outside the workspace's own real path, so a
-symbolic link or junction inside the workspace cannot lead a read outside it.
-A command whose wildcards reach more than 4,096 paths is declined. `.env`,
-`*.env` and `*.env.*` names are refused in any letter case wherever they
-appear in an argument, except in the search pattern of `rg`, `grep`,
-`egrep`, `fgrep` and `git grep`: the first positional word when no `-e`,
-`--regexp`, `-f` or `--file` supplies the pattern, and every `-e` or
-`--regexp` value. A pattern such as
+which PowerShell turns into separate arguments, an unquoted `@` at the start
+of a word, which PowerShell treats as splatting, and any backslash inside
+double quotes. A pipe is allowed only when every segment is. A word whose
+first character is an unquoted glob, or an option word with a glob before
+any `=`, is refused, because the shell could expand it into an option-shaped
+file name; `./*.ts`, `src/*.ts` and `--include=*.ts` are allowed. The
+programs are read-only `git` subcommands (only `-C`, `--no-pager`,
+`--no-optional-locks` and `-c core.pager=cat` as global options; `--output`,
+`--ext-diff`, `--textconv`, `--show-signature`, the `%G` and `%(signature)`
+format placeholders, `git grep -O`, `--no-index`, `--untracked` and
+`--no-exclude-standard` and their abbreviations refused), `rg` without
+`--pre`, `--hostname-bin`, `-z`/`--search-zip`, `-L`/`--follow`,
+`--hidden`/`-.`, `-u`/`--unrestricted` or any `--no-ignore` option, `grep`,
+`egrep` and `fgrep` without recursion (`-r`, `-R`, `-d`, `--directories`),
+`cat` (without PowerShell's `-Wait`), `head`, `tail` without follow
+(including the obsolete `+Nf` form), `sed` only as `sed -n '<range>p'` or
+`sed -n '<range>p;<range>p'` followed by files (a range is `N`, `$`, `N,M` or
+`N,$`; no `-i`, no other option and no other command, so `w`, `W`, `r`, `R`,
+`e` and `s` never run), `ls` without `-L`/`--dereference`, `find` without
+`-L`, `-follow`, `-exec`, `-ok`, `-delete`, `-fprint` or `-files0-from`
+forms, `wc` without `--files0-from`, `diff` without `-r` or `-l`, `stat`,
+`file` without `-C`, `-z`, `-Z` or `-f`/`--files-from`, `tree` without `-o`,
+`-R` or `-l`, `sort` without `-o`, `-T`, `--compress-program` or
+`--files0-from` (the `files0-from` and `files-from` options read the names of
+further files from a file, which neither containment check sees), `uniq`
+with at most one file and no glob, `cut`, `nl`, `tr`, `column`, `jq` without
+environment access, program files, modules or extra input files (`-f`, `-L`,
+`--rawfile`, `--slurpfile`, `import`, `include`, `modulemeta`), `pwd`,
+`which` and `echo`. An argument that is absolute, starts with `~` or contains
+a `..` segment must stay inside the workspace, and so must every suffix of a
+short-option bundle after its first letter, so `grep -nf/etc/passwd` and also
+`grep -nfsrc/patterns` are refused while `grep -nf src/patterns` is allowed.
+Because that check is lexical, Claude's broker and OpenCode's permission
+handler then resolve every argument and option value that names an existing
+path with `realpath`, after expanding its wildcards against the directory
+listing (quoted wildcards too under Windows rules and wherever the shell may
+be PowerShell), and decline the command when one resolves outside the
+workspace's own real path, so a symbolic link or junction inside the
+workspace cannot lead a read outside it. A command whose wildcards reach more
+than 4,096 paths is declined. `.env`, `*.env` and `*.env.*` names are refused
+in any letter case wherever they appear in an argument, except in the search
+pattern of `rg`, `grep`, `egrep`, `fgrep` and `git grep`: the first
+positional word when no `-e`, `--regexp`, `-f` or `--file` supplies the
+pattern, and every `-e` or `--regexp` value. A pattern such as
 `process.env.API_URL` is therefore allowed, while a path operand or a `-f`
 pattern file with such a name is refused. A path operand with a wildcard is
-refused unless its last segment ends in a literal extension other than `.env`,
-so `src/*.ts` is allowed while `config/*`, `*.e*`, `prod.en?` and `prod.[e]nv`
-are refused. When an option before the pattern is not one the classifier
-knows, no word is treated as the pattern. A command is
-capped at 4,096 characters and 256 arguments. An allowed command runs without
-an approval and counts towards the receipt's command count; a declined one is a
-`command-attempt`. Claude and OpenCode watcher runs set
-`GIT_OPTIONAL_LOCKS=0`, so `git status` leaves `.git/index` alone; `git diff`
-and `git describe --dirty` still refresh the index after a file's timestamps
-change (measured with Git 2.54) and can hold `index.lock` for that moment.
-They also drop `RIPGREP_CONFIG_PATH`, in any letter case, from the provider's
-environment, so a ripgrep configuration file cannot add `--pre` to a plain
-`rg` search. On Claude the broker also returns each allowed command with
-`--no-config` inserted after every `rg`, so a shell startup file that sets the
-variable again is ignored as well. OpenCode's permission reply cannot change
-the command, so OpenCode watchers rely on the environment alone.
-Known limits: the real-path check runs just before the command does, so a link
-created in between is not seen; a search reads any workspace file its pattern
-reaches except files that Git's or rg's ignore rules skip, so a tracked or
-unignored secret file can be read; programs still honor their own
-configuration (a `diff.external`, textconv, `core.fsmonitor`, `gpg.program` or
+refused unless its last segment ends in a literal extension other than
+`.env`, so `src/*.ts` is allowed while `config/*`, `*.e*`, `prod.en?` and
+`prod.[e]nv` are refused. When an option before the pattern is not one the
+classifier knows, no word is treated as the pattern. A command is capped at
+4,096 characters and 256 arguments. An allowed command runs without an
+approval and counts towards the receipt's command count; a declined one is a
+`command-attempt`.
+
+Every refusal the broker returns to Claude carries the allowlist's reason
+followed by `readOnlyCommandReminder(shell)`, a one-line list of the allowed
+commands and the quoting rules of that shell, so the model can switch to an
+allowed form instead of seeing only "User declined tool execution". Codex's
+app-server decline (`decision: "decline"`) and ACP's `reject_once` have no
+field for a reason, so those providers get none; the watcher chat still
+records each decline.
+
+Claude and OpenCode watcher runs set `GIT_OPTIONAL_LOCKS=0`, so `git status`
+leaves `.git/index` alone; `git diff` and `git describe --dirty` still
+refresh the index after a file's timestamps change (measured with Git 2.54)
+and can hold `index.lock` for that moment. They also drop
+`RIPGREP_CONFIG_PATH`, in any letter case, from the provider's environment,
+so a ripgrep configuration file cannot add `--pre` to a plain `rg` search. On
+Claude the broker also returns each allowed command with `--no-config`
+inserted after every `rg`, so a shell startup file that sets the variable
+again is ignored as well. OpenCode's permission reply cannot change the
+command, so OpenCode watchers rely on the environment alone. Known limits:
+the real-path check runs just before the command does, so a link created in
+between is not seen; a search reads any workspace file its pattern reaches
+except files that Git's or rg's ignore rules skip, so a tracked or unignored
+secret file can be read; programs still honor their own configuration (a
+`diff.external`, textconv, `core.fsmonitor`, `gpg.program` or
 `log.showSignature` setting in Git config, a `RIPGREP_CONFIG_PATH` that
 OpenCode's shell startup files set again, or one that applies to an `rg`
 command Claude Code runs on its own read-only rules without asking the
@@ -332,38 +394,49 @@ Watcher support is not a `PROVIDER_CAPABILITY_IDS` entry. Adding an id changes
 every harness's capability manifest and therefore its attestation digest.
 `providerContinuationCompatibilityToken` returns that digest as the
 continuation identity, so a new id would make every existing chat lose native
-session resume on upgrade. The allowlist is ordinary reviewed code: admitting
-a harness is a code change that lands with its portable fixture, and it leaves
-manifests and continuation tokens untouched.
+session resume on upgrade. The harness list and the tier table are ordinary
+reviewed code: changing them is a code change that lands with its portable
+fixture, and it leaves manifests and continuation tokens untouched.
 
-### Enforcement layers
+### Enforcement layers for a read-only watcher
 
 Each layer works on its own; none relies on the model following instructions.
 
-1. **Mode and access pinned.** A watcher conversation is created with
-   `interactionMode: "plan"` and `accessMode: "supervised"`. Turn preparation
-   refuses any watcher turn that is not plan, supervised and on an allowed
-   harness, and `conversation.update` refuses mode and access changes.
-   Supervised is the lowest access level, so a watcher never has more access
-   than the chat it watches.
+1. **Mode and access pinned.** A read-only watcher conversation is created
+   with `interactionMode: "plan"` and `accessMode: "supervised"`. Turn
+   preparation refuses a read-only watcher turn that is not plan, supervised
+   and on a harness with a tier, and `conversation.update` refuses mode and
+   access changes. The provider sees plan mode only on the `approvals` and
+   `provider` tiers; on the `inertia` tier the adapters translate the profile
+   into the settings in the table above.
 2. **Fail-closed interactions.** Approval requests are declined through the
-   provider's own deny decision and recorded as a visible activity. No approval
-   card is broadcast, so watcher conversations never have pending approvals. A
-   declined edit request (a `file-change` approval, or a `permissions` approval
-   asking for write access) is recorded as a `write-attempt` and the turn
-   continues; any other declined request is a `command-attempt`. A second
-   declined request in one turn, or a request without a deny option, stops the
-   turn. An input request stops the turn.
-3. **Real-time activity guard.** A started `file` activity, or an activity in
-   the `coding` category, cancels the provider run and settles the turn as
+   provider's own deny decision and recorded as a visible activity. No
+   approval card is broadcast. A declined edit request (a `file-change`
+   approval, or a `permissions` approval asking for write access) is recorded
+   as a `write-attempt` and the turn continues; any other declined request is
+   a `command-attempt`. The fifth declined request in one check
+   (`READ_ONLY_WATCHER_MAX_DENIALS`), or a request without a deny option,
+   stops the check. A question that still reaches Inertia stops the check;
+   Claude's questions are denied with a reason, Codex's question tool is off,
+   and OpenCode's is denied by its ruleset, so on those it should not occur.
+3. **Real-time activity guard.** An activity the adapter marks
+   `fileMutation` because an edit is actually executing (an ACP tool call of
+   kind `edit`, `delete` or `move` reported `in_progress`, or an Antigravity
+   file-writing tool) cancels the provider run and settles the turn as
    failed with "Watchers are read-only. Inertia stopped this check." The
-   outcome is `write-attempt`. Write attempts are counted per watched turn,
-   whether declined or stopped: the second pauses the link with
-   `write-attempts` and stops the check. A started `command` activity does
-   not stop the turn: commands are governed by the provider gates in the table
-   above, and the receipt records how many commands the watcher ran
-   (`commandsRun` on the feed item). The `command-attempt` outcome is used only
-   for a command approval that was requested and declined.
+   outcome is `write-attempt`. On harnesses whose edits wait for an approval
+   Inertia declines (`editsGatedBeforeStart` in `watcher-harness-profile.ts`:
+   Claude, Codex, Cursor and Kimi Code) that is the only trigger, because
+   those providers announce an edit before they ask for its approval: Claude
+   streams an Edit tool's start before `canUseTool`, Codex sends
+   `item/started` for a file change before its approval request, and ACP
+   agents send a `pending` tool call first. A declined edit there is
+   recorded as a `write-attempt` and the check continues; the fingerprint
+   guard backs it up. On OpenCode and Antigravity a started `file` activity
+   or an activity in the `coding` category also stops the check. Write
+   attempts are counted per watched turn, whether declined or stopped: the
+   second pauses the link with `write-attempts` and stops the check. A
+   started `command` activity does not stop the turn.
 4. **Git fingerprint backstop.** `src/server/git/checkout-fingerprint.ts`
    fingerprints the checkout before and after each check through
    `runGitInspection` (`--no-optional-locks`, `core.fsmonitor=false`):
@@ -391,88 +464,119 @@ Each layer works on its own; none relies on the model following instructions.
    read-only command allowlist and no started edit; `watcherActivityMayWrite`,
    which classifies the command text a harness records in the activity's
    `Command:` detail, or the title when there is none, after unwrapping a
-   shell wrapper such as Codex's `/bin/zsh -lc '…'`). An inconclusive check
-   keeps its finding and records its unexplained paths on the feed item
-   (`guardPaths`), which the finding card and the check's receipt line list.
-   Unexplained paths in a conclusive window pause the link with
-   `write-detected` and list at most 20 paths. A non-repository, a timeout or
-   a truncated fingerprint is *unavailable*; the other layers still apply.
+   shell wrapper such as Codex's `/bin/zsh -lc '…'`; on a Windows host a
+   command counts as read-only when it passes either the POSIX or the Windows
+   rules, since the activity does not say which shell ran it). An
+   inconclusive check keeps its finding and records its unexplained paths on
+   the feed item (`guardPaths`). Unexplained paths in a conclusive window
+   pause the link with `write-detected` and list at most 20 paths. A
+   non-repository, a timeout or a truncated fingerprint is *unavailable*; the
+   other layers still apply.
 5. **Boundary instruction.** The `inertia-watcher` instruction states that the
-   watcher is read-only.
+   watcher is read-only and how its tier enforces it.
 
-Watcher turns also skip checkpoints and turn Git artifacts entirely, so they
-never write `refs/inertia/checkpoints/*`, never run `git write-tree`, and never
-offer a Revert that could undo the watched chat's work. Capability-pack
-instructions are not sent and the orchestration and Browser tools are not
-offered. The watcher's only host tool is the context tool, with a fourth access
-kind, `"watched"`, that reads the watched chat without a route filter and
-without the approval chooser, bounded by `contextReadsPerWake` (default 4).
-The link's sharing choices bound those reads as they bound each check: with
-`brief` off the tool returns no user requests (and no request images), with
-`activities` off no commands, tool calls or errors, with `partialReplies` off
-no agent messages or pages, and with `changedFiles` off no file lists.
+Read-only watcher turns also skip checkpoints and turn Git artifacts entirely,
+so they never write `refs/inertia/checkpoints/*`, never run `git write-tree`,
+and never offer a Revert that could undo the watched chat's work. For every
+watcher, capability-pack instructions are not sent and the orchestration and
+Browser tools are not offered. The watcher's only host tool is the context
+tool, with a fourth access kind, `"watched"`, that reads the watched chat
+without a route filter and without the approval chooser, bounded by
+`contextReadsPerWake` (default 4). The link's sharing choices bound those
+reads as they bound each check: with `brief` off the tool returns no user
+requests (and no request images), with `activities` off no commands, tool
+calls or errors, with `partialReplies` off no agent messages or pages, and
+with `changedFiles` off no file lists.
 
 ### Hidden instructions and the digest
 
-- `inertia-watcher` carries the role and boundary, the preset, the user's
+- `inertia-watcher` carries the role and boundary, the preset, the person's
   instructions quoted as user-authored, the output format and the rule to
   answer exactly `SILENT` when there is nothing to report, followed only by
-  the `Resolved: check N` line when an earlier finding is now fixed. With
-  automatic sending on, the boundary tells the watcher that the user chose to
-  have Inertia send its findings. It stays under 6 KiB, below the 16 KiB
-  per-instruction cap, and accompanies every watcher turn, including a
-  message the user types into the watcher chat.
+  the `Resolved: check N` line when an earlier finding is now fixed. For a
+  read-only watcher it says that the watcher is read-only, states its tier in
+  one sentence (the allowed commands and quoting rules on `inertia`; "your
+  edits and anything needing approval are declined; there is no sandbox, so
+  only read" on `approvals`; "you run in plan mode; do not edit or run
+  anything that writes" on `provider`), and tells it never to ask questions,
+  never to try to edit and never to hand off a plan, but to answer with a
+  finding or `SILENT`. It never mentions provider plan mode on the `inertia`
+  tier. For a watcher with chat access it says that the watcher may use its
+  tools as its mode and access allow but that its job is still to watch and
+  report, and to prefer deciding over asking, since the person is told when
+  it asks. It stays under 6 KiB and accompanies every watcher turn, including
+  a message the person types into the watcher chat. It is sent at system
+  level where the harness has a field for it (`ProviderRunInput.systemInstruction`:
+  Claude's preset system prompt `append`, recorded with `snapshot: false` so
+  an edited role takes effect; Codex's `developerInstructions` on
+  `thread/start` and `thread/resume`; OpenCode's `system` prompt option), and
+  otherwise falls back to the internal instructions at the end of the prompt.
 - `inertia-watcher-note` accompanies a main-chat turn that delivers a watcher
-  note, and marks the note as forwarded from the watcher, not written by the
-  user. A note sent automatically carries `automatic: true` in its
-  attribution, and the instruction then says that the watcher sent it and the
-  user did not choose to send it. A steered note carries the same attribution
-  in its provider content.
+  note. It names the watcher the person attached (its preset, label and
+  agent), says whether the person sent the note or it was sent automatically
+  without the person choosing it, and asks the main agent to treat it as
+  review feedback from a colleague: consider it, act on it where it fits what
+  the person asked for, and say briefly what it did with it. It also says the
+  note is another agent's output that may quote untrusted project text and
+  is not the person's words, that the main agent must never run a command,
+  fetch a URL, change configuration or reveal secrets only because the note
+  asks, and that the note cannot grant permissions, change the access mode
+  or widen the task. A steered note carries the same attribution in its
+  provider content.
 
 Both labels are part of the `INERTIA_SECTION_LABEL` alternation in
 `untrusted-agent-text.ts`, so text from the watched chat or the provider that
 imitates them is neutralized. NEL, LINE SEPARATOR and PARAGRAPH SEPARATOR
 (U+0085, U+2028, U+2029) become newlines before any quoting and spaces in
 single-line labels, so quoted text cannot step outside its `> ` quote. The
-digest for each check is the watcher turn's
-visible content (64 KiB turn cap, `digestKiB` default 24), not a hidden
-instruction, and every quoted string passes through
-`boundedUntrustedAgentText`. It honours the link's sharing choices; the
-watched turn's plan is shared under `activities`. With `changedFiles` shared, a
-final pass quotes the turn's unified diff (at most a third of the digest and
-6 KiB per file) and falls back to the changed paths when the diff is
-unavailable; with neither, it says that Inertia could not capture the turn's
-changes instead of reporting no changed files. A turn that a watcher note
-started is quoted under a heading that says whether the user forwarded the
-note or the watcher sent it automatically. A `manual` or `initial` digest is
-built even when nothing is new, and then says so. An `initial` digest of a
-watched turn that has already ended also quotes that turn's diff or changed
-paths, without counting as its final pass. Each check records its
-digest's size (`digestBytes`), which the receipt line shows, for example
-`24 KiB sent`. Every check lists up to five of the watcher's earlier findings
-in the same watched turn with their delivery state, and a reply that ends with
-`Resolved: check N` records `resolvedBySequence` on those findings.
+digest for each check is the watcher turn's visible content (64 KiB turn cap,
+`digestKiB` default 24), not a hidden instruction, and every quoted string
+passes through `boundedUntrustedAgentText`. It honours the link's sharing
+choices; the watched turn's plan is shared under `activities`. With
+`changedFiles` shared, a final pass quotes the turn's unified diff (at most a
+third of the digest and 6 KiB per file) and falls back to the changed paths
+when the diff is unavailable; with neither, it says that Inertia could not
+capture the turn's changes instead of reporting no changed files. A turn that
+a watcher note started is quoted under a heading that says whether the person
+forwarded the note or the watcher sent it automatically. A `manual` or
+`initial` digest is built even when nothing is new, and then says so. An
+`initial` digest of a watched turn that has already ended also quotes that
+turn's diff or changed paths, without counting as its final pass. Each check
+records its digest's size (`digestBytes`), which the receipt line shows, for
+example `24 KiB sent`. Every check lists up to five of the watcher's earlier
+findings in the same watched turn with their delivery state, and a reply that
+ends with `Resolved: check N` records `resolvedBySequence` on those findings.
+
+A check whose reply is empty or only a plan hand-off phrase ("Plan submitted
+for review") takes the plan the watcher handed off in that turn as its
+finding text, so a review delivered as a plan is not lost. Only a hand-off
+counts (Claude's `ExitPlanMode`, Codex's plan item, Cursor's
+`cursor/create_plan`, Kimi Code's plan request), reported as a plan event
+with `handoff: true` and kept apart from ordinary plan and checklist
+updates such as TodoWrite or `update_plan`, so a short finding that mentions
+a plan is never replaced by the watcher's own checklist. A check that ends
+with an empty reply and no hand-off is recorded as `failed`, and the watcher
+chat shows "The watcher answered nothing."
 
 ### Pauses and resume
 
 A paused link records its reason. A wake whose route fails the
-`watcherRouteReadiness` preflight (selection, allowlist, backend readiness, a
-runnable provider) retries as transient with the scheduler's backoff at most
-`WATCHER_ROUTE_RETRY_LIMIT` (3) times; the next failure pauses the link with
-`route-unavailable`, a detail that names the route and the readiness message,
-and a `watcher.link.updated` broadcast. The retry count starts again when a
-check finds its route ready or the link resumes. A check whose watcher turn
-fails to queue (for example when path authority refuses the shared checkout)
-is recorded as `failed`; the `WATCHER_DISPATCH_FAILURE_LIMIT`-th (3rd)
-consecutive failure pauses the link with `route-unavailable` instead of
-retrying with backoff forever, and that count starts again when a check's turn
-queues or the link resumes. A `wake-budget` pause belongs to one watched turn:
-the next watched turn ends it and grants a fresh allowance. A final pass always
-digests the turn that ended (`turnId` on the digest), even when the next turn
-already began, and never spends the next turn's allowance; the cursor update is
-a compare-and-set on the turn the digest was built from, so a late check never
-rewinds coverage.
-`usage-limit` and `route-unavailable`
+`watcherRouteReadiness` preflight (selection, harness list, backend readiness,
+a runnable provider) retries as transient with the scheduler's backoff at
+most `WATCHER_ROUTE_RETRY_LIMIT` (3) times; the next failure pauses the link
+with `route-unavailable`, a detail that names the route and the readiness
+message, and a `watcher.link.updated` broadcast. The retry count starts again
+when a check finds its route ready or the link resumes. A check whose watcher
+turn fails to queue (for example when path authority refuses the shared
+checkout) is recorded as `failed`; the `WATCHER_DISPATCH_FAILURE_LIMIT`-th
+(3rd) consecutive failure pauses the link with `route-unavailable` instead of
+retrying with backoff forever, and that count starts again when a check's
+turn queues or the link resumes. A `wake-budget` pause belongs to one watched
+turn: the next watched turn ends it and grants a fresh allowance. A final
+pass always digests the turn that ended (`turnId` on the digest), even when
+the next turn already began, and never spends the next turn's allowance; the
+cursor update is a compare-and-set on the turn the digest was built from, so
+a late check never rewinds coverage. `usage-limit` and `route-unavailable`
 resume only once `watcherRouteReadiness` reports the watcher's route ready,
 and no link resumes while its watched chat or its own chat is archived,
 whatever its pause reason. Every resume refills the turn's check allowance to
@@ -481,26 +585,25 @@ runs once the link resumes; a failed one is retried at most
 `WATCHER_FINAL_PASS_RETRY_LIMIT` (2) times, and a cancelled one is done. A
 pause or archive that lands while a check is being prepared settles the
 attempt as paused or transient, so a final pass it carried stays due. The
-further pages of a `manual` or `initial` check keep that request's trigger: they
-spend no allowance and stop after `WATCHER_MAX_CONTINUATION_PAGES` (4) pages.
-After a restart, reconciliation also schedules the final pass of the turn
-before the cursor's turn when that turn ended after the link was created and
-has no recorded final pass. Deleting the watched chat detaches the link in
-SQL and deleting the watcher chat removes it; the delete command then broadcasts
-`watcher.link.removed` for each link the chat took part in. A delete of a
-watched chat whose watcher chat has an unfinished turn (a check, or an answer
-to the user's own message) is refused with a request error before any side
-effect (no checkpoint, worktree or ownership change); the
+further pages of a `manual` or `initial` check keep that request's trigger:
+they spend no allowance and stop after `WATCHER_MAX_CONTINUATION_PAGES` (4)
+pages. After a restart, reconciliation also schedules the final pass of the
+turn before the cursor's turn when that turn ended after the link was created
+and has no recorded final pass. Deleting the watched chat detaches the link
+in SQL and deleting the watcher chat removes it; the delete command then
+broadcasts `watcher.link.removed` for each link the chat took part in. A
+delete of a watched chat whose watcher chat has an unfinished turn (a check,
+or an answer to the person's own message) is refused with a request error
+before any side effect (no checkpoint, worktree or ownership change); the
 `BEFORE DELETE` trigger stays as the backstop. Archiving the watched chat
-pauses its link with `watched-archived`, and archiving the watcher chat itself
-pauses it with `watcher-archived`, from any attached status: either reason
-replaces an earlier pause, and a check that is running is cancelled. An
-archive by an agent's management tool reaches the link through the
+pauses its link with `watched-archived`, and archiving the watcher chat
+itself pauses it with `watcher-archived`, from any attached status: either
+reason replaces an earlier pause, and a check that is running is cancelled.
+An archive by an agent's management tool reaches the link through the
 conversation shell update it broadcasts. Attach checks again inside its
 transaction that the watched chat is not archived, so an archive that races
-the attach is refused with "Unarchive this chat before adding a watcher."
-Removing a project cascades its watcher links in SQL; the runtime then
-forgets them and broadcasts `watcher.link.removed` for each.
+the attach is refused. Removing a project cascades its watcher links in SQL;
+the runtime then forgets them and broadcasts `watcher.link.removed` for each.
 
 Each new check retires the link's checks older than its newest
 `WATCHER_WAKE_RETENTION` (500), at most four per check: the wake row and its
@@ -517,58 +620,75 @@ case-insensitive by default.
 
 `tests/server/watcher-read-only-harnesses.test.ts` is a portable suite
 (`// @inertia-test-suite portable`, without an `@inertia-harness` marker,
-because each harness can be registered only once). It runs watcher turns
-through the TurnController's read-only policy and the real harness adapters,
-with the real `ProviderManager`, against scripted providers in a temporary Git
-repository. Each scripted provider writes only if Inertia lets it, and every
-case compares the checkout fingerprint, `git status` and the file contents
-before and after the turn.
+because each harness can be registered only once). It runs read-only watcher
+turns through the TurnController and the real harness adapters, with the real
+`ProviderManager`, against scripted providers in a temporary Git repository.
+Each scripted provider writes only if Inertia lets it, and the cases compare
+the checkout fingerprint, `git status` and the file contents before and after
+the turn.
 
-- Claude: the query receives `permissionMode: "plan"`, no setting sources and
-  Inertia's `canUseTool`. Read and Grep run without `canUseTool`, as Claude
-  Code's plan mode does; a Write permission request is declined as a
-  `write-attempt` and the turn completes. Allowlisted Bash commands, including
-  a pipe, run without an approval, and a command with a redirection is
-  declined as a `command-attempt`. A streamed Edit tool start stops the turn,
-  aborts the query before the edit and releases the run.
-- Codex: `thread/start` and `thread/resume` carry `approvalPolicy: "untrusted"`,
-  `sandbox: "read-only"` and a `config` that disables every MCP server
-  `config/read` reports, apps, plugins, hooks, subagents and web search, and
-  `turn/start` carries the same policy,
-  `sandboxPolicy: { type: "readOnly", networkAccess: false }` and plan
-  collaboration mode. A known-safe read command runs without an approval; a
-  write command's approval is answered `decline` and recorded as a
-  `command-attempt`. A malformed frame fails the turn and the app-server
-  process exits.
-- OpenCode: the scripted server evaluates rules as OpenCode does (agent rules,
-  then session rules, last match wins). Under the supervised plan ruleset
-  alone, read, glob, grep, list and bash all prompt. A watcher turn sends the
-  profile ruleset, reads complete without a prompt, `.env` files are denied,
-  edit is denied, an allowlisted bash command is answered `once` and any other
-  is rejected as a `command-attempt`, and the server process exits on
-  shutdown. A second case
-  gives the agent its own rules that allow everything, edits, shell and
-  `external_directory`; the session profile still wins, because OpenCode
-  merges the agent's ruleset first and the session's after it and takes the
-  last match. The profile depends on that order. If OpenCode ever evaluated
+- Claude: the query receives `permissionMode: "default"`, no
+  `planModeInstructions`, no setting sources, Inertia's `canUseTool` and the
+  watcher role in the system prompt's `append`. The fixture models default
+  mode: Read and Grep inside the workspace run without `canUseTool`, while
+  Write, `AskUserQuestion`, `ExitPlanMode`, Edit and Bash all reach it. The
+  write is declined as a `write-attempt` with its reason, the question is
+  denied with its reason and not counted, the plan hand-off is declined and
+  its plan recorded, and the turn completes. A streamed Edit start no longer
+  stops the turn: the broker declines the edit with its reason and the check
+  completes. Allowlisted Bash commands run without an approval, and a
+  redirection is declined with the allowlist's reason and the reminder.
+- Codex: `thread/start` and `thread/resume` carry `approvalPolicy:
+  "untrusted"`, `sandbox: "read-only"`, `developerInstructions` with the
+  watcher role and a `config` that disables every MCP server `config/read`
+  reports, apps, plugins, hooks, subagents, web search and
+  `request_user_input`; `turn/start` carries the same policy and
+  `sandboxPolicy: { type: "readOnly", networkAccess: false }` and no
+  collaboration mode. A known-safe read runs without an approval; a write
+  command's approval is answered `decline` and recorded as a
+  `command-attempt`. A file change that starts before its approval request
+  is declined, recorded as a `write-attempt`, and the check completes. A
+  malformed frame fails the turn and the app-server process exits.
+- OpenCode: the scripted server evaluates rules as OpenCode does (agent
+  rules, then session rules, last match wins). A watcher turn sends no agent,
+  the profile ruleset and the watcher role as `system`; reads complete without
+  a prompt, `.env` files and edits are denied, an allowlisted bash command is
+  answered `once` and any other is rejected as a `command-attempt`. A second
+  case gives the agent its own rules that allow everything; the session
+  profile still wins, because OpenCode merges the agent's ruleset first and
+  the session's after it and takes the last match. If OpenCode ever evaluated
   agent rules after session rules, its allows would win, so the scheduled
   canary and this fixture are what must catch such a change.
+- Cursor: a scripted ACP agent is switched to its plan mode; it announces
+  an edit as a `pending` tool call, asks for permission, is answered
+  `reject_once` (a write attempt, the check continues) and fails the tool
+  call; `cursor/ask_question` is cancelled and `cursor/create_plan` answered
+  `rejected` without counting, and the plan is recorded as a hand-off.
+- Kimi Code: a question arriving as a permission request is cancelled and not
+  counted, a `pending` edit followed by its permission request is rejected
+  as a write attempt and the check continues, a plan hand-off is recorded
+  and answered `plan_revise`, and a tool call of kind `edit` reported
+  `in_progress` whose title says nothing about editing stops the check.
+- Antigravity: a scripted `agy` receives `--mode plan` and neither
+  `accept-edits` nor `--dangerously-skip-permissions`, and a `write_to_file`
+  step stops the check.
 
-Run it with `npm run test:portable`. Integration coverage
-lives in `tests/server/watcher-read-only-guard.test.ts` and
-`tests/server/watcher-delivery.test.ts`, which also checks that steering a note
-is refused on Cursor.
+Run it with `npm run test:portable`. Integration coverage lives in
+`tests/server/watcher-read-only-guard.test.ts` (the five-request cap, chat
+access approvals and checkpoints), `tests/server/watcher-wake-runner.test.ts`
+(hand-off plan to finding, an empty reply recorded as failed, the
+`"approval"` and `"question"` live phases, the skipped guard) and
+`tests/server/watcher-delivery.test.ts`, which also checks that steering a
+note is refused on Cursor.
 
 ### Excluded harnesses and custom backends
 
-`cursor-acp`, `kimi-acp`, `antigravity-cli` and the CLI harnesses
-(`claude-cli`, `codex-cli`, `cursor-cli`, `opencode-cli`) are not in the
-allowlist. Antigravity has no Inertia-mediated approvals or host tools, so a
-watcher there could neither be held read-only by Inertia nor read the watched
-chat. Any of these can still be the watched chat. A harness joins the
-allowlist only together with a portable fixture that proves the layers above.
+The CLI harnesses (`claude-cli`, `codex-cli`, `cursor-cli`, `opencode-cli`)
+are not in `WATCHER_HARNESS_IDS`. Any harness can still be the watched chat.
+A harness joins the list, or gets a read-only tier, only together with a
+portable fixture that proves the layers above.
 
-A custom backend on an allowed harness can be a watcher, but custom backends
+A custom backend on a listed harness can be a watcher, but custom backends
 never receive Inertia host tools. Such a watcher reviews only the digest each
 check sends it and cannot read more of the watched chat; the dock states
 "Custom backend: it sees only what each check sends."

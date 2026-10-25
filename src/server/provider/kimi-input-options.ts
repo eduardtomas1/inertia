@@ -186,25 +186,29 @@ function isKimiPermissionOptionKind(
     || kind === "reject_always";
 }
 
-function kimiPermissionQuestionText(
+export function kimiPermissionContentText(
   params: Pick<RequestPermissionRequest, "toolCall">,
-  kind: KimiInputOptions["kind"],
-): string | null {
-  let text: string | undefined;
+): string | undefined {
   for (const content of params.toolCall.content ?? []) {
     const value = objectValue(content);
     if (value?.type === "content" && typeof value.content === "object") {
       const nested = objectValue(value.content);
-      if (nested?.type === "text" && typeof nested.text === "string") {
-        text = nested.text;
-        break;
-      }
+      if (nested?.type === "text" && typeof nested.text === "string") return nested.text;
     }
-    if (value?.type === "text" && typeof value.text === "string") {
-      text = value.text;
-      break;
-    }
+    if (value?.type === "text" && typeof value.text === "string") return value.text;
   }
+  return undefined;
+}
+
+export function kimiPlanReviseOptionId(params: Pick<RequestPermissionRequest, "options">): string | undefined {
+  return params.options.find((option) => option.optionId === "plan_revise" && option.kind === "reject_once")?.optionId;
+}
+
+function kimiPermissionQuestionText(
+  params: Pick<RequestPermissionRequest, "toolCall">,
+  kind: KimiInputOptions["kind"],
+): string | null {
+  let text = kimiPermissionContentText(params);
   text ??= kind === "plan"
     ? "How should Kimi Code proceed with this plan?"
     : "Kimi Code needs your input.";

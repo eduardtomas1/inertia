@@ -511,7 +511,7 @@ function startOpenCodeRun(
         providerData.data.all,
         providerData.data.connected,
       );
-      const agent = resolveOpenCodeAgent(options.input.interactionMode, agents.data);
+      const agent = resolveOpenCodeAgent(options.input.readOnlyProfile === "watcher" ? "build" : options.input.interactionMode, agents.data);
       if (options.input.reasoningEffort && selectedModel && !selectedModel.variants?.[options.input.reasoningEffort]) {
         throw new Error(`OpenCode does not advertise the selected reasoning variant '${options.input.reasoningEffort}'.`);
       }
@@ -764,6 +764,7 @@ function startOpenCodeRun(
             ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
             ...(agent ? { agent: agent.name } : {}),
             ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}),
+            ...(options.input.systemInstruction ? { system: options.input.systemInstruction } : {}),
             parts: [
               { type: "text", text: options.input.prompt },
               ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),

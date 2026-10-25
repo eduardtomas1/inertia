@@ -710,6 +710,32 @@ describe("ProviderMaintenanceController", () => {
   });
 });
 
+describe("ProviderMaintenanceController unreadable journal diagnostics", () => {
+  it("reports every idle provider as quarantined instead of failing the snapshot", () => {
+    const journal = providerMaintenanceJournalTestDouble();
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: {
+        ...journal,
+        pending: () => {
+          throw new Error("A provider maintenance journal record is invalid.");
+        },
+      },
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      resolveCapabilities: async ({ providerId }) => capabilities(providerId),
+      runAction: async () => success(),
+      operationId: operationIds(),
+      onOperation: () => undefined,
+    });
+
+    const states = controller.diagnosticStates();
+
+    expect(states).toHaveLength(6);
+    expect(states.every(({ state }) => state === "quarantined")).toBe(true);
+    expect(controller.hasBlockingAuthority("claude")).toBe(true);
+  });
+});
+
 describe("ProviderMaintenanceController release cooldown", () => {
   const npmCodex = "/home/ada/.npm-global/lib/node_modules/@openai/codex/bin/codex.js";
 

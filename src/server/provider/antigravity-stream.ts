@@ -99,7 +99,7 @@ function conversationIdentity(value: unknown): string | null | undefined {
 export function antigravityArguments(
   input: Pick<
     ProviderRunInput,
-    "sessionId" | "modelSelection" | "reasoningEffort" | "interactionMode" | "access"
+    "sessionId" | "modelSelection" | "reasoningEffort" | "interactionMode" | "access" | "readOnlyProfile"
   >,
 ): string[] {
   const args: string[] = [...ANTIGRAVITY_HEADLESS_ARGUMENTS];
@@ -111,10 +111,19 @@ export function antigravityArguments(
   }
   const effort = input.modelSelection.reasoningEffort ?? input.reasoningEffort;
   if (effort && EFFORTS.has(effort)) args.push("--effort", effort);
-  if (input.interactionMode === "plan") args.push("--mode", "plan");
+  if (input.readOnlyProfile === "watcher" || input.interactionMode === "plan") args.push("--mode", "plan");
   else if (input.access === "full") args.push("--dangerously-skip-permissions");
   else args.push("--mode", "accept-edits");
   return args;
+}
+
+const ANTIGRAVITY_FILE_MUTATION_TOOLS: ReadonlySet<string> = new Set([
+  "write_to_file", "write_file", "create_file", "edit_file", "replace_file_content",
+  "multi_replace_file_content", "delete_file", "move_file", "rename_file",
+]);
+
+export function antigravityFileMutationTool(toolName: string): boolean {
+  return ANTIGRAVITY_FILE_MUTATION_TOOLS.has(toolName.trim().toLowerCase());
 }
 
 export function antigravityUserLine(prompt: string): string {

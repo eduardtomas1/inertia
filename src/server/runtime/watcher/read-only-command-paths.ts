@@ -6,6 +6,7 @@ import {
   environmentFileName,
   OUTSIDE_WORKSPACE,
   readOnlyCommandOperands,
+  readOnlyCommandUsesWindowsPaths,
   type ReadOnlyCommandContext,
   type ReadOnlyCommandOperand,
 } from "./read-only-commands";
@@ -36,7 +37,7 @@ export async function readOnlyCommandPathProblem(
   context: ReadOnlyCommandContext,
   files: ReadOnlyCommandFileSystem = NODE_FILE_SYSTEM,
 ): Promise<string | null> {
-  const paths = context.windows ? win32 : posix;
+  const paths = readOnlyCommandUsesWindowsPaths(context) ? win32 : posix;
   const cwd = paths.resolve(context.cwd);
   const workspace = await realPath(files, cwd);
   if (workspace === undefined) return OUTSIDE_WORKSPACE;

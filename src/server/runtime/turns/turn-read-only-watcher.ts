@@ -4,7 +4,7 @@ import { agentActivityKind } from "../../runtime-snapshots";
 import type { ReadOnlyWatcherViolationKind } from "./turn-controller-types";
 
 export const READ_ONLY_WATCHER_STOP_MESSAGE = "Watchers are read-only. Inertia stopped this check.";
-export const READ_ONLY_WATCHER_MAX_DENIALS = 2;
+export const READ_ONLY_WATCHER_MAX_DENIALS = 5;
 
 const MAX_DETAIL_CHARS = 200;
 const MULTI_EDIT_TOOL_PATTERN = /^multi[\s_-]?edit$/iu;
@@ -16,8 +16,10 @@ export function readOnlyViolationDetail(value: string): string {
   return line.length > MAX_DETAIL_CHARS ? `${line.slice(0, MAX_DETAIL_CHARS - 1)}…` : line;
 }
 
-export function isReadOnlyWriteActivity(event: ProviderActivityEvent): boolean {
+export function isReadOnlyWriteActivity(event: ProviderActivityEvent, editsGatedBeforeStart = false): boolean {
   if (event.phase !== "started") return false;
+  if (event.fileMutation === true) return true;
+  if (editsGatedBeforeStart) return false;
   const kind = agentActivityKind(event);
   if (kind === "command") return false;
   if (kind === "tool" && MULTI_EDIT_TOOL_PATTERN.test(event.label.trim())) return true;

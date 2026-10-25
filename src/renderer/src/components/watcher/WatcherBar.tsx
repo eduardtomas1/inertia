@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Ellipsis } from "lucide-react";
 
+import { watcherAccessLabel } from "@shared/access-labels";
 import type { ConversationShell } from "@shared/contracts";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { WatcherLinkView } from "@shared/watcher";
@@ -12,6 +13,7 @@ import {
   watcherErrorText,
   watcherOutcomeText,
   watcherPauseAnnouncement,
+  watcherPhaseAttention,
   watcherPhaseText,
 } from "../../utils/watcherCopy";
 import { watcherEventsText, watcherPresetName } from "../../utils/watcherLinks";
@@ -42,16 +44,17 @@ type Pending = "pause" | "wake" | "review" | "detach" | "visibility" | "delivery
 
 const QUIET_OUTCOMES = new Set(["silent", "finding"]);
 
-function useTransitionAnnouncement(link: WatcherLinkView): string {
+function useTransitionAnnouncement(link: WatcherLinkView, attention: string | null): string {
   const [announcement, setAnnouncement] = useState("");
   const latestFindingAt = link.latestFindingAt;
   const latestAt = link.latest?.at ?? null;
   const outcome = link.latest?.outcome ?? null;
-  const previous = useRef({ status: link.status, reason: link.pauseReason, latestAt, latestFindingAt });
+  const previous = useRef({ status: link.status, reason: link.pauseReason, latestAt, latestFindingAt, attention });
   useEffect(() => {
     const prior = previous.current;
-    previous.current = { status: link.status, reason: link.pauseReason, latestAt, latestFindingAt };
+    previous.current = { status: link.status, reason: link.pauseReason, latestAt, latestFindingAt, attention };
     const parts: string[] = [];
+    if (attention !== null && attention !== prior.attention) parts.push(attention);
     if (latestFindingAt !== null && latestFindingAt !== prior.latestFindingAt) parts.push("New finding");
     if (latestAt !== prior.latestAt && outcome !== null && !QUIET_OUTCOMES.has(outcome)) {
       parts.push(watcherOutcomeText(outcome));
@@ -62,7 +65,7 @@ function useTransitionAnnouncement(link: WatcherLinkView): string {
     if (parts.length === 0) return;
     const text = parts.join(". ");
     setAnnouncement((current) => current !== text ? text : text.endsWith(".") ? text.slice(0, -1) : `${text}.`);
-  }, [latestAt, latestFindingAt, link.pauseDetail, link.pauseReason, link.status, outcome]);
+  }, [latestAt, latestFindingAt, link.pauseDetail, link.pauseReason, link.status, attention, outcome]);
   return announcement;
 }
 
@@ -82,6 +85,7 @@ function MenuNote({ children }: { children: string }): React.JSX.Element {
 
 function WatcherBarMenuItems({
   link,
+  watcher,
   pending,
   actions,
   reviewUnavailable,
@@ -94,6 +98,7 @@ function WatcherBarMenuItems({
   onStop,
 }: {
   link: WatcherLinkView;
+  watcher: ConversationShell | undefined;
   pending: Pending;
   actions: WatcherActions | null;
   reviewUnavailable: boolean;
@@ -213,6 +218,7 @@ function WatcherBarMenuItems({
         Stop watching…
       </button>
       <div role="separator" />
+      <MenuNote>{watcherAccessLabel(link, watcher ?? null)}</MenuNote>
       {!budgetPaused && (
         <MenuNote>{`${counterText(checksLeft)} of ${counterText(allowance)} checks left this turn`}</MenuNote>
       )}
@@ -255,13 +261,14 @@ export function WatcherBar({
   useEffect(() => {
     if (closed) setConfirmingStop(false);
   }, [closed]);
-  const announcement = useTransitionAnnouncement(link);
   const live = useWatcherLive(link.id);
   const waking = link.status === "waking";
   const latestTurn = watcher?.latestTurn ?? null;
   const turnRunning = latestTurn !== null && !isAgentTurnTerminalStatus(latestTurn.status);
   const startedAt = waking && turnRunning ? latestTurn.startedAt ?? latestTurn.requestedAt : null;
   const liveForTurn = waking && live && (latestTurn === null || live.turnId === latestTurn.id) ? live : null;
+  const attention = liveForTurn ? watcherPhaseAttention(liveForTurn.phase) : null;
+  const announcement = useTransitionAnnouncement(link, attention);
   const paused = link.status === "paused";
   const run = (name: Exclude<Pending, null>, operation: () => Promise<unknown>): void => {
     if (pending) return;
@@ -278,8 +285,11 @@ export function WatcherBar({
   const resumeUnavailable = !actions || pending !== null || resumeBlocked !== null;
   const checkUnavailable = !actions || pending !== null || waking;
   const reviewUnavailable = checkUnavailable || paused || link.status === "detached";
-  const primaryUnavailable = paused ? resumeUnavailable : checkUnavailable;
-  const primaryLabel = paused ? link.pauseReason === "write-detected" ? "Resume…" : "Resume" : "Check now";
+  const openChat = attention !== null && !paused ? onOpenWatcherChat : null;
+  const primaryUnavailable = openChat ? false : paused ? resumeUnavailable : checkUnavailable;
+  const primaryLabel = openChat
+    ? "Open chat"
+    : paused ? link.pauseReason === "write-detected" ? "Resume…" : "Resume" : "Check now";
   const restoreMoreFocus = (): void => {
     moreRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
   };
@@ -293,7 +303,7 @@ export function WatcherBar({
           <span className="visually-hidden">Watching </span>
           <span className="watcher-bar-title">{title}</span>
         </h2>
-        <p className="watcher-bar-state" data-phase={waking ? "waking" : link.status}>
+        <p className="watcher-bar-state" data-phase={attention !== null ? "attention" : waking ? "waking" : link.status}>
           <span className="watcher-bar-route">{agentLabel} · {preset} · </span>
           <span className="watcher-bar-phase-text">{phase}</span>
           <WatcherElapsed startedAt={startedAt} />
@@ -305,6 +315,10 @@ export function WatcherBar({
           className="watcher-text-button"
           aria-disabled={primaryUnavailable || undefined}
           onClick={() => {
+            if (openChat) {
+              openChat();
+              return;
+            }
             if (primaryUnavailable || !actions) return;
             if (paused) onResumeRequest();
             else run("wake", actions.wake);
@@ -323,6 +337,7 @@ export function WatcherBar({
             {(close) => (
               <WatcherBarMenuItems
                 link={link}
+                watcher={watcher}
                 pending={pending}
                 actions={actions}
                 reviewUnavailable={reviewUnavailable}

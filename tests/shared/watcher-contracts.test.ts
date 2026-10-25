@@ -29,6 +29,9 @@ import {
   watcherBudgetsSchema,
   watcherFeedItemSchema,
   watcherHarnessAllowed,
+  watcherReadOnlyEnforcement,
+  WATCHER_LIVE_PHASES,
+  WATCHER_READ_ONLY_ENFORCEMENT,
   watcherInstructionsSchema,
   watcherLinksSerializedBytes,
   watcherLinkViewSchema,
@@ -54,6 +57,7 @@ const link: WatcherLinkView = {
   budgets: { ...DEFAULT_WATCHER_BUDGETS },
   privateConnect: "inherit",
   delivery: "manual",
+  readOnly: true,
   status: "watching",
   pauseReason: null,
   pauseDetail: null,
@@ -98,12 +102,30 @@ const note = {
 };
 
 describe("watcher shared contracts", () => {
-  it("gates watchers on the reviewed harness allowlist only", () => {
-    expect(WATCHER_HARNESS_IDS).toEqual(["claude-agent-sdk", "codex-app-server", "opencode-sdk"]);
-    for (const harnessId of WATCHER_HARNESS_IDS) expect(watcherHarnessAllowed(harnessId)).toBe(true);
-    for (const harnessId of ["cursor-acp", "codex-cli", "kimi-cli", "", "CODEX-APP-SERVER"]) {
-      expect(watcherHarnessAllowed(harnessId)).toBe(false);
+  it("lets every current provider's harness watch and gives each a read-only tier", () => {
+    expect(WATCHER_HARNESS_IDS).toEqual([
+      "claude-agent-sdk", "codex-app-server", "opencode-sdk", "cursor-acp", "kimi-acp", "antigravity-cli",
+    ]);
+    for (const harnessId of WATCHER_HARNESS_IDS) {
+      expect(watcherHarnessAllowed(harnessId)).toBe(true);
+      expect(watcherReadOnlyEnforcement(harnessId)).not.toBeNull();
     }
+    expect(WATCHER_READ_ONLY_ENFORCEMENT).toEqual({
+      "claude-agent-sdk": "inertia",
+      "codex-app-server": "inertia",
+      "opencode-sdk": "inertia",
+      "cursor-acp": "approvals",
+      "kimi-acp": "approvals",
+      "antigravity-cli": "provider",
+    });
+    for (const harnessId of ["codex-cli", "kimi-cli", "claude-cli", "", "CODEX-APP-SERVER", "toString", "__proto__"]) {
+      expect(watcherHarnessAllowed(harnessId)).toBe(false);
+      expect(watcherReadOnlyEnforcement(harnessId)).toBeNull();
+    }
+  });
+
+  it("ends the live phases with the approval and question phases", () => {
+    expect(WATCHER_LIVE_PHASES).toEqual(["starting", "reading", "searching", "thinking", "writing", "approval", "question"]);
   });
 
   it("treats commands as governed by the provider gate, not as a pause reason", () => {
@@ -164,8 +186,11 @@ describe("watcher shared contracts", () => {
       { ...link, filesystemPath: "/private" },
       { ...link, delivery: "steer" },
       { ...link, delivery: undefined },
+      { ...link, readOnly: undefined },
+      { ...link, readOnly: "yes" },
     ]) expect(watcherLinkViewSchema.safeParse(invalid).success).toBe(false);
     expect(watcherLinkViewSchema.safeParse({ ...link, delivery: "auto" }).success).toBe(true);
+    expect(watcherLinkViewSchema.parse({ ...link, readOnly: false }).readOnly).toBe(false);
     expect(watcherLinkViewSchema.safeParse({ ...link, usage: { totalTokens: 48_200 } }).success).toBe(true);
     expect(watcherLinkViewSchema.safeParse({ ...link, usage: { totalTokens: null } }).success).toBe(true);
     for (const usage of [{ totalTokens: -1 }, { totalTokens: 1.5 }, {}, { totalTokens: 1, cost: 2 }, null]) {
@@ -411,6 +436,29 @@ describe("watcher shared contracts", () => {
     expect(clientCommandSchema.safeParse(attach).success).toBe(true);
     const parsedAttach = clientCommandSchema.parse(attach);
     expect(parsedAttach.type === "watcher.attach" && parsedAttach.payload.delivery).toBeUndefined();
+    expect(parsedAttach.type === "watcher.attach" && parsedAttach.payload.readOnly).toBeUndefined();
+    expect(parsedAttach.type === "watcher.attach" && parsedAttach.payload.interactionMode).toBeUndefined();
+    expect(parsedAttach.type === "watcher.attach" && parsedAttach.payload.accessMode).toBeUndefined();
+    const chatAccess = { ...attach, payload: { ...attach.payload, readOnly: false, interactionMode: "build", accessMode: "full" } };
+    const parsedChatAccess = clientCommandSchema.parse(chatAccess);
+    expect(parsedChatAccess.type === "watcher.attach" && parsedChatAccess.payload).toMatchObject({
+      readOnly: false, interactionMode: "build", accessMode: "full",
+    });
+    expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, readOnly: true } }).success).toBe(true);
+    for (const invalid of [
+      { readOnly: false },
+      { readOnly: false, interactionMode: "plan" },
+      { readOnly: false, accessMode: "supervised" },
+      { readOnly: true, interactionMode: "build" },
+      { readOnly: true, accessMode: "auto-edit" },
+      { readOnly: true, interactionMode: "plan", accessMode: "supervised" },
+      { interactionMode: "build" },
+      { accessMode: "full" },
+      { interactionMode: "build", accessMode: "full" },
+      { readOnly: false, interactionMode: "review", accessMode: "full" },
+      { readOnly: false, interactionMode: "build", accessMode: "unrestricted" },
+      { readOnly: "false", interactionMode: "build", accessMode: "full" },
+    ]) expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, ...invalid } }).success).toBe(false);
     expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, delivery: "auto" } }).success).toBe(true);
     expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, delivery: "steer" } }).success).toBe(false);
     expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, instructions: "x".repeat(2_001) } }).success).toBe(false);

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { watcherWakeSummaries, watcherWatchedAccess } from "../../src/server/persistence/watcher-link-codecs";
-import { WatcherPolicyError, type WatcherLinkDraft } from "../../src/server/persistence/watcher-link-repository";
+import { WATCHER_READ_ONLY_REFUSAL, WatcherPolicyError, type WatcherLinkDraft } from "../../src/server/persistence/watcher-link-repository";
 import { buildWatcherDigest } from "../../src/server/runtime/watcher/watcher-digest";
 import type { Conversation } from "../../src/shared/contracts";
 import { watcherFeedResultSchema } from "../../src/shared/contracts/watcher-schema";
@@ -67,15 +67,18 @@ function draft(watchedConversationId: string, overrides: Partial<WatcherLinkDraf
   };
 }
 
-function attach(watched: Conversation, overrides: Partial<WatcherLinkDraft> = {}) {
+function attach(
+  watched: Conversation,
+  overrides: Partial<WatcherLinkDraft> = {},
+  access: { interactionMode: "build" | "plan"; accessMode: "supervised" | "auto-edit" | "full" } = { interactionMode: "plan", accessMode: "supervised" },
+) {
   return store.watcherLinks.createWithConversation({
     link: draft(watched.id, overrides),
     conversation: {
       projectId: watched.projectId,
       title: `Watcher · Reviewer · ${watched.title}`,
       options: {
-        interactionMode: "plan",
-        accessMode: "supervised",
+        ...access,
         modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "provider-default" }),
       },
     },
@@ -150,7 +153,8 @@ describe("watcher link repository", () => {
     });
     expect(store.watcherLinks.findByWatcher(conversation.id)?.id).toBe(link.id);
     expect(store.watcherLinks.findActiveByWatched(watched.id)?.id).toBe(link.id);
-    expect(store.watcherLinks.policyForConversation(conversation.id)).toEqual({ linkId: link.id, status: "watching" });
+    expect(store.watcherLinks.policyForConversation(conversation.id)).toEqual({ linkId: link.id, status: "watching", readOnly: true });
+    expect(link.readOnly).toBe(true);
     expect(store.watcherLinks.policyForConversation(watched.id)).toBeNull();
     expect(raw((database) => watcherWatchedAccess(database, conversation.id, watched.id))).toBe(true);
     expect(raw((database) => watcherWatchedAccess(database, watched.id, conversation.id))).toBe(false);
@@ -564,10 +568,44 @@ describe("watcher link repository", () => {
     expect(() => links.assertRunConfigurationAllowed(conversation.id, allowed)).not.toThrow();
     expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, interactionMode: "build" })).toThrow(WatcherPolicyError);
     expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, accessMode: "full" })).toThrow(WatcherPolicyError);
-    expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, harnessId: "cursor-acp" })).toThrow(WatcherPolicyError);
+    expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, interactionMode: "build" })).toThrow(WATCHER_READ_ONLY_REFUSAL);
+    expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, harnessId: "codex-cli" })).toThrow("This agent can't run as a watcher.");
+    for (const harnessId of ["cursor-acp", "kimi-acp", "antigravity-cli", "claude-agent-sdk", "opencode-sdk"]) {
+      expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, harnessId })).not.toThrow();
+    }
     expect(() => links.assertRunConfigurationAllowed(watched.id, { ...allowed, accessMode: "full" })).not.toThrow();
     links.transition(link.id, ["watching"], { status: "detached", reason: "user" }, tick());
     expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, interactionMode: "build" })).not.toThrow();
+  });
+
+  it("stores the access choice, keeps old-style links read-only and lets a chat-access watcher change mode and access", () => {
+    const readOnly = attach(chat("Read-only"));
+    expect(readOnly.link.readOnly).toBe(true);
+    expect(raw((database) => database.prepare("SELECT read_only FROM watcher_links WHERE id = ?").get(readOnly.link.id))).toEqual({ read_only: 1 });
+    expect(() => attach(chat("Wrong modes"), {}, { interactionMode: "build", accessMode: "full" })).toThrow(WATCHER_READ_ONLY_REFUSAL);
+    expect(() => attach(chat("Explicit wrong modes"), { readOnly: true }, { interactionMode: "plan", accessMode: "full" })).toThrow(WATCHER_READ_ONLY_REFUSAL);
+    const chatAccessChat = chat("Chat access");
+    const chatAccess = attach(chatAccessChat, { readOnly: false }, { interactionMode: "build", accessMode: "full" });
+    expect(() => attach(chatAccessChat, { id: chatAccess.link.id, readOnly: true })).toThrow("This watcher already exists.");
+    expect(attach(chatAccessChat, { id: chatAccess.link.id, readOnly: false }, { interactionMode: "build", accessMode: "full" }))
+      .toMatchObject({ created: false, link: { id: chatAccess.link.id, readOnly: false } });
+    expect(chatAccess.link.readOnly).toBe(false);
+    expect(chatAccess.conversation).toMatchObject({ interactionMode: "build", accessMode: "full" });
+    expect(store.watcherLinks.policyForConversation(chatAccess.conversation.id)).toMatchObject({ readOnly: false });
+    expect(store.shellSnapshot().watchers?.find(({ id }) => id === chatAccess.link.id)).toMatchObject({ readOnly: false });
+    const links = store.watcherLinks;
+    for (const configuration of [
+      { interactionMode: "build" as const, accessMode: "full" as const },
+      { interactionMode: "plan" as const, accessMode: "auto-edit" as const },
+      { interactionMode: "build" as const, accessMode: "supervised" as const },
+    ]) {
+      expect(() => links.assertRunConfigurationAllowed(chatAccess.conversation.id, { ...configuration, harnessId: "codex-app-server" })).not.toThrow();
+    }
+    expect(() => links.assertRunConfigurationAllowed(chatAccess.conversation.id, {
+      interactionMode: "build", accessMode: "full", harnessId: "codex-cli",
+    })).toThrow("This agent can't run as a watcher.");
+    expect(() => raw((database) => database.prepare("UPDATE watcher_links SET read_only = 2 WHERE id = ?").run(readOnly.link.id)))
+      .toThrow(/CHECK constraint failed/u);
   });
 
   it("binds checks to the watcher chat's own turns and admits only dispatching claims", () => {

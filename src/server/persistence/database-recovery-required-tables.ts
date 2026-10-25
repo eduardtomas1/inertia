@@ -123,6 +123,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "commands_declined",
   ]],
   [100, "todos", ["due_time", "project_id", "linked_at"]],
+  [101, "watcher_links", ["read_only"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [

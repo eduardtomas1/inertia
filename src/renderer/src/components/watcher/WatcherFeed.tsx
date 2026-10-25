@@ -21,6 +21,7 @@ interface WatcherFeedProps {
   watchedRunning: boolean;
   steerable: boolean;
   online: boolean;
+  readOnly?: boolean;
 }
 
 type FocusTarget = { kind: "status" | "card"; wakeId: string } | { kind: "heading" };
@@ -63,6 +64,7 @@ export function WatcherFeed({
   watchedRunning,
   steerable,
   online,
+  readOnly = true,
 }: WatcherFeedProps): React.JSX.Element {
   const [pending, setPending] = useState<ReadonlyMap<string, WatcherFindingAction>>(() => new Map());
   const [failures, setFailures] = useState<ReadonlyMap<string, WatcherFindingFailure>>(() => new Map());
@@ -198,7 +200,7 @@ export function WatcherFeed({
             return (
             <li key={group.key} className="watcher-feed-entry" data-kind={group.kind === "receipts" ? "receipts" : group.item.outcome === "finding" ? "finding" : "notice"}>
               {group.kind === "receipts" ? (
-                <WatcherReceiptGroup group={group} motionIndex={index} enter={enter} onEntered={onEntered} />
+                <WatcherReceiptGroup group={group} readOnly={readOnly} motionIndex={index} enter={enter} onEntered={onEntered} />
               ) : isFinding(group.item) ? (
                 <WatcherFindingCard
                   item={group.item}
@@ -219,7 +221,7 @@ export function WatcherFeed({
                   cardRef={registerCard}
                 />
               ) : (
-                <WatcherNoticeLine item={group.item} motionIndex={index} enter={enter} onEntered={onEntered} />
+                <WatcherNoticeLine item={group.item} readOnly={readOnly} motionIndex={index} enter={enter} onEntered={onEntered} />
               )}
             </li>
             );

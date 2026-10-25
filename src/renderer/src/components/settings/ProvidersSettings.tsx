@@ -377,7 +377,9 @@ export function ProvidersSettings({
                         className="setting-input"
                         aria-label={`${selectedProvider.label} executable path`}
                         value={binaryValue}
-                        placeholder={`No working ${selectedProvider.label} executable detected`}
+                        placeholder={selectedProvider.installState === "recovery-required"
+                          ? "Executable check paused for recovery"
+                          : `No working ${selectedProvider.label} executable detected`}
                         readOnly
                         title={binaryValue || undefined}
                       />

@@ -79,9 +79,12 @@ import {
 import { selectKimiAcpAuthMethod } from "./acp-terminal-auth";
 import { AcpCompactionProjection } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
+import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED, acpFileMutation, acpReadOnlyWatcher } from "./acp-watcher";
 import { KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON } from "../../shared/provider";
 import {
   kimiInputOptions,
+  kimiPermissionContentText,
+  kimiPlanReviseOptionId,
   type KimiInputOptions,
 } from "./kimi-input-options";
 
@@ -146,6 +149,7 @@ interface ToolActivity {
   label: string;
   command?: string;
   status?: ToolCallStatus | null;
+  toolKind?: ToolKind | null;
 }
 
 export function kimiAcpProcessInvocation(
@@ -289,6 +293,7 @@ function startKimiRun(
           emitter.rich,
           approvals,
           inputs,
+          emitter.activity,
         );
       },
     )
@@ -304,7 +309,7 @@ function startKimiRun(
       }
     }, ({ params: rawParams }) => {
       try {
-        const params = redactHostMcpPayload(rawParams);
+        const params = secretRedactor.streamNotification(rawParams);
         if (
           cancelRequested
           || !sessionId
@@ -750,8 +755,16 @@ async function kimiPermission(
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
   approvals: Map<string, PendingApproval>,
   inputs: Map<string, PendingInput>,
+  emitActivity: ReturnType<typeof createAgentHarnessEmitter>["activity"],
 ): Promise<RequestPermissionResponse> {
   const inputOptions = kimiInputOptions(displayParams);
+  if (inputOptions && acpReadOnlyWatcher(options.input)) {
+    const plan = inputOptions.kind === "plan" ? kimiPermissionContentText(displayParams)?.trim() : undefined;
+    if (plan) emit({ type: "plan", explanation: plan, steps: [], handoff: true });
+    emitActivity("system", "info", inputOptions.kind === "plan" ? ACP_WATCHER_PLAN_DECLINED : ACP_WATCHER_QUESTION_DECLINED);
+    const revise = inputOptions.kind === "plan" ? kimiPlanReviseOptionId(params) : undefined;
+    return revise ? { outcome: { outcome: "selected", optionId: revise } } : { outcome: { outcome: "cancelled" } };
+  }
   if (inputOptions) {
     return kimiInputPermission(
       params,
@@ -766,7 +779,7 @@ async function kimiPermission(
   if (allow && acpAttachmentReadAllowed(params, options.input.attachmentReadRoots)) {
     return { outcome: { outcome: "selected", optionId: allow.optionId } };
   }
-  if (options.input.interactionMode === "plan") {
+  if (options.input.interactionMode === "plan" && !acpReadOnlyWatcher(options.input)) {
     return { outcome: { outcome: "cancelled" } };
   }
   const fileMutation = isFileMutationKind(params.toolCall.kind);
@@ -954,6 +967,7 @@ function handleKimiUpdate(
       emitter.activity(kind, phase, label, {
         activityId,
         ...(detail ? { detail } : {}),
+        ...acpFileMutation(update.kind, update.status),
       });
       if (phase === "completed" || phase === "failed") {
         toolActivities.delete(activityId);
@@ -963,6 +977,7 @@ function handleKimiUpdate(
           label,
           ...(command ? { command } : {}),
           status: update.status,
+          toolKind: update.kind,
         });
       }
       return;
@@ -982,6 +997,7 @@ function handleKimiUpdate(
         update.title ?? update.name ?? existing?.label ?? "Kimi Code tool",
       );
       const status = update.status ?? existing?.status;
+      const toolKind = update.kind ?? existing?.toolKind;
       const phase = toolActivityPhase(status);
       const rawInput = objectValue(update.rawInput);
       const command = typeof rawInput?.command === "string"
@@ -995,6 +1011,7 @@ function handleKimiUpdate(
       emitter.activity(kind, phase, label, {
         activityId,
         ...(detail ? { detail } : {}),
+        ...acpFileMutation(toolKind, status),
       });
       if (phase === "completed" || phase === "failed") {
         toolActivities.delete(activityId);
@@ -1004,6 +1021,7 @@ function handleKimiUpdate(
           label,
           ...(command ? { command } : {}),
           status,
+          toolKind,
         });
       }
       return;

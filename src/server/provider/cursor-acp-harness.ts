@@ -14,6 +14,7 @@ import type {
   SessionModeState,
   SessionNotification,
   ToolCallStatus,
+  ToolKind,
   Usage,
 } from "@agentclientprotocol/sdk";
 
@@ -87,6 +88,7 @@ import { emitCursorMetadata } from "./cursor-acp-metadata";
 import { CursorInbandErrors } from "./cursor-acp-inband-errors";
 import { imageMediaType, readBoundedProviderImage } from "./provider-image-read";
 import { configureCursorSession } from "./cursor-acp-session";
+import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED, acpFileMutation, acpReadOnlyWatcher } from "./acp-watcher";
 export { findCursorAdvertisedConfigValue } from "./cursor-acp-session";
 
 export {
@@ -315,7 +317,7 @@ function startCursorRun(
         () => parseAcpSessionNotification(value) as SessionNotification,
         "Cursor ACP sent an invalid session update.",
       ), ({ params }) => {
-      const safeParams = redactHostMcpPayload(params);
+      const safeParams = secretRedactor.streamNotification(params);
       if (!sessionId || safeParams.sessionId !== sessionId || cancelRequested) return;
       if (
         acceptsCommandAdvertisement
@@ -351,6 +353,10 @@ function startCursorRun(
     })
     .onRequest("cursor/ask_question", (value) => value, async ({ params: rawParams, signal }) => {
       if (!ownsActivePrompt()) return { outcome: { outcome: "cancelled" } };
+      if (acpReadOnlyWatcher(options.input)) {
+        emitter.activity("system", "info", ACP_WATCHER_QUESTION_DECLINED);
+        return { outcome: { outcome: "cancelled" } };
+      }
       const providerParams = parseCursorQuestionRequest(rawParams);
       const params = parseCursorQuestionRequest(
         redactHostMcpPayload(rawParams),
@@ -391,7 +397,11 @@ function startCursorRun(
         return { outcome: { outcome: "cancelled" } };
       }
       const params = parseCursorPlanRequest(redactHostMcpPayload(rawParams));
-      emitter.rich({ type: "plan", explanation: params.plan, steps: cursorTodoSteps(todoSessions.apply(sessionId, { merge: false, todos: params.todos }), params.plan) });
+      emitter.rich({ type: "plan", explanation: params.plan, steps: cursorTodoSteps(todoSessions.apply(sessionId, { merge: false, todos: params.todos }), params.plan), handoff: true });
+      if (acpReadOnlyWatcher(options.input)) {
+        emitter.activity("system", "info", ACP_WATCHER_PLAN_DECLINED);
+        return { outcome: { outcome: "rejected" } };
+      }
       // Acceptance lets Cursor persist a plan artifact. Reuse the same
       // one-shot file-change policy as native ACP edit permission requests;
       // displaying a plan does not itself grant supervised write authority.
@@ -805,6 +815,7 @@ function handleCursorUpdate(
       label: string;
       command?: string;
       status?: ToolCallStatus | null;
+      toolKind?: ToolKind | null;
     }
   >,
   compactions: AcpCompactionProjection,
@@ -853,6 +864,7 @@ function handleCursorUpdate(
       emitter.activity(kind, phase, label, {
         activityId,
         ...(detail ? { detail } : {}),
+        ...acpFileMutation(update.kind, update.status),
       });
       if (phase === "completed" || phase === "failed") {
         toolActivities.delete(activityId);
@@ -862,6 +874,7 @@ function handleCursorUpdate(
           label,
           ...(command ? { command } : {}),
           status: update.status,
+          toolKind: update.kind,
         });
       }
       return;
@@ -882,6 +895,7 @@ function handleCursorUpdate(
         update.title ?? update.name ?? existing?.label ?? "Cursor tool",
       );
       const status = update.status ?? existing?.status;
+      const toolKind = update.kind ?? existing?.toolKind;
       const phase = cursorToolActivityPhase(status);
       const rawInput = objectValue(update.rawInput);
       const command = typeof rawInput?.command === "string"
@@ -895,6 +909,7 @@ function handleCursorUpdate(
       emitter.activity(kind, phase, label, {
         activityId,
         ...(detail ? { detail } : {}),
+        ...acpFileMutation(toolKind, status),
       });
       if (phase === "completed" || phase === "failed") {
         toolActivities.delete(activityId);
@@ -904,6 +919,7 @@ function handleCursorUpdate(
           label,
           ...(command ? { command } : {}),
           status,
+          toolKind,
         });
       }
       return;

@@ -1,19 +1,23 @@
 # Watcher
 
-A watcher is a read-only second agent that sits beside a chat and follows its work as it happens. It reviews what the main agent does, keeps its findings in a side dock, and sends nothing to the main chat until you choose **Send**, unless you turn on [automatic sending](#send-findings-automatically).
+A watcher is a second agent that sits beside a chat and follows its work as it happens. It is read-only unless you give it [access](#access). It reviews what the main agent does, keeps its findings in a side dock, and sends nothing to the main chat until you choose **Send**, unless you turn on [automatic sending](#send-findings-automatically).
 
 ## Add a watcher
 
 1. Open the chat's actions and choose **Add a watcher…**. The same item is in the chat header and on the chat's row in the **Work** tab. You can also search for **Add a watcher** with ⌘K (Ctrl+K elsewhere).
 2. Choose a [preset](#presets): **Reviewer**, **Scope guard** or **Explainer**.
-3. Choose a model route on an [agent that can be a watcher](#which-agents-can-be-watchers). A route that isn't ready can't be chosen, and the dialog says why.
-4. Optionally add your own instructions, up to 2,000 characters.
-5. Under **What the watcher sees**, choose what each check includes: the brief, activities, changed files and partial replies. The main agent's plan is shared with **Activities**.
-6. Optionally turn on **Send findings to the main chat automatically**. See [Send findings automatically](#send-findings-automatically).
-7. Turn on **Review the last turn now** to have the watcher check the chat's most recent turn right away. It is available while that turn runs and after it has completed.
-8. If Private Connect is set up, choose under **On paired devices** whether the watcher follows the chat's visibility or stays hidden. See [Private Connect](#private-connect).
-9. Optionally open **Budgets** and change them. See [Budgets and cost](#budgets-and-cost).
-10. Choose **Add watcher**.
+3. Choose a model route. Every agent can be a [watcher](#which-agents-can-be-watchers). A route that isn't ready can't be chosen, and the dialog says why. Choosing a favorite also applies the access, mode and speed saved with it.
+4. Under **Access**, choose **Read-only**, **Supervised**, **Auto-accept edits** or **Full access**. **Read-only** is the default, and the dialog says how the chosen agent keeps a watcher read-only. See [Access](#access).
+5. If you chose anything other than **Read-only**, choose a **Mode**: **Build** or **Plan**.
+6. Under **Reasoning**, choose the reasoning level, when the route offers levels.
+7. Under **Speed**, choose **Standard** or **Fast**, when the route offers Fast.
+8. Optionally add your own instructions, up to 2,000 characters.
+9. Under **What the watcher sees**, choose what each check includes: the brief, activities, changed files and partial replies. The main agent's plan is shared with **Activities**.
+10. Optionally turn on **Send findings to the main chat automatically**. See [Send findings automatically](#send-findings-automatically).
+11. Turn on **Review the last turn now** to have the watcher check the chat's most recent turn right away. It is available while that turn runs and after it has completed.
+12. If Private Connect is set up, choose under **On paired devices** whether the watcher follows the chat's visibility or stays hidden. See [Private Connect](#private-connect).
+13. Optionally open **Budgets** and change them. See [Budgets and cost](#budgets-and-cost).
+14. Choose **Add watcher**.
 
 The watcher is its own chat, named **Watcher · *preset* · *chat title***. It works in the same checkout and branch as the chat it watches, and Inertia doesn't rename it. In the **Work** tab it is nested under its chat.
 
@@ -25,19 +29,19 @@ The watcher opens in a dock beside the chat. When the dock is collapsed, a slim 
 
 The bar at the top of the dock has two lines: the title of the chat it watches, and one line with the watcher's agent, its preset and what it is doing, for example **Codex · Reviewer · Watching**. While a check runs, that line says what the watcher is doing, such as reading a file, and how long the check has run. Between checks it reads **Watching**, or **Sends findings automatically** with automatic sending on, and while the watcher is paused it reads **Paused**.
 
-Beside the title, **Check now** runs a check without waiting. While the watcher is paused, the same button reads **Resume**.
+Beside the title, **Check now** runs a check without waiting. While the watcher is paused, the same button reads **Resume**. While a check of a watcher with chat access waits for an approval, the line reads **Needs your approval** and the button reads **Open chat**, which opens the watcher chat so you can answer.
 
 The **More watcher actions** menu holds:
 
 - **Pause**, which stops new checks.
 - **Review the last turn**, which has the watcher review the chat's latest turn again from its start, even while that turn is still running. It is unavailable while a check runs or the watcher is paused.
-- **Open watcher chat**, which opens the watcher's own chat in [split view](working-side-by-side.md). There you can see each check as a **Check *N* · *K* events** row, open **What the watcher was shown**, and ask the watcher a question directly. Its composer shows **Read-only watcher · Plan · Supervised**.
+- **Open watcher chat**, which opens the watcher's own chat in [split view](working-side-by-side.md). There you can see each check as a **Check *N* · *K* events** row, open **What the watcher was shown**, and ask the watcher a question directly. For a read-only watcher, its composer shows **Read-only watcher**. A watcher with chat access has the usual mode, access, reasoning and speed menus there.
 - **Send findings automatically**. See [Send findings automatically](#send-findings-automatically).
 - **Hide from paired devices**, when Private Connect is set up. See [Private Connect](#private-connect).
 - **Collapse**, which hides the dock. Inertia remembers this for each chat.
 - **Stop watching…**, which detaches the watcher. See [Stop, detach and delete](#stop-detach-and-delete).
 
-Below them the menu lists the watcher's numbers, for example **28 of 30 checks left this turn**, **2 events waiting** and **Last check 9:04 PM**. It adds **Main chat quiet since 9:04 PM** when the main chat has produced no output for 10 minutes, and **Used 48.2K tokens** once the watcher's agent has reported its token use.
+Below them the menu lists the watcher's access, such as **Read-only** or **Build · Full access**, and its numbers, for example **28 of 30 checks left this turn**, **2 events waiting** and **Last check 9:04 PM**. It adds **Main chat quiet since 9:04 PM** when the main chat has produced no output for 10 minutes, and **Used 48.2K tokens** once the watcher's agent has reported its token use.
 
 Escape inside the dock collapses it and returns focus to the handle. Drag the dock's edge to resize it, or focus the edge and use the arrow keys. When the dock would leave the chat less than 360 pixels, it opens as a sheet over the chat instead. A sheet starts collapsed, stops above the composer, and collapses when you press outside it.
 
@@ -51,7 +55,7 @@ Each check reminds the watcher of up to five of its findings from earlier checks
 
 Each card and each row in the watcher chat carries the watcher's lifetime check number, **Check *N***. That number counts every check, including **Check now** and reviews of the last turn, so it can be higher than the checks used this turn.
 
-When the watcher has nothing to report, it answers with exactly `SILENT`. The dock groups these quiet checks into one receipt, such as **Checked once · 9:04 PM · nothing to report** or **Checked 3 times · 9:04–9:12 PM · nothing to report**. When the watcher ran read-only commands, the receipt adds them, for example **ran 2 read-only commands · 1 declined**. Open a receipt to see each check: why it ran, how many events it covered, the commands it ran, how much it sent, such as **24 KiB sent**, and what was shortened or left out. A check that fails or is stopped shows its own line saying why, such as **The check failed.**
+When the watcher has nothing to report, it answers with exactly `SILENT`. The dock groups these quiet checks into one receipt, such as **Checked once · 9:04 PM · nothing to report** or **Checked 3 times · 9:04–9:12 PM · nothing to report**. When the watcher ran read-only commands, the receipt adds them, for example **ran 2 read-only commands · 1 declined**. For a watcher with chat access, it says **ran 2 commands**. Open a receipt to see each check: why it ran, how many events it covered, the commands it ran, how much it sent, such as **24 KiB sent**, and what was shortened or left out. A check that fails or is stopped shows its own line saying why, such as **The check failed.**
 
 Watcher checks don't send desktop notifications, play completion sounds or mark the watcher unread, and the desktop mascot ignores quiet checks.
 
@@ -87,24 +91,33 @@ With **Send findings automatically** on, each finding is sent as soon as its che
 
 A finding from a turn that a watcher note started is never sent automatically, so the watcher and the main agent can't keep each other going. Its card waits for you to choose **Send** or **Dismiss**. Automatic sending also leaves the last place in the main chat's queue for you: when the queue is full or has one place left, the card says **Not sent**, and you can choose **Send** yourself once the queue has room.
 
+## Access
+
+**Access** decides what the watcher may do.
+
+- **Read-only**, the default, lets the watcher read the chat it watches and the project's files, and nothing else. How strictly Inertia can hold an agent to this depends on the agent; see [Which agents can be watchers](#which-agents-can-be-watchers) and [Read-only guarantees](#read-only-guarantees).
+- **Supervised**, **Auto-accept edits** and **Full access** give the watcher chat access: it works like a chat with the mode and access you chose. When its access needs your approval, the approval card appears in the watcher chat and the dock says **Needs your approval**. Its edits and commands are its own, with checkpoints like any chat, and the [changed-files pause](#read-only-guarantees) doesn't apply. You can change its mode, access, reasoning and speed in the watcher chat's composer.
+
+A watcher's findings still reach the main chat only as notes, when you choose **Send** or turn on automatic sending.
+
 ## Read-only guarantees
 
-A watcher can read the chat it watches and the project's files. It can't change them. Inertia enforces this in several independent layers:
+A read-only watcher can read the chat it watches and the project's files. It can't change them. On Claude Code, Codex and OpenCode, Inertia enforces this in several independent layers:
 
-- **Locked mode and access.** The watcher always runs in Plan mode with Supervised access, which can't be changed. You can switch its model only to another agent that can be a watcher.
-- **Approvals are declined.** Every approval request is declined automatically, and the watcher chat records what was declined. The watcher never shows you an approval card. A second declined request in one check stops that check, and a question from the watcher stops the check too.
+- **Locked mode and access.** A read-only watcher's mode and access can't be changed. You can switch its model only to another agent that can be a watcher.
+- **Approvals are declined.** Every approval request is declined automatically, and the watcher chat records what was declined. The watcher never shows you an approval card. A declined command tells the watcher why, so it can try an allowed form instead. A check stops after five declined requests. On Claude Code, Cursor and Kimi Code, a question from the watcher is declined with the reason and the check continues; on Codex the watcher can't ask questions during a check; elsewhere a question stops the check.
 - **Edits are attempts, never changes.** If the watcher asks to edit a file, the request is declined, Inertia records it as an attempt, and the check continues. If the watcher actually starts to edit, create or delete a file, Inertia stops that check. A second attempt during the same turn of the main chat pauses the watcher.
-- **Commands stay read-only.** On Claude Code and OpenCode, the watcher runs commands from Inertia's read-only allowlist without asking: read-only Git commands such as `git diff`, `git log`, `git show`, `git status` and `git blame`, and `rg`, `grep`, `cat`, `head`, `tail`, `ls`, `find`, `wc`, `diff`, `stat`, `tree`, `jq` and a few similar tools. Inertia declines, without an approval card, any other command that reaches it and any form of these that could write, follow a file, run another program or read outside the workspace, including redirection, chaining and command substitution; a pipe between allowed commands is fine. Claude Code also runs the commands that its own plan mode treats as read-only, and its own read and search tools, without asking Inertia. See [Commands](#commands). Codex runs its own known-safe read-only commands inside its read-only sandbox, without network access; any other command needs approval and is declined. On OpenCode the watcher can also read, search and list files; every other OpenCode tool, including edits, is turned off. Receipts show how many commands the watcher ran and how many were declined.
+- **Commands stay read-only.** On Claude Code and OpenCode, the watcher runs commands from Inertia's read-only allowlist without asking: read-only Git commands such as `git diff`, `git log`, `git show`, `git status` and `git blame`, and `rg`, `grep`, `cat`, `head`, `tail`, `ls`, `find`, `wc`, `diff`, `stat`, `tree`, `jq` and a few similar tools. Inertia declines, without an approval card, any other command that reaches it and any form of these that could write, follow a file, run another program or read outside the workspace, including redirection, chaining and command substitution; a pipe between allowed commands is fine. Claude Code runs its own read and search tools without asking; its commands go through Inertia's allowlist. See [Commands](#commands). Codex runs its own known-safe read-only commands inside its read-only sandbox, without network access; any other command needs approval and is declined. On OpenCode the watcher can also read, search and list files; every other OpenCode tool, including edits, is turned off. Receipts show how many commands the watcher ran and how many were declined.
 - **Changed files pause the watcher.** Before and after each check, Inertia takes a fingerprint of the checkout's Git state. If files changed that no running agent accounts for, and during the check the watcher started an edit or ran a command outside the read-only allowlist, the watcher pauses and a banner lists the changed paths. **Resume…** asks you to confirm: if you edited those files yourself, resume. If the watcher only read, or another agent ran a command, or a terminal, a project script or a Git operation was busy on the checkout at the same time, the check counts as inconclusive: the watcher keeps its finding and keeps going, and the card or receipt names the files that changed during the check. Outside a Git repository the fingerprint is unavailable and the other layers still apply.
 - **The watcher's instructions** tell it that it is read-only and which commands it may run.
 
-Watcher turns create no checkpoints and record no changed files, so nothing in the watcher chat can revert the main chat's work. Taking the fingerprint doesn't write to your repository.
+A read-only watcher's turns create no checkpoints and record no changed files, so nothing in the watcher chat can revert the main chat's work. Taking the fingerprint doesn't write to your repository.
 
 ### Commands
 
 A content search across the workspace stays within the files Git and ripgrep normally search: recursive `grep` and `diff`, `rg --hidden`, `rg -u`, the `--no-ignore` options, and `git grep --untracked` or `--no-index` are declined.
 
-Commands that read a `.env`, `*.env` or `*.env.*` file are declined in any letter case, including a pattern file given with `-f`. A path with a wildcard is allowed only when its name ends in a fixed extension other than `.env`, such as `src/*.ts`; `config/*` is declined. A search pattern that only mentions such a name, such as `rg 'process.env.API_URL' src`, is allowed.
+Commands that name a `.env`, `*.env` or `*.env.*` file are declined in any letter case, including a pattern file given with `-f`. A search pattern or a wildcard can still match such a file; see the limits below. A path with a wildcard is allowed only when its name ends in a fixed extension other than `.env`, such as `src/*.ts`; `config/*` is declined. A search pattern that only mentions such a name, such as `rg 'process.env.API_URL' src`, is allowed.
 
 Some limits remain. A command can still read any other workspace file it names, including one that Git ignores, and a search with no path or a folder path can still read a `*.env` file that Git or ripgrep doesn't ignore. A symbolic link that leads outside the workspace is declined, but one created between Inertia's check and the command's run isn't noticed. Programs still follow their own configuration, such as Git's external diff or textconv settings, a `RIPGREP_CONFIG_PATH` that OpenCode's shell startup files set again, jq's `~/.jq`, or shell aliases on OpenCode.
 
@@ -131,22 +144,29 @@ If the watcher reaches its own account's usage limit, it pauses and says so, and
 
 ## Which agents can be watchers
 
-- **Claude Code** (Agent SDK)
-- **Codex** (app-server)
-- **OpenCode**
+Every agent can be a watcher. How a read-only watcher is held to read-only depends on the agent:
 
-Cursor, Kimi Code and Antigravity can't be watchers yet. A custom backend on Claude Code, Codex or OpenCode can watch, but it can only review what each check sends: it can't read more of the main chat, and the dock says so.
+| Agent | How it stays read-only | Limits |
+|---|---|---|
+| **Claude Code**, **OpenCode** | Inertia enforces it: approvals are declined, commands come from a read-only allowlist, and a change to files pauses the watcher. See [Read-only guarantees](#read-only-guarantees). | None beyond those layers. |
+| **Codex** | Inertia enforces it: approvals are declined, Codex runs its own known-safe commands inside its read-only sandbox, and a change to files pauses the watcher. See [Read-only guarantees](#read-only-guarantees). | None beyond those layers. |
+| **Cursor**, **Kimi Code** | Inertia declines what the agent reports and pauses the watcher if files change. | The agent controls its own reads and commands, and there is no sandbox. |
+| **Antigravity** | The agent runs in its own plan mode. Inertia stops a check after an edit it sees and pauses the watcher if files change. | Inertia can't decline its actions, and the watcher can't read more of the main chat. Inertia recognises Antigravity's file-writing tools by the names its CLI uses; an edit through a tool it doesn't recognise is caught only by the fingerprint check. |
+
+When you choose a route, the dialog repeats this under **Access** for that agent.
+
+A custom backend can watch too, but it can only review what each check sends: it can't read more of the main chat, and the dock says so.
 
 The main chat can use any agent, and it can [switch provider](chats-and-agents.md#give-the-agent-context) mid-chat. The watcher keeps following.
 
 ## Private Connect
 
-On a device paired with [Private Connect](../PRIVATE_CONNECT.md), a watcher is visible when the chat it watches is visible, unless you hide it: choose **Hidden** under **On paired devices** when you add it, or **Hide from paired devices** in the dock's menu. The device shows the watcher as an ordinary chat titled **Watcher · …**. A Collaborate device can prompt the watcher, which stays read-only. **Send** and **Dismiss** are available only on the desktop.
+On a device paired with [Private Connect](../PRIVATE_CONNECT.md), a watcher is visible when the chat it watches is visible, unless you hide it: choose **Hidden** under **On paired devices** when you add it, or **Hide from paired devices** in the dock's menu. The device shows the watcher as an ordinary chat titled **Watcher · …**. A Collaborate device can prompt the watcher, which keeps the access you gave it. **Send** and **Dismiss** are available only on the desktop.
 
 ## Stop, detach and delete
 
 - **Pause** stops new checks and keeps the watcher attached. **Resume** continues.
-- **Stop watching…** asks you to confirm, stops any running check and detaches the watcher. It becomes an ordinary chat in the **Work** tab, and its mode is no longer locked.
+- **Stop watching…** asks you to confirm, stops any running check and detaches the watcher. It becomes an ordinary chat in the **Work** tab, and a read-only watcher's mode and access are no longer locked.
 - **Archiving the main chat** pauses the watcher and stops a running check, and **Resume** is refused until you unarchive the chat.
 - **Archiving the watcher chat** pauses the watcher and stops a running check too, and **Resume** is refused until you unarchive the watcher chat.
 - **Deleting the main chat** detaches its watcher. If the main chat owned an isolated worktree, the detached watcher keeps it.
@@ -166,7 +186,7 @@ After Inertia restarts, watchers continue where they were. If a turn of the main
 
 ### The dialog offers no model
 
-Only ready routes on Claude Code, Codex and OpenCode can be watchers. Open **Settings → Agents** and check that one of them is installed and signed in.
+Only ready routes can be chosen. Open **Settings → Agents** and check that an agent is installed and signed in.
 
 ### The watcher never reports anything
 
@@ -190,6 +210,10 @@ The dock says why:
 ### A banner lists changed files
 
 Files in the checkout changed during a check in which the watcher started an edit or ran a command outside the read-only allowlist, and no running agent accounts for them. Look at the listed paths. If you edited them yourself, choose **Resume…** and confirm.
+
+### The dock says Needs your approval
+
+The watcher has chat access, and its access needs your approval for what it is trying to do. Choose **Open chat** and answer the approval card in the watcher chat.
 
 ### Send doesn't queue the note
 

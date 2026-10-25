@@ -9,6 +9,7 @@ export interface ReadOnlyCommandContext {
   cwd: string;
   windows: boolean;
   powershell?: boolean;
+  windowsPaths?: boolean;
 }
 
 export interface ReadOnlyCommandOperand {
@@ -39,10 +40,13 @@ export const ENVIRONMENT_FILE = "The command reads an environment file.";
 const ENVIRONMENT_GLOB = "The command uses a glob that could match an environment file.";
 const OPTION_GLOB = "The command uses a glob that could expand to an option.";
 const UNIQ_GLOB = "uniq cannot take a glob, because a second matched file would become its output.";
+const SED_FORMS = "sed can only print line ranges in a watcher, as sed -n '10,40p' file or sed -n '1,5p;20,30p' file.";
+const SED_PRINT_SCRIPT = /^(?:\d+|\$)(?:,(?:\d+|\$))?p(?:;(?:\d+|\$)(?:,(?:\d+|\$))?p)?$/u;
 
 const UNQUOTED_REJECTED = new Set([";", "&", "<", ">", "(", ")", "{", "}", "$", "\\"]);
 const WORD_START_REJECTED = new Set(["#", "~", "="]);
 const DOUBLE_QUOTED_REJECTED = new Set(["$", "\\"]);
+const DOUBLE_QUOTED_ESCAPES = new Set(["$", "\"", "\\"]);
 const WINDOWS_REJECTED = new Set(["%", "^", "&", "|", "<", ">", "\"", "\\"]);
 const GLOB = new Set(["*", "?", "["]);
 const STDERR_REDIRECTS = ["2>/dev/null", "2>&1"];
@@ -101,7 +105,17 @@ const PROGRAMS: Readonly<Record<string, ProgramRule>> = Object.freeze({
   tr: noRule,
   column: noRule,
   jq: jqRule,
+  sed: sedRule,
 });
+
+export const READ_ONLY_COMMAND_LIST =
+  "git diff, git log, git show, git status, git blame and git grep, rg, grep, cat, head, tail, sed -n with line ranges, ls, find, wc, diff, stat, tree and jq";
+
+export function readOnlyCommandReminder(shell: "posix" | "windows"): string {
+  return shell === "posix"
+    ? `Watchers can run ${READ_ONLY_COMMAND_LIST} on workspace paths, quoted with single or double quotes and joined only by pipes; 2>/dev/null is fine, other redirection, chaining and substitution are not.`
+    : `Watchers can run ${READ_ONLY_COMMAND_LIST} on workspace paths with forward slashes, quoted with single quotes only (no double quotes or backslashes) and joined only by pipes, with no redirection, chaining or substitution.`;
+}
 
 export function classifyReadOnlyCommand(command: string, context: ReadOnlyCommandContext): ReadOnlyCommandVerdict {
   if (command.length > MAX_READ_ONLY_COMMAND_CHARS) return refuse("The command is too long.");
@@ -187,7 +201,15 @@ function tokenize(command: string, windows: boolean, powershell: boolean): Word[
     }
     if (quote === "\"") {
       if (character === "\"") quote = null;
-      else if (DOUBLE_QUOTED_REJECTED.has(character)) return SHELL_SYNTAX;
+      else if (character === "\\" && !windows && !powershell) {
+        const next = characters[index + 1];
+        if (next !== undefined && DOUBLE_QUOTED_ESCAPES.has(next)) {
+          append(word!, next, false);
+          index += 1;
+        } else {
+          append(word!, character, false);
+        }
+      } else if (DOUBLE_QUOTED_REJECTED.has(character)) return SHELL_SYNTAX;
       else append(word!, character, false);
       word!.end = index + 1;
       continue;
@@ -244,16 +266,21 @@ function append(word: Word, character: string, glob: boolean): void {
   for (let index = 0; index < character.length; index += 1) word.glob.push(glob);
 }
 
+export function readOnlyCommandUsesWindowsPaths(context: ReadOnlyCommandContext): boolean {
+  return context.windowsPaths ?? context.windows;
+}
+
 function pathProblem(word: Word, context: ReadOnlyCommandContext, providerPaths: boolean, pattern: boolean): string | null {
-  const paths = context.windows ? win32 : posix;
-  const separators = context.windows ? /[\\/]/u : /\//u;
+  const windowsPaths = readOnlyCommandUsesWindowsPaths(context);
+  const paths = windowsPaths ? win32 : posix;
+  const separators = windowsPaths ? /[\\/]/u : /\//u;
   if (globReachesParent(word, separators)) return OUTSIDE_WORKSPACE;
   for (const offset of pathCandidateOffsets(word.value)) {
     const candidate = word.value.slice(offset);
     if (globMayMatchEnvironmentFile(candidate, word.glob.slice(offset))) return ENVIRONMENT_GLOB;
     if (candidate.startsWith("~")) return OUTSIDE_WORKSPACE;
-    if (context.windows && /^[A-Za-z]:(?![\\/])/u.test(candidate)) return OUTSIDE_WORKSPACE;
-    if (context.windows && providerPaths && candidate.replace(/^[A-Za-z]:(?=[\\/])/u, "").includes(":")) return OUTSIDE_WORKSPACE;
+    if (windowsPaths && /^[A-Za-z]:(?![\\/])/u.test(candidate)) return OUTSIDE_WORKSPACE;
+    if (windowsPaths && providerPaths && candidate.replace(/^[A-Za-z]:(?=[\\/])/u, "").includes(":")) return OUTSIDE_WORKSPACE;
     const segments = candidate.split(separators);
     if (paths.isAbsolute(candidate) || segments.includes("..")) {
       const relative = paths.relative(context.cwd, paths.resolve(context.cwd, candidate));
@@ -443,6 +470,12 @@ function uniqRule(args: readonly string[], globbed: readonly boolean[]): string 
     else if (arg === "-" || !arg.startsWith("-")) positionals += 1;
   }
   return positionals > 1 ? UNSAFE_OPTION : null;
+}
+
+function sedRule(args: readonly string[], globbed: readonly boolean[]): string | null {
+  const [quiet, script, ...files] = args;
+  if (quiet !== "-n" || script === undefined || globbed[1] === true || !SED_PRINT_SCRIPT.test(script)) return SED_FORMS;
+  return files.some((file) => file.startsWith("-")) ? SED_FORMS : null;
 }
 
 function jqRule(args: readonly string[]): string | null {

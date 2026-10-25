@@ -32,6 +32,7 @@ const roots: string[] = [];
 const FIRST_GENERATION = "00000000-0000-4000-8000-000000000001:1";
 const SECOND_GENERATION = "00000000-0000-4000-8000-000000000002:1";
 const BOOT_ID = "test:00000000-0000-4000-8000-000000000001";
+const NEXT_BOOT_ID = "test:00000000-0000-4000-8000-000000000002";
 
 function root(): string {
   const value = mkdtempSync(join(tmpdir(), "inertia-maintenance-journal-"));
@@ -82,6 +83,7 @@ describe("ProviderMaintenanceJournal", () => {
       runtimeGenerationId: FIRST_GENERATION,
       systemBootId: BOOT_ID,
       verifiedIdentity: null,
+      runtimeCleanupConfirmed: false,
     }]);
     expect(reopened.markVerified("maintenance-1", observed)).toBe(true);
     expect(journal(dataDirectory).pending()[0]?.verifiedIdentity).toEqual(observed);
@@ -171,6 +173,118 @@ describe("ProviderMaintenanceJournal", () => {
     expect(subject.abandonUnadmitted("maintenance-2", owning)).toBe(false);
     expect(subject.pending()).toHaveLength(1);
   });
+
+  it("checkpoints only exact generation or confirmed prior-boot cleanup", () => {
+    const subject = journal(root());
+    expect(subject.begin("cleanup-checkpoint", identity())).toBe(true);
+    const reconcile = (generation: string, boot = BOOT_ID, priorBootCleanupConfirmed = false) => subject.reconcile({
+      confirmedRuntimeGenerationIds: new Set([generation]),
+      currentSystemBootId: boot,
+      priorBootCleanupConfirmed,
+    })[0]!;
+    expect(reconcile(SECOND_GENERATION).runtimeCleanupConfirmed).toBe(false);
+    expect(reconcile(SECOND_GENERATION, NEXT_BOOT_ID).runtimeCleanupConfirmed).toBe(false);
+    expect(reconcile(SECOND_GENERATION, NEXT_BOOT_ID, true).runtimeCleanupConfirmed).toBe(true);
+    expect(subject.abandonUnadmitted("cleanup-checkpoint", identity())).toBe(false);
+  });
+
+  it.each([
+    ["unavailable", BOOT_ID],
+    [BOOT_ID, "unavailable"],
+    ["unavailable", "unavailable"],
+    [BOOT_ID, "invalid-boot-id"],
+  ])("requires exact generation cleanup when boot identity is unknown (%s -> %s)", (recordBootId, currentBootId) => {
+    const dataDirectory = root();
+    const subject = new ProviderMaintenanceJournal(dataDirectory, {
+      runtimeGenerationId: FIRST_GENERATION, systemBootId: recordBootId,
+    });
+    expect(subject.begin("unknown-boot", identity())).toBe(true);
+    const reconciliation = {
+      confirmedRuntimeGenerationIds: new Set<string>(),
+      currentSystemBootId: currentBootId, priorBootCleanupConfirmed: true,
+    };
+    expect(subject.reconcile(reconciliation)[0]?.runtimeCleanupConfirmed).toBe(false);
+    expect(subject.reconcile({
+      ...reconciliation, confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+    })[0]?.runtimeCleanupConfirmed).toBe(true);
+  });
+
+  it.each(["owning", "cleaned"])("retains cleanup proof when retirement of %s is interrupted", (phase) => {
+    const dataDirectory = root();
+    const subject = journal(dataDirectory);
+    expect(subject.begin("interrupted-retirement", identity())).toBe(true);
+    subject.reconcile({
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID,
+      priorBootCleanupConfirmed: false,
+    });
+    expect(subject.markVerified("interrupted-retirement", identity())).toBe(true);
+    const interrupted = journal(dataDirectory, SECOND_GENERATION, {
+      beforeUnlink: (path) => {
+        if (path.endsWith(`.${phase}.json`)) throw new Error("injected unlink failure");
+      },
+    });
+    expect(interrupted.retireVerified("interrupted-retirement", identity())).toBe(false);
+    const reopened = journal(dataDirectory, SECOND_GENERATION);
+    expect(reopened.pending()).toEqual([expect.objectContaining({ runtimeCleanupConfirmed: true })]);
+    expect(() => validateProviderMaintenanceJournalStorage(dataDirectory)).not.toThrow();
+    expect(reopened.markVerified("interrupted-retirement", identity())).toBe(true);
+    expect(reopened.retireVerified("interrupted-retirement", identity())).toBe(true);
+    expect(reopened.pending()).toEqual([]);
+  });
+
+  it("stores cleanup proof outside the journal listing of earlier releases", () => {
+    const releasedPrefix = ".provider-maintenance-";
+    const releasedPattern = /^\.provider-maintenance-([0-9a-f]{64})\.(owning|verified)\.(json|publish\.tmp)$/u;
+    const dataDirectory = root();
+    const subject = journal(dataDirectory);
+    expect(subject.begin("rollback-compatible", identity())).toBe(true);
+    const interrupted = journal(dataDirectory, SECOND_GENERATION, {
+      afterTemporaryFileClosed: () => { throw new Error("injected publication failure"); },
+    });
+    expect(() => interrupted.reconcile({
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID, priorBootCleanupConfirmed: false,
+    })).toThrow("cleanup proof could not be persisted");
+    const transient = readdirSync(dataDirectory).filter((name) => name.endsWith(".publish.tmp"));
+    expect(transient).toHaveLength(1);
+    expect(transient[0]!.startsWith(releasedPrefix)).toBe(false);
+
+    expect(subject.reconcile({
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID, priorBootCleanupConfirmed: false,
+    })).toEqual([expect.objectContaining({ runtimeCleanupConfirmed: true })]);
+    const names = readdirSync(dataDirectory);
+    const listedByReleasedBuilds = names.filter((name) => name.startsWith(releasedPrefix));
+    expect(listedByReleasedBuilds).toHaveLength(1);
+    expect(listedByReleasedBuilds.every((name) => releasedPattern.test(name))).toBe(true);
+    const proof = names.find((name) => !name.startsWith(releasedPrefix));
+    expect(proof).toMatch(/\.json$/u);
+    expect(proof!.startsWith(".runtime-")).toBe(false);
+
+    expect(() => validateProviderMaintenanceJournalStorage(dataDirectory)).not.toThrow();
+    writeFileSync(join(dataDirectory, proof!), "{}", "utf8");
+    expect(() => validateProviderMaintenanceJournalStorage(dataDirectory)).toThrow(
+      "A provider maintenance journal record is invalid.",
+    );
+  });
+
+  it("keeps ownership unconfirmed when cleanup checkpoint publication is interrupted", () => {
+    const dataDirectory = root();
+    expect(journal(dataDirectory).begin("interrupted-checkpoint", identity())).toBe(true);
+    const interrupted = journal(dataDirectory, SECOND_GENERATION, {
+      afterTemporaryFileClosed: (path) => {
+        if (path.endsWith(".cleaned.publish.tmp")) throw new Error("injected publication failure");
+      },
+    });
+    expect(() => interrupted.reconcile({
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID, priorBootCleanupConfirmed: false,
+    })).toThrow("cleanup proof could not be persisted");
+    expect(journal(dataDirectory).pending()).toEqual([
+      expect.objectContaining({ runtimeCleanupConfirmed: false }),
+    ]);
+  });
 });
 
 describe("provider maintenance startup recovery", () => {
@@ -257,6 +371,45 @@ describe("provider maintenance startup recovery", () => {
     })).resolves.toHaveLength(1);
     expect(leases.isQuarantined(owning)).toBe(true);
     expect(journal(dataDirectory, SECOND_GENERATION).pending()).toHaveLength(1);
+  });
+
+  it("retries failed conformance after restart without the consumed cleanup receipt", async () => {
+    const dataDirectory = root();
+    expect(journal(dataDirectory).begin("retry-after-restart", identity())).toBe(true);
+    const options = {
+      journal: journal(dataDirectory, SECOND_GENERATION),
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      runtime: runtime(vi.fn(async () => { throw new Error("temporary verification failure"); })),
+      cwd: "/workspace",
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID,
+      priorBootCleanupConfirmed: false,
+    };
+    await expect(recoverProviderMaintenanceJournal(options)).resolves.toHaveLength(1);
+    const verify = vi.fn(async () => identity());
+    await expect(recoverProviderMaintenanceJournal({
+      ...options,
+      journal: journal(dataDirectory, "00000000-0000-4000-8000-000000000003:1"),
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      runtime: runtime(verify),
+      confirmedRuntimeGenerationIds: new Set(),
+    })).resolves.toEqual([]);
+    expect(verify).toHaveBeenCalledOnce();
+  });
+
+  it("does not verify a checkpointed installation when provider execution is disabled", async () => {
+    const dataDirectory = root();
+    expect(journal(dataDirectory).begin("disabled-recovery", identity())).toBe(true);
+    const verify = vi.fn(async () => identity());
+    await expect(recoverProviderMaintenanceJournal({
+      journal: journal(dataDirectory, SECOND_GENERATION),
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      runtime: runtime(verify), cwd: "/workspace",
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID, priorBootCleanupConfirmed: false,
+      verificationEnabled: false,
+    })).resolves.toHaveLength(1);
+    expect(verify).not.toHaveBeenCalled();
   });
 
   it("retires a verified record left unretired and reopens admission only after startup recovery", async () => {

@@ -10,7 +10,7 @@ import {
   watcherPrivateConnectSchema,
   watcherSharingSchema,
 } from "../../watcher";
-import { requestBase } from "./common";
+import { accessModeSchema, interactionModeSchema, requestBase } from "./common";
 
 const linkId = z.uuid();
 
@@ -25,6 +25,14 @@ export const watcherAttachPayloadSchema = z.strictObject({
   privateConnect: watcherPrivateConnectSchema,
   delivery: watcherDeliveryPolicySchema.optional(),
   initialReview: z.boolean(),
+  readOnly: z.boolean().optional(),
+  interactionMode: interactionModeSchema.optional(),
+  accessMode: accessModeSchema.optional(),
+}).superRefine((payload, context) => {
+  const issue = (message: string) => context.addIssue({ code: "custom", message });
+  const chosen = [payload.interactionMode, payload.accessMode].filter((value) => value !== undefined).length;
+  if (payload.readOnly === false && chosen < 2) issue("A watcher with chat access needs both a mode and an access level.");
+  if (payload.readOnly !== false && chosen > 0) issue("A read-only watcher cannot choose a mode or access level.");
 });
 
 export const watcherUpdatePayloadSchema = z.strictObject({

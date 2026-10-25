@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppSnapshot, ConversationLatestTurnSummary, ProviderId, ProviderInfo } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
@@ -8,7 +8,25 @@ import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING, type WatcherLinkView } from "../../src/shared/watcher";
 import { WatcherAttachDialog, WatcherAttachPresence } from "../../src/renderer/src/components/watcher/WatcherAttachDialog";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
+import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
 import { WATCHED_ID, link, payloadOf, project, recordingRequest, shell } from "./watcher-fixtures";
+
+const tiers = vi.hoisted(() => ({ withoutReadOnly: new Set<string>() }));
+
+vi.mock("../../src/shared/watcher", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/shared/watcher")>();
+  return {
+    ...actual,
+    watcherReadOnlyEnforcement: (harnessId: string) => tiers.withoutReadOnly.has(harnessId)
+      ? null
+      : actual.watcherReadOnlyEnforcement(harnessId),
+  };
+});
+
+afterEach(() => {
+  tiers.withoutReadOnly.clear();
+  window.localStorage.removeItem(MODEL_FAVORITES_STORAGE_KEY);
+});
 
 const ready = (id: ProviderId, label: string, overrides: Partial<ProviderInfo> = {}): ProviderInfo => ({
   id,
@@ -87,6 +105,51 @@ async function openDialog(value: AppSnapshot, options: Parameters<typeof Harness
   const dialog = await screen.findByRole("dialog", { name: "Add a watcher" });
   return { trigger, dialog };
 }
+
+const tunable = (id: ProviderId, label: string): ProviderInfo => ready(id, label, {
+  models: [{
+    id: "fixture-model",
+    label: "Fixture model",
+    description: "Test model",
+    isDefault: true,
+    inputModalities: ["text"],
+    reasoningOptions: [
+      { value: "low", label: "Low", description: "" },
+      { value: "medium", label: "Medium", description: "" },
+      { value: "high", label: "High", description: "" },
+    ],
+    defaultReasoningEffort: "medium",
+    fastMode: { providerValue: "priority", label: "Fast", description: "Faster replies that use more of the plan.", isDefault: false },
+  }],
+});
+
+async function attachPayload(dialog: HTMLElement, request: ReturnType<typeof recordingRequest>["request"]) {
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add watcher" }));
+  await waitFor(() => expect(request).toHaveBeenCalled());
+  return payloadOf(request.mock.calls.at(-1)![0]);
+}
+
+async function openChooser(dialog: HTMLElement) {
+  const section = within(dialog).getByRole("heading", { name: "Model route" }).closest("section")!;
+  fireEvent.click(section.querySelector<HTMLButtonElement>("button[aria-controls]")!);
+  return screen.findByRole("dialog", { name: "Choose model" });
+}
+
+async function chooseRoute(dialog: HTMLElement, source: string, harnessId: string) {
+  const chooser = await openChooser(dialog);
+  fireEvent.click(await within(chooser).findByRole("button", { name: new RegExp(`^${source}, `, "u") }));
+  const row = [...chooser.querySelectorAll<HTMLElement>("[data-model-route-key]")]
+    .find((candidate) => candidate.dataset.modelRouteKey?.includes(harnessId) && candidate.getAttribute("aria-disabled") !== "true");
+  expect(row).toBeDefined();
+  fireEvent.click(row!.closest("button") ?? row!);
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument());
+}
+
+const INERTIA_TIER = "Inertia enforces it: approvals are declined, Codex runs its own known-safe commands inside its read-only sandbox, and a change to files pauses the watcher.";
+const ALLOWLIST_TIER = "Inertia enforces it: approvals are declined, commands come from a read-only allowlist, and a change to files pauses the watcher.";
+
+const CHAT_ACCESS_NOTE = "The watcher can use its tools like a chat. Approvals appear in the watcher chat.";
+const READ_ONLY_NOTE = "Reads the chat and the project's files. Can't change them.";
 
 const TABBABLE = 'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]';
 
@@ -176,18 +239,20 @@ describe("watcher attach dialog", () => {
     const budgets = within(dialog).getByText("Budgets").closest("summary")!;
     const attach = within(dialog).getByRole("button", { name: "Add watcher" });
     expect(index(preset)).toBeGreaterThan(-1);
-    expect(order.filter((element) => element.getAttribute("role") === "radio")).toEqual([preset]);
-    expect(index(preset)).toBeLessThan(index(instructions));
+    const access = within(dialog).getByRole("radio", { name: "Read-only" });
+    expect(order.filter((element) => element.getAttribute("role") === "radio")).toEqual([preset, access]);
+    expect(index(preset)).toBeLessThan(index(access));
+    expect(index(access)).toBeLessThan(index(instructions));
     expect(index(instructions)).toBeLessThan(index(brief));
     expect(index(brief)).toBeLessThan(index(budgets));
     expect(index(budgets)).toBeLessThan(index(attach));
   });
 
-  it("chooses a ready watcher route even when the watched chat runs elsewhere", async () => {
+  it("chooses another ready route when the watched chat's agent isn't ready", async () => {
     const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
     const onAttached = vi.fn();
     const { dialog } = await openDialog(
-      snapshot([ready("cursor", "Cursor"), ready("codex", "Codex")], "cursor"),
+      snapshot([ready("cursor", "Cursor", { authState: "unauthenticated", canRun: false }), ready("codex", "Codex")], "cursor"),
       { request, onAttached },
     );
     const attach = within(dialog).getByRole("button", { name: "Add watcher" });
@@ -224,38 +289,39 @@ describe("watcher attach dialog", () => {
     expect(payloadOf(request.mock.calls[0]![0])).toMatchObject({ delivery: "auto" });
   });
 
-  it("lists only routes on agents that can watch, and only ready ones are selectable", async () => {
+  it("lists routes on every ready agent", async () => {
     const { dialog } = await openDialog(snapshot([
       ready("cursor", "Cursor"),
+      ready("kimi", "Kimi Code"),
+      ready("antigravity", "Antigravity"),
       ready("codex", "Codex"),
       ready("opencode", "OpenCode", { authState: "unauthenticated", canRun: false }),
     ]));
-    const section = within(dialog).getByRole("heading", { name: "Model route" }).closest("section")!;
-    fireEvent.click(section.querySelector<HTMLButtonElement>("button[aria-controls]")!);
-    const chooser = await screen.findByRole("dialog", { name: "Choose model" });
-    const rows = [...chooser.querySelectorAll<HTMLElement>("[data-model-route-key]")];
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.some((row) => row.dataset.modelRouteKey?.includes("cursor"))).toBe(false);
-    for (const row of rows) {
-      const key = row.dataset.modelRouteKey ?? "";
-      expect(key.includes("codex-app-server") || key.includes("opencode-sdk")).toBe(true);
-      if (key.includes("opencode-sdk")) expect(row).toHaveAttribute("aria-disabled", "true");
+    const chooser = await openChooser(dialog);
+    for (const [source, harnessId] of [["Codex", "codex-app-server"], ["Cursor", "cursor-acp"], ["Kimi Code", "kimi-acp"], ["Antigravity", "antigravity-cli"]] as const) {
+      fireEvent.click(await within(chooser).findByRole("button", { name: new RegExp(`^${source}, `, "u") }));
+      const rows = [...chooser.querySelectorAll<HTMLElement>("[data-model-route-key]")];
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((row) => row.dataset.modelRouteKey?.includes(harnessId))).toBe(true);
+      expect(rows.some((row) => row.getAttribute("aria-disabled") !== "true")).toBe(true);
     }
+    expect(within(chooser).queryByRole("button", { name: /^OpenCode, /u })).not.toBeInTheDocument();
   });
 
   it("keeps Attach disabled until a watcher route is ready", async () => {
     const { dialog } = await openDialog(snapshot([
       ready("codex", "Codex", { authState: "unauthenticated", canRun: false }),
-      ready("cursor", "Cursor"),
+      ready("cursor", "Cursor", { authState: "unauthenticated", canRun: false }),
     ]));
     expect(within(dialog).getByRole("button", { name: "Add watcher" })).toHaveAttribute("aria-disabled", "true");
-    expect(within(dialog).getByRole("status")).not.toHaveTextContent(/Cursor/u);
   });
 
-  it("offers no route when only agents that cannot watch are ready", async () => {
-    const { dialog } = await openDialog(snapshot([ready("cursor", "Cursor")], "cursor"));
-    expect(within(dialog).getByRole("button", { name: "Add watcher" })).toHaveAttribute("aria-disabled", "true");
-    expect(within(dialog).getByRole("status")).toHaveTextContent("No watcher route");
+  it("offers the watched chat's own agent when it is the only ready one", async () => {
+    const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+    const { dialog } = await openDialog(snapshot([ready("cursor", "Cursor")], "cursor"), { request });
+    expect(within(dialog).getByRole("button", { name: "Add watcher" })).not.toHaveAttribute("aria-disabled");
+    expect(dialog.querySelector(".watcher-attach-warning")).toBeNull();
+    expect(await attachPayload(dialog, request)).toMatchObject({ readOnly: true, modelSelection: { harnessId: "cursor-acp" } });
   });
 
   it("closes on Escape and restores focus to the trigger", async () => {
@@ -383,5 +449,299 @@ describe("watcher attach dialog", () => {
     await waitFor(() => expect(recorded.commands).toHaveLength(2));
     const [first, second] = recorded.commands.map((command) => payloadOf(command).linkId);
     expect(first).not.toEqual(second);
+  });
+
+  describe("access", () => {
+    it("attaches read-only by default, with no mode, and says what read-only means", async () => {
+      const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+      const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request });
+      const group = within(dialog).getByRole("radiogroup", { name: "Access" });
+      expect(within(group).getAllByRole("radio").map((radio) => radio.textContent)).toEqual([
+        "Read-only",
+        "Supervised",
+        "Auto-accept edits",
+        "Full access",
+      ]);
+      expect(within(group).getByRole("radio", { name: "Read-only" })).toHaveAttribute("aria-checked", "true");
+      expect(group).toHaveAccessibleDescription(`${READ_ONLY_NOTE} ${INERTIA_TIER}`);
+      expect(within(dialog).queryByRole("radiogroup", { name: "Mode" })).not.toBeInTheDocument();
+      expect(within(dialog).queryByText(CHAT_ACCESS_NOTE)).not.toBeInTheDocument();
+      const payload = await attachPayload(dialog, request);
+      expect(payload).toMatchObject({ readOnly: true });
+      expect(payload).not.toHaveProperty("interactionMode");
+      expect(payload).not.toHaveProperty("accessMode");
+    });
+
+    it.each([
+      ["Supervised", "supervised"],
+      ["Auto-accept edits", "auto-edit"],
+      ["Full access", "full"],
+    ] as const)("reveals Mode for %s and attaches with chat access", async (label, accessMode) => {
+      const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+      const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request });
+      fireEvent.click(within(dialog).getByRole("radio", { name: label }));
+      const group = within(dialog).getByRole("radiogroup", { name: "Access" });
+      expect(group).toHaveAccessibleDescription(CHAT_ACCESS_NOTE);
+      expect(dialog).not.toHaveAccessibleDescription(/never edits files/u);
+      const mode = within(dialog).getByRole("radiogroup", { name: "Mode" });
+      expect(within(mode).getAllByRole("radio").map((radio) => radio.textContent)).toEqual(["Build", "Plan"]);
+      expect(within(mode).getByRole("radio", { name: "Build" })).toHaveAttribute("aria-checked", "true");
+      fireEvent.click(within(mode).getByRole("radio", { name: "Plan" }));
+      expect(await attachPayload(dialog, request)).toMatchObject({ readOnly: false, interactionMode: "plan", accessMode });
+    });
+
+    it("hides Mode again and drops the mode fields when Read-only is chosen back", async () => {
+      const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+      const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request });
+      fireEvent.click(within(dialog).getByRole("radio", { name: "Full access" }));
+      expect(within(dialog).getByRole("radiogroup", { name: "Mode" })).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole("radio", { name: "Read-only" }));
+      expect(within(dialog).queryByRole("radiogroup", { name: "Mode" })).not.toBeInTheDocument();
+      expect(dialog).toHaveAccessibleDescription(/never edits files/u);
+      const payload = await attachPayload(dialog, request);
+      expect(payload).toMatchObject({ readOnly: true });
+      expect(payload).not.toHaveProperty("interactionMode");
+      expect(payload).not.toHaveProperty("accessMode");
+    });
+
+    it("moves through access levels with the arrow keys as one tab stop", async () => {
+      const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]));
+      const radios = within(within(dialog).getByRole("radiogroup", { name: "Access" })).getAllByRole("radio");
+      expect(radios.map((radio) => radio.getAttribute("tabindex"))).toEqual(["0", "-1", "-1", "-1"]);
+      radios[0]!.focus();
+      fireEvent.keyDown(radios[0]!, { key: "ArrowRight" });
+      expect(radios[1]).toHaveFocus();
+      expect(radios[1]).toHaveAttribute("aria-checked", "true");
+      fireEvent.keyDown(radios[1]!, { key: "End" });
+      expect(radios[3]).toHaveFocus();
+      expect(radios[3]).toHaveAccessibleName("Full access");
+      expect(radios.map((radio) => radio.getAttribute("tabindex"))).toEqual(["-1", "-1", "-1", "0"]);
+      const mode = within(within(dialog).getByRole("radiogroup", { name: "Mode" })).getAllByRole("radio");
+      mode[0]!.focus();
+      fireEvent.keyDown(mode[0]!, { key: "ArrowLeft" });
+      expect(mode[1]).toHaveFocus();
+      expect(mode[1]).toHaveAttribute("aria-checked", "true");
+      fireEvent.keyDown(radios[3]!, { key: "Home" });
+      expect(radios[0]).toHaveFocus();
+      expect(within(dialog).queryByRole("radiogroup", { name: "Mode" })).not.toBeInTheDocument();
+    });
+
+    it("says why Supervised can't pause for approval on a route that can't supervise", async () => {
+      const { dialog } = await openDialog(snapshot([ready("antigravity", "Antigravity")], "antigravity"));
+      fireEvent.click(within(dialog).getByRole("radio", { name: "Supervised" }));
+      expect(within(dialog).getByRole("radiogroup", { name: "Access" })).toHaveAccessibleDescription(
+        expect.stringContaining("can't pause for approval"),
+      );
+      fireEvent.click(within(dialog).getByRole("radio", { name: "Full access" }));
+      expect(within(dialog).queryByText(/can't pause for approval/u)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("read-only tiers", () => {
+    it.each([
+      ["codex", "Codex", INERTIA_TIER],
+      ["claude", "Claude Code", ALLOWLIST_TIER],
+      ["opencode", "OpenCode", ALLOWLIST_TIER],
+      ["cursor", "Cursor", "Inertia declines what Cursor reports and pauses the watcher if files change. Cursor controls its own reads and commands; there is no sandbox."],
+      ["kimi", "Kimi Code", "Inertia declines what Kimi Code reports and pauses the watcher if files change. Kimi Code controls its own reads and commands; there is no sandbox."],
+      ["antigravity", "Antigravity", "Antigravity runs in its own plan mode. Inertia can't decline its actions; it stops a check after an edit it sees and pauses the watcher if files change. It can't read more of the main chat."],
+    ] as const)("states how %s keeps a watcher read-only", async (providerId, label, statement) => {
+      const { dialog } = await openDialog(snapshot([ready(providerId, label)], providerId));
+      const group = within(dialog).getByRole("radiogroup", { name: "Access" });
+      expect(within(group).getByRole("radio", { name: "Read-only" })).toHaveAttribute("aria-checked", "true");
+      expect(within(group).getByRole("radio", { name: "Read-only" })).toBeEnabled();
+      expect(group).toHaveAccessibleDescription(`${READ_ONLY_NOTE} ${statement}`);
+      if (statement === INERTIA_TIER || statement === ALLOWLIST_TIER) expect(dialog).toHaveAccessibleDescription(/never edits files/u);
+      else expect(dialog).not.toHaveAccessibleDescription(/never edits files/u);
+    });
+
+    it("updates the statement when the route moves to another agent", async () => {
+      const { dialog } = await openDialog(snapshot([ready("codex", "Codex"), ready("cursor", "Cursor")]));
+      const group = within(dialog).getByRole("radiogroup", { name: "Access" });
+      expect(group).toHaveAccessibleDescription(`${READ_ONLY_NOTE} ${INERTIA_TIER}`);
+      await chooseRoute(dialog, "Cursor", "cursor-acp");
+      expect(group).toHaveAccessibleDescription(expect.stringContaining("Inertia declines what Cursor reports"));
+    });
+
+    it("starts an agent without a read-only tier on Plan and Supervised, with Read-only unavailable", async () => {
+      tiers.withoutReadOnly.add("kimi-acp");
+      const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+      const { dialog } = await openDialog(snapshot([ready("kimi", "Kimi Code")], "kimi"), { request });
+      const group = within(dialog).getByRole("radiogroup", { name: "Access" });
+      const readOnly = within(group).getByRole("radio", { name: "Read-only" });
+      expect(readOnly).toBeDisabled();
+      expect(readOnly).toHaveAttribute("aria-checked", "false");
+      expect(readOnly).toHaveAttribute("tabindex", "-1");
+      expect(within(group).getByRole("radio", { name: "Supervised" })).toHaveAttribute("aria-checked", "true");
+      expect(within(group).getByRole("radio", { name: "Supervised" })).toHaveAttribute("tabindex", "0");
+      expect(group).toHaveAccessibleDescription(`Read-only isn't available on this agent. ${CHAT_ACCESS_NOTE}`);
+      expect(within(dialog).getByRole("radio", { name: "Plan" })).toHaveAttribute("aria-checked", "true");
+      const supervised = within(group).getByRole("radio", { name: "Supervised" });
+      supervised.focus();
+      fireEvent.keyDown(supervised, { key: "Home" });
+      expect(within(group).getByRole("radio", { name: "Supervised" })).toHaveFocus();
+      fireEvent.keyDown(supervised, { key: "ArrowLeft" });
+      expect(within(group).getByRole("radio", { name: "Full access" })).toHaveFocus();
+      fireEvent.keyDown(within(group).getByRole("radio", { name: "Full access" }), { key: "ArrowRight" });
+      expect(supervised).toHaveFocus();
+      expect(await attachPayload(dialog, request)).toMatchObject({ readOnly: false, interactionMode: "plan", accessMode: "supervised" });
+    });
+
+    it("switches to Plan and Supervised when the route moves to an agent without a read-only tier", async () => {
+      tiers.withoutReadOnly.add("kimi-acp");
+      const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+      const { dialog } = await openDialog(snapshot([ready("codex", "Codex"), ready("kimi", "Kimi Code")]), { request });
+      const group = within(dialog).getByRole("radiogroup", { name: "Access" });
+      expect(within(group).getByRole("radio", { name: "Read-only" })).toHaveAttribute("aria-checked", "true");
+      await chooseRoute(dialog, "Kimi Code", "kimi-acp");
+      const focused = document.activeElement;
+      expect(within(group).getByRole("radio", { name: "Read-only" })).toBeDisabled();
+      expect(within(group).getByRole("radio", { name: "Supervised" })).toHaveAttribute("aria-checked", "true");
+      expect(within(dialog).getByRole("radio", { name: "Plan" })).toHaveAttribute("aria-checked", "true");
+      expect(document.activeElement).toBe(focused);
+      expect(await attachPayload(dialog, request)).toMatchObject({
+        readOnly: false,
+        interactionMode: "plan",
+        accessMode: "supervised",
+        modelSelection: { harnessId: "kimi-acp" },
+      });
+    });
+
+    it("keeps a chosen chat access when the route moves to an agent without a read-only tier", async () => {
+      tiers.withoutReadOnly.add("kimi-acp");
+      const { dialog } = await openDialog(snapshot([ready("codex", "Codex"), ready("kimi", "Kimi Code")]));
+      fireEvent.click(within(dialog).getByRole("radio", { name: "Full access" }));
+      await chooseRoute(dialog, "Kimi Code", "kimi-acp");
+      expect(within(dialog).getByRole("radio", { name: "Full access" })).toHaveAttribute("aria-checked", "true");
+      expect(within(dialog).getByRole("radio", { name: "Build" })).toHaveAttribute("aria-checked", "true");
+    });
+  });
+
+  describe("reasoning and speed", () => {
+    it("hides Reasoning and Speed for a route without those choices", async () => {
+      const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]));
+      expect(within(dialog).queryByRole("radiogroup", { name: "Reasoning" })).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole("radiogroup", { name: "Speed" })).not.toBeInTheDocument();
+    });
+
+    it("offers the route's reasoning levels and speed and attaches them in the model selection", async () => {
+      const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+      const { dialog } = await openDialog(snapshot([tunable("codex", "Codex")]), { request });
+      const reasoning = within(dialog).getByRole("radiogroup", { name: "Reasoning" });
+      expect(within(reasoning).getAllByRole("radio").map((radio) => radio.textContent)).toEqual([
+        "Low",
+        "Medium · Default",
+        "High",
+      ]);
+      expect(within(reasoning).getByRole("radio", { name: "Medium · Default" })).toHaveAttribute("aria-checked", "true");
+      const speed = within(dialog).getByRole("radiogroup", { name: "Speed" });
+      expect(within(speed).getAllByRole("radio").map((radio) => radio.textContent)).toEqual(["Standard", "Fast"]);
+      expect(within(speed).getByRole("radio", { name: "Standard" })).toHaveAttribute("aria-checked", "true");
+      const high = within(reasoning).getByRole("radio", { name: "High" });
+      high.focus();
+      fireEvent.keyDown(high, { key: "ArrowLeft" });
+      expect(within(reasoning).getByRole("radio", { name: "Medium · Default" })).toHaveFocus();
+      fireEvent.click(high);
+      fireEvent.click(within(speed).getByRole("radio", { name: "Fast" }));
+      expect(within(speed).getByRole("radio", { name: "Fast" })).toHaveAttribute("aria-checked", "true");
+      expect(await attachPayload(dialog, request)).toMatchObject({
+        modelSelection: { harnessId: "codex-app-server", reasoningEffort: "high", providerOptions: { fastMode: "priority" } },
+      });
+    });
+
+    it("drops Fast when Standard is chosen again", async () => {
+      const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+      const { dialog } = await openDialog(snapshot([tunable("codex", "Codex")]), { request });
+      const speed = within(dialog).getByRole("radiogroup", { name: "Speed" });
+      fireEvent.click(within(speed).getByRole("radio", { name: "Fast" }));
+      fireEvent.click(within(speed).getByRole("radio", { name: "Standard" }));
+      const payload = await attachPayload(dialog, request);
+      expect((payload.modelSelection as { providerOptions: Record<string, unknown> }).providerOptions).not.toHaveProperty("fastMode");
+    });
+  });
+
+  function storeFullAccessFavorite(): void {
+    window.localStorage.setItem(MODEL_FAVORITES_STORAGE_KEY, JSON.stringify({
+      version: 2,
+      favorites: [{
+        harnessId: "codex-app-server",
+        backendProfileId: "builtin:openai",
+        modelId: "fixture-model",
+        reasoningEffort: "high",
+        configuration: { accessMode: "full", interactionMode: "plan", fastMode: true },
+      }],
+    }));
+  }
+
+  async function chooseFullAccessFavorite(dialog: HTMLElement): Promise<void> {
+    const chooser = await openChooser(dialog);
+    const favorite = [...chooser.querySelectorAll<HTMLElement>("[data-model-route-key]")]
+      .find((row) => row.textContent?.includes("Full access"));
+    expect(favorite).toBeDefined();
+    fireEvent.click(favorite!.closest("button") ?? favorite!);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument());
+  }
+
+  const liveRegion = (dialog: HTMLElement) => dialog.querySelector<HTMLElement>('p.visually-hidden[role="status"]')!;
+
+  it("says when the access came from a favorite and announces it", async () => {
+    storeFullAccessFavorite();
+    const { dialog } = await openDialog(snapshot([tunable("codex", "Codex")]));
+    const group = within(dialog).getByRole("radiogroup", { name: "Access" });
+    expect(within(dialog).queryByText("Set from the favorite.")).not.toBeInTheDocument();
+    expect(liveRegion(dialog)).toHaveAttribute("aria-live", "polite");
+    expect(liveRegion(dialog)).toBeEmptyDOMElement();
+    await chooseFullAccessFavorite(dialog);
+    expect(within(group).getByRole("radio", { name: "Full access" })).toHaveAttribute("aria-checked", "true");
+    expect(within(dialog).getByText("Set from the favorite.")).toBeInTheDocument();
+    expect(group).toHaveAccessibleDescription(`${CHAT_ACCESS_NOTE} Set from the favorite.`);
+    expect(liveRegion(dialog)).toHaveTextContent(/^Access set to Full access from the favorite\.?$/u);
+    fireEvent.click(within(group).getByRole("radio", { name: "Supervised" }));
+    expect(within(dialog).queryByText("Set from the favorite.")).not.toBeInTheDocument();
+    expect(group).toHaveAccessibleDescription(CHAT_ACCESS_NOTE);
+  });
+
+  it("drops the favorite note when access is changed from the keyboard", async () => {
+    storeFullAccessFavorite();
+    const { dialog } = await openDialog(snapshot([tunable("codex", "Codex")]));
+    await chooseFullAccessFavorite(dialog);
+    const full = within(dialog).getByRole("radio", { name: "Full access" });
+    full.focus();
+    fireEvent.keyDown(full, { key: "ArrowLeft" });
+    expect(within(dialog).getByRole("radio", { name: "Auto-accept edits" })).toHaveFocus();
+    expect(within(dialog).queryByText("Set from the favorite.")).not.toBeInTheDocument();
+  });
+
+  it("applies a favorite's access, mode and speed when it is chosen", async () => {
+    window.localStorage.setItem(MODEL_FAVORITES_STORAGE_KEY, JSON.stringify({
+      version: 2,
+      favorites: [{
+        harnessId: "codex-app-server",
+        backendProfileId: "builtin:openai",
+        modelId: "fixture-model",
+        reasoningEffort: "high",
+        configuration: { accessMode: "full", interactionMode: "plan", fastMode: true },
+      }],
+    }));
+    const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+    const { dialog } = await openDialog(snapshot([tunable("codex", "Codex")]), { request });
+    const section = within(dialog).getByRole("heading", { name: "Model route" }).closest("section")!;
+    fireEvent.click(section.querySelector<HTMLButtonElement>("button[aria-controls]")!);
+    const chooser = await screen.findByRole("dialog", { name: "Choose model" });
+    const favorite = [...chooser.querySelectorAll<HTMLElement>("[data-model-route-key]")]
+      .find((row) => row.textContent?.includes("Full access"));
+    expect(favorite).toBeDefined();
+    fireEvent.click(favorite!.closest("button") ?? favorite!);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument());
+    expect(within(dialog).getByRole("radio", { name: "Full access" })).toHaveAttribute("aria-checked", "true");
+    expect(within(dialog).getByRole("radio", { name: "Plan" })).toHaveAttribute("aria-checked", "true");
+    expect(within(dialog).getByRole("radio", { name: "High" })).toHaveAttribute("aria-checked", "true");
+    expect(within(dialog).getByRole("radio", { name: "Fast" })).toHaveAttribute("aria-checked", "true");
+    expect(await attachPayload(dialog, request)).toMatchObject({
+      readOnly: false,
+      interactionMode: "plan",
+      accessMode: "full",
+      modelSelection: { reasoningEffort: "high", providerOptions: { fastMode: "priority" } },
+    });
   });
 });

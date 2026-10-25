@@ -14,6 +14,7 @@ import type {
 } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { acpAttachmentReadAllowed } from "./attachment-read-grant";
+import { acpReadOnlyWatcher } from "./acp-watcher";
 import type { AgentApprovalDecision } from "./interactions";
 
 export const MAX_PENDING_CURSOR_INTERACTIONS = 64;
@@ -62,6 +63,9 @@ export async function cursorPermission(
   const allow = cursorOneShotPermissionOption(params.options, true);
   if (allow && acpAttachmentReadAllowed(params, options.input.attachmentReadRoots)) {
     return { outcome: { outcome: "selected", optionId: allow.optionId } };
+  }
+  if (acpReadOnlyWatcher(options.input)) {
+    return askCursorPermission(params, displayParams, signal, options, emit, approvals);
   }
   if (options.input.interactionMode === "plan") {
     return { outcome: { outcome: "cancelled" } };

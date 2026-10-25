@@ -919,7 +919,7 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
           content: "Check the Windows path handling.", watcherNote: note,
         });
         expect(f.provider.input?.prompt).toContain("[inertia-watcher-note]");
-        expect(f.provider.input?.prompt).toContain("read-only watcher");
+        expect(f.provider.input?.prompt).toContain("Treat it as review feedback from a colleague");
       } finally { await f.close(); }
     });
 

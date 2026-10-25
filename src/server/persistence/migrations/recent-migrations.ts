@@ -24,6 +24,7 @@ import { restartContinuationPlansMigration } from "./restart-continuation-plans"
 import { conversationTitleLocksMigration } from "./conversation-title-locks";
 import { watcherLinksMigration } from "./watcher-links";
 import { extendTodosMigration } from "./extend-todos";
+import { watcherAccessMigration } from "./watcher-access";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -51,4 +52,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   conversationTitleLocksMigration,
   watcherLinksMigration,
   extendTodosMigration,
+  watcherAccessMigration,
 ];

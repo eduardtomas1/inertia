@@ -32,8 +32,6 @@ import type { ProviderMaintenanceTarget } from "./provider/maintenance-capabilit
 import {
   ProviderInstallationLeaseCoordinator,
 } from "./provider/installation-lease";
-import { ProviderMaintenanceJournal } from
-  "./provider/maintenance-journal";
 import { recoverProviderMaintenanceJournal } from
   "./provider/maintenance-recovery";
 import { createProviderInfoRefresh, providerInstallationVerifier } from "./provider/provider-info-refresh";
@@ -260,6 +258,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const {
     conversationAttachments: initializedConversationAttachments,
     recovery,
+    providerMaintenanceJournal,
   } = await initializeRuntimePersistence(options, startupRecovery, store);
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
@@ -309,13 +308,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
   const providerInstallationLeases = new ProviderInstallationLeaseCoordinator();
-  const providerMaintenanceJournal = new ProviderMaintenanceJournal(
-    dataDirectory,
-    {
-      runtimeGenerationId: options.runtimeGenerationId,
-      systemBootId: options.systemBootId,
-    },
-  );
   const terminals = new TerminalManager({
     windowsTerminalAuthority: options.windowsTerminalAuthority,
     onOwnedProcessCleanupUnconfirmed:
@@ -334,7 +326,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     credentials: options.backendCredentials,
     builtInClaudeProfiles: options.kimiClaudeProfiles ?? [],
   });
+  let recoveryBlockedProviders = new Set(providerMaintenanceJournal.pending().map(
+    (record) => record.installationIdentity.providerId,
+  ));
   const providers = ProviderManager.createProduction({
+    providerRecoveryPending: (providerId) => recoveryBlockedProviders.has(providerId),
     metadataCache,
     installationLeases: providerInstallationLeases,
     lifetimeSignal: runtimeLifetimeAbort.signal,
@@ -365,6 +361,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     priorBootCleanupConfirmed: !runtimeSafetyLock
       && options.enableProviders !== false
       && startupRecovery.priorBootLeasesCleared,
+    verificationEnabled: options.enableProviders !== false,
   }).catch(() => {
     throw new RuntimeStartupBlockerError(
       "provider-installation-quarantined",
@@ -372,7 +369,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     );
   });
   const enableProviders = !runtimeSafetyLock
-    && providerMaintenanceRecovery.length === 0
     && (options.enableProviders ?? true);
   const agentWorkflows = new AgentWorkflowController(store, providers);
   const attachmentResolver = options.attachmentRoot && options.attachments
@@ -382,7 +378,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       )
     : null;
   const cachedProviderMetadata = Object.fromEntries(PROVIDER_IDS.map((providerId) => [providerId, providers.cachedMetadata(providerId)]));
-  let providerInfo = initialProviderSnapshots(enableProviders, cachedProviderMetadata);
+  recoveryBlockedProviders = new Set(providerMaintenanceRecovery.map(
+    (record) => record.installationIdentity.providerId,
+  ));
+  let providerInfo = initialProviderSnapshots(enableProviders, cachedProviderMetadata, recoveryBlockedProviders);
   let providerMaintenance: ProviderMaintenanceController;
   const runtimeSync = new RuntimeSyncHub<WebSocket>(send, undefined, (linkId) => store.watcherLinks.get(linkId));
   const pendingApprovals = new Map<string, AgentApprovalRequest>();
@@ -565,6 +564,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   providerMaintenance = new ProviderMaintenanceController({
     installationLeases: providerInstallationLeases,
     maintenanceJournal: providerMaintenanceJournal,
+    startupRecoveryOperationIds: new Set(providerMaintenanceRecovery.map(({ operationId }) => operationId)),
     installationIdentity: (target) =>
       providers.providerInstallationIdentityForMaintenance(
         target.providerId,
@@ -604,7 +604,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   });
   backendProfileController.attachProviderMutationGuard((providerId) => providerMaintenance.hasBlockingAuthority(providerId));
-  if (!runtimeSafetyLock && providerMaintenanceRecovery.length === 0) await backendProfileController.initialize();
+  if (!runtimeSafetyLock) await backendProfileController.initialize(recoveryBlockedProviders);
   const workspacePath = (projectId: string, conversationId?: string): string => {
     if (!conversationId && store.project(projectId).workspaceKind === "scratch") {
       throw new RequestError("Choose a chat to use its own workspace folder.");
@@ -651,6 +651,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       watcherInstructionsForTurn: (input) => watcherPolicy.watcherInstructionsFor(input),
       hostToolsForTurn: (input) => watcherPolicy.hostToolsForTurn(input) ?? agentThreads?.manager.bridgeFor(input),
       onReadOnlyViolation: (turn, violation) => watchers?.onReadOnlyViolation(turn, violation),
+      onPlanHandoff: (turn, text) => watchers?.onPlanHandoff(turn, text),
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
       },
@@ -965,7 +966,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
     transcriptCache: privateConnectTranscriptCache,
     privateConnectPromptSafety: (conversation) =>
-      privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId, { watcher: watcherPolicy.isWatcherConversation(conversation.id) }),
+      privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId, { watcher: watcherPolicy.privateConnectWatcher(conversation) }),
     watcherParent: (conversationId) => watchers?.watcherParent(conversationId) ?? null,
     queuePrompt: (conversationId, content, deviceId) => queuePrivateConnectPrompt({
       store,

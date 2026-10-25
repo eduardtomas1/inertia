@@ -2004,7 +2004,7 @@ describe("server event remaining discriminant and identity boundary", () => {
     const watchedId = "33333333-3333-4333-8333-333333333333";
     const link = {
       id: "44444444-4444-4444-8444-444444444444", watcherConversationId: watcherId, watchedConversationId: watchedId,
-      projectId, preset: "reviewer", instructions: "", privateConnect: "inherit", delivery: "manual", status: "watching",
+      projectId, preset: "reviewer", instructions: "", privateConnect: "inherit", delivery: "manual", readOnly: true, status: "watching",
       sharing: { brief: true, activities: true, changedFiles: true, partialReplies: false },
       budgets: { wakesPerWatchedTurn: 30, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake: 4 },
       pauseReason: null, pauseDetail: null, detachedReason: null, watchedTurnId: null,

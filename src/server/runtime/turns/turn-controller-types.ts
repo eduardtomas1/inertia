@@ -202,6 +202,7 @@ export interface TurnControllerHooks {
    */
   onTurnSettled?(turn: AgentTurn, settlement: TurnSettledEvidence): void | Promise<void>;
   onReadOnlyViolation?(turn: AgentTurn, violation: ReadOnlyWatcherViolation): void;
+  onPlanHandoff?(turn: AgentTurn, text: string): void;
   /** Benchmark-only stage attribution; absent in ordinary runtime instances. */
   testOnlyStreamingTrace?: StreamingTrace;
 }
@@ -224,6 +225,7 @@ export interface ReadOnlyWatcherTurn {
   linkId: string;
   wakeId: string | null;
   deniedApprovals: number;
+  editsGatedBeforeStart: boolean;
 }
 
 export interface FollowUpSteerOptions {
@@ -260,6 +262,7 @@ export interface QueueTurnRequest {
   activateConversation?: boolean;
   /** Server-constructed only. Renderer command schemas never accept this. */
   internalInstructions?: readonly HiddenProviderInstruction[];
+  systemInstructions?: readonly HiddenProviderInstruction[];
   checkpointId?: string | null;
   checkpointFailure?: string | null;
   turnCheckpoint?: boolean;

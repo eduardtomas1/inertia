@@ -6,7 +6,7 @@ import type { ConversationLatestTurnSummary, ConversationShell } from "../../src
 import type { WatcherLinkView } from "../../src/shared/watcher";
 import { WatcherBar } from "../../src/renderer/src/components/watcher/WatcherBar";
 import { createWatcherActions } from "../../src/renderer/src/hooks/useWatcherActions";
-import { clearWatcherLive, publishWatcherLive, resetWatcherLiveStore } from "../../src/renderer/src/utils/watcherLiveStore";
+import { clearWatcherLive, publishWatcherLive, resetWatcherLiveStore, type WatcherLiveEvent } from "../../src/renderer/src/utils/watcherLiveStore";
 import { LINK_ID, WATCHED_ID, WATCHER_ID, link, payloadOf, shell, watcherRuntime } from "./watcher-fixtures";
 
 const STARTED = "2026-10-19T10:42:00.000Z";
@@ -42,13 +42,15 @@ function bar(
     resumeBlocked?: string | null;
     usageTokens?: number | null;
     onError?: (message: string | null) => void;
+    onOpenWatcherChat?: (() => void) | null;
+    watcher?: ConversationShell;
   } = {},
 ) {
   return (
     <WatcherBar
       link={current}
       watched={shell(WATCHED_ID, "Refactor parser")}
-      watcher={current.status === "waking" ? runningWatcher() : shell(WATCHER_ID, "Watcher")}
+      watcher={options.watcher ?? (current.status === "waking" ? runningWatcher() : shell(WATCHER_ID, "Watcher"))}
       agentLabel="Team Codex · fixture-model"
       headingId="watcher-heading"
       closed={false}
@@ -57,7 +59,7 @@ function bar(
       resumeBlocked={options.resumeBlocked ?? null}
       usageTokens={options.usageTokens ?? null}
       onCollapse={vi.fn()}
-      onOpenWatcherChat={vi.fn()}
+      onOpenWatcherChat={options.onOpenWatcherChat === undefined ? vi.fn() : options.onOpenWatcherChat}
       onResumeRequest={onResumeRequest}
       onError={options.onError ?? vi.fn()}
     />
@@ -105,6 +107,7 @@ describe("watcher bar", () => {
       "Hide from paired devices",
       "Collapse",
       "Stop watching…",
+      "Read-only",
       "27 of 30 checks left this turn",
       "2 events waiting",
       expect.stringMatching(/^Last check /u),
@@ -151,6 +154,16 @@ describe("watcher bar", () => {
     fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Review the last turn" }));
     await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(refusal));
+  });
+
+  it("names a chat-access watcher's mode and access in the More menu", async () => {
+    const watcher = { ...shell(WATCHER_ID, "Watcher"), interactionMode: "build" as const, accessMode: "full" as const };
+    render(bar(link({ readOnly: false }), undefined, undefined, { watcher }));
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    const menu = await screen.findByRole("menu", { name: "More watcher actions" });
+    const note = within(menu).getByRole("menuitem", { name: "Build · Full access" });
+    expect(note).toHaveAttribute("aria-disabled", "true");
+    expect(within(menu).queryByRole("menuitem", { name: "Read-only" })).not.toBeInTheDocument();
   });
 
   it("shows no usage line until the watcher's token use is known", async () => {
@@ -305,6 +318,85 @@ describe("watcher bar", () => {
     }));
     expect(screen.getByText("Reading src/parser.ts")).toBeInTheDocument();
     expect(document.querySelector(".watcher-bar-state")).toHaveAttribute("data-phase", "waking");
+  });
+
+  it("asks for approval and offers the watcher chat while a check waits on an approval", () => {
+    const onOpenWatcherChat = vi.fn();
+    const runtime = watcherRuntime();
+    const current = link({ status: "waking", readOnly: false });
+    const view = render(bar(current, runtime, undefined, { onOpenWatcherChat }));
+    const primary = within(document.querySelector<HTMLElement>(".watcher-bar-actions")!).getAllByRole("button")[0]!;
+    primary.focus();
+    act(() => publishWatcherLive({
+      type: "watcher.live",
+      linkId: LINK_ID,
+      watcherConversationId: WATCHER_ID,
+      turnId: "watcher-turn-4",
+      phase: "approval",
+      label: "Running npm test",
+      at: STARTED,
+    }));
+    expect(document.querySelector(".watcher-bar-phase-text")).toHaveTextContent(/^Needs your approval$/u);
+    expect(primary).toHaveFocus();
+    expect(primary).toHaveAccessibleName("Open chat");
+    expect(primary).not.toHaveAttribute("aria-disabled");
+    expect(liveRegion()).toHaveTextContent(/^Needs your approval\.?$/u);
+    fireEvent.click(primary);
+    expect(onOpenWatcherChat).toHaveBeenCalledOnce();
+    expect(runtime.commands).toHaveLength(0);
+    act(() => publishWatcherLive({
+      type: "watcher.live",
+      linkId: LINK_ID,
+      watcherConversationId: WATCHER_ID,
+      turnId: "watcher-turn-4",
+      phase: "thinking",
+      label: null,
+      at: STARTED,
+    }));
+    expect(primary).toHaveFocus();
+    expect(primary).toHaveAccessibleName("Check now");
+    expect(primary).toHaveAttribute("aria-disabled", "true");
+    view.rerender(bar(link({ readOnly: false }), runtime, undefined, { onOpenWatcherChat }));
+    expect(primary).toHaveAccessibleName("Check now");
+  });
+
+  it("asks for an answer and offers the watcher chat while a check waits on a question", () => {
+    const onOpenWatcherChat = vi.fn();
+    const runtime = watcherRuntime();
+    render(bar(link({ status: "waking", readOnly: false }), runtime, undefined, { onOpenWatcherChat }));
+    const primary = within(document.querySelector<HTMLElement>(".watcher-bar-actions")!).getAllByRole("button")[0]!;
+    primary.focus();
+    act(() => publishWatcherLive({
+      type: "watcher.live",
+      linkId: LINK_ID,
+      watcherConversationId: WATCHER_ID,
+      turnId: "watcher-turn-4",
+      phase: "question" as string as WatcherLiveEvent["phase"],
+      label: "Which branch should I compare?",
+      at: STARTED,
+    }));
+    expect(document.querySelector(".watcher-bar-phase-text")).toHaveTextContent(/^Needs your answer$/u);
+    expect(document.querySelector(".watcher-bar-state")).toHaveAttribute("data-phase", "attention");
+    expect(primary).toHaveFocus();
+    expect(primary).toHaveAccessibleName("Open chat");
+    expect(primary).not.toHaveAttribute("aria-disabled");
+    expect(liveRegion()).toHaveTextContent(/^Needs your answer\.?$/u);
+    fireEvent.click(primary);
+    expect(onOpenWatcherChat).toHaveBeenCalledOnce();
+    expect(runtime.commands).toHaveLength(0);
+    act(() => publishWatcherLive({
+      type: "watcher.live",
+      linkId: LINK_ID,
+      watcherConversationId: WATCHER_ID,
+      turnId: "watcher-turn-4",
+      phase: "approval",
+      label: null,
+      at: STARTED,
+    }));
+    expect(document.querySelector(".watcher-bar-phase-text")).toHaveTextContent(/^Needs your approval$/u);
+    expect(liveRegion()).toHaveTextContent(/^Needs your approval\.?$/u);
+    expect(primary).toHaveFocus();
+    expect(primary).toHaveAccessibleName("Open chat");
   });
 
   it("never shows the previous check's phase when the next check starts", () => {

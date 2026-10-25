@@ -11,6 +11,7 @@ function verifiesSignInOnRun(provider: ProviderInfo): boolean {
 }
 
 export function providerStateLabel(provider: ProviderInfo): string {
+  if (provider.installState === "recovery-required") return "Recovery required";
   if (provider.installState === "checking" || provider.authState === "checking") return "Checking";
   if (provider.installState === "not-installed") return "Not installed";
   if (provider.installState === "unresponsive") return "Not responding";
@@ -40,6 +41,7 @@ export function providerStateDetail(provider: ProviderInfo): string {
 }
 
 export function providerSetupAction(provider: ProviderInfo): ProviderSetupAction {
+  if (provider.installState === "recovery-required") return null;
   if (provider.installState === "checking" || provider.authState === "checking") return null;
   if (provider.installState !== "installed") return "refresh";
   if (

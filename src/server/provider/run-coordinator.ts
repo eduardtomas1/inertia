@@ -41,6 +41,7 @@ import type { ProviderMetadataCache } from "./metadata";
 import { ProviderInstallationAdmissionError } from "./installation-lease";
 import { providerChildEnvironment } from "../environment";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
+import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../shared/provider-maintenance";
 import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../../shared/runtime-command-timeouts";
 
 interface ProviderRunInstallationUse {
@@ -90,6 +91,7 @@ export interface ProviderRunCoordinatorOptions {
   /** True while this provider's capability evidence is untrusted (#336). */
   evidenceUncertain?(providerId: ProviderId): boolean;
   installationState?(providerId: ProviderId): "current" | "changed" | "unverified";
+  recoveryPending?(providerId: ProviderId): boolean;
   capabilityAvailable(
     input: ProviderRunInput,
     capabilityId: ProviderCapabilityId,
@@ -227,6 +229,13 @@ export class ProviderRunCoordinator {
       );
     }
     const expectedIdentity = providerRunIdentity(input);
+    if (this.options.recoveryPending?.(input.providerId)) {
+      this.refuse(
+        expectedIdentity,
+        "invalid_input",
+        PROVIDER_MAINTENANCE_RECOVERY_MESSAGE,
+      );
+    }
     if (!isIsolatedProviderConversationId(conversationId)) {
       try {
         this.options.conversationProviderGate?.(conversationId, input.providerId);

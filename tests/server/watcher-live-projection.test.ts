@@ -49,4 +49,28 @@ describe("watcher live projection", () => {
     expect(watcherLiveLabel(activity("x".repeat(500)))!.length).toBe(MAX_WATCHER_LIVE_LABEL_CHARS);
     expect(watcherLiveLabel(activity("   "))).toBeNull();
   });
+
+  it("shows the approval phase while a check waits for the person and returns to thinking once it is answered", () => {
+    const timers = new ManualTimers();
+    const events: Extract<RuntimeMutationEvent, { type: "watcher.live" }>[] = [];
+    const live = new WatcherLiveProjection({ scheduler: timers, clock: () => timers.now, broadcast: (event) => events.push(event) });
+    live.begin(LINK, WATCHER, "turn-1");
+    timers.advance(750);
+    live.observeApproval(LINK, { conversationId: WATCHER, turnId: "turn-2", title: "Edit src/a.ts" });
+    live.observeApproval(LINK, { conversationId: "other", turnId: "turn-1", title: "Edit src/a.ts" });
+    expect(events).toHaveLength(1);
+    live.observeApproval(LINK, { conversationId: WATCHER, turnId: "turn-1", title: "Edit src/a.ts" });
+    expect(events.at(-1)).toMatchObject({ phase: "approval", label: "Edit src/a.ts", turnId: "turn-1" });
+    timers.advance(750);
+    live.interactionResolved(LINK, "turn-2");
+    expect(events).toHaveLength(2);
+    live.interactionResolved(LINK, "turn-1");
+    expect(events.at(-1)).toMatchObject({ phase: "thinking", label: null });
+    timers.advance(750);
+    live.observeQuestion(LINK, { conversationId: WATCHER, turnId: "turn-1", questions: [{
+      id: "q", header: "Scope", question: "Which file should I review?", options: [], allowMultiple: false, isOther: false, isSecret: false,
+    }] });
+    expect(events.at(-1)).toMatchObject({ phase: "question", label: "Which file should I review?" });
+  });
 });
+

@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 
+import { effectiveAccessMode } from "../../../shared/access-modes";
 import { clipCodeUnits } from "../../../shared/code-units";
 import type { ModelSelection, RuntimeMutationEvent } from "../../../shared/contracts";
 import type { WatcherAttachPayload, WatcherUpdatePayload } from "../../../shared/contracts/client-command/watcher";
@@ -10,6 +11,7 @@ import {
   WATCHER_PRESET_LABELS,
   watcherFlattenLine,
   watcherLinkViewSchema,
+  watcherReadOnlyEnforcement,
   type WatcherFeedItem,
   type WatcherLinkView,
   type WatcherPauseReason,
@@ -22,6 +24,7 @@ import {
   WATCHER_ARCHIVED_REFUSAL,
   WATCHER_LIMIT_REFUSAL,
   WATCHER_OF_WATCHER_REFUSAL,
+  WATCHER_READ_ONLY_UNAVAILABLE_REFUSAL,
   WatcherPolicyError,
   type WatcherFeedPage,
   type WatcherLinkRecord,
@@ -162,7 +165,11 @@ export class WatcherLinkCoordinator {
     const { store } = this.#deps;
     const existing = store.watcherLinks.get(payload.linkId);
     if (existing) {
-      if (existing.watchedConversationId === payload.watchedConversationId && existing.status !== "detached") {
+      if (
+        existing.watchedConversationId === payload.watchedConversationId
+        && existing.status !== "detached"
+        && existing.readOnly === (payload.readOnly !== false)
+      ) {
         return this.#detail(existing);
       }
       throw new RuntimeRequestError("This watcher already exists.");
@@ -195,6 +202,15 @@ export class WatcherLinkCoordinator {
       }
     }
     const current = store.conversation(watched.id);
+    const readOnly = payload.readOnly !== false;
+    const interactionMode = readOnly ? "plan" : payload.interactionMode;
+    const accessMode = readOnly ? "supervised" : payload.accessMode;
+    if (interactionMode === undefined || accessMode === undefined) {
+      throw new RuntimeRequestError("A watcher with chat access needs both a mode and an access level.");
+    }
+    if (readOnly && watcherReadOnlyEnforcement(route.selection.harnessId) === null) {
+      throw new RuntimeRequestError(WATCHER_READ_ONLY_UNAVAILABLE_REFUSAL);
+    }
     let created: ReturnType<RuntimeStore["watcherLinks"]["createWithConversation"]>;
     try {
       created = store.watcherLinks.createWithConversation({
@@ -207,6 +223,7 @@ export class WatcherLinkCoordinator {
           budgets: payload.budgets,
           privateConnect: payload.privateConnect,
           delivery: payload.delivery,
+          readOnly,
         },
         conversation: {
           projectId: current.projectId,
@@ -214,8 +231,8 @@ export class WatcherLinkCoordinator {
           options: {
             providerId: route.providerId,
             modelSelection: route.selection,
-            interactionMode: "plan",
-            accessMode: "supervised",
+            interactionMode,
+            accessMode: readOnly ? accessMode : effectiveAccessMode(route.providerId, accessMode),
             branch: current.branch,
             worktreePath: current.worktreePath,
             activate: false,

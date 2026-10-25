@@ -4,18 +4,21 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NativeUsageReader } from "../../src/server/usage/native";
+import { NativeSubscriptionReader } from "../../src/server/usage/native-subscriptions";
 import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
 import { opaqueUsageIdentity } from "../../src/server/usage/cliproxy";
 import type { ProviderManager } from "../../src/server/providers";
 import type { UsageResetConfirmation } from "../../src/shared/provider-usage-limits";
 import { usageAccount } from "../helpers/usage-limits";
 import { deduplicateUsageAccounts } from "../../src/shared/usage-limits-projection";
+import { PROVIDER_IDS } from "../../src/server/provider/contracts";
+import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../src/shared/provider-maintenance";
 
 const protocol = vi.hoisted(() => ({ store: "file" as string | null, request: vi.fn<(method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>>() }));
 vi.mock("../../src/server/codex/control-client", () => ({ CODEX_CONTROL_MAX_FRAME_BYTES: 4194304, CODEX_CONTROL_MAX_PROTOCOL_BYTES: 16777216, withCodexControlClient: async (options: { signal?: AbortSignal }, callback: (client: { request(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> }) => unknown) => { options.signal?.throwIfAborted(); return callback({ request: (method, params) => method === "config/read" ? Promise.resolve({ config: { cli_auth_credentials_store: protocol.store } }) : protocol.request(method, params) }); } }));
 const dirs: string[] = [];
 afterEach(async () => { vi.clearAllMocks(); protocol.store = "file"; for (const path of dirs.splice(0)) await rm(path, { recursive: true, force: true }); });
-async function fixture() {
+async function fixture(subscriptions?: NativeSubscriptionReader) {
   const directory = await mkdtemp(join(tmpdir(), "inertia-native-usage-")); dirs.push(directory);
   await writeFile(join(directory, "auth.json"), JSON.stringify({ tokens: { account_id: "synthetic-account" } }));
   const controller = new AbortController(); const abandonBeforeSpawn = vi.fn(() => true);
@@ -24,8 +27,50 @@ async function fixture() {
   protocol.request.mockImplementation(async (method) => method === "account/read" ? { account: { type: "chatgpt", email: "fixture@example.test", planType: "pro" } }
     : method === "account/rateLimitResetCredit/consume" ? { outcome: "reset" }
       : { rateLimits: { primary: { usedPercent: 30, windowDurationMins: 300, resetsAt: 2000000000 } }, rateLimitResetCredits: { availableCount: 2, credits: null } });
-  return { directory, controller, detect, abandonBeforeSpawn, reader: new NativeUsageReader(providers, directory, controller.signal), info: { ...initialProviderSnapshots(false)[0]!, canRun: true } };
+  return { directory, controller, detect, abandonBeforeSpawn, reader: new NativeUsageReader(providers, directory, controller.signal, subscriptions), info: { ...initialProviderSnapshots(false)[0]!, canRun: true } };
 }
+describe("provider recovery limits", () => {
+  it.each(PROVIDER_IDS)("preserves %s recovery guidance without reading quota", async (providerId) => {
+    const environment = vi.fn(async () => ({}));
+    const credentials = vi.fn(async () => null);
+    const request = vi.fn<typeof fetch>().mockRejectedValue(new Error("Quota access must stay blocked"));
+    const f = await fixture(new NativeSubscriptionReader({
+      environment, readFile: credentials, readCursorKeychain: credentials,
+      openCodeAccount: credentials, accountKey: credentials, fetch: request,
+    }));
+    const info = initialProviderSnapshots(false).find(({ id }) => id === providerId)!;
+    const account = await f.reader.read({
+      ...info, installState: "recovery-required", authState: "unknown", canRun: false,
+      statusMessage: PROVIDER_MAINTENANCE_RECOVERY_MESSAGE,
+      rateLimits: [{ id: "cached-window", label: "Cached quota", usedPercent: 0, remainingPercent: 100, windowMinutes: 300, resetsAt: null }],
+      metadataState: { ...info.metadataState, rateLimits: { ...info.metadataState.rateLimits, freshness: "fresh", updatedAt: new Date().toISOString() } },
+    });
+    expect(account).toMatchObject({
+      status: "unavailable", detail: PROVIDER_MAINTENANCE_RECOVERY_MESSAGE,
+      windows: [], updatedAt: null, identityKey: null, canReset: false,
+    });
+    expect(f.detect).not.toHaveBeenCalled();
+    expect(protocol.request).not.toHaveBeenCalled();
+    expect(environment).not.toHaveBeenCalled();
+    expect(credentials).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each(["codex", "claude"] as const)("retains recovery discovered during the first %s quota read", async (providerId) => {
+    const f = await fixture();
+    const detection = {
+      canRun: false, authState: "unknown", installState: "recovery-required",
+      statusMessage: providerId === "codex" ? undefined : PROVIDER_MAINTENANCE_RECOVERY_MESSAGE,
+    };
+    f.detect.mockResolvedValueOnce(detection);
+    const info = initialProviderSnapshots(true).find(({ id }) => id === providerId)!;
+    const account = await f.reader.read(info);
+    expect(account).toMatchObject({ status: "unavailable", detail: PROVIDER_MAINTENANCE_RECOVERY_MESSAGE, windows: [] });
+    expect(f.detect).toHaveBeenCalledOnce();
+    expect(protocol.request).not.toHaveBeenCalled();
+  });
+});
+
 describe("native Codex limits and reset protocol", () => {
   it("verifies a native account when Limits opens before startup detection, retaining two exact account identities", async () => {
     const f = await fixture();

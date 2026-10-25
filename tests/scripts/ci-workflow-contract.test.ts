@@ -91,7 +91,7 @@ it("binds every checkout to the candidate and makes migration lineage part of th
   expect(Object.keys(lineage.on)).toEqual(["workflow_call"]);
   expect(workflow.jobs.lineage.uses).toBe("./.github/workflows/database-migration-lineage.yml");
   expect(lineage.jobs.lineage.steps[0].with.ref).toBe("${{ github.sha }}");
-  expect(source(".github/actions/install-dependencies/action.yml")).toContain('default: "22.23.2"');
+  expect(source(".github/actions/install-dependencies/action.yml")).toContain('default: "22.23.4"');
 });
 
 it("release builds prove exact packages before desktop tests and never continue on unconfirmed cleanup", () => {

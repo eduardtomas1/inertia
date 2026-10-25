@@ -11,6 +11,7 @@ import { WatcherContext, type WatcherSurfaceModel } from "../../src/renderer/src
 import { loadWatcherDock } from "../../src/renderer/src/components/watcher/watcherLoaders";
 import { WATCHER_DOCK_WIDTH_KEY } from "../../src/renderer/src/components/watcher/WatcherDock";
 import { TOOLTIP_DELAY_MS } from "../../src/renderer/src/components/Tooltip";
+import { publishWatcherLive, resetWatcherLiveStore, type WatcherLiveEvent } from "../../src/renderer/src/utils/watcherLiveStore";
 import {
   readWatcherDock,
   reportWatcherDockError,
@@ -123,6 +124,71 @@ describe("watcher dock", () => {
     await user.keyboard("{Enter}");
     expect(readWatcherDock(WATCHED_ID).open).toBe(true);
     await waitFor(() => expect(within(aside).getByRole("heading", { name: "Watching Refactor parser" })).toHaveFocus());
+  });
+
+  it("names the watcher's access in the More menu", async () => {
+    const { update } = setup();
+    const aside = await dock();
+    fireEvent.click(within(aside).getByRole("button", { name: "More watcher actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Read-only" })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    update(link({ readOnly: false }));
+    fireEvent.click(within(aside).getByRole("button", { name: "More watcher actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Build · Supervised" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("asks for approval and opens the watcher chat from the bar while a check waits on one", async () => {
+    resetWatcherLiveStore();
+    const current = link({ readOnly: false, status: "waking" });
+    const runtime = watcherRuntime({ link: () => current });
+    const openWatcherChat = vi.fn();
+    render(<Dock model={surfaceModel({ watchers: [current], request: runtime.request, openWatcherChat })} />);
+    const aside = await dock();
+    const primary = within(aside.querySelector<HTMLElement>(".watcher-bar-actions")!).getAllByRole("button")[0]!;
+    primary.focus();
+    act(() => publishWatcherLive({
+      type: "watcher.live",
+      linkId: current.id,
+      watcherConversationId: WATCHER_ID,
+      turnId: "watcher-turn",
+      phase: "approval",
+      label: null,
+      at: NOW,
+    }));
+    expect(aside.querySelector(".watcher-bar-phase-text")).toHaveTextContent(/^Needs your approval$/u);
+    expect(primary).toHaveAccessibleName("Open chat");
+    expect(primary).toHaveFocus();
+    fireEvent.click(primary);
+    expect(openWatcherChat).toHaveBeenCalledExactlyOnceWith(WATCHER_ID);
+    expect(runtime.commands.some(({ type }) => type === "watcher.wake")).toBe(false);
+    resetWatcherLiveStore();
+  });
+
+  it("asks for an answer and opens the watcher chat from the bar while a check waits on a question", async () => {
+    resetWatcherLiveStore();
+    const current = link({ readOnly: false, status: "waking" });
+    const runtime = watcherRuntime({ link: () => current });
+    const openWatcherChat = vi.fn();
+    render(<Dock model={surfaceModel({ watchers: [current], request: runtime.request, openWatcherChat })} />);
+    const aside = await dock();
+    const primary = within(aside.querySelector<HTMLElement>(".watcher-bar-actions")!).getAllByRole("button")[0]!;
+    primary.focus();
+    act(() => publishWatcherLive({
+      type: "watcher.live",
+      linkId: current.id,
+      watcherConversationId: WATCHER_ID,
+      turnId: "watcher-turn",
+      phase: "question" as string as WatcherLiveEvent["phase"],
+      label: null,
+      at: NOW,
+    }));
+    expect(aside.querySelector(".watcher-bar-phase-text")).toHaveTextContent(/^Needs your answer$/u);
+    expect(primary).toHaveAccessibleName("Open chat");
+    expect(primary).toHaveFocus();
+    fireEvent.click(primary);
+    expect(openWatcherChat).toHaveBeenCalledExactlyOnceWith(WATCHER_ID);
+    expect(runtime.commands.some(({ type }) => type === "watcher.wake")).toBe(false);
+    resetWatcherLiveStore();
   });
 
   it("shows unseen findings on the handle as plain text and announces a new one", async () => {

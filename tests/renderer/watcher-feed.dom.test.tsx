@@ -26,11 +26,13 @@ function FeedHarness({
   running = false,
   harnessId = "codex-app-server",
   revision = 1,
+  readOnly,
 }: {
   runtime: Pick<ReturnType<typeof watcherRuntime>, "request">;
   running?: boolean;
   harnessId?: string;
   revision?: number;
+  readOnly?: boolean;
 }) {
   const actions = useMemo(() => createWatcherActions(runtime.request, LINK_ID), [runtime]);
   const feed = useWatcherFeed(LINK_ID, revision, actions);
@@ -48,12 +50,13 @@ function FeedHarness({
         watchedRunning={running}
         steerable={running && supportsActiveParentFollowUp(harnessId)}
         online
+        readOnly={readOnly}
       />
     </>
   );
 }
 
-function renderFeed(items: WatcherFeedItem[], options: { running?: boolean; harnessId?: string } = {}) {
+function renderFeed(items: WatcherFeedItem[], options: { running?: boolean; harnessId?: string; readOnly?: boolean } = {}) {
   const runtime = watcherRuntime({ link: () => link(), feed: () => items });
   render(<FeedHarness runtime={runtime} {...options} />);
   return runtime;
@@ -90,6 +93,17 @@ describe("watcher feed", () => {
     const [receipt] = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
     expect(receipt).toHaveTextContent(/Checked 3 times · .* · nothing to report · ran 3 read-only commands/u);
     expect(receipt).toHaveTextContent("ran 1 read-only command");
+  });
+
+  it("doesn't call a chat-access watcher's commands read-only", async () => {
+    renderFeed([
+      feedItem(2, { commandsRun: 2 }),
+      feedItem(1, { commandsRun: 1 }),
+    ], { readOnly: false });
+    const list = await screen.findByRole("list", { name: "Watcher checks" });
+    const [receipt] = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
+    expect(receipt).toHaveTextContent(/Checked 2 times · .* · nothing to report · ran 3 commands/u);
+    expect(receipt).not.toHaveTextContent(/read-only/u);
   });
 
   it("says how many command requests the watcher declined after the commands it ran", async () => {

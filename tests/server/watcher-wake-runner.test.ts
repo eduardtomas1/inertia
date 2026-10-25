@@ -6,7 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClientCommand } from "../../src/shared/contracts";
 
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
-import { WATCHER_FINAL_PASS_RETRY_LIMIT, WATCHER_ROUTE_RETRY_LIMIT } from "../../src/server/runtime/watcher/watcher-wake-runner";
+import {
+  WATCHER_ANSWERED_NOTHING,
+  WATCHER_FINAL_PASS_RETRY_LIMIT,
+  WATCHER_ROUTE_RETRY_LIMIT,
+} from "../../src/server/runtime/watcher/watcher-wake-runner";
 import {
   WATCHER_ACCUMULATE_AGE_COOLDOWNS,
   WATCHER_ACCUMULATE_MIN,
@@ -16,6 +20,7 @@ import {
 import {
   cleanupWatcherFixtures,
   createWatcherFixture,
+  watcherTestSelection,
   type WatcherFixture,
 } from "../support/watcher-runtime-fixture";
 
@@ -59,10 +64,11 @@ describe("watcher wake runner", () => {
       await f.startWatchedTurn();
       const watcherId = await wakeOnce(f, link.id);
       const input = f.provider.input(watcherId);
-      expect(input).toMatchObject({ interactionMode: "plan", access: "supervised" });
+      expect(input).toMatchObject({ interactionMode: "plan", access: "supervised", readOnlyProfile: "watcher" });
       expect(input.prompt).toContain("Check 1 for \"Fix the parser\"");
       expect(input.prompt).toContain("Main chat (Codex · gpt-test): turn running for ");
-      expect(input.prompt).toContain("[inertia-watcher]");
+      expect(input.prompt).not.toContain("[inertia-watcher]");
+      expect(input.systemInstruction).toMatch(/^\[inertia-watcher\]\nYou are a watcher: a read-only second agent/u);
       expect(input.prompt).not.toContain("Capability pack.");
       expect(f.provider.runs.get(watcherId)!.callbacks.hostTools?.definitions.map(({ name }) => name))
         .toEqual(["inertia_request_context"]);
@@ -84,7 +90,8 @@ describe("watcher wake runner", () => {
       const question = f.controller.queue({ conversationId: watcherId, content: "Why did you flag the parser?" });
       f.controller.start(question.turn.id);
       await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("question not started"); });
-      const asked = f.provider.input(watcherId).prompt;
+      expect(f.provider.input(watcherId).prompt).not.toContain("[inertia-watcher]");
+      const asked = f.provider.input(watcherId).systemInstruction!;
       expect(asked.split("[inertia-watcher]")).toHaveLength(2);
       expect(asked).toContain("Watched chat: \"Fix the parser\"");
       expect(asked).toContain("> Focus on parser edge cases.");
@@ -93,7 +100,8 @@ describe("watcher wake runner", () => {
 
       await f.startWatchedTurn();
       await wakeOnce(f, link.id);
-      expect(f.provider.input(watcherId).prompt.split("[inertia-watcher]")).toHaveLength(2);
+      expect(f.provider.input(watcherId).systemInstruction!.split("[inertia-watcher]")).toHaveLength(2);
+      expect(f.provider.input(watcherId).prompt).not.toContain("[inertia-watcher]");
       await f.finishTurn(watcherId, "SILENT");
     } finally {
       await f.close();
@@ -344,7 +352,7 @@ describe("watcher wake runner", () => {
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", writeAttemptsThisTurn: 1 });
 
       watcherId = await wakeOnce(f, link.id);
-      f.provider.emit(watcherId, { type: "activity", kind: "tool", phase: "started", label: "Edit", activityId: "edit-1" });
+      f.provider.emit(watcherId, { type: "activity", kind: "tool", phase: "started", label: "Edit", activityId: "edit-1", fileMutation: true });
       await f.flush();
       expect(feed(f, link.id)[0]).toMatchObject({ outcome: "write-attempt" });
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({
@@ -705,8 +713,8 @@ describe("watcher wake runner", () => {
       await vi.waitFor(() => { if (!f.provider.runs.has(f.watched.id)) throw new Error("note turn not started"); });
       const notePrompt = f.provider.input(f.watched.id).prompt;
       expect(notePrompt).toContain("[inertia-watcher-note]");
-      expect(notePrompt).toContain("The watcher sent this note automatically");
-      expect(notePrompt).not.toContain("The user forwarded");
+      expect(notePrompt).toContain("Inertia sent it automatically, as the user set it up, without the user choosing this note.");
+      expect(notePrompt).not.toContain("The user chose to send it to you.");
       expect(f.store.conversationDetail(f.watched.id)!.messages.find((message) => message.watcherNote)?.watcherNote)
         .toMatchObject({ automatic: true, delivery: "queue" });
       expect(feed(f, link.id)[0]).toMatchObject({ delivery: { mode: "queue", state: "sent" } });
@@ -900,6 +908,155 @@ describe("watcher wake runner", () => {
       expect(f.store.watcherLinks.wakeForTurn(f.provider.input(watcherId).turnId)).toMatchObject({ trigger: "turn-end", watchedTurnId: watchedTurn.id });
       await f.finishTurn(watcherId, "SILENT");
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({ finalPassTurnId: watchedTurn.id });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("keeps the role instruction in the prompt for a provider without a system-level field", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ modelSelection: watcherTestSelection("cursor") });
+      await f.startWatchedTurn();
+      const watcherId = await wakeOnce(f, link.id);
+      const input = f.provider.input(watcherId);
+      expect(input).not.toHaveProperty("systemInstruction");
+      expect(input.prompt.split("[inertia-watcher]")).toHaveLength(2);
+      expect(input.prompt).toContain("Your edits and anything needing approval are declined; there is no sandbox, so only read.");
+      await f.finishTurn(watcherId, "SILENT");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it.each([
+    ["an empty reply", null],
+    ["a plan hand-off phrase", "Plan submitted for review."],
+    ["a wrapped hand-off phrase", "**I've presented the plan above for approval.**"],
+  ])("turns a plan the watcher handed off, with %s, into the finding", async (_label, reply) => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const watcherId = await wakeOnce(f, link.id);
+      f.provider.emit(watcherId, {
+        type: "plan",
+        explanation: "- bug: src/parser.ts drops the last token\n- risk: no test covers empty input",
+        steps: [{ step: "bug: src/parser.ts drops the last token", status: "pending" }],
+        handoff: true,
+      });
+      await f.finishTurn(watcherId, reply);
+      expect(feed(f, link.id)[0]).toMatchObject({
+        outcome: "finding",
+        finding: "- bug: src/parser.ts drops the last token\n- risk: no test covers empty input",
+      });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("never swaps a short finding about a plan for the watcher's own checklist", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const watcherId = await wakeOnce(f, link.id);
+      f.provider.emit(watcherId, { type: "plan", explanation: null, steps: [{ step: "Read the migration", status: "completed" }] });
+      await f.finishTurn(watcherId, "The main agent's plan skips review of the migration.");
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "finding", finding: "The main agent's plan skips review of the migration." });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("records a check that answered nothing as failed and says so in the watcher chat", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const watcherId = await wakeOnce(f, link.id);
+      const turnId = f.provider.input(watcherId).turnId;
+      f.provider.emit(watcherId, { type: "plan", explanation: "- nit: rename parse", steps: [] });
+      await f.finishTurn(watcherId, null);
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "failed", finding: null });
+      expect(f.store.conversationDetail(watcherId)!.activities).toContainEqual(expect.objectContaining({
+        turnId, kind: "error", title: WATCHER_ANSWERED_NOTHING,
+      }));
+      expect(WATCHER_ANSWERED_NOTHING).toBe("The watcher answered nothing.");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("keeps a real reply and a SILENT reply over a stored plan", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      let watcherId = await wakeOnce(f, link.id);
+      f.provider.emit(watcherId, { type: "plan", explanation: "- nit: rename parse", steps: [] });
+      await f.finishTurn(watcherId, "- bug: the review plan skips src/lexer.ts");
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "finding", finding: "- bug: the review plan skips src/lexer.ts" });
+      watcherId = await wakeOnce(f, link.id);
+      f.provider.emit(watcherId, { type: "plan", explanation: "- nit: rename parse", steps: [] });
+      await f.finishTurn(watcherId, "SILENT");
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "silent", finding: null });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("runs a chat-access check like a normal chat: approval card, approval live phase, checkpoint and no fingerprint guard", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ readOnly: false, interactionMode: "build", accessMode: "supervised" });
+      await f.startWatchedTurn();
+      const watcherId = await wakeOnce(f, link.id);
+      const input = f.provider.input(watcherId);
+      expect(input).toMatchObject({ interactionMode: "build", access: "supervised" });
+      expect(input).not.toHaveProperty("readOnlyProfile");
+      expect(input.systemInstruction).toContain("You may use your tools as your mode and access allow");
+      await vi.waitFor(() => { if (!f.checkpoints.includes(input.turnId)) throw new Error("no checkpoint"); });
+      f.provider.emit(watcherId, { type: "approval", request: approval("approval-1", "file-change") });
+      await f.flush();
+      expect(f.events).toContainEqual(expect.objectContaining({ type: "agent.approval.requested" }));
+      expect(f.provider.approvals).toEqual([]);
+      await f.advance(1_000);
+      expect(f.watcherEvents()).toContainEqual(expect.objectContaining({
+        type: "watcher.live", linkId: link.id, phase: "approval", label: "Edit src/parser.ts",
+      }));
+      await f.command("agent.approval.respond", {
+        conversationId: watcherId, runId: input.runId, turnId: input.turnId, requestId: "approval-1", decision: "approve",
+      }).catch(() => undefined);
+      await f.finishTurn(watcherId, "- risk: the parser change needs a test");
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "finding", guardState: "skipped", guardPaths: [] });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("shows the question phase while a chat-access check waits for the person's answer", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ readOnly: false, interactionMode: "build", accessMode: "supervised" });
+      await f.startWatchedTurn();
+      const watcherId = await wakeOnce(f, link.id);
+      f.provider.emit(watcherId, {
+        type: "input",
+        request: {
+          requestId: "input-1",
+          questions: [{ id: "q", header: "Scope", question: "Which file should I review?", options: [], allowMultiple: false, isOther: false, isSecret: false }],
+          autoResolutionMs: null,
+        },
+      });
+      await f.flush();
+      await f.advance(1_000);
+      expect(f.events).toContainEqual(expect.objectContaining({ type: "agent.input.requested" }));
+      expect(f.watcherEvents()).toContainEqual(expect.objectContaining({
+        type: "watcher.live", linkId: link.id, phase: "question", label: "Which file should I review?",
+      }));
+      await f.finishTurn(watcherId, "SILENT");
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", readOnly: false });
     } finally {
       await f.close();
     }

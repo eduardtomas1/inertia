@@ -79,6 +79,7 @@ export interface WatcherRuntime {
   observe(event: RuntimeMutationEvent): void;
   onTurnSettled(turn: AgentTurn): Promise<void>;
   onReadOnlyViolation(turn: AgentTurn, violation: ReadOnlyWatcherViolation): void;
+  onPlanHandoff(turn: AgentTurn, text: string): void;
   isWatcherConversation(conversationId: string): boolean;
   watcherParent(conversationId: string): { watchedConversationId: string | null; privateConnect: WatcherPrivateConnect } | null;
   onConversationArchived(conversationId: string): void;
@@ -303,6 +304,18 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
           delivery.noteDelivered(event.message.watcherNote, event.message);
           return;
         }
+        if (
+          event.type === "agent.approval.requested" || event.type === "agent.approval.resolved"
+          || event.type === "agent.input.requested" || event.type === "agent.input.resolved"
+        ) {
+          const requested = event.type === "agent.approval.requested" || event.type === "agent.input.requested";
+          const interactionLink = index.forWatcher(requested ? event.request.conversationId : event.conversationId);
+          if (interactionLink === null) return;
+          if (event.type === "agent.approval.requested") live.observeApproval(interactionLink, event.request);
+          else if (event.type === "agent.input.requested") live.observeQuestion(interactionLink, event.request);
+          else live.interactionResolved(interactionLink, event.turnId);
+          return;
+        }
         const conversationId = eventConversationId(event);
         if (conversationId === null) return;
         const watcherLink = index.forWatcher(conversationId);
@@ -332,6 +345,9 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
       }
       const watchedLink = index.forWatched(turn.conversationId);
       if (watchedLink !== null) wakeScheduler.onWatchedTurnSettled(watchedLink, turn.id);
+    },
+    onPlanHandoff(turn, text) {
+      if (!disposed) runner.onPlanHandoff(turn, text);
     },
     onReadOnlyViolation(turn, violation) {
       if (!disposed) runner.onViolation(turn, violation);

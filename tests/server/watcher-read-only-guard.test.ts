@@ -14,7 +14,11 @@ import type {
   ReadOnlyWatcherViolation,
   TurnControllerHooks,
 } from "../../src/server/runtime/turns/turn-controller-types";
-import { READ_ONLY_WATCHER_STOP_MESSAGE } from "../../src/server/runtime/turns/turn-read-only-watcher";
+import {
+  READ_ONLY_WATCHER_MAX_DENIALS,
+  READ_ONLY_WATCHER_STOP_MESSAGE,
+} from "../../src/server/runtime/turns/turn-read-only-watcher";
+import { WATCHER_READ_ONLY_REFUSAL } from "../../src/server/persistence/watcher-link-repository";
 import {
   cleanupTurnControllerTestDirectories,
   createTurnControllerTestRuntime,
@@ -27,7 +31,10 @@ afterEach(cleanupTurnControllerTestDirectories);
 const now = () => new Date().toISOString();
 
 async function watcherRuntime(
-  options: { modelSelection?: Conversation["modelSelection"] } = {},
+  options: {
+    modelSelection?: Conversation["modelSelection"];
+    access?: { interactionMode: Conversation["interactionMode"]; accessMode: Conversation["accessMode"] };
+  } = {},
   hooks: Partial<TurnControllerHooks> = {},
 ) {
   const violations: ReadOnlyWatcherViolation[] = [];
@@ -54,6 +61,7 @@ async function watcherRuntime(
       sharing: { ...DEFAULT_WATCHER_SHARING },
       budgets: { ...DEFAULT_WATCHER_BUDGETS },
       privateConnect: "inherit",
+      readOnly: options.access === undefined,
     },
     conversation: {
       projectId: watched.projectId,
@@ -61,8 +69,8 @@ async function watcherRuntime(
       options: {
         modelSelection: options.modelSelection
           ?? providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test", reasoningEffort: "high" }),
-        interactionMode: "plan",
-        accessMode: "supervised",
+        interactionMode: options.access?.interactionMode ?? "plan",
+        accessMode: options.access?.accessMode ?? "supervised",
       },
     },
   }, now());
@@ -126,7 +134,7 @@ describe("read-only watcher turns", () => {
     }
   });
 
-  it("declines an approval without a card and stops at the second request", async () => {
+  it("declines approvals without a card, keeps checking and stops at the fifth declined request", async () => {
     const runtime = await watcherRuntime();
     try {
       const respond = vi.spyOn(runtime.provider, "respondToApproval");
@@ -137,36 +145,43 @@ describe("read-only watcher turns", () => {
       expect(respond).toHaveBeenCalledWith(runtime.watcher.id, "approval-1", "deny", { runId: turn.runId, turnId: turn.id });
       expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);
       expect(runtime.store.conversation(runtime.watcher.id)).toMatchObject({ status: "running", attentionKind: null });
-      expect(runtime.store.agentTurn(turn.id).status).not.toBe("failed");
       expect(runtime.store.conversationDetail(runtime.watcher.id)!.activities.map(({ title }) => title))
         .toContain("Needed permission: Run npm test — declined (watchers are read-only)");
-      expect(runtime.violations).toEqual([expect.objectContaining({ kind: "command-attempt", stopped: false })]);
-
       runtime.provider.emit({ ...base, type: "approval-resolved", requestId: "approval-1", decision: "deny" });
       expect(runtime.events.some((event) => event.type === "agent.approval.resolved")).toBe(false);
 
       runtime.provider.emit({ ...base, type: "approval", request: approval("approval-2", "file-change") });
+      for (const requestId of ["approval-3", "approval-4"]) {
+        runtime.provider.emit({ ...base, type: "approval", request: approval(requestId) });
+      }
       await flushTurnControllerTestPromises();
-      expect(respond).toHaveBeenCalledTimes(2);
+      expect(READ_ONLY_WATCHER_MAX_DENIALS).toBe(5);
+      expect(runtime.store.agentTurn(turn.id).status).not.toBe("failed");
+      expect(runtime.violations.map(({ kind, stopped }) => [kind, stopped])).toEqual([
+        ["command-attempt", false], ["write-attempt", false], ["command-attempt", false], ["command-attempt", false],
+      ]);
+
+      runtime.provider.emit({ ...base, type: "approval", request: approval("approval-5") });
+      await flushTurnControllerTestPromises();
+      expect(respond).toHaveBeenCalledTimes(5);
       expect(runtime.store.agentTurn(turn.id)).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
       expect(runtime.provider.cancelCount).toBeGreaterThan(0);
-      expect(runtime.violations.at(-1)).toMatchObject({ kind: "write-attempt", stopped: true, linkId: runtime.link.id });
+      expect(runtime.violations.at(-1)).toMatchObject({ kind: "approval-limit", stopped: true, linkId: runtime.link.id });
     } finally {
       runtime.store.close();
     }
   });
 
-  it("stops at the second command request as the approval limit", async () => {
+  it("stops a file change at the fifth declined request as a write attempt", async () => {
     const runtime = await watcherRuntime();
     try {
       const { turn } = runtime.startWake();
       const base = identity(runtime, runtime.watcher.id);
-      runtime.provider.emit({ ...base, type: "approval", request: approval("approval-1") });
-      runtime.provider.emit({ ...base, type: "approval", request: approval("approval-2") });
+      for (let index = 1; index <= 4; index += 1) runtime.provider.emit({ ...base, type: "approval", request: approval(`approval-${index}`) });
+      runtime.provider.emit({ ...base, type: "approval", request: approval("approval-5", "file-change") });
       await flushTurnControllerTestPromises();
       expect(runtime.store.agentTurn(turn.id)).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
-      expect(runtime.violations.map(({ kind, stopped }) => [kind, stopped]))
-        .toEqual([["command-attempt", false], ["approval-limit", true]]);
+      expect(runtime.violations.at(-1)).toMatchObject({ kind: "write-attempt", stopped: true });
     } finally {
       runtime.store.close();
     }
@@ -218,8 +233,8 @@ describe("read-only watcher turns", () => {
     ["an edit tool", "Edit"],
     ["a write tool", "Write"],
     ["a multi-edit tool", "MultiEdit"],
-  ])("stops on %s as soon as it starts", async (_name, label) => {
-    const runtime = await watcherRuntime();
+  ])("stops on %s as soon as it starts on a harness that does not gate edits first", async (_name, label) => {
+    const runtime = await watcherRuntime({ modelSelection: providerNativeModelSelection({ providerId: "opencode", modelId: "gpt-test" }) });
     try {
       const { turn } = runtime.startWake();
       runtime.provider.emit({ ...identity(runtime, runtime.watcher.id), type: "activity", kind: "tool", phase: "started", label });
@@ -228,6 +243,26 @@ describe("read-only watcher turns", () => {
       expect(runtime.store.conversationDetail(runtime.watcher.id)!.activities)
         .toContainEqual(expect.objectContaining({ kind: "error", title: READ_ONLY_WATCHER_STOP_MESSAGE }));
       expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", detail: label, stopped: true })]);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("lets a gated harness's edit start, declines its approval as an attempt and keeps checking, but stops a running file mutation", async () => {
+    const runtime = await watcherRuntime();
+    try {
+      const { turn } = runtime.startWake();
+      const base = identity(runtime, runtime.watcher.id);
+      runtime.provider.emit({ ...base, type: "activity", kind: "tool", phase: "started", label: "File change", activityId: "change-1" });
+      runtime.provider.emit({ ...base, type: "approval", request: approval("approval-1", "file-change") });
+      runtime.provider.emit({ ...base, type: "activity", kind: "tool", phase: "failed", label: "File change", activityId: "change-1" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(turn.id).status).not.toBe("failed");
+      expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", stopped: false })]);
+      runtime.provider.emit({ ...base, type: "activity", kind: "tool", phase: "started", label: "src/a.ts", activityId: "change-2", fileMutation: true });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(turn.id)).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
+      expect(runtime.violations.at(-1)).toMatchObject({ kind: "write-attempt", detail: "src/a.ts", stopped: true });
     } finally {
       runtime.store.close();
     }
@@ -280,7 +315,7 @@ describe("read-only watcher turns", () => {
     try {
       runtime.store.updateConversation(runtime.watcher.id, patch);
       expect(() => runtime.controller.queue({ conversationId: runtime.watcher.id, content: "Typed by the user" }))
-        .toThrow("A watcher stays read-only: plan mode with supervised access.");
+        .toThrow(WATCHER_READ_ONLY_REFUSAL);
       expect(runtime.provider.runCount).toBe(0);
     } finally {
       runtime.store.close();
@@ -334,7 +369,7 @@ describe("watcher run configuration updates", () => {
       } as unknown as ConversationCommandDependencies);
       for (const payload of [{ interactionMode: "build" }, { accessMode: "full" }, { accessMode: "auto-edit" }]) {
         await expect(handler({} as never, update(runtime.watcher.id, payload)))
-          .rejects.toThrow("A watcher stays read-only");
+          .rejects.toThrow(WATCHER_READ_ONLY_REFUSAL);
       }
       expect(runtime.store.conversation(runtime.watcher.id)).toMatchObject({ interactionMode: "plan", accessMode: "supervised" });
       await expect(handler({} as never, update(runtime.watcher.id, { interactionMode: "plan" }))).resolves.toBe("mutation");
@@ -342,6 +377,65 @@ describe("watcher run configuration updates", () => {
 
       runtime.store.watcherLinks.transition(runtime.link.id, ["watching"], { status: "detached", reason: "user" }, now());
       await expect(handler({} as never, update(runtime.watcher.id, { interactionMode: "build" }))).resolves.toBe("mutation");
+    } finally {
+      runtime.store.close();
+    }
+  });
+});
+
+describe("watcher turns with chat access", () => {
+  const update = (conversationId: string, payload: Record<string, unknown>) => ({
+    type: "conversation.update",
+    requestId: randomUUID(),
+    payload: { conversationId, ...payload },
+  }) as Extract<ClientCommand, { type: "conversation.update" }>;
+
+  it("runs a check like a normal chat: its mode and access, an approval card, a checkpoint and no read-only profile", async () => {
+    const runtime = await watcherRuntime({ access: { interactionMode: "build", accessMode: "supervised" } });
+    try {
+      const respond = vi.spyOn(runtime.provider, "respondToApproval");
+      const { turn } = runtime.startWake();
+      await flushTurnControllerTestPromises();
+      expect(runtime.provider.input).toMatchObject({ interactionMode: "build", access: "supervised" });
+      expect(runtime.provider.input).not.toHaveProperty("readOnlyProfile");
+      expect(runtime.checkpoints).toEqual([turn.id]);
+      const base = identity(runtime, runtime.watcher.id);
+      runtime.provider.emit({ ...base, type: "approval", request: approval("approval-1", "file-change") });
+      await flushTurnControllerTestPromises();
+      expect(respond).not.toHaveBeenCalled();
+      expect(runtime.events).toContainEqual(expect.objectContaining({ type: "agent.approval.requested" }));
+      runtime.provider.emit({ ...base, type: "activity", kind: "tool", phase: "started", label: "Edit" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(turn.id).status).not.toBe("failed");
+      expect(runtime.violations).toEqual([]);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("lets the person change its mode and access like a normal chat but still refuses goals and watcher notes", async () => {
+    const runtime = await watcherRuntime({ access: { interactionMode: "plan", accessMode: "supervised" } });
+    try {
+      const handler = createConversationCommandHandler({
+        store: runtime.store,
+        backendProfileController: { isExternalSelection: vi.fn(() => false) },
+      } as unknown as ConversationCommandDependencies);
+      for (const payload of [{ interactionMode: "build" }, { accessMode: "full" }, { accessMode: "auto-edit" }]) {
+        await expect(handler({} as never, update(runtime.watcher.id, payload))).resolves.toBe("mutation");
+      }
+      expect(runtime.store.conversation(runtime.watcher.id)).toMatchObject({ interactionMode: "build", accessMode: "auto-edit" });
+      expect(() => runtime.controller.queue({
+        conversationId: runtime.watcher.id,
+        content: "Note",
+        watcherNote: {
+          linkId: runtime.link.id, wakeId: randomUUID(), watcherConversationId: runtime.watcher.id,
+          preset: "reviewer", watcherLabel: "Reviewer", delivery: "queue",
+        },
+      })).toThrow("A watcher chat can't start goals or receive watcher notes.");
+      const queued = runtime.controller.queue({ conversationId: runtime.watcher.id, content: "Typed by the user", turnCheckpoint: true });
+      runtime.controller.start(queued.turn.id);
+      await flushTurnControllerTestPromises();
+      expect(runtime.provider.input).toMatchObject({ interactionMode: "build", access: "auto-edit" });
     } finally {
       runtime.store.close();
     }

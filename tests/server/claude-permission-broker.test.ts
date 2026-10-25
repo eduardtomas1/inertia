@@ -8,6 +8,15 @@ import {
   type AgentHarnessEvent,
 } from "../../src/server/provider/agent-harness";
 import { ClaudePermissionBroker } from "../../src/server/provider/claude-permission-broker";
+import {
+  CLAUDE_WATCHER_PLAN_REFUSAL,
+  CLAUDE_WATCHER_QUESTION_REFUSAL,
+  CLAUDE_WATCHER_READ_REFUSAL,
+  CLAUDE_WATCHER_WRITE_REFUSAL,
+  claudeWatcherDecision,
+  claudeWatcherToolRefusal,
+} from "../../src/server/provider/claude-watcher-permissions";
+import { readOnlyCommandReminder } from "../../src/server/runtime/watcher/read-only-commands";
 import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
 import { portableFixtureRoot } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
@@ -147,7 +156,23 @@ describe("Claude permission broker", () => {
     expect(events).toEqual([]);
   });
 
-  it("declines a watcher command that follows a link out of the workspace without an approval", async () => {
+  async function declinedThroughRuntime(
+    toolName: string,
+    input: Record<string, unknown>,
+    extra: Record<string, unknown> = {},
+    cwd = "/workspace",
+    decision: "deny" | "approve" = "deny",
+  ) {
+    const events: AgentHarnessEvent[] = [];
+    const permissions = watcherBroker(events, "watcher", cwd);
+    const result = permissions.canUseTool(toolName, input, callbackOptions(extra));
+    await expect.poll(() => approvalRequests(events).length).toBe(1);
+    const [request] = approvalRequests(events);
+    expect(permissions.settleApproval(request!.requestId, decision)).toBe(true);
+    return { request: request!, result: await result, events };
+  }
+
+  it("declines a watcher command that follows a link out of the workspace and tells Claude why", async () => {
     const root = portableFixtureRoot("broker watcher link");
     try {
       const workspace = join(root, "workspace");
@@ -160,34 +185,50 @@ describe("Claude permission broker", () => {
       const readInside = { command: "cat src/parser.ts" };
       await expect(watcherBroker(events, "watcher", workspace).canUseTool("Bash", readInside, callbackOptions()))
         .resolves.toEqual({ behavior: "allow", updatedInput: readInside });
-      await expect(watcherBroker(events, "watcher", workspace).canUseTool("Bash", { command: "cat linked/secret.txt" }, callbackOptions()))
-        .resolves.toEqual({ behavior: "deny", message: "The command reads outside the workspace." });
       expect(events).toEqual([]);
+      const { request, result } = await declinedThroughRuntime("Bash", { command: "cat linked/secret.txt" }, {}, workspace);
+      expect(request).toMatchObject({ kind: "command" });
+      expect(result).toEqual({
+        behavior: "deny",
+        message: `The command reads outside the workspace. ${readOnlyCommandReminder("posix")}`,
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
   it.each([
-    ["a command outside the allowlist", { command: "npm test" }, {}],
-    ["a redirect", { command: "git diff > out.txt" }, {}],
-    ["a read outside the workspace", { command: "cat /etc/passwd" }, {}],
-    ["a background command", { command: "git diff", run_in_background: true }, {}],
-    ["a command outside Claude's sandbox", { command: "git diff", dangerouslyDisableSandbox: true }, {}],
-    ["a path Claude flagged", { command: "cat src/parser.ts" }, { blockedPath: "/elsewhere/parser.ts" }],
-    ["a command that is not text", { command: ["git", "diff"] }, {}],
-  ])("keeps the approval path for %s in a watcher turn", async (_label, input, extra) => {
-    const events: AgentHarnessEvent[] = [];
-    const permissions = watcherBroker(events);
-    const decision = permissions.canUseTool("Bash", input, callbackOptions(extra));
-    await expect.poll(() => approvalRequests(events).length).toBe(1);
-    const [request] = approvalRequests(events);
+    ["a command outside the allowlist", { command: "npm test" }, {}, "npm is not a read-only command watchers can run."],
+    ["a redirect", { command: "git diff > out.txt" }, {}, "The command uses shell syntax that watchers cannot run."],
+    ["a read outside the workspace", { command: "cat /etc/passwd" }, {}, "The command reads outside the workspace."],
+    ["a background command", { command: "git diff", run_in_background: true }, {}, "Watchers can't run commands in the background."],
+    ["a command outside Claude's sandbox", { command: "git diff", dangerouslyDisableSandbox: true }, {}, "Watchers can't run commands outside the sandbox."],
+    ["a path Claude flagged", { command: "cat src/parser.ts" }, { blockedPath: "/elsewhere/parser.ts" }, "The command reads outside the workspace."],
+    ["a command that is not text", { command: ["git", "diff"] }, {}, "The command was not text."],
+    ["an in-place sed", { command: "sed -i 's/a/b/' src/parser.ts" }, {}, "sed can only print line ranges in a watcher"],
+  ])("declines %s through the runtime with the allowlist's reason", async (_label, input, extra, reason) => {
+    const { request, result } = await declinedThroughRuntime("Bash", input, extra);
     expect(request).toMatchObject({ kind: "command" });
-    expect(permissions.settleApproval(request!.requestId, "deny")).toBe(true);
-    await expect(decision).resolves.toEqual({ behavior: "deny", message: "User declined tool execution." });
+    expect(result).toMatchObject({ behavior: "deny" });
+    const message = (result as { message: string }).message;
+    expect(message.startsWith(reason)).toBe(true);
+    expect(message.endsWith(readOnlyCommandReminder("posix"))).toBe(true);
+    expect(message).not.toContain("User declined tool execution.");
   });
 
-  it("asks before an allowlisted command outside a watcher turn and before a host-served Bash tool", async () => {
+  it("keeps the watcher reason when Claude's approval display text is unsafe", async () => {
+    const events: AgentHarnessEvent[] = [];
+    await expect(watcherBroker(events).canUseTool("Bash", { command: "npm test" }, callbackOptions({ title: "Run\u0000it" })))
+      .resolves.toEqual({ behavior: "deny", message: `npm is not a read-only command watchers can run. ${readOnlyCommandReminder("posix")}` });
+    expect(approvalRequests(events)).toEqual([]);
+  });
+
+  it("keeps declining a watcher request even if the runtime approves it", async () => {
+    const { result } = await declinedThroughRuntime("Bash", { command: "npm test" }, {}, "/workspace", "approve");
+    expect(result).toMatchObject({ behavior: "deny" });
+  });
+
+  it("asks before an allowlisted command outside a watcher turn and declines a host-served Bash tool in one", async () => {
     for (const [profile, extra] of [[null, {}], ["watcher", { mcpServer: { name: "other", source: "sdk" } }]] as const) {
       const events: AgentHarnessEvent[] = [];
       const permissions = watcherBroker(events, profile);
@@ -203,15 +244,109 @@ describe("Claude permission broker", () => {
     ["Edit", { file_path: "/workspace/src/parser.ts", old_string: "a", new_string: "b" }],
     ["MultiEdit", { file_path: "/workspace/src/parser.ts", edits: [] }],
     ["NotebookEdit", { notebook_path: "/workspace/notes.ipynb", new_source: "" }],
-  ])("keeps a watcher's %s on the approval path", async (toolName, input) => {
-    const events: AgentHarnessEvent[] = [];
-    const permissions = watcherBroker(events);
-    const decision = permissions.canUseTool(toolName, input, callbackOptions());
-    await expect.poll(() => approvalRequests(events).length).toBe(1);
-    const [request] = approvalRequests(events);
+  ])("declines a watcher's %s as a write attempt and tells Claude to report instead", async (toolName, input) => {
+    const { request, result } = await declinedThroughRuntime(toolName, input);
     expect(request).toMatchObject({ kind: "file-change" });
-    expect(permissions.settleApproval(request!.requestId, "deny")).toBe(true);
-    await expect(decision).resolves.toMatchObject({ behavior: "deny" });
+    expect(result).toEqual({ behavior: "deny", message: CLAUDE_WATCHER_WRITE_REFUSAL });
+  });
+
+  it("declines a watcher's question at once without asking the user or the runtime", async () => {
+    const events: AgentHarnessEvent[] = [];
+    await expect(watcherBroker(events).canUseTool("AskUserQuestion", {
+      questions: [{ question: "Which file?", header: "Scope", options: [{ label: "A", description: "a" }], multiSelect: false }],
+    }, callbackOptions())).resolves.toEqual({ behavior: "deny", message: CLAUDE_WATCHER_QUESTION_REFUSAL });
+    expect(events).toEqual([]);
+  });
+
+  it("keeps a watcher's plan hand-off as the plan and declines leaving or entering plan mode", async () => {
+    const exit = await declinedThroughRuntime("ExitPlanMode", { plan: "- risk: retries never back off" });
+    expect(exit.events.some((event) => event.type === "extension" && event.event.type === "plan")).toBe(true);
+    expect(exit.request).toMatchObject({ kind: "permissions" });
+    expect(exit.result).toEqual({ behavior: "deny", message: CLAUDE_WATCHER_PLAN_REFUSAL });
+    const enter = await declinedThroughRuntime("EnterPlanMode", {});
+    expect(enter.result).toEqual({ behavior: "deny", message: CLAUDE_WATCHER_PLAN_REFUSAL });
+  });
+
+  it.each([
+    ["WebFetch", { url: "https://example.com", prompt: "read" }, {}],
+    ["WebSearch", { query: "x" }, {}],
+    ["Task", { description: "explore", prompt: "go" }, {}],
+    ["Agent", { description: "explore", prompt: "go" }, {}],
+    ["mcp__github__create_issue", { title: "x" }, { mcpServer: { name: "github", source: "project" } }],
+    ["SomethingNew", {}, {}],
+  ])("declines the watcher tool %s with a reason and not as a write", async (toolName, input, extra) => {
+    const { request, result } = await declinedThroughRuntime(toolName, input, extra);
+    expect(request).toMatchObject({ kind: "permissions" });
+    expect(result).toEqual({ behavior: "deny", message: claudeWatcherToolRefusal(toolName) });
   });
 });
 
+describe("Claude watcher decisions", () => {
+  const decide = (toolName: string, toolInput: Record<string, unknown>, cwd: string, platform: NodeJS.Platform = process.platform) =>
+    claudeWatcherDecision({ toolName, toolInput, cwd, mcpServer: false, blockedPath: undefined, platform });
+
+  it("checks PowerShell paths by the host's path rules", async () => {
+    await expect(decide("PowerShell", { command: "cat '/work/repo/src/a.ts'" }, "/work/repo", "linux")).resolves.toMatchObject({ kind: "allow" });
+    await expect(decide("PowerShell", { command: "cat '/etc/passwd'" }, "/work/repo", "linux")).resolves.toMatchObject({
+      kind: "decline", message: expect.stringContaining("The command reads outside the workspace."),
+    });
+  });
+
+  it("treats Claude's Bash as a POSIX shell on Windows and PowerShell by the Windows rules", async () => {
+    const root = portableFixtureRoot("claude watcher shells");
+    try {
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(join(root, "src", "parser.ts"), "export {};\n");
+      for (const command of ["rg -n \"parse input\" src", "git log --oneline 2>/dev/null | head -5"]) {
+        await expect(decide("Bash", { command }, root, "win32")).resolves.toMatchObject({ kind: "allow" });
+        await expect(decide("PowerShell", { command }, root, "win32")).resolves.toMatchObject({
+          kind: "decline",
+          approval: "command",
+          message: expect.stringContaining(readOnlyCommandReminder("windows")),
+        });
+      }
+      await expect(decide("Bash", { command: "sed -n '1,5p' src/parser.ts" }, root, "win32")).resolves.toMatchObject({ kind: "allow" });
+      await expect(decide("PowerShell", { command: "sed -n '1,5p' src/parser.ts" }, root, "win32")).resolves.toMatchObject({ kind: "allow" });
+      await expect(decide("PowerShell", { command: "rg -n 'parse input' src" }, root, "win32")).resolves.toEqual({
+        kind: "allow",
+        updatedInput: { command: "rg --no-config -n 'parse input' src" },
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("lets a routed read run only inside the workspace and never on an environment file", async () => {
+    const root = portableFixtureRoot("claude watcher reads");
+    try {
+      const workspace = join(root, "workspace");
+      mkdirSync(join(workspace, "src"), { recursive: true });
+      mkdirSync(join(root, "outside"));
+      writeFileSync(join(workspace, "src", "parser.ts"), "export {};\n");
+      writeFileSync(join(workspace, ".env"), "SECRET=1\n");
+      writeFileSync(join(root, "outside", "secret.txt"), "outside\n");
+      await expect(decide("Read", { file_path: join(workspace, "src", "parser.ts") }, workspace)).resolves.toMatchObject({ kind: "allow" });
+      await expect(decide("Grep", { pattern: "parse", path: "src" }, workspace)).resolves.toMatchObject({ kind: "allow" });
+      await expect(decide("Glob", { pattern: "**/*.ts" }, workspace)).resolves.toMatchObject({ kind: "allow" });
+      await expect(decide("Grep", { pattern: "process.env.API_URL", path: "src" }, workspace)).resolves.toMatchObject({ kind: "allow" });
+      await expect(decide("Glob", { pattern: "src/environment*.ts" }, workspace)).resolves.toMatchObject({ kind: "allow" });
+      for (const [toolName, input] of [
+        ["Read", { file_path: join(root, "outside", "secret.txt") }],
+        ["Read", { file_path: join(workspace, ".env") }],
+        ["LS", { path: join(root, "outside") }],
+        ["Glob", { pattern: "../outside/*" }],
+        ["Glob", { pattern: "**/.env" }],
+        ["Glob", { pattern: "config/*.env.*" }],
+        ["Grep", { pattern: "KEY", glob: ".env*" }],
+        ["Grep", { pattern: "KEY", type: "env" }],
+        ["Grep", { pattern: "KEY", path: ".env" }],
+      ] as const) {
+        await expect(decide(toolName, input, workspace)).resolves.toEqual({
+          kind: "decline", approval: "permissions", message: CLAUDE_WATCHER_READ_REFUSAL,
+        });
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

@@ -45,6 +45,7 @@ export interface WatcherLinkRow {
   budgets_json: string;
   private_connect: WatcherPrivateConnect;
   delivery: WatcherDeliveryPolicy;
+  read_only: number;
   status: WatcherStatus;
   pause_reason: WatcherPauseReason | null;
   pause_detail: string | null;
@@ -201,6 +202,7 @@ export function watcherLinkFromRow(row: WatcherLinkRow): WatcherLinkRecord {
     budgets: clampWatcherBudgets(typeof budgets === "object" && budgets !== null ? budgets : {}),
     privateConnect: row.private_connect,
     delivery: row.delivery,
+    readOnly: row.read_only !== 0,
     status: row.status,
     pauseReason: row.pause_reason,
     pauseDetail: row.pause_detail === null ? null : watcherPrintableLineOf(row.pause_detail, MAX_WATCHER_PAUSE_DETAIL_CHARS) || null,

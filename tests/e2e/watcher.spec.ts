@@ -4,6 +4,7 @@ import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
+import { TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
 import { closeWorkspaceTools, ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
@@ -36,6 +37,8 @@ const steps = [
   ["main-step-3", "npm test -- parser", "4 passing"],
 ];
 let threadId = "watcher-thread-" + process.pid;
+let threadCount = 0;
+const watcherThreads = new Set();
 let active = null;
 let sequence = 0;
 const finish = (turn, status, text) => {
@@ -43,11 +46,11 @@ const finish = (turn, status, text) => {
   turn.settled = true;
   if (turn.timer) clearTimeout(turn.timer);
   if (text && status === "completed") {
-    send({ method: "item/completed", params: { threadId, turnId: turn.id, completedAtMs: Date.now(), item: {
+    send({ method: "item/completed", params: { threadId: turn.threadId, turnId: turn.id, completedAtMs: Date.now(), item: {
       id: turn.id + "-answer", type: "agentMessage", text, phase: "final_answer",
     } } });
   }
-  send({ method: "turn/completed", params: { threadId, turn: {
+  send({ method: "turn/completed", params: { threadId: turn.threadId, turn: {
     id: turn.id, status, items: [], error: status === "failed" ? { message: text } : null,
   } } });
 };
@@ -74,8 +77,8 @@ const claimReply = () => {
 };
 const command = (turn, index, step) => {
   const item = { id: turn.id + "-command-" + index, type: "commandExecution", command: step[1], status: "inProgress" };
-  send({ method: "item/started", params: { threadId, turnId: turn.id, startedAtMs: Date.now(), item } });
-  send({ method: "item/completed", params: { threadId, turnId: turn.id, completedAtMs: Date.now(), item: {
+  send({ method: "item/started", params: { threadId: turn.threadId, turnId: turn.id, startedAtMs: Date.now(), item } });
+  send({ method: "item/completed", params: { threadId: turn.threadId, turnId: turn.id, completedAtMs: Date.now(), item: {
     ...item, status: "completed", exitCode: 0, aggregatedOutput: step[2] + "\\n",
   } } });
 };
@@ -94,7 +97,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: null, rateLimitsByLimitId: null } });
   if (message.method === "thread/goal/get") return send({ id: message.id, result: { goal: null } });
   if (message.method === "thread/start" || message.method === "thread/resume") {
-    threadId = message.params.threadId || threadId;
+    threadCount += 1;
+    threadId = message.params.threadId || "watcher-thread-" + process.pid + "-" + threadCount;
+    if (String(message.params.developerInstructions || "").includes("[inertia-watcher]")) watcherThreads.add(threadId);
     return send({ id: message.id, result: { thread: { id: threadId }, cwd: process.cwd(), model: "fixture", serviceTier: null, initialTurnsPage: null } });
   }
   if (message.method === "turn/interrupt") {
@@ -107,13 +112,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   sequence += 1;
-  const turn = { id: "watcher-turn-" + process.pid + "-" + sequence, settled: false, timer: null };
+  const turn = { id: "watcher-turn-" + process.pid + "-" + sequence, threadId: message.params.threadId || threadId, settled: false, timer: null };
   active = turn;
   send({ id: message.id, result: { turn: { id: turn.id, status: "inProgress", items: [], error: null } } });
-  send({ method: "turn/started", params: { threadId, turn: { id: turn.id, status: "inProgress", items: [], error: null } } });
+  send({ method: "turn/started", params: { threadId: turn.threadId, turn: { id: turn.id, status: "inProgress", items: [], error: null } } });
   const text = (message.params.input || []).filter((item) => item && item.type === "text").map((item) => item.text || "").join("\\n");
   if (message.params.outputSchema) return finish(turn, "completed", JSON.stringify({ title: "Parser cleanup" }));
-  if (text.includes("[inertia-watcher]")) return waitFor(turn, claimReply, (reply) => finish(turn, "completed", reply));
+  if (watcherThreads.has(message.params.threadId) || text.includes("[inertia-watcher]")) return waitFor(turn, claimReply, (reply) => finish(turn, "completed", reply));
   if (text.includes("[inertia-watcher-note]")) return finish(turn, "completed", ${JSON.stringify(NOTE_ANSWER)});
   runSteps(turn, 0);
 });
@@ -231,6 +236,11 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(dialog.getByText("Model route unavailable", { exact: true })).toHaveCount(0);
     await presets.getByRole("radio", { name: /^Reviewer/u }).click();
     await expect(presets.getByRole("radio", { name: /^Reviewer/u })).toHaveAttribute("aria-checked", "true");
+    const access = dialog.getByRole("radiogroup", { name: "Access" });
+    await expect(access.getByRole("radio")).toHaveText(["Read-only", "Supervised", "Auto-accept edits", "Full access"]);
+    await expect(access.getByRole("radio", { name: "Read-only" })).toHaveAttribute("aria-checked", "true");
+    await expect(dialog.getByText(/^Reads the chat and the project's files\. Can't change them\. Inertia enforces it: approvals are declined, .+ runs its own known-safe commands inside its read-only sandbox, and a change to files pauses the watcher\.$/u)).toBeVisible();
+    await expect(dialog.getByRole("radiogroup", { name: "Mode" })).toHaveCount(0);
     await expect(dialog.getByText("It reads and reports: it may run read-only commands and never edits files or changes the workspace.", { exact: true })).toBeVisible();
     const attach = dialog.getByRole("button", { name: "Add watcher" });
     await expect(attach).not.toHaveAttribute("aria-disabled");
@@ -249,6 +259,7 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(dock().getByRole("heading", { level: 2 })).toBeFocused();
     await expect(phase()).toHaveText(/^.+ · Reviewer · Watching$/u);
     await expectMenuNote(/^\d+ of 30 checks left this turn$/u);
+    await expectMenuNote("Read-only");
     await expect(dock().getByRole("button", { name: "More watcher actions" })).toBeFocused();
     await expect(page.locator(".watcher-dock-frame")).toHaveAttribute("data-presentation", "inline");
     await expect(page.getByRole("main", { name: "Split conversation workspace" })).toHaveCount(0);
@@ -320,6 +331,7 @@ test.describe("watcher on the fake Codex route", () => {
   });
 
   test("queues a finding and delivers it after the watched turn as a watcher note", async ({ browserName: _browserName }, info) => {
+    test.slow();
     const page = app.page;
     await gate("main-step-3");
     await expectMenuNote("1 event waiting");
@@ -355,6 +367,8 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(page.getByText(MAIN_ANSWER, { exact: true }).first()).toBeVisible();
     const divider = page.getByRole("separator", { name: /^Note from watcher · Reviewer · /u });
     await expect(divider).toBeVisible();
+    await expect(page.getByRole("region", { name: "Turn 1", exact: true }).locator(".turn-changed-files.is-pending"))
+      .toHaveCount(0, { timeout: TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS });
     await expect(page.getByText(NOTE_ANSWER, { exact: true }).first()).toBeVisible();
     const bubble = page.getByLabel("Note from watcher", { exact: true }).first();
     await expect(bubble).toContainText("Empty lines lost their test:");

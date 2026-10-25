@@ -75,6 +75,38 @@ describe("watcher commands", () => {
     }
   });
 
+  it("attaches with chat access only when both a mode and an access level come with it", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const payload = (watchedConversationId: string, extra: Record<string, unknown>) => ({
+        linkId: randomUUID(), watchedConversationId, modelSelection: f.store.conversation(f.watched.id).modelSelection,
+        preset: "reviewer", instructions: "", sharing: { brief: true, activities: true, changedFiles: true, partialReplies: true },
+        budgets: { wakesPerWatchedTurn: 6, cooldownSeconds: 30, digestKiB: 16, contextReadsPerWake: 2 },
+        privateConnect: "inherit", initialReview: false, ...extra,
+      });
+      for (const extra of [
+        { readOnly: false },
+        { readOnly: false, interactionMode: "build" },
+        { readOnly: false, accessMode: "full" },
+        { interactionMode: "build", accessMode: "full" },
+        { readOnly: true, accessMode: "supervised" },
+        { readOnly: false, interactionMode: "build", accessMode: "everything" },
+      ]) {
+        await expect(f.command("watcher.attach", payload(f.watched.id, extra))).rejects.toThrow("The watcher request was invalid.");
+      }
+      expect(f.store.watcherLinks.active()).toEqual([]);
+      const attached = result(await f.command("watcher.attach", payload(f.watched.id, { readOnly: false, interactionMode: "build", accessMode: "full" })));
+      expect(attached).toMatchObject({ kind: "watcher.link", link: { readOnly: false } });
+      if (attached.kind !== "watcher.link") throw new Error("unexpected");
+      expect(f.store.conversation(attached.link.watcherConversationId)).toMatchObject({ interactionMode: "build", accessMode: "full" });
+      for (const reply of f.sent.filter((event) => event.type === "request.result")) {
+        expect(() => serverEventSchema.parse(reply)).not.toThrow();
+      }
+    } finally {
+      await f.close();
+    }
+  });
+
   it("returns contract-valid watcher.link, watcher.feed and watcher.delivery results and events", async () => {
     const f = await createWatcherFixture();
     try {

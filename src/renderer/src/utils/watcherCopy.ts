@@ -67,7 +67,15 @@ export function watcherErrorText(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-const PHASE_TEXT: Readonly<Record<WatcherLivePhase, string>> = {
+type WatcherAttentionPhase = "approval" | "question";
+type WatcherWorkingPhase = Exclude<WatcherLivePhase, WatcherAttentionPhase>;
+
+const ATTENTION_TEXT: Readonly<Record<WatcherAttentionPhase, string>> = {
+  approval: "Needs your approval",
+  question: "Needs your answer",
+};
+
+const PHASE_TEXT: Readonly<Record<WatcherWorkingPhase, string>> = {
   starting: "Starting",
   reading: "Reading",
   searching: "Searching",
@@ -75,8 +83,13 @@ const PHASE_TEXT: Readonly<Record<WatcherLivePhase, string>> = {
   writing: "Writing its review",
 };
 
+export function watcherPhaseAttention(phase: WatcherLivePhase): string | null {
+  const value: string = phase;
+  return value === "approval" || value === "question" ? ATTENTION_TEXT[value] : null;
+}
+
 export function watcherPhaseText(phase: WatcherLivePhase, label: string | null): string {
-  return label?.trim() || PHASE_TEXT[phase];
+  return watcherPhaseAttention(phase) ?? (label?.trim() || PHASE_TEXT[phase as WatcherWorkingPhase]);
 }
 
 export function watcherDetailClause(detail: string | null): string | null {

@@ -74,6 +74,7 @@ export interface ConversationLatestTurnSummary {
   terminalReason: string | null;
   updatedAt: string;
   usageLimited?: boolean;
+  failureKind?: import("../turn-lifecycle").TurnFailureKind;
 }
 
 export interface ProviderReasoningOption {
@@ -159,6 +160,7 @@ export interface ProviderInfo {
   executable?: string | null;
   installState: ProviderInstallState;
   authState: ProviderAuthState;
+  accountKind?: import("../provider").ProviderAccountKind;
   canRun: boolean;
   statusMessage: string | null;
   models: ProviderModel[];

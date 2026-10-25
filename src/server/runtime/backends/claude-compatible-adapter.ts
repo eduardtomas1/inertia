@@ -22,7 +22,10 @@ import type {
   ProviderRunInput,
 } from "../../provider/contracts";
 import { safeProviderBackendLabel } from "../../provider/adapters";
-import { validateBackendEndpointNetworkPolicy } from "./backend-compatibility-probe/http";
+import {
+  validateBackendEndpointNetworkPolicy,
+  type BackendEndpointNetworkPolicy,
+} from "./backend-compatibility-probe/http";
 
 const CLAUDE_TIER_ENVIRONMENT_VARIABLES = {
   fable: "ANTHROPIC_DEFAULT_FABLE_MODEL",
@@ -127,9 +130,10 @@ export interface ClaudeBackendLaunchResolverOptions {
   ) => string | null | Promise<string | null>;
   validateEndpointNetworkPolicy?: (
     endpointUrl: string,
-    allowInsecureLocalhost: boolean,
+    policy: BackendEndpointNetworkPolicy,
     signal: AbortSignal,
   ) => Promise<unknown>;
+  allowPrivateNetwork?: (profileId: string) => boolean;
 }
 
 export interface ClaudeBackendProfileRegistrations {
@@ -467,7 +471,10 @@ export function createClaudeBackendLaunchResolver(
     if (profile.source !== "custom") return resolveAfterAdmission();
     return Promise.resolve(validateEndpointNetworkPolicy(
       profile.baseUrl!,
-      profile.allowInsecureLocalhost,
+      {
+        allowInsecureLocalhost: profile.allowInsecureLocalhost,
+        allowPrivateNetwork: options.allowPrivateNetwork?.(profile.id) === true,
+      },
       context.signal,
     )).then(
       resolveAfterAdmission,

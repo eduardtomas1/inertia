@@ -106,3 +106,30 @@ it.each(["codex", "claude"] as const)("preserves %s sign-in without an ACP probe
   expect(launch.installationUse.abandonBeforeSpawn()).toBe(true);
   expect(f.leases.hasProviderAuthority(providerId)).toBe(false);
 });
+
+it("runs the Claude console sign-in only when the console method is requested", async () => {
+  const f = fixture("selected-claude");
+  const claude = { ...f.options, providerId: "claude" as const };
+
+  const account = await prepareProviderAuthLaunch(claude);
+  expect(account.args.slice(-2)).toEqual(["auth", "login"]);
+  account.installationUse.abandonBeforeSpawn();
+  const explicitAccount = await prepareProviderAuthLaunch({ ...claude, method: "account" });
+  expect(explicitAccount.args.slice(-2)).toEqual(["auth", "login"]);
+  explicitAccount.installationUse.abandonBeforeSpawn();
+  const console = await prepareProviderAuthLaunch({ ...claude, method: "console" });
+  expect(console.args.slice(-3)).toEqual(["auth", "login", "--console"]);
+  console.installationUse.abandonBeforeSpawn();
+  expect(f.leases.hasProviderAuthority("claude")).toBe(false);
+});
+
+it("refuses the console sign-in for providers other than Claude", async () => {
+  const f = fixture("selected-codex");
+
+  await expect(prepareProviderAuthLaunch({
+    ...f.options,
+    providerId: "codex",
+    method: "console",
+  })).rejects.toThrow("Console sign-in is available only for Claude.");
+  expect(f.leases.hasProviderAuthority("codex")).toBe(false);
+});

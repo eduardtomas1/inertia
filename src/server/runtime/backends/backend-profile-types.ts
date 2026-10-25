@@ -25,6 +25,7 @@ export interface BackendProfileControllerOptions {
   now?: () => Date;
   /** Deterministic exact-operation identity used by focused tests. */
   probeOperationId?: () => string;
+  signal?: AbortSignal;
 }
 
 export class BackendProfileControllerError extends Error {

@@ -16,6 +16,7 @@ import type {
   ServerEvent,
   ThemePreference,
 } from "@shared/contracts";
+import type { ProviderAuthMethod } from "@shared/provider";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { providerAuthBrowserUrlFromTerminal } from "../utils/providerAuthBrowser";
@@ -27,6 +28,7 @@ import "./ProviderAuthDialog.css";
 
 type ProviderAuthDialogProps = {
   provider: ProviderInfo | null;
+  method?: ProviderAuthMethod;
   status: ConnectionStatus;
   theme: ThemePreference;
   colorTheme?: ColorThemeId;
@@ -79,6 +81,7 @@ function terminalTheme(): { background: string; foreground: string; cursor: stri
 
 export function ProviderAuthDialog({
   provider,
+  method = "account",
   status,
   theme,
   colorTheme,
@@ -396,7 +399,11 @@ export function ProviderAuthDialog({
     terminal?.writeln(
       `\x1b[2mOpening ${providerLabel} sign-in…\x1b[0m`,
     );
-    void sendCommand(command({ type: "provider.auth.start", payload: { providerId, ...size } }))
+    void sendCommand(command({ type: "provider.auth.start", payload: {
+      providerId,
+      ...size,
+      ...(method === "console" ? { method } : {}),
+    } }))
       .then((event) => {
         if (event.type !== "terminal.created") throw new Error("The connection service returned an unexpected response.");
         if (attempt.cancelled || authAttemptRef.current !== attempt) {
@@ -448,6 +455,7 @@ export function ProviderAuthDialog({
   }, [
     finishTerminal,
     instanceReady,
+    method,
     providerId,
     providerLabel,
     sendAuthInput,
@@ -476,11 +484,13 @@ export function ProviderAuthDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="provider-auth-title"
-        aria-describedby={isAntigravity ? "provider-auth-description" : undefined}
+        aria-describedby={isAntigravity || method === "console" ? "provider-auth-description" : undefined}
       >
         <header className="provider-auth-header">
-          <span><h2 id="provider-auth-title">Connect {provider.label}</h2>{isAntigravity && <p id="provider-auth-description">
+          <span><h2 id="provider-auth-title">{method === "console" ? `Sign in to ${provider.label} for API billing` : `Connect ${provider.label}`}</h2>{isAntigravity && <p id="provider-auth-description">
             Sign in with Antigravity&apos;s own prompt below. Inertia only shows this terminal and doesn&apos;t read or store your sign-in. Close this window once Antigravity is ready.
+          </p>}{method === "console" && <p id="provider-auth-description">
+            Uses your Anthropic Console credits through Claude Code&apos;s own login.
           </p>}</span>
           <IconButton label="Close connection window" onClick={closeDialog}><X size={16} /></IconButton>
         </header>

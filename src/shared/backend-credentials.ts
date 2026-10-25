@@ -64,6 +64,30 @@ export function isBackendCredentialSecret(value: unknown): value is string {
     && !/[\0\r\n]/u.test(value);
 }
 
+export function backendCredentialSecretIssue(value: unknown): string | null {
+  if (typeof value !== "string") return "Paste the API key or token as text.";
+  if (value.length > MAX_BACKEND_CREDENTIAL_LENGTH) {
+    return "The API key or token is longer than 16,384 characters.";
+  }
+  const secret = value.trim();
+  if (secret.length === 0) {
+    return "Paste an API key or token. Only spaces or line breaks were entered.";
+  }
+  if (secret === BACKEND_CREDENTIAL_MASK) {
+    return "Paste a new API key or token. The masked placeholder cannot be saved.";
+  }
+  if (/[\0\r\n]/u.test(secret)) {
+    return "The API key or token must be on a single line.";
+  }
+  return null;
+}
+
+export function normalizeBackendCredentialSecret(value: unknown): string {
+  const issue = backendCredentialSecretIssue(value);
+  if (issue !== null) throw new Error(issue);
+  return (value as string).trim();
+}
+
 export function parseSetBackendCredentialRequest(
   value: unknown,
 ): SetBackendCredentialRequest | null {
@@ -72,11 +96,13 @@ export function parseSetBackendCredentialRequest(
   if (
     Object.keys(candidate).length !== 2
     || !isBackendCredentialProfileId(candidate.profileId)
-    || !isBackendCredentialSecret(candidate.secret)
+    || backendCredentialSecretIssue(candidate.secret) !== null
   ) return null;
+  const secret = normalizeBackendCredentialSecret(candidate.secret);
+  if (!isBackendCredentialSecret(secret)) return null;
   return {
     profileId: candidate.profileId,
-    secret: candidate.secret,
+    secret,
   };
 }
 

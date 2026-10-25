@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 
 import type { AgentApprovalDecision } from "./provider/interactions";
 import { officiallyAllowsModelSwitchWithinSession } from "../shared/continuation-policy";
+import type { ProviderAuthMethod } from "../shared/provider";
+import { officialPresetEndpoint } from "./runtime/backends/backend-profile-presets";
 import {
   CURSOR_ACP_TERMINAL_RESUME_VERIFIED_VERSION,
   cursorVersionHasVerifiedAcpTerminalResume,
@@ -19,9 +21,7 @@ import {
   currentKnownHarnessIdSchema,
   providerNativeBackendProfile,
   resolveHarnessBackendCompatibility,
-  type ContinuationIdentity,
   type HarnessBackendCompatibility,
-  type KnownHarnessId,
   type ModelBackendProfile,
   type ModelSelection,
 } from "../shared/model-routing";
@@ -49,7 +49,6 @@ import {
   ProviderRuntimeError,
   type ProviderAuthLaunch,
   type ProviderDetection,
-  type ProviderDetectionOptions,
   type ProviderId,
   type ProviderGoalMutation,
   type ProviderGoalSnapshot,
@@ -61,11 +60,16 @@ import {
   type ProviderSteerInput,
 } from "./provider/contracts";
 import { detectProvider, detectProviders } from "./provider/discovery";
+import type {
+  ProviderInstallationReadContext,
+  ProviderManagerDetectionOptions,
+  ProviderManagerMetadataRequestOptions,
+  ResolvedModelRoute,
+} from "./provider/provider-manager-types";
 import { detectAllProviders, type DetectAllProvidersOptions } from "./provider/detect-all-providers";
 import {
   ProviderMetadataCache,
   type ProviderMetadata,
-  type ProviderMetadataRequestOptions,
 } from "./provider/metadata";
 import { readClaudeAgentSdkSkills } from "./provider/claude-agent-sdk-harness";
 import {
@@ -102,33 +106,13 @@ export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
 export type { OwnedProviderStopResult } from "./provider/run-coordinator";
 export type * from "./provider/agent-harness";
 export type * from "./provider/contracts";
+export type * from "./provider/provider-manager-types";
 const DEFAULT_CANCEL_GRACE_MS = 2_000;
 const PRODUCTION_MANAGER_CONSTRUCTION = Symbol("production-provider-manager");
 const TEST_MANAGER_CONSTRUCTION = Symbol("test-provider-manager");
 type ProviderManagerConstructionAuthority =
   | typeof PRODUCTION_MANAGER_CONSTRUCTION
   | typeof TEST_MANAGER_CONSTRUCTION;
-
-export interface ResolvedModelRoute {
-  providerId: ProviderId;
-  harnessId: KnownHarnessId;
-  backendProfile: ModelBackendProfile;
-  compatibility: HarnessBackendCompatibility;
-  continuationIdentity: ContinuationIdentity;
-}
-
-export interface ProviderInstallationReadContext {
-  /** Exact process-local authority issued only after a maintenance command. */
-  installationVerificationAuthority?: ProviderInstallationVerificationAuthority;
-}
-
-export type ProviderManagerDetectionOptions = Omit<
-  ProviderDetectionOptions,
-  "command"
-> & ProviderInstallationReadContext;
-
-export type ProviderManagerMetadataRequestOptions =
-  ProviderMetadataRequestOptions & ProviderInstallationReadContext;
 
 type ProviderManagerConstructionOptions = ProviderManagerOptions & {
   metadataCache?: ProviderMetadataCache;
@@ -556,6 +540,7 @@ export class ProviderManager {
           evaluatedAt: this.backendProbeNow(),
           modelId: selection.modelId,
           probe,
+          officialEndpoint: officialPresetEndpoint(backendProfile),
         })
       : explicit ?? resolveHarnessBackendCompatibility(
           harnessId.data,
@@ -834,7 +819,11 @@ export class ProviderManager {
     ));
   }
 
-  authLaunch(providerId: ProviderId, cwd = process.cwd()): Promise<ProviderAuthLaunch> {
+  authLaunch(
+    providerId: ProviderId,
+    cwd = process.cwd(),
+    method?: ProviderAuthMethod,
+  ): Promise<ProviderAuthLaunch> {
     return this.trackAuxiliary(async () => {
       this.installationAuthority.assertRecoveryComplete(providerId);
       let executable = this.resolvedCommands.get(providerId);
@@ -845,6 +834,7 @@ export class ProviderManager {
       return await prepareProviderAuthLaunch({
         providerId, executable, cwd, environment: environment.env,
         signal: this.lifetimeSignal, installationAuthority: this.installationAuthority,
+        ...(method ? { method } : {}),
       });
     });
   }

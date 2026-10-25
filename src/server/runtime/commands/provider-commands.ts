@@ -72,6 +72,7 @@ export function createProviderCommandHandler(
         const launch = await dependencies.providers.authLaunch(
           command.payload.providerId,
           dependencies.defaultWorkspacePath,
+          command.payload.method,
         );
         const terminalId = dependencies.terminals.createProcess(
           socket,

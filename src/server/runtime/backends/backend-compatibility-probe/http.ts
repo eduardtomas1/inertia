@@ -7,13 +7,17 @@ import { BlockList, isIP } from "node:net";
 import type { BackendCompatibilityProbeRequest } from "../../../../shared/backend-probe";
 import { isBackendCredentialSecret } from "../../../../shared/backend-credentials";
 import type {
+  BackendAuthenticationMode,
   ModelBackendProtocol,
   ModelCapability,
 } from "../../../../shared/model-routing";
 import {
   abortable,
   BackendProbeError,
+  clampInteger,
+  DEFAULT_STAGE_TIMEOUT_MS,
   FIXED_FAILURE_MESSAGES,
+  MAX_TIMEOUT_MS,
   plainObject,
   stringField,
   throwIfAborted,
@@ -24,6 +28,12 @@ import {
 } from "./core";
 
 const MAX_REQUEST_BYTES = 16 * 1024;
+export const TEXT_PROBE_MAX_OUTPUT_TOKENS = 256;
+export const TOOL_PROBE_MAX_OUTPUT_TOKENS = 1_024;
+export interface BackendEndpointNetworkPolicy {
+  allowInsecureLocalhost: boolean;
+  allowPrivateNetwork: boolean;
+}
 
 interface HttpResponse {
   statusCode: number;
@@ -68,6 +78,30 @@ for (const [network, prefix] of [
   BLOCKED_ADDRESSES.addSubnet(network, prefix, "ipv6");
 }
 
+const PRIVATE_NETWORK_ADDRESSES = new BlockList();
+for (const [network, prefix] of [
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+] as const) {
+  PRIVATE_NETWORK_ADDRESSES.addSubnet(network, prefix, "ipv4");
+}
+for (const [network, prefix] of [
+  ["fc00::", 7],
+  ["fe80::", 10],
+] as const) {
+  PRIVATE_NETWORK_ADDRESSES.addSubnet(network, prefix, "ipv6");
+}
+
+const CLOUD_METADATA_ADDRESSES = new BlockList();
+for (const address of ["169.254.169.254", "169.254.170.2", "100.100.100.200"]) {
+  CLOUD_METADATA_ADDRESSES.addAddress(address, "ipv4");
+}
+CLOUD_METADATA_ADDRESSES.addAddress("fd00:ec2::254", "ipv6");
+
 export async function probeHttpBackend(
   request: BackendCompatibilityProbeRequest,
   dependencies: BackendCompatibilityProbeDependencies,
@@ -86,12 +120,20 @@ export async function probeHttpBackend(
   try {
     const { baseUrl, resolved } = await validateBackendEndpointNetworkPolicy(
       request.endpointUrl,
-      request.allowInsecureLocalhost,
+      {
+        allowInsecureLocalhost: request.allowInsecureLocalhost,
+        allowPrivateNetwork: request.allowPrivateNetwork === true,
+      },
       signal,
       dependencies.resolveAddresses ?? resolveAddresses,
     );
     const endpoint = apiEndpoint(baseUrl, request.profile.protocol);
-    secret = await resolveProbeCredential(request, dependencies, signal);
+    secret = await resolveProbeCredential(
+      request.profile.authenticationMode,
+      request.secretReference,
+      dependencies,
+      signal,
+    );
     throwIfAborted(signal);
     const body = probeBody(request.profile.protocol, request.modelId);
     headers = probeHeaders(
@@ -114,14 +156,21 @@ export async function probeHttpBackend(
         )
       : null;
     secret = null;
-    const response = await boundedRequest(
-      endpoint,
-      resolved,
-      body,
-      headers,
-      signal,
-      maxResponseBytes,
+    const stageTimeoutMs = clampInteger(
+      dependencies.stageTimeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS,
+      1,
+      MAX_TIMEOUT_MS,
     );
+    const textHeaders = headers;
+    const response = await withStageDeadline(signal, stageTimeoutMs, (stageSignal) =>
+      boundedRequest(
+        endpoint,
+        resolved,
+        body,
+        textHeaders,
+        stageSignal,
+        maxResponseBytes,
+      ));
     assertSuccessfulResponse(response);
     const observation = parseStreamingResponse(
       request.profile.protocol as HttpBackendProtocol,
@@ -142,14 +191,17 @@ export async function probeHttpBackend(
     // result in a bounded follow-up. Nothing on the host is ever executed.
     try {
       const challenge = toolProbeChallenge();
-      const toolResponse = await boundedRequest(
-        endpoint,
-        resolved,
-        toolProbeBody(request.modelId, challenge),
-        toolHeaders,
-        signal,
-        maxResponseBytes,
-      );
+      const toolRequestHeaders = toolHeaders;
+      const continuationRequestHeaders = continuationHeaders;
+      const toolResponse = await withStageDeadline(signal, stageTimeoutMs, (stageSignal) =>
+        boundedRequest(
+          endpoint,
+          resolved,
+          toolProbeBody(request.modelId, challenge),
+          toolRequestHeaders,
+          stageSignal,
+          maxResponseBytes,
+        ));
       assertSuccessfulResponse(toolResponse);
       const call = parseInertToolResponse(
         request.modelId,
@@ -157,14 +209,15 @@ export async function probeHttpBackend(
         toolResponse.headers,
         toolResponse.body,
       );
-      const continuationResponse = await boundedRequest(
-        endpoint,
-        resolved,
-        toolContinuationProbeBody(request.modelId, challenge, call),
-        continuationHeaders,
-        signal,
-        maxResponseBytes,
-      );
+      const continuationResponse = await withStageDeadline(signal, stageTimeoutMs, (stageSignal) =>
+        boundedRequest(
+          endpoint,
+          resolved,
+          toolContinuationProbeBody(request.modelId, challenge, call),
+          continuationRequestHeaders,
+          stageSignal,
+          maxResponseBytes,
+        ));
       assertSuccessfulResponse(continuationResponse);
       parseToolContinuationResponse(
         request.modelId,
@@ -199,22 +252,58 @@ export async function probeHttpBackend(
   }
 }
 
-async function resolveProbeCredential(
-  request: BackendCompatibilityProbeRequest,
-  dependencies: BackendCompatibilityProbeDependencies,
+async function withStageDeadline<T>(
+  signal: AbortSignal,
+  timeoutMs: number,
+  run: (stageSignal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  throwIfAborted(signal);
+  const controller = new AbortController();
+  let expired = false;
+  const timer = setTimeout(() => {
+    expired = true;
+    controller.abort();
+  }, timeoutMs);
+  timer.unref();
+  const forward = (): void => controller.abort();
+  signal.addEventListener("abort", forward, { once: true });
+  try {
+    return await run(controller.signal);
+  } catch (error) {
+    if (expired && !signal.aborted) {
+      throw new BackendProbeError("timeout", FIXED_FAILURE_MESSAGES.timeout);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", forward);
+  }
+}
+
+function modelMatchesRequest(requestedModelId: string, actualModel: string | null): boolean {
+  if (actualModel === null) return false;
+  if (actualModel === requestedModelId) return true;
+  if (!actualModel.startsWith(`${requestedModelId}-`)) return false;
+  return /^(?:\d{8}|\d{4}-\d{2}-\d{2})$/u.test(actualModel.slice(requestedModelId.length + 1));
+}
+
+export async function resolveProbeCredential(
+  authenticationMode: BackendAuthenticationMode,
+  secretReference: string | null,
+  dependencies: Pick<BackendCompatibilityProbeDependencies, "resolveCredential">,
   signal: AbortSignal,
 ): Promise<string | null> {
-  if (request.profile.authenticationMode === "none") return null;
-  if (request.profile.authenticationMode === "harness-managed") {
+  if (authenticationMode === "none") return null;
+  if (authenticationMode === "harness-managed") {
     throw new BackendProbeError("credential-unavailable", FIXED_FAILURE_MESSAGES["credential-unavailable"]);
   }
-  if (!request.secretReference || !dependencies.resolveCredential) {
+  if (!secretReference || !dependencies.resolveCredential) {
     throw new BackendProbeError("credential-unavailable", FIXED_FAILURE_MESSAGES["credential-unavailable"]);
   }
   let secret: string | null;
   try {
     secret = await abortable(
-      dependencies.resolveCredential(request.secretReference, signal),
+      dependencies.resolveCredential(secretReference, signal),
       signal,
     );
   } catch {
@@ -264,14 +353,14 @@ function validateEndpointUrl(value: string, allowInsecureLocalhost: boolean): UR
  */
 export async function validateBackendEndpointNetworkPolicy(
   endpointUrl: string,
-  allowInsecureLocalhost: boolean,
+  policy: BackendEndpointNetworkPolicy,
   signal: AbortSignal,
   resolver: NonNullable<BackendCompatibilityProbeDependencies["resolveAddresses"]> = resolveAddresses,
 ): Promise<{ baseUrl: URL; resolved: BackendProbeResolvedAddress }> {
-  const baseUrl = validateEndpointUrl(endpointUrl, allowInsecureLocalhost);
+  const baseUrl = validateEndpointUrl(endpointUrl, policy.allowInsecureLocalhost);
   const resolved = await resolveAndValidateAddress(
     baseUrl,
-    allowInsecureLocalhost,
+    policy,
     resolver,
     signal,
   );
@@ -280,10 +369,11 @@ export async function validateBackendEndpointNetworkPolicy(
 
 async function resolveAndValidateAddress(
   url: URL,
-  allowInsecureLocalhost: boolean,
+  policy: BackendEndpointNetworkPolicy,
   resolver: NonNullable<BackendCompatibilityProbeDependencies["resolveAddresses"]>,
   signal: AbortSignal,
 ): Promise<BackendProbeResolvedAddress> {
+  const { allowInsecureLocalhost, allowPrivateNetwork } = policy;
   const hostname = stripIpv6Brackets(url.hostname);
   const literalLocal = isLiteralLocalhost(url.hostname);
   let addresses: readonly BackendProbeResolvedAddress[];
@@ -313,14 +403,20 @@ async function resolveAndValidateAddress(
       if (!allowInsecureLocalhost || !loopback) {
         throw new BackendProbeError("private-network", FIXED_FAILURE_MESSAGES["private-network"]);
       }
-    } else if (loopback || isBlockedAddress(candidate.address, candidate.family)) {
+    } else if (
+      loopback
+      || (
+        isBlockedAddress(candidate.address, candidate.family)
+        && !(allowPrivateNetwork && isPrivateNetworkAddress(candidate.address, candidate.family))
+      )
+    ) {
       throw new BackendProbeError("private-network", FIXED_FAILURE_MESSAGES["private-network"]);
     }
   }
   return addresses[0]!;
 }
 
-async function resolveAddresses(
+export async function resolveAddresses(
   hostname: string,
   signal: AbortSignal,
 ): Promise<readonly BackendProbeResolvedAddress[]> {
@@ -370,7 +466,7 @@ function probeBody(protocol: ModelBackendProtocol, modelId: string): Buffer {
     : {
         model: modelId,
         input: "Reply with OK.",
-        max_output_tokens: 16,
+        max_output_tokens: TEXT_PROBE_MAX_OUTPUT_TOKENS,
         store: false,
         stream: true,
       };
@@ -406,7 +502,7 @@ function toolProbeBody(modelId: string, challenge: ToolProbeChallenge): Buffer {
   const value = {
     model: modelId,
     input: `Call ${challenge.name} exactly once with the required nonce. Do not answer with text.`,
-    max_output_tokens: 64,
+    max_output_tokens: TOOL_PROBE_MAX_OUTPUT_TOKENS,
     store: false,
     stream: true,
     parallel_tool_calls: false,
@@ -461,7 +557,7 @@ function toolContinuationProbeBody(
         output: challenge.resultNonce,
       },
     ],
-    max_output_tokens: 64,
+    max_output_tokens: TOOL_PROBE_MAX_OUTPUT_TOKENS,
     store: false,
     stream: true,
     parallel_tool_calls: false,
@@ -495,17 +591,17 @@ function probeHeaders(
   return headers;
 }
 
-function scrubHeaders(headers: Record<string, string>): void {
+export function scrubHeaders(headers: Record<string, string>): void {
   for (const key of Object.keys(headers)) {
     if (key === "authorization" || key === "x-api-key") headers[key] = "";
     delete headers[key];
   }
 }
 
-function boundedRequest(
+export function boundedRequest(
   url: URL,
   address: BackendProbeResolvedAddress,
-  body: Buffer,
+  body: Buffer | null,
   headers: Record<string, string>,
   signal: AbortSignal,
   maxResponseBytes: number,
@@ -523,16 +619,18 @@ function boundedRequest(
     const onAbort = (): void => {
       activeRequest?.destroy(new BackendProbeError("cancelled", FIXED_FAILURE_MESSAGES.cancelled));
     };
-    const requestHeaders: Record<string, string> = {
-      ...headers,
-      "content-length": String(body.byteLength),
-    };
+    const requestHeaders: Record<string, string> = body === null
+      ? { ...headers }
+      : {
+          ...headers,
+          "content-length": String(body.byteLength),
+        };
     const options: RequestOptions & { servername?: string } = {
       protocol: url.protocol,
       hostname: stripIpv6Brackets(url.hostname),
       port: url.port || undefined,
       path: `${url.pathname}${url.search}`,
-      method: "POST",
+      method: body === null ? "GET" : "POST",
       headers: requestHeaders,
       agent: false,
       lookup: (_hostname, _options, callback) => {
@@ -584,7 +682,8 @@ function boundedRequest(
     }
     activeRequest.once("error", (error) => finish(() => reject(error)));
     signal.addEventListener("abort", onAbort, { once: true });
-    activeRequest.end(body);
+    if (body === null) activeRequest.end();
+    else activeRequest.end(body);
   });
 }
 
@@ -624,7 +723,7 @@ function parseStreamingResponse(
         const message = plainObject(payload.message) ? payload.message : null;
         protocolVerified = message?.type === "message";
         const actualModel = message ? stringField(message, "model") : null;
-        modelVerified = actualModel === requestedModelId;
+        modelVerified = modelMatchesRequest(requestedModelId, actualModel);
         usageVerified ||= validUsage(message?.usage);
       } else if (type === "message_delta") {
         usageVerified ||= validUsage(payload.usage);
@@ -639,12 +738,20 @@ function parseStreamingResponse(
         const response = plainObject(payload.response) ? payload.response : null;
         protocolVerified = protocolVerified || response !== null;
         const actualModel = response ? stringField(response, "model") : null;
-        modelVerified = modelVerified || actualModel === requestedModelId;
-      } else if (type === "response.completed") {
+        modelVerified = modelVerified || modelMatchesRequest(requestedModelId, actualModel);
+      } else if (type === "response.completed" || type === "response.incomplete") {
         const response = plainObject(payload.response) ? payload.response : null;
+        if (type === "response.incomplete") {
+          const details = response && plainObject(response.incomplete_details)
+            ? response.incomplete_details
+            : null;
+          if (!details || stringField(details, "reason") !== "max_output_tokens") {
+            throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+          }
+        }
         protocolVerified = response !== null;
         const actualModel = response ? stringField(response, "model") : null;
-        modelVerified = actualModel === requestedModelId;
+        modelVerified = modelMatchesRequest(requestedModelId, actualModel);
         usageVerified = validUsage(response?.usage);
         terminal = true;
       } else if (type === "error" || type === "response.failed") {
@@ -841,7 +948,7 @@ function collectFinalFunctionCall(
   calls.set(callId, { name, arguments: argumentsValue });
 }
 
-function assertSuccessfulResponse(response: HttpResponse): void {
+export function assertSuccessfulResponse(response: HttpResponse): void {
   if (response.statusCode >= 300 && response.statusCode < 400) {
     throw new BackendProbeError("unsafe-redirect", FIXED_FAILURE_MESSAGES["unsafe-redirect"]);
   }
@@ -945,6 +1052,12 @@ function isLoopbackAddress(address: string, family: 4 | 6): boolean {
 
 function isBlockedAddress(address: string, family: 4 | 6): boolean {
   return BLOCKED_ADDRESSES.check(address, family === 4 ? "ipv4" : "ipv6");
+}
+
+function isPrivateNetworkAddress(address: string, family: 4 | 6): boolean {
+  const type = family === 4 ? "ipv4" : "ipv6";
+  return PRIVATE_NETWORK_ADDRESSES.check(address, type)
+    && !CLOUD_METADATA_ADDRESSES.check(address, type);
 }
 
 function stripIpv6Brackets(hostname: string): string {

@@ -2,7 +2,7 @@
 
 ## Does Inertia send my code to its own cloud?
 
-No. History and preferences stay on your computer. Agents run through the providers you connect, and each provider keeps its own authentication. Custom backend credentials are stored in your operating system's credential vault.
+No. History and preferences stay on your computer. Agents run through the providers you connect, and each provider keeps its own authentication. API keys and custom backend credentials are stored in your operating system's credential vault, never in Inertia's database.
 
 ## Which agents does Inertia support?
 
@@ -11,6 +11,18 @@ Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Connect them in **Se
 ## Do I need a new subscription?
 
 No. Inertia uses the coding accounts you already have with each provider.
+
+## Can I use API credits instead of a subscription?
+
+Yes. In **Settings → Agents → Accounts and API keys**, choose **Add API key** on the Claude Code card for an Anthropic API key, or on the Codex card for an OpenAI API key. For Claude Code you can also choose **Sign in for API billing through Claude Code**, which uses your Anthropic Console credits. It is under **Sign in through Claude Code** while you are signed out, and beside **Refresh** once you are signed in. Antigravity is account only for now. The provider's command-line tool must be installed, but you don't need to sign in to its account. See [Accounts and API keys](getting-started.md#accounts-and-api-keys).
+
+## Does a chat use my account or my API key?
+
+The route you choose in the model chooser. Rows that run on an API key read *‹name› · API key*; account rows keep the account name. You can keep both set up and switch per chat.
+
+## Can I use Kimi with an API key?
+
+Yes. The Kimi Code card has a built-in Kimi key route: choose **Add key** on its row. It runs through Claude Code, so Claude Code must be installed.
 
 ## Is Full Access safe?
 

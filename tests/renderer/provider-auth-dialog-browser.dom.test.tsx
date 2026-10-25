@@ -103,6 +103,7 @@ function renderDialog(options: {
   copyText?: (text: string) => Promise<boolean>;
   sendCommand?: (command: ClientCommand) => Promise<ServerEvent>;
   provider?: ProviderInfo;
+  method?: "account" | "console";
 } = {}) {
   let subscriber: ((event: ServerEvent) => void) | null = null;
   const openExternal = vi.fn(options.openExternal ?? (async () => undefined));
@@ -120,6 +121,7 @@ function renderDialog(options: {
   ) => (
     <ProviderAuthDialog
       provider={nextProvider}
+      {...(options.method ? { method: options.method } : {})}
       status={status}
       theme="dark"
       fontSize={13}
@@ -168,6 +170,23 @@ describe("ProviderAuthDialog browser handoff", () => {
 
   afterEach(() => {
     Reflect.deleteProperty(window, "inertia");
+  });
+
+  it("starts Claude's console login for API billing and says so", async () => {
+    const dialog = renderDialog({ method: "console" });
+    await screen.findByText("Waiting for sign-in");
+    const start = dialog.sendCommand.mock.calls.find(([sent]) => sent.type === "provider.auth.start")?.[0];
+    expect(start).toMatchObject({ type: "provider.auth.start", payload: { providerId: "claude", method: "console" } });
+    const heading = screen.getByRole("heading", { name: "Sign in to Claude for API billing" });
+    expect(heading.closest("[role=dialog]")).toHaveAccessibleDescription("Uses your Anthropic Console credits through Claude Code's own login.");
+  });
+
+  it("starts the ordinary account login without a method", async () => {
+    const dialog = renderDialog();
+    await screen.findByText("Waiting for sign-in");
+    const start = dialog.sendCommand.mock.calls.find(([sent]) => sent.type === "provider.auth.start")?.[0];
+    expect(start?.type === "provider.auth.start" ? start.payload : null).not.toHaveProperty("method");
+    expect(screen.getByRole("heading", { name: "Connect Claude" })).toBeInTheDocument();
   });
 
   it("opens a chunked Claude OAuth URL once through the desktop host", async () => {

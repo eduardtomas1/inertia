@@ -669,8 +669,23 @@ describe("detached chat runtime authority", () => {
     expect(rejection({
       type: "backend.profile.probe",
       requestId: REQUEST,
-      payload: { profileId: "codex-local", modelId: "gpt-5" },
+      payload: { profileId: "codex-local", modelIds: ["gpt-5"] },
     })).toBeNull();
+    expect(rejection({
+      type: "backend.profile.probe",
+      requestId: REQUEST,
+      payload: { profileId: "codex-local" },
+    })).not.toBeNull();
+    expect(rejection({
+      type: "backend.profile.probe",
+      requestId: REQUEST,
+      payload: { profileId: "codex-local", modelIds: ["gpt-5", "gpt-4"] },
+    })).not.toBeNull();
+    expect(rejection({
+      type: "backend.profile.discover-models",
+      requestId: REQUEST,
+      payload: { profileId: "codex-local" },
+    })).not.toBeNull();
     expect(rejection({
       type: "provider.maintenance.update",
       requestId: REQUEST,

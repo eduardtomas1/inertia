@@ -27,6 +27,10 @@ No. History and preferences stay on your computer, and each provider keeps its o
 
 Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Connect them in **Settings → Agents**. See [Getting started](getting-started.md#connect-an-agent).
 
+### Can I use API credits instead of a subscription?
+
+Yes. Add an Anthropic or OpenAI API key in **Settings → Agents → Accounts and API keys**, then choose its route in the model chooser. See [Accounts and API keys](getting-started.md#accounts-and-api-keys).
+
 ### Can I work on two things at once?
 
 Yes. Open two chats in [split view](working-side-by-side.md), move a chat into its own window, or launch a [Duo](duo.md).

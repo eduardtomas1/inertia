@@ -14,6 +14,7 @@ import {
   probeBackendCompatibility,
   type BackendCompatibilityProbeDependencies,
 } from "../../src/server/runtime/backends/backend-compatibility-probe";
+import { validateBackendEndpointNetworkPolicy } from "../../src/server/runtime/backends/backend-compatibility-probe/http";
 
 const SECRET_REFERENCE = "secret:probe-profile";
 const SECRET = "never-return-this-probe-secret";
@@ -620,6 +621,81 @@ describe("backend compatibility probe", () => {
       }),
     );
     expect(result.failure?.code).toBe("private-network");
+  });
+
+  it.each([
+    ["10.1.2.3", 4],
+    ["172.20.0.5", 4],
+    ["192.168.1.20", 4],
+    ["100.64.0.9", 4],
+    ["198.18.0.7", 4],
+    ["169.254.10.1", 4],
+    ["fd00::5", 6],
+    ["fe80::1", 6],
+  ] as const)("admits private network address %s only with the private network switch", async (address, family) => {
+    const resolveAddresses = async () => [{ address, family }];
+    await expect(validateBackendEndpointNetworkPolicy(
+      "https://gateway.lan/v1",
+      { allowInsecureLocalhost: false, allowPrivateNetwork: false },
+      new AbortController().signal,
+      resolveAddresses,
+    )).rejects.toMatchObject({ code: "private-network" });
+    await expect(validateBackendEndpointNetworkPolicy(
+      "https://gateway.lan/v1",
+      { allowInsecureLocalhost: false, allowPrivateNetwork: true },
+      new AbortController().signal,
+      resolveAddresses,
+    )).resolves.toMatchObject({ resolved: { address, family } });
+  });
+
+  it.each([
+    ["127.0.0.1", 4],
+    ["::1", 6],
+    ["192.0.2.10", 4],
+    ["224.0.0.1", 4],
+    ["169.254.169.254", 4],
+    ["169.254.170.2", 4],
+    ["100.100.100.200", 4],
+    ["fd00:ec2::254", 6],
+    ["::ffff:127.0.0.1", 6],
+  ] as const)("keeps %s blocked when the private network switch is on", async (address, family) => {
+    await expect(validateBackendEndpointNetworkPolicy(
+      "https://gateway.lan/v1",
+      { allowInsecureLocalhost: false, allowPrivateNetwork: true },
+      new AbortController().signal,
+      async () => [{ address, family }],
+    )).rejects.toMatchObject({ code: "private-network" });
+  });
+
+  it("keeps plain HTTP limited to literal loopback when private networks are allowed", async () => {
+    await expect(validateBackendEndpointNetworkPolicy(
+      "http://10.0.0.8:8080/v1",
+      { allowInsecureLocalhost: true, allowPrivateNetwork: true },
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: "insecure-url" });
+    await expect(validateBackendEndpointNetworkPolicy(
+      "https://127.0.0.1:8443/v1",
+      { allowInsecureLocalhost: false, allowPrivateNetwork: true },
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: "private-network" });
+  });
+
+  it("honours the private network switch carried by a probe request", async () => {
+    const refused = await probeBackendCompatibility(
+      requestFor("anthropic-messages", "https://gateway.lan/"),
+      dependencies({
+        resolveAddresses: async () => [{ address: "10.0.0.8", family: 4 }],
+      }),
+    );
+    expect(refused.failure?.code).toBe("private-network");
+    const admitted = await probeBackendCompatibility(
+      requestFor("anthropic-messages", "https://gateway.lan/", { allowPrivateNetwork: true }),
+      dependencies({
+        resolveAddresses: async () => [{ address: "10.0.0.8", family: 4 }],
+        timeoutMs: 50,
+      }),
+    );
+    expect(admitted.failure?.code).not.toBe("private-network");
   });
 
   it.each([

@@ -325,6 +325,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     store,
     credentials: options.backendCredentials,
     builtInClaudeProfiles: options.kimiClaudeProfiles ?? [],
+    signal: runtimeLifetimeAbort.signal,
   });
   let recoveryBlockedProviders = new Set(providerMaintenanceJournal.pending().map(
     (record) => record.installationIdentity.providerId,
@@ -495,6 +496,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     runtimeSync.broadcastSnapshot(currentSnapshot);
   });
   const broadcastSnapshot = (): void => snapshotBroadcasts.request();
+  backendProfileController.attachChangeListener(broadcastSnapshot);
   const flushSnapshot = (): void => snapshotBroadcasts.flush();
   onDatabaseBackupCreated = () => {
     if (!closed) broadcastSnapshot();
@@ -799,6 +801,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       createIsolatedReviewCommandHandler({
         store,
+        backendProfileController,
         turns,
         isolatedRuns,
         secureFiles,

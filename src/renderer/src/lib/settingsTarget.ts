@@ -39,15 +39,18 @@ export interface SettingsTarget {
   anchor?: string;
   projectId?: string;
   profileId?: string;
+  profilePanel?: SettingsProfilePanel;
   selection?: DiagnosticSelection;
 }
+
+export type SettingsProfilePanel = "key" | "models";
 
 export type SettingsTargetInput = Omit<SettingsTarget, "section"> & { section: SettingsSection | LegacySettingsSection };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const ANCHOR = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
-const TARGET_KEYS = new Set(["section", "anchor", "projectId", "profileId", "selection"]);
+const TARGET_KEYS = new Set(["section", "anchor", "projectId", "profileId", "profilePanel", "selection"]);
 const SELECTION_KEYS = new Set(["incidentId", "turnId", "requestId"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -93,6 +96,11 @@ export function parseSettingsTarget(value: unknown): SettingsTarget | null {
   if (value.profileId !== undefined) {
     if (typeof value.profileId !== "string" || !PROFILE_ID.test(value.profileId)) return null;
     target.profileId = value.profileId;
+  }
+  if (value.profilePanel !== undefined) {
+    if (value.profilePanel !== "key" && value.profilePanel !== "models") return null;
+    if (target.profileId === undefined) return null;
+    target.profilePanel = value.profilePanel;
   }
   if (value.selection !== undefined) {
     const selection = target.section === "help" ? parseSelection(value.selection) : null;

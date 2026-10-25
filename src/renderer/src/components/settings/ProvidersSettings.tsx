@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { FolderOpen, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 
+import type { ProviderAuthMethod } from "@shared/provider";
 import type {
   AppSettings,
   ProviderId,
@@ -32,7 +33,7 @@ export interface ProvidersSettingsProps {
   maintenanceOperations: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>;
   maintenanceStatuses: ReadonlyMap<ProviderMaintenanceProviderId, NonNullable<ProviderInfo["maintenance"]>>;
   onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
-  onConnectProvider: (providerId: ProviderId) => void;
+  onConnectProvider: (providerId: ProviderId, method?: ProviderAuthMethod) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
   onRefreshProviderMaintenance: (providerId: ProviderMaintenanceProviderId) => Promise<void>;
   onUpdateProvider: (providerId: ProviderMaintenanceProviderId) => Promise<void>;
@@ -436,7 +437,7 @@ export function ProvidersSettings({
                   )}
 
                   <p className="provider-settings-privacy-note">
-                    Sign-in stays in the provider&apos;s own flow. Inertia stores no provider passwords or tokens.
+                    Account sign-in stays in the provider&apos;s own flow, and Inertia never sees that password. API keys you add below are kept in your system&apos;s credential vault.
                   </p>
                 </div>
               ) : (

@@ -171,8 +171,8 @@ describe("Claude-compatible backend profiles", () => {
       id: "custom:claims",
       displayName: "Claimed gateway",
       baseUrl: "https://gateway.example.test",
-      authenticationMode: "none",
-      secretReference: null,
+      authenticationMode: "api-key",
+      secretReference: SECRET_REFERENCE,
       primaryModelId: "custom-model",
       capabilityOverrides: [{
         id: "tools",
@@ -186,8 +186,8 @@ describe("Claude-compatible backend profiles", () => {
       id: "custom:declared",
       displayName: "Declared gateway",
       baseUrl: "https://gateway.example.test",
-      authenticationMode: "none",
-      secretReference: null,
+      authenticationMode: "api-key",
+      secretReference: SECRET_REFERENCE,
       primaryModelId: "custom-model",
       capabilityOverrides: [{
         id: "tools",

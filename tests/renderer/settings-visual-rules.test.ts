@@ -96,7 +96,7 @@ describe("agents settings", () => {
   });
 
   it("marks the selected backend and harness with the selected fill and no accent", () => {
-    expect(rule(backends, ".backend-profile-rail-item.is-active")).toContain("background: var(--fill-strong);");
+    expect(rule(backends, ".backend-choice-grid > button.is-active")).toContain("background: var(--fill-strong);");
     expect(source(backends)).not.toMatch(/var\(--accent/u);
   });
 });

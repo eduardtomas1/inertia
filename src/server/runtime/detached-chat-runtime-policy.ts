@@ -182,7 +182,8 @@ export function detachedChatCommandRejection(
       return shell
         && command.payload.profileId
           === shell.modelSelection.backendProfileId
-        && command.payload.modelId === shell.modelSelection.modelId
+        && command.payload.modelIds?.length === 1
+        && command.payload.modelIds[0] === shell.modelSelection.modelId
         ? null
         : REJECTION;
     case "settings.update":

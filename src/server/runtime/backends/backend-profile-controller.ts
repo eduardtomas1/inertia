@@ -1,23 +1,41 @@
 import { randomUUID } from "node:crypto";
 
+import { ZodError } from "zod";
+
 import {
+  MAX_BACKEND_PROBE_MODELS,
   backendProfileUsesCredential,
   modelSelectionForBackendProfile,
   modelBackendProfileDraftSchema,
   modelBackendProfileUpdateSchema,
   persistedModelBackendProfileSchema,
+  type BackendDiscoveredModel,
+  type BackendProfileModelsResult,
   type ModelBackendDefault,
+  type ModelBackendProfileCreateDraft,
   type ModelBackendProfileDetail,
-  type ModelBackendProfileDraft,
+  type ModelBackendProfileUpdate,
   type ModelBackendProfileView,
+  type PersistedModelBackendProfile,
 } from "../../../shared/backend-profile-settings";
+import {
+  backendPresetDefinition,
+  isApiKeyBackendPresetId,
+  normalizeBackendBaseUrl,
+} from "../../../shared/backend-presets";
 import {
   validateKimiClaudeModelSelection,
 } from "../../../shared/claude-backend-profiles";
-import { backendCompatibilityProbeResultSchema } from "../../../shared/backend-probe";
 import {
+  backendCompatibilityProbeResultSchema,
+  type BackendCompatibilityProbeResult,
+} from "../../../shared/backend-probe";
+import {
+  BACKEND_CREDENTIAL_REQUIRED_MESSAGE,
   BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION,
+  claudeBackendRequiresCredential,
   BACKEND_PROBE_FRESHNESS_MS,
+  BACKEND_PROBE_RENEWAL_MS,
   modelSelectionSchema,
   providerIdForHarness,
   providerNativeBackendProfile,
@@ -37,6 +55,9 @@ import type { ProviderManagerOptions } from "../../provider/contracts";
 import { ProviderManager } from "../../providers";
 import { probeBackendCompatibility } from "./backend-compatibility-probe";
 import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../../shared/provider-maintenance";
+import { BackendProbeError, DEFAULT_TIMEOUT_MS, type HttpBackendProtocol } from "./backend-compatibility-probe/core";
+import { discoverHttpBackendModels } from "./backend-compatibility-probe/discovery";
+import { verifyBackendKey } from "./backend-key-check";
 
 import {
   PROVIDER_IDS,
@@ -47,7 +68,26 @@ import {
   persistedKimiProfile,
   safeBackendProfile,
 } from "./backend-profile-model";
-import { BackendProfileRuntime } from "./backend-profile-runtime";
+import {
+  backendProfileDraftFailure,
+  backendProfileIssueFailure,
+} from "./backend-profile-issues";
+import {
+  customConnectionValues,
+  defaultProbeModelIds,
+  presetConnectionValues,
+  withPresetReasoning,
+  type BackendConnectionValues,
+} from "./backend-profile-presets";
+import {
+  backendConnectionSemantics,
+  backendDraftForValidation,
+  backendPersistedState,
+  compatibilityFailureMessage,
+  profileProbesOverHttp,
+  sameNormalizedBaseUrl,
+} from "./backend-profile-rules";
+import { BackendProfileRuntime, backendKeyVerified } from "./backend-profile-runtime";
 import {
   BackendProfileControllerError,
   type BackendProfileControllerOptions,
@@ -59,42 +99,32 @@ export {
   type BackendProfileControllerOptions,
 } from "./backend-profile-types";
 
-function backendExecutionSemantics(
-  profile: StoredModelBackendProfile["profile"],
-): string {
-  return JSON.stringify({
-    harnessId: profile.harnessId,
-    protocol: profile.protocol,
-    authenticationMode: profile.authenticationMode,
-    preset: profile.preset,
-    baseUrl: profile.baseUrl,
-    allowInsecureLocalhost: profile.allowInsecureLocalhost,
-    models: profile.models,
-    routing: profile.routing,
-    capabilityHints: profile.capabilityHints,
-  });
-}
+const PROBE_BATCH_BUDGET_MS = 180_000;
 
-function backendPersistedState(
-  profile: StoredModelBackendProfile["profile"],
-): string {
-  return JSON.stringify({
-    ...profile,
-    updatedAt: null,
-  });
-}
+const REMOVED_MODEL_MESSAGE =
+  "The selected model is no longer configured on this backend profile. Start a new chat with another model.";
+
+type ProbeAdmission = {
+  operationId: string;
+  admissionSequence: number;
+  installationFingerprint: string | null;
+};
 
 export class BackendProfileController {
   private readonly store: RuntimeStore;
   private readonly runtime: BackendProfileRuntime;
   private readonly now: () => Date;
   private readonly probeOperationId: () => string;
+  private readonly lifetimeSignal: AbortSignal | undefined;
   private readonly probeAdmissionSequences = new Map<string, number>();
+  private readonly renewals = new Map<string, Promise<void>>();
+  private changeListener: (() => void) | null = null;
 
   private constructor(options: BackendProfileControllerOptions) {
     this.store = options.store;
     this.now = options.now ?? (() => new Date());
     this.probeOperationId = options.probeOperationId ?? randomUUID;
+    this.lifetimeSignal = options.signal;
     this.runtime = new BackendProfileRuntime(
       options.credentials,
       options.builtInClaudeProfiles ?? [],
@@ -141,6 +171,15 @@ export class BackendProfileController {
     this.runtime.attachProviderMutationGuard(providerMaintenanceBlocked);
   }
 
+  attachChangeListener(listener: () => void): void {
+    if (this.changeListener && this.changeListener !== listener) {
+      throw new BackendProfileControllerError(
+        "The backend profile change listener is already attached.",
+      );
+    }
+    this.changeListener = listener;
+  }
+
   profiles(providerInfo: readonly ProviderInfo[]): ModelBackendProfileView[] {
     this.runtime.rememberProviders(providerInfo);
     const native = PROVIDER_IDS.map((providerId) =>
@@ -179,36 +218,38 @@ export class BackendProfileController {
   }
 
   async createProfile(
-    draftInput: ModelBackendProfileDraft,
+    draftInput: ModelBackendProfileCreateDraft,
   ): Promise<ModelBackendProfileDetail> {
+    const failure = backendProfileDraftFailure(draftInput);
+    if (failure) throw new BackendProfileControllerError(failure);
     const draft = modelBackendProfileDraftSchema.parse(draftInput);
-    if (draft.preset !== "custom") {
-      throw new BackendProfileControllerError(
-        "Kimi is available as a single verified built-in preset.",
-      );
-    }
-    const baseUrl = normalizedBaseUrl(
-      draft.baseUrl,
-      draft.allowInsecureLocalhost,
+    const values: BackendConnectionValues = draft.preset === "custom"
+      ? customConnectionValues(draft)
+      : presetConnectionValues(draft);
+    const baseUrl = this.connectionUrl(
+      values.protocol,
+      values.baseUrl,
+      values.allowInsecureLocalhost,
     );
     const now = new Date().toISOString();
-    const profile = persistedModelBackendProfileSchema.parse({
+    const profile = this.parsePersisted({
       id: `custom:${randomUUID()}`,
-      displayName: draft.displayName,
-      harnessId: draft.harnessId,
-      protocol: draft.protocol,
-      authenticationMode: draft.authenticationMode,
+      displayName: values.displayName,
+      harnessId: values.harnessId,
+      protocol: values.protocol,
+      authenticationMode: values.authenticationMode,
       source: "custom",
       enabled: false,
       configurationRevision: 1,
       endpointIdentity: backendEndpointIdentity(baseUrl),
-      preset: "custom",
+      preset: values.preset,
       baseUrl,
-      allowInsecureLocalhost: draft.allowInsecureLocalhost,
+      allowInsecureLocalhost: values.allowInsecureLocalhost,
+      allowPrivateNetwork: values.allowPrivateNetwork,
       credentialGeneration: null,
-      models: draft.models,
-      routing: draft.routing,
-      capabilityHints: draft.capabilityHints,
+      models: this.withPresetReasoning(values.preset, values.models),
+      routing: values.routing,
+      capabilityHints: values.capabilityHints,
       createdAt: now,
       updatedAt: now,
     });
@@ -222,7 +263,20 @@ export class BackendProfileController {
     profileId: string,
     updateInput: unknown,
   ): Promise<ModelBackendProfileDetail> {
-    const update = modelBackendProfileUpdateSchema.parse(updateInput);
+    return (await this.updateProfileWithOutcome(profileId, updateInput)).profile;
+  }
+
+  async updateProfileWithOutcome(
+    profileId: string,
+    updateInput: unknown,
+  ): Promise<{ profile: ModelBackendProfileDetail; credentialCleared: boolean }> {
+    const parsedUpdate = modelBackendProfileUpdateSchema.safeParse(updateInput);
+    if (!parsedUpdate.success) {
+      throw new BackendProfileControllerError(
+        backendProfileIssueFailure(parsedUpdate.error.issues),
+      );
+    }
+    const update = parsedUpdate.data;
     const stored = this.store.modelBackendProfile(profileId);
     if (stored.profile.preset === "native") {
       throw new BackendProfileControllerError(
@@ -238,36 +292,47 @@ export class BackendProfileController {
         );
       }
     }
-    const now = new Date().toISOString();
-    const baseUrl = update.baseUrl === undefined
-      ? stored.profile.baseUrl
-      : normalizedBaseUrl(
-          update.baseUrl,
-          update.allowInsecureLocalhost
-            ?? stored.profile.allowInsecureLocalhost,
-        );
-    const merged = persistedModelBackendProfileSchema.parse({
-      ...stored.profile,
-      ...update,
+    if (update.preset !== undefined && update.preset !== stored.profile.preset) {
+      throw new BackendProfileControllerError(
+        "The backend type cannot be changed. Add a new backend instead.",
+      );
+    }
+    const { enabled: requestedEnabled, ...settings } = update;
+    const requested = { ...stored.profile, ...settings };
+    if (
+      stored.profile.source === "custom"
+      && Object.keys(settings).length > 0
+    ) {
+      const failure = backendProfileDraftFailure(backendDraftForValidation(requested, update));
+      if (failure) throw new BackendProfileControllerError(failure);
+    }
+    const { baseUrl, endpointIdentity } = this.updatedEndpoint(stored.profile, requested, update);
+    const merged = this.parsePersisted({
+      ...requested,
       baseUrl,
-      endpointIdentity: baseUrl === stored.profile.baseUrl
-        ? stored.profile.endpointIdentity
-        : backendEndpointIdentity(baseUrl!),
+      endpointIdentity,
+      models: this.withPresetReasoning(requested.preset, requested.models),
       configurationRevision: stored.profile.configurationRevision,
-      enabled: update.enabled ?? stored.profile.enabled,
+      enabled: requestedEnabled ?? stored.profile.enabled,
       updatedAt: stored.profile.updatedAt,
     });
-    const executionChanged = backendExecutionSemantics(merged)
-      !== backendExecutionSemantics(stored.profile);
-    const candidate = persistedModelBackendProfileSchema.parse({
+    const connectionChanged = backendConnectionSemantics(merged)
+      !== backendConnectionSemantics(stored.profile);
+    const credentialRebound = stored.profile.source === "custom" && (
+      merged.endpointIdentity !== stored.profile.endpointIdentity
+      || merged.protocol !== stored.profile.protocol
+      || merged.authenticationMode !== stored.profile.authenticationMode
+    );
+    const candidate = this.parsePersisted({
       ...merged,
       configurationRevision: stored.profile.configurationRevision
-        + (executionChanged ? 1 : 0),
-      enabled: executionChanged ? false : merged.enabled,
-      updatedAt: now,
+        + (connectionChanged ? 1 : 0),
+      enabled: connectionChanged ? false : merged.enabled,
+      credentialGeneration: credentialRebound ? null : merged.credentialGeneration,
+      updatedAt: new Date().toISOString(),
     });
     if (backendPersistedState(candidate) === backendPersistedState(stored.profile)) {
-      return this.runtime.detailView(stored);
+      return { profile: this.runtime.detailView(stored), credentialCleared: false };
     }
     if (candidate.enabled && !stored.profile.enabled) {
       const compatibility = this.runtime.compatibility(
@@ -275,16 +340,29 @@ export class BackendProfileController {
         candidate.routing.primaryModelId,
         backendProbeForModel(stored, candidate.routing.primaryModelId),
       );
-      if (!isUsableCompatibility(compatibility)) {
+      const awaitingFirstProbe = compatibility.reasonCode === "probe-required"
+        && backendKeyVerified(stored);
+      if (!isUsableCompatibility(compatibility) && !awaitingFirstProbe) {
         throw new BackendProfileControllerError(
           `Test this backend before enabling it. ${compatibility.reason}`,
         );
       }
     }
     this.runtime.assertConfigurationMutable(candidate.harnessId);
+    if (credentialRebound) {
+      try {
+        await this.runtime.removeCredential(profileId);
+      } catch {
+        throw new BackendProfileControllerError(
+          "The saved key could not be removed, so the connection was not changed.",
+        );
+      }
+      this.runtime.assertConfigurationMutable(candidate.harnessId);
+    }
     const next = this.store.saveModelBackendProfile(candidate);
     this.runtime.publishProfile(next.profile);
-    return this.runtime.detailView(next);
+    if (credentialRebound) await this.runtime.credentialStatus(profileId, true);
+    return { profile: this.runtime.detailView(next), credentialCleared: credentialRebound };
   }
 
   async reconcileCredentialRevision(
@@ -299,44 +377,164 @@ export class BackendProfileController {
     }
     const current = this.store.modelBackendProfile(profileId);
     this.runtime.assertConfigurationMutable(current.profile.harnessId);
-    const next = this.store.reconcileModelBackendCredentialGeneration(
-      profileId,
-      status.credentialGeneration,
-    );
-    this.runtime.publishProfile(next.profile);
-    this.runtime.removeProbeResults(profileId);
+    const next = this.reconcileGeneration(current, status.credentialGeneration);
     return this.runtime.detailView(next);
   }
 
   async probe(
     profileId: string,
-    modelId: string,
+    modelIds?: readonly string[],
   ): Promise<ModelBackendProfileDetail> {
+    return (await this.probeWithOutcome(profileId, modelIds)).profile;
+  }
+
+  async probeWithOutcome(
+    profileId: string,
+    modelIds?: readonly string[],
+  ): Promise<{ profile: ModelBackendProfileDetail; skippedModelIds: string[] }> {
     let stored = this.store.modelBackendProfile(profileId);
     const profile = stored.profile;
-    if (!profile.models.some((model) => model.id === modelId)) {
+    if (claudeBackendRequiresCredential(profile)) {
+      throw new BackendProfileControllerError(BACKEND_CREDENTIAL_REQUIRED_MESSAGE);
+    }
+    if (modelIds !== undefined && modelIds.length === 0) {
+      return { profile: await this.checkKey(stored), skippedModelIds: [] };
+    }
+    const requested = modelIds === undefined
+      ? defaultProbeModelIds(profile)
+      : [...new Set(modelIds)];
+    if (requested.length > MAX_BACKEND_PROBE_MODELS) {
+      throw new BackendProfileControllerError(
+        `Test at most ${MAX_BACKEND_PROBE_MODELS} models at a time.`,
+      );
+    }
+    if (
+      requested.length === 0
+      || requested.some((modelId) => !profile.models.some(({ id }) => id === modelId))
+    ) {
       throw new BackendProfileControllerError(
         "The selected model is not configured on this backend.",
       );
     }
+    stored = await this.requireCurrentCredential(stored, "testing the connection");
+    const skippedModelIds: string[] = [];
+    this.beginProbe(profileId);
+    try {
+      const startedAt = this.now().getTime();
+      for (const modelId of requested) {
+        if (
+          skippedModelIds.length > 0
+          || this.now().getTime() - startedAt + DEFAULT_TIMEOUT_MS > PROBE_BATCH_BUDGET_MS
+        ) {
+          skippedModelIds.push(modelId);
+          continue;
+        }
+        await this.probeModel(profileId, modelId);
+      }
+    } finally {
+      this.endProbe(profileId);
+    }
+    return {
+      profile: this.runtime.detailView(this.store.modelBackendProfile(profileId)),
+      skippedModelIds,
+    };
+  }
+
+  private async requireCurrentCredential(
+    record: StoredModelBackendProfile,
+    action: string,
+  ): Promise<StoredModelBackendProfile> {
+    const profile = record.profile;
+    if (!backendProfileUsesCredential(profile)) return record;
+    const status = await this.runtime.credentialStatus(profile.id, true);
+    let stored = record;
+    if (status?.credentialGeneration !== profile.credentialGeneration) {
+      this.runtime.assertConfigurationMutable(profile.harnessId);
+      stored = this.reconcileGeneration(stored, status?.credentialGeneration ?? null);
+    }
+    if (!status?.hasSecret) {
+      throw new BackendProfileControllerError(`Add the ${profile.displayName} credential before ${action}.`);
+    }
+    return stored;
+  }
+
+  private async checkKey(record: StoredModelBackendProfile): Promise<ModelBackendProfileDetail> {
+    const stored = await this.requireCurrentCredential(record, "checking it");
+    const { profile } = stored;
+    const { baseUrl, protocol } = profile;
+    if (baseUrl !== null && (protocol === "anthropic-messages" || protocol === "openai-responses")) {
+      const endpoint = { ...profile, baseUrl, protocol };
+      await verifyBackendKey({
+        listModels: () => this.listModels(endpoint),
+        primaryModelId: defaultProbeModelIds(profile)[0],
+        probeModel: async (modelId) => backendProbeForModel(await this.probeModel(profile.id, modelId), modelId),
+        now: this.now,
+      });
+    }
+    this.runtime.assertConfigurationMutable(stored.profile.harnessId);
+    const next = this.store.recordModelBackendKeyCheck(stored.profile.id, {
+      credentialGeneration: stored.profile.credentialGeneration,
+      checkedAt: this.now().toISOString(),
+    });
+    this.notifyChanged();
+    return this.runtime.detailView(next);
+  }
+
+  async discoverModels(profileId: string): Promise<BackendProfileModelsResult> {
+    const { profile } = this.store.modelBackendProfile(profileId);
+    if (
+      profile.baseUrl === null
+      || (profile.protocol !== "anthropic-messages" && profile.protocol !== "openai-responses")
+    ) {
+      throw new BackendProfileControllerError(
+        "Model lists can be loaded only for API key and custom backends.",
+      );
+    }
     if (backendProfileUsesCredential(profile)) {
       const status = await this.runtime.credentialStatus(profile.id, true);
-      if (status?.credentialGeneration !== profile.credentialGeneration) {
-        this.runtime.assertConfigurationMutable(profile.harnessId);
-        stored = this.store.reconcileModelBackendCredentialGeneration(
-          profile.id,
-          status?.credentialGeneration ?? null,
-        );
-        this.runtime.publishProfile(stored.profile);
-      }
       if (!status?.hasSecret) {
         throw new BackendProfileControllerError(
-          `Add the ${profile.displayName} credential before testing the connection.`,
+          `Add the ${profile.displayName} credential before loading its models.`,
         );
       }
     }
+    try {
+      const models = await this.listModels({ ...profile, baseUrl: profile.baseUrl, protocol: profile.protocol });
+      return { kind: "backend.profile.models", profileId: profile.id, models };
+    } catch (error) {
+      if (error instanceof BackendProbeError) {
+        throw new BackendProfileControllerError(error.message);
+      }
+      throw error;
+    }
+  }
+
+  private listModels(
+    profile: StoredModelBackendProfile["profile"] & { baseUrl: string; protocol: HttpBackendProtocol },
+  ): Promise<BackendDiscoveredModel[]> {
+    return discoverHttpBackendModels({
+      protocol: profile.protocol,
+      authenticationMode: profile.authenticationMode,
+      endpointUrl: profile.baseUrl,
+      secretReference: backendProfileUsesCredential(profile)
+        ? this.runtime.secretReference(profile.id)
+        : null,
+      allowInsecureLocalhost: profile.allowInsecureLocalhost,
+      allowPrivateNetwork: profile.allowPrivateNetwork,
+    }, {
+      resolveCredential: (reference, signal) =>
+        this.runtime.resolveCredential(reference, signal),
+    }, this.lifetimeSignal);
+  }
+
+  private async probeModel(
+    profileId: string,
+    modelId: string,
+  ): Promise<StoredModelBackendProfile> {
+    const stored = this.store.modelBackendProfile(profileId);
     const current = stored.profile;
-    const model = current.models.find((candidate) => candidate.id === modelId)!;
+    const model = current.models.find((candidate) => candidate.id === modelId);
+    if (!model) return stored;
     const admission = this.nextProbeAdmission(stored, modelId);
     const probed = await probeBackendCompatibility({
       profile: safeBackendProfile(current),
@@ -346,6 +544,7 @@ export class BackendProfileController {
         ? this.runtime.secretReference(current.id)
         : null,
       allowInsecureLocalhost: current.allowInsecureLocalhost,
+      allowPrivateNetwork: current.allowPrivateNetwork,
       capabilityHints: current.capabilityHints,
       contextWindowHint: model.contextWindowTokens === null
         ? null
@@ -359,7 +558,7 @@ export class BackendProfileController {
         this.runtime.resolveCredential(reference, signal),
       now: this.now,
       admission,
-    });
+    }, this.lifetimeSignal);
     const result = backendCompatibilityProbeResultSchema.parse({
       ...probed,
       authority: {
@@ -373,23 +572,33 @@ export class BackendProfileController {
       },
     });
     if (!this.probeAdmissionIsCurrent(current, modelId, admission.admissionSequence)) {
-      return this.runtime.detailView(this.store.modelBackendProfile(profileId));
+      return this.store.modelBackendProfile(profileId);
     }
     this.runtime.assertConfigurationMutable(current.harnessId);
     const next = this.store.recordModelBackendProbe(profileId, result);
     const persisted = backendProbeForModel(next, result.modelId);
     if (persisted) this.runtime.recordProbeResult(persisted);
-    return this.runtime.detailView(next);
+    return next;
   }
 
   private nextProbeAdmission(
     stored: StoredModelBackendProfile,
     modelId: string,
-  ): {
-    operationId: string;
-    admissionSequence: number;
-    installationFingerprint: string | null;
-  } {
+  ): ProbeAdmission {
+    const admissionSequence = this.advanceProbeAdmission(stored, modelId);
+    return {
+      operationId: this.probeOperationId(),
+      admissionSequence,
+      installationFingerprint: this.runtime.installationFingerprint(
+        stored.profile.harnessId,
+      ),
+    };
+  }
+
+  private advanceProbeAdmission(
+    stored: StoredModelBackendProfile,
+    modelId: string,
+  ): number {
     const key = this.probeAdmissionKey(stored.profile, modelId);
     const persisted = stored.probeAdmissionHighWater.find(
       (entry) => entry.modelId === modelId,
@@ -402,13 +611,7 @@ export class BackendProfileController {
     }
     const admissionSequence = current + 1;
     this.probeAdmissionSequences.set(key, admissionSequence);
-    return {
-      operationId: this.probeOperationId(),
-      admissionSequence,
-      installationFingerprint: this.runtime.installationFingerprint(
-        stored.profile.harnessId,
-      ),
-    };
+    return admissionSequence;
   }
 
   private probeAdmissionIsCurrent(
@@ -664,9 +867,7 @@ export class BackendProfileController {
     const model = record.profile.models.find(({ id }) =>
       id === submitted.modelId);
     if (!model) {
-      throw new BackendProfileControllerError(
-        "The selected model is no longer configured on this backend profile.",
-      );
+      throw new BackendProfileControllerError(REMOVED_MODEL_MESSAGE);
     }
     this.rejectUnsupportedProviderOptions(submitted);
     const reasoningEffort = this.validateReasoningEffort(
@@ -700,6 +901,9 @@ export class BackendProfileController {
   ): Promise<{ ready: boolean; message: string | null } | null> {
     if (!this.isExternalSelection(selectionInput)) return null;
     let record = this.recordForSelection(selectionInput);
+    if (claudeBackendRequiresCredential(record.profile)) {
+      return { ready: false, message: BACKEND_CREDENTIAL_REQUIRED_MESSAGE };
+    }
     if (!record.profile.enabled) {
       return {
         ready: false,
@@ -726,15 +930,7 @@ export class BackendProfileController {
       );
       if (status?.credentialGeneration !== record.profile.credentialGeneration) {
         this.runtime.assertConfigurationMutable(record.profile.harnessId);
-        record = this.store.reconcileModelBackendCredentialGeneration(
-          record.profile.id,
-          status?.credentialGeneration ?? null,
-        );
-        this.runtime.publishProfile(record.profile);
-        return {
-          ready: false,
-          message: "The backend credential changed. Test and enable this profile again.",
-        };
+        record = this.reconcileGeneration(record, status?.credentialGeneration ?? null);
       }
       if (!status?.hasSecret) {
         return {
@@ -742,6 +938,9 @@ export class BackendProfileController {
           message: `The ${record.profile.displayName} credential is unavailable.`,
         };
       }
+    }
+    if (profileProbesOverHttp(record.profile)) {
+      return await this.readinessFromEvidence(record, selectionInput.modelId);
     }
     const compatibility = this.runtime.compatibility(
       record.profile,
@@ -752,6 +951,212 @@ export class BackendProfileController {
       return { ready: false, message: compatibility.reason };
     }
     return { ready: true, message: null };
+  }
+
+  private async readinessFromEvidence(
+    record: StoredModelBackendProfile,
+    modelId: string,
+  ): Promise<{ ready: boolean; message: string | null }> {
+    if (!record.profile.models.some(({ id }) => id === modelId)) {
+      return { ready: false, message: REMOVED_MODEL_MESSAGE };
+    }
+    const probe = backendProbeForModel(record, modelId);
+    const compatibility = this.runtime.compatibility(record.profile, modelId, probe);
+    const installationChanged = this.probeInstallationChanged(record.profile, probe);
+    if (isUsableCompatibility(compatibility) && !installationChanged) {
+      if (this.renewalDue(record, probe)) this.renewInBackground(record.profile.id, modelId);
+      return { ready: true, message: null };
+    }
+    if (
+      probe !== null
+      && compatibility.reasonCode !== "probe-stale"
+      && !installationChanged
+      && !this.renewalDue(record, probe)
+    ) {
+      return { ready: false, message: compatibilityFailureMessage(compatibility, probe) };
+    }
+    let renewed: StoredModelBackendProfile;
+    try {
+      renewed = await this.renewNow(record.profile.id, modelId);
+    } catch (error) {
+      if (error instanceof BackendProfileControllerError) {
+        return { ready: false, message: error.message };
+      }
+      throw error;
+    }
+    const renewedProbe = backendProbeForModel(renewed, modelId);
+    const renewedCompatibility = this.runtime.compatibility(
+      renewed.profile,
+      modelId,
+      renewedProbe,
+    );
+    return isUsableCompatibility(renewedCompatibility)
+      ? { ready: true, message: null }
+      : {
+          ready: false,
+          message: compatibilityFailureMessage(renewedCompatibility, renewedProbe),
+        };
+  }
+
+  private probeInstallationChanged(
+    profile: PersistedModelBackendProfile,
+    probe: BackendCompatibilityProbeResult | null,
+  ): boolean {
+    const current = this.runtime.installationFingerprint(profile.harnessId);
+    return probe !== null
+      && current !== null
+      && probe.authority?.installationFingerprint !== current;
+  }
+
+  private renewalDue(
+    record: StoredModelBackendProfile,
+    probe: BackendCompatibilityProbeResult | null,
+  ): boolean {
+    if (!probe) return true;
+    const checkedAt = Date.parse(probe.checkedAt);
+    if (!Number.isFinite(checkedAt)) return true;
+    if (this.now().getTime() - checkedAt >= BACKEND_PROBE_RENEWAL_MS) return true;
+    const requestedAt = Date.parse(record.probeRenewalRequestedAt ?? "");
+    return Number.isFinite(requestedAt) && checkedAt <= requestedAt;
+  }
+
+  private renewInBackground(profileId: string, modelId: string): void {
+    if (this.lifetimeSignal?.aborted) return;
+    if (this.renewals.has(this.renewalKey(profileId, modelId))) return;
+    void this.renewNow(profileId, modelId).catch(() => undefined);
+  }
+
+  private async renewNow(
+    profileId: string,
+    modelId: string,
+  ): Promise<StoredModelBackendProfile> {
+    const key = this.renewalKey(profileId, modelId);
+    const existing = this.renewals.get(key);
+    if (existing) {
+      await existing;
+      return this.store.modelBackendProfile(profileId);
+    }
+    const operation = (async () => {
+      this.beginProbe(profileId, true);
+      try {
+        await this.probeModel(profileId, modelId);
+      } finally {
+        this.endProbe(profileId, true);
+      }
+    })();
+    const settled = operation.then(() => undefined, () => undefined);
+    this.renewals.set(key, settled);
+    void settled.finally(() => {
+      if (this.renewals.get(key) === settled) this.renewals.delete(key);
+    });
+    await operation;
+    return this.store.modelBackendProfile(profileId);
+  }
+
+  private renewalKey(profileId: string, modelId: string): string {
+    return `${profileId}\0${modelId}`;
+  }
+
+  private beginProbe(profileId: string, renewal = false): void {
+    if (this.runtime.beginProbe(profileId, renewal)) this.notifyChanged();
+  }
+
+  private endProbe(profileId: string, renewal = false): void {
+    if (this.runtime.endProbe(profileId, renewal)) this.notifyChanged();
+  }
+
+  private notifyChanged(): void {
+    try {
+      this.changeListener?.();
+    } catch {
+      return;
+    }
+  }
+
+  private reconcileGeneration(
+    record: StoredModelBackendProfile,
+    credentialGeneration: string | null,
+  ): StoredModelBackendProfile {
+    const current = this.store.modelBackendProfile(record.profile.id);
+    if (current.profile.credentialGeneration === credentialGeneration) return current;
+    for (const model of current.profile.models) {
+      this.advanceProbeAdmission(current, model.id);
+    }
+    const next = this.store.reconcileModelBackendCredentialGeneration(
+      record.profile.id,
+      credentialGeneration,
+      this.now().toISOString(),
+    );
+    this.runtime.publishProfile(next.profile);
+    return next;
+  }
+
+  private withPresetReasoning(
+    preset: PersistedModelBackendProfile["preset"],
+    models: PersistedModelBackendProfile["models"],
+  ): PersistedModelBackendProfile["models"] {
+    if (!isApiKeyBackendPresetId(preset)) return models;
+    const providerId = backendPresetDefinition(preset).providerId;
+    return withPresetReasoning(
+      preset,
+      models,
+      this.runtime.provider(providerId)?.models ?? [],
+    );
+  }
+
+  private connectionUrl(
+    protocol: PersistedModelBackendProfile["protocol"],
+    value: string,
+    allowInsecureLocalhost: boolean,
+  ): string {
+    let normalized: string;
+    try {
+      normalized = normalizeBackendBaseUrl(protocol, value);
+    } catch (error) {
+      throw new BackendProfileControllerError(
+        error instanceof Error ? error.message : "Enter a valid backend base URL.",
+      );
+    }
+    return normalizedBaseUrl(normalized, allowInsecureLocalhost);
+  }
+
+  private updatedEndpoint(
+    stored: PersistedModelBackendProfile,
+    requested: PersistedModelBackendProfile,
+    update: ModelBackendProfileUpdate,
+  ): { baseUrl: string | null; endpointIdentity: string | null } {
+    if (stored.source !== "custom") {
+      return { baseUrl: stored.baseUrl, endpointIdentity: stored.endpointIdentity };
+    }
+    const candidate = update.baseUrl ?? stored.baseUrl;
+    if (candidate === null) {
+      return { baseUrl: stored.baseUrl, endpointIdentity: stored.endpointIdentity };
+    }
+    const normalized = this.connectionUrl(
+      requested.protocol,
+      candidate,
+      requested.allowInsecureLocalhost,
+    );
+    if (
+      stored.protocol === requested.protocol
+      && (normalized === stored.baseUrl
+        || sameNormalizedBaseUrl(stored.protocol, stored.baseUrl, normalized))
+    ) {
+      normalizedBaseUrl(stored.baseUrl!, requested.allowInsecureLocalhost);
+      return { baseUrl: stored.baseUrl, endpointIdentity: stored.endpointIdentity };
+    }
+    return { baseUrl: normalized, endpointIdentity: backendEndpointIdentity(normalized) };
+  }
+
+  private parsePersisted(value: unknown): PersistedModelBackendProfile {
+    try {
+      return persistedModelBackendProfileSchema.parse(value);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new BackendProfileControllerError(backendProfileIssueFailure(error.issues));
+      }
+      throw error;
+    }
   }
 
   async initialize(recoveryBlockedProviders: ReadonlySet<ProviderInfo["id"]> = new Set()): Promise<void> {
@@ -780,6 +1185,7 @@ export class BackendProfileController {
         profile = this.store.reconcileModelBackendCredentialGeneration(
           existing.profile.id,
           status?.credentialGeneration ?? null,
+          this.now().toISOString(),
         ).profile;
       } else {
         profile = this.store.saveModelBackendProfile(profile).profile;
@@ -808,6 +1214,7 @@ export class BackendProfileController {
           stored = this.store.reconcileModelBackendCredentialGeneration(
             stored.profile.id,
             status?.credentialGeneration ?? null,
+            this.now().toISOString(),
           );
         }
       }

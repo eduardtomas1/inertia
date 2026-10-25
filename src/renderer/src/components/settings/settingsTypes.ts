@@ -1,11 +1,12 @@
 import type {
   AppSettings,
   AppSettingsUpdate,
+  BackendDiscoveredModel,
   Conversation,
   DatabaseBackupStatus,
   ModelBackendDefault,
+  ModelBackendProfileCreateDraft,
   ModelBackendProfileDetail,
-  ModelBackendProfileDraft,
   ModelBackendProfileView,
   ModelSelection,
   Project,
@@ -16,6 +17,9 @@ import type {
   RuntimeLifecycleDiagnosticSnapshot,
 } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
+import type { BackendProfileUpdateInput } from "../../lib/backendProfileCommands";
+import type { BackendProbeOutcome } from "../../hooks/useBackendProfiles";
+import type { ProviderAuthMethod } from "@shared/provider";
 import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 import type { IssueReportSettingsProps } from "../IssueReportSettings";
 import type { SettingsSectionMemory } from "./sectionMemory";
@@ -39,7 +43,7 @@ export interface SettingsViewProps {
   onUpdate: (settings: AppSettingsUpdate) => Promise<void>;
   onSetDefaultModel: (update: Pick<AppSettings, "defaultProvider" | "defaultModel" | "defaultReasoningEffort">) => Promise<void>;
   onRestoreDefaults: () => Promise<void>;
-  onConnectProvider: (providerId: ProviderId) => void;
+  onConnectProvider: (providerId: ProviderId, method?: ProviderAuthMethod) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
   maintenanceOperations: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>;
   maintenanceStatuses: ReadonlyMap<ProviderMaintenanceProviderId, NonNullable<ProviderInfo["maintenance"]>>;
@@ -60,11 +64,12 @@ export interface SettingsViewProps {
   onUnarchive: (conversation: Conversation) => void;
   onOpenConversation?: (conversationId: string) => boolean;
   onLoadBackendProfile: (profileId: string) => Promise<ModelBackendProfileDetail>;
-  onCreateBackendProfile: (draft: ModelBackendProfileDraft) => Promise<ModelBackendProfileDetail>;
-  onUpdateBackendProfile: (profileId: string, update: Partial<ModelBackendProfileDraft> & { enabled?: boolean }) => Promise<ModelBackendProfileDetail>;
+  onCreateBackendProfile: (draft: ModelBackendProfileCreateDraft) => Promise<ModelBackendProfileDetail>;
+  onUpdateBackendProfile: (profileId: string, update: BackendProfileUpdateInput) => Promise<ModelBackendProfileDetail>;
   onSetBackendCredential: (profileId: string, secret: string) => Promise<ModelBackendProfileDetail>;
   onClearBackendCredential: (profileId: string) => Promise<ModelBackendProfileDetail>;
-  onProbeBackendProfile: (profileId: string, modelId: string) => Promise<ModelBackendProfileDetail>;
+  onProbeBackendProfile: (profileId: string, modelIds?: readonly string[]) => Promise<BackendProbeOutcome>;
+  onDiscoverBackendModels: (profileId: string) => Promise<BackendDiscoveredModel[]>;
   onDeleteBackendProfile: (profileId: string) => Promise<void>;
   onSetBackendDefault: (projectId: string | null, selection: ModelSelection) => Promise<void>;
   onClearBackendDefault: (projectId: string | null) => Promise<void>;

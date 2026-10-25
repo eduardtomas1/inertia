@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { AgentTurn, Conversation, WorkspaceRun } from "../../shared/contracts";
+import type { TurnFailureKind } from "../../shared/turn-lifecycle";
 import type { AgentTurnSettlementResult, AgentTurnSettlementUpdate } from "./types";
 
 interface SettlementProjectionStore {
@@ -8,7 +9,10 @@ interface SettlementProjectionStore {
     "status" | "attentionKind" | "providerSessionId" | "continuationIdentity">>): Conversation;
   workspaceRun(runId: string): WorkspaceRun;
   updateWorkspaceRun(runId: string, update: Partial<Pick<WorkspaceRun, "status" | "detail">>): WorkspaceRun;
-  limitResets: { markUsageLimited(turnId: string): void };
+  limitResets: {
+    markUsageLimited(turnId: string): void;
+    markFailureKind(turnId: string, failureKind: TurnFailureKind): void;
+  };
 }
 
 /** Stored lifecycle projections commit with their terminal row, or not at all. */
@@ -45,6 +49,9 @@ export function settleProjectedAgentTurn(
       });
     }
     if (projection.usageLimited && turn.status === "failed") store.limitResets.markUsageLimited(turn.id);
+    if (projection.failureKind && turn.status === "failed") {
+      store.limitResets.markFailureKind(turn.id, projection.failureKind);
+    }
     return result;
   })();
 }

@@ -13,6 +13,15 @@ export const AGENT_TURN_STATUSES = [
 ] as const;
 
 export type AgentTurnStatus = (typeof AGENT_TURN_STATUSES)[number];
+
+export const TURN_FAILURE_KINDS = [
+  "billing",
+  "authentication",
+  "rate-limited",
+  "model-not-found",
+] as const;
+
+export type TurnFailureKind = (typeof TURN_FAILURE_KINDS)[number];
 export type AgentTurnTerminalStatus = Extract<
   AgentTurnStatus,
   "completed" | "failed" | "cancelled" | "interrupted"

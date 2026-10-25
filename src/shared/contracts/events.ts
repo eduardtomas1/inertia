@@ -17,6 +17,8 @@ import type {
   AgentSkillSummary,
 } from "./agent-workflows";
 import type {
+  BackendProfileModelsResult,
+  BackendProfileProbeResult,
   ModelBackendDefault,
   ModelBackendProfileDetail,
 } from "../backend-profile-settings";
@@ -256,8 +258,9 @@ export type ServerEvent =
             delivery: WatcherDelivery;
             queue?: MessageQueueResult;
           }
-        | { kind: "backend.profile"; profile: ModelBackendProfileDetail }
-        | { kind: "backend.profile.probe"; profile: ModelBackendProfileDetail }
+        | { kind: "backend.profile"; profile: ModelBackendProfileDetail; credentialCleared?: true }
+        | BackendProfileProbeResult
+        | BackendProfileModelsResult
         | { kind: "backend.default"; value: ModelBackendDefault | null }
         | { kind: "provider.maintenance"; providers: ProviderMaintenanceStatus[] }
         | { kind: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }

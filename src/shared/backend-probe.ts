@@ -67,6 +67,7 @@ export interface BackendCompatibilityProbeRequest {
   modelId: string;
   secretReference: string | null;
   allowInsecureLocalhost: boolean;
+  allowPrivateNetwork?: boolean;
   capabilityHints: readonly ModelCapability[];
   contextWindowHint: {
     tokens: number;
@@ -126,6 +127,7 @@ export const backendCompatibilityProbeRequestSchema = /* @__PURE__ */ (() => z.o
   modelId: modelIdSchema,
   secretReference: secretReferenceSchema.nullable(),
   allowInsecureLocalhost: z.boolean(),
+  allowPrivateNetwork: z.boolean().optional(),
   capabilityHints: z.array(capabilityHintSchema).max(32),
   contextWindowHint: z.object({
     tokens: z.number().int().positive().max(100_000_000),

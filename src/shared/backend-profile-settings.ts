@@ -5,6 +5,15 @@ import {
   type BackendCompatibilityProbeResult,
 } from "./backend-probe";
 import {
+  API_KEY_BACKEND_PRESET_IDS,
+  BACKEND_PRESETS,
+  isApiKeyBackendPresetId,
+  isBackendPresetId,
+  normalizeBackendBaseUrl,
+  type ApiKeyBackendPresetId,
+  type BackendPresetDefinition,
+} from "./backend-presets";
+import {
   CURRENT_KNOWN_HARNESS_IDS,
   HARNESS_BACKEND_COMPATIBILITY_REASON_CODES,
   MODEL_CAPABILITY_IDS,
@@ -16,21 +25,40 @@ import {
   modelBackendProtocolSchema,
   modelCapabilitySchema,
   modelSelectionSchema,
+  providerIdForHarness,
+  type BackendAuthenticationMode,
   type HarnessBackendCompatibility,
+  type HarnessId,
   type KnownHarnessId,
   type ModelBackendProfile,
+  type ModelBackendProtocol,
   type ModelCapability,
   type ModelSelection,
 } from "./model-routing";
+import type { ProviderId } from "./provider";
 
 export const MODEL_BACKEND_PROFILE_PRESETS = [
   "native",
   "kimi-code",
   "custom",
+  "anthropic-api-key",
+  "openai-api-key",
 ] as const;
 
 export type ModelBackendProfilePreset =
   (typeof MODEL_BACKEND_PROFILE_PRESETS)[number];
+
+export const MODEL_BACKEND_DRAFT_PRESETS = [
+  ...API_KEY_BACKEND_PRESET_IDS,
+  "custom",
+] as const;
+
+export type ModelBackendDraftPreset = (typeof MODEL_BACKEND_DRAFT_PRESETS)[number];
+
+const PRESET_CATALOGUE: Readonly<Record<
+  Exclude<ModelBackendProfilePreset, "native" | "custom">,
+  BackendPresetDefinition
+>> = BACKEND_PRESETS;
 
 export const MODEL_BACKEND_CONNECTION_STATES = [
   "not-tested",
@@ -55,6 +83,19 @@ export const MODEL_BACKEND_AUTH_STATES = [
 export type ModelBackendAuthState =
   (typeof MODEL_BACKEND_AUTH_STATES)[number];
 
+export const BACKEND_ROUTE_KINDS = ["account", "api-key"] as const;
+
+export type BackendRouteKind = (typeof BACKEND_ROUTE_KINDS)[number];
+
+const BACKEND_PROVIDER_IDS = [
+  "codex",
+  "claude",
+  "cursor",
+  "kimi",
+  "opencode",
+  "antigravity",
+] as const satisfies readonly ProviderId[];
+
 export const CLAUDE_BACKEND_TIER_IDS = [
   "fable",
   "opus",
@@ -63,6 +104,9 @@ export const CLAUDE_BACKEND_TIER_IDS = [
 ] as const;
 
 export type ClaudeBackendTierId = (typeof CLAUDE_BACKEND_TIER_IDS)[number];
+
+export const MAX_BACKEND_PROBE_MODELS = 16;
+export const MAX_DISCOVERED_BACKEND_MODELS = 1_000;
 
 export interface BackendReasoningOption {
   value: string;
@@ -100,6 +144,7 @@ export interface PersistedModelBackendProfile extends ModelBackendProfile {
   preset: ModelBackendProfilePreset;
   baseUrl: string | null;
   allowInsecureLocalhost: boolean;
+  allowPrivateNetwork: boolean;
   credentialGeneration: string | null;
   models: readonly BackendModelDefinition[];
   routing: BackendModelRouting;
@@ -108,11 +153,21 @@ export interface PersistedModelBackendProfile extends ModelBackendProfile {
   updatedAt: string;
 }
 
+export interface ModelBackendProfileModelView extends BackendModelDefinition {
+  compatibility: HarnessBackendCompatibility;
+  latestProbe: BackendCompatibilityProbeResult | null;
+}
+
 export interface ModelBackendProfileView
-  extends Omit<PersistedModelBackendProfile, "baseUrl"> {
+  extends Omit<PersistedModelBackendProfile, "baseUrl" | "models"> {
+  models: readonly ModelBackendProfileModelView[];
+  routeKind: BackendRouteKind;
+  providerId: ProviderId;
   endpointHost: string | null;
   authState: ModelBackendAuthState;
   connectionState: ModelBackendConnectionState;
+  renewing?: boolean;
+  keyVerified?: boolean;
   compatibility: HarnessBackendCompatibility;
   latestProbe: BackendCompatibilityProbeResult | null;
   canDelete: boolean;
@@ -136,18 +191,58 @@ export interface ModelBackendProfileDraft {
   harnessId: KnownHarnessId;
   protocol: PersistedModelBackendProfile["protocol"];
   authenticationMode: PersistedModelBackendProfile["authenticationMode"];
-  preset: Exclude<ModelBackendProfilePreset, "native">;
+  preset: "custom";
   baseUrl: string;
   allowInsecureLocalhost: boolean;
+  allowPrivateNetwork?: boolean;
   models: readonly BackendModelDefinition[];
   routing: BackendModelRouting;
   capabilityHints: readonly ModelCapability[];
 }
 
+export interface ModelBackendPresetProfileDraft {
+  preset: ApiKeyBackendPresetId;
+  displayName?: string;
+  harnessId?: KnownHarnessId;
+  protocol?: PersistedModelBackendProfile["protocol"];
+  authenticationMode?: PersistedModelBackendProfile["authenticationMode"];
+  baseUrl?: string;
+  allowInsecureLocalhost?: boolean;
+  allowPrivateNetwork?: boolean;
+  models?: readonly BackendModelDefinition[];
+  routing?: BackendModelRouting;
+  capabilityHints?: readonly ModelCapability[];
+}
+
+export type ModelBackendProfileCreateDraft =
+  | ModelBackendProfileDraft
+  | ModelBackendPresetProfileDraft;
+
+export interface BackendDiscoveredModel {
+  id: string;
+  displayName: string;
+}
+
+export interface BackendProfileModelsResult {
+  kind: "backend.profile.models";
+  profileId: string;
+  models: readonly BackendDiscoveredModel[];
+}
+
+export interface BackendProfileProbeResult {
+  kind: "backend.profile.probe";
+  profile: ModelBackendProfileDetail;
+  skippedModelIds?: readonly string[];
+}
+
+const CONTROL_CHARACTERS = /[\0\r\n]/u;
+const UNAUTHENTICATED_CLAUDE_BACKEND_MESSAGE =
+  "Claude-compatible backends need an API key or bearer token. Without one, Claude Code would send your Anthropic account sign-in to this host.";
+
 const labelSchema = z.string().trim().min(1).max(200)
-  .refine((value) => !/[\0\r\n]/u.test(value), "Labels cannot contain control characters.");
+  .refine((value) => !CONTROL_CHARACTERS.test(value), "Labels cannot contain control characters.");
 const modelIdSchema = z.string().trim().min(1).max(500)
-  .refine((value) => !/[\0\r\n]/u.test(value), "Model IDs cannot contain control characters.");
+  .refine((value) => !CONTROL_CHARACTERS.test(value), "Model IDs cannot contain control characters.");
 const timestampSchema = z.string().datetime({ offset: true });
 const baseUrlSchema = z.string().trim().min(1).max(2_048)
   .refine((value) => {
@@ -159,19 +254,74 @@ const baseUrlSchema = z.string().trim().min(1).max(2_048)
     }
   }, "Backend URLs cannot contain credentials, query parameters, or fragments.");
 
+const draftNameSchema = z.string().trim()
+  .min(1, "Enter a name for this backend.")
+  .max(200, "Names can be at most 200 characters.")
+  .refine((value) => !CONTROL_CHARACTERS.test(value), "Names cannot contain line breaks.");
+const draftModelIdSchema = z.string().trim()
+  .min(1, "Enter a model ID.")
+  .max(500, "Model IDs can be at most 500 characters.")
+  .refine((value) => !CONTROL_CHARACTERS.test(value), "Model IDs cannot contain line breaks.");
+const draftModelNameSchema = z.string().trim()
+  .min(1, "Enter a display name for this model.")
+  .max(200, "Model names can be at most 200 characters.")
+  .refine((value) => !CONTROL_CHARACTERS.test(value), "Model names cannot contain line breaks.");
+
+function draftBaseUrlProblem(value: string): string | null {
+  if (!value) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return "Enter a full URL, such as https://gateway.example.com/v1.";
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return "Backend URLs must start with http:// or https://.";
+  }
+  if (url.username || url.password) {
+    return "Backend URLs cannot contain a user name or password. Save the key separately.";
+  }
+  if (url.search || value.includes("?")) {
+    return "Backend URLs cannot contain a query string.";
+  }
+  if (url.hash || value.includes("#")) {
+    return "Backend URLs cannot contain a fragment.";
+  }
+  return null;
+}
+
+const draftBaseUrlSchema = z.string().trim()
+  .min(1, "Enter the backend URL.")
+  .max(2_048, "Backend URLs can be at most 2,048 characters.")
+  .superRefine((value, context) => {
+    const problem = draftBaseUrlProblem(value);
+    if (problem) context.addIssue({ code: "custom", message: problem });
+  });
+
 export const backendReasoningOptionSchema = z.object({
   value: z.string().trim().min(1).max(100),
   label: labelSchema,
   description: z.string().trim().max(500),
 }).strict();
 
-export const backendModelDefinitionSchema = z.object({
+const contextWindowTokensSchema = z.number()
+  .int("Enter the context window as a whole number of tokens.")
+  .min(8_192, "Context windows must be at least 8,192 tokens.")
+  .max(100_000_000, "Context windows can be at most 100,000,000 tokens.")
+  .nullable();
+
+const backendModelDefinitionShape = z.object({
   id: modelIdSchema,
   displayName: labelSchema,
-  contextWindowTokens: z.number().int().min(8_192).max(100_000_000).nullable(),
+  contextWindowTokens: contextWindowTokensSchema,
   reasoningOptions: z.array(backendReasoningOptionSchema).max(32),
   capabilities: z.array(modelCapabilitySchema).max(MODEL_CAPABILITY_IDS.length),
-}).strict().superRefine((model, context) => {
+}).strict();
+
+function validateModelDefinitionLists(
+  model: Pick<BackendModelDefinition, "reasoningOptions" | "capabilities">,
+  context: z.RefinementCtx,
+): void {
   if (new Set(model.reasoningOptions.map(({ value }) => value)).size
     !== model.reasoningOptions.length) {
     context.addIssue({
@@ -188,7 +338,36 @@ export const backendModelDefinitionSchema = z.object({
       message: "Model capability identifiers must be unique.",
     });
   }
-});
+}
+
+export const backendModelDefinitionSchema =
+  backendModelDefinitionShape.superRefine(validateModelDefinitionLists);
+
+const draftModelDefinitionSchema = backendModelDefinitionShape.extend({
+  id: draftModelIdSchema,
+  displayName: draftModelNameSchema,
+}).strict().superRefine(validateModelDefinitionLists);
+
+function duplicateModelMessage(modelId: string): string {
+  return `Model IDs must be unique. '${modelId}' is listed more than once.`;
+}
+
+const draftModelsSchema = z.array(draftModelDefinitionSchema)
+  .min(1, "Add at least one model.")
+  .max(128, "A backend can list at most 128 models.")
+  .superRefine((models, context) => {
+    const seen = new Set<string>();
+    models.forEach((model, index) => {
+      if (seen.has(model.id)) {
+        context.addIssue({
+          code: "custom",
+          path: [index, "id"],
+          message: duplicateModelMessage(model.id),
+        });
+      }
+      seen.add(model.id);
+    });
+  });
 
 export const backendModelRoutingSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -208,11 +387,15 @@ export const backendModelRoutingSchema = z.discriminatedUnion("mode", [
   }).strict(),
 ]);
 
+const capabilityHintsSchema =
+  z.array(modelCapabilitySchema).max(MODEL_CAPABILITY_IDS.length);
+
 const persistedModelBackendProfileShape = modelBackendProfileSchema.extend({
   harnessId: z.enum(CURRENT_KNOWN_HARNESS_IDS),
   preset: z.enum(MODEL_BACKEND_PROFILE_PRESETS),
   baseUrl: baseUrlSchema.nullable(),
   allowInsecureLocalhost: z.boolean(),
+  allowPrivateNetwork: z.boolean().default(false),
   credentialGeneration: z.string()
     .min(1)
     .max(200)
@@ -220,25 +403,26 @@ const persistedModelBackendProfileShape = modelBackendProfileSchema.extend({
     .nullable(),
   models: z.array(backendModelDefinitionSchema).min(1).max(128),
   routing: backendModelRoutingSchema,
-  capabilityHints: z.array(modelCapabilitySchema).max(MODEL_CAPABILITY_IDS.length),
+  capabilityHints: capabilityHintsSchema,
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 });
 
-function validateProfileRelationships(
-  profile: z.infer<typeof persistedModelBackendProfileShape>,
+function validateRouting(
+  routing: BackendModelRouting,
+  modelIds: ReadonlySet<string>,
+  protocol: ModelBackendProtocol,
   context: z.RefinementCtx,
 ): void {
-  const modelIds = new Set(profile.models.map(({ id }) => id));
-  const routedModels = profile.routing.mode === "simple"
-    ? [profile.routing.primaryModelId]
+  const routedModels = routing.mode === "simple"
+    ? [routing.primaryModelId]
     : [
-        profile.routing.primaryModelId,
-        ...Object.values(profile.routing.tierModels),
-        profile.routing.subagentModelId,
+        routing.primaryModelId,
+        ...Object.values(routing.tierModels),
+        routing.subagentModelId,
       ];
-  for (const modelId of routedModels) {
-    if (!modelIds.has(modelId)) {
+  for (const modelId of new Set(routedModels)) {
+    if (modelIds.size > 0 && !modelIds.has(modelId)) {
       context.addIssue({
         code: "custom",
         path: ["routing"],
@@ -246,27 +430,154 @@ function validateProfileRelationships(
       });
     }
   }
-  if (modelIds.size !== profile.models.length) {
+  if (routing.mode === "advanced" && protocol !== "anthropic-messages") {
     context.addIssue({
       code: "custom",
-      path: ["models"],
-      message: "Model identifiers must be unique within a backend profile.",
+      path: ["routing"],
+      message: "Advanced tier mappings are available only to Claude harness profiles.",
     });
   }
-  if (new Set(profile.capabilityHints.map(({ id }) => id)).size
-    !== profile.capabilityHints.length) {
+}
+
+function validateUniqueCapabilityHints(
+  capabilityHints: readonly ModelCapability[],
+  context: z.RefinementCtx,
+): void {
+  if (new Set(capabilityHints.map(({ id }) => id)).size !== capabilityHints.length) {
     context.addIssue({
       code: "custom",
       path: ["capabilityHints"],
       message: "Capability hint identifiers must be unique.",
     });
   }
-  if (profile.source === "custom" && profile.preset !== "custom") {
+}
+
+const PROTOCOL_LABELS: Readonly<Partial<Record<ModelBackendProtocol, string>>> = {
+  "anthropic-messages": "Anthropic Messages",
+  "openai-responses": "OpenAI Responses",
+};
+
+const AUTHENTICATION_LABELS: Readonly<Record<BackendAuthenticationMode, string>> = {
+  "harness-managed": "harness-managed",
+  "api-key": "API key",
+  "bearer-token": "bearer token",
+  none: "no",
+};
+
+function harnessLabel(harnessId: KnownHarnessId): string {
+  if (harnessId.startsWith("claude-")) return "Claude";
+  if (harnessId.startsWith("codex-")) return "Codex";
+  return harnessId;
+}
+
+function sameBackendBaseUrl(
+  protocol: ModelBackendProtocol,
+  left: string,
+  right: string,
+): boolean {
+  try {
+    return normalizeBackendBaseUrl(protocol, left) === normalizeBackendBaseUrl(protocol, right);
+  } catch {
+    return false;
+  }
+}
+
+interface PresetConnectionValues {
+  harnessId?: KnownHarnessId | undefined;
+  protocol?: ModelBackendProtocol | undefined;
+  authenticationMode?: BackendAuthenticationMode | undefined;
+  baseUrl?: string | null | undefined;
+  allowInsecureLocalhost?: boolean | undefined;
+  allowPrivateNetwork?: boolean | undefined;
+}
+
+function validatePresetConnection(
+  preset: BackendPresetDefinition,
+  values: PresetConnectionValues,
+  context: z.RefinementCtx,
+): void {
+  if (values.harnessId !== undefined && values.harnessId !== preset.harnessId) {
+    context.addIssue({
+      code: "custom",
+      path: ["harnessId"],
+      message: `${preset.displayName} runs on the ${harnessLabel(preset.harnessId)} harness.`,
+    });
+  }
+  if (values.protocol !== undefined && values.protocol !== preset.protocol) {
+    context.addIssue({
+      code: "custom",
+      path: ["protocol"],
+      message: `${preset.displayName} uses the ${PROTOCOL_LABELS[preset.protocol] ?? preset.protocol} protocol.`,
+    });
+  }
+  if (
+    values.authenticationMode !== undefined
+    && values.authenticationMode !== preset.authenticationMode
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["authenticationMode"],
+      message: `${preset.displayName} uses ${AUTHENTICATION_LABELS[preset.authenticationMode]} authentication.`,
+    });
+  }
+  if (
+    values.baseUrl !== undefined
+    && (values.baseUrl === null || !sameBackendBaseUrl(preset.protocol, values.baseUrl, preset.baseUrl))
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["baseUrl"],
+      message: `${preset.displayName} always connects to ${preset.baseUrl}.`,
+    });
+  }
+  for (const field of ["allowInsecureLocalhost", "allowPrivateNetwork"] as const) {
+    if (values[field] === true) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `${preset.displayName} connects only to its public endpoint.`,
+      });
+    }
+  }
+}
+
+function validateProfileRelationships(
+  profile: z.infer<typeof persistedModelBackendProfileShape>,
+  context: z.RefinementCtx,
+): void {
+  const modelIds = new Set<string>();
+  profile.models.forEach((model, index) => {
+    if (modelIds.has(model.id)) {
+      context.addIssue({
+        code: "custom",
+        path: ["models", index, "id"],
+        message: duplicateModelMessage(model.id),
+      });
+    }
+    modelIds.add(model.id);
+  });
+  validateRouting(profile.routing, modelIds, profile.protocol, context);
+  validateUniqueCapabilityHints(profile.capabilityHints, context);
+  if (
+    profile.source === "custom"
+    && profile.preset !== "custom"
+    && !isApiKeyBackendPresetId(profile.preset)
+  ) {
     context.addIssue({
       code: "custom",
       path: ["preset"],
-      message: "Custom sources require the Custom preset.",
+      message: "Custom sources require the Custom preset or an API key preset.",
     });
+  }
+  if (isApiKeyBackendPresetId(profile.preset)) {
+    if (profile.source !== "custom") {
+      context.addIssue({
+        code: "custom",
+        path: ["source"],
+        message: "API key presets are created by the person and stored as custom profiles.",
+      });
+    }
+    validatePresetConnection(PRESET_CATALOGUE[profile.preset], profile, context);
   }
   if (profile.preset === "native" && profile.source !== "built-in") {
     context.addIssue({
@@ -311,48 +622,112 @@ function validateProfileRelationships(
       });
     }
   }
-  if (
-    profile.routing.mode === "advanced"
-    && profile.protocol !== "anthropic-messages"
-  ) {
-    context.addIssue({
-      code: "custom",
-      path: ["routing"],
-      message: "Advanced tier mappings are available only to Claude harness profiles.",
-    });
-  }
 }
 
 export const persistedModelBackendProfileSchema =
   persistedModelBackendProfileShape.strict().superRefine(validateProfileRelationships);
 
+export function backendProfileRouteKind(
+  profile: Pick<ModelBackendProfile, "authenticationMode">,
+): BackendRouteKind {
+  return profile.authenticationMode === "harness-managed" ? "account" : "api-key";
+}
+
+export function backendProfileProviderId(profile: {
+  harnessId: HarnessId;
+  preset: ModelBackendProfilePreset;
+}): ProviderId {
+  if (isBackendPresetId(profile.preset)) return PRESET_CATALOGUE[profile.preset].providerId;
+  const providerId = providerIdForHarness(profile.harnessId);
+  if (!providerId) throw new Error("The backend harness does not belong to a provider.");
+  return providerId;
+}
+
+const harnessBackendCompatibilitySchema = z.object({
+  harnessId: harnessIdSchema,
+  backendProfileId: modelBackendProfileIdSchema,
+  backendProtocol: modelBackendProtocolSchema,
+  state: z.enum(MODEL_CAPABILITY_STATES),
+  provenance: z.enum(["built-in", "probe", "user", "unknown"]),
+  allowsModelSwitchWithinSession: z.boolean(),
+  reasonCode: z.enum(HARNESS_BACKEND_COMPATIBILITY_REASON_CODES),
+  reason: z.string().min(1).max(1_000),
+}).strict();
+
+const modelBackendProfileModelViewSchema = backendModelDefinitionShape.extend({
+  compatibility: harnessBackendCompatibilitySchema,
+  latestProbe: backendCompatibilityProbeResultSchema.nullable(),
+}).strict().superRefine(validateModelDefinitionLists);
+
 const modelBackendProfileViewShape =
   persistedModelBackendProfileShape.omit({ baseUrl: true }).extend({
+    allowPrivateNetwork: z.boolean(),
+    models: z.array(modelBackendProfileModelViewSchema).min(1).max(128),
+    routeKind: z.enum(BACKEND_ROUTE_KINDS),
+    providerId: z.enum(BACKEND_PROVIDER_IDS),
     endpointHost: z.string().max(255).nullable(),
     authState: z.enum(MODEL_BACKEND_AUTH_STATES),
     connectionState: z.enum(MODEL_BACKEND_CONNECTION_STATES),
-    compatibility: z.object({
-      harnessId: harnessIdSchema,
-      backendProfileId: modelBackendProfileIdSchema,
-      backendProtocol: modelBackendProtocolSchema,
-      state: z.enum(MODEL_CAPABILITY_STATES),
-      provenance: z.enum(["built-in", "probe", "user", "unknown"]),
-      allowsModelSwitchWithinSession: z.boolean(),
-      reasonCode: z.enum(HARNESS_BACKEND_COMPATIBILITY_REASON_CODES),
-      reason: z.string().min(1).max(1_000),
-    }).strict(),
+    renewing: z.boolean().optional(),
+    keyVerified: z.boolean().optional(),
+    compatibility: harnessBackendCompatibilitySchema,
     latestProbe: backendCompatibilityProbeResultSchema.nullable(),
     canDelete: z.boolean(),
     canDisable: z.boolean(),
   });
 
+function validateViewProjection(
+  view: z.infer<typeof modelBackendProfileViewShape>,
+  context: z.RefinementCtx,
+): void {
+  if (view.routeKind !== backendProfileRouteKind(view)) {
+    context.addIssue({
+      code: "custom",
+      path: ["routeKind"],
+      message: "The route kind does not match this profile's authentication.",
+    });
+  }
+  if (view.providerId !== backendProfileProviderId(view)) {
+    context.addIssue({
+      code: "custom",
+      path: ["providerId"],
+      message: "The provider does not match this profile's harness and preset.",
+    });
+  }
+  view.models.forEach((model, index) => {
+    if (
+      model.compatibility.backendProfileId !== view.id
+      || model.compatibility.harnessId !== view.harnessId
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["models", index, "compatibility"],
+        message: "Model compatibility must describe this profile.",
+      });
+    }
+    if (
+      model.latestProbe
+      && (model.latestProbe.profileId !== view.id || model.latestProbe.modelId !== model.id)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["models", index, "latestProbe"],
+        message: "Model probe evidence must belong to this model.",
+      });
+    }
+  });
+}
+
 export const modelBackendProfileViewSchema =
-  modelBackendProfileViewShape.strict();
+  modelBackendProfileViewShape.strict().superRefine(validateViewProjection);
 
 export const modelBackendProfileDetailSchema =
   modelBackendProfileViewShape.extend({
     baseUrl: baseUrlSchema.nullable(),
-  }).strict().superRefine(validateProfileRelationships);
+  }).strict().superRefine((profile, context) => {
+    validateProfileRelationships(profile, context);
+    validateViewProjection(profile, context);
+  });
 
 export const modelBackendDefaultSchema = z.object({
   scope: z.enum(["global", "project"]),
@@ -369,33 +744,68 @@ export const modelBackendDefaultSchema = z.object({
   }
 });
 
-const draftShape = z.object({
-  displayName: labelSchema,
+const customDraftShape = z.object({
+  displayName: draftNameSchema,
   harnessId: z.enum(CURRENT_KNOWN_HARNESS_IDS),
   protocol: modelBackendProtocolSchema,
   authenticationMode: backendAuthenticationModeSchema,
-  preset: z.enum(["kimi-code", "custom"]),
-  baseUrl: baseUrlSchema,
+  preset: z.literal("custom"),
+  baseUrl: draftBaseUrlSchema,
   allowInsecureLocalhost: z.boolean(),
-  models: z.array(backendModelDefinitionSchema).min(1).max(128),
+  allowPrivateNetwork: z.boolean().optional(),
+  models: draftModelsSchema,
   routing: backendModelRoutingSchema,
-  capabilityHints: z.array(modelCapabilitySchema).max(MODEL_CAPABILITY_IDS.length),
+  capabilityHints: capabilityHintsSchema,
 }).strict();
 
-export const modelBackendProfileDraftSchema = draftShape.superRefine((draft, context) => {
+const presetDraftShape = z.object({
+  preset: z.enum(API_KEY_BACKEND_PRESET_IDS),
+  displayName: draftNameSchema.optional(),
+  harnessId: z.enum(CURRENT_KNOWN_HARNESS_IDS).optional(),
+  protocol: modelBackendProtocolSchema.optional(),
+  authenticationMode: backendAuthenticationModeSchema.optional(),
+  baseUrl: draftBaseUrlSchema.optional(),
+  allowInsecureLocalhost: z.boolean().optional(),
+  allowPrivateNetwork: z.boolean().optional(),
+  models: draftModelsSchema.optional(),
+  routing: backendModelRoutingSchema.optional(),
+  capabilityHints: capabilityHintsSchema.optional(),
+}).strict();
+
+function validateCustomDraft(
+  draft: z.infer<typeof customDraftShape>,
+  context: z.RefinementCtx,
+): void {
+  if (draft.authenticationMode === "harness-managed") {
+    context.addIssue({
+      code: "custom",
+      path: ["authenticationMode"],
+      message: "Custom backends need an API key, a bearer token, or no authentication.",
+    });
+  } else if (
+    draft.protocol === "anthropic-messages"
+    && draft.authenticationMode === "none"
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["authenticationMode"],
+      message: UNAUTHENTICATED_CLAUDE_BACKEND_MESSAGE,
+    });
+  }
   validateProfileRelationships({
     id: "custom:validation",
     displayName: draft.displayName,
     harnessId: draft.harnessId,
     protocol: draft.protocol,
     authenticationMode: draft.authenticationMode,
-    source: draft.preset === "custom" ? "custom" : "built-in",
+    source: "custom",
     enabled: false,
     configurationRevision: 1,
     endpointIdentity: "validation",
     preset: draft.preset,
     baseUrl: draft.baseUrl,
     allowInsecureLocalhost: draft.allowInsecureLocalhost,
+    allowPrivateNetwork: draft.allowPrivateNetwork ?? false,
     credentialGeneration: null,
     models: draft.models,
     routing: draft.routing,
@@ -403,11 +813,49 @@ export const modelBackendProfileDraftSchema = draftShape.superRefine((draft, con
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
   }, context);
+}
+
+function validatePresetDraft(
+  draft: z.infer<typeof presetDraftShape>,
+  context: z.RefinementCtx,
+): void {
+  const preset = PRESET_CATALOGUE[draft.preset];
+  validatePresetConnection(preset, draft, context);
+  if (draft.routing) {
+    validateRouting(
+      draft.routing,
+      new Set((draft.models ?? preset.defaultModels).map(({ id }) => id)),
+      preset.protocol,
+      context,
+    );
+  }
+  if (draft.capabilityHints) validateUniqueCapabilityHints(draft.capabilityHints, context);
+}
+
+export const modelBackendProfileDraftSchema = z.discriminatedUnion("preset", [
+  customDraftShape,
+  presetDraftShape,
+]).superRefine((draft, context) => {
+  if (draft.preset === "custom") validateCustomDraft(draft, context);
+  else validatePresetDraft(draft, context);
 });
 
-export const modelBackendProfileUpdateSchema = draftShape.partial().extend({
-  enabled: z.boolean().optional(),
-}).strict();
+export const modelBackendProfileUpdateSchema = z.object({
+  displayName: draftNameSchema,
+  harnessId: z.enum(CURRENT_KNOWN_HARNESS_IDS),
+  protocol: modelBackendProtocolSchema,
+  authenticationMode: backendAuthenticationModeSchema,
+  preset: z.enum(MODEL_BACKEND_DRAFT_PRESETS),
+  baseUrl: draftBaseUrlSchema,
+  allowInsecureLocalhost: z.boolean(),
+  allowPrivateNetwork: z.boolean(),
+  models: draftModelsSchema,
+  routing: backendModelRoutingSchema,
+  capabilityHints: capabilityHintsSchema,
+  enabled: z.boolean(),
+}).partial().strict();
+
+export type ModelBackendProfileUpdate = z.infer<typeof modelBackendProfileUpdateSchema>;
 
 export const modelBackendCredentialRevisionSchema = z.object({
   profileId: modelBackendProfileIdSchema,
@@ -419,7 +867,32 @@ export const modelBackendCredentialRevisionSchema = z.object({
 
 export const modelBackendProfileProbeSchema = z.object({
   profileId: modelBackendProfileIdSchema,
-  modelId: modelIdSchema,
+  modelIds: z.array(modelIdSchema)
+    .max(MAX_BACKEND_PROBE_MODELS)
+    .refine((modelIds) => new Set(modelIds).size === modelIds.length, "Each model can be probed once per request.")
+    .optional(),
+}).strict();
+
+export const backendProfileProbeSkippedModelIdsSchema = z.array(modelIdSchema)
+  .max(MAX_BACKEND_PROBE_MODELS)
+  .refine((modelIds) => new Set(modelIds).size === modelIds.length, "Each skipped model is listed once.");
+
+export const modelBackendProfileDiscoverModelsSchema = z.object({
+  profileId: modelBackendProfileIdSchema,
+}).strict();
+
+export const backendProfileModelsResultSchema = z.object({
+  kind: z.literal("backend.profile.models"),
+  profileId: modelBackendProfileIdSchema,
+  models: z.array(z.object({
+    id: modelIdSchema,
+    displayName: labelSchema,
+  }).strict())
+    .max(MAX_DISCOVERED_BACKEND_MODELS)
+    .refine(
+      (models) => new Set(models.map(({ id }) => id)).size === models.length,
+      "Discovered model IDs must be unique.",
+    ),
 }).strict();
 
 export const modelBackendDefaultInputSchema = z.object({

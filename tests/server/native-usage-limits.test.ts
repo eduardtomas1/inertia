@@ -31,11 +31,9 @@ async function fixture(subscriptions?: NativeSubscriptionReader) {
 }
 describe("provider recovery limits", () => {
   it.each(PROVIDER_IDS)("preserves %s recovery guidance without reading quota", async (providerId) => {
-    const environment = vi.fn(async () => ({}));
     const credentials = vi.fn(async () => null);
     const request = vi.fn<typeof fetch>().mockRejectedValue(new Error("Quota access must stay blocked"));
     const f = await fixture(new NativeSubscriptionReader({
-      environment, readFile: credentials, readCursorKeychain: credentials,
       openCodeAccount: credentials, accountKey: credentials, fetch: request,
     }));
     const info = initialProviderSnapshots(false).find(({ id }) => id === providerId)!;
@@ -51,7 +49,6 @@ describe("provider recovery limits", () => {
     });
     expect(f.detect).not.toHaveBeenCalled();
     expect(protocol.request).not.toHaveBeenCalled();
-    expect(environment).not.toHaveBeenCalled();
     expect(credentials).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
   });

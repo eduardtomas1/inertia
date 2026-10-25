@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BACKEND_PROFILE_DISCOVERY_REQUEST_TIMEOUT_MS,
+  BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
   CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
   GIT_MUTATION_REQUEST_TIMEOUT_MS,
   GIT_READ_OPERATION_TIMEOUT_MS,
@@ -95,5 +97,16 @@ describe("runtime command delivery policy", () => {
       .toBeGreaterThan(GIT_READ_OPERATION_TIMEOUT_MS);
     expect(WORKSPACE_GIT_REFRESH_REQUEST_TIMEOUT_MS)
       .toBeGreaterThan(WORKSPACE_GIT_DISCOVERY_TIMEOUT_MS);
+  });
+
+  it("keeps backend probes ambiguous and model discovery retry-safe within their server deadlines", () => {
+    expect(runtimeCommandPolicy("backend.profile.probe")).toEqual({
+      timeoutMs: BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
+      timeoutDelivery: "ambiguous",
+    });
+    expect(runtimeCommandPolicy("backend.profile.discover-models")).toEqual({
+      timeoutMs: BACKEND_PROFILE_DISCOVERY_REQUEST_TIMEOUT_MS,
+      timeoutDelivery: "rejected",
+    });
   });
 });

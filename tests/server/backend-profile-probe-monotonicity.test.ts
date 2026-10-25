@@ -32,7 +32,16 @@ vi.mock(
 
 import {
   BackendProfileController,
+  type BackendCredentialBroker,
 } from "../../src/server/runtime/backends/backend-profile-controller";
+
+function credentialBroker(): BackendCredentialBroker {
+  return {
+    resolve: async () => "probe-order-credential",
+    status: async () => ({ hasSecret: true, credentialGeneration: null }),
+    forget: async () => true,
+  };
+}
 
 const temporaryDirectories: string[] = [];
 const openStores = new Set<RuntimeStore>();
@@ -60,7 +69,7 @@ function draft(): ModelBackendProfileDraft {
     displayName: "Concurrent probe gateway",
     harnessId: "claude-agent-sdk",
     protocol: "anthropic-messages",
-    authenticationMode: "none",
+    authenticationMode: "api-key",
     preset: "custom",
     baseUrl: "https://probe-order.example.test/v1",
     allowInsecureLocalhost: false,
@@ -167,6 +176,7 @@ describe("durable backend probe ordering", () => {
     const subject = await databaseSubject();
     const controller = await BackendProfileController.create({
       store: subject.store,
+      credentials: credentialBroker(),
       now: () => PROBE_NOW,
     });
     const created = await controller.createProfile(draft());
@@ -187,10 +197,10 @@ describe("durable backend probe ordering", () => {
       .mockReturnValueOnce(older.promise)
       .mockReturnValueOnce(newer.promise);
 
-    const olderCompletion = controller.probe(profile.id, "probe-model");
-    expect(probeCompatibility).toHaveBeenCalledTimes(1);
-    const newerCompletion = controller.probe(profile.id, "probe-model");
-    expect(probeCompatibility).toHaveBeenCalledTimes(2);
+    const olderCompletion = controller.probe(profile.id, ["probe-model"]);
+    await vi.waitFor(() => expect(probeCompatibility).toHaveBeenCalledTimes(1));
+    const newerCompletion = controller.probe(profile.id, ["probe-model"]);
+    await vi.waitFor(() => expect(probeCompatibility).toHaveBeenCalledTimes(2));
 
     newer.resolve(newerResult);
     await expect(newerCompletion).resolves.toMatchObject({
@@ -216,6 +226,7 @@ describe("durable backend probe ordering", () => {
     const subject = await databaseSubject();
     const controller = await BackendProfileController.create({
       store: subject.store,
+      credentials: credentialBroker(),
       now: () => PROBE_NOW,
     });
     const created = await controller.createProfile(draft());
@@ -241,6 +252,7 @@ describe("durable backend probe ordering", () => {
     openStores.add(reopened);
     const hydrated = BackendProfileController.open({
       store: reopened,
+      credentials: credentialBroker(),
       now: () => PROBE_NOW,
     })
       .providerManagerOptions();
@@ -254,6 +266,7 @@ describe("durable backend probe ordering", () => {
     const subject = await databaseSubject();
     const controller = await BackendProfileController.create({
       store: subject.store,
+      credentials: credentialBroker(),
       now: () => PROBE_NOW,
     });
     const created = await controller.createProfile(draft());
@@ -274,8 +287,10 @@ describe("durable backend probe ordering", () => {
     const b = deferred<BackendCompatibilityProbeResult>();
     probeCompatibility.mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
 
-    const aCompletion = controller.probe(profile.id, "probe-model");
-    const bCompletion = controller.probe(profile.id, "probe-model-b");
+    const aCompletion = controller.probe(profile.id, ["probe-model"]);
+    await vi.waitFor(() => expect(probeCompatibility).toHaveBeenCalledTimes(1));
+    const bCompletion = controller.probe(profile.id, ["probe-model-b"]);
+    await vi.waitFor(() => expect(probeCompatibility).toHaveBeenCalledTimes(2));
     b.resolve(newerB);
     await bCompletion;
     a.resolve(olderA);
@@ -294,6 +309,7 @@ describe("durable backend probe ordering", () => {
     openStores.add(reopened);
     const hydrated = BackendProfileController.open({
       store: reopened,
+      credentials: credentialBroker(),
       now: () => PROBE_NOW,
     })
       .providerManagerOptions();
@@ -325,6 +341,7 @@ describe("durable backend probe ordering", () => {
     const subject = await databaseSubject();
     const controller = await BackendProfileController.create({
       store: subject.store,
+      credentials: credentialBroker(),
       now: () => PROBE_NOW,
     });
     const created = await controller.createProfile(draft());
@@ -354,6 +371,7 @@ describe("durable backend probe ordering", () => {
     });
     const legacyController = BackendProfileController.open({
       store: reopened,
+      credentials: credentialBroker(),
       now: () => PROBE_NOW,
     });
     expect(legacyController.detail(profile.id).compatibility).toMatchObject({
@@ -393,6 +411,7 @@ describe("durable backend probe ordering", () => {
     );
     const controller = await BackendProfileController.create({
       store: subject.store,
+      credentials: credentialBroker(),
       now: () => PROBE_NOW,
     });
     const created = await controller.createProfile({
@@ -452,6 +471,7 @@ describe("durable backend probe ordering", () => {
     )).toBe(false);
     const restartedController = BackendProfileController.open({
       store: reopened,
+      credentials: credentialBroker(),
       now: () => PROBE_NOW,
     });
     probeCompatibility.mockResolvedValueOnce(compatibleProbe(
@@ -460,7 +480,7 @@ describe("durable backend probe ordering", () => {
       300_000,
       evictedModelId!,
     ));
-    await restartedController.probe(profile.id, evictedModelId!);
+    await restartedController.probe(profile.id, [evictedModelId!]);
 
     const afterRestart = reopened.modelBackendProfile(profile.id);
     expect(afterRestart.probeResults.find(

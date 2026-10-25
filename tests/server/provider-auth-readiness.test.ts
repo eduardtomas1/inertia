@@ -58,3 +58,23 @@ it("does not accept Claude's structured signed-in status from a failed probe", a
   await expect(detection("claude", JSON.stringify({ loggedIn: true }), 1))
     .resolves.toMatchObject({ canRun: false });
 });
+
+describe("account kind reported by the CLI", () => {
+  it.each([
+    ["claude", JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }), "Claude account"],
+    ["claude", JSON.stringify({ loggedIn: true, authMethod: "console", apiProvider: "firstParty" }), "Console API key"],
+    ["codex", "Logged in using ChatGPT", "ChatGPT account"],
+    ["codex", "Logged in using an API key - sk-proj-***", "OpenAI API key"],
+  ] as const)("reads %s status %s as %s", async (providerId, output, accountKind) => {
+    await expect(detection(providerId, output)).resolves.toMatchObject({ accountKind });
+  });
+
+  it.each([
+    ["claude", JSON.stringify({ loggedIn: false, authMethod: "claude.ai" })],
+    ["claude", JSON.stringify({ loggedIn: true, authMethod: "something-new" })],
+    ["codex", "Authenticated"],
+    ["codex", "Not signed in"],
+  ] as const)("reports no account kind for %s status %s", async (providerId, output) => {
+    expect(await detection(providerId, output)).not.toHaveProperty("accountKind");
+  });
+});

@@ -158,8 +158,8 @@ describe("Claude-compatible process adapter", () => {
       id: "custom:registered",
       displayName: "Custom",
       baseUrl: "https://gateway.example.test",
-      authenticationMode: "none",
-      secretReference: null,
+      authenticationMode: "api-key",
+      secretReference: "secret:custom-registered",
       primaryModelId: "custom-model",
     });
     const registrations = claudeBackendProfileRegistrations([kimi, custom]);
@@ -328,7 +328,7 @@ describe("Claude-compatible process adapter", () => {
     })).toThrow(/model and context window are not supported/u);
   });
 
-  it("supports bearer and no-auth custom endpoints without credential crossover", () => {
+  it("supports bearer endpoints and refuses keyless ones without credential crossover", () => {
     const bearerProfile = createCustomClaudeBackendProfile({
       id: "custom:bearer",
       displayName: "Bearer gateway",
@@ -345,7 +345,7 @@ describe("Claude-compatible process adapter", () => {
     expect(bearer.environment.ANTHROPIC_AUTH_TOKEN).toBe(SECRET_VALUE);
     expect(bearer.environment.ANTHROPIC_API_KEY).toBeUndefined();
 
-    const noAuthProfile = createCustomClaudeBackendProfile({
+    expect(() => createCustomClaudeBackendProfile({
       id: "custom:none",
       displayName: "Local gateway",
       baseUrl: "http://127.0.0.1:8787",
@@ -353,17 +353,15 @@ describe("Claude-compatible process adapter", () => {
       authenticationMode: "none",
       secretReference: null,
       primaryModelId: "local-model",
-    });
-    const noAuth = resolveClaudeCompatibleLaunch({
-      profile: noAuthProfile,
-      baseEnvironment: {
-        ANTHROPIC_API_KEY: "stale",
-        ANTHROPIC_AUTH_TOKEN: "stale",
+    })).toThrow("Add an API key or bearer token to use this backend.");
+    expect(() => resolveClaudeCompatibleLaunch({
+      profile: {
+        ...bearerProfile,
+        authenticationMode: "none",
+        secretReference: null,
       },
-    });
-    expect(noAuth.environment.ANTHROPIC_API_KEY).toBeUndefined();
-    expect(noAuth.environment.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
-    expect(noAuth.environment.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8787/");
+      baseEnvironment: { CLAUDE_CODE_OAUTH_TOKEN: "account-token" },
+    })).toThrow(expect.objectContaining({ code: "invalid-profile" }));
   });
 
   it("never mutates global process.env", () => {
@@ -488,11 +486,11 @@ describe("Claude-compatible process adapter", () => {
       primaryModelId: "local-model",
     });
     let secretRead = false;
-    const validations: Array<[string, boolean]> = [];
+    const validations: Array<[string, { allowInsecureLocalhost: boolean; allowPrivateNetwork: boolean }]> = [];
     const resolver = createPrivilegedClaudeBackendLaunchResolver({
       profiles: [profile],
-      validateEndpointNetworkPolicy: async (endpointUrl, allowLocal) => {
-        validations.push([endpointUrl, allowLocal]);
+      validateEndpointNetworkPolicy: async (endpointUrl, policy) => {
+        validations.push([endpointUrl, policy]);
         throw new Error("private-rebind");
       },
       resolveSecret: async () => {
@@ -506,8 +504,40 @@ describe("Claude-compatible process adapter", () => {
       {},
       { signal: new AbortController().signal },
     )).rejects.toMatchObject({ code: "invalid-profile" });
-    expect(validations).toEqual([["http://127.0.0.1:4312/v1/", true]]);
+    expect(validations).toEqual([["http://127.0.0.1:4312/v1/", {
+      allowInsecureLocalhost: true,
+      allowPrivateNetwork: false,
+    }]]);
     expect(secretRead).toBe(false);
+  });
+
+  it("admits a private network endpoint at launch only with the private network switch", async () => {
+    const profile = createCustomClaudeBackendProfile({
+      id: "custom:lan-gateway",
+      displayName: "LAN Claude gateway",
+      baseUrl: "https://10.0.0.8:8443",
+      authenticationMode: "api-key",
+      secretReference: "secret:lan-gateway",
+      primaryModelId: "lan-model",
+    });
+    const launch = (allowPrivateNetwork: boolean) => createPrivilegedClaudeBackendLaunchResolver({
+      profiles: [profile],
+      resolveSecret: async () => SECRET_VALUE,
+      allowPrivateNetwork: (profileId) => allowPrivateNetwork && profileId === profile.id,
+    })(
+      providerInput(profile),
+      {},
+      { signal: new AbortController().signal },
+    );
+
+    await expect(launch(false)).rejects.toMatchObject({ code: "invalid-profile" });
+    await expect(launch(true)).resolves.toMatchObject({
+      modelArgument: "lan-model",
+      environment: {
+        ANTHROPIC_BASE_URL: "https://10.0.0.8:8443/",
+        ANTHROPIC_API_KEY: SECRET_VALUE,
+      },
+    });
   });
 
   it("preserves the built-in Kimi bridge outside custom endpoint validation", async () => {

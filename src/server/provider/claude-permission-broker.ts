@@ -5,6 +5,11 @@ import type { CanUseTool, PermissionResult } from "@anthropic-ai/claude-agent-sd
 import type { AgentHarnessEmitter } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
+import {
+  CLAUDE_KEYED_LAUNCH_COMMAND_REFUSAL,
+  claudeCommandExposesLaunchCredentials,
+} from "./claude-credential-commands";
+import type { ClaudeLaunchRedactor } from "./claude-launch-redaction";
 import { claudeQuestions } from "./claude-questions";
 import { claudeWatcherDecision } from "./claude-watcher-permissions";
 import type { ProviderRunInput } from "./contracts";
@@ -39,6 +44,7 @@ export interface ClaudePermissionBrokerOptions {
   providerNativeToolsAvailable: boolean;
   hostToolNames: ReadonlySet<string> | undefined;
   cancelled: () => boolean;
+  launchRedaction?: ClaudeLaunchRedactor | null;
 }
 
 export class ClaudePermissionBroker {
@@ -62,13 +68,22 @@ export class ClaudePermissionBroker {
         "Provider-native tools are unavailable for this exact backend and model.",
       );
     }
+    if (
+      this.options.launchRedaction
+      && !mcpServer
+      && (toolName === "Bash" || toolName === "PowerShell")
+      && typeof toolInput.command === "string"
+      && claudeCommandExposesLaunchCredentials(toolInput.command)
+    ) {
+      return deny(CLAUDE_KEYED_LAUNCH_COMMAND_REFUSAL);
+    }
     if (CLAUDE_CHECKLIST_TOOLS.has(toolName) && !mcpServer) {
       return { behavior: "allow", updatedInput: toolInput };
     }
     const watcher = input.readOnlyProfile === "watcher";
     if (toolName === "ExitPlanMode") {
       const plan = stringValue(toolInput.plan) ?? stringValue(toolInput.content);
-      if (plan) emitter.rich({ type: "plan", explanation: plan, steps: planSteps(plan), handoff: true });
+      if (plan) emitter.rich(this.display({ type: "plan", explanation: plan, steps: planSteps(plan), handoff: true }));
       if (!watcher) return deny("The proposed plan was returned to the user for review.");
     }
     if (watcher) {
@@ -88,7 +103,7 @@ export class ClaudePermissionBroker {
       const answers = await new Promise<Record<string, string[]>>((resolve) => {
         this.inputs.set(requestId, { resolve, settled: false });
         callbackOptions.signal.addEventListener("abort", () => this.settleInput(requestId, {}), { once: true });
-        emitter.rich({ type: "input", request });
+        emitter.rich(this.display({ type: "input", request }));
       });
       if (callbackOptions.signal.aborted || this.options.cancelled()) return deny("User cancelled the request.", true);
       const sdkAnswers: Record<string, string> = {};
@@ -181,7 +196,7 @@ export class ClaudePermissionBroker {
     const decision = await new Promise<AgentApprovalDecision>((resolve) => {
       this.approvals.set(requestId, { resolve, settled: false });
       callbackOptions.signal.addEventListener("abort", () => this.settleApproval(requestId, "cancel"), { once: true });
-      emitter.rich({
+      emitter.rich(this.display({
         type: "approval",
         request: {
           requestId,
@@ -198,12 +213,16 @@ export class ClaudePermissionBroker {
             : [],
           availableDecisions: ["approve", "deny", "cancel"],
         },
-      });
+      }));
     });
     if (callbackOptions.signal.aborted || this.options.cancelled()) {
       return deny("User cancelled the request.", true);
     }
     return { decision };
+  }
+
+  private display<T>(value: T): T {
+    return this.options.launchRedaction?.payload(value) ?? value;
   }
 
   settleApproval(requestId: string, decision: AgentApprovalDecision): boolean {

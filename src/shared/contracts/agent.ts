@@ -186,6 +186,7 @@ export interface AgentTurn {
   createdAt: string;
   updatedAt: string;
   usageLimited?: true;
+  failureKind?: import("../turn-lifecycle").TurnFailureKind;
 }
 
 /**

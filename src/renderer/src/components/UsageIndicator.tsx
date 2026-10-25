@@ -9,9 +9,11 @@ import type {
   UsageDisplayMode,
 } from "@shared/contracts";
 import {
+  API_KEY_USAGE_UNAVAILABLE,
   contextUsageDisplayValue,
   type ContextUsageDataQuality,
   type ContextUsageDisplayValue,
+  type UsageQuotaSource,
   usageDisplayBehavior,
 } from "../utils/usageDisplay";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -31,7 +33,7 @@ type UsageIndicatorProps = {
    * Custom/external routes must opt into isolation even when their harness has
    * native account limits in memory.
    */
-  quotaSource: "selected-route" | "isolated";
+  quotaSource: UsageQuotaSource;
   mode: UsageDisplayMode;
   providerLabel: string;
   contextQuality?: ContextUsageDataQuality;
@@ -453,7 +455,9 @@ export function UsageIndicator({
                 </div>
               ) : (
                 <p className="usage-popover-unavailable">
-                  {quotaSource === "isolated"
+                  {quotaSource === "api-key"
+                    ? API_KEY_USAGE_UNAVAILABLE
+                    : quotaSource === "isolated"
                     ? "Quota is unavailable for this selected custom route."
                     : quotaStateDetail(scopedRateLimitState)}
                 </p>

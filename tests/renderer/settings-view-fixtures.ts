@@ -70,6 +70,7 @@ export function settingsViewProps(
     onSetBackendCredential: vi.fn(),
     onClearBackendCredential: vi.fn(),
     onProbeBackendProfile: vi.fn(),
+    onDiscoverBackendModels: vi.fn(async () => []),
     onDeleteBackendProfile: vi.fn(async () => undefined),
     onSetBackendDefault: vi.fn(async () => undefined),
     onClearBackendDefault: vi.fn(async () => undefined),

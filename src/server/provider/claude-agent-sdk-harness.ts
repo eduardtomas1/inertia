@@ -39,6 +39,8 @@ import {
   type ProviderRunResult,
 } from "./contracts";
 import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, isClaudeUnansweredPromptResult, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
+import { claudeCredentialCommandHooks } from "./claude-credential-commands";
+import { ClaudeLaunchRedactor } from "./claude-launch-redaction";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { CLAUDE_MESSAGE_DRAIN_TIMEOUT, nextClaudeMessage, claudeFastModeFailure } from "./claude-sdk-lifecycle-support";
@@ -275,9 +277,14 @@ function startClaudeRun(
       });
   };
 
+  const launchRedaction = options.input.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
+    ? null
+    : ClaudeLaunchRedactor.forEnvironment(claudeRunEnvironment(options.environment));
+  const redactLaunchText = (value: string): string => launchRedaction?.text(value) ?? value;
   const permissions = new ClaudePermissionBroker({
     input: options.input,
     emitter,
+    launchRedaction,
     providerNativeToolsAvailable: options.providerNativeToolsAvailable,
     hostToolNames: claudeHostTools?.providerToolNames,
     cancelled: () => cancelRequested,
@@ -389,6 +396,7 @@ function startClaudeRun(
                   : "default",
           allowDangerouslySkipPermissions: options.input.access === "full",
           canUseTool: permissions.canUseTool,
+          ...(launchRedaction ? { hooks: claudeCredentialCommandHooks() } : {}),
           ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),
           strictMcpConfig: true,
           ...(claudeHostTools
@@ -406,7 +414,8 @@ function startClaudeRun(
       if (usesNativeAnthropic) {
         void emitClaudeModelMetadata(query, emitter.rich).catch(() => undefined);
       }
-      messageIterator = query[Symbol.asyncIterator]();
+      const sdkIterator = query[Symbol.asyncIterator]();
+      messageIterator = launchRedaction ? launchRedaction.iterator(sdkIterator) : sdkIterator;
       let terminalDrainDeadline: number | null = null;
       let parentResumedAfterProvisional = false;
       let announcedShortenedEvent = false;
@@ -721,9 +730,9 @@ function startClaudeRun(
       );
     } catch (error) {
       if (cancelRequested || abortController.signal.aborted) return finishResult("cancelled");
-      const rawError = claudeReadableRuntimeError(
+      const rawError = redactLaunchText(claudeReadableRuntimeError(
         safeError(ownedProcess.transportError() ?? error, "Claude Agent SDK stopped unexpectedly."),
-      );
+      ));
       const message = routeFailure(rawError);
       const technicalDetail = routeDetail(rawError, sanitizeProviderFailureDetail(
         ownedProcess.stderrTail(), launchCredentials,
@@ -779,9 +788,10 @@ function startClaudeRun(
       await ownedProcess.terminate(true);
       const wireError = ownedProcess.transportError();
       if (wireError && outcome.status !== "cancelled") {
-        const error = routeFailure(wireError.message);
+        const wireDetail = redactLaunchText(wireError.message);
+        const error = routeFailure(wireDetail);
         terminal = { ...outcome, status: "failed", error,
-          failure: claudeRuntimeFailure(wireError.message, error) };
+          failure: claudeRuntimeFailure(wireDetail, error) };
       }
     } catch {
       terminal = {

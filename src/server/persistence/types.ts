@@ -175,7 +175,12 @@ export interface AgentTurnSettlementUpdate
   extends Omit<AgentTurnLifecycleUpdate, "status"> {
   status: AgentTurnTerminalStatus;
   /** Controller-owned stored projections belong to the same terminal commit. */
-  projection?: { workspaceRunCreated: boolean; detail: string; usageLimited?: true };
+  projection?: {
+    workspaceRunCreated: boolean;
+    detail: string;
+    usageLimited?: true;
+    failureKind?: import("../../shared/turn-lifecycle").TurnFailureKind;
+  };
 }
 
 export interface AgentTurnSettlementResult {
@@ -278,6 +283,13 @@ export interface StoredModelBackendProfile {
   probeResults: readonly BackendCompatibilityProbeResult[];
   probeAdmissionHighWater: readonly BackendProbeAdmissionHighWater[];
   latestProbe: BackendCompatibilityProbeResult | null;
+  probeRenewalRequestedAt?: string | null;
+  probeKeyCheck?: BackendKeyCheck | null;
+}
+
+export interface BackendKeyCheck {
+  credentialGeneration: string | null;
+  checkedAt: string;
 }
 
 export type { ModelBackendDefault };

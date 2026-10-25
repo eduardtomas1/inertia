@@ -34,9 +34,10 @@ failures say the provider did not answer, or refused the check for this login,
 without asking you to sign in again. The Limits page and the composer's
 **All provider limits** dialog read the providers when they open and at most
 every three minutes while visible, and read again when they become visible
-with a reading older than three minutes. Opening either one is an explicit
-read, so on macOS it can read a Cursor login from the Keychain. No additional background worker, persistent provider process or
-startup probe is created by this feature.
+with a reading older than three minutes. Inertia does not read Cursor or Kimi
+Code credential stores, so their usage shows as not reported. No additional
+background worker, persistent provider process or startup probe is created by
+this feature.
 
 ## Usage-limited chats
 

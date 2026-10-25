@@ -347,6 +347,20 @@ describe("ElectronSafeStorageBackend", () => {
     ).availability()).toMatchObject({ available: false, provider: "unavailable" });
   });
 
+  it("explains a Linux system without a keyring and refuses to store a key there", async () => {
+    const message = "Inertia cannot store keys safely on this system because no keyring is available. "
+      + "Install or unlock a Secret Service keyring, such as GNOME Keyring or KWallet, then restart Inertia.";
+    for (const backend of ["basic_text", "unknown"]) {
+      const encryption = new ElectronSafeStorageBackend(safeStorageStub({ backend }) as never, "linux");
+      expect(await encryption.availability()).toEqual({ available: false, provider: "unavailable", message });
+      const vault = new CredentialVault(encryption, { read: async () => null, write: async () => undefined });
+      await expect(vault.setForProfile("custom:key", "linux-secret")).rejects.toMatchObject({
+        code: "storage-unavailable",
+        publicDetail: message,
+      });
+    }
+  });
+
   it("fails closed when asynchronous encryption is unavailable", async () => {
     const state = await new ElectronSafeStorageBackend(
       safeStorageStub({ available: false }) as never,

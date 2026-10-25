@@ -17,6 +17,8 @@ import type {
   ThreadUsageSnapshot,
 } from "../../shared/contracts";
 import type { BackendCompatibilityProbeResult } from "../../shared/backend-probe";
+import type { ProviderAccountKind } from "../../shared/provider";
+import type { TurnFailureKind } from "../../shared/turn-lifecycle";
 import type {
   AgentApprovalDecision,
   AgentApprovalPermissionRoot,
@@ -53,6 +55,7 @@ export interface ProviderDetection {
   executable?: string;
   installState: ProviderInstallState;
   authState: ProviderAuthState;
+  accountKind?: ProviderAccountKind;
   canRun: boolean;
   /** Exact executable/version protocol probes succeeded independently of auth. */
   protocolVerified?: boolean;
@@ -200,6 +203,7 @@ export interface ProviderRunFailure {
   sessionUnavailable?: true;
   resumeRejected?: true;
   usageLimited?: true;
+  failureKind?: TurnFailureKind;
 }
 
 export interface ProviderFreshSessionFallback {

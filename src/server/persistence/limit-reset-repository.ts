@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { LimitResetPlan } from "../../shared/limit-reset";
+import type { TurnFailureKind } from "../../shared/turn-lifecycle";
 
 export interface StoredLimitResetPlan extends LimitResetPlan {
   routeIdentity: string; accountIdentity: string; nextAttemptAt: string; attempts: number; turnId: string | null;
@@ -53,6 +54,9 @@ export class LimitResetRepository {
   }
   markUsageLimited(turnId: string): void {
     this.database.prepare("INSERT OR IGNORE INTO usage_limited_turns (turn_id) VALUES (?)").run(turnId);
+  }
+  markFailureKind(turnId: string, failureKind: TurnFailureKind): void {
+    this.database.prepare("INSERT OR REPLACE INTO turn_failure_kinds (turn_id, failure_kind) VALUES (?, ?)").run(turnId, failureKind);
   }
   usageLimited(turnId: string): boolean {
     return this.database.prepare("SELECT 1 FROM usage_limited_turns WHERE turn_id = ?").get(turnId) !== undefined;

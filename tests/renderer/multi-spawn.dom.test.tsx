@@ -34,6 +34,7 @@ import {
   type MultiSpawnDraft,
 } from "../../src/renderer/src/utils/multiSpawn";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { backendView } from "./backend-view-fixtures";
 
 const firstProjectId = "11111111-1111-4111-8111-111111111111";
 const secondProjectId = "22222222-2222-4222-8222-222222222222";
@@ -135,7 +136,7 @@ const customSelection: ModelSelection = {
   backendConfigurationRevision: 4,
 };
 
-const probeNeededProfile: ModelBackendProfileView = {
+const probeNeededProfile: ModelBackendProfileView = backendView({
   id: customSelection.backendProfileId,
   displayName: customSelection.backendProfileDisplayName,
   protocol: "openai-responses",
@@ -182,13 +183,14 @@ const probeNeededProfile: ModelBackendProfileView = {
   latestProbe: null,
   canDelete: true,
   canDisable: true,
-};
+});
 
 function readyCustomProfile(
   configurationRevision: number,
 ): ModelBackendProfileView {
-  return {
+  return backendView<ModelBackendProfileView>({
     ...probeNeededProfile,
+    models: probeNeededProfile.models.map(({ compatibility: _compatibility, latestProbe: _latestProbe, ...model }) => model),
     configurationRevision,
     endpointIdentity: `opaque-team-route-${configurationRevision}`,
     connectionState: "connected",
@@ -199,7 +201,7 @@ function readyCustomProfile(
       reasonCode: "responses-probe-verified",
       reason: "The exact Responses route was verified.",
     },
-  };
+  });
 }
 
 const settings = {
@@ -953,14 +955,26 @@ describe("multi-spawn", () => {
       .toHaveLength(2);
   });
 
-  it("keeps setup available for an exact custom route that needs a probe", () => {
+  it("keeps setup available for an exact custom route whose probe failed", () => {
     const onOpenBackendSetup = vi.fn();
+    const failedCompatibility = {
+      ...probeNeededProfile.compatibility,
+      state: "unavailable" as const,
+      provenance: "probe" as const,
+      reasonCode: "probe-failed" as const,
+    };
+    const failedProfile = {
+      ...probeNeededProfile,
+      connectionState: "failed" as const,
+      compatibility: failedCompatibility,
+      models: probeNeededProfile.models.map((model) => ({ ...model, compatibility: failedCompatibility })),
+    };
     render(
       <MultiSpawnDialog
         open
         snapshot={{
           ...snapshot,
-          backendProfiles: [probeNeededProfile],
+          backendProfiles: [failedProfile],
           backendDefaults: [{
             scope: "global",
             projectId: null,
@@ -979,7 +993,7 @@ describe("multi-spawn", () => {
     );
 
     expect(screen.getByRole("button", { name: "Start duo" })).toBeEnabled();
-    expect(screen.getAllByText("Team gateway needs a probe")).toHaveLength(1);
+    expect(screen.getAllByText("Team gateway failed its connection test")).toHaveLength(1);
     fireEvent.click(
       screen.getAllByRole("button", { name: "Open setup" })[0]!,
     );

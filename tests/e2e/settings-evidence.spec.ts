@@ -360,8 +360,8 @@ async function captureAgentStates(viewport: Viewport): Promise<void> {
   await capture(evidenceName("agents", "cli-missing", viewport)(null));
 
   await capturePages(evidenceName("agents", "custom-backends", viewport), { start: backendsTop });
-  await page.getByRole("button", { name: "New profile" }).click();
-  const cancel = page.getByRole("button", { name: "Cancel profile editing" });
+  await page.getByRole("button", { name: "Add custom backend…" }).click();
+  const cancel = page.getByRole("form", { name: "New custom backend" }).getByRole("button", { name: "Cancel" });
   await expect(cancel).toBeVisible();
   await waitForSettledSection();
   await capturePages(evidenceName("agents", "new-profile", viewport), { start: backendsTop });

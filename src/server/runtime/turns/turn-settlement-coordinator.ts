@@ -4,6 +4,8 @@ import {
   type ChatMessage,
 } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
+import type { TurnFailureKind } from "../../../shared/turn-lifecycle";
+import { turnFailureKind } from "./turn-failure-kind";
 import type {
   ProviderRunFailure,
 } from "../../provider/contracts";
@@ -171,7 +173,14 @@ export class TurnSettlementCoordinator {
   ): boolean {
     let settlement: CommittedSettlement;
     try {
-      settlement = this.commit(active, status, terminalReason, message, status === "failed" && failure?.usageLimited === true);
+      settlement = this.commit(
+        active,
+        status,
+        terminalReason,
+        message,
+        status === "failed" && failure?.usageLimited === true,
+        status === "failed" ? turnFailureKind(failure) : undefined,
+      );
     } catch {
       try {
         active.runState.repairSettlementFailure("stream-persistence-failed");
@@ -213,6 +222,7 @@ export class TurnSettlementCoordinator {
     terminalReason: string,
     message?: string,
     usageLimited = false,
+    failureKind?: TurnFailureKind,
   ): CommittedSettlement {
     const completedAt = this.options.now();
     try {
@@ -233,6 +243,7 @@ export class TurnSettlementCoordinator {
           workspaceRunCreated: active.workspaceRunCreated,
           detail: message ?? active.conversation.title,
           ...(usageLimited ? { usageLimited: true as const } : {}),
+          ...(failureKind ? { failureKind } : {}),
         },
       });
     } catch (error) {

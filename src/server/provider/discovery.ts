@@ -24,6 +24,7 @@ import {
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
+import type { ProviderAccountKind } from "../../shared/provider";
 import { providerAuthStatusArgs } from "./auth";
 import { PROVIDER_INFO } from "./catalog";
 import {
@@ -382,6 +383,30 @@ function authStateFromProbe(providerId: ProviderId, probe: ProbeResult): Provide
   if (probe.exitCode && probe.exitCode !== 0) return "unauthenticated";
   if (probe.exitCode === 0 && /logged in|signed in|\bauthenticated\b|loggedin["']?\s*:\s*true/iu.test(lower)) return "authenticated";
   return "unknown";
+}
+
+function accountKindFromProbe(
+  providerId: ProviderId,
+  probe: ProbeResult,
+  authState: ProviderAuthState,
+): ProviderAccountKind | null {
+  if (authState !== "authenticated") return null;
+  const normalized = probe.output.replace(/\u001b\[[0-9;]*m/gu, "").trim();
+  if (providerId === "claude") {
+    try {
+      const status = JSON.parse(normalized) as { authMethod?: unknown };
+      if (status.authMethod === "claude.ai") return "Claude account";
+      if (status.authMethod === "console" || status.authMethod === "api_key") return "Console API key";
+    } catch {
+      return null;
+    }
+    return null;
+  }
+  if (providerId === "codex") {
+    if (/\blogged in using chatgpt\b/iu.test(normalized)) return "ChatGPT account";
+    if (/\blogged in using an api key\b/iu.test(normalized)) return "OpenAI API key";
+  }
+  return null;
 }
 
 function statusMessage(installState: ProviderInstallState, authState: ProviderAuthState): string {
@@ -882,6 +907,7 @@ async function detectProviderRecordingCleanup(
       )
     : null;
   const canRun = admissible && claudeLaunch?.ok !== false;
+  const accountKind = accountKindFromProbe(providerId, authProbe, authState);
   return {
     provider,
     available: true,
@@ -889,6 +915,7 @@ async function detectProviderRecordingCleanup(
     ...(selected.version ? { version: selected.version } : {}),
     installState: "installed",
     authState,
+    ...(accountKind ? { accountKind } : {}),
     canRun,
     protocolVerified: cleanupConfirmed,
     cleanupConfirmed,

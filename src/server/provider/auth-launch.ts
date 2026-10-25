@@ -1,6 +1,7 @@
 import { providerChildEnvironment } from "../environment";
 import { isProcessTreeTerminationUnconfirmed } from "../process-lifecycle";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
+import type { ProviderAuthMethod } from "../../shared/provider";
 import { providerAuthLaunchEnvironment, providerAuthLoginArgs } from "./auth";
 import { cursorAgentCommandArgs } from "./cursor-command";
 import { ProviderRuntimeError, type ProviderAuthLaunch, type ProviderId } from "./contracts";
@@ -18,9 +19,11 @@ export async function prepareProviderAuthLaunch(options: {
   environment: NodeJS.ProcessEnv;
   signal: AbortSignal;
   installationAuthority: ProviderManagerInstallationAuthority;
+  method?: ProviderAuthMethod;
 }): Promise<ProviderAuthLaunch> {
   const { providerId, executable, cwd, signal, installationAuthority } = options;
   signal.throwIfAborted();
+  const loginArgs = providerAuthLoginArgs(providerId, options.method);
   const environment = providerAuthLaunchEnvironment(
     providerId, providerChildEnvironment(providerId, options.environment),
   );
@@ -51,8 +54,8 @@ export async function prepareProviderAuthLaunch(options: {
       : providerProcessInvocation(
         executable,
         providerId === "cursor"
-          ? cursorAgentCommandArgs(executable, providerAuthLoginArgs(providerId))
-          : providerAuthLoginArgs(providerId),
+          ? cursorAgentCommandArgs(executable, loginArgs)
+          : loginArgs,
         childEnvironment,
       );
     return {

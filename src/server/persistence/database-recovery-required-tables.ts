@@ -169,6 +169,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [97, ["restart_continuation_plans"]],
   [98, ["conversation_title_locks"]],
   [99, ["watcher_links", "watcher_wakes"]],
+  [103, ["turn_failure_kinds"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {

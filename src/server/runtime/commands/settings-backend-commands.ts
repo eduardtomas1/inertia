@@ -7,6 +7,7 @@ import type {
   ProviderId,
   ServerEvent,
 } from "../../../shared/contracts";
+import { backendPresetDefinition } from "../../../shared/backend-presets";
 import { defaultSettings } from "../../../shared/contracts/app";
 import { providerIdForHarness } from "../../../shared/model-routing";
 import { restoredDefaultSettings } from "../../../shared/restore-defaults";
@@ -65,6 +66,7 @@ export function createSettingsBackendCommandHandler(
     "backend.profile.update",
     "backend.profile.credential-revision",
     "backend.profile.probe",
+    "backend.profile.discover-models",
     "backend.profile.delete",
     "backend.default.set",
     "backend.default.clear",
@@ -178,7 +180,11 @@ export function createSettingsBackendCommandHandler(
         });
         return "handled";
       case "backend.profile.create": {
-        assertHarnessMaintenanceIdle(command.payload.harnessId);
+        assertHarnessMaintenanceIdle(
+          command.payload.preset === "custom"
+            ? command.payload.harnessId
+            : backendPresetDefinition(command.payload.preset).harnessId,
+        );
         const profile = await dependencies.backendProfileController
           .createProfile(command.payload);
         dependencies.broadcastSnapshot();
@@ -195,8 +201,8 @@ export function createSettingsBackendCommandHandler(
             command.payload.profileId,
           ).harnessId,
         );
-        const profile = await dependencies.backendProfileController
-          .updateProfile(
+        const { profile, credentialCleared } = await dependencies.backendProfileController
+          .updateProfileWithOutcome(
             command.payload.profileId,
             command.payload.update,
           );
@@ -204,7 +210,11 @@ export function createSettingsBackendCommandHandler(
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
-          result: { kind: "backend.profile", profile },
+          result: {
+            kind: "backend.profile",
+            profile,
+            ...(credentialCleared ? { credentialCleared: true as const } : {}),
+          },
         });
         return "handled";
       }
@@ -233,15 +243,27 @@ export function createSettingsBackendCommandHandler(
             command.payload.profileId,
           ).harnessId,
         );
-        const profile = await dependencies.backendProfileController.probe(
-          command.payload.profileId,
-          command.payload.modelId,
-        );
+        const { profile, skippedModelIds } = await dependencies.backendProfileController
+          .probeWithOutcome(
+            command.payload.profileId,
+            command.payload.modelIds,
+          );
         dependencies.broadcastSnapshot();
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
-          result: { kind: "backend.profile.probe", profile },
+          result: { kind: "backend.profile.probe", profile, skippedModelIds },
+        });
+        return "handled";
+      }
+      case "backend.profile.discover-models": {
+        const result = await dependencies.backendProfileController.discoverModels(
+          command.payload.profileId,
+        );
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result,
         });
         return "handled";
       }

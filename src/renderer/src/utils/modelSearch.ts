@@ -1,4 +1,5 @@
-import type { AccessMode, InteractionMode } from "@shared/contracts";
+import type { AccessMode, BackendRouteKind, InteractionMode, ProviderId } from "@shared/contracts";
+import { providerIdForHarness } from "../../../shared/model-routing";
 
 const MAX_MODEL_SEARCH_QUERY_LENGTH = 300;
 
@@ -23,6 +24,9 @@ export interface ModelSearchRoute {
   backendConfigurationRevision?: number;
   providerLabel: string;
   source: "built-in" | "custom";
+  sourceProviderId?: ProviderId;
+  routeKind?: BackendRouteKind;
+  routeLabel?: string;
   /**
    * Truthful route-specific terms that are not already present in the visible
    * identity, such as "Kimi" or "OpenAI". Do not infer these from display text.
@@ -120,14 +124,43 @@ function modelRouteSearchScore(
   return Math.min(phraseScore, 100 + tokenScore);
 }
 
-/**
- * Filters and ranks model routes without changing any route identity or
- * availability state. Exact and prefix matches rank first; ties retain their
- * original provider order.
- */
+const SEARCH_PROVIDER_IDS: readonly ProviderId[] = [
+  "codex",
+  "claude",
+  "cursor",
+  "kimi",
+  "opencode",
+  "antigravity",
+];
+
+function queryProviderId(queryTokens: readonly string[]): ProviderId | null {
+  return SEARCH_PROVIDER_IDS.find((providerId) => queryTokens.includes(providerId)) ?? null;
+}
+
+function routeOwnerProviderId(route: ModelSearchRoute): ProviderId | null {
+  return route.sourceProviderId ?? providerIdForHarness(route.harnessId);
+}
+
+function providerTier(
+  route: ModelSearchRoute,
+  providerId: ProviderId | null,
+  pinned: (route: ModelSearchRoute) => boolean,
+): number {
+  if (!providerId) return 0;
+  if (pinned(route)) return 0;
+  const owned = routeOwnerProviderId(route) === providerId;
+  if (owned && route.modelId === "provider-default") return 1;
+  return owned ? 2 : 3;
+}
+
+export interface ModelSearchOptions {
+  pinned?: (route: ModelSearchRoute) => boolean;
+}
+
 export function searchModelRoutes<Route extends ModelSearchRoute>(
   routes: readonly Route[],
   rawQuery: string,
+  options: ModelSearchOptions = {},
 ): ModelSearchResult<Route> {
   const query = rawQuery.trim().slice(0, MAX_MODEL_SEARCH_QUERY_LENGTH);
   const normalizedQuery = normalizeModelSearchText(query);
@@ -145,15 +178,20 @@ export function searchModelRoutes<Route extends ModelSearchRoute>(
     };
   }
 
+  const providerId = queryProviderId(queryTokens);
+  const pinned = options.pinned ?? (() => false);
   const items = routes
     .map((route, index) => ({
       route,
       index,
+      tier: providerTier(route, providerId, pinned),
       score: modelRouteSearchScore(route, normalizedQuery, queryTokens),
     }))
     .filter((candidate): candidate is typeof candidate & { score: number } =>
       candidate.score !== null)
-    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .sort((left, right) => left.tier - right.tier
+      || left.score - right.score
+      || left.index - right.index)
     .map(({ route }) => route);
 
   return {

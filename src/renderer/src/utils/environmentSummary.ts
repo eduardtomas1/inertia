@@ -261,7 +261,7 @@ function usageSummary(
   );
   const context = contextUsageDisplayValue(usage ?? null, contextQuality);
   const quotaState = provider?.metadataState.rateLimits;
-  const freshness: EnvironmentUsageFreshness = quotaSource === "isolated"
+  const freshness: EnvironmentUsageFreshness = quotaSource !== "selected-route"
     ? "unavailable"
     : quotaState?.refreshing
       ? "refreshing"

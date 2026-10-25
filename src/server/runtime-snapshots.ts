@@ -111,6 +111,7 @@ export function providerSnapshot(
     executable: detection.executable ?? null,
     installState: detection.installState,
     authState: detection.authState,
+    ...(detection.accountKind ? { accountKind: detection.accountKind } : {}),
     canRun: detection.canRun,
     statusMessage: detection.statusMessage ?? null,
     models: metadata.models,

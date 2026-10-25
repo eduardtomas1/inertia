@@ -84,7 +84,8 @@ function fixture(authority: ConversationWorkAuthority) {
     secureFiles: {},
     dataDirectory: "/private/inertia-data",
     enableProviders: true,
-    providerInfo: () => [{ id: "codex", canRun: true }],
+    providerInfo: vi.fn(() => [{ id: "codex", canRun: true }]),
+    backendProfileController: { readiness: vi.fn(async () => null) },
     publicError: (error: unknown) => String(error),
     broadcastSnapshot: vi.fn(),
     send: vi.fn(),
@@ -114,6 +115,72 @@ describe("isolated review revision authority", () => {
     expect(reviewSupport.selectedReviewContext).not.toHaveBeenCalled();
     expect(reviewSupport.captureRequiredCheckpoint).not.toHaveBeenCalled();
     expect(queue).not.toHaveBeenCalled();
+  });
+
+  it("gates reviews on route readiness so a key route runs while the account is signed out", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    const { dependencies } = fixture(authority);
+    const signedOut = {
+      id: "codex",
+      canRun: false,
+      authState: "unauthenticated",
+      statusMessage: "Codex is not signed in.",
+    };
+    vi.mocked(dependencies.providerInfo).mockReturnValue([signedOut] as never);
+    const readiness = vi.mocked(dependencies.backendProfileController.readiness);
+    reviewSupport.selectedReviewContext.mockRejectedValue(new Error("context reached"));
+    const handler = createIsolatedReviewCommandHandler(dependencies);
+
+    readiness.mockResolvedValueOnce({ ready: true, message: null });
+    await expect(handler({} as WebSocket, askCommand)).rejects.toThrow("context reached");
+    readiness.mockResolvedValueOnce({ ready: true, message: null });
+    await expect(handler({} as WebSocket, command)).rejects.toThrow("context reached");
+    expect(readiness).toHaveBeenCalledWith(conversation.modelSelection, signedOut);
+
+    readiness.mockResolvedValueOnce({
+      ready: false,
+      message: "The Work key credential is unavailable.",
+    });
+    await expect(handler({} as WebSocket, askCommand))
+      .rejects.toThrow("The Work key credential is unavailable.");
+    readiness.mockResolvedValueOnce(null);
+    await expect(handler({} as WebSocket, askCommand)).rejects.toThrow("Codex is not signed in.");
+  });
+
+  it("holds the pending question while readiness runs so a second Ask is refused", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    const { dependencies, runIsolated, stopConversation } = fixture(authority);
+    const readiness = deferred<{ ready: boolean; message: string | null } | null>();
+    vi.mocked(dependencies.backendProfileController.readiness)
+      .mockReturnValueOnce(readiness.promise);
+    reviewSupport.selectedReviewContext.mockRejectedValue(new Error("context reached"));
+    const handler = createIsolatedReviewCommandHandler(dependencies);
+    const socket = {} as WebSocket;
+
+    const first = handler(socket, askCommand);
+    await vi.waitFor(() => {
+      expect(dependencies.backendProfileController.readiness).toHaveBeenCalledOnce();
+    });
+    await expect(handler(socket, { ...askCommand, requestId: projectId }))
+      .rejects.toThrow("Wait for the current agent or review turn to finish first.");
+    await expect(handler(socket, {
+      type: "review.selection.cancel",
+      requestId: turnId,
+      payload: { conversationId },
+    })).resolves.toBe("handled");
+    readiness.resolve({ ready: true, message: null });
+
+    await expect(first).resolves.toBe("handled");
+    expect(reviewSupport.selectedReviewContext).not.toHaveBeenCalled();
+    expect(runIsolated).not.toHaveBeenCalled();
+    expect(stopConversation).toHaveBeenCalledWith(conversationId, "selection-ask");
+    expect(dependencies.send).toHaveBeenCalledWith(socket, { type: "request.ok", requestId });
   });
 
   it("rejects selection Ask while the conversation turn is active", async () => {

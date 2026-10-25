@@ -13,7 +13,7 @@ function draft(): ModelBackendProfileDraft {
     displayName: "Long-lived team gateway",
     harnessId: "claude-agent-sdk",
     protocol: "anthropic-messages",
-    authenticationMode: "none",
+    authenticationMode: "api-key",
     preset: "custom",
     baseUrl: "https://gateway.example.test/v1",
     allowInsecureLocalhost: false,

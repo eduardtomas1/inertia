@@ -1,5 +1,6 @@
 import type { ProviderActivityPhase, ProviderRunFailure } from "../provider/contracts";
 import { objectValue, type JsonObject } from "./protocol";
+import type { TurnFailureKind } from "../../shared/turn-lifecycle";
 
 export type CodexCommandOrPatchStatus =
   | "inProgress"
@@ -78,6 +79,13 @@ export function codexTurnInterruptionFailure(
 
 export function codexUsageLimited(errorInfo: unknown): boolean {
   return codexErrorInfoName(errorInfo) === "usageLimitExceeded";
+}
+
+export function codexFailureKind(errorInfo: unknown): TurnFailureKind | undefined {
+  const name = codexErrorInfoName(errorInfo);
+  if (name === "unauthorized") return "authentication";
+  if (name === "usageLimitExceeded" || name === "rateLimitExceeded") return "rate-limited";
+  return undefined;
 }
 
 function codexErrorInfoName(value: unknown): string | undefined {

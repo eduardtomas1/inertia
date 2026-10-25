@@ -30,16 +30,12 @@ test("keeps branded model sources and rows legible across themes and narrow wind
   // setup, also proving unavailable profiles do not leave empty rail icons.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Agents", exact: true }).click();
-  const profiles = page.getByLabel("Backend profiles");
-  const gateways = profiles.getByRole("button", { name: /^Catalog gateway /u });
-  await expect(gateways).toHaveCount(5);
-  for (const gateway of await gateways.all()) {
-    await gateway.click();
-    const enabled = page.getByRole("switch", { name: "Use this backend", exact: true });
-    await expect(enabled).toBeChecked();
-    await enabled.click();
-    await expect(enabled).not.toBeChecked();
-    await expect(enabled).toBeEnabled();
+  const accounts = page.getByRole("region", { name: "Accounts and API keys" });
+  await expect(accounts.getByRole("listitem", { name: /^Catalog gateway /u })).toHaveCount(5);
+  for (let index = 1; index <= 5; index += 1) {
+    const name = `Catalog gateway ${index}`;
+    await accounts.getByRole("button", { name: `Turn off ${name}`, exact: true }).click();
+    await expect(accounts.getByRole("button", { name: `Turn on ${name}`, exact: true })).toBeVisible();
   }
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await page.getByRole("complementary", { name: "Project navigation", exact: true })
@@ -49,7 +45,8 @@ test("keeps branded model sources and rows legible across themes and narrow wind
   const capture = async (name: string, vertical?: "above" | "below"): Promise<void> => {
     await expectModelChooserPlacement(chooser, vertical);
     await expect(chooser.locator('[data-model-source-rail-item^="custom:"]')).toHaveCount(0);
-    await expect(chooser.locator('[data-model-source-rail-item^="provider:"]')).toHaveCount(2);
+    await expect(chooser.locator('[data-model-source-rail-item^="provider:"]')).toHaveCount(3);
+    await expect(chooser.locator('[data-model-source-rail-item="provider:kimi"]')).toHaveCount(1);
     await expect(trigger.locator(".provider-brand-icon")).toBeVisible();
     for (const source of await chooser.locator("[data-model-source-rail-item]").all()) {
       await expect(source).toBeInViewport({ ratio: 1 });
@@ -96,7 +93,14 @@ test("keeps branded model sources and rows legible across themes and narrow wind
       // Without a viewport constraint, the frame ends with its content rather
       // than reserving a fixed-height blank area below these few model rows.
       const content = await chooser.evaluate(modelChooserContentGeometry);
-      expect(content.bottomGap).toBeLessThanOrEqual(2);
+      const railGap = await chooser.evaluate((element) => {
+        const rail = element.querySelector('[aria-label="Model sources"]');
+        const results = element.querySelector('[aria-label="Model results"]');
+        if (!rail || !results) throw new Error("The model chooser rail or results list is missing.");
+        const contentBottom = Math.max(rail.getBoundingClientRect().bottom, results.getBoundingClientRect().bottom);
+        return Math.abs(element.getBoundingClientRect().bottom - contentBottom);
+      });
+      expect(Math.min(content.bottomGap, railGap)).toBeLessThanOrEqual(2);
       if (id === "codex") {
         await search.fill("Codex Beta");
         await expect(chooser.locator(".model-chooser-row-option")).toHaveCount(1);

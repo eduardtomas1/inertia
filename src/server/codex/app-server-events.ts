@@ -7,7 +7,6 @@ import {
 import {
   codexGoalContinuationGraceMs,
   codexSubagentDrainTimeoutMs,
-  type CodexRunPhase,
 } from "./app-server-config";
 import {
   CodexSubagentLifecycle,
@@ -31,7 +30,6 @@ import {
 import { parseCodexPlan } from "./plans";
 import {
   boundedText,
-  CappedTextBuffer,
   objectValue,
   rpcId,
   stringValue,
@@ -55,7 +53,9 @@ import {
 import { projectCodexSecurityNotification } from "./app-server-security-events";
 import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
 import { projectCodexErrorNotification } from "./app-server-error-events";
-import { codexTurnInterruptionFailure, codexUsageLimited } from "./app-server-status";
+import { codexFailureKind, codexTurnInterruptionFailure, codexUsageLimited } from "./app-server-status";
+import type { CodexAppServerEventHost } from "./app-server-event-host";
+export type { CodexAppServerEventHost } from "./app-server-event-host";
 import { CodexApprovalAuthority } from "./app-server-approval-authority";
 import { parseCodexTokenUsage } from "./usage";
 import type { AgentGoalStatus } from "../../shared/contracts";
@@ -64,7 +64,6 @@ import { stableProviderActivityId } from "../provider/activity-lifecycle";
 import { CodexCommandOutput } from "./app-server-command-output";
 import type {
   ProviderGoalSnapshot,
-  ProviderRunFailure,
 } from "../provider/contracts";
 import type {
   AgentApprovalDecision,
@@ -88,37 +87,6 @@ interface PendingApproval {
 interface PendingInput {
   rpcId: RpcId;
   request: AgentInputRequest;
-}
-
-export interface CodexAppServerEventHost {
-  options: CodexAppServerOptions;
-  resultText: CappedTextBuffer;
-  isSettled: () => boolean;
-  phase: () => CodexRunPhase;
-  setPhase: (phase: CodexRunPhase) => void;
-  providerThreadId: () => string | undefined;
-  activeTurnId: () => string | undefined;
-  setActiveTurnId: (turnId: string | undefined) => void;
-  requestedTurnId?: () => string | null | undefined;
-  cancelRequested: () => boolean;
-  lastError: () => string | undefined;
-  setLastError: (message: string) => void;
-  setLastProtocolMethod: (method: string) => void;
-  setLastActivityId: (activityId: string) => void;
-  setTerminalEvent: (event: string) => void;
-  writeMessage: (message: JsonObject) => boolean;
-  cancel: (reason?: "malformed-protocol") => void;
-  finish: (
-    status: CodexAppServerResult["status"],
-    exitCode: number | null,
-    signal: NodeJS.Signals | null,
-  ) => void;
-  rememberFailure: (
-    reason: ProviderRunFailure["reason"],
-    message: string,
-    technicalDetail?: string,
-    usageLimited?: boolean,
-  ) => void;
 }
 
 interface PendingParentCompletion {
@@ -941,6 +909,7 @@ export class CodexAppServerEvents {
           interruptionFailure?.message ?? boundedText(turnError?.message, 4_000) ?? "Codex could not complete the turn.",
           interruptionFailure ? interruptionFailure.technicalDetail : lastError,
           codexUsageLimited(turnError?.codexErrorInfo),
+          codexFailureKind(turnError?.codexErrorInfo),
         );
         this.completeParentTurn("failed", 1);
       } else if (status === "completed") {

@@ -308,10 +308,12 @@ export function ModelChooser({
       sourceFilter,
     ],
   );
-  const results = useMemo(
-    () => searchModelRoutes(sourceRoutes, query),
-    [query, sourceRoutes],
-  );
+  const results = useMemo(() => {
+    const pinnedKeys = new Set(resolvedFavoriteRoutes.map(({ key }) => key));
+    return searchModelRoutes(sourceRoutes, query, {
+      pinned: (route) => pinnedKeys.has(route.key),
+    });
+  }, [query, resolvedFavoriteRoutes, sourceRoutes]);
   const resultItems = results.items;
   const virtualized = resultItems.length
     >= MODEL_CHOOSER_VIRTUALIZATION_MIN_RESULTS;

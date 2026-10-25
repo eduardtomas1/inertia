@@ -13,21 +13,25 @@ export interface AgentsSettingsProps extends ProvidersSettingsProps, Pick<
   | "onSetBackendCredential"
   | "onClearBackendCredential"
   | "onProbeBackendProfile"
+  | "onDiscoverBackendModels"
   | "onDeleteBackendProfile"
 > {
   backendProfiles: ModelBackendProfileView[];
   initialProfileId?: string;
+  initialProfilePanel?: "key" | "models";
 }
 
 export function AgentsSettings({
   backendProfiles,
   initialProfileId,
+  initialProfilePanel,
   onLoadBackendProfile,
   onCreateBackendProfile,
   onUpdateBackendProfile,
   onSetBackendCredential,
   onClearBackendCredential,
   onProbeBackendProfile,
+  onDiscoverBackendModels,
   onDeleteBackendProfile,
   ...providers
 }: AgentsSettingsProps): React.JSX.Element {
@@ -38,14 +42,20 @@ export function AgentsSettings({
       {Backends ? (
         <Backends
           profiles={backendProfiles}
+          providers={providers.providers}
+          providerIdentityLabels={providers.settings.providerIdentityLabels}
           initialProfileId={initialProfileId}
+          initialProfilePanel={initialProfilePanel}
           disabled={providers.disabled}
+          onConnectProvider={providers.onConnectProvider}
+          onRefreshProvider={providers.onRefreshProvider}
           onLoadDetail={onLoadBackendProfile}
           onCreate={onCreateBackendProfile}
           onUpdate={onUpdateBackendProfile}
           onSetCredential={onSetBackendCredential}
           onClearCredential={onClearBackendCredential}
           onProbe={onProbeBackendProfile}
+          onDiscoverModels={onDiscoverBackendModels}
           onDelete={onDeleteBackendProfile}
         />
       ) : <SettingsSectionFallback />}

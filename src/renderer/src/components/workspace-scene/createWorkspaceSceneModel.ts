@@ -570,6 +570,7 @@ export function createWorkspaceSceneModel({
       onSetBackendCredential: backendProfileActions.setBackendCredential,
       onClearBackendCredential: backendProfileActions.clearBackendCredential,
       onProbeBackendProfile: backendProfileActions.probeBackendProfile,
+      onDiscoverBackendModels: backendProfileActions.discoverBackendModels,
       onDeleteBackendProfile: backendProfileActions.deleteBackendProfile,
       onSetBackendDefault: backendProfileActions.setBackendDefault,
       onClearBackendDefault: backendProfileActions.clearBackendDefault,

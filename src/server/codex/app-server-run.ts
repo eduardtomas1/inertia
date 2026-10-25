@@ -9,6 +9,7 @@ import {
 
 import { staleProviderSessionDecision } from "../../shared/continuation-policy";
 import { INERTIA_VERSION } from "../../shared/version";
+import type { TurnFailureKind } from "../../shared/turn-lifecycle";
 import {
   CODEX_RPC_TIMEOUT_MS,
   CODEX_CHILD_INTERRUPT_OVERALL_TIMEOUT_MS,
@@ -42,6 +43,7 @@ import {
   type JsonObject,
 } from "./protocol";
 import { codexWatcherThreadConfig } from "./read-only-thread-config";
+import { codexModelProviderThreadConfig } from "./model-provider-config";
 import type {
   CodexAppServerOptions,
   CodexAppServerResult,
@@ -171,6 +173,7 @@ export function startCodexAppServerRun(
     message: string,
     technicalDetail?: string,
     usageLimited = false,
+    failureKind?: TurnFailureKind,
   ): void => {
     failure ??= {
       reason,
@@ -181,6 +184,7 @@ export function startCodexAppServerRun(
       ...(technicalDetail ? { technicalDetail } : {}),
     };
     if (usageLimited && reason === "codex-error" && failure.reason === "codex-error") failure.usageLimited = true;
+    if (failureKind && reason === "codex-error" && failure.reason === "codex-error") failure.failureKind ??= failureKind;
   };
 
   const rememberTransportFailure = (message: string, technicalDetail?: string): void => {
@@ -945,20 +949,15 @@ export async function openCodexTurn({
   notify("initialized");
 
   const accessPolicy = codexAccessPolicy(options);
-  const watcherConfig = options.readOnlyProfile === "watcher"
-    ? codexWatcherThreadConfig(await request("config/read", { includeLayers: false, cwd: options.cwd }))
+  const effectiveConfig = options.readOnlyProfile === "watcher" || modelProvider?.credentialEnvironmentKey
+    ? await request("config/read", { includeLayers: false, cwd: options.cwd })
     : null;
-  const providerConfig = modelProvider ? {
-    [`model_providers.${modelProvider.providerId}`]: {
-      name: modelProvider.displayName,
-      base_url: modelProvider.baseUrl,
-      wire_api: "responses",
-      requires_openai_auth: false,
-      ...(modelProvider.credentialEnvironmentKey
-        ? { env_key: modelProvider.credentialEnvironmentKey }
-        : {}),
-    },
-  } : null;
+  const watcherConfig = options.readOnlyProfile === "watcher" && effectiveConfig
+    ? codexWatcherThreadConfig(effectiveConfig)
+    : null;
+  const providerConfig = modelProvider
+    ? codexModelProviderThreadConfig(modelProvider, effectiveConfig)
+    : null;
   const threadConfig = {
     cwd: options.cwd,
     approvalPolicy: accessPolicy.approvalPolicy,

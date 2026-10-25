@@ -1,14 +1,17 @@
 import { useCallback } from "react";
 import type {
+  BackendDiscoveredModel,
+  ModelBackendProfileCreateDraft,
   ModelBackendProfileDetail,
-  ModelBackendProfileDraft,
   ModelSelection,
   ServerEvent,
 } from "@shared/contracts";
 import {
   backendProfileCreatePayload,
   backendProfileUpdatePayload,
+  type BackendProfileUpdateInput,
 } from "../lib/backendProfileCommands";
+import { ELECTRON_IPC_ERROR_PREFIX } from "./useDesktopTools";
 import {
   resultEvent,
   type CommandWithoutId,
@@ -29,7 +32,50 @@ function backendProfileResult(event: ServerEvent): ModelBackendProfileDetail {
       "The local service returned an unexpected backend profile response.",
     );
   }
+  if (
+    result.kind === "backend.profile"
+    && result.credentialCleared === true
+    && result.profile.authState !== "missing"
+  ) {
+    return { ...result.profile, authState: "missing" };
+  }
   return result.profile;
+}
+
+function discoveredModelsResult(
+  event: ServerEvent,
+  profileId: string,
+): BackendDiscoveredModel[] {
+  const result = resultEvent(event).result;
+  if (result.kind !== "backend.profile.models" || result.profileId !== profileId) {
+    throw new Error(
+      "The local service returned an unexpected model list.",
+    );
+  }
+  return result.models.map(({ id, displayName }) => ({ id, displayName }));
+}
+
+const quiet = { reportError: false } as const;
+
+export type BackendProbeOutcome = ModelBackendProfileDetail & {
+  skippedModelIds?: readonly string[];
+};
+
+function skippedProbeModelIds(result: object): string[] {
+  const value = (result as { skippedModelIds?: unknown }).skippedModelIds;
+  return Array.isArray(value)
+    ? value.filter((modelId): modelId is string => typeof modelId === "string")
+    : [];
+}
+
+async function withoutIpcPrefix<Value>(operation: () => Promise<Value>): Promise<Value> {
+  try {
+    return await operation();
+  } catch (reason) {
+    if (!(reason instanceof Error)) throw reason;
+    const message = reason.message.replace(ELECTRON_IPC_ERROR_PREFIX, "").trim();
+    throw new Error(message || "The credential vault could not be reached.");
+  }
 }
 
 export function useBackendProfiles({
@@ -45,16 +91,16 @@ export function useBackendProfiles({
     })), [request]);
 
   const createBackendProfile = useCallback(async (
-    draft: ModelBackendProfileDraft,
+    draft: ModelBackendProfileCreateDraft,
   ): Promise<ModelBackendProfileDetail> =>
     backendProfileResult(await run("backend.profile.create", {
       type: "backend.profile.create",
       payload: backendProfileCreatePayload(draft),
-    })), [run]);
+    }, quiet)), [run]);
 
   const updateBackendProfile = useCallback(async (
     profileId: string,
-    update: Partial<ModelBackendProfileDraft> & { enabled?: boolean },
+    update: BackendProfileUpdateInput,
   ): Promise<ModelBackendProfileDetail> =>
     backendProfileResult(await run("backend.profile.update", {
       type: "backend.profile.update",
@@ -62,7 +108,7 @@ export function useBackendProfiles({
         profileId,
         update: backendProfileUpdatePayload(update),
       },
-    })), [run]);
+    }, quiet)), [run]);
 
   const reconcileBackendCredential = useCallback(async (
     profileId: string,
@@ -79,6 +125,7 @@ export function useBackendProfiles({
         type: "backend.profile.credential-revision",
         payload: { profileId, credentialGeneration },
       },
+      quiet,
     ));
   }, [run]);
 
@@ -86,10 +133,10 @@ export function useBackendProfiles({
     profileId: string,
     secret: string,
   ): Promise<ModelBackendProfileDetail> => {
-    const state = await window.inertia.setBackendCredential({
+    const state = await withoutIpcPrefix(() => window.inertia.setBackendCredential({
       profileId,
       secret,
-    });
+    }));
     return reconcileBackendCredential(
       profileId,
       state.credentialGeneration,
@@ -99,7 +146,7 @@ export function useBackendProfiles({
   const clearBackendCredential = useCallback(async (
     profileId: string,
   ): Promise<ModelBackendProfileDetail> => {
-    const state = await window.inertia.clearBackendCredential({ profileId });
+    const state = await withoutIpcPrefix(() => window.inertia.clearBackendCredential({ profileId }));
     return reconcileBackendCredential(
       profileId,
       state.credentialGeneration,
@@ -108,12 +155,26 @@ export function useBackendProfiles({
 
   const probeBackendProfile = useCallback(async (
     profileId: string,
-    modelId: string,
-  ): Promise<ModelBackendProfileDetail> =>
-    backendProfileResult(await run("backend.profile.probe", {
+    modelIds?: readonly string[],
+  ): Promise<BackendProbeOutcome> => {
+    const event = await run("backend.profile.probe", {
       type: "backend.profile.probe",
-      payload: { profileId, modelId },
-    })), [run]);
+      payload: modelIds !== undefined
+        ? { profileId, modelIds: [...modelIds] }
+        : { profileId },
+    }, quiet);
+    const profile = backendProfileResult(event);
+    const skipped = skippedProbeModelIds(resultEvent(event).result);
+    return skipped.length > 0 ? { ...profile, skippedModelIds: skipped } : profile;
+  }, [run]);
+
+  const discoverBackendModels = useCallback(async (
+    profileId: string,
+  ): Promise<BackendDiscoveredModel[]> =>
+    discoveredModelsResult(await run("backend.profile.discover-models", {
+      type: "backend.profile.discover-models",
+      payload: { profileId },
+    }, quiet), profileId), [run]);
 
   const deleteBackendProfile = useCallback(async (
     profileId: string,
@@ -121,7 +182,7 @@ export function useBackendProfiles({
     await run("backend.profile.delete", {
       type: "backend.profile.delete",
       payload: { profileId },
-    });
+    }, quiet);
   }, [run]);
 
   const setBackendDefault = useCallback(async (
@@ -159,6 +220,7 @@ export function useBackendProfiles({
     setBackendCredential,
     clearBackendCredential,
     probeBackendProfile,
+    discoverBackendModels,
     deleteBackendProfile,
     setBackendDefault,
     clearBackendDefault,

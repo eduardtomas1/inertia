@@ -3,7 +3,7 @@ import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SettingsSection } from "./lib/settingsTarget";
+import type { SettingsProfilePanel, SettingsSection } from "./lib/settingsTarget";
 import { useSettingsMode } from "./hooks/useSettingsMode";
 import { useDiagnosticNavigation } from "./hooks/useDiagnosticNavigation";
 import {
@@ -21,6 +21,7 @@ import {
 import type { MessageSearchHit } from "@shared/message-search";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
 import { DEFAULT_QUOTA_WARNINGS } from "@shared/quota-warnings";
+import type { ProviderAuthMethod } from "@shared/provider";
 import { useConversationNavigation } from "./hooks/useConversationNavigation";
 import "./detached-chat-workbench.css";
 import { AppLayout } from "./components/AppLayout";
@@ -134,7 +135,11 @@ export default function App(): React.JSX.Element {
   if (view !== "tasks" && tasksFocusAddRequest !== 0) setTasksFocusAddRequest(0);
   const helpOpen = useHelpGuideOpen();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
-  const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
+  const [authRequest, setAuthRequest] = useState<{
+    providerId: ProviderId;
+    method: ProviderAuthMethod;
+  } | null>(null);
+  const authProviderId = authRequest?.providerId ?? null;
   const [latestContentVisible, setLatestContentVisible] = useState(false);
   const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
   const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
@@ -728,13 +733,21 @@ export default function App(): React.JSX.Element {
       payload: providerId ? { providerId } : {},
     }).catch(() => undefined);
   }, [run]);
-  const connectProvider = useCallback((providerId: ProviderId) => setAuthProviderId(providerId), []);
-  const closeProviderAuth = useCallback(() => setAuthProviderId(null), []);
+  const connectProvider = useCallback((
+    providerId: ProviderId,
+    method: ProviderAuthMethod = "account",
+  ) => setAuthRequest({ providerId, method }), []);
+  const closeProviderAuth = useCallback(() => setAuthRequest(null), []);
   const openProviderSetup = useCallback((_providerId: ProviderId) => {
     openSettings({ section: "agents" });
   }, [openSettings]);
-  const openBackendSetup = useCallback((profileId: string) => {
-    openSettings({ section: "agents", anchor: "model-backends", profileId });
+  const openBackendSetup = useCallback((profileId: string, profilePanel?: SettingsProfilePanel) => {
+    openSettings({
+      section: "agents",
+      anchor: "model-backends",
+      profileId,
+      ...(profilePanel ? { profilePanel } : {}),
+    });
   }, [openSettings]);
   const openProjectSettings = useCallback((projectId: string) => {
     openSettings({ section: "projects", projectId });
@@ -994,6 +1007,7 @@ export default function App(): React.JSX.Element {
   );
   const layoutProviderAuth = useMemo(() => ({
     provider: authProvider,
+    method: authRequest?.method ?? "account",
     status: connection.status,
     theme: settings.theme,
     colorTheme: settings.colorTheme,
@@ -1003,6 +1017,7 @@ export default function App(): React.JSX.Element {
     onClose: closeProviderAuth,
   }), [
     authProvider,
+    authRequest?.method,
     closeProviderAuth,
     connection.status,
     connection.subscribe,

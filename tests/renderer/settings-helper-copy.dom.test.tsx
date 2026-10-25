@@ -89,7 +89,7 @@ describe("settings helper copy", () => {
 describe("agents helper copy", () => {
   it("keeps the credential note and one-line empty states", async () => {
     render(<SettingsView {...settingsViewProps({ target: { section: "agents" }, providers: [settingsProvider("codex", "Codex")] })} />);
-    expect(await screen.findByText("Sign-in stays in the provider's own flow. Inertia stores no provider passwords or tokens.")).toBeVisible();
+    expect(await screen.findByText("Account sign-in stays in the provider's own flow, and Inertia never sees that password. API keys you add below are kept in your system's credential vault.")).toBeVisible();
     for (const text of [
       "Use the coding tools and accounts already installed on this computer.",
       "Shown wherever Inertia names this account.",

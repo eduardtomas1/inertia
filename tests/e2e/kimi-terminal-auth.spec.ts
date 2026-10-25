@@ -6,13 +6,15 @@ import { delimiter, dirname, join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
-import { executableProcessExists } from "../helpers/executable-process";
+import { fixtureProcessExists } from "../helpers/executable-process";
 import { writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 interface WireEvent {
   kind: "launch" | "login" | "rpc";
   pid: number;
+  instance: string;
+  endpoint: string | null;
   args?: string[];
   tty?: boolean;
   method?: string;
@@ -33,12 +35,18 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
 });
 `;
 
+const FIXTURE_ENDPOINT_PREFIX = process.platform === "win32" ? "\\\\.\\pipe\\inertia-kimi-fixture-" : null;
+
 function kimiFixtureSource(wirePath: string, signedInPath: string): string {
   return `
 const fs = require("node:fs");
 const args = process.argv.slice(2);
+const instance = require("node:crypto").randomUUID();
+const endpointPrefix = ${JSON.stringify(FIXTURE_ENDPOINT_PREFIX)};
+const endpoint = endpointPrefix === null ? null : endpointPrefix + instance;
+if (endpoint !== null) require("node:net").createServer(socket => socket.destroy()).listen(endpoint).unref();
 const signedIn = () => fs.existsSync(${JSON.stringify(signedInPath)});
-const record = event => fs.appendFileSync(${JSON.stringify(wirePath)}, JSON.stringify({ pid: process.pid, ...event }) + "\\n");
+const record = event => fs.appendFileSync(${JSON.stringify(wirePath)}, JSON.stringify({ pid: process.pid, instance, endpoint, ...event }) + "\\n");
 record({ kind: "launch", args, tty: process.stdin.isTTY === true, signedIn: signedIn() });
 if (args[0] === "--version") { console.log("kimi 0.41.0"); process.exit(0); }
 if (args[0] === "acp" && args[1] === "--help") { console.log("Usage: kimi acp - Agent Client Protocol"); process.exit(0); }
@@ -83,6 +91,15 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
   throw new Error("Unsupported synthetic Kimi RPC.");
 });
 `;
+}
+
+async function everyExited(events: WireEvent[]): Promise<boolean> {
+  const alive = await Promise.all(events.map(event => fixtureProcessExists(event)));
+  return alive.every(value => !value);
+}
+
+function processOwners(events: WireEvent[]): WireEvent[] {
+  return events.filter(event => event.kind === "login" || (event.kind === "rpc" && event.method === "initialize"));
 }
 
 async function wireEvents(path: string): Promise<WireEvent[]> {
@@ -187,11 +204,16 @@ test("connects Kimi through a native login-only PTY then admits fresh ACP turns 
   expect(login).toEqual([expect.objectContaining({ args: ["acp", "--login"], tty: true })]);
   const priorInitialize = loginEvents.find(event => event.kind === "rpc" && event.method === "initialize");
   expect(priorInitialize).toMatchObject({ terminalAuth: true, signedIn: false });
-  expect(priorInitialize?.pid).not.toBe(login[0]?.pid);
+  expect(priorInitialize?.instance).not.toBe(login[0]?.instance);
   await app.page.getByRole("button", { name: "Workspace", exact: true }).click();
   await completeTurn(app, "Synthetic Kimi first send");
   await completeTurn(app, "Synthetic Kimi second send");
   await expect.poll(() => durableCounts(app, conversationId)).toEqual({ completed: 2, owners: 0 });
+  const ownersBeforeRestart = processOwners(await wireEvents(wirePath));
+  await expect.poll(() => everyExited(ownersBeforeRestart), {
+    message: "Every Kimi process from before the restart exits before a new app instance can reuse its PID",
+    timeout: 15_000,
+  }).toBe(true);
   await app.restart();
   await expect(app.page.getByText("Synthetic Kimi first send", { exact: true })).toBeVisible();
   await expect(app.page.getByText("Synthetic Kimi second send", { exact: true })).toBeVisible();
@@ -200,10 +222,13 @@ test("connects Kimi through a native login-only PTY then admits fresh ACP turns 
   const events = await wireEvents(wirePath);
   const initialized = events.filter(event => event.kind === "rpc" && event.method === "initialize");
   expect(initialized.filter(event => event.signedIn === true)).toHaveLength(3);
-  expect(new Set(initialized.map(event => event.pid)).size).toBe(initialized.length);
+  expect(new Set(initialized.map(event => event.instance)).size).toBe(initialized.length);
   expect(events.filter(event => event.method === "authenticate")).toEqual([]);
   expect(events.filter(event => event.method === "session/prompt")).toHaveLength(3);
   expect(events.filter(event => event.kind === "login")).toHaveLength(1);
-  await expect.poll(() => [...initialized, ...login].every(event => !executableProcessExists(event.pid))).toBe(true);
+  await expect.poll(() => everyExited(processOwners(events)), {
+    message: "Every Kimi login and ACP process exits after its turn settles",
+    timeout: 15_000,
+  }).toBe(true);
   expect(app.rendererErrors).toEqual([]);
 });

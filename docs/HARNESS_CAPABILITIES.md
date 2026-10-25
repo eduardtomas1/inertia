@@ -698,6 +698,201 @@ digest is provider-agnostic, `"watched"` access applies no route filter, and
 whether a note can be steered into the running turn is recomputed from that
 turn's harness against `STEERABLE_HARNESS_IDS`.
 
+## Accounts and API keys
+
+Every provider keeps its own sign-in. An API key is a second, separate route
+that Inertia adds only where the harness has a documented way to receive one.
+
+| Provider | What the CLI supports itself | What Inertia routes |
+| --- | --- | --- |
+| Claude | Claude account sign-in (`claude auth login`), Anthropic Console sign-in (`claude auth login --console`), and `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` in its environment. | Account route: the native Claude backend. Settings can start either the account or the Console sign-in in the terminal (`provider.auth.start` with `method: "account"` or `"console"`). Key route: the **Anthropic API key** preset, a Claude Agent SDK profile on the Anthropic Messages protocol at `https://api.anthropic.com`. |
+| Codex | ChatGPT sign-in (`codex login`) and API-key sign-in, plus custom `model_providers` with an `env_key`. | Account route: the native OpenAI backend. Key route: the **OpenAI API key** preset, a Codex App Server profile on the Responses protocol at `https://api.openai.com/v1`. |
+| OpenCode | Its own provider sign-in and key store (`opencode auth login`). | OpenCode's own sign-in only. Keys stay in OpenCode's store; Inertia never passes a vault key to OpenCode and offers no key route for it. |
+| Cursor | Browser sign-in (`login`). | Account only. |
+| Kimi | Kimi Code sign-in through its ACP `authenticate` exchange. | Account route through Kimi ACP. A Kimi key runs through the Claude harness instead: the built-in Kimi preset sends the vault key to Kimi's Anthropic-compatible coding endpoint and is listed under Kimi. |
+| Antigravity | Google sign-in, checked when a turn starts. Google recommends a Gemini Enterprise or Google AI Studio key for third-party apps; `agy` uses `GEMINI_API_KEY` only when its own settings choose the Gemini model provider. | Account only. A Gemini key route is not offered yet: Inertia has no verified way to choose `agy`'s model provider for one launch without editing the person's own Antigravity settings, and a launch that ignored the key would silently use the Google account. |
+
+### How a key reaches a provider
+
+Keys live only in the privileged credential vault. The database stores the
+profile, an opaque vault generation and probe evidence, never the key. The
+runtime process starts with every `*_API_KEY` variable removed, so a key in the
+user's shell never reaches a provider by accident.
+
+At launch the resolver reads the key for exactly one child process:
+
+- **Claude** clears every inherited Anthropic, gateway and cloud-routing
+  variable, then sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` (or
+  `ANTHROPIC_AUTH_TOKEN` for bearer tokens) in that child's environment. A
+  Claude-compatible profile must use a key or bearer token, because Claude Code
+  would otherwise send the account's own token to the configured host. New and
+  edited profiles cannot choose "no authentication". Rows saved without a key by
+  an earlier release stay readable so they can be edited or removed, but they
+  are not registered for launch, their models report `credential-required`,
+  readiness answers "Add an API key or bearer token to use this backend.", and
+  probes and launches are refused.
+- **Codex** receives a `model_providers` entry with the base URL and
+  `env_key = INERTIA_CODEX_BACKEND_TOKEN`; only the child environment holds the
+  token. The JSON-RPC configuration never contains it, and Codex's own
+  `auth.json` is untouched. The thread configuration also sets
+  `shell_environment_policy.ignore_default_excludes = false` and adds the
+  variable to `shell_environment_policy.exclude` (merged with the person's own
+  exclusions, read through `config/read`), so tool shells never inherit it.
+  When the person's policy uses `filters`, which cannot be mixed with
+  `exclude`, Codex's default `*TOKEN*` exclusion keeps it out instead.
+
+Both resolvers drop the key from the launch environment once the process has
+started.
+
+Claude Code still holds the key in its own process environment, and its Bash
+and PowerShell tools inherit it. On a Claude key route Inertia therefore adds
+three layers that the account route does not need:
+
+- **Redaction.** Every SDK message of the turn passes through a redactor before
+  the projector, the transcript or the failure path sees it. It masks the
+  exact key and these forms of it: URL and JSON escaping, base64 and base64url
+  of the key alone and followed by `
+` or `
+` (what `echo $KEY | base64`
+  prints), and lower- and upper-case hex. Spaces, tabs and line breaks
+  between characters are ignored, so wrapped base64 (`base64` wraps at 76
+  columns), `xxd -p` output and a key split across lines each become one
+  `[redacted]`. Streamed text and thinking deltas hold back only a tail that
+  could still complete one of these forms (at most twice the longest form);
+  the tail is masked or released when its block ends. Approval and question
+  displays, thrown errors and transport errors are masked the same way. The
+  command Claude runs is not rewritten. Other encodings, such as `xxd` with
+  offsets, `od`, compression, encryption or a key reversed, are not
+  recognised.
+- **Command refusal.** A `PreToolUse` hook passed through the SDK `hooks`
+  option (matcher `Bash|PowerShell`) declines commands that mention
+  `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, read `/proc/*/environ`, or
+  dump the environment (`env` without a command, `printenv` without names,
+  `set` without arguments, `export`, `export -p`, `declare -x`,
+  `Get-ChildItem Env:`), including inside `bash -c` or `cmd /c`. Hooks run
+  before the permission check in every mode, so the refusal also covers
+  full access (`bypassPermissions`) and commands Claude Code would approve as
+  read-only; the binary runs SDK callback hooks even under the managed
+  `disableAllHooks` setting Inertia applies. The permission broker repeats the
+  same check. Only these command shapes are refused: a program that reads its
+  environment some other way (for example a script that prints
+  `os.environ`) is not refused, and its output is masked only when it shows
+  the key in one of the forms above.
+- **No `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`.** The bundled Claude Code binary
+  scrubs `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and related variables from
+  its subprocesses when this flag is set, but the same flag forces the
+  permission mode to `default` (dropping plan mode and accept-edits), enables a
+  subprocess sandbox that pins protected paths to the launch directory, and is
+  refused together with `--await-claim`. Inertia does not set it.
+
+### How account and key routes coexist
+
+A chat stores one route: harness, backend profile, configuration revision and
+model. The account route and the key route of the same provider are different
+profiles, so a chat runs on exactly one of them and never switches silently.
+
+- **Readiness.** A key route needs the CLI installed and the key saved. It does
+  not need the provider account to be signed in. The provider snapshot keeps
+  `installState` and `authState` separate, so the interface can show "installed,
+  not signed in" while the key route is ready.
+- **Key check.** After a key is saved, `backend.profile.probe` with
+  `modelIds: []` checks only the key: `GET /v1/models` through the model-list
+  module. When the endpoint has no model list (a 404 or other unsupported
+  answer, a body that is not a model list, or an empty list), the check probes
+  the route's primary model instead and records that probe; its success is the
+  key check and its failure is reported as the reason. Success records the
+  check for the current key generation and the view reports
+  `keyVerified: true`; the profile can then be enabled while its
+  models are still `probe-required`, and the first send probes the chosen model
+  before launch (for the Responses protocol this includes the tool stage that
+  Codex admission needs). A new key, or a connection change, clears the check.
+  A full test stays available by naming the models.
+- **Account kind.** The provider snapshot may carry `accountKind`, read from the
+  CLI's own status: `Claude account` or `Console API key` from
+  `claude auth status --json`, and `ChatGPT account` or `OpenAI API key` from
+  `codex login status`.
+- **Key rotation.** Saving a new key records the new vault generation and keeps
+  the configuration revision, the enabled state, the probe evidence, the
+  defaults and every chat. The evidence of each model is marked for renewal.
+- **Edits.** A change to the address, protocol, authentication, local-HTTP or
+  private-network setting bumps the configuration revision, disables the
+  profile until it is tested again, clears its defaults, and asks existing chats
+  to start a new chat. Names, models, routing and capability hints keep the
+  revision; removing a model affects only chats and defaults on that model. A
+  backend's preset cannot change, and a preset always connects to its catalogue
+  address.
+- **Keys stay with their host.** When a custom backend's address, protocol or
+  authentication changes, the saved key is removed from the vault before the
+  new connection is stored, and the command result carries
+  `credentialCleared: true`. If the vault cannot remove the key, the change is
+  refused.
+- **Evidence.** A test probes the requested models, or every model up to 16,
+  one after another. Each model gets up to three stages of 8 seconds: the text
+  request, and for the Responses protocol the inert tool call and its
+  continuation, so a slow tool stage never consumes the text stage's time. A
+  test stops starting new models once another model could take it past 180
+  seconds, inside the 210-second request deadline. Evidence is kept per model
+  and is valid for 7 days. Before a send, evidence older than 24 hours (or
+  older than the latest key change) is renewed in the background while the turn
+  proceeds; expired or missing evidence is probed before the launch, and the
+  turn is refused only when that probe fails, with its reason.
+- **States.** `connectionState: "testing"` means a person-started test is
+  running. An automatic renewal, in the background or before a launch, sets
+  `renewing: true` instead and leaves `connectionState` on the last result.
+- **Probe shapes.** The probes read the providers' real streams: Responses
+  `response.created`, `response.in_progress`, `response.output_item.*`,
+  `response.content_part.*`, `response.output_text.*` and
+  `response.function_call_arguments.*`, ending in `response.completed`, or in
+  `response.incomplete` when the only reason is `max_output_tokens`; and
+  Messages `message_start`, `content_block_*`, `ping`, `message_delta` (including
+  `stop_reason: "max_tokens"`) and `message_stop`. The text probe allows 256
+  output tokens and the tool stages 1,024, so reasoning models can finish. A
+  returned model counts as the requested one when it is identical or a dated
+  snapshot of it, such as `gpt-5-2025-08-07` for `gpt-5`.
+- **Official endpoints.** A successful probe of a model on the official
+  Anthropic or OpenAI API (the address of the API key presets) reports
+  `verified` compatibility. Gateways and other custom endpoints report
+  `partially-compatible`, because a text probe cannot prove every
+  provider-specific feature.
+- **Model lists.** `backend.profile.discover-models` reads `GET /v1/models`
+  through the probe's network module and returns IDs and display names without
+  saving them.
+- **Model list contents.** Model IDs that contain control, bidirectional or
+  zero-width characters are dropped, and those characters are removed from
+  display names.
+- **Private networks.** Private, carrier-grade NAT, benchmark and link-local
+  addresses are refused unless the profile turns on `allowPrivateNetwork`; the
+  probe, model lists and both launch-time checks apply the same rule. Cloud
+  metadata addresses (`169.254.169.254`, `169.254.170.2`, `100.100.100.200` and
+  `fd00:ec2::254`) stay refused even with the switch on. Loopback still needs
+  `allowInsecureLocalhost`, and plain HTTP is accepted only for literal
+  loopback.
+- **Usage.** Account routes report the provider's subscription windows through
+  official channels (Codex, Claude, OpenCode Go). Cursor and Kimi report
+  "Usage is not reported by this agent."; Inertia no longer reads their sign-in
+  files or Keychain entries, nor calls their internal usage endpoints. Key
+  routes report "Usage and limits are not available for API keys." and never
+  call an account usage endpoint.
+- **Failure kinds.** A failed turn may carry `failureKind` (`billing`,
+  `authentication`, `rate-limited` or `model-not-found`) when the harness
+  classified the error: Claude's assistant error codes, Codex's
+  `codexErrorInfo` (`unauthorized`, `usageLimitExceeded`, `rateLimitExceeded`),
+  usage-limit tags and authentication phases of the ACP and Antigravity
+  harnesses.
+- **Linux without a keyring.** When Electron's safe storage falls back to plain
+  text, keys are refused with "Inertia cannot store keys safely on this system
+  because no keyring is available. Install or unlock a Secret Service keyring,
+  such as GNOME Keyring or KWallet, then restart Inertia."
+
+### Not verified against live services
+
+The deterministic fixtures cover the request shapes, headers, network policy
+and failure handling. These have not been exercised against the real services:
+the Anthropic and OpenAI APIs with real keys, model lists from those APIs,
+`claude auth login --console` on an installed Claude Code, Claude Code with a
+first-party API key through the custom launch options, Codex `model_providers`
+with an OpenAI key, and the Kimi key route.
+
 ## What the open-source review changed
 
 The August 2026 review used other projects as evidence and adversarial test

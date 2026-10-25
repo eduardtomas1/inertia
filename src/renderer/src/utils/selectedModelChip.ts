@@ -24,7 +24,7 @@ export type SelectedModelChipRoute = Pick<
   | "modelId"
   | "reasoningEffort"
   | "source"
->;
+> & Partial<Pick<ModelSearchRoute, "sourceProviderId">>;
 
 export interface SelectedModelChipIdentity {
   routeKey: string;
@@ -51,10 +51,10 @@ export function selectedModelChipLabel(
 }
 
 export function selectedModelChipGlyph(
-  route: Pick<SelectedModelChipRoute, "harnessId" | "source">,
+  route: Pick<SelectedModelChipRoute, "harnessId" | "source" | "sourceProviderId">,
 ): SelectedModelChipGlyph {
   if (route.source === "custom") return "custom";
-  return providerIdForHarness(route.harnessId) ?? "unknown";
+  return route.sourceProviderId ?? providerIdForHarness(route.harnessId) ?? "unknown";
 }
 
 function labeledIdentity(label: string, id: string): string {

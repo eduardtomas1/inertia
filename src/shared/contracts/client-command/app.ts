@@ -29,10 +29,12 @@ import {
 import {
   modelBackendCredentialRevisionSchema,
   modelBackendDefaultInputSchema,
+  modelBackendProfileDiscoverModelsSchema,
   modelBackendProfileDraftSchema,
   modelBackendProfileProbeSchema,
   modelBackendProfileUpdateSchema,
 } from "../../backend-profile-settings";
+import { PROVIDER_AUTH_METHODS, providerSupportsAuthMethod } from "../../provider";
 import {
   providerMaintenanceOperationIdSchema,
   providerMaintenanceProviderIdSchema,
@@ -133,7 +135,12 @@ export const appCommandSchemas = [
         providerId: providerIdSchema,
         cols: z.number().int().min(40).max(240),
         rows: z.number().int().min(10).max(80),
-      }).strict(),
+        method: z.enum(PROVIDER_AUTH_METHODS).optional(),
+      }).strict().refine(
+        (payload) => payload.method === undefined
+          || providerSupportsAuthMethod(payload.providerId, payload.method),
+        { path: ["method"], message: "Console sign-in is available only for Claude." },
+      ),
     })
     .strict(),
   z
@@ -499,6 +506,13 @@ export const configurationCommandSchemas = [
       ...requestBase,
       type: z.literal("backend.profile.probe"),
       payload: modelBackendProfileProbeSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("backend.profile.discover-models"),
+      payload: modelBackendProfileDiscoverModelsSchema,
     })
     .strict(),
   z

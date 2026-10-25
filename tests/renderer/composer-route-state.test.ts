@@ -10,6 +10,7 @@ import {
   providerNativeModelSelection,
   withModelSelectionFastMode,
 } from "../../src/shared/model-routing";
+import { backendView } from "./backend-view-fixtures";
 
 function provider(
   freshness: ProviderInfo["metadataState"]["models"]["freshness"] = "fresh",
@@ -59,7 +60,7 @@ function provider(
 }
 
 function customProfile(): ModelBackendProfileView {
-  return {
+  return backendView<ModelBackendProfileView>({
     id: "custom:team",
     displayName: "Team gateway",
     harnessId: "codex-app-server",
@@ -103,7 +104,7 @@ function customProfile(): ModelBackendProfileView {
     latestProbe: null,
     canDelete: true,
     canDisable: true,
-  };
+  });
 }
 
 describe("exact composer route state", () => {

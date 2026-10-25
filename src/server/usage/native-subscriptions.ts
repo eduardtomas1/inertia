@@ -1,31 +1,17 @@
 import type { ProviderId } from "../../shared/contracts";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
-import { providerChildEnvironment, providerEnvironment } from "../environment";
-import { cursorSubscriptionWindows, kimiSubscriptionWindows, openCodeSubscriptionWindows } from "./subscription-parsers";
-import { readSubscriptionFile, subscriptionAccountIdentity, subscriptionJson, SubscriptionHttpError, type NativeUsageAccount } from "./subscription-io";
-import {
-  CURSOR_ENDPOINT,
-  KIMI_ENDPOINT,
-  credentialContinuity,
-  cursorCredential,
-  kimiCredential,
-  type SubscriptionCredential,
-} from "./subscription-credentials";
+import { openCodeSubscriptionWindows } from "./subscription-parsers";
+import { subscriptionAccountIdentity, subscriptionJson, SubscriptionHttpError, type NativeUsageAccount } from "./subscription-io";
 
 export interface NativeSubscriptionDependencies {
-  environment?: () => Promise<NodeJS.ProcessEnv>;
-  platform?: NodeJS.Platform;
   fetch?: typeof fetch;
-  readFile?: typeof readSubscriptionFile;
-  readCursorKeychain?: () => Promise<string | null>;
   openCodeAccount?: (cwd: string, model: string | undefined, signal: AbortSignal) => Promise<{ token: string; scope: string } | null>;
   accountKey?: (signal: AbortSignal) => Promise<string | null>;
 }
-const KEYCHAIN_REASON = "Inertia reads this Cursor login from the macOS Keychain only when you ask, so it cannot confirm the account at the reset.";
-const SESSION_REASON = "This login does not name a stable account, so Inertia cannot confirm it at the reset.";
+type SubscriptionCredential = { token: string; scope: string };
 const STORAGE_REASON = "Secure storage is unavailable, so Inertia cannot confirm the account at the reset.";
 const NO_ACCOUNT_REASON = "The provider did not report an account Inertia can confirm at the reset.";
-const UNSUPPORTED_DETAIL = "This account or selected model does not expose a supported subscription reset time.";
+const UNREPORTED_DETAIL = "Usage is not reported by this agent.";
 const OPENCODE_UNSUPPORTED_DETAIL = "Reset times are available for OpenCode Go models with a Go subscription. "
   + "Other OpenCode backends do not expose a shared quota API.";
 const FAILED_DETAIL = "The provider did not answer the quota check.";
@@ -35,26 +21,12 @@ const MAX_COOLDOWN_MS = 15 * 60_000;
 const MAX_COOLDOWNS = 32;
 const waitDetail = (until: number) =>
   `The provider asked Inertia to wait ${Math.max(1, Math.ceil((until - Date.now()) / 60_000))} min before checking quota again.`;
-const sameAccount = (left: SubscriptionCredential, right: SubscriptionCredential) => left.scope === right.scope
-  && (credentialContinuity(left) ?? left.token) === (credentialContinuity(right) ?? right.token);
+const sameAccount = (left: SubscriptionCredential, right: SubscriptionCredential) => left.scope === right.scope && left.token === right.token;
 
 export class NativeSubscriptionReader {
-  private keychainRead: Promise<string | null> | null = null;
   private identityKey: string | null = null;
   private readonly cooldowns = new Map<string, number>();
   constructor(private readonly dependencies: NativeSubscriptionDependencies = {}) {}
-  private keychain(): Promise<string | null> {
-    if (!this.keychainRead) {
-      this.keychainRead = (async () => {
-        if (this.dependencies.readCursorKeychain) return this.dependencies.readCursorKeychain();
-        const { AsyncEntry } = await import("@napi-rs/keyring");
-        return await new AsyncEntry("cursor-access-token", "cursor-user").getPassword() ?? null;
-      })().finally(() => {
-        this.keychainRead = null;
-      });
-    }
-    return this.keychainRead;
-  }
   private async key(signal: AbortSignal): Promise<string | null> {
     this.identityKey ??= await this.dependencies.accountKey?.(signal).catch(() => null) ?? null;
     return this.identityKey;
@@ -68,12 +40,9 @@ export class NativeSubscriptionReader {
     return { ...account, credentialFingerprint: subscriptionAccountIdentity(key, `metadata:${account.providerId}`, reported) };
   }
   private async resumeIdentity(credential: SubscriptionCredential, signal: AbortSignal): Promise<Partial<NativeUsageAccount>> {
-    if (credential.keychain) return { keychain: "read", resumeUnavailable: KEYCHAIN_REASON };
-    const continuity = credentialContinuity(credential);
-    if (!continuity) return { resumeUnavailable: SESSION_REASON };
     const key = await this.key(signal);
     if (!key) return { resumeUnavailable: STORAGE_REASON };
-    return { credentialFingerprint: subscriptionAccountIdentity(key, credential.scope, continuity) };
+    return { credentialFingerprint: subscriptionAccountIdentity(key, credential.scope, JSON.stringify(["key", credential.token])) };
   }
   private coolDown(fingerprint: string, until: number): void {
     this.cooldowns.delete(fingerprint);
@@ -81,64 +50,36 @@ export class NativeSubscriptionReader {
     if (this.cooldowns.size >= MAX_COOLDOWNS) this.cooldowns.delete(this.cooldowns.keys().next().value!);
     this.cooldowns.set(fingerprint, until);
   }
-  private async credentials(provider: ProviderId, model: string | undefined, env: NodeJS.ProcessEnv, cwd: string,
-    signal: AbortSignal, interactive: boolean): Promise<SubscriptionCredential | "deferred" | null> {
-    const source = {
-      env,
-      platform: this.dependencies.platform ?? process.platform,
-      read: this.dependencies.readFile ?? readSubscriptionFile,
-      keychain: () => this.keychain(),
-      interactive,
-    };
-    if (provider === "cursor") return cursorCredential(source);
-    if (provider === "kimi") return kimiCredential(source, model);
+  private async credentials(provider: ProviderId, model: string | undefined, cwd: string, signal: AbortSignal): Promise<SubscriptionCredential | null> {
     if (provider !== "opencode") return null;
-    const account = await this.dependencies.openCodeAccount?.(cwd, model, signal);
-    return account ? { ...account, kind: "key" } : null;
+    return await this.dependencies.openCodeAccount?.(cwd, model, signal) ?? null;
   }
-  private async quota(provider: ProviderId, token: string, signal: AbortSignal): Promise<unknown> {
-    const fetcher = this.dependencies.fetch ?? fetch;
-    if (provider === "cursor") {
-      return subscriptionJson(fetcher, `${CURSOR_ENDPOINT}/aiserver.v1.DashboardService/GetCurrentPeriodUsage`, token, signal,
-        { post: true, headers: { "connect-protocol-version": "1", "x-cursor-client-type": "cli" } });
-    }
-    const url = provider === "kimi" ? `${KIMI_ENDPOINT}/usages` : "https://opencode.ai/zen/go/v1/usage";
-    return subscriptionJson(fetcher, url, token, signal);
-  }
-  async read(base: UsageAccount, model: string | undefined, lifetime: AbortSignal, cwd: string, interactive = false): Promise<NativeUsageAccount> {
+  async read(base: UsageAccount, model: string | undefined, lifetime: AbortSignal, cwd: string): Promise<NativeUsageAccount> {
     const provider = base.providerId as ProviderId;
+    if (provider === "cursor" || provider === "kimi") return { ...base, windows: [], status: "unavailable", detail: UNREPORTED_DETAIL };
     if (provider === "antigravity") {
       return { ...base, windows: [], status: "unsupported", detail: "Antigravity's current CLI protocol does not report subscription reset times." };
     }
     const signal = AbortSignal.any([lifetime, AbortSignal.timeout(10_000)]);
     let identity: Partial<NativeUsageAccount> = {};
     const work = async (): Promise<NativeUsageAccount> => {
-      const source = await (this.dependencies.environment?.() ?? providerEnvironment().then(({ env }) => env));
-      const env = providerChildEnvironment(provider, source);
-      const account = await this.credentials(provider, model, env, cwd, signal, interactive);
-      if (account === "deferred") {
-        return { ...base, windows: [], status: "unavailable", keychain: "deferred",
-          detail: "Refresh Limits to read this Cursor login from the macOS Keychain." };
-      }
-      if (!account) {
-        return { ...base, windows: [], status: "unsupported", detail: provider === "opencode" ? OPENCODE_UNSUPPORTED_DETAIL : UNSUPPORTED_DETAIL };
-      }
+      const account = await this.credentials(provider, model, cwd, signal);
+      if (!account) return { ...base, windows: [], status: "unsupported", detail: OPENCODE_UNSUPPORTED_DETAIL };
       signal.throwIfAborted();
       identity = await this.resumeIdentity(account, signal);
       const fingerprint = identity.credentialFingerprint;
       const until = fingerprint ? this.cooldowns.get(fingerprint) ?? 0 : 0;
       if (until > Date.now()) return { ...base, ...identity, windows: [], status: "error", detail: waitDetail(until) };
-      const raw = await this.quota(provider, account.token, signal);
+      const raw = await subscriptionJson(this.dependencies.fetch ?? fetch, "https://opencode.ai/zen/go/v1/usage", account.token, signal);
       const receivedAt = Date.now();
-      const current = account.keychain ? account : await this.credentials(provider, model, env, cwd, signal, interactive);
+      const current = await this.credentials(provider, model, cwd, signal);
       signal.throwIfAborted();
-      if (!current || current === "deferred" || !sameAccount(current, account)) {
+      if (!current || !sameAccount(current, account)) {
         identity = {};
         throw new Error("The provider account changed during the read.");
       }
       if (fingerprint) this.cooldowns.delete(fingerprint);
-      const windows = provider === "cursor" ? cursorSubscriptionWindows(raw)
-        : provider === "kimi" ? kimiSubscriptionWindows(raw, receivedAt) : openCodeSubscriptionWindows(raw);
+      const windows = openCodeSubscriptionWindows(raw);
       return {
         ...base,
         windows,

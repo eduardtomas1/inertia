@@ -44,13 +44,19 @@ export type CredentialVaultErrorCode =
 
 export class CredentialVaultError extends Error {
   readonly code: CredentialVaultErrorCode;
+  readonly publicDetail: string | null;
 
-  constructor(code: CredentialVaultErrorCode, message: string) {
+  constructor(code: CredentialVaultErrorCode, message: string, publicDetail: string | null = null) {
     super(message);
     this.name = "CredentialVaultError";
     this.code = code;
+    this.publicDetail = publicDetail;
   }
 }
+
+export const NO_KEYRING_MESSAGE =
+  "Inertia cannot store keys safely on this system because no keyring is available. "
+  + "Install or unlock a Secret Service keyring, such as GNOME Keyring or KWallet, then restart Inertia.";
 
 export interface CredentialEncryptionBackend {
   availability(): Promise<BackendCredentialStorageState>;
@@ -143,7 +149,7 @@ export class ElectronSafeStorageBackend implements CredentialEncryptionBackend {
       if (this.platform === "linux") {
         const selected = this.storage.getSelectedStorageBackend();
         if (selected === "basic_text" || selected === "unknown") {
-          return publicStorageState(false, "unavailable");
+          return { ...publicStorageState(false, "unavailable"), message: NO_KEYRING_MESSAGE };
         }
       }
       if (!await this.storage.isAsyncEncryptionAvailable()) {
@@ -849,6 +855,7 @@ export class CredentialVault {
       throw new CredentialVaultError(
         "storage-unavailable",
         "Secure credential storage is unavailable on this system.",
+        storage.message === NO_KEYRING_MESSAGE ? NO_KEYRING_MESSAGE : null,
       );
     }
     let encrypted: Buffer;

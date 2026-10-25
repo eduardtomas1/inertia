@@ -1,6 +1,7 @@
 import type { ClientCommand } from "@shared/contracts";
 import {
   AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
+  BACKEND_PROFILE_DISCOVERY_REQUEST_TIMEOUT_MS,
   BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
   CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS,
   CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
@@ -113,6 +114,10 @@ export const RUNTIME_COMMAND_POLICIES = {
   "backend.profile.create": shortMutation,
   "backend.profile.credential-revision": shortMutation,
   "backend.profile.delete": shortMutation,
+  "backend.profile.discover-models": {
+    timeoutMs: BACKEND_PROFILE_DISCOVERY_REQUEST_TIMEOUT_MS,
+    timeoutDelivery: "rejected",
+  },
   "backend.profile.get": shortRetrySafe,
   "backend.profile.probe": {
     timeoutMs: BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,

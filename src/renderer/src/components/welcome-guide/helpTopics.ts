@@ -121,8 +121,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         detail: "Save reusable prompts in Prompt presets and keep drafts for this chat in Scratch prompts. Presets never send automatically.",
       },
       {
-        name: "Custom backends",
-        detail: "Add a custom backend in Settings → Agents to route a chat through your own compatible endpoint. Its credential is stored in the system credential vault.",
+        name: "Accounts and API keys",
+        detail: "Sign in with a provider account, or add an Anthropic or OpenAI API key in Settings → Agents → Accounts and API keys to use your API credits. Each chat uses the route you choose in the model chooser. Keys are stored in the system credential vault. Custom backends route a chat through your own compatible endpoint.",
         jump: "Open Settings → Agents",
       },
       {

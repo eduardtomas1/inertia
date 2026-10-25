@@ -25,6 +25,43 @@ The useful changes in each Inertia release, in plain language.
   its prompt cache for **1 hour** instead of 5 minutes. It costs more to write
   and less to resume after a break.
 
+### Performance
+
+- Deleting a chat or project no longer stalls the app for seconds on a large
+  database: the turn columns of activities, messages and reasoning rows are
+  indexed, and three superseded indexes are dropped.
+- A long reply streams more smoothly: the chat workspace no longer re-renders
+  on every scroll event, the live thinking line parses only the new reasoning
+  instead of the whole turn, and typing in the composer renders it once per
+  keystroke.
+- The sidebar stays still while you scroll inside a row and while agents start
+  and finish commands.
+- Idle usage-limit checks start the provider CLIs less often: every 3 minutes
+  at first, then up to every 30 minutes while the limits do not change, and
+  not at all while no window is connected. The usage reading can be up to
+  30 minutes old while Inertia is idle.
+- On Linux, each agent, terminal and Git process is watched at 500 ms instead
+  of 50 ms once it has started, and its exit is still seen within milliseconds.
+- The hourly backup is skipped when nothing changed since the last one, and a
+  command whose bounded output stopped changing is no longer re-saved and
+  re-sent every 64 ms.
+
+### Diagnostics
+
+- A Claude turn that ends because the account hit its usage limit while a
+  follow-up was pending now says so instead of "Claude cancelled an accepted
+  follow-up", and no longer records a turn failure.
+- Quiet turns are recorded in Diagnostics only after ten minutes of silence,
+  as one record, with system sleep excluded, so routine waits no longer push
+  real failures out of the journal.
+- Runtime stderr lines that Inertia does not recognise are recorded by kind
+  (Node warning name, stack frame, Chromium log level, SDK warning) instead of
+  only being counted; their text is still never stored.
+- Failed-command incidents record the command type.
+- New chats that are not saved yet no longer send a queue request that the
+  runtime must reject.
+- Repeated or empty Codex diff updates no longer add duplicate activity rows.
+
 ## 0.0.77 — 2026-10-25
 
 Any agent as a watcher with the access you choose, API keys beside your

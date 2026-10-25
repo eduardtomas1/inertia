@@ -2,7 +2,11 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Unreleased
+## 0.0.77 — 2026-10-25
+
+Any agent as a watcher with the access you choose, API keys beside your
+provider accounts, and an interrupted agent update that no longer blocks the
+others.
 
 ### Watcher
 
@@ -28,19 +32,19 @@ The useful changes in each Inertia release, in plain language.
 
 ### Chats
 
-- Keep Copy and Snooze submenus open while the pointer crosses the gap from
+- Copy and Snooze submenus stay open while the pointer crosses the gap from
   their chat-menu row into the submenu.
 
 ### Security
 
-- Keep Cursor and Kimi's local tool-bridge credentials out of replies,
+- Cursor and Kimi's local tool-bridge credentials stay out of replies,
   reasoning and diagnostics when another credential shares part of their value
   or overlaps their start or end, including responses split across updates.
-- Update HTTP request parsing and URI/IP validation libraries to patched
+- HTTP request parsing and URI/IP validation libraries are updated to patched
   releases, along with the affected development dependencies.
-- Run CI and release builds on Node 22.23.4 with its October security fixes,
-  and update electron-updater to 6.8.11, which refuses missing or path-valued
-  cached update file names.
+- CI and release builds run on Node 22.23.4 with its October security fixes,
+  and electron-updater is updated to 6.8.11, which refuses missing or
+  path-valued cached update file names.
 
 ### Accounts and API keys
 

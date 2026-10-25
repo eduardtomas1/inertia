@@ -1,5 +1,5 @@
 import type * as ChildProcess from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -35,8 +35,8 @@ afterEach(() => {
 });
 
 describe("runtime bootstrap recovery", () => {
-  it("probes the macOS boot identity once per launch", async () => {
-    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-recovery-")); roots.push(root);
+  it.skipIf(process.platform === "win32")("probes the macOS boot identity once per launch", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "inertia-bootstrap-recovery-"))); roots.push(root);
     spawnSyncMock.mockImplementation((command: string, ...rest: unknown[]) => {
       if (command === "/usr/sbin/sysctl") {
         const stdout = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA\n";

@@ -11,12 +11,7 @@ export * from "./provider-terminal-resume";
 export * from "./run-state";
 export * from "./lifecycle-diagnostics";
 export * from "./conversation-context";
-export type {
-  PromptPreset,
-  PromptPresetDraft,
-  PromptPresetRoute,
-} from "./prompt-presets";
-export type { Todo, TodoDraft, TodoPatch, TodoPriority } from "./todos";
+export type { PromptPreset } from "./prompt-presets";
 export * from "./contracts/agent";
 export * from "./contracts/agent-workflows";
 export * from "./contracts/app";

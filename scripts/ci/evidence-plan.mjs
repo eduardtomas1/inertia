@@ -158,7 +158,6 @@ export function outputsForEvidencePlan(plan) {
     plan_json: JSON.stringify(plan),
     matrix_json: JSON.stringify(plan.matrix),
     electron_matrix_json: JSON.stringify(plan.electronMatrix),
-    full_certification: plan.fullCertification,
     renderer: plan.renderer,
     benchmarks: plan.benchmarks,
     performance_smoke: plan.performanceSmoke,

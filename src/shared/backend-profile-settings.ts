@@ -917,12 +917,6 @@ export function backendProfileUsesCredential(
     || profile.authenticationMode === "bearer-token";
 }
 
-export function redactBackendProfileForTransport(
-  profile: PersistedModelBackendProfile,
-): PersistedModelBackendProfile {
-  return persistedModelBackendProfileSchema.parse(profile);
-}
-
 export function backendProfilePrimaryModel(
   profile: Pick<PersistedModelBackendProfile, "models" | "routing">,
 ): BackendModelDefinition {

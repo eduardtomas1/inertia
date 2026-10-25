@@ -82,7 +82,6 @@ export const todoSchema = z.object({
 }).strict().refine(dueTimeRequiresDate, TODO_TIME_WITHOUT_DATE_MESSAGE);
 
 export type TodoPriority = z.infer<typeof todoPrioritySchema>;
-export type TodoDraft = z.infer<typeof todoDraftSchema>;
 export type TodoPatch = z.infer<typeof todoPatchSchema>;
 export type Todo = z.infer<typeof todoSchema>;
 

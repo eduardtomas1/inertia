@@ -108,6 +108,17 @@ describe("runtime stderr capture", () => {
     expect(h.record).toHaveBeenLastCalledWith("omitted", 1);
   });
 
+  it("classifies a long unterminated warning hint in linear time", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const record = vi.fn();
+    const h = new RuntimeStderrJournal({ record });
+    const started = performance.now();
+    h.write(`(Use \`${"--trace-".repeat(511)}\n`);
+    expect(performance.now() - started).toBeLessThan(50);
+    vi.advanceTimersByTime(5_000);
+    expect(record).toHaveBeenCalledExactlyOnceWith("other", 1);
+  });
+
   it("caps records per minute and reports the excess as omitted in the next window", () => {
     const h = journal({ maxRecordsPerWindow: 5 });
     h.journal.write("The scheduled database backup failed.\n".repeat(12));

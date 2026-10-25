@@ -30,7 +30,8 @@ const SDK_WARNING_PREFIXES = [
   "Recursive reference detected at ",
 ];
 const NODE_WARNING = /^\([A-Za-z][\w .-]{0,40}:\d+\) (?:\[[A-Z0-9_]+\] )?([A-Za-z]*Warning)(?=[:\s]|$)/u;
-const NODE_WARNING_HINT = /^\(Use `[^`]*--trace-[a-z-]+[^`]*` to show where the warning was created\)$/u;
+const NODE_WARNING_HINT = /^\(Use `[^`]*` to show where the warning was created\)$/u;
+const TRACE_FLAG = /--trace-[a-z-]/u;
 const STACK_FRAME = /^at \S/u;
 const CHROMIUM_LOG = /^\[(?:\d+:){0,2}\d{4}\/\d{6}(?:\.\d+)?:([A-Z]+)\d*:[^\]]*\]/u;
 
@@ -62,7 +63,7 @@ export function classifyRuntimeStderrShape(line: string): RuntimeStderrShapeCode
   if (warning) {
     return `node-warning:${closedMember<RuntimeNodeWarningName>(RUNTIME_NODE_WARNING_NAMES, warning[1], "other")}`;
   }
-  if (NODE_WARNING_HINT.test(line)) return "node-warning-hint";
+  if (NODE_WARNING_HINT.test(line) && TRACE_FLAG.test(line)) return "node-warning-hint";
   if (STACK_FRAME.test(line)) return "stack-frame";
   const chromium = CHROMIUM_LOG.exec(line);
   if (chromium) {

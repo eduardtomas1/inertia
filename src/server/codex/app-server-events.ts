@@ -113,6 +113,7 @@ export class CodexAppServerEvents {
   private readonly itemActivities = new Map<string, CodexItemActivity>();
   private readonly completedPlanItemIds = new Set<string>();
   private readonly completedTurnIds = new Set<string>();
+  private readonly latestDiffs = new Map<string, string>();
   private readonly approvalAuthority: CodexApprovalAuthority;
   private readonly subagentProjection = new Map<
     string,
@@ -850,12 +851,9 @@ export class CodexAppServerEvents {
     }
     if (method === "turn/diff/updated") {
       const diff = boundedText(params.diff, 128_000);
-      this.emitActivity(
-        "tool",
-        "completed",
-        "Patch updated",
-        diff ? { detail: `Diff:\n${diff}` } : undefined,
-      );
+      if (!diff || this.latestDiffs.get(notificationTurnId ?? "") === diff) return;
+      this.latestDiffs.set(notificationTurnId ?? "", diff);
+      this.emitActivity("tool", "completed", "Patch updated", { detail: `Diff:\n${diff}` });
       return;
     }
     if (method === "turn/plan/updated") {
@@ -867,6 +865,7 @@ export class CodexAppServerEvents {
       if (!notificationTurnId) return;
       this.completedTurnIds.add(notificationTurnId);
       this.hostTools.retireTurn(notificationTurnId);
+      this.latestDiffs.delete(notificationTurnId);
       const turn = objectValue(params.turn);
       const status = stringValue(turn?.status);
       const turnError = objectValue(turn?.error);

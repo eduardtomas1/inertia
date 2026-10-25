@@ -265,7 +265,7 @@ describe("idle usage freshness", () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it("keeps idle usage fresh between reads at one read per interval", async () => {
+  it("keeps idle usage fresh between backed-off reads", async () => {
     let reads = 0;
     const cache = new ProviderMetadataCache({
       read: async () => {
@@ -296,7 +296,7 @@ describe("idle usage freshness", () => {
       freshness.add(cache.current("codex").metadataState.rateLimits.freshness);
     }
     expect([...freshness]).toEqual(["fresh"]);
-    expect(reads).toBe(10);
+    expect(reads).toBe(3);
     abort.abort();
   });
 
@@ -308,6 +308,110 @@ describe("idle usage freshness", () => {
     startIdleRateLimitRefresh(value.dependencies);
     await vi.advanceTimersByTimeAsync(tick);
     expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
+    value.abort.abort();
+  });
+});
+
+describe("idle usage cadence", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+  const minute = 60 * 1_000;
+
+  function cadenceFixture(options: { present?: () => boolean; rollingReset?: boolean } = {}) {
+    const used = new Map<string, number>([["codex", 40], ["claude", 40]]);
+    const readsAt = new Map<string, number[]>([["codex", []], ["claude", []]]);
+    const busy = new Set<ProviderId>();
+    const started = Date.now();
+    const cache = new ProviderMetadataCache({
+      read: async (providerId) => {
+        readsAt.get(providerId)!.push((Date.now() - started) / minute);
+        return { rateLimits: [{ id: `${providerId}:primary`, label: providerId, usedPercent: used.get(providerId)!, remainingPercent: 100 - used.get(providerId)!, windowMinutes: 300, resetsAt: options.rollingReset ? new Date(Date.now() + 5 * 60 * minute).toISOString() : null }] };
+      },
+    });
+    const read = (providerId: ProviderId, fields: Array<"models" | "rateLimits">) => cache.metadata(providerId, `/tools/${providerId}`, {}, "/workspace", { fields, force: true });
+    const abort = new AbortController();
+    const start = async () => {
+      await read("codex", ["rateLimits"]);
+      await read("claude", ["rateLimits"]);
+      readsAt.set("codex", []);
+      readsAt.set("claude", []);
+      startIdleRateLimitRefresh({
+        enabled: true,
+        signal: abort.signal,
+        isClosed: () => false,
+        cachedState: (providerId) => cache.current(providerId),
+        read: (providerId, fields) => read(providerId as ProviderId, fields),
+        apply: () => undefined,
+        broadcastSnapshot: () => undefined,
+        isExternalTurn: () => false,
+        canRun: (providerId) => providerId === "codex" || providerId === "claude",
+        activeProviderIds: () => busy,
+        track: async (operation) => await operation(),
+        ...(options.present ? { clientPresent: options.present } : {}),
+      });
+    };
+    return { cache, used, readsAt, busy, abort, start, read };
+  }
+
+  it("backs off idle reads geometrically while limits stay unchanged", async () => {
+    const value = cadenceFixture();
+    await value.start();
+    const freshness = new Set<string>();
+    for (let elapsed = 0; elapsed < 60 * minute; elapsed += 10_000) {
+      await vi.advanceTimersByTimeAsync(10_000);
+      freshness.add(value.cache.current("codex").metadataState.rateLimits.freshness);
+      freshness.add(value.cache.current("claude").metadataState.rateLimits.freshness);
+    }
+    expect(value.readsAt.get("codex")!.length).toBeLessThanOrEqual(4);
+    expect(value.readsAt.get("claude")!.length).toBeLessThanOrEqual(4);
+    expect(value.readsAt.get("codex")).toEqual([3, 9, 21, 45]);
+    expect([...freshness]).toEqual(["fresh"]);
+    value.abort.abort();
+  });
+
+  it("keeps backing off when only a rolling reset time moves", async () => {
+    const value = cadenceFixture({ rollingReset: true });
+    await value.start();
+    await vi.advanceTimersByTimeAsync(60 * minute);
+    expect(value.readsAt.get("codex")).toEqual([3, 9, 21, 45]);
+    value.abort.abort();
+  });
+
+  it("returns to the short cadence when a read reports changed limits", async () => {
+    const value = cadenceFixture();
+    await value.start();
+    await vi.advanceTimersByTimeAsync(20 * minute);
+    expect(value.readsAt.get("codex")).toEqual([3, 9]);
+    value.used.set("codex", 55);
+    await vi.advanceTimersByTimeAsync(10 * minute);
+    expect(value.readsAt.get("codex")).toEqual([3, 9, 21, 24, 30]);
+    value.abort.abort();
+  });
+
+  it("returns to the short cadence after a turn ran on the provider", async () => {
+    const value = cadenceFixture();
+    await value.start();
+    await vi.advanceTimersByTimeAsync(22 * minute);
+    expect(value.readsAt.get("codex")).toEqual([3, 9, 21]);
+    value.busy.add("codex");
+    await vi.advanceTimersByTimeAsync(2 * minute);
+    value.busy.clear();
+    await value.read("codex", ["rateLimits"]);
+    await vi.advanceTimersByTimeAsync(4 * minute);
+    expect(value.readsAt.get("codex")).toEqual([3, 9, 21, 24, 27]);
+    value.abort.abort();
+  });
+
+  it("skips idle reads while no renderer client is connected", async () => {
+    let present = false;
+    const value = cadenceFixture({ present: () => present });
+    await value.start();
+    await vi.advanceTimersByTimeAsync(60 * minute);
+    expect(value.readsAt.get("codex")).toEqual([]);
+    expect(value.readsAt.get("claude")).toEqual([]);
+    present = true;
+    await vi.advanceTimersByTimeAsync(3 * minute);
+    expect(value.readsAt.get("codex")).toEqual([63]);
     value.abort.abort();
   });
 });

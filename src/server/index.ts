@@ -634,6 +634,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       try { return [store.conversation(conversationId).providerId]; } catch { return []; }
     })),
     track: trackRuntimeOperation,
+    clientPresent: () => runtimeSync.connectionCount > 0,
   };
   const conversationTitles = createConversationTitleRuntime({
     store, providers, backendProfileController, broadcastSnapshot, signal: runtimeLifetimeAbort.signal,

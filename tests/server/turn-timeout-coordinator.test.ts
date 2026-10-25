@@ -80,25 +80,22 @@ describe("TurnTimeoutCoordinator", () => {
     return { coordinator, active, cancel, fail, reportIncident, setStatus: (value: AgentTurnStatus) => { status = value; } };
   }
 
-  it("observes one silence episode, recovers on activity, and leaves both safety deadlines intact", () => {
+  it("records one silence episode when activity resumes, and leaves both safety deadlines intact", () => {
     const h = observedRuntime();
     const lifetime = h.active.lifetimeTimer;
-    vi.advanceTimersByTime(200);
-    expect(h.reportIncident).toHaveBeenCalledOnce();
-    const warning = h.reportIncident.mock.calls[0]![0];
-    expect(warning).toMatchObject({ code: "turn.inactivity", outcome: "observing", metadata: { silenceMs: 200 } });
-    vi.advanceTimersByTime(200);
-    expect(h.reportIncident).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(400);
+    expect(h.reportIncident).not.toHaveBeenCalled();
     expect(h.cancel).not.toHaveBeenCalled();
     h.coordinator.activity(h.active);
-    expect(h.reportIncident.mock.calls[1]![0]).toMatchObject({ id: warning.id, outcome: "recovered", metadata: { silenceMs: 400 } });
+    expect(h.reportIncident).toHaveBeenCalledOnce();
+    expect(h.reportIncident.mock.calls[0]![0]).toMatchObject({ code: "turn.inactivity", outcome: "recovered", metadata: { silenceMs: 400 } });
     expect(h.active.lifetimeTimer).toBe(lifetime);
     vi.advanceTimersByTime(1_000);
     expect(h.cancel).toHaveBeenCalledOnce();
     expect(h.fail).toHaveBeenCalledOnce();
     expect(h.active.diagnosticFailureCode).toBe("turn.inactivity-timeout");
     h.coordinator.stop(h.active);
-    expect(h.reportIncident.mock.calls.at(-1)![0].outcome).toBe("ended");
+    expect(h.reportIncident.mock.calls.at(-1)![0]).toMatchObject({ outcome: "ended", metadata: { silenceMs: 1_000 } });
   });
 
   it.each(["waiting-for-approval", "waiting-for-input"] as const)("exempts %s without calling it recovery or counting its elapsed time", (status) => {
@@ -107,13 +104,16 @@ describe("TurnTimeoutCoordinator", () => {
     h.setStatus(status); h.coordinator.activity(h.active);
     expect(h.reportIncident.mock.calls.at(-1)![0].outcome).toBe("ended");
     vi.advanceTimersByTime(5_000);
-    expect(h.reportIncident).toHaveBeenCalledTimes(2);
+    expect(h.reportIncident).toHaveBeenCalledTimes(1);
     expect(h.fail).not.toHaveBeenCalled();
     h.setStatus("running"); h.coordinator.activity(h.active);
+    expect(h.reportIncident).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(199);
-    expect(h.reportIncident).toHaveBeenCalledTimes(2);
-    vi.advanceTimersByTime(1);
-    expect(h.reportIncident.mock.calls.at(-1)![0].metadata.silenceMs).toBe(200);
+    h.coordinator.activity(h.active);
+    expect(h.reportIncident).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(250);
+    h.coordinator.activity(h.active);
+    expect(h.reportIncident.mock.calls.at(-1)![0]).toMatchObject({ outcome: "recovered", metadata: { silenceMs: 250 } });
   });
 
   it("does not warn after terminal cleanup and cannot break deadlines when observation throws", () => {
@@ -129,6 +129,59 @@ describe("TurnTimeoutCoordinator", () => {
     vi.advanceTimersByTime(10_000);
     expect(h.reportIncident).not.toHaveBeenCalled();
   });
+  function silenceRuntime(suspendedMs?: (fromMs: number, toMs: number) => number) {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const reportIncident = vi.fn();
+    const coordinator = new TurnTimeoutCoordinator({
+      scheduler: { setTimeout: (callback, delay) => setTimeout(callback, delay), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) },
+      inactivityMs: 6 * 60 * 60 * 1_000, maxLifetimeMs: 7 * 60 * 60 * 1_000,
+      status: () => "running", cancel: vi.fn(), fail: vi.fn(), reportIncident, now: Date.now,
+      ...(suspendedMs ? { suspendedMs } : {}),
+    });
+    const active = activeTurn();
+    coordinator.start(active);
+    return { coordinator, active, reportIncident };
+  }
+
+  it("records nothing for a routine two-minute silence", () => {
+    const h = silenceRuntime();
+    vi.advanceTimersByTime(2 * 60 * 1_000);
+    h.coordinator.activity(h.active);
+    vi.advanceTimersByTime(30_000);
+    h.coordinator.activity(h.active);
+    expect(h.reportIncident).toHaveBeenCalledTimes(0);
+  });
+
+  it("records one merged record for a fifteen-minute silence", () => {
+    const h = silenceRuntime();
+    vi.advanceTimersByTime(15 * 60 * 1_000);
+    h.coordinator.activity(h.active);
+    expect(h.reportIncident).toHaveBeenCalledTimes(1);
+    expect(h.reportIncident.mock.calls[0]![0]).toMatchObject({ code: "turn.inactivity", outcome: "recovered", metadata: { silenceMs: 15 * 60 * 1_000 } });
+    h.coordinator.stop(h.active);
+    expect(h.reportIncident).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes a long silence that ends with the turn as ended", () => {
+    const h = silenceRuntime();
+    vi.advanceTimersByTime(11 * 60 * 1_000);
+    h.coordinator.stop(h.active);
+    expect(h.reportIncident).toHaveBeenCalledTimes(1);
+    expect(h.reportIncident.mock.calls[0]![0]).toMatchObject({ outcome: "ended", metadata: { silenceMs: 11 * 60 * 1_000 } });
+  });
+
+  it("does not count recorded system suspend as provider silence", () => {
+    const windows: Array<[number, number]> = [];
+    const h = silenceRuntime((fromMs, toMs) => { windows.push([fromMs, toMs]); return 14 * 60 * 1_000; });
+    vi.advanceTimersByTime(15 * 60 * 1_000);
+    h.coordinator.activity(h.active);
+    expect(h.reportIncident).toHaveBeenCalledTimes(0);
+    expect(windows).toEqual([[0, 15 * 60 * 1_000]]);
+    vi.advanceTimersByTime(30 * 60 * 1_000);
+    h.coordinator.activity(h.active);
+    expect(h.reportIncident.mock.calls[0]![0]).toMatchObject({ metadata: { silenceMs: 16 * 60 * 1_000 } });
+  });
+
   it("refreshes provider inactivity without replacing the lifetime fail-safe", () => {
     const runtime = timeoutRuntime();
     const active = activeTurn();

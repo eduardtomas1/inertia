@@ -18,13 +18,12 @@ interface TurnTimeoutCoordinatorOptions {
   readonly reportIncident?: (observation: IncidentObservation) => unknown;
   readonly now?: () => number;
   readonly observationMs?: number;
+  readonly suspendedMs?: (fromMs: number, toMs: number) => number;
 }
 
 /** Owns the silence watchdog and the independent process-lifetime fail-safe. */
 export class TurnTimeoutCoordinator {
-  private readonly observations = new WeakMap<ActiveTurn, {
-    id: string; startedAt: number; warned: boolean; timer: unknown;
-  }>();
+  private readonly observations = new WeakMap<ActiveTurn, { startedAt: number }>();
   constructor(private readonly options: TurnTimeoutCoordinatorOptions) {}
 
   start(active: ActiveTurn): void {
@@ -52,21 +51,7 @@ export class TurnTimeoutCoordinator {
     if (ended) {
       return;
     }
-    if (this.options.reportIncident) {
-      const episode = { id: "", startedAt: this.now(), warned: false, timer: null as unknown };
-      this.observations.set(active, episode);
-      // An observation is useful well before the six-hour safety deadline.
-      // Shorter configured deadlines retain a strictly earlier observation.
-      const delay = Math.max(1, Math.min(this.options.observationMs ?? 60_000, this.options.inactivityMs / 2));
-      episode.timer = this.options.scheduler.setTimeout(() => {
-        episode.timer = null;
-        if (this.observations.get(active) !== episode || active.runState.isTerminal()
-          || HUMAN_WAIT_STATUSES.has(this.options.status(active))) return;
-        episode.id = randomUUID();
-        episode.warned = true;
-        this.observe(active, episode, "observing");
-      }, delay);
-    }
+    if (this.options.reportIncident) this.observations.set(active, { startedAt: this.now() });
     active.timeoutTimer = this.options.scheduler.setTimeout(() => {
       active.timeoutTimer = null;
       if (
@@ -90,17 +75,17 @@ export class TurnTimeoutCoordinator {
     const episode = this.observations.get(active);
     if (!episode) return;
     this.observations.delete(active);
-    if (episode.timer !== null) this.options.scheduler.clearTimeout(episode.timer);
-    if (episode.warned) this.observe(active, episode, outcome);
-  }
-
-  private observe(active: ActiveTurn, episode: { id: string; startedAt: number }, outcome: "observing" | "ended" | "recovered"): void {
+    const threshold = Math.max(1, Math.min(this.options.observationMs ?? 600_000, this.options.inactivityMs / 2));
+    const endedAt = this.now();
+    if (endedAt - episode.startedAt < threshold) return;
     try {
-      this.options.reportIncident?.({ id: episode.id, correlationId: active.turn.id,
+      const silenceMs = endedAt - episode.startedAt - Math.max(0, this.options.suspendedMs?.(episode.startedAt, endedAt) ?? 0);
+      if (silenceMs < threshold) return;
+      this.options.reportIncident?.({ id: randomUUID(), correlationId: active.turn.id,
         code: "turn.inactivity", outcome,
         context: { providerId: active.turn.providerId, projectId: active.conversation.projectId,
           conversationId: active.conversation.id, turnId: active.turn.id },
-        metadata: { silenceMs: Math.max(0, Math.min(7 * 24 * 60 * 60 * 1_000, this.now() - episode.startedAt)) },
+        metadata: { silenceMs: Math.min(7 * 24 * 60 * 60 * 1_000, silenceMs) },
       });
     } catch { /* Observation must not change deadlines or cancellation. */ }
   }

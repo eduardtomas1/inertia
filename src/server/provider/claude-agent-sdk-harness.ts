@@ -547,6 +547,13 @@ function startClaudeRun(
         if (commandLifecycle && (commandLifecycle.state === "refused"
           || commandLifecycle.state === "cancelled" || commandLifecycle.state === "discarded")) {
           if (pendingFollowUpIds.has(commandLifecycle.command_uuid)) {
+            const projectedFailure = messageProjector.preferredFailure();
+            if (projectedFailure?.usageLimited || messageProjector.rateLimitRejected) {
+              const error = `${routeFailure(projectedFailure?.usageLimited ? projectedFailure.message : "Claude reached an account rate limit.")} Your follow-up was not answered.`;
+              return finishResult("failed", error, projectedFailure?.usageLimited
+                ? { ...projectedFailure, message: error }
+                : claudeFailure(error, `lifecycle/follow-up-${commandLifecycle.state}`));
+            }
             throw new Error(`Claude ${commandLifecycle.state} an accepted follow-up before returning an answer.`);
           }
           if (commandLifecycle.command_uuid === prompt.uuid) break;

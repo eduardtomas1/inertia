@@ -27,6 +27,7 @@ export interface ProviderUsageRefreshDependencies<Metadata> {
   canRun(providerId: ProviderId): boolean;
   activeProviderIds(): ReadonlySet<ProviderId>;
   track(operation: () => Promise<void>): Promise<void>;
+  clientPresent?(): boolean;
   now?(): number;
 }
 
@@ -34,8 +35,8 @@ const RATE_LIMIT_PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude"];
 export const IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS = 3 * 60 * 1_000;
 const RATE_LIMIT_READ_BUDGET_MS = 30 * 1_000;
 const IDLE_READ_WINDOW_MS = RATE_LIMIT_PROVIDER_IDS.length * RATE_LIMIT_READ_BUDGET_MS;
-export const RATE_LIMIT_TTL_MS = IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS + 2 * IDLE_READ_WINDOW_MS;
 const MAX_IDLE_RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1_000;
+export const RATE_LIMIT_TTL_MS = MAX_IDLE_RATE_LIMIT_BACKOFF_MS + 2 * IDLE_READ_WINDOW_MS;
 export const RESET_READ_DELAY_MS = 5 * 1_000;
 const MAX_TIMER_MS = 2_147_483_647;
 
@@ -91,6 +92,15 @@ export function startIdleRateLimitRefresh<Metadata>(
     RATE_LIMIT_PROVIDER_IDS.map((providerId) => [providerId, now()]),
   );
   const lastResetRead = new Map<ProviderId, number>();
+  const cadence = new Map<ProviderId, { delayMs: number; limits: string; updatedAt: string | null }>();
+  const observed = (providerId: ProviderId) => {
+    const cached = dependencies.cachedState(providerId);
+    return {
+      limits: JSON.stringify(cached.rateLimits, (key, value: unknown) => key === "resetsAt" ? undefined : value),
+      updatedAt: cached.metadataState.rateLimits.updatedAt,
+    };
+  };
+  let absent = false;
   let refreshing = false;
   let stopped = false;
   let resetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -129,7 +139,17 @@ export function startIdleRateLimitRefresh<Metadata>(
         const metadata = await dependencies.read(providerId, ["rateLimits"])
           .catch(() => null);
         if (dependencies.isClosed()) return;
-        if (metadata !== null) dependencies.apply(providerId, metadata);
+        if (metadata !== null) {
+          dependencies.apply(providerId, metadata);
+          const previous = cadence.get(providerId);
+          const current = observed(providerId);
+          cadence.set(providerId, {
+            ...current,
+            delayMs: previous?.limits === current.limits
+              ? Math.min(MAX_IDLE_RATE_LIMIT_BACKOFF_MS, previous.delayMs * 2)
+              : intervalMs,
+          });
+        }
         if (dependencies.cachedState(providerId).metadataState.rateLimits.freshness === "fresh") {
           retry.delete(providerId);
         } else {
@@ -168,15 +188,30 @@ export function startIdleRateLimitRefresh<Metadata>(
   }
   const tick = (): void => {
     if (dependencies.isClosed() || refreshing) return;
+    if (dependencies.clientPresent?.() === false) {
+      absent = true;
+      armReset();
+      return;
+    }
+    if (absent) cadence.clear();
+    absent = false;
     const busy = dependencies.activeProviderIds();
     const due = RATE_LIMIT_PROVIDER_IDS.filter((providerId) => {
       const rateLimits = dependencies.cachedState(providerId).metadataState.rateLimits;
+      const current = observed(providerId);
+      const previous = cadence.get(providerId);
+      const delayMs = busy.has(providerId)
+        || previous?.limits !== current.limits
+        || previous.updatedAt !== current.updatedAt
+        ? intervalMs
+        : previous.delayMs;
+      cadence.set(providerId, { ...current, delayMs });
       return dependencies.canRun(providerId)
         && !busy.has(providerId)
         && (retry.get(providerId)?.at ?? 0) <= now()
         && rateLimits.updatedAt !== null
         && (rateLimits.freshness !== "fresh"
-          || now() - Date.parse(rateLimits.updatedAt) + intervalMs + IDLE_READ_WINDOW_MS > RATE_LIMIT_TTL_MS);
+          || now() - Date.parse(rateLimits.updatedAt) + intervalMs > delayMs + IDLE_READ_WINDOW_MS);
     });
     if (due.length === 0) armReset();
     else refresh(due);

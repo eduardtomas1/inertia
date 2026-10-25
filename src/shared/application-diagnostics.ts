@@ -179,6 +179,7 @@ export const diagnosticContextSchema = z.object({
   conversationId: uuidSchema.optional(),
   turnId: uuidSchema.optional(),
   requestId: uuidSchema.optional(),
+  commandType: z.string().max(80).regex(/^[a-z][A-Za-z0-9]*(?:[.-][A-Za-z0-9]+)*$/u).optional(),
 }).strict();
 
 export const diagnosticIncidentSchema = z.object({

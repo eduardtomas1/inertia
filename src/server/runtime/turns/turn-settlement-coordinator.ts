@@ -274,8 +274,10 @@ export class TurnSettlementCoordinator {
     if (wonSettlement && (status === "failed" || status === "interrupted")) {
       // Emit only after authoritative settlement, carrying identity captured by
       // this turn. Never persist the failure message or provider output here.
+      const usageLimitedEnding = status === "failed" && failure?.usageLimited === true
+        && !active.diagnosticFailureCode;
       try {
-        this.options.hooks.reportIncident?.({ correlationId: active.turn.id,
+        if (!usageLimitedEnding) this.options.hooks.reportIncident?.({ correlationId: active.turn.id,
           code: active.diagnosticFailureCode ?? (terminalReason === "turn-start-failed" ? "provider.start-failed"
             : failure?.phase === "auth" ? "provider.auth-failed"
             : failure?.reason === "transport-closed" || failure?.reason === "rpc-timeout"

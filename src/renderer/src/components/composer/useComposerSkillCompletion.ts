@@ -22,7 +22,9 @@ export function useComposerSkillCompletion(
     setAccepted({ value, caret: acceptedCaret });
   };
   const onSkillSelectionChange = (editor: HTMLTextAreaElement): void => {
-    setSelection({ value: editor.value, start: editor.selectionStart, end: editor.selectionEnd });
+    const { value, selectionStart: start, selectionEnd: end } = editor;
+    if (selection?.value === value && selection.start === start && selection.end === end) return;
+    setSelection({ value, start, end });
   };
   const skillListboxId = `${useId()}-skills`;
   const [highlightedSkillId, setHighlightedSkillId] = useState<string | null>(null);

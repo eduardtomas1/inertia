@@ -128,6 +128,28 @@ export function settingsSaveActions(run: SettingsSaveRunner): Pick<SettingsViewP
   };
 }
 
+const unsavedChatQueueRunners = new WeakMap<QueueCommandRunner, QueueCommandRunner>();
+
+function unsavedChatQueueRunner(run: QueueCommandRunner): QueueCommandRunner {
+  let unsaved = unsavedChatQueueRunners.get(run);
+  if (!unsaved) {
+    unsaved = async (command) => command.type === "message.queue.get" && command.payload.id === undefined
+      ? { kind: "message.queue", conversationId: command.payload.conversationId, entries: [], receipt: null }
+      : await run(command);
+    unsavedChatQueueRunners.set(run, unsaved);
+  }
+  return unsaved;
+}
+
+export function chatQueueRunner(
+  run: QueueCommandRunner | undefined,
+  draft: Conversation | null,
+  conversations: readonly Pick<Conversation, "id">[] | undefined,
+): QueueCommandRunner | undefined {
+  if (!run || !draft || conversations?.some(({ id }) => id === draft.id)) return run;
+  return unsavedChatQueueRunner(run);
+}
+
 export function visibleChatConversation(
   draft: Conversation | null,
   detail: Conversation | null,
@@ -665,7 +687,11 @@ export function createWorkspaceSceneModel({
       contextPackets: chatProjection.contextPackets,
       watcherWakes: chatProjection.watcherWakes,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
-      onQueueCommand: actions.runQueueCommand,
+      onQueueCommand: chatQueueRunner(
+        actions.runQueueCommand,
+        draftConversation,
+        connection.snapshot?.conversations,
+      ),
       onLimitResetCommand: actions.runLimitResetCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,

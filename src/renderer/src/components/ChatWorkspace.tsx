@@ -849,12 +849,15 @@ export function ChatWorkspace({
     // wheel intent. Keep the bounded gesture guard until it expires: neither
     // that event nor a small upward movement within the follow tolerance
     // proves that the reader has finished navigating.
-    dispatchNavigation({
+    const scrolled = {
       type: "reader.scrolled",
       conversationId: conversationId ?? "",
       followsLatest: follows,
       intentional,
-    });
+    } as const;
+    if (transcriptNavigationReducer(navigationRef.current, scrolled) !== navigationRef.current) {
+      dispatchNavigation(scrolled);
+    }
     onLatestContentVisibilityChange?.(follows);
   };
 

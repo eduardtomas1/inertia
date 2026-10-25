@@ -50,8 +50,10 @@ the equivalent same-platform sentinel.
 No assertions are removed from full certification. The complete Linux x64
 suite enforces unchanged all-source/per-area coverage thresholds once. Linux
 ARM64 runs the same complete unit suite without duplicate instrumentation;
-macOS keeps the two-worker bound; four Windows x64 duration-balanced shards
-remain single-worker; Windows ARM64 retains its portable/native obligations.
+macOS keeps the two-worker bound, and macOS x64 runs its units as two Vitest
+hash shard jobs while its matrix job keeps packaging and smoke; four Windows
+x64 duration-balanced shards remain single-worker; Windows ARM64 retains its
+portable/native obligations.
 Windows Electron remains one worker, other isolated desktop projects two. The
 desktop Electron projects run in two jobs per complete target, display-sensitive
 and isolated followed by runtime-recovery; Windows splits its isolated project
@@ -67,9 +69,9 @@ platform/desktop timing benchmarks retain their main/nightly policy.
 The stable `merge-ready` job uses `always()` and explicitly requires classifier,
 quality, migration lineage and every planned result. It validates the canonical
 plan and enumerates actual REST job records, including every selected matrix
-member and all four required Windows shards. Failure, cancellation, timeout,
-unexpected skip, missing/duplicate check, unplanned execution or wrong run/head
-cannot count as success. Jobs intentionally omitted by the plan are distinct
+member, all four required Windows shards and both macOS x64 unit shards.
+Failure, cancellation, timeout, unexpected skip, missing/duplicate check,
+unplanned execution or wrong run/head cannot count as success. Jobs intentionally omitted by the plan are distinct
 from required jobs which did not execute.
 
 GitHub PR checkouts test the synthetic merge SHA (`github.sha`); Actions REST
@@ -196,8 +198,8 @@ Windows isolated project is sharded in two rather than run with a second
 worker. Full-suite jobs precede recovery-only siblings in the matrix, and
 outside the nightly the Electron matrix may run ten jobs at once, which covers
 every pull-request tier without queueing behind `max-parallel`.
-The matrices may request six macOS runners across both architectures; hosted
-concurrency limits can queue jobs. The gain must be measured from completed
+The matrices and the macOS x64 unit shards may request eight macOS runners;
+hosted concurrency limits can queue jobs. The gain must be measured from completed
 hosted runs, not inferred from the sum of phase times.
 
 Opt-in authenticated Kimi smoke runs only on trusted scheduled Linux x64,

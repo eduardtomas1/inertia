@@ -140,4 +140,10 @@ describe("prompt cache lifetime option", () => {
     expect(promptCacheTtlAllowed({ harnessId: "codex-app-server", protocol: "openai-responses" })).toBe(false);
     expect(promptCacheTtlAllowed({ harnessId: "claude-agent-sdk", protocol: "openai-responses" })).toBe(false);
   });
+
+  it("is never available on the Kimi preset, which is billed by quota and manages its own context", () => {
+    expect(promptCacheTtlAllowed({ harnessId: "claude-agent-sdk", protocol: "anthropic-messages", preset: "kimi-code" })).toBe(false);
+    expect(promptCacheTtlAllowed({ harnessId: "claude-agent-sdk", protocol: "anthropic-messages", preset: "anthropic-api-key" })).toBe(true);
+    expect(promptCacheTtlAllowed({ harnessId: "claude-agent-sdk", protocol: "anthropic-messages", preset: "custom" })).toBe(true);
+  });
 });

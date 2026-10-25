@@ -157,7 +157,7 @@
   background: var(--fill);
 }
 
-.composer-history-chip[data-history-mode="full"] {
+.composer-history-chip[aria-pressed="true"] {
   border-color: var(--line-strong);
   color: var(--text);
 }

@@ -2,13 +2,13 @@ import type { ComposerPrimaryActionState } from "../../utils/composerPrimaryActi
 
 export function ComposerSendActionsFallback({
   primaryAction,
-  compactAndSend = false,
+  compactOnReturnMode = null,
   compacting = false,
   onSubmit,
   onStop,
 }: {
   primaryAction: ComposerPrimaryActionState;
-  compactAndSend?: boolean;
+  compactOnReturnMode?: "compact" | "full" | null;
   compacting?: boolean;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
@@ -23,7 +23,9 @@ export function ComposerSendActionsFallback({
     ? stopping ? "Stopping agent" : "Stop agent"
     : submitting
     ? compacting ? "Compacting before sending" : "Sending message"
-    : compactAndSend && primaryAction === "send-ready" ? "Compact and send" : "Send message";
+    : primaryAction === "send-ready" && compactOnReturnMode
+    ? compactOnReturnMode === "compact" ? "Compact and send" : "Send"
+    : "Send message";
   return (
     <button
         type="button"

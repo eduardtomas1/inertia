@@ -281,24 +281,27 @@ test("offers Compact and send on a stale API-key chat, then shows the compaction
     const offer = page.getByRole("button", { name: "Compact and send" });
     await expect(offer).toBeVisible();
     await expect(offer).toHaveAccessibleDescription("Summarize 252K tokens of history, then send");
-    await expect(page.getByRole("button", { name: "History: Compact" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Full history" })).toHaveAttribute("aria-pressed", "false");
     await app.expectNoViewportOverflow();
     await capture(testInfo, `compact-and-send-offer-${theme}`);
   }
 
   await page.getByRole("button", { name: /^Open usage and context\./u }).click();
   const meter = page.getByRole("dialog", { name: "Usage & context" });
-  await expect(meter.getByText(/^Cache expired \d+ min ago$/u)).toBeVisible();
+  await expect(meter.getByText(/^Prompt cache expired \d+ min ago$/u)).toBeVisible();
   await capture(testInfo, "usage-meter-cache-expired-dark");
   await page.keyboard.press("Escape");
   await expect(meter).toBeHidden();
 
-  const chip = page.getByRole("button", { name: "History: Compact" });
-  await chip.click();
-  await expect(page.getByRole("button", { name: "History: Full" })).toBeFocused();
-  await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
+  const fullHistory = page.getByRole("button", { name: "Full history" });
+  await fullHistory.focus();
+  await page.keyboard.press("Space");
+  await expect(fullHistory).toBeFocused();
+  await expect(fullHistory).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
   await capture(testInfo, "full-history-chosen-dark");
-  await page.getByRole("button", { name: "History: Full" }).click();
+  await page.keyboard.press("Space");
+  await expect(fullHistory).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByRole("button", { name: "Compact and send" })).toBeVisible();
 
   await setAppearance(page, "light");
@@ -309,7 +312,7 @@ test("offers Compact and send on a stale API-key chat, then shows the compaction
     conversationId,
     content: DRAFT,
     attachments: [],
-    activate: true,
+    activate: false,
     reason: "on-return",
   });
   await expect(page.getByRole("status").filter({ hasText: "Compacting before sending…" })).toBeVisible();
@@ -339,7 +342,7 @@ test("offers Compact and send on a stale API-key chat, then shows the compaction
   const setting = page.getByRole("radiogroup", { name: "Compact large API chats when you return" });
   await setting.scrollIntoViewIfNeeded();
   await expect(setting.getByRole("radio", { name: "Offer" })).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByText("Offers to summarize a chat of 200K tokens or more on an API key once its prompt cache has expired, so the next turn costs less.")).toBeVisible();
+  await expect(page.getByText("Offers Compact and send when you return to a chat of 200K tokens or more on an Anthropic or OpenAI API key after its prompt cache has expired. Later turns then cost less. Enter follows the button.")).toBeVisible();
   await capture(testInfo, "chats-setting-light");
 
   await sections.getByRole("button", { name: "Agents", exact: true }).click();

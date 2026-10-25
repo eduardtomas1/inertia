@@ -475,11 +475,11 @@ function refuseUnlessCompactableOnReturn(
       && BLOCKING_FAILURE_KINDS.has(latestTurn.failureKind))
   ) {
     throw new RuntimeRequestError(
-      "The last turn stopped on a usage, billing or sign-in problem. Resolve it before compacting this chat.",
+      "The last turn stopped on a usage limit, billing, sign-in or rate-limit problem. Resolve it before compacting this chat.",
     );
   }
   if (dependencies.settings?.().compactOnReturn === "never") {
-    throw new RuntimeRequestError("Compact on return is turned off in Settings.");
+    throw new RuntimeRequestError("Compacting on return is set to Never in Settings → Chats.");
   }
   const profile = dependencies.backendProfileController
     .profiles(dependencies.providerInfo())

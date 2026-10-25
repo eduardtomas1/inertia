@@ -45,14 +45,14 @@ function openMeter(): HTMLElement {
 
 describe("prompt cache in the usage meter", () => {
   it.each([
-    [20, "Cache expired 15 min ago"],
-    [2, "Cache warm, expires in 3 min"],
+    [20, "Prompt cache expired 15 min ago"],
+    [2, "Prompt cache warm, expires in 3 min"],
   ])("describes a cache last used %i minutes ago", (minutes, text) => {
     const snapshot = usage(minutes);
     render(
       <UsageIndicator
         usage={snapshot}
-        promptCache={{ lastRequestStartedAt: snapshot.promptCache!.lastRequestStartedAt, lifetimeMs: 300_000 }}
+        promptCache={{ lastRequestStartedAt: snapshot.promptCache!.lastRequestStartedAt, lifetimeMs: 300_000, source: "configured" }}
         rateLimits={[]}
         rateLimitState={unavailable}
         quotaSource="api-key"
@@ -76,7 +76,7 @@ describe("prompt cache in the usage meter", () => {
         onModeChange={() => undefined}
       />,
     );
-    expect(within(openMeter()).queryByText(/^Cache /u)).toBeNull();
+    expect(within(openMeter()).queryByText(/^Prompt cache /u)).toBeNull();
   });
 
   it.each([
@@ -91,7 +91,7 @@ describe("prompt cache in the usage meter", () => {
     };
     render(<Composer {...composerProps(chat, { providers: [claude], usage: usage(20) })} />);
     const meter = openMeter();
-    if (shown) expect(within(meter).getByText("Cache expired 15 min ago")).toBeInTheDocument();
-    else expect(within(meter).queryByText(/^Cache /u)).toBeNull();
+    if (shown) expect(within(meter).getByText("Prompt cache expired 15 min ago")).toBeInTheDocument();
+    else expect(within(meter).queryByText(/^Prompt cache /u)).toBeNull();
   });
 });

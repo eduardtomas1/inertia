@@ -44,7 +44,7 @@ function provider(id: ProviderId): ProviderInfo {
 
 function key(overrides: Partial<ModelBackendProfileDetail> = {}): ModelBackendProfileDetail {
   const id = overrides.id ?? "custom:anthropic";
-  const anthropic = (overrides.preset ?? "anthropic-api-key") === "anthropic-api-key";
+  const anthropic = overrides.preset !== "openai-api-key";
   return backendView<ModelBackendProfileDetail>({
     id,
     displayName: anthropic ? "Anthropic API key" : "OpenAI API key",
@@ -143,6 +143,27 @@ describe("Prompt cache option", () => {
     expect(onProbe).not.toHaveBeenCalled();
   });
 
+  it("offers no prompt cache choice or summary on the Kimi key", async () => {
+    const user = userEvent.setup();
+    const kimi = key({
+      id: "builtin:kimi-code",
+      displayName: "Kimi",
+      source: "built-in",
+      preset: "kimi-code",
+      baseUrl: "https://api.kimi.com/coding",
+      endpointHost: "api.kimi.com",
+      providerId: "kimi",
+      canDelete: false,
+    });
+    render(<ModelBackendsSettings {...props(kimi, { providers: [provider("claude"), provider("kimi")] })} />);
+    const row = screen.getByRole("listitem", { name: "Kimi" });
+    expect(within(row).queryByText(/prompt cache/u)).toBeNull();
+    await user.click(within(row).getByRole("button", { name: "Models for Kimi" }));
+    const form = await screen.findByRole("form", { name: "Edit Kimi" });
+    expect(within(form).queryByRole("group", { name: "Prompt cache" })).toBeNull();
+    expect(backendEditDraftFromDetail(kimi).promptCacheTtl).toBeUndefined();
+  });
+
   it("offers no prompt cache choice on an OpenAI key", async () => {
     const user = userEvent.setup();
     const profile = key({ id: "custom:openai", preset: "openai-api-key" });
@@ -151,6 +172,31 @@ describe("Prompt cache option", () => {
     await user.click(screen.getByRole("button", { name: "Models for OpenAI API key" }));
     const form = await screen.findByRole("form", { name: "Edit OpenAI API key" });
     expect(within(form).queryByRole("group", { name: "Prompt cache" })).toBeNull();
+  });
+
+  it("offers the prompt cache in the add-key dialog only for the Anthropic preset", async () => {
+    const user = userEvent.setup();
+    const kimi = key({
+      id: "builtin:kimi-code",
+      displayName: "Kimi",
+      source: "built-in",
+      preset: "kimi-code",
+      baseUrl: "https://api.kimi.com/coding",
+      endpointHost: "api.kimi.com",
+      providerId: "kimi",
+      canDelete: false,
+    });
+    render(<ModelBackendsSettings {...props(kimi, { providers: [provider("claude"), provider("codex"), provider("kimi")] })} />);
+    expect(within(screen.getByRole("region", { name: /^Kimi/u })).queryByRole("button", { name: /Add API key/u })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Add API key for Codex" }));
+    const openai = screen.getByRole("dialog", { name: "Add OpenAI API key" });
+    expect(within(openai).queryByRole("group", { name: "Prompt cache" })).toBeNull();
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("button", { name: "Add API key for Claude Code" }));
+    const anthropic = screen.getByRole("dialog", { name: "Add Anthropic API key" });
+    expect(within(anthropic).getByRole("group", { name: "Prompt cache" })).toBeInTheDocument();
   });
 
   it("sends a 1-hour cache when adding an Anthropic key and leaves the default out", async () => {

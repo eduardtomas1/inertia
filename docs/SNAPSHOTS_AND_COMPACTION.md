@@ -165,8 +165,9 @@ the uncached rate. Compact on return offers to shrink the context first.
 **When it is offered.** The composer offers **Compact and send** when all of
 these hold (`compactOnReturnOffer` in `src/shared/compact-on-return.ts`):
 
-- the setting **Compact on return** is `offer` (the default; `never` turns it
-  off, and Restore defaults sets it back to `offer`);
+- the setting **Compact large API chats when you return** (`compactOnReturn`)
+  is `offer` (the default; `never` turns it off, and Restore defaults sets it
+  back to `offer`);
 - the chat's route is eligible (below);
 - the chat holds at least 200,000 tokens of context (`usedTokens`);
 - no turn is running and the chat is not already compacting;
@@ -174,6 +175,14 @@ these hold (`compactOnReturnOffer` in `src/shared/compact-on-return.ts`):
 
 There is no background timer: the offer is computed when the person returns
 to the composer, from the stored prompt-cache facts.
+
+Compaction is itself one model call over the whole history at the uncached
+rate, plus the summary's output. It pays off over the requests that follow
+(each tool step of the next turn and later turns re-read about 18K instead of
+250K), not on the first request. The 200,000-token threshold matches
+Anthropic's long-context price tier. On models with a 200K context window,
+Claude Code compacts on its own before a chat reaches it, so in practice the
+offer appears on long-context models.
 
 **Eligible routes** (`compactOnReturnEligibility`):
 
@@ -183,7 +192,8 @@ to the composer, from the stored prompt-cache facts.
 | Native Claude when `claude auth status` reports a `Console API key` | 5 minutes |
 | Codex harness on the **OpenAI API key** preset | 30 minutes |
 
-Kimi (it manages its own context), custom gateways (no published cache
+Kimi (Kimi Code is a quota membership, not per-token billing, and manages its
+own context), custom gateways (no published cache
 lifetime), native Claude on a Claude account, native Codex, OpenCode, Cursor
 and Antigravity are excluded. The server checks eligibility again against the
 chat's current route and refuses an ineligible request.
@@ -279,8 +289,9 @@ When the facts change:
 - Usage from other providers, and the context reset after a compaction that
   reported no usage, keeps the stored facts.
 
-**What is assumed.** The cache lifetimes are the providers' published
-defaults; providers can evict earlier. Inertia measures from when it observed a
+**What is assumed.** The Anthropic lifetimes are published defaults; the
+OpenAI figure is an assumption. Providers can evict earlier. Inertia measures
+from when it observed a
 request start, not from when the provider wrote or last read the cache.
 The 30-minute OpenAI figure and the start time of Codex requests are estimates;
 the Codex start time is the report time, so the idle time is never overstated.

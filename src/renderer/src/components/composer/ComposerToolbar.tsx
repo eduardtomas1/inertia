@@ -176,7 +176,7 @@ export interface ComposerToolbarProps {
   primaryAction: ComposerPrimaryActionState;
   compactOnReturn?: ComposerCompactOnReturnAction | null;
   compacting?: boolean;
-  promptCache?: Pick<PromptCacheFacts, "lastRequestStartedAt" | "lifetimeMs"> | null;
+  promptCache?: Pick<PromptCacheFacts, "lastRequestStartedAt" | "lifetimeMs" | "source"> | null;
   canSendQueuedNow: boolean;
   queuedTurnId: string | null;
   queuedTurnStatus: AgentTurnStatus | null;
@@ -552,7 +552,7 @@ export function ComposerToolbar({
           fallback={(
             <ComposerSendActionsFallback
               primaryAction={primaryAction}
-              compactAndSend={compactOnReturn?.mode === "compact"}
+              compactOnReturnMode={compactOnReturn?.mode ?? null}
               compacting={compacting}
               onSubmit={onSubmit}
               onStop={onStop}

@@ -44,7 +44,7 @@ export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
         <SettingRadioGroup
           id="compact-on-return"
           title="Compact large API chats when you return"
-          description="Offers to summarize a chat of 200K tokens or more on an API key once its prompt cache has expired, so the next turn costs less."
+          description="Offers Compact and send when you return to a chat of 200K tokens or more on an Anthropic or OpenAI API key after its prompt cache has expired. Later turns then cost less. Enter follows the button."
           value={settings.compactOnReturn ?? DEFAULT_COMPACT_ON_RETURN}
           options={COMPACT_ON_RETURN_CHOICES}
           disabled={disabled}

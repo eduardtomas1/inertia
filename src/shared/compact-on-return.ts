@@ -79,8 +79,14 @@ const KIMI_EXCLUDED = "Kimi manages its own context, so compact on return is not
 const CUSTOM_EXCLUDED = "Custom gateways do not publish a prompt cache lifetime, so compact on return is not offered.";
 const CLAUDE_ACCOUNT_EXCLUDED = "Claude chats are compacted on return only when signed in with a Console API key.";
 
-export function promptCacheTtlAllowed(route: { harnessId: HarnessId; protocol: ModelBackendProtocol | string }): boolean {
-  return route.harnessId === "claude-agent-sdk" && route.protocol === "anthropic-messages";
+export function promptCacheTtlAllowed(route: {
+  harnessId: HarnessId;
+  protocol: ModelBackendProtocol | string;
+  preset?: string | null;
+}): boolean {
+  return route.harnessId === "claude-agent-sdk"
+    && route.protocol === "anthropic-messages"
+    && route.preset !== "kimi-code";
 }
 
 function ineligible(reason: string): CompactOnReturnEligibility {

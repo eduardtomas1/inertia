@@ -35,7 +35,7 @@ export interface CompactOnReturnController {
   compactingOnReturn: boolean;
   failure: string | null;
   action: ComposerCompactOnReturnAction | null;
-  promptCache: Pick<PromptCacheFacts, "lastRequestStartedAt" | "lifetimeMs"> | null;
+  promptCache: Pick<PromptCacheFacts, "lastRequestStartedAt" | "lifetimeMs" | "source"> | null;
   notice: (manual: ComposerCompactNotice | null) => ComposerCompactNotice | null;
   toggle: () => void;
   reset: () => void;
@@ -130,9 +130,9 @@ export function useCompactOnReturn(options: {
     compacting,
     compactingOnReturn,
     failure: failure?.conversationId === conversationId ? failure.message : null,
-    action: tooltip ? { mode, tooltip, onToggle: toggle } : null,
+    action: tooltip ? { mode, tooltip, onToggle: toggle, toggleVisible: failure?.conversationId !== conversationId } : null,
     promptCache: eligible && lifetimeMs !== null && lastRequestStartedAt !== null
-      ? { lastRequestStartedAt, lifetimeMs }
+      ? { lastRequestStartedAt, lifetimeMs, source: usage?.promptCache?.source ?? "assumed" }
       : null,
     notice: (manual) => compactingOnReturn
       ? COMPACTING_BEFORE_SENDING_NOTICE

@@ -25,7 +25,7 @@ describe("Compact on return setting", () => {
     const group = await screen.findByRole("radiogroup", { name: "Compact large API chats when you return" });
     expect(defaultSettings.compactOnReturn).toBe("offer");
     expect(within(group).getByRole("radio", { name: "Offer" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText("Offers to summarize a chat of 200K tokens or more on an API key once its prompt cache has expired, so the next turn costs less."))
+    expect(screen.getByText("Offers Compact and send when you return to a chat of 200K tokens or more on an Anthropic or OpenAI API key after its prompt cache has expired. Later turns then cost less. Enter follows the button."))
       .toBeInTheDocument();
 
     fireEvent.click(within(group).getByRole("radio", { name: "Never" }));
@@ -39,6 +39,14 @@ describe("Compact on return setting", () => {
     })} />);
     const group = await screen.findByRole("radiogroup", { name: "Compact large API chats when you return" });
     expect(within(group).getByRole("radio", { name: "Never" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it.each(["1 hour", "prompt cache"])("finds the Accounts and API keys row by searching for %s", async (query) => {
+    render(<SettingsView {...settingsViewProps({ target: { section: "appearance" } })} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Search settings" }), { target: { value: query } });
+    const results = screen.getByRole("listbox", { name: "Matching settings" });
+    expect(within(within(results).getByRole("group", { name: "Agents" }))
+      .getByRole("option", { name: "Accounts and API keys" })).toBeInTheDocument();
   });
 
   it.each(["prompt cache", "compact on return", "summarize"])("finds the setting by searching for %s", async (query) => {

@@ -104,17 +104,26 @@ describe("compact on return copy", () => {
 
   it("describes a warm and an expired prompt cache in minutes", () => {
     const start = Date.parse("2026-10-25T10:00:00.000Z");
-    const facts = { lastRequestStartedAt: "2026-10-25T10:00:00.000Z", lifetimeMs: 300_000 };
-    expect(promptCacheStatus(facts, start + 60_000)).toBe("Cache warm, expires in 4 min");
-    expect(promptCacheStatus(facts, start + 4 * 60_000 + 30_000)).toBe("Cache warm, expires in 1 min");
-    expect(promptCacheStatus(facts, start + 5 * 60_000 + 20_000)).toBe("Cache expired just now");
-    expect(promptCacheStatus(facts, start + 17 * 60_000)).toBe("Cache expired 12 min ago");
-    expect(promptCacheStatus(facts, start + 3 * 3_600_000)).toBe("Cache expired 3 hr ago");
+    const facts = { lastRequestStartedAt: "2026-10-25T10:00:00.000Z", lifetimeMs: 300_000, source: "reported" as const };
+    expect(promptCacheStatus(facts, start + 60_000)).toBe("Prompt cache warm, expires in 4 min");
+    expect(promptCacheStatus(facts, start + 4 * 60_000 + 30_000)).toBe("Prompt cache warm, expires in 1 min");
+    expect(promptCacheStatus(facts, start + 5 * 60_000 + 20_000)).toBe("Prompt cache expired just now");
+    expect(promptCacheStatus(facts, start + 17 * 60_000)).toBe("Prompt cache expired 12 min ago");
+    expect(promptCacheStatus(facts, start + 3 * 3_600_000)).toBe("Prompt cache expired 3 hr ago");
+  });
+
+  it("says about when the cache lifetime is assumed", () => {
+    const start = Date.parse("2026-10-25T10:00:00.000Z");
+    const facts = { lastRequestStartedAt: "2026-10-25T10:00:00.000Z", lifetimeMs: 1_800_000, source: "assumed" as const };
+    expect(promptCacheStatus(facts, start + 10 * 60_000)).toBe("Prompt cache warm, expires in about 20 min");
+    expect(promptCacheStatus(facts, start + 30 * 60_000 + 10_000)).toBe("Prompt cache expired just now");
+    expect(promptCacheStatus(facts, start + 47 * 60_000)).toBe("Prompt cache expired about 17 min ago");
+    expect(promptCacheStatus({ ...facts, source: "configured" }, start + 47 * 60_000)).toBe("Prompt cache expired 17 min ago");
   });
 
   it("stays quiet without a request time or lifetime", () => {
-    expect(promptCacheStatus({ lastRequestStartedAt: null, lifetimeMs: 300_000 }, Date.now())).toBeNull();
-    expect(promptCacheStatus({ lastRequestStartedAt: "2026-10-25T10:00:00.000Z", lifetimeMs: null }, Date.now())).toBeNull();
+    expect(promptCacheStatus({ lastRequestStartedAt: null, lifetimeMs: 300_000, source: "reported" }, Date.now())).toBeNull();
+    expect(promptCacheStatus({ lastRequestStartedAt: "2026-10-25T10:00:00.000Z", lifetimeMs: null, source: "reported" }, Date.now())).toBeNull();
   });
 });
 

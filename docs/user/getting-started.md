@@ -78,9 +78,11 @@ Usage and limits are not available for API keys; the API key's provider bills it
 
 ### Prompt cache
 
-An Anthropic API key has a **Prompt cache** choice in **Add API key** and in **Models…**: **5 minutes (default)** or **1 hour**. A 1-hour cache costs more to write and less to resume after a break; worth it when you return to a chat after 5 to 60 minutes. The key row shows the length, such as *1-hour prompt cache*. Claude-compatible custom backends have the same choice in **Edit…**. Claude Code signed in for API billing always uses a 5-minute cache, and OpenAI keys keep theirs for 30 minutes; neither has the choice.
+An Anthropic API key has a **Prompt cache** choice in **Add API key** and in **Models…**: **5 minutes (default)** or **1 hour**. A 1-hour cache costs more to write and less to resume after a break; worth it when you return to a chat after 5 to 60 minutes. If you often come back within the hour, a 1-hour Prompt cache avoids most compaction offers. The key row shows the length, such as *1-hour prompt cache*.
 
-When you come back to a large chat on an API key after its cache has expired, the composer offers to compact it first. See [Compact on return](chats-and-agents.md#compact-on-return).
+The same choice is offered when you add a custom backend on the Claude harness, and in its **Edit…**. The gateway must accept the 1-hour cache. Custom backends are never offered compaction on return. Claude Code signed in for API billing uses Claude Code's 5-minute default unless Claude reports a longer one, and has no choice. Inertia assumes about 30 minutes for OpenAI keys; OpenAI does not publish a fixed lifetime.
+
+When you come back to a large chat on an API key after its cache has expired, the composer offers **Compact and send**, with **Full history** beside it to send with the whole history instead. Enter follows the button. See [Compact on return](chats-and-agents.md#compact-on-return).
 
 ### Custom backends
 

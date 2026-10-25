@@ -40,7 +40,7 @@ type UsageIndicatorProps = {
   mode: UsageDisplayMode;
   providerLabel: string;
   contextQuality?: ContextUsageDataQuality;
-  promptCache?: Pick<PromptCacheFacts, "lastRequestStartedAt" | "lifetimeMs"> | null;
+  promptCache?: Pick<PromptCacheFacts, "lastRequestStartedAt" | "lifetimeMs" | "source"> | null;
   onModeChange: (mode: UsageDisplayMode) => void;
 };
 

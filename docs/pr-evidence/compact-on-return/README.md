@@ -12,7 +12,8 @@ provider account, API key or user repository is shown.
 
 The runtime's answer to **Compact and send** is simulated at the WebSocket
 boundary: the spec checks the exact `conversation.compact-and-send` payload the
-composer sends (content, attachments, `activate` and `reason: "on-return"`),
+composer sends (content, attachments, `activate: false` and
+`reason: "on-return"`),
 holds it to capture the in-progress state, answers with a `sent` result, and
 then adds an on-return compaction receipt (252K → 18.3K tokens) to the chat
 detail and reloads. The message itself is therefore not sent to a provider in
@@ -24,23 +25,24 @@ this fixture.
 
 With a draft in the composer, the send button reads **Compact and send**. Its
 description, checked by the spec, is "Summarize 252K tokens of history, then
-send". Beside it, the **Compact** chip (named "History: Compact") switches the
-message to full history.
+send". Beside it, the **Full history** toggle (not pressed) sends the message
+with the whole history instead.
 
 ## Full history for this message
 
 `full-history-chosen-dark.png`
 
-After the chip is pressed it reads **Full**, keeps keyboard focus, and the send
-button returns to the plain round **Send message**. Pressing the chip again
-brings **Compact and send** back.
+The spec presses **Full history** with Space. The toggle shows as pressed and
+keeps keyboard focus, and the send button reads **Send**, which is what Enter
+now does. Pressing Space again brings **Compact and send** back.
 
 ## Prompt cache in the usage meter
 
 `usage-meter-cache-expired-dark.png`
 
 The usage meter's **Usage & context** popover shows "252K used of 1M" and
-"Cache expired 42 min ago" under the context value.
+"Prompt cache expired 42 min ago" under the context value. The fixture reports
+the lifetime, so the line has no "about".
 
 ## Compacting before sending
 
@@ -55,6 +57,9 @@ which stays in place, and the send button turns into a busy spinner named
 
 `compacted-on-return-light.png`, `compacted-on-return-dark.png`
 
+The send in these shots was simulated at the WebSocket boundary; no provider
+compacted or answered.
+
 Once the message is sent the draft clears. After the reload, the timeline
 shows one divider, "Compacted on return · 252K → 18.3K tokens", with no
 `/compact` request bubble. The chat now reports 18.3K tokens and a warm cache,
@@ -65,9 +70,10 @@ so the composer offers the plain send button again.
 `chats-setting-light.png`
 
 Settings → Chats, under **Usage display**: **Compact large API chats when you
-return**, "Offers to summarize a chat of 200K tokens or more on an API key once
-its prompt cache has expired, so the next turn costs less.", with **Offer**
-chosen and **Never** beside it.
+return**, "Offers Compact and send when you return to a chat of 200K tokens
+or more on an Anthropic or OpenAI API key after its prompt cache has expired.
+Later turns then cost less. Enter follows the button.", with **Offer** chosen
+and **Never** beside it.
 
 ## Prompt cache on an Anthropic key
 

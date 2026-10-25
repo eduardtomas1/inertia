@@ -59,7 +59,7 @@ export function AddApiKeyDialog({
   const [secret, setSecret] = useState("");
   const [models, setModels] = useState<ModelChoice>(resume ? "discover" : "defaults");
   const [promptCacheTtl, setPromptCacheTtl] = useState<PromptCacheTtl>("5m");
-  const cacheChoice = promptCacheTtlAllowed(definition);
+  const cacheChoice = promptCacheTtlAllowed({ ...definition, preset });
   const [submitted, setSubmitted] = useState(false);
   const keyRef = useRef<HTMLInputElement>(null);
   const setup = useBackendSetup(actions, onStatus, resume);

@@ -58,16 +58,17 @@ function durationText(ms: number, round: (value: number) => number): string {
 }
 
 export function promptCacheStatus(
-  facts: Pick<PromptCacheFacts, "lastRequestStartedAt" | "lifetimeMs">,
+  facts: Pick<PromptCacheFacts, "lastRequestStartedAt" | "lifetimeMs" | "source">,
   now: number,
 ): string | null {
   if (facts.lastRequestStartedAt === null || facts.lifetimeMs === null) return null;
   const startedAt = Date.parse(facts.lastRequestStartedAt);
   if (!Number.isFinite(startedAt)) return null;
+  const about = facts.source === "assumed" ? "about " : "";
   const remaining = startedAt + facts.lifetimeMs - now;
-  if (remaining > 0) return `Cache warm, expires in ${durationText(remaining, Math.ceil)}`;
-  if (-remaining < MINUTE_MS) return "Cache expired just now";
-  return `Cache expired ${durationText(-remaining, Math.floor)} ago`;
+  if (remaining > 0) return `Prompt cache warm, expires in ${about}${durationText(remaining, Math.ceil)}`;
+  if (-remaining < MINUTE_MS) return "Prompt cache expired just now";
+  return `Prompt cache expired ${about}${durationText(-remaining, Math.floor)} ago`;
 }
 
 export function compactOnReturnChatState(

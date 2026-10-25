@@ -451,7 +451,7 @@ function validateRouting(
 }
 
 function validatePromptCacheTtl(
-  values: { promptCacheTtl?: PromptCacheTtl | undefined; harnessId: string; protocol: string },
+  values: { promptCacheTtl?: PromptCacheTtl | undefined; harnessId: string; protocol: string; preset?: string | null },
   context: z.RefinementCtx,
 ): void {
   if (values.promptCacheTtl !== undefined && !promptCacheTtlAllowed(values)) {
@@ -582,7 +582,7 @@ function validateProfileRelationships(
   });
   validateRouting(profile.routing, modelIds, profile.protocol, context);
   validateUniqueCapabilityHints(profile.capabilityHints, context);
-  validatePromptCacheTtl(profile, context);
+  validatePromptCacheTtl({ promptCacheTtl: profile.promptCacheTtl, harnessId: profile.harnessId, protocol: profile.protocol }, context);
   if (
     profile.source === "custom"
     && profile.preset !== "custom"
@@ -862,6 +862,7 @@ function validatePresetDraft(
     promptCacheTtl: draft.promptCacheTtl,
     harnessId: draft.harnessId ?? preset.harnessId,
     protocol: draft.protocol ?? preset.protocol,
+    preset: draft.preset,
   }, context);
 }
 
@@ -885,13 +886,14 @@ export const modelBackendProfileUpdateSchema = z.object({
   models: draftModelsSchema,
   routing: backendModelRoutingSchema,
   capabilityHints: capabilityHintsSchema,
-  promptCacheTtl: promptCacheTtlSchema,
+  promptCacheTtl: promptCacheTtlSchema.nullable(),
   enabled: z.boolean(),
 }).partial().strict().superRefine((update, context) => {
   validatePromptCacheTtl({
-    promptCacheTtl: update.promptCacheTtl,
+    promptCacheTtl: update.promptCacheTtl ?? undefined,
     harnessId: update.harnessId ?? "claude-agent-sdk",
     protocol: update.protocol ?? "anthropic-messages",
+    preset: update.preset ?? null,
   }, context);
 });
 

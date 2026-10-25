@@ -26,6 +26,7 @@ export interface ComposerCompactOnReturnAction {
   mode: "compact" | "full";
   tooltip: string;
   onToggle: () => void;
+  toggleVisible: boolean;
 }
 
 export const COMPACT_AND_SEND = "Compact and send";
@@ -66,31 +67,30 @@ function primaryPresentation(
       label: compacting ? COMPACTING_BEFORE_SENDING : "Sending message",
     };
   }
-  const compactAndSend = state === "send-ready" && compactOnReturn?.mode === "compact";
+  const offered = state === "send-ready" && compactOnReturn !== null;
+  const compactAndSend = offered && compactOnReturn.mode === "compact";
   return {
     action: "send" as const,
     busy: false,
     disabled: state === "send-disabled",
     icon: arrowUpMorphIcon,
     iconState: "send",
-    label: compactAndSend ? COMPACT_AND_SEND : "Send message",
+    label: compactAndSend ? COMPACT_AND_SEND : offered ? "Send" : "Send message",
     tooltip: compactAndSend ? compactOnReturn.tooltip : undefined,
-    visibleLabel: compactAndSend,
+    visibleLabel: offered,
   };
 }
 
-function CompactOnReturnChip({ action }: { action: ComposerCompactOnReturnAction }): React.JSX.Element {
-  const full = action.mode === "full";
-  const text = full ? "Full" : "Compact";
+function FullHistoryToggle({ action }: { action: ComposerCompactOnReturnAction }): React.JSX.Element {
   return (
     <TooltipButton
       className="composer-history-chip"
       data-history-mode={action.mode}
-      aria-label={`History: ${text}`}
-      tooltip={full ? "Compact before sending instead" : "Send with full history instead"}
+      aria-pressed={action.mode === "full"}
+      tooltip="Send this message with the whole history instead of compacting first"
       onClick={action.onToggle}
     >
-      {text}
+      Full history
     </TooltipButton>
   );
 }
@@ -145,7 +145,7 @@ export function ComposerSendActions({
     if (focusedAction === "primary") primaryRef.current?.focus();
   }, [focusedAction, focusedGroup]);
   const presentation = primaryPresentation(primaryAction, compactOnReturn, compacting);
-  const showsChip = compactOnReturn !== null && primaryAction === "send-ready";
+  const showsToggle = compactOnReturn !== null && compactOnReturn.toggleVisible && primaryAction === "send-ready";
   return (
     <>
       <Suspense fallback={null}>
@@ -162,7 +162,7 @@ export function ComposerSendActions({
           onReleaseAttachment={onReleaseAttachment}
         />
       </Suspense>
-      {showsChip && <CompactOnReturnChip action={compactOnReturn} />}
+      {showsToggle && <FullHistoryToggle action={compactOnReturn} />}
       <TooltipButton
         ref={primaryRef}
         tooltip={"tooltip" in presentation && presentation.tooltip ? presentation.tooltip : presentation.label}

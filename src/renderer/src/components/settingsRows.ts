@@ -137,7 +137,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["provider-updates", "Provider updates", ["maintenance", "upgrade", "update", "version"]],
     ],
     "Accounts and API keys": [
-      ["model-backends", "Accounts and API keys", ["api key", "api keys", "anthropic", "openai", "console", "credits", "billing", "sign in", "account", "custom backends", "model backends", "backends", "token", "openai compatible", "endpoint", "model", "kimi"]],
+      ["model-backends", "Accounts and API keys", ["api key", "api keys", "anthropic", "openai", "console", "credits", "billing", "sign in", "account", "custom backends", "model backends", "backends", "token", "openai compatible", "endpoint", "model", "kimi", "prompt cache", "cache", "1 hour"]],
     ],
   }),
   section("devices", "Devices & integrations", {

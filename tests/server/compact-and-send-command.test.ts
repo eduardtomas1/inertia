@@ -538,10 +538,10 @@ describe("conversation.compact-and-send", () => {
   it.each<[string, FixtureOptions, string]>([
     ["an archived chat", { archived: true }, "Unarchive this chat"],
     ["a watcher chat", { watcher: true }, "Watcher chats are not compacted on return."],
-    ["a usage-limited chat", { latestTurn: { status: "failed", usageLimited: true } }, "usage, billing or sign-in"],
+    ["a usage-limited chat", { latestTurn: { status: "failed", usageLimited: true } }, "The last turn stopped on a usage limit, billing, sign-in or rate-limit problem. Resolve it before compacting this chat."],
     ...(["billing", "authentication", "rate-limited"] as const).map((failureKind) =>
-      [`a ${failureKind} failure`, { latestTurn: { status: "failed", failureKind } }, "usage, billing or sign-in"] as [string, FixtureOptions, string]),
-    ["the setting turned off", { setting: "never" as const }, "turned off in Settings"],
+      [`a ${failureKind} failure`, { latestTurn: { status: "failed", failureKind } }, "The last turn stopped on a usage limit, billing, sign-in or rate-limit problem. Resolve it before compacting this chat."] as [string, FixtureOptions, string]),
+    ["the setting turned off", { setting: "never" as const }, "Compacting on return is set to Never in Settings → Chats."],
     ["a chat with no provider session", { sessionId: null }, "does not have a provider session"],
     ["an active turn", { turnActive: true }, "Wait for the current provider"],
   ])("refuses %s", async (_label, options, message) => {

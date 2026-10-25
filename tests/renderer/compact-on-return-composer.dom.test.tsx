@@ -130,11 +130,12 @@ describe("compact on return composer offer", () => {
     render(<Composer {...props()} />);
     type("Pick up where we left off");
 
-    expect(await screen.findByRole("button", { name: "History: Compact" })).toBeVisible();
+    const toggle = await screen.findByRole("button", { name: "Full history" });
+    expect(toggle).toBeVisible();
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
     const button = await primary("Compact and send");
     expect(button).toHaveAccessibleDescription("Summarize 252K tokens of history, then send");
     expect(button).toHaveTextContent("Compact and send");
-    expect(screen.getByRole("button", { name: "History: Compact" })).toBeVisible();
   });
 
   it.each([
@@ -149,7 +150,7 @@ describe("compact on return composer offer", () => {
     type("Pick up where we left off");
 
     expect(screen.queryByRole("button", { name: "Compact and send" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^History:/u })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Full history" })).toBeNull();
   });
 
   function lastTurn(overrides: Partial<NonNullable<ComposerProps["latestTurnSummary"]>>): NonNullable<ComposerProps["latestTurnSummary"]> {
@@ -195,7 +196,7 @@ describe("compact on return composer offer", () => {
   it("still offers after a last turn that failed for another reason", async () => {
     render(<Composer {...props({ latestTurnSummary: lastTurn({ status: "failed", failureKind: "model-not-found" }) })} />);
     type("Use the other model");
-    expect(await screen.findByRole("button", { name: "History: Compact" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Full history" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Compact and send" })).toBeInTheDocument();
   });
 
@@ -271,15 +272,18 @@ describe("compact on return composer offer", () => {
     render(<Composer {...props({ onSend, onCompactAndSend })} />);
     type("Send it whole");
 
-    const chip = await screen.findByRole("button", { name: "History: Compact" });
-    expect(chip).toHaveAccessibleDescription("Send with full history instead");
-    chip.focus();
-    fireEvent.click(chip);
-    expect(screen.getByRole("button", { name: "History: Full" })).toHaveFocus();
-    expect(screen.getByRole("button", { name: "History: Full" }))
-      .toHaveAccessibleDescription("Compact before sending instead");
+    const toggle = await screen.findByRole("button", { name: "Full history" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveAccessibleDescription("Send this message with the whole history instead of compacting first");
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Full history" })).toBe(toggle);
+    expect(toggle).toHaveFocus();
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: "Compact and send" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send).toBeEnabled();
+    expect(send).toHaveTextContent("Send");
 
     fireEvent.keyDown(textbox(), { key: "Enter" });
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("Send it whole", [], undefined));
@@ -352,6 +356,7 @@ describe("compact on return composer offer", () => {
     expect(textbox()).toHaveValue("Keep this draft");
     expect(within(alert).getByRole("button", { name: "Send without compacting" })).toBeEnabled();
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Full history" })).toBeNull();
 
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(onCompactAndSend).toHaveBeenCalledTimes(2));

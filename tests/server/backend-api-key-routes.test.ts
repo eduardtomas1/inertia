@@ -14,6 +14,7 @@ import {
   type PersistedModelBackendProfile,
 } from "../../src/shared/backend-profile-settings";
 import type { ProviderInfo } from "../../src/shared/contracts";
+import { createKimiClaudeBackendProfile, KIMI_CODING_MODELS } from "../../src/shared/claude-backend-profiles";
 import {
   BACKEND_PROBE_FRESHNESS_MS,
   BACKEND_PROBE_RENEWAL_MS,
@@ -1088,6 +1089,71 @@ describe("prompt cache length", () => {
     expect(await launchFor(controller, profile)).not.toHaveProperty("harnessConfiguration");
   });
 
+  it("drops the cache length when a Claude backend moves to the Codex harness", async () => {
+    const store = await runtimeStore();
+    const time = clock();
+    const controller = await BackendProfileController.create({ store, credentials: credentialBroker(), now: time.now });
+    const created = await controller.createProfile(privateGateway("1h"));
+    expect(created.promptCacheTtl).toBe("1h");
+
+    const moved = await controller.updateProfile(created.id, {
+      harnessId: "codex-app-server",
+      protocol: "openai-responses",
+      authenticationMode: "bearer-token",
+    });
+    expect(moved).toMatchObject({ harnessId: "codex-app-server", protocol: "openai-responses" });
+    expect(moved).not.toHaveProperty("promptCacheTtl");
+    expect(store.modelBackendProfile(created.id).profile).not.toHaveProperty("promptCacheTtl");
+
+    await controller.updateProfile(created.id, {
+      harnessId: "claude-agent-sdk",
+      protocol: "anthropic-messages",
+      authenticationMode: "api-key",
+    });
+    await controller.reconcileCredentialRevision(created.id, "generation:one");
+    probeCompatibility.mockImplementation(async (request) => successfulProbe(request, time.now()));
+    await controller.probe(created.id);
+    await controller.updateProfile(created.id, { enabled: true });
+    const back = store.modelBackendProfile(created.id).profile;
+    expect(back).not.toHaveProperty("promptCacheTtl");
+    expect(await launchFor(controller, back)).not.toHaveProperty("harnessConfiguration");
+  });
+
+  it("clears the cache length with an explicit null and keeps it when the update omits it", async () => {
+    const store = await runtimeStore();
+    const controller = await BackendProfileController.create({ store, credentials: credentialBroker() });
+    const created = await controller.createProfile({ preset: "anthropic-api-key", promptCacheTtl: "1h" });
+    const renamed = await controller.updateProfile(created.id, { displayName: "Long cache" });
+    expect(renamed.promptCacheTtl).toBe("1h");
+    const cleared = await controller.updateProfile(created.id, { promptCacheTtl: null });
+    expect(cleared).not.toHaveProperty("promptCacheTtl");
+    expect(store.modelBackendProfile(created.id).profile).not.toHaveProperty("promptCacheTtl");
+  });
+
+  it("never launches Kimi with a cache length and drops one stored on it at the next update", async () => {
+    const store = await runtimeStore();
+    const kimi = createKimiClaudeBackendProfile({
+      id: "kimi:cache-length",
+      secretReference: "secret:kimi-cache-length",
+      primaryModelId: KIMI_CODING_MODELS[0]!.id,
+    });
+    const controller = await BackendProfileController.create({
+      store,
+      credentials: credentialBroker(),
+      builtInClaudeProfiles: [kimi],
+    });
+    const stored = store.modelBackendProfile(kimi.id).profile;
+    expect(stored.preset).toBe("kimi-code");
+    store.saveModelBackendProfile({ ...stored, promptCacheTtl: "1h" });
+    expect(store.modelBackendProfile(kimi.id).profile.promptCacheTtl).toBe("1h");
+    const launch = await launchFor(controller, store.modelBackendProfile(kimi.id).profile);
+    expect(launch).not.toHaveProperty("harnessConfiguration");
+    expect(store.modelBackendProfile(kimi.id).profile.promptCacheTtl).toBe("1h");
+    await controller.updateProfile(kimi.id, { enabled: false });
+    expect(store.modelBackendProfile(kimi.id).profile).not.toHaveProperty("promptCacheTtl");
+    await expect(controller.updateProfile(kimi.id, { promptCacheTtl: "1h" })).rejects.toThrow();
+  });
+
   it("refuses a cache length on an OpenAI key", async () => {
     const store = await runtimeStore();
     const controller = await BackendProfileController.create({ store, credentials: credentialBroker() });
@@ -1096,5 +1162,6 @@ describe("prompt cache length", () => {
     const created = await controller.createProfile({ preset: "openai-api-key" });
     await expect(controller.updateProfile(created.id, { promptCacheTtl: "1h" })).rejects.toThrow();
     expect(store.modelBackendProfile(created.id).profile).not.toHaveProperty("promptCacheTtl");
+    await expect(controller.updateProfile(created.id, { promptCacheTtl: null })).resolves.not.toHaveProperty("promptCacheTtl");
   });
 });

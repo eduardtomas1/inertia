@@ -896,7 +896,7 @@ long its cache lives, and offers to compact a long chat before the next message
 | Claude, **Anthropic API key** preset | yes | 5 minutes, or 1 hour with `promptCacheTtl: "1h"` | reported from `message_start` usage when Claude breaks cache writes down, otherwise configured or assumed |
 | Claude, native, `Console API key` account kind | yes | 5 minutes | reported or assumed |
 | Claude, native, `Claude account` | no | Claude Code chooses its own cache length on subscriptions | |
-| Claude, Kimi preset | no | Kimi manages its own context | |
+| Claude, Kimi preset | no | Kimi Code is a quota membership, not per-token billing, and manages its own context | |
 | Claude, custom gateway | no | no published lifetime | |
 | Codex, **OpenAI API key** preset | yes | 30 minutes | assumed |
 | Codex, native ChatGPT account | no | | |
@@ -906,7 +906,9 @@ long its cache lives, and offers to compact a long chat before the next message
   `promptCacheTtl` to `"5m"` or `"1h"` on `backend.profile.create` and
   `backend.profile.update`; it is stored with the profile, shown on its view
   and detail, and changes neither the configuration revision nor the enabled
-  state. The shared schema refuses it on every other harness or protocol.
+  state. The shared schema refuses it on every other harness or protocol and
+on the Kimi preset; a value already stored on a Kimi profile is ignored at
+launch and dropped at its next update.
   When a launch uses such a profile, the backend resolver adds the harness
   configuration `{ kind: "claude-messages", promptCacheTtl }`, and the Claude
   harness passes it as the SDK `settings.promptCacheTtl` (merged with the fast
@@ -936,8 +938,10 @@ first-party API key through the custom launch options, Codex `model_providers`
 with an OpenAI key, and the Kimi key route. The prompt-cache facts were checked
 against fixture streams only: whether the real Anthropic API reports the
 `cache_creation` breakdown on `message_start` for every model, whether Claude
-Code honours `settings.promptCacheTtl` on an API key, and the real expiry of
-the OpenAI cache have not been observed.
+Code honours `settings.promptCacheTtl` on an API key, the real expiry of the
+OpenAI cache, whether Codex requests extended cache retention, and that Claude
+Code limits its own idle compaction to the 1-hour cache (read from the binary,
+not documented) have not been observed.
 
 ## What the open-source review changed
 

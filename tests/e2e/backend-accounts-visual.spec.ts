@@ -147,7 +147,8 @@ test("captures accounts, API keys and the API key route in the model chooser", a
   }
 
   claudeSignedIn = true;
-  await page.getByRole("button", { name: "Refresh all providers" }).click();
+  await setTheme("Light");
+  await openSettingsSection("Agents");
   await expect(claude.getByText(/^Signed in(?: |$)/u)).toBeVisible();
 
   for (const theme of ["Light", "Dark"] as const) {

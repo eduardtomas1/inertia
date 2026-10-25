@@ -58,8 +58,9 @@ endpoint**. The footer has **Cancel** and **Add API key**.
 
 `model-chooser-api-key-route-light.png`, `model-chooser-api-key-route-dark.png`
 
-Before these screenshots the fixture signs Claude Code in and refreshes
-providers. The chooser is opened from the composer and searched for "Claude".
+Before these screenshots the fixture marks Claude Code as signed in and
+waits for the Claude Code card to show it. The chooser is opened from the
+composer and searched for "Claude".
 The rows, in order:
 
 - **Provider default** · Claude: the Claude account route.

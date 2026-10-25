@@ -3,6 +3,26 @@ export type LegacyProviderId = "codex" | "claude" | "cursor" | "kimi" | "opencod
 
 export type ProviderId = LegacyProviderId | "antigravity";
 
+export const PROVIDER_AUTH_METHODS = ["account", "console"] as const;
+
+export const PROVIDER_ACCOUNT_KINDS = [
+  "Claude account",
+  "Console API key",
+  "ChatGPT account",
+  "OpenAI API key",
+] as const;
+
+export type ProviderAccountKind = (typeof PROVIDER_ACCOUNT_KINDS)[number];
+
+export type ProviderAuthMethod = (typeof PROVIDER_AUTH_METHODS)[number];
+
+export function providerSupportsAuthMethod(
+  providerId: ProviderId,
+  method: ProviderAuthMethod,
+): boolean {
+  return method === "account" || providerId === "claude";
+}
+
 export const ANTIGRAVITY_IMAGE_INPUT_UNAVAILABLE_REASON =
   "Antigravity can't read images in Inertia.";
 

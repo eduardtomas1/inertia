@@ -32,6 +32,57 @@ describe("runtime boundary helpers", () => {
     });
   });
 
+  it("answers invalid backend drafts with the validation messages", () => {
+    const create = parseRuntimeCommand(Buffer.from(JSON.stringify({
+      requestId: "backend-create",
+      type: "backend.profile.create",
+      payload: {
+        displayName: "Gateway",
+        harnessId: "claude-agent-sdk",
+        protocol: "anthropic-messages",
+        authenticationMode: "none",
+        preset: "custom",
+        baseUrl: "https://gateway.example.test",
+        allowInsecureLocalhost: false,
+        models: [{
+          id: "model",
+          displayName: "Model",
+          contextWindowTokens: null,
+          reasoningOptions: [],
+          capabilities: [],
+        }],
+        routing: { mode: "simple", primaryModelId: "model" },
+        capabilityHints: [],
+      },
+    })), false);
+    expect(create.error).toEqual({
+      type: "request.error",
+      requestId: "backend-create",
+      message: expect.stringContaining("Claude-compatible backends need an API key or bearer token."),
+    });
+    const preset = parseRuntimeCommand(Buffer.from(JSON.stringify({
+      requestId: "backend-preset",
+      type: "backend.profile.create",
+      payload: { preset: "openai-api-key", baseUrl: "https://elsewhere.example.test/v1" },
+    })), false);
+    expect(preset.error).toMatchObject({
+      message: "OpenAI API key always connects to https://api.openai.com/v1.",
+    });
+    const update = parseRuntimeCommand(Buffer.from(JSON.stringify({
+      requestId: "backend-update",
+      type: "backend.profile.update",
+      payload: { profileId: "custom:gateway", update: { displayName: " ", models: [] } },
+    })), false);
+    expect(update.error).toMatchObject({
+      message: "Enter a name for this backend. Add at least one model.",
+    });
+    expect(parseRuntimeCommand(Buffer.from(JSON.stringify({
+      requestId: "22222222-2222-4222-8222-222222222222",
+      type: "backend.profile.create",
+      payload: { preset: "anthropic-api-key" },
+    })), false).command).toMatchObject({ type: "backend.profile.create" });
+  });
+
   it("accepts bounded prompt preset commands at the runtime boundary", () => {
     const command = {
       requestId: "11111111-1111-4111-8111-111111111111",

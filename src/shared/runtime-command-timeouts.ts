@@ -60,7 +60,8 @@ export const REVIEW_OPERATION_REQUEST_TIMEOUT_MS = 10 * 60_000;
 
 // Backend probes can use their full 30-second safety deadline. A timed-out
 // probe is still delivery-ambiguous because it persists compatibility state.
-export const BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS = 45_000;
+export const BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS = 210_000;
+export const BACKEND_PROFILE_DISCOVERY_REQUEST_TIMEOUT_MS = 45_000;
 
 // Workspace discovery can inspect thousands of folders and many independent
 // repositories. Keep the renderer pending through that bounded operation

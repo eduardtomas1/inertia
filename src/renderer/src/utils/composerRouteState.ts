@@ -161,7 +161,7 @@ export function resolveComposerRouteState(input: {
       unavailable(
         "Unavailable",
         `${input.selection.backendProfileDisplayName} is unavailable`,
-        "Open Model Backends or choose another exact route.",
+        "Open Settings → Agents → Accounts and API keys, or choose another route.",
         null,
       ),
       false,
@@ -184,7 +184,7 @@ export function resolveComposerRouteState(input: {
       unavailable(
         "Route changed",
         `${profile.displayName} was reconfigured`,
-        "Open Model Backends or choose a route from the current revision.",
+        "Open Settings → Agents → Accounts and API keys, or choose a route from the current revision.",
         null,
       ),
       false,

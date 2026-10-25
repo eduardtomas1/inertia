@@ -47,6 +47,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "fixture" } });
   if (message.method === "initialized") return;
+  if (message.method === "config/read") {
+    return send({ id: message.id, result: { config: { shell_environment_policy: { exclude: ["PRIVATE_*"] } } } });
+  }
   if (message.method === "thread/start") {
     fs.writeFileSync(process.env.INERTIA_CODEX_CUSTOM_CAPTURE, JSON.stringify({
       message,
@@ -235,6 +238,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           requires_openai_auth: false,
           env_key: "INERTIA_CODEX_BACKEND_TOKEN",
         },
+        "shell_environment_policy.ignore_default_excludes": false,
+        "shell_environment_policy.exclude": ["PRIVATE_*", "INERTIA_CODEX_BACKEND_TOKEN"],
       },
     });
     expect(JSON.stringify(captured.message)).not.toContain("owned-integration-secret");

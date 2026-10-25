@@ -24,6 +24,7 @@ import {
   MAX_RESPONSE_BYTES,
   MAX_TIMEOUT_MS,
   normalizeProbeError,
+  PROBE_STAGE_COUNT,
   throwIfAborted,
   unknownCapability,
   type BackendCompatibilityProbeDependencies,
@@ -55,7 +56,15 @@ export async function probeBackendCompatibility(
     admissionSequence: 1,
     installationFingerprint: null,
   };
-  const timeoutMs = clampInteger(dependencies.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1, MAX_TIMEOUT_MS);
+  const timeoutMs = clampInteger(
+    dependencies.timeoutMs ?? (
+      dependencies.stageTimeoutMs === undefined
+        ? DEFAULT_TIMEOUT_MS
+        : dependencies.stageTimeoutMs * PROBE_STAGE_COUNT
+    ),
+    1,
+    MAX_TIMEOUT_MS,
+  );
   const maxResponseBytes = clampInteger(
     dependencies.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
     1,

@@ -78,6 +78,12 @@ export function modelSourceFilterId(filter: ModelSourceFilter): string {
   ].join(":");
 }
 
+function routeProviderId(route: ModelSearchRoute): ProviderId | null {
+  if (route.sourceProviderId) return route.sourceProviderId;
+  if (route.source === "custom") return null;
+  return providerIdForHarness(route.harnessId);
+}
+
 function railItem<Route extends ModelSearchRoute>(
   input: Omit<ModelSourceRailItem<Route>, "id" | "routeCount">,
 ): ModelSourceRailItem<Route> {
@@ -88,11 +94,6 @@ function railItem<Route extends ModelSearchRoute>(
   };
 }
 
-/**
- * Builds the rail from actual route identities. Custom backends are grouped
- * before harness-family detection so a Claude-compatible gateway never becomes
- * indistinguishable from the native Claude backend.
- */
 export function deriveModelSourceRailItems<Route extends ModelSearchRoute>(
   routes: readonly Route[],
   options: DeriveModelSourceRailOptions<Route> = {},
@@ -117,7 +118,7 @@ export function deriveModelSourceRailItems<Route extends ModelSearchRoute>(
   }>();
 
   for (const route of routes) {
-    if (route.source === "custom") {
+    if (route.source === "custom" && !route.sourceProviderId) {
       const filter = {
         kind: "custom",
         harnessId: route.harnessId,
@@ -137,7 +138,7 @@ export function deriveModelSourceRailItems<Route extends ModelSearchRoute>(
       continue;
     }
 
-    const providerId = providerIdForHarness(route.harnessId);
+    const providerId = routeProviderId(route);
     if (providerId) {
       providerRoutes.get(providerId)?.push(route);
       continue;
@@ -219,16 +220,17 @@ export function filterModelRoutesBySource<Route extends ModelSearchRoute>(
   if (filter.kind === "custom") {
     return routes.filter((route) =>
       route.source === "custom"
+      && !route.sourceProviderId
       && route.harnessId === filter.harnessId
       && route.backendProfileId === filter.backendProfileId);
   }
   if (filter.kind === "harness") {
     return routes.filter((route) =>
-      route.source === "built-in" && route.harnessId === filter.harnessId);
+      route.source === "built-in"
+      && !route.sourceProviderId
+      && route.harnessId === filter.harnessId);
   }
-  return routes.filter((route) =>
-    route.source === "built-in"
-    && providerIdForHarness(route.harnessId) === filter.providerId);
+  return routes.filter((route) => routeProviderId(route) === filter.providerId);
 }
 
 export const nextModelSourceRailIndex = nextSidebarNavigationIndex;

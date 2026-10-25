@@ -43,22 +43,17 @@ describe("privileged usage limits", () => {
     expect(f.read).toHaveBeenCalledOnce();
     expect(f.service.snapshot().accounts).toEqual([]);
   });
-  it("reads Keychain-backed accounts only for explicit Limits refreshes and keeps the last explicit result", async () => {
+  it("passes only the chat route to the native reader and publishes each report as read", async () => {
     const f = setup();
-    const shown = { ...usageAccount(), keychain: "read" as const };
-    const deferred = { ...usageAccount(), status: "unavailable" as const, windows: [], keychain: "deferred" as const };
-    f.read.mockResolvedValueOnce(shown);
+    const unavailable = { ...usageAccount(), status: "unavailable" as const, windows: [] };
+    f.read.mockResolvedValueOnce(usageAccount());
     await f.service.refresh();
-    expect(f.read).toHaveBeenLastCalledWith(expect.anything(), undefined, undefined, true);
-    f.read.mockResolvedValueOnce(deferred);
-    const background = await f.service.refresh(true, false);
-    expect(f.read).toHaveBeenLastCalledWith(expect.anything(), undefined, undefined, false);
-    expect(background.accounts[0]).toMatchObject({ status: "ready", windows: shown.windows });
-    expect(background.accounts[0]).not.toHaveProperty("keychain");
-    f.read.mockResolvedValueOnce(deferred);
-    expect(await f.service.nativeAccount("codex", true, "model", "/chat")).toMatchObject({ keychain: "deferred" });
-    expect(f.read).toHaveBeenLastCalledWith(expect.anything(), "model", "/chat", false);
-    expect(f.service.snapshot().accounts[0]).toMatchObject({ status: "ready", windows: shown.windows });
+    expect(f.read).toHaveBeenLastCalledWith(expect.anything());
+    f.read.mockResolvedValueOnce(unavailable);
+    expect((await f.service.refresh(true, false)).accounts[0]).toMatchObject({ status: "unavailable", windows: [] });
+    f.read.mockResolvedValueOnce(unavailable);
+    expect(await f.service.nativeAccount("codex", true, "model", "/chat")).toMatchObject({ status: "unavailable", windows: [] });
+    expect(f.read).toHaveBeenLastCalledWith(expect.anything(), "model", "/chat");
   });
   it("keeps the last reported windows as stale when a read fails for the same subscription login", async () => {
     const f = setup();
@@ -122,7 +117,7 @@ describe("privileged usage limits", () => {
     const explicit = f.service.refresh(true, true);
     release();
     await Promise.all([background, explicit]);
-    expect(f.read.mock.calls.map((call) => call[3])).toEqual([false, true]);
+    expect(f.read).toHaveBeenCalledTimes(2);
   });
   it("upgrades exact schema 73 transactionally without rewriting released migration records", () => {
     const db = new Database(":memory:"); databases.push(db); migrateRuntimeDatabase(db, 73);
@@ -305,6 +300,22 @@ describe("privileged usage limits", () => {
     await f.service.saveSource(source);
     await expect(f.service.saveSource({ ...source, url: "https://different.example.test" })).rejects.toThrow("new management key");
     expect(f.repository.sources()).toEqual([source]);
+  });
+  it("states that usage is not available for API key routes without reading any account", async () => {
+    const f = setup();
+    f.deps.customProfiles = () => [
+      { id: "custom:anthropic-key", label: "Anthropic API key", routeKind: "api-key" },
+    ];
+    const snapshot = await f.service.refresh(true);
+    expect(snapshot.accounts.find(({ id }) => id === "profile:custom:anthropic-key")).toMatchObject({
+      providerId: "custom",
+      label: "Anthropic API key",
+      status: "unavailable",
+      detail: "Usage and limits are not available for API keys.",
+      windows: [],
+    });
+    expect(f.read).toHaveBeenCalledTimes(1);
+    expect(f.read.mock.calls[0]?.[0]).toMatchObject({ id: "codex" });
   });
   it("records new sources without changing agent profiles or making network requests", async () => {
     const f = setup(); const profiles = vi.fn(() => []); f.deps.customProfiles = profiles;

@@ -29,6 +29,36 @@ const probeCapabilities = MODEL_CAPABILITY_IDS.map((id) => ({
   detail: null,
   checkedAt,
 }));
+const backendCompatibility = {
+  harnessId: selection.harnessId,
+  backendProfileId: nativeBackend.id,
+  backendProtocol: nativeBackend.protocol,
+  state: "verified",
+  provenance: "built-in",
+  allowsModelSwitchWithinSession: true,
+  reasonCode: "native-backend",
+  reason: "The native backend is supported.",
+};
+const backendProbe = {
+  profileId: nativeBackend.id,
+  backendConfigurationRevision: nativeBackend.configurationRevision,
+  endpointIdentity: nativeBackend.endpointIdentity,
+  protocol: nativeBackend.protocol,
+  modelId: selection.modelId,
+  compatibility: "protocol-compatible",
+  protocolVerified: true,
+  modelVerified: true,
+  capabilities: probeCapabilities,
+  contextWindow: {
+    tokens: null,
+    state: "unknown",
+    provenance: "probe",
+    detail: null,
+    checkedAt,
+  },
+  failure: null,
+  checkedAt,
+};
 const backendProfile = {
   id: nativeBackend.id,
   displayName: nativeBackend.displayName,
@@ -42,51 +72,28 @@ const backendProfile = {
   preset: "native",
   baseUrl: null,
   allowInsecureLocalhost: false,
+  allowPrivateNetwork: false,
   credentialGeneration: null,
+  routing: { mode: "simple", primaryModelId: selection.modelId },
+  capabilityHints: [capability],
+  createdAt: checkedAt,
+  updatedAt: checkedAt,
+  routeKind: "account",
+  providerId: "codex",
+  endpointHost: null,
+  authState: "harness-managed",
+  connectionState: "connected",
+  compatibility: backendCompatibility,
+  latestProbe: backendProbe,
   models: [{
     id: selection.modelId,
     displayName: "GPT Test",
     contextWindowTokens: null,
     reasoningOptions: [{ value: "high", label: "High", description: "Thorough." }],
     capabilities: [capability],
+    compatibility: backendCompatibility,
+    latestProbe: backendProbe,
   }],
-  routing: { mode: "simple", primaryModelId: selection.modelId },
-  capabilityHints: [capability],
-  createdAt: checkedAt,
-  updatedAt: checkedAt,
-  endpointHost: null,
-  authState: "harness-managed",
-  connectionState: "connected",
-  compatibility: {
-    harnessId: selection.harnessId,
-    backendProfileId: nativeBackend.id,
-    backendProtocol: nativeBackend.protocol,
-    state: "verified",
-    provenance: "built-in",
-    allowsModelSwitchWithinSession: true,
-    reasonCode: "native-backend",
-    reason: "The native backend is supported.",
-  },
-  latestProbe: {
-    profileId: nativeBackend.id,
-    backendConfigurationRevision: nativeBackend.configurationRevision,
-    endpointIdentity: nativeBackend.endpointIdentity,
-    protocol: nativeBackend.protocol,
-    modelId: selection.modelId,
-    compatibility: "protocol-compatible",
-    protocolVerified: true,
-    modelVerified: true,
-    capabilities: probeCapabilities,
-    contextWindow: {
-      tokens: null,
-      state: "unknown",
-      provenance: "probe",
-      detail: null,
-      checkedAt,
-    },
-    failure: null,
-    checkedAt,
-  },
   canDelete: false,
   canDisable: false,
 };
@@ -448,7 +455,15 @@ describe("server event request-result trust boundary", () => {
 
   it.each([
     { kind: "backend.profile", profile: backendProfile },
+    { kind: "backend.profile", profile: backendProfile, credentialCleared: true },
     { kind: "backend.profile.probe", profile: backendProfile },
+    { kind: "backend.profile.probe", profile: backendProfile, skippedModelIds: [] },
+    { kind: "backend.profile.probe", profile: backendProfile, skippedModelIds: ["model-b", "model-c"] },
+    {
+      kind: "backend.profile.models",
+      profileId: nativeBackend.id,
+      models: [{ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol" }],
+    },
     {
       kind: "workspace.entries",
       directory: "src",
@@ -674,6 +689,25 @@ describe("server event request-result trust boundary", () => {
         },
       },
     },
+    { kind: "backend.profile", profile: backendProfile, credentialCleared: "yes" },
+    { kind: "backend.profile.probe", profile: backendProfile, skippedModelIds: "model-b" },
+    { kind: "backend.profile.probe", profile: backendProfile, skippedModelIds: ["model-b", "model-b"] },
+    { kind: "backend.profile.probe", profile: backendProfile, skippedModelIds: [""] },
+    { kind: "backend.profile", profile: { ...backendProfile, routeKind: "api-key" } },
+    { kind: "backend.profile", profile: { ...backendProfile, providerId: "claude" } },
+    {
+      kind: "backend.profile.probe",
+      profile: {
+        ...backendProfile,
+        models: [{ ...backendProfile.models[0], latestProbe: { ...backendProbe, modelId: "other" } }],
+      },
+    },
+    {
+      kind: "backend.profile.models",
+      profileId: nativeBackend.id,
+      models: [{ id: "a", displayName: "A" }, { id: "a", displayName: "Again" }],
+    },
+    { kind: "backend.profile.models", profileId: nativeBackend.id, models: [{ id: "a" }] },
     { kind: "workspace.entries", directory: "", entries: [{ path: "x" }], truncated: false },
     { kind: "workspace.file", file: { path: "x", content: 7 } },
     {
@@ -1363,6 +1397,14 @@ describe("server event provider identity boundary", () => {
       });
     },
   );
+  it.each(["Claude account", "Console API key", "ChatGPT account", "OpenAI API key"])(
+    "accepts the reported %s account kind",
+    (accountKind) => {
+      expect(parseServerEvent(snapshotEvent({ ...provider, accountKind }))).toMatchObject({
+        type: "snapshot.updated",
+      });
+    },
+  );
   it.each([
     ["provider identity", { ...provider, id: "unknown-provider" }], ["model IDs", { ...provider, models: [provider.models[0], { ...provider.models[0] }] }],
     ["Fast mode metadata", { ...provider, models: [{ ...provider.models[0], fastMode: { providerValue: 1, label: "Fast", description: "Broken", isDefault: false } }] }],
@@ -1373,6 +1415,7 @@ describe("server event provider identity boundary", () => {
     ["undeclared Fast metadata", { ...provider, models: [{ ...provider.models[0], fastMode: { ...provider.models[0].fastMode, apiKey: "never-cross-ipc" } }] }],
     ["rate-limit IDs", { ...provider, rateLimits: [provider.rateLimits[0], { ...provider.rateLimits[0] }] }],
     ["chat-tool capability", { ...provider, agentThreadManagement: { state: "invented", detail: "Unsafe" } }],
+    ["account kind", { ...provider, accountKind: "claude-account" }],
     ["capability schema", { ...provider, capabilityContract: { ...provider.capabilityContract, schemaVersion: 99 } }],
     ["capability provider relationship", { ...provider, capabilityContract: { ...provider.capabilityContract, harnessId: harnessIds.claude } }],
     ["capability digest", { ...provider, capabilityContract: { ...provider.capabilityContract, manifestDigest: "unsafe" } }],

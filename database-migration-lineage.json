@@ -762,6 +762,16 @@
       "version": 101,
       "name": "PersistWatcherAccess",
       "digest": "313548d431a9d54010e8563c1a3200d1b051e773c68c107d2bf1fd8aa8bdf4cd"
+    },
+    {
+      "version": 102,
+      "name": "ExtendBackendPresets",
+      "digest": "8971b6075b2069fec3008fe3c1cd5289f399e73cffe8e3723eaa5cf059232189"
+    },
+    {
+      "version": 103,
+      "name": "PersistTurnFailureKinds",
+      "digest": "98486ccd5b5e5954822f6f26be83bc6714a760983778e104006dd894086e48fb"
     }
   ]
 }

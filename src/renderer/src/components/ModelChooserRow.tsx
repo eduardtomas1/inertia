@@ -43,6 +43,7 @@ interface ModelChooserRowBase {
   configuration?: ModelSearchRoute["configuration"];
   harnessLabel: string;
   backendProfileName: string;
+  routeLabel?: string;
   nativeBackend: boolean;
   source: "built-in" | "custom";
   providerId: ProviderId | null;
@@ -100,7 +101,8 @@ export function modelChooserRowFromRoute(
   if (!route.selectable && !disabledReason) {
     throw new Error("A disabled model chooser row requires a compatibility explanation.");
   }
-  const providerId = route.source === "built-in" ? providerIdForHarness(route.harnessId) : null;
+  const providerId = route.sourceProviderId
+    ?? (route.source === "built-in" ? providerIdForHarness(route.harnessId) : null);
   const base: ModelChooserRowBase = {
     key: route.key,
     displayName: route.displayName,
@@ -111,6 +113,7 @@ export function modelChooserRowFromRoute(
     ...(route.configuration ? { configuration: route.configuration } : {}),
     harnessLabel: route.harnessLabel,
     backendProfileName: route.backendProfileName,
+    ...(route.routeLabel ? { routeLabel: route.routeLabel } : {}),
     nativeBackend: providerId !== null && route.backendProfileId === providerNativeBackendProfile(providerId).id,
     source: route.source,
     providerId,
@@ -130,6 +133,7 @@ export function modelChooserSecondaryIdentity(
     | "providerId"
     | "harnessLabel"
     | "backendProfileName"
+    | "routeLabel"
     | "nativeBackend"
     | "reasoningEffort"
     | "responseSpeed"
@@ -139,7 +143,9 @@ export function modelChooserSecondaryIdentity(
 ): string {
   return [
     row.providerId ? MODEL_SOURCE_PROVIDER_LABELS[row.providerId] : row.harnessLabel,
-    ...(row.nativeBackend ? [] : [row.backendProfileName]),
+    ...(row.nativeBackend
+      ? row.routeLabel ? [row.routeLabel] : []
+      : [row.routeLabel ?? row.backendProfileName]),
     ...(row.reasoningEffort ? [`${row.reasoningEffort} reasoning`] : []),
     ...(row.responseSpeed === "Fast" ? ["Fast"] : []),
     ...(row.configuration ? [
@@ -244,7 +250,7 @@ export const ModelChooserRow = memo(function ModelChooserRow({
               />
             )}
             <span title={secondaryIdentity}>{secondaryIdentity}</span>
-            {row.source === "custom" && <em>Custom</em>}
+            {row.source === "custom" && !row.routeLabel && <em>Custom</em>}
             {compatibilityLabel && (
               <TooltipText
                 id={compatibilityId}

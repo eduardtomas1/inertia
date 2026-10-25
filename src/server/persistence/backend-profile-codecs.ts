@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import {
   containsBackendCredentialMaterial,
   persistedModelBackendProfileSchema,
@@ -9,7 +11,7 @@ import {
   type BackendProbeAdmissionHighWater,
 } from "../../shared/backend-probe";
 import type { ModelBackendProfileRow } from "./rows";
-import type { StoredModelBackendProfile } from "./types";
+import type { BackendKeyCheck, StoredModelBackendProfile } from "./types";
 import { backendEndpointIdentityMatches } from "../../shared/backend-endpoint-identity";
 
 export function modelBackendProfileFromRow(
@@ -56,7 +58,12 @@ export function modelBackendProfileFromRow(
       "The stored model backend profile columns do not match its configuration.",
     );
   }
-  const { probeResults, probeAdmissionHighWater } = parseProbeState(probeValue);
+  const {
+    probeResults,
+    probeAdmissionHighWater,
+    probeRenewalRequestedAt,
+    probeKeyCheck,
+  } = parseStoredProbeState(probeValue);
   if (probeResults.some((result) => (
     result.profileId !== profile.id
     || result.backendConfigurationRevision !== profile.configurationRevision
@@ -81,13 +88,54 @@ export function modelBackendProfileFromRow(
       : latest,
     null,
   );
-  return { profile, probeResults, probeAdmissionHighWater, latestProbe };
+  return {
+    profile,
+    probeResults,
+    probeAdmissionHighWater,
+    latestProbe,
+    probeRenewalRequestedAt,
+    probeKeyCheck,
+  };
 }
 
-function parseProbeState(value: unknown): {
+export interface StoredProbeState {
   probeResults: readonly BackendCompatibilityProbeResult[];
   probeAdmissionHighWater: readonly BackendProbeAdmissionHighWater[];
-} {
+  probeRenewalRequestedAt: string | null;
+  probeKeyCheck: BackendKeyCheck | null;
+}
+
+const renewalRequestedAtSchema = z.string().datetime({ offset: true });
+const keyCheckSchema = z.object({
+  credentialGeneration: z.string().min(1).max(200).nullable(),
+  checkedAt: z.string().datetime({ offset: true }),
+}).strict();
+
+export function parseStoredProbeState(value: unknown): StoredProbeState {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ...parseProbeState(value), probeRenewalRequestedAt: null, probeKeyCheck: null };
+  }
+  const { renewalRequestedAt, keyCheck, ...rest } = value as Record<string, unknown>;
+  const hasRenewal = Object.prototype.hasOwnProperty.call(value, "renewalRequestedAt");
+  const hasKeyCheck = Object.prototype.hasOwnProperty.call(value, "keyCheck");
+  if (!hasRenewal && !hasKeyCheck) {
+    return { ...parseProbeState(value), probeRenewalRequestedAt: null, probeKeyCheck: null };
+  }
+  const renewal = hasRenewal ? renewalRequestedAtSchema.safeParse(renewalRequestedAt) : null;
+  const check = hasKeyCheck ? keyCheckSchema.safeParse(keyCheck) : null;
+  if ((renewal && !renewal.success) || (check && !check.success)) {
+    throw new Error("The stored backend probe renewal state is invalid.");
+  }
+  return {
+    ...parseProbeState(rest),
+    probeRenewalRequestedAt: renewal?.success ? renewal.data : null,
+    probeKeyCheck: check?.success ? check.data : null,
+  };
+}
+
+function parseProbeState(
+  value: unknown,
+): Omit<StoredProbeState, "probeRenewalRequestedAt" | "probeKeyCheck"> {
   if (value === null) {
     return { probeResults: [], probeAdmissionHighWater: [] };
   }

@@ -1,5 +1,7 @@
 import {
   backendProfilePrimaryModel,
+  backendProfileProviderId,
+  backendProfileRouteKind,
   backendProfileUsesCredential,
   modelBackendProfileDetailSchema,
   modelBackendProfileViewSchema,
@@ -18,8 +20,11 @@ import {
 } from "../../../shared/claude-backend-profiles";
 import type { BackendCompatibilityProbeResult } from "../../../shared/backend-probe";
 import {
+  BACKEND_CREDENTIAL_REQUIRED_MESSAGE,
+  claudeBackendRequiresCredential,
   providerIdForHarness,
   resolveHarnessBackendCompatibility,
+  type BackendAuthenticationMode,
   type HarnessBackendCompatibility,
 } from "../../../shared/model-routing";
 import type { ProviderId, ProviderInfo } from "../../../shared/contracts";
@@ -32,8 +37,10 @@ import type {
 } from "../../provider/contracts";
 import { ProviderManager } from "../../providers";
 import {
+  ClaudeBackendLaunchConfigurationError,
   createClaudeBackendLaunchResolver,
 } from "./claude-compatible-adapter";
+import { officialPresetEndpoint } from "./backend-profile-presets";
 import {
   createCodexResponsesBackendLaunchResolver,
   type CodexResponsesBackendProfile,
@@ -49,6 +56,36 @@ import {
   type BackendCredentialBroker,
 } from "./backend-profile-types";
 
+function claudeLaunchAuthentication(
+  mode: BackendAuthenticationMode,
+): Exclude<BackendAuthenticationMode, "harness-managed" | "none"> {
+  if (mode === "harness-managed" || mode === "none") {
+    throw new BackendProfileControllerError(BACKEND_CREDENTIAL_REQUIRED_MESSAGE);
+  }
+  return mode;
+}
+
+export function backendKeyVerified(record: StoredModelBackendProfile): boolean {
+  const keyCheck = record.probeKeyCheck ?? null;
+  return keyCheck !== null && keyCheck.credentialGeneration === record.profile.credentialGeneration;
+}
+
+function incrementCount(counts: Map<string, number>, key: string): boolean {
+  const current = counts.get(key) ?? 0;
+  counts.set(key, current + 1);
+  return current === 0;
+}
+
+function decrementCount(counts: Map<string, number>, key: string): boolean {
+  const next = (counts.get(key) ?? 1) - 1;
+  if (next > 0) {
+    counts.set(key, next);
+    return false;
+  }
+  counts.delete(key);
+  return true;
+}
+
 export class BackendProfileRuntime {
   private readonly credentials: BackendCredentialBroker | undefined;
   private readonly builtInClaudeProfiles =
@@ -61,6 +98,10 @@ export class BackendProfileRuntime {
   private readonly credentialStatuses =
     new Map<string, BackendCredentialStatus | null>();
   private readonly profileHarnessIds = new Map<string, string>();
+  private readonly privateNetworkProfiles = new Set<string>();
+  private readonly credentialRequiredProfiles = new Set<string>();
+  private readonly activeProbes = new Map<string, number>();
+  private readonly activeRenewals = new Map<string, number>();
   private readonly providerInfo = new Map<ProviderId, ProviderInfo>();
   private providers: ProviderManager | null = null;
   private providerMaintenanceBlocked: ((providerId: ProviderId) => boolean) | null = null;
@@ -86,6 +127,7 @@ export class BackendProfileRuntime {
       profiles: () => [...this.claudeProfiles.values()],
       resolveSecret: (reference, signal) =>
         this.resolveCredential(reference, signal),
+      allowPrivateNetwork: (profileId) => this.privateNetworkProfiles.has(profileId),
     });
     this.resolveCodexLaunch = createCodexResponsesBackendLaunchResolver({
       profiles: () => [...this.codexProfiles.values()],
@@ -212,6 +254,8 @@ export class BackendProfileRuntime {
     this.codexProfiles.delete(profileId);
     this.credentialStatuses.delete(profileId);
     this.profileHarnessIds.delete(profileId);
+    this.privateNetworkProfiles.delete(profileId);
+    this.credentialRequiredProfiles.delete(profileId);
     this.providers?.removeBackendProfile(
       profileId,
       harnessId
@@ -220,12 +264,28 @@ export class BackendProfileRuntime {
     );
   }
 
-  removeProbeResults(profileId: string): void {
-    this.providers?.removeBackendProbeResults(profileId);
+  beginProbe(profileId: string, renewal = false): boolean {
+    return incrementCount(renewal ? this.activeRenewals : this.activeProbes, profileId);
+  }
+
+  endProbe(profileId: string, renewal = false): boolean {
+    return decrementCount(renewal ? this.activeRenewals : this.activeProbes, profileId);
+  }
+
+  probing(profileId: string): boolean {
+    return this.activeProbes.has(profileId);
+  }
+
+  renewing(profileId: string): boolean {
+    return this.activeRenewals.has(profileId);
   }
 
   recordProbeResult(result: BackendCompatibilityProbeResult): void {
     this.providers?.recordBackendProbeResult(result);
+  }
+
+  async removeCredential(profileId: string): Promise<void> {
+    await this.credentials?.forget(this.secretReference(profileId));
   }
 
   async forgetCredential(profileId: string): Promise<void> {
@@ -271,13 +331,23 @@ export class BackendProfileRuntime {
 
   view(record: StoredModelBackendProfile): ModelBackendProfileView {
     const profile = record.profile;
-    const { baseUrl: _baseUrl, ...profileWithoutBaseUrl } = profile;
+    const {
+      baseUrl: _baseUrl,
+      models: _models,
+      ...profileWithoutBaseUrl
+    } = profile;
     const status = this.credentialStatuses.get(profile.id);
-    const primaryProbe = backendProbeForModel(
-      record,
-      profile.routing.primaryModelId,
-    );
-    const compatibility = this.compatibility(
+    const models = profile.models.map((model) => {
+      const latestProbe = backendProbeForModel(record, model.id);
+      return {
+        ...model,
+        compatibility: this.compatibility(profile, model.id, latestProbe),
+        latestProbe,
+      };
+    });
+    const primary = models.find(({ id }) => id === profile.routing.primaryModelId);
+    const primaryProbe = primary?.latestProbe ?? null;
+    const compatibility = primary?.compatibility ?? this.compatibility(
       profile,
       profile.routing.primaryModelId,
       primaryProbe,
@@ -296,11 +366,18 @@ export class BackendProfileRuntime {
               : "missing";
     return modelBackendProfileViewSchema.parse({
       ...profileWithoutBaseUrl,
+      models,
+      routeKind: backendProfileRouteKind(profile),
+      providerId: backendProfileProviderId(profile),
       endpointHost: safeEndpointHost(profile.baseUrl),
       authState,
       connectionState: profile.preset === "native"
         ? "connected"
-        : connectionState(primaryProbe),
+        : this.probing(profile.id)
+          ? "testing"
+          : connectionState(primaryProbe),
+      renewing: this.renewing(profile.id),
+      keyVerified: backendKeyVerified(record),
       compatibility,
       latestProbe: primaryProbe,
       canDelete: profile.source === "custom",
@@ -330,15 +407,30 @@ export class BackendProfileRuntime {
         );
       }
     }
+    const safeProfile = safeBackendProfile(profile);
     return resolveHarnessBackendCompatibility(
       profile.harnessId,
-      safeBackendProfile(profile),
-      { evaluatedAt: this.now(), modelId, probe },
+      safeProfile,
+      {
+        evaluatedAt: this.now(),
+        modelId,
+        probe,
+        officialEndpoint: officialPresetEndpoint(safeProfile),
+      },
     );
   }
 
   private registerProfile(profile: PersistedModelBackendProfile): void {
     this.profileHarnessIds.set(profile.id, profile.harnessId);
+    if (profile.allowPrivateNetwork) this.privateNetworkProfiles.add(profile.id);
+    else this.privateNetworkProfiles.delete(profile.id);
+    if (claudeBackendRequiresCredential(profile)) {
+      this.credentialRequiredProfiles.add(profile.id);
+      this.claudeProfiles.delete(profile.id);
+      this.codexProfiles.delete(profile.id);
+      return;
+    }
+    this.credentialRequiredProfiles.delete(profile.id);
     if (profile.protocol === "anthropic-messages") {
       const secretReference = backendProfileUsesCredential(profile)
         ? this.secretReference(profile.id)
@@ -365,9 +457,7 @@ export class BackendProfileRuntime {
           id: profile.id,
           displayName: profile.displayName,
           baseUrl: profile.baseUrl!,
-          authenticationMode: profile.authenticationMode === "harness-managed"
-            ? "none"
-            : profile.authenticationMode,
+          authenticationMode: claudeLaunchAuthentication(profile.authenticationMode),
           secretReference,
           primaryModelId: profile.routing.primaryModelId,
           configurationRevision: profile.configurationRevision,
@@ -395,6 +485,7 @@ export class BackendProfileRuntime {
           ? this.secretReference(profile.id)
           : null,
         allowInsecureLocalhost: profile.allowInsecureLocalhost,
+        allowPrivateNetwork: profile.allowPrivateNetwork,
       });
       this.claudeProfiles.delete(profile.id);
     }
@@ -411,6 +502,12 @@ export class BackendProfileRuntime {
       input.harnessId === "claude-agent-sdk"
       || input.harnessId === "claude-cli"
     ) {
+      if (this.credentialRequiredProfiles.has(input.backendProfile.id)) {
+        throw new ClaudeBackendLaunchConfigurationError(
+          "credential-unavailable",
+          BACKEND_CREDENTIAL_REQUIRED_MESSAGE,
+        );
+      }
       return this.resolveClaudeLaunch(input, environment, context);
     }
     if (

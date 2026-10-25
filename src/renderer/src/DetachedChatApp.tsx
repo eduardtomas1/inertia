@@ -456,9 +456,9 @@ export default function DetachedChatApp({
   const probeBackendProfile = backendProfiles.probeBackendProfile;
   const probeConversationBackendProfile = useCallback(async (
     profileId: string,
-    modelId: string,
+    modelIds?: readonly string[],
   ): Promise<void> => {
-    await probeBackendProfile(profileId, modelId);
+    await probeBackendProfile(profileId, modelIds);
   }, [probeBackendProfile]);
   const changeUsageDisplayMode = useCallback((mode: UsageDisplayMode): void => {
     void updateSettings({ usageDisplayMode: mode }).catch(() => undefined);

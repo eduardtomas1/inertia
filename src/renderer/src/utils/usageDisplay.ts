@@ -4,6 +4,7 @@ import type {
   ThreadUsageSnapshot,
   UsageDisplayMode,
 } from "@shared/contracts";
+import { backendRouteKind } from "./backendRouteState";
 
 export const RECOMMENDED_USAGE_DISPLAY_MODE: UsageDisplayMode = "compact";
 
@@ -26,7 +27,9 @@ export interface UsageDisplayBehavior {
 }
 
 export type ContextUsageDataQuality = "current" | "stale" | "unavailable";
-export type UsageQuotaSource = "selected-route" | "isolated";
+export type UsageQuotaSource = "selected-route" | "isolated" | "api-key";
+
+export const API_KEY_USAGE_UNAVAILABLE = "Usage is not available for API keys.";
 
 export interface ContextUsageDisplayValue {
   readonly quality: ContextUsageDataQuality;
@@ -73,8 +76,13 @@ const nativeQuotaProfileIds = new Set([
  */
 export function usageQuotaSourceForSelection(
   selection: Pick<ModelSelection, "backendProfileId">,
-  profile: Pick<ModelBackendProfileView, "id" | "preset"> | undefined,
+  profile: Pick<ModelBackendProfileView, "id" | "preset"> & Partial<Pick<ModelBackendProfileView, "authenticationMode" | "routeKind">> | undefined,
 ): UsageQuotaSource {
+  if (
+    profile?.id === selection.backendProfileId
+    && profile.authenticationMode !== undefined
+    && backendRouteKind({ authenticationMode: profile.authenticationMode, routeKind: profile.routeKind }) === "api-key"
+  ) return "api-key";
   if (!nativeQuotaProfileIds.has(selection.backendProfileId)) return "isolated";
   if (!profile) return "selected-route";
   return profile.id === selection.backendProfileId && profile.preset === "native"

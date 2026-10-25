@@ -4,6 +4,10 @@ import type { Duplex } from "node:stream";
 import WebSocket, { type RawData } from "ws";
 
 import { clientCommandSchema, type ClientCommand, type ServerEvent } from "../shared/contracts";
+import {
+  backendProfileDraftFailure,
+  backendProfileUpdateFailure,
+} from "./runtime/backends/backend-profile-issues";
 import { SerializedRuntimeEvent, type EncodedRuntimeEvent } from "./serialized-runtime-event";
 
 /**
@@ -97,6 +101,24 @@ export function rejectRuntimeUpgrade(socket: Duplex, status: 403 | 404 | 503): v
   socket.end(`HTTP/1.1 ${status} ${label}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
 }
 
+function commandValidationMessage(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const command = value as Record<string, unknown>;
+  const payload = command.payload;
+  if (command.type === "backend.profile.create") {
+    return backendProfileDraftFailure(payload);
+  }
+  if (
+    command.type === "backend.profile.update"
+    && typeof payload === "object"
+    && payload !== null
+    && !Array.isArray(payload)
+  ) {
+    return backendProfileUpdateFailure((payload as Record<string, unknown>).update);
+  }
+  return null;
+}
+
 function requestIdFrom(value: unknown): string {
   return typeof value === "object" && value !== null && "requestId" in value && typeof value.requestId === "string"
     ? value.requestId
@@ -170,5 +192,11 @@ export function parseRuntimeCommand(data: RawData, isBinary: boolean): { command
   const result = clientCommandSchema.safeParse(value);
   return result.success
     ? { command: result.data }
-    : { error: { type: "request.error", requestId: requestIdFrom(value), message: "Invalid command." } };
+    : {
+        error: {
+          type: "request.error",
+          requestId: requestIdFrom(value),
+          message: commandValidationMessage(value) ?? "Invalid command.",
+        },
+      };
 }

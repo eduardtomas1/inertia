@@ -73,6 +73,7 @@ function retainedLegacyBackendProfile(): PersistedModelBackendProfile {
     preset: "custom",
     baseUrl: "https://retained.example.test/v1",
     allowInsecureLocalhost: false,
+    allowPrivateNetwork: false,
     credentialGeneration: null,
     models: [{
       id: "retained-model",

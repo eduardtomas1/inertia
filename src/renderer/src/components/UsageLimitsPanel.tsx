@@ -56,8 +56,14 @@ function poolCells(pools: UsagePool[], account?: UsageAccount): Array<LimitCellV
   });
 }
 
-function LimitCells({ cells, now }: { cells: Array<LimitCellValue | null>; now: number }): React.JSX.Element {
-  if (cells.length === 0) return <span className="limits-cells"><span className="limits-cell-empty">Quota not reported</span></span>;
+function unreportedDetail(accounts: readonly UsageAccount[]): string | null {
+  if (accounts.length === 0 || accounts.some(({ status, windows }) => status !== "unavailable" || windows.length > 0)) return null;
+  const details = new Set(accounts.map(({ detail }) => detail?.trim() ?? ""));
+  return details.size === 1 ? [...details][0] || null : null;
+}
+
+function LimitCells({ cells, now, empty = "Quota not reported" }: { cells: Array<LimitCellValue | null>; now: number; empty?: string }): React.JSX.Element {
+  if (cells.length === 0) return <span className="limits-cells"><span className="limits-cell-empty">{empty}</span></span>;
   return <span className="limits-cells">{cells.map((cell, index) => cell === null
     ? <span className="limits-cell" data-tone="unknown" key={`absent-${index}`} aria-hidden="true" />
     : <span className="limits-cell" data-tone={limitTone(cell.value, cell.stale)} key={cell.key} style={{ "--c": index } as CSSProperties}>
@@ -125,7 +131,7 @@ function AccountDetails({ account, number, cells, now, selected, onSelect, reque
     <button ref={accountTrigger} type="button" className="limits-account-trigger" aria-expanded={selected} aria-controls={id} onClick={onSelect}>
       <span className="limits-account-number">{number}</span>
       <span className="limits-account-name"><strong>{account.label}</strong><span>{account.plan ?? "Plan not reported"}</span><span className={`limits-state is-${account.status}`}>{account.status}</span><span>{account.credits ? `${account.credits.availableCount} reset${account.credits.availableCount === 1 ? "" : "s"}` : ""}</span></span>
-      <LimitCells cells={cells} now={now} />
+      <LimitCells cells={cells} now={now} empty={unreportedDetail([account]) ?? undefined} />
       <ChevronDown className="limits-chevron" size={14} aria-hidden="true" />
     </button>
     {selected && <div className="limits-account-detail" id={id}>
@@ -166,7 +172,7 @@ function ProviderLimits({ accounts, index, now, open, onToggle, renderAccount }:
     <div className="limits-strip">
       <ProviderLogo providerId={providerId} />
       <div className="limits-strip-name"><h3>{providerLabel}<span>{accounts.length} account{accounts.length === 1 ? "" : "s"}</span></h3><small>{summary || "Plan not reported"}</small></div>
-      <LimitCells cells={poolCells(pools)} now={now} />
+      <LimitCells cells={poolCells(pools)} now={now} empty={unreportedDetail(accounts) ?? undefined} />
       <button type="button" className="limits-strip-toggle" aria-expanded={open} aria-controls={id} aria-label={`${open ? "Hide" : "Show"} ${providerLabel} accounts`} onClick={onToggle}><ChevronDown size={16} aria-hidden="true" /></button>
     </div>
     <div className="limits-strip-accounts" id={id} inert={!open}><div>{accounts.map((account, number) => renderAccount(account, number + 1, poolCells(pools, account)))}</div></div>

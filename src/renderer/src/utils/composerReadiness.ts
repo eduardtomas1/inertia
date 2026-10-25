@@ -5,6 +5,12 @@ import type {
 } from "@shared/contracts";
 import { providerNativeBackendProfile } from "../../../shared/model-routing";
 import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../../shared/provider-maintenance";
+import {
+  backendCompatibilityUsable,
+  backendModelCompatibility,
+  backendProfileRenewing,
+  backendServerChecksBeforeSending,
+} from "./backendRouteState";
 
 export type ComposerRouteRepair =
   | "install"
@@ -32,12 +38,22 @@ type ComposerBackendReadiness = Pick<
   | "displayName"
   | "enabled"
   | "preset"
+  | "renewing"
 > & {
   compatibility: Pick<
     ModelBackendProfileView["compatibility"],
     "reason" | "reasonCode" | "state"
   >;
+  models?: readonly {
+    id: string;
+    compatibility?: Pick<
+      ModelBackendProfileView["compatibility"],
+      "reason" | "reasonCode" | "state"
+    >;
+  }[];
 };
+
+const SETTINGS_PLACE = "Settings → Agents → Accounts and API keys";
 
 const READY_BACKEND_AUTH_STATES = new Set([
   "configured",
@@ -191,7 +207,7 @@ function externalReadiness(
   selection: Pick<
     ModelSelection,
     "backendProfileDisplayName" | "harnessId"
-  >,
+  > & Partial<Pick<ModelSelection, "modelId">>,
 ): ComposerRouteReadiness {
   const backend = profile?.displayName ?? selection.backendProfileDisplayName;
   if (!profile) {
@@ -206,13 +222,28 @@ function externalReadiness(
     return unavailable(
       "Disabled",
       `${backend} is disabled`,
-      "Enable this profile in Model Backends, then probe it if required.",
+      `Turn it on in ${SETTINGS_PLACE}.`,
       "configure",
     );
   }
 
   const installed = providerInstallReadiness(provider, selection);
   if (!installed.ready) return installed;
+
+  const credentialCompatibility = backendModelCompatibility(profile, selection.modelId);
+  if (
+    credentialCompatibility.reasonCode === "credential-required"
+    || profile.compatibility.reasonCode === "credential-required"
+  ) {
+    return unavailable(
+      "Key missing",
+      `${backend} needs a key`,
+      credentialCompatibility.reasonCode === "credential-required"
+        ? credentialCompatibility.reason
+        : profile.compatibility.reason,
+      "add-key",
+    );
+  }
 
   if (profile.authState === "checking") {
     return unavailable(
@@ -229,7 +260,7 @@ function externalReadiness(
       `${backend} needs a key`,
       profile.authState === "unavailable"
         ? "The backend credential could not be read from secure storage."
-        : "Add the backend credential in Model Backends.",
+        : `Add the API key in ${SETTINGS_PLACE}.`,
       "add-key",
     );
   }
@@ -238,34 +269,37 @@ function externalReadiness(
   // is optional, and native Claude account state is not part of this route.
   if (profile.preset === "kimi-code") return { ready: true };
 
-  if (profile.connectionState === "testing") {
+  const compatibility = backendModelCompatibility(profile, selection.modelId);
+  const checking = unavailable(
+    "Checking",
+    "Checking the backend…",
+    `Inertia is checking that ${backend} still answers. This usually takes a few seconds.`,
+    null,
+    true,
+  );
+  if (profile.connectionState === "testing") return checking;
+  if (backendCompatibilityUsable(compatibility)) return { ready: true };
+  if (backendServerChecksBeforeSending(compatibility, profile)) return { ready: true };
+  if (backendProfileRenewing(profile)) return checking;
+  const cannotBeProbed = (
+    compatibility.reasonCode === "protocol-mismatch"
+    || compatibility.reasonCode === "cursor-managed"
+    || compatibility.reasonCode === "opencode-native-catalog"
+  );
+  if (cannotBeProbed) {
     return unavailable(
-      "Probing",
-      `Probing ${backend}`,
-      "Testing the selected endpoint and model…",
+      "Unavailable",
+      `${backend} is incompatible`,
+      compatibility.reason,
       null,
-      true,
     );
   }
-  if (
-    profile.compatibility.state === "unknown"
-    || profile.compatibility.state === "unavailable"
-  ) {
-    const cannotBeProbed = (
-      profile.compatibility.reasonCode === "protocol-mismatch"
-      || profile.compatibility.reasonCode === "cursor-managed"
-      || profile.compatibility.reasonCode === "opencode-native-catalog"
-    );
-    return unavailable(
-      cannotBeProbed ? "Unavailable" : "Probe needed",
-      cannotBeProbed
-        ? `${backend} is incompatible`
-        : `${backend} needs a probe`,
-      profile.compatibility.reason,
-      cannotBeProbed ? null : "probe",
-    );
-  }
-  return { ready: true };
+  return unavailable(
+    "Test failed",
+    `${backend} failed its connection test`,
+    compatibility.reason,
+    "probe",
+  );
 }
 
 export function composerRouteReadiness(input: {
@@ -276,7 +310,7 @@ export function composerRouteReadiness(input: {
     | "backendProfileDisplayName"
     | "backendProfileId"
     | "harnessId"
-  >;
+  > & Partial<Pick<ModelSelection, "modelId">>;
 }): ComposerRouteReadiness {
   const nativeBackendId = input.provider
     ? providerNativeBackendProfile(input.provider.id).id
@@ -290,6 +324,7 @@ export function composerRouteReadiness(input: {
 export function composerProviderReady(
   provider: ProviderInfo | undefined,
   profile: ComposerBackendReadiness | undefined,
+  modelId?: string,
 ): boolean {
   if (!profile || profile.preset === "native") {
     return provider?.canRun === true;
@@ -305,7 +340,10 @@ export function composerProviderReady(
     || !provider.executable
   ) return false;
   if (profile.preset === "kimi-code") return true;
+  const compatibility = backendModelCompatibility(profile, modelId);
   return profile.connectionState !== "testing"
-    && profile.compatibility.state !== "unknown"
-    && profile.compatibility.state !== "unavailable";
+    && (
+      backendCompatibilityUsable(compatibility)
+      || backendServerChecksBeforeSending(compatibility, profile)
+    );
 }

@@ -11,7 +11,6 @@ import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/mi
 import { LimitResetScheduler, type LimitResetDependencies } from "../../src/server/usage/limit-reset-scheduler";
 import { resetQuota, resumeAccountIdentity } from "../../src/server/usage/limit-reset-policy";
 import { NativeSubscriptionReader } from "../../src/server/usage/native-subscriptions";
-import { queuedRouteIdentity } from "../../src/server/persistence/queued-message-repository";
 import { providerUsageLimitsMigration } from "../../src/server/persistence/migrations/provider-usage-limits";
 import { UsageLimitsRepository } from "../../src/server/persistence/usage-limits-repository";
 import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
@@ -76,7 +75,6 @@ afterEach(() => { abort.abort(); store.close(); rmSync(directory, { recursive: t
 describe("quota reset actions", () => {
   it.each([
     ["codex", "gpt-test", "codex:primary"], ["claude", "claude-sonnet", "claude:five_hour"],
-    ["cursor", "composer-2", "cursor:autoPercentUsed"], ["kimi", "kimi-code/k2", "kimi:weekly"],
     ["opencode", "opencode-go/model", "opencode:go_rolling"],
   ] as const)("schedules and admits one continuation for the native %s route", async (providerId, model, windowId) => {
     const projectId = store.conversation(conversationId).projectId;
@@ -427,77 +425,44 @@ describe("quota reset actions", () => {
   });
 });
 
+const goUsage = (percent: number) => ({ usage: { rolling: { percent, resetsAt: reset }, weekly: { percent: 10, resetsAt: reset }, monthly: { percent: 10, resetsAt: reset } } });
+function goChat(token: () => string, accountKey: () => Promise<string | null>) {
+  const projectId = store.conversation(conversationId).projectId;
+  conversationId = store.createConversation(projectId, "Paused OpenCode Go task", { providerId: "opencode", model: "opencode-go/model" }).id;
+  const turn = begin(); failedTurnId = turn.id;
+  store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+  store.limitResets.markUsageLimited(turn.id);
+  store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+  const reader = new NativeSubscriptionReader({ accountKey,
+    openCodeAccount: async () => ({ token: token(), scope: "opencode:go" }),
+    fetch: vi.fn<typeof fetch>(async () => new Response(JSON.stringify(goUsage(Date.now() >= Date.parse(reset) ? 0 : 100)))) });
+  dependencies.readAccount = (_providerId, _force, model, cwd) => reader.read({ ...usage(), id: "native:opencode", providerId: "opencode",
+    providerLabel: "OpenCode", email: null, identityKey: null, status: "unavailable", windows: [] }, model, abort.signal, cwd ?? directory);
+}
+
 describe("resume account identity storage", () => {
-  const secret = ["eyJhbGciOiJSUzI1NiJ9", Buffer.from(JSON.stringify({ sub: "cursor-account" })).toString("base64url"), "signature-0123456789"].join(".");
-  function cursorChat(accountKey: () => Promise<string | null>) {
-    const projectId = store.conversation(conversationId).projectId;
-    conversationId = store.createConversation(projectId, "Paused Cursor task", { providerId: "cursor", model: "composer-2" }).id;
-    const turn = begin(); failedTurnId = turn.id;
-    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
-    store.limitResets.markUsageLimited(turn.id);
-    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
-    const reader = new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: secret }), accountKey,
-      fetch: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ billingCycleEnd: Date.parse(reset),
-        planUsage: { totalPercentUsed: 40, autoPercentUsed: 100, apiPercentUsed: 0 } }))) });
-    dependencies.readAccount = (_providerId, _force, model, cwd) => reader.read({ ...usage(), id: "native:cursor", providerId: "cursor",
-      providerLabel: "Cursor", email: null, identityKey: null, status: "unavailable", windows: [] }, model, abort.signal, cwd ?? directory);
-  }
+  const secret = "opencode-go-secret-key-0123456789";
   it("stores neither a provider token nor its plain SHA-256 in the database", async () => {
-    cursorChat(async () => "per-install-identity-key");
+    goChat(() => secret, async () => "per-install-identity-key");
     await schedule();
     expect(store.limitResets.get(conversationId)).toMatchObject({ state: "waiting", accountIdentity: expect.stringMatching(/^[0-9a-f]{64}$/u) });
     const contents = readdirSync(directory).filter((name) => name.startsWith("inertia.sqlite"))
       .map((name) => readFileSync(join(directory, name)).toString("latin1")).join("");
     for (const derivative of [secret, createHash("sha256").update(secret).digest("hex"),
-      createHash("sha256").update("inertia-subscription\0cursor:subscription\0").update(secret).digest("hex")]) {
+      createHash("sha256").update("inertia-subscription\0opencode:go\0").update(secret).digest("hex"),
+      createHash("sha256").update("inertia-subscription\0opencode:go\0").update(JSON.stringify(["key", secret])).digest("hex")]) {
       expect(contents.includes(derivative), derivative).toBe(false);
     }
   });
   it("disables automatic resume when the per-install identity key is unavailable", async () => {
-    cursorChat(async () => null);
+    goChat(() => secret, async () => null);
     expect((await scheduler.get(conversationId)).offer).toMatchObject({ failedTurnId, canResume: false });
     await expect(schedule()).rejects.toThrow("limit changed");
-  });
-});
-
-describe("macOS Keychain access", () => {
-  let keychain: ReturnType<typeof vi.fn<() => Promise<string | null>>>;
-  beforeEach(() => {
-    const projectId = store.conversation(conversationId).projectId;
-    conversationId = store.createConversation(projectId, "Paused Cursor task", { providerId: "cursor", model: "composer-2" }).id;
-    const turn = begin(); failedTurnId = turn.id;
-    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
-    store.limitResets.markUsageLimited(turn.id);
-    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
-    keychain = vi.fn(async () => "keychain-session-token");
-    const reader = new NativeSubscriptionReader({ platform: "darwin", environment: async () => ({ HOME: directory }), readCursorKeychain: keychain,
-      accountKey: async () => "per-install-identity-key",
-      fetch: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ billingCycleEnd: Date.parse(reset),
-        planUsage: { totalPercentUsed: 40, autoPercentUsed: 100, apiPercentUsed: 0 } }))) });
-    dependencies.readAccount = (_providerId, _force, model, cwd, interactive) => reader.read({ ...usage(), id: "native:cursor", providerId: "cursor",
-      providerLabel: "Cursor", email: null, identityKey: null, status: "unavailable", windows: [] }, model, abort.signal, cwd ?? directory, interactive);
-  });
-  it("never reads the Keychain from the automatic chat refresh", async () => {
-    expect(await scheduler.get(conversationId)).toMatchObject({ offer: null, plan: null });
-    expect(keychain).not.toHaveBeenCalled();
-    await scheduler.snooze({ conversationId, failedTurnId, resetsAt: reset });
-    expect(keychain).toHaveBeenCalledOnce();
-    expect(store.conversation(conversationId).snoozedUntil).toBe(reset);
   });
   it("accepts no client request for an explicit account read", () => {
     const command = { type: "conversation.limit-reset.get", requestId: randomUUID(), payload: { conversationId } };
     expect(clientCommandSchema.safeParse(command).success).toBe(true);
     expect(clientCommandSchema.safeParse({ ...command, payload: { conversationId, refresh: true } }).success).toBe(false);
-  });
-  it("never reads the Keychain from the scheduler", async () => {
-    const route = queuedRouteIdentity(store.conversation(conversationId));
-    store.limitResets.save({ id: randomUUID(), conversationId, failedTurnId, routeIdentity: route, accountIdentity: "a".repeat(64),
-      resetsAt: reset, nextAttemptAt: reset, attempts: 0, state: "waiting", error: null, turnId: null });
-    vi.setSystemTime(instant + 61_000);
-    await scheduler.tick();
-    expect(keychain).not.toHaveBeenCalled();
-    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "blocked" });
-    expect(dependencies.dispatch).not.toHaveBeenCalled();
   });
 });
 
@@ -572,8 +537,6 @@ describe("scheduler isolation", () => {
 
 describe("cached reports for providers without a structured usage-limit signal", () => {
   it.each([
-    ["cursor", "composer-2", "cursor:totalPercentUsed"],
-    ["kimi", "kimi-code/k2", "kimi:weekly"],
     ["opencode", "opencode-go/m", "opencode:go_rolling"],
   ] as const)("offers %s after the Limits page reported its exhausted quota", async (providerId, model, windowId) => {
     const db = new Database(":memory:");
@@ -702,44 +665,20 @@ describe("reported quota windows", () => {
   });
 });
 
-describe("resume identity across credential renewal", () => {
-  const jwt = (claims: Record<string, unknown>, nonce: string) => ["eyJhbGciOiJSUzI1NiJ9",
-    Buffer.from(JSON.stringify({ ...claims, exp: 1_900_000_000, jti: nonce })).toString("base64url"), `signature-${nonce}`].join(".");
-  let accessToken: string;
+describe("resume identity across key changes", () => {
+  let key: string;
   beforeEach(() => {
-    const projectId = store.conversation(conversationId).projectId;
-    conversationId = store.createConversation(projectId, "Paused Kimi task", { providerId: "kimi", model: "k" }).id;
-    const turn = begin(); failedTurnId = turn.id;
-    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
-    store.limitResets.markUsageLimited(turn.id);
-    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
-    accessToken = jwt({ iss: "https://auth.kimi.com", sub: "account-one" }, "before");
-    let remaining = "0";
-    const config = `default_model = "k"\n[models.k]\nmodel = "k"\nprovider = "managed:kimi-code"\n[providers."managed:kimi-code"]\ntype = "kimi"\nbase_url = "https://api.kimi.com/coding/v1"\n[providers."managed:kimi-code".oauth]\nstorage = "file"\nkey = "oauth/kimi-code"\n`;
-    const reader = new NativeSubscriptionReader({ environment: async () => ({ KIMI_CODE_HOME: "/k" }), accountKey: async () => "per-install-identity-key",
-      readFile: async (path) => path.endsWith("config.toml") ? config : path.endsWith("kimi-code.json")
-        ? JSON.stringify({ access_token: accessToken, expires_at: Date.now() / 1000 + 3600 }) : null,
-      fetch: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ usage: { limit: "100", remaining, resetAt: reset } }))) });
-    dependencies.readAccount = (_providerId, _force, model, cwd) => {
-      remaining = Date.now() >= Date.parse(reset) ? "100" : "0";
-      return reader.read({ ...usage(), id: "native:kimi", providerId: "kimi", providerLabel: "Kimi",
-        email: null, identityKey: null, status: "unavailable", windows: [] }, model, abort.signal, cwd ?? directory);
-    };
+    key = "opencode-go-key-one";
+    goChat(() => key, async () => "per-install-identity-key");
   });
-  it.each([["the same account", "account-one", "completed"], ["another account", "account-two", "blocked"]] as const)(
-    "resumes only when a renewed OAuth token names %s", async (_label, sub, state) => {
+  it.each([["the same key", "opencode-go-key-one", "completed"], ["another key", "opencode-go-key-two", "blocked"]] as const)(
+    "resumes only when the OpenCode Go route still uses %s", async (_label, next, state) => {
       expect((await scheduler.get(conversationId)).offer).toMatchObject({ canResume: true, unavailableReason: null });
       await schedule();
       vi.setSystemTime(instant + 61_000);
-      accessToken = jwt({ iss: "https://auth.kimi.com", sub }, "after");
+      key = next;
       await scheduler.tick();
       expect(store.limitResets.get(conversationId)).toMatchObject({ state });
       expect(dependencies.dispatch).toHaveBeenCalledTimes(state === "completed" ? 1 : 0);
     });
-  it("offers snooze only, with the reason, for a session token without a stable account claim", async () => {
-    accessToken = "opaque-session-token-without-claims";
-    const offer = (await scheduler.get(conversationId)).offer;
-    expect(offer).toMatchObject({ failedTurnId, canResume: false, unavailableReason: expect.stringContaining("stable account") });
-    await expect(schedule()).rejects.toThrow("limit changed");
-  });
 });

@@ -1,7 +1,17 @@
 import type {
+  BackendModelDefinition,
+  BackendModelRouting,
   ClientCommand,
+  ModelBackendProfileCreateDraft,
   ModelBackendProfileDraft,
+  ModelBackendProfileUpdate,
+  ModelCapability,
 } from "@shared/contracts";
+
+export type BackendProfileUpdateInput = Partial<Omit<ModelBackendProfileDraft, "preset">> & {
+  preset?: ModelBackendProfileUpdate["preset"];
+  enabled?: boolean;
+};
 
 type BackendProfileCreatePayload = Extract<
   ClientCommand,
@@ -11,10 +21,11 @@ type BackendProfileUpdatePayload = Extract<
   ClientCommand,
   { type: "backend.profile.update" }
 >["payload"]["update"];
+type MutableModels = NonNullable<BackendProfileUpdatePayload["models"]>;
+type MutableRouting = NonNullable<BackendProfileUpdatePayload["routing"]>;
+type MutableCapabilities = NonNullable<BackendProfileUpdatePayload["capabilityHints"]>;
 
-function mutableBackendRouting(
-  routing: ModelBackendProfileDraft["routing"],
-): BackendProfileCreatePayload["routing"] {
+function mutableBackendRouting(routing: BackendModelRouting): MutableRouting {
   return routing.mode === "simple"
     ? { ...routing }
     : {
@@ -24,30 +35,59 @@ function mutableBackendRouting(
 }
 
 function mutableBackendModels(
-  models: ModelBackendProfileDraft["models"],
-): BackendProfileCreatePayload["models"] {
+  models: readonly BackendModelDefinition[],
+): MutableModels {
   return models.map((model) => ({
-    ...model,
+    id: model.id,
+    displayName: model.displayName,
+    contextWindowTokens: model.contextWindowTokens,
     reasoningOptions: model.reasoningOptions.map((option) => ({ ...option })),
     capabilities: model.capabilities.map((capability) => ({ ...capability })),
   }));
 }
 
+function mutableCapabilities(
+  capabilities: readonly ModelCapability[],
+): MutableCapabilities {
+  return capabilities.map((capability) => ({ ...capability }));
+}
+
 export function backendProfileCreatePayload(
-  draft: ModelBackendProfileDraft,
+  draft: ModelBackendProfileCreateDraft,
 ): BackendProfileCreatePayload {
+  if (draft.preset === "custom") {
+    return {
+      ...draft,
+      models: mutableBackendModels(draft.models),
+      routing: mutableBackendRouting(draft.routing),
+      capabilityHints: mutableCapabilities(draft.capabilityHints),
+    };
+  }
   return {
-    ...draft,
-    models: mutableBackendModels(draft.models),
-    routing: mutableBackendRouting(draft.routing),
-    capabilityHints: draft.capabilityHints.map((capability) => ({
-      ...capability,
-    })),
+    preset: draft.preset,
+    ...(draft.displayName !== undefined ? { displayName: draft.displayName } : {}),
+    ...(draft.harnessId !== undefined ? { harnessId: draft.harnessId } : {}),
+    ...(draft.protocol !== undefined ? { protocol: draft.protocol } : {}),
+    ...(draft.authenticationMode !== undefined
+      ? { authenticationMode: draft.authenticationMode }
+      : {}),
+    ...(draft.baseUrl !== undefined ? { baseUrl: draft.baseUrl } : {}),
+    ...(draft.allowInsecureLocalhost !== undefined
+      ? { allowInsecureLocalhost: draft.allowInsecureLocalhost }
+      : {}),
+    ...(draft.allowPrivateNetwork !== undefined
+      ? { allowPrivateNetwork: draft.allowPrivateNetwork }
+      : {}),
+    ...(draft.models !== undefined ? { models: mutableBackendModels(draft.models) } : {}),
+    ...(draft.routing !== undefined ? { routing: mutableBackendRouting(draft.routing) } : {}),
+    ...(draft.capabilityHints !== undefined
+      ? { capabilityHints: mutableCapabilities(draft.capabilityHints) }
+      : {}),
   };
 }
 
 export function backendProfileUpdatePayload(
-  update: Partial<ModelBackendProfileDraft> & { enabled?: boolean },
+  update: BackendProfileUpdateInput,
 ): BackendProfileUpdatePayload {
   return {
     ...(update.displayName !== undefined
@@ -63,6 +103,9 @@ export function backendProfileUpdatePayload(
     ...(update.allowInsecureLocalhost !== undefined
       ? { allowInsecureLocalhost: update.allowInsecureLocalhost }
       : {}),
+    ...(update.allowPrivateNetwork !== undefined
+      ? { allowPrivateNetwork: update.allowPrivateNetwork }
+      : {}),
     ...(update.models !== undefined
       ? { models: mutableBackendModels(update.models) }
       : {}),
@@ -70,11 +113,7 @@ export function backendProfileUpdatePayload(
       ? { routing: mutableBackendRouting(update.routing) }
       : {}),
     ...(update.capabilityHints !== undefined
-      ? {
-          capabilityHints: update.capabilityHints.map((capability) => ({
-            ...capability,
-          })),
-        }
+      ? { capabilityHints: mutableCapabilities(update.capabilityHints) }
       : {}),
     ...(update.enabled !== undefined ? { enabled: update.enabled } : {}),
   };

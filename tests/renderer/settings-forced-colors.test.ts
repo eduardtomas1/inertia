@@ -29,7 +29,7 @@ describe("settings in forced colours", () => {
   it("draws the selected provider and backend outlines inside their clipped frames", () => {
     for (const [path, selector] of [
       ["../../src/renderer/src/components/settings/ProvidersSettings.css", ".provider-settings-list-row.is-selected"],
-      ["../../src/renderer/src/components/ModelBackendsSettings.css", ".backend-profile-rail-item.is-active"],
+      ["../../src/renderer/src/components/ModelBackendsSettings.css", ".backend-choice-grid > button.is-active"],
     ] as const) {
       const rule = forcedColorsRule(path, selector);
       expect(rule).toContain("outline: 1px solid CanvasText");

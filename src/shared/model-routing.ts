@@ -129,7 +129,19 @@ export const HARNESS_BACKEND_COMPATIBILITY_REASON_CODES = [
   "kimi-managed",
   "opencode-native-catalog",
   "antigravity-managed",
+  "credential-required",
 ] as const;
+
+export const BACKEND_CREDENTIAL_REQUIRED_MESSAGE =
+  "Add an API key or bearer token to use this backend.";
+
+export function claudeBackendRequiresCredential(
+  profile: Pick<ModelBackendProfile, "protocol" | "source" | "authenticationMode">,
+): boolean {
+  return profile.protocol === "anthropic-messages"
+    && profile.source === "custom"
+    && (profile.authenticationMode === "none" || profile.authenticationMode === "harness-managed");
+}
 
 export type HarnessBackendCompatibilityReasonCode =
   (typeof HARNESS_BACKEND_COMPATIBILITY_REASON_CODES)[number];
@@ -142,10 +154,12 @@ export interface HarnessBackendCompatibilityEvidence {
   probe?: HarnessBackendProbeEvidence | null;
   /** Deterministic evaluation seam; production callers use the current time. */
   evaluatedAt?: Date;
+  officialEndpoint?: boolean;
 }
 
 export const BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION = 1;
-export const BACKEND_PROBE_FRESHNESS_MS = 24 * 60 * 60 * 1_000;
+export const BACKEND_PROBE_FRESHNESS_MS = 7 * 24 * 60 * 60 * 1_000;
+export const BACKEND_PROBE_RENEWAL_MS = 24 * 60 * 60 * 1_000;
 
 export interface HarnessBackendProbeAuthority {
   schemaVersion: typeof BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION;
@@ -605,6 +619,18 @@ export function resolveHarnessBackendCompatibility(
   const providerId = providerIdForHarness(harnessId);
   const native = providerId ? CURRENT_NATIVE_BACKENDS[providerId] : null;
   const expected = EXPECTED_PROTOCOL[harnessId];
+  if (claudeBackendRequiresCredential(profile)) {
+    return {
+      harnessId,
+      backendProfileId: profile.id,
+      backendProtocol: profile.protocol,
+      state: "unavailable",
+      provenance: "built-in",
+      allowsModelSwitchWithinSession: false,
+      reasonCode: "credential-required",
+      reason: BACKEND_CREDENTIAL_REQUIRED_MESSAGE,
+    };
+  }
   if (!profile.enabled) {
     return {
       harnessId,
@@ -795,15 +821,17 @@ export function resolveHarnessBackendCompatibility(
     backendProtocol: profile.protocol,
     // A text probe verifies routing, not every provider-specific Codex or
     // Claude capability. Keep the richer harness contract honest.
-    state: "partially-compatible",
+    state: evidence.officialEndpoint ? "verified" : "partially-compatible",
     provenance: "probe",
     allowsModelSwitchWithinSession: false,
     reasonCode: harnessId === "codex-app-server"
       ? "responses-probe-verified"
       : "anthropic-probe-verified",
-    reason: harnessId === "codex-app-server"
-      ? "The Responses API and selected model were verified; provider-specific features may vary."
-      : "The Anthropic Messages API and selected model were verified; provider-specific features may vary.",
+    reason: evidence.officialEndpoint
+      ? "The provider's official API and the selected model were verified."
+      : harnessId === "codex-app-server"
+        ? "The Responses API and selected model were verified; provider-specific features may vary."
+        : "The Anthropic Messages API and selected model were verified; provider-specific features may vary.",
   };
 }
 

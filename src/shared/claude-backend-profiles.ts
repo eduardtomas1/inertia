@@ -6,6 +6,7 @@ import {
 } from "./backend-endpoint-identity";
 
 import {
+  BACKEND_CREDENTIAL_REQUIRED_MESSAGE,
   type BackendAuthenticationMode,
   type HarnessBackendCompatibility,
   type HarnessBackendCompatibilityEvidence,
@@ -351,6 +352,13 @@ export const claudeCompatibleBackendProfileSchema = /* @__PURE__ */ (() => claud
       code: "custom",
       path: ["authenticationMode"],
       message: "Custom Claude-compatible profiles cannot use harness-managed authentication.",
+    });
+  }
+  if (profile.authenticationMode === "none") {
+    context.addIssue({
+      code: "custom",
+      path: ["authenticationMode"],
+      message: BACKEND_CREDENTIAL_REQUIRED_MESSAGE,
     });
   }
   const needsSecret = profile.authenticationMode === "api-key"

@@ -9,6 +9,7 @@ import {
 } from "../../src/shared/contracts";
 import {
   AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
+  BACKEND_PROFILE_DISCOVERY_REQUEST_TIMEOUT_MS,
   BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
   DUO_CANCEL_REQUEST_TIMEOUT_MS,
   DUO_DISPATCH_REQUEST_TIMEOUT_MS,
@@ -506,7 +507,19 @@ describe("useInertiaConnection", () => {
         requestId: "11111111-1111-4111-8111-111111111111",
         payload: {
           profileId: "custom:test",
-          modelId: "model-test",
+          modelIds: ["model-test"],
+        },
+      },
+    },
+    {
+      name: "backend model discovery",
+      timeoutMs: BACKEND_PROFILE_DISCOVERY_REQUEST_TIMEOUT_MS,
+      delivery: "rejected" as const,
+      command: {
+        type: "backend.profile.discover-models",
+        requestId: "11111111-1111-4111-8111-111111111111",
+        payload: {
+          profileId: "custom:test",
         },
       },
     },

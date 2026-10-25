@@ -1,6 +1,7 @@
 import type WebSocket from "ws";
 
 import type {
+  Conversation,
   ProviderInfo,
   ServerEvent,
 } from "../../../shared/contracts";
@@ -24,6 +25,7 @@ import {
   type IsolatedRunController,
   isolatedRunSelection,
 } from "../reviews/isolated-run-controller";
+import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { TurnController } from "../turns/turn-controller";
 import {
   defineRuntimeCommandHandler,
@@ -38,6 +40,7 @@ import {
 
 export interface IsolatedReviewCommandDependencies {
   store: RuntimeStore;
+  backendProfileController: Pick<BackendProfileController, "readiness">;
   turns: TurnController;
   isolatedRuns: IsolatedRunController<WebSocket>;
   secureFiles: RuntimeSecureFileBroker;
@@ -57,6 +60,25 @@ export function createIsolatedReviewCommandHandler(
     cancelled: boolean;
     abort: AbortController;
   }>();
+  const assertRouteReady = async (
+    conversation: Conversation,
+    unavailable: string,
+  ): Promise<ProviderInfo | undefined> => {
+    const provider = dependencies.providerInfo().find(
+      ({ id }) => id === conversation.providerId,
+    );
+    const readiness = await dependencies.backendProfileController.readiness(
+      conversation.modelSelection,
+      provider,
+    );
+    if (readiness && !readiness.ready) {
+      throw new RuntimeRequestError(readiness.message ?? unavailable);
+    }
+    if (!readiness && !provider?.canRun) {
+      throw new RuntimeRequestError(provider?.statusMessage ?? unavailable);
+    }
+    return provider;
+  };
   return defineRuntimeCommandHandler([
     "review.selection.ask",
     "review.selection.revise",
@@ -83,21 +105,20 @@ export function createIsolatedReviewCommandHandler(
             "Wait for the current agent or review turn to finish first.",
           );
         }
-        const provider = dependencies.providerInfo().find(
-          ({ id }) => id === conversation.providerId,
-        );
-        if (!provider?.canRun) {
-          throw new RuntimeRequestError(
-            provider?.statusMessage
-              ?? "The selected review agent is unavailable.",
-          );
-        }
         const pending = {
           cancelled: false,
           abort: new AbortController(),
         };
         pendingSelectionQuestions.set(conversation.id, pending);
         try {
+          const provider = await assertRouteReady(conversation, "The selected review agent is unavailable.");
+          if (pending.cancelled) {
+            dependencies.send(socket, {
+              type: "request.ok",
+              requestId: command.requestId,
+            });
+            return "handled";
+          }
           const context = await selectedReviewContext(
             dependencies.store,
             command.payload,
@@ -248,15 +269,7 @@ export function createIsolatedReviewCommandHandler(
             "Wait for the current agent or review turn to finish first.",
           );
         }
-        const provider = dependencies.providerInfo().find(
-          ({ id }) => id === conversation.providerId,
-        );
-        if (!provider?.canRun) {
-          throw new RuntimeRequestError(
-            provider?.statusMessage
-              ?? "The selected agent is unavailable.",
-          );
-        }
+        await assertRouteReady(conversation, "The selected agent is unavailable.");
         if (!dependencies.store.conversationWork.reserve(conversation.id)) {
           throw new RuntimeRequestError(
             "End the resumed provider terminal before starting another agent task for this chat.",
@@ -388,13 +401,10 @@ export function createIsolatedReviewCommandHandler(
             "An isolated review is already running for this thread.",
           );
         }
-        const provider = dependencies.providerInfo().find(
-          ({ id }) => id === conversation.providerId,
-        );
-        if (!provider?.canRun) {
+        const provider = await assertRouteReady(conversation, "The selected review agent is unavailable.");
+        if (dependencies.turns.isActive(conversation.id) || dependencies.isolatedRuns.has(conversation.id)) {
           throw new RuntimeRequestError(
-            provider?.statusMessage
-              ?? "The selected review agent is unavailable.",
+            "An isolated review is already running for this thread.",
           );
         }
         try {
@@ -425,12 +435,12 @@ export function createIsolatedReviewCommandHandler(
             structured.files,
           );
           const selectedReviewModel = conversation.model
-            ? provider.models.find(
+            ? (provider?.models ?? []).find(
                 ({ id }) => id === conversation.model,
               )?.id ?? conversation.model
             : (
-              provider.models.find(({ isDefault }) => isDefault)
-              ?? provider.models[0]
+              (provider?.models ?? []).find(({ isDefault }) => isDefault)
+              ?? provider?.models[0]
             )?.id ?? null;
           const completion = await dependencies.isolatedRuns.run({
             kind: "diff-summary",

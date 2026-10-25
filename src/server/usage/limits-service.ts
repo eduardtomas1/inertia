@@ -23,7 +23,7 @@ export interface UsageLimitsDependencies {
   credentials?: BackendCredentialBroker;
   native: Pick<NativeUsageReader, "read" | "consume">;
   providers(): ProviderInfo[];
-  customProfiles(): Array<{ id: string; label: string }>;
+  customProfiles(): Array<{ id: string; label: string; routeKind?: "account" | "api-key" }>;
   signal: AbortSignal;
   enabled: boolean;
   hub?: CliproxyUsageClient;
@@ -46,7 +46,6 @@ export class UsageLimitsService {
       accounts: this.accounts.map((account) => {
         const publicAccount = { ...account };
         delete publicAccount.credentialFingerprint;
-        delete publicAccount.keychain;
         delete publicAccount.resumeUnavailable;
         const pending = account.identityKey ? this.dependencies.repository.pending(account.identityKey) : null;
         const incompatible = pending && pending.confirmation.creditId === null && account.id !== "native:codex";
@@ -67,7 +66,7 @@ export class UsageLimitsService {
     if (!running && !force && this.checkedAt && Date.now() - Date.parse(this.checkedAt) < 60000) {
       return Promise.resolve(this.snapshot());
     }
-    const operation = this.serial(() => this.read(interactive));
+    const operation = this.serial(() => this.read());
     this.refreshInFlight = { promise: operation, interactive };
     void operation.finally(() => {
       if (this.refreshInFlight?.promise === operation) this.refreshInFlight = null;
@@ -112,8 +111,8 @@ export class UsageLimitsService {
     const read = this.serial(async () => {
       const info = this.dependencies.providers().find((provider) => provider.id === providerId);
       if (!info || !this.dependencies.enabled) return null;
-      const account = await this.dependencies.native.read(info, model, cwd, interactive).catch(() => null);
-      if (account && account.keychain !== "deferred") this.rememberChatAccount(scope, account);
+      const account = await this.dependencies.native.read(info, model, cwd).catch(() => null);
+      if (account) this.rememberChatAccount(scope, account);
       return account;
     }).finally(() => {
       if (this.chatReads.get(key) === read) this.chatReads.delete(key);
@@ -133,14 +132,14 @@ export class UsageLimitsService {
     this.chatAccounts.set(scope, account);
     if (this.chatAccounts.size > CHAT_ACCOUNT_LIMIT) this.chatAccounts.delete(this.chatAccounts.keys().next().value!);
   }
-  private async read(interactive: boolean): Promise<UsageLimitsSnapshot> {
+  private async read(): Promise<UsageLimitsSnapshot> {
     const previous = new Map(this.accounts.map((account) => [account.id, account]));
     const next: NativeUsageAccount[] = [];
     this.routes.clear(); this.sourceErrors.clear();
     for (const info of this.dependencies.providers()) {
       if (!info.available && info.installState === "not-installed") continue;
       try {
-        next.push(this.dependencies.enabled ? await this.dependencies.native.read(info, undefined, undefined, interactive) : {
+        next.push(this.dependencies.enabled ? await this.dependencies.native.read(info) : {
           id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
           email: null, plan: null, identityKey: null, sources: ["This computer"], status: info.rateLimits.length ? "ready" : "unsupported", detail: info.rateLimits.length ? null : "This provider does not expose a supported subscription quota API.",
           windows: usageWindows(info.rateLimits), credits: null, canReset: false, updatedAt: info.metadataState.rateLimits.updatedAt, checkedAt: new Date().toISOString(),
@@ -151,7 +150,10 @@ export class UsageLimitsService {
       }
     }
     for (const profile of this.dependencies.customProfiles()) next.push({ id: `profile:${profile.id}`, providerId: "custom", providerLabel: profile.label, label: profile.label,
-      email: null, plan: null, identityKey: null, sources: ["Configured route"], status: "unsupported", detail: "This custom route does not expose subscription quotas. Connecting a usage hub does not change agent routing.", windows: [], credits: null, canReset: false, updatedAt: null, checkedAt: null });
+      email: null, plan: null, identityKey: null, sources: ["Configured route"], windows: [], credits: null, canReset: false, updatedAt: null, checkedAt: null,
+      ...(profile.routeKind === "api-key"
+        ? { status: "unavailable" as const, detail: "Usage and limits are not available for API keys." }
+        : { status: "unsupported" as const, detail: "This custom route does not expose subscription quotas. Connecting a usage hub does not change agent routing." }) });
     // A single deadline covers all hub requests, including streaming and account fan-out.
     const timeout = AbortSignal.timeout(20000);
     const signal = AbortSignal.any([this.dependencies.signal, timeout]);
@@ -175,7 +177,6 @@ export class UsageLimitsService {
     }
     this.accounts = next.map((account) => {
       const old = previous.get(account.id);
-      if (account.keychain === "deferred" && old) return old;
       const sameLogin = old && ((old.identityKey && account.identityKey === old.identityKey)
         || (old.credentialFingerprint && account.credentialFingerprint === old.credentialFingerprint));
       return account.status === "error" && sameLogin

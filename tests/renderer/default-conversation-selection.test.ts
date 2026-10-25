@@ -7,6 +7,7 @@ import {
   type ProviderInfo,
 } from "../../src/shared/contracts";
 import { modelSelectionSchema } from "../../src/shared/model-routing";
+import { backendView } from "./backend-view-fixtures";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 
@@ -26,7 +27,7 @@ function customSelection(revision: number) {
 }
 
 function profile(): ModelBackendProfileView {
-  return {
+  return backendView<ModelBackendProfileView>({
     id: "custom:team",
     displayName: "Team gateway",
     harnessId: "codex-app-server",
@@ -70,7 +71,7 @@ function profile(): ModelBackendProfileView {
     latestProbe: null,
     canDelete: true,
     canDisable: true,
-  };
+  });
 }
 
 function provider(freshness: "fresh" | "stale"): ProviderInfo {

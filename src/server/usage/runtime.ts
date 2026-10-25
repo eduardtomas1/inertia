@@ -30,7 +30,7 @@ export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManag
       openCodeAccount: (directory, model, lifetime) => providers.openCodeUsageAccount(directory, model, lifetime),
       accountKey: async (lifetime) => await credentials?.resolve(USAGE_ACCOUNT_IDENTITY_SECRET_REFERENCE, lifetime) ?? null,
     })), providers: providerInfo,
-    customProfiles: () => backends.profiles(providerInfo()).filter((profile) => profile.preset !== "native").map((profile) => ({ id: profile.id, label: profile.displayName })),
+    customProfiles: () => backends.profiles(providerInfo()).filter((profile) => profile.preset !== "native").map((profile) => ({ id: profile.id, label: profile.displayName, routeKind: profile.routeKind })),
     signal, enabled,
   });
   const limitReset = createLimitResetRuntime(resume.dependencies, service, { signal, track: resume.track });

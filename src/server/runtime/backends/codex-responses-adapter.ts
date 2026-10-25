@@ -9,7 +9,10 @@ import type {
   ProviderRunInput,
 } from "../../provider/contracts";
 import { safeProviderBackendLabel } from "../../provider/adapters";
-import { validateBackendEndpointNetworkPolicy } from "./backend-compatibility-probe/http";
+import {
+  validateBackendEndpointNetworkPolicy,
+  type BackendEndpointNetworkPolicy,
+} from "./backend-compatibility-probe/http";
 
 const CODEX_CREDENTIAL_ENVIRONMENT_KEY = "INERTIA_CODEX_BACKEND_TOKEN";
 
@@ -22,6 +25,7 @@ export interface CodexResponsesBackendProfile {
   secretReference: string | null;
   /** Advanced local-development escape hatch; literal loopback only. */
   allowInsecureLocalhost?: boolean;
+  allowPrivateNetwork?: boolean;
 }
 
 export interface CodexResponsesBackendLaunchResolverOptions {
@@ -34,7 +38,7 @@ export interface CodexResponsesBackendLaunchResolverOptions {
   ) => string | null | Promise<string | null>;
   validateEndpointNetworkPolicy?: (
     endpointUrl: string,
-    allowInsecureLocalhost: boolean,
+    policy: BackendEndpointNetworkPolicy,
     signal: AbortSignal,
   ) => Promise<unknown>;
 }
@@ -149,6 +153,7 @@ function normalizedProfiles(
       baseUrl,
       secretReference,
       allowInsecureLocalhost: input.allowInsecureLocalhost === true,
+      allowPrivateNetwork: input.allowPrivateNetwork === true,
     });
   }
   return result;
@@ -226,7 +231,10 @@ export function createCodexResponsesBackendLaunchResolver(
       && (
         input.backendCompatibility.provenance !== "probe"
         || input.backendCompatibility.reasonCode !== "responses-probe-verified"
-        || input.backendCompatibility.state !== "partially-compatible"
+        || (
+          input.backendCompatibility.state !== "partially-compatible"
+          && input.backendCompatibility.state !== "verified"
+        )
       )
     ) {
       throw new CodexResponsesBackendConfigurationError(
@@ -275,7 +283,10 @@ export function createCodexResponsesBackendLaunchResolver(
       try {
         await validateEndpointNetworkPolicy(
           configured.baseUrl,
-          configured.allowInsecureLocalhost === true,
+          {
+            allowInsecureLocalhost: configured.allowInsecureLocalhost === true,
+            allowPrivateNetwork: configured.allowPrivateNetwork === true,
+          },
           context.signal,
         );
       } catch {

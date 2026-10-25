@@ -12,7 +12,7 @@ import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pull
 import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode, isTurnSessionRecovery } from "../continuation-policy";
-import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
+import { backendDefault, backendProfile, backendProfileResultValidators, optionalProviderAccountKind, optionalTurnFailureKind } from "./backend-profile-result-schema";
 import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
 import { DUO_COMPARISON_STATES, DUO_DISPATCH_STATES, DUO_LAUNCH_STATES } from "./duo";
@@ -89,13 +89,6 @@ function optionalContinuationReasonCode(value: UnknownRecord): boolean {
   const reason = value.continuationReasonCode;
   const recovery = value.sessionRecovery;
   return (reason === undefined || reason === null || isContinuationReasonCode(reason)) && (recovery === undefined || recovery === null || isTurnSessionRecovery(recovery));
-}
-function backendProfile(value: unknown, detail = false): boolean {
-  return (detail ? modelBackendProfileDetailSchema : modelBackendProfileViewSchema)
-    .safeParse(value).success;
-}
-function backendDefault(value: unknown): boolean {
-  return modelBackendDefaultSchema.safeParse(value).success;
 }
 function syncCursor(value: unknown): boolean {
   return recordWithStrings(value, "runtimeGeneration")
@@ -189,7 +182,8 @@ function latestTurn(value: unknown): boolean {
     && optionalContinuationReasonCode(value)
     && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
     && modelRouteIdentityCoherent(value)
-    && optionalBooleanField(value, "usageLimited");
+    && optionalBooleanField(value, "usageLimited")
+    && optionalTurnFailureKind(value);
 }
 
 function conversation(value: unknown): value is UnknownRecord {
@@ -318,6 +312,7 @@ function providerInfo(value: unknown): boolean {
     && providerMetadataField(value.metadataState.rateLimits)
     && optionalProviderCapabilityContract(value.capabilityContract, value.id)
     && (value.agentThreadManagement === undefined || (record(value.agentThreadManagement) && oneOf(value.agentThreadManagement, "state", ["supported", "unavailable"] as const) && stringField(value.agentThreadManagement, "detail")))
+    && optionalProviderAccountKind(value)
     && (value.maintenance === undefined
       || (providerMaintenanceStatus(value.maintenance)
         && record(value.maintenance)
@@ -907,6 +902,7 @@ function agentTurn(value: unknown): boolean {
     && modelRouteIdentityCoherent(value)
     && nullableStringField(value, "modelAlias")
     && (value.usageLimited === undefined || value.usageLimited === true)
+    && optionalTurnFailureKind(value)
     && nullableStringField(value, "providerSessionBefore")
     && nullableStringField(value, "providerSessionAfter")
     && nullableStringField(value, "startedAt")
@@ -1115,9 +1111,7 @@ const REQUEST_RESULT_VALIDATORS = {
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
     && oneOf(value, "disposition", ["new-turn", "follow-up"]),
   "conversation.compacted": (value) => recordWithStrings(value, "conversationId", "providerId", "message") && oneOf(value, "providerId", PROVIDER_IDS) && booleanField(value, "instructionForwarded"),
-  "backend.profile": (value) => backendProfile(value.profile, true),
-  "backend.profile.probe": (value) => backendProfile(value.profile, true),
-  "backend.default": (value) => value.value === null || backendDefault(value.value),
+  ...backendProfileResultValidators,
   "provider.maintenance": (value) => arrayOf(value.providers, providerMaintenanceStatus)
     && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) => providerMaintenanceOperation(value.operation),

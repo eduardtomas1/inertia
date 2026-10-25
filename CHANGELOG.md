@@ -42,6 +42,34 @@ The useful changes in each Inertia release, in plain language.
   and update electron-updater to 6.8.11, which refuses missing or path-valued
   cached update file names.
 
+### Accounts and API keys
+
+- Use your API credits beside your account. **Settings → Agents → Accounts
+  and API keys** shows each agent's sign-in state and its API keys, and
+  **Add API key** sets up an Anthropic or OpenAI key in one step: Inertia
+  stores it in your system's vault, checks the key and turns the route on;
+  each model is tested the first time a chat uses it. Claude Code can also
+  sign in for API billing.
+- A key route works without the account. The model chooser offers it as
+  soon as the agent is installed, labels it **API key**, and judges each
+  model on its own test. Replacing a key keeps the route and your chats.
+- Tests show each model's result and the reason for a failure. Evidence
+  lasts seven days, renews in the background after a day, and a stale
+  route is re-tested right before launch instead of refused.
+- Custom backends get field-level validation, the key at creation, the
+  effective address, an **Allow private network addresses** switch, and
+  **Discover models** from the endpoint. A Claude-harness backend without
+  a credential is refused everywhere, so the account's token never reaches
+  another host.
+- Checking a key falls back to testing the route's primary model when the
+  endpoint offers no model list.
+- On a Claude Code key route, the key is masked in replies, tool output and
+  errors, and commands that would print it or the whole environment are
+  declined.
+- Cursor and Kimi Code usage no longer reads from those CLIs' credential
+  stores and shows as not reported. Inertia no longer ships the native
+  Keychain binding or the TOML parser that this needed.
+
 ## 0.0.76 — 2026-10-23
 
 Tasks that follow the agent without marking your work done for you, a more

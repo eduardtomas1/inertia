@@ -8,13 +8,14 @@ import { RESTORE_DEFAULTS_SCOPE } from "../../src/shared/restore-defaults";
 import { modelRouteIdentityKey } from "../../src/renderer/src/utils/modelFavorites";
 import { conversation } from "./composer-fixtures";
 import { settingsProvider, settingsViewProps } from "./settings-view-fixtures";
+import { backendView } from "./backend-view-fixtures";
 
 function row(id: string): HTMLElement {
   return document.querySelector<HTMLElement>(`[data-setting-id="${id}"]`)!;
 }
 
 function teamProfile(): ModelBackendProfileView {
-  return {
+  return backendView<ModelBackendProfileView>({
     id: "custom:team",
     displayName: "Team gateway",
     harnessId: "codex-app-server",
@@ -54,7 +55,7 @@ function teamProfile(): ModelBackendProfileView {
     latestProbe: null,
     canDelete: true,
     canDisable: true,
-  };
+  });
 }
 
 const teamSelection = modelSelectionSchema.parse({
@@ -121,7 +122,7 @@ describe("New chats single home", () => {
       .map((select) => select.getAttribute("aria-label"))).toEqual(newChatNames);
 
     fireEvent.click(screen.getByRole("button", { name: "Agents" }));
-    await screen.findByRole("heading", { name: "Custom backends" });
+    await screen.findByRole("heading", { name: "Accounts and API keys" });
     expect(screen.queryByRole("combobox", { name: /default/iu })).toBeNull();
     for (const name of newChatNames) expect(screen.queryByRole("combobox", { name })).toBeNull();
     expect(screen.queryByText("New chat defaults")).toBeNull();

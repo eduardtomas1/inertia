@@ -13,6 +13,7 @@ import type {
   ProviderInfo,
 } from "../../src/shared/contracts";
 import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../src/shared/provider-maintenance";
+import { backendView } from "./backend-view-fixtures";
 
 function provider(
   overrides: Partial<ProviderInfo> = {},
@@ -53,7 +54,7 @@ function provider(
 function profile(
   overrides: Partial<ModelBackendProfileView> = {},
 ): ModelBackendProfileView {
-  return {
+  return backendView<ModelBackendProfileView>({
     id: "custom:team",
     displayName: "Team gateway",
     harnessId: "claude-agent-sdk",
@@ -88,7 +89,7 @@ function profile(
     canDelete: true,
     canDisable: true,
     ...overrides,
-  };
+  });
 }
 
 function customSelection(
@@ -250,36 +251,56 @@ describe("composer route readiness", () => {
     });
   });
 
-  it("offers Probe for missing, stale, or failed compatibility evidence", () => {
-    for (const [reasonCode, state] of [
-      ["probe-required", "unknown"],
-      ["probe-stale", "unknown"],
-      ["probe-failed", "unavailable"],
-    ] as const) {
+  it("lets the runtime renew stale or missing evidence and offers a test only after a failed probe", () => {
+    const claude = provider({
+      id: "claude",
+      label: "Claude",
+      command: "claude",
+      executable: "/opt/bin/claude",
+    });
+    const withEvidence = (
+      reasonCode: "probe-required" | "probe-stale" | "probe-failed",
+      overrides: Partial<ModelBackendProfileView> = {},
+    ) => profile({
+      connectionState: reasonCode === "probe-failed" ? "failed" : "not-tested",
+      compatibility: {
+        ...profile().compatibility,
+        reasonCode,
+        state: reasonCode === "probe-failed" ? "unavailable" : "unknown",
+        reason: "Probe this exact endpoint and model.",
+      },
+      ...overrides,
+    });
+    for (const reasonCode of ["probe-required", "probe-stale"] as const) {
       expect(composerRouteReadiness({
-        provider: provider({
-          id: "claude",
-          label: "Claude",
-          command: "claude",
-          executable: "/opt/bin/claude",
-        }),
-        profile: profile({
-          connectionState: reasonCode === "probe-failed" ? "failed" : "not-tested",
-          compatibility: {
-            ...profile().compatibility,
-            reasonCode,
-            state,
-            reason: "Probe this exact endpoint and model.",
-          },
-        }),
+        provider: claude,
+        profile: withEvidence(reasonCode),
         selection: customSelection(),
-      })).toMatchObject({
-        ready: false,
-        title: "Team gateway needs a probe",
-        detail: "Probe this exact endpoint and model.",
-        action: "probe",
-      });
+      })).toEqual({ ready: true });
+      expect(composerProviderReady(claude, withEvidence(reasonCode))).toBe(true);
+      expect(composerRouteReadiness({
+        provider: claude,
+        profile: withEvidence(reasonCode, { authState: "missing" }),
+        selection: customSelection(),
+      })).toMatchObject({ ready: false, badge: "Key missing", action: "add-key" });
+      expect(composerRouteReadiness({
+        provider: { ...claude, installState: "not-installed", available: false, executable: null },
+        profile: withEvidence(reasonCode),
+        selection: customSelection(),
+      })).toMatchObject({ ready: false, action: "install" });
     }
+    expect(composerRouteReadiness({
+      provider: claude,
+      profile: withEvidence("probe-failed"),
+      selection: customSelection(),
+    })).toMatchObject({
+      ready: false,
+      badge: "Test failed",
+      title: "Team gateway failed its connection test",
+      detail: "Probe this exact endpoint and model.",
+      action: "probe",
+    });
+    expect(composerProviderReady(claude, withEvidence("probe-failed"))).toBe(false);
   });
 
   it("keeps text-compatible Codex unavailable until its inert tool check passes", () => {
@@ -305,7 +326,7 @@ describe("composer route readiness", () => {
     });
     expect(readiness).toMatchObject({
       ready: false,
-      badge: "Probe needed",
+      badge: "Test failed",
       action: "probe",
       detail: "Codex requires this Responses backend to pass the inert tool-call compatibility check.",
     });

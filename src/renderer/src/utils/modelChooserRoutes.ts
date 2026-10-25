@@ -1,5 +1,4 @@
 import type {
-  BackendModelDefinition,
   ContinuationIdentity,
   HarnessBackendCompatibility,
   ModelBackendProfileView,
@@ -21,6 +20,16 @@ import {
 } from "../../../shared/model-routing";
 import { officiallyAllowsModelSwitchWithinSession } from "../../../shared/continuation-policy";
 import type { ModelChooserSelectionCompatibility } from "../components/ModelChooserRow";
+import {
+  apiKeyRouteLabel,
+  backendCompatibilityUsable,
+  backendModelCompatibility,
+  backendServerChecksBeforeSending,
+  providerAccountKind,
+  backendRouteKind,
+  backendSourceProviderId,
+  providerInstalledForKeyRoutes,
+} from "./backendRouteState";
 import { modelRouteIdentityKey } from "./modelFavorites";
 import type { ModelSearchRoute } from "./modelSearch";
 
@@ -204,6 +213,14 @@ function profileRoute(
   if (!model) throw new Error("The selected backend model is unavailable.");
   const providerId = providerIdForHarness(profile.harnessId);
   const provider = providers.find(({ id }) => id === providerId);
+  const routeKind = backendRouteKind(profile);
+  const compatibility = backendModelCompatibility(profile, model.id);
+  const sourceProviderId = profile.preset === "custom"
+    ? null
+    : backendSourceProviderId(profile);
+  const routeLabel = routeKind === "api-key" && profile.authenticationMode !== "none"
+    ? apiKeyRouteLabel(profile.displayName)
+    : null;
   const baseSelection = selectionForProfileModel(profile, model.id);
   const generatedSelection = profile.preset === "native"
     ? modelSelectionSchema.parse({
@@ -227,8 +244,10 @@ function profileRoute(
       && provider?.models.some(({ id }) => id === model.id) === true
     );
   const selectable = profile.enabled
-    && profile.compatibility.state !== "unknown"
-    && profile.compatibility.state !== "unavailable"
+    && (
+      backendCompatibilityUsable(compatibility)
+      || backendServerChecksBeforeSending(compatibility, profile)
+    )
     && nativeCatalogCurrent;
   return {
     key: modelRouteIdentityKey(selection),
@@ -241,9 +260,13 @@ function profileRoute(
     backendProfileName: profile.displayName,
     backendConfigurationRevision:
       selection.backendConfigurationRevision,
-    providerLabel: provider?.label ?? profile.displayName,
+    providerLabel: routeLabel ?? provider?.label ?? profile.displayName,
     source: profile.source,
+    ...(sourceProviderId ? { sourceProviderId } : {}),
+    routeKind,
+    ...(routeLabel ? { routeLabel } : {}),
     routeTerms: [
+      ...(routeKind === "api-key" ? ["API key"] : []),
       profile.preset,
       profile.protocol,
       ...(providerId ? [providerId] : []),
@@ -265,17 +288,21 @@ function profileRoute(
       ? null
       : !nativeCatalogCurrent
         ? refreshModelsReason
-        : profile.compatibility.reason,
+        : compatibility.reason,
     selection,
     continuationIdentity: continuationIdentityForSelection(
       selection,
       profile.endpointIdentity,
-      !officiallyAllowsModelSwitchWithinSession(profile.compatibility),
+      !officiallyAllowsModelSwitchWithinSession(compatibility),
     ),
-    compatibility: profile.compatibility,
-    rowCompatibility: compatibilityForRow(profile.compatibility),
+    compatibility,
+    rowCompatibility: compatibilityForRow(compatibility),
     providerId,
-    providerReady: providerId === null || providerRunsModels(provider),
+    providerReady: providerId === null || (
+      routeKind === "api-key"
+        ? providerInstalledForKeyRoutes(provider)
+        : providerRunsModels(provider)
+    ),
   };
 }
 
@@ -332,6 +359,8 @@ function fallbackNativeRoutes(
           selection.backendConfigurationRevision,
         providerLabel: provider.label,
         source: "built-in" as const,
+        sourceProviderId: provider.id,
+        routeKind: "account" as const,
         routeTerms: [provider.id],
         reasoningEffort: selection.reasoningEffort,
         reasoningOptions: Array.from(new Set([
@@ -366,7 +395,8 @@ function fallbackNativeRoutes(
 
 function nativeProviderDefaultModel(
   provider: ProviderInfo | undefined,
-): BackendModelDefinition {
+  profile: ModelBackendProfileView,
+): ModelBackendProfileView["models"][number] {
   const currentDefault = provider?.models.find(({ isDefault }) => isDefault)
     ?? provider?.models[0];
   return {
@@ -377,6 +407,8 @@ function nativeProviderDefaultModel(
       ...option,
     })) ?? [],
     capabilities: [],
+    compatibility: profile.compatibility,
+    latestProbe: null,
   };
 }
 
@@ -394,6 +426,7 @@ function profileWithProviderDefault(
     models: [
       nativeProviderDefaultModel(
         providers.find(({ id }) => id === providerId),
+        profile,
       ),
       ...profile.models,
     ],
@@ -410,11 +443,18 @@ export function buildComposerModelRoutes(
   currentSelection: ModelSelection,
   providerIdentityLabels: ProviderIdentityLabels = {},
 ): ComposerModelRoute[] {
-  const applyIdentityLabels = (routes: ComposerModelRoute[]) => routes.map(
-    (route) => route.providerId && providerIdentityLabels[route.providerId]
-      ? { ...route, providerLabel: providerIdentityLabels[route.providerId]! }
-      : route,
-  );
+  const applyIdentityLabels = (routes: ComposerModelRoute[]) => routes.map((route) => {
+    if (route.routeKind === "api-key" || !route.providerId) return route;
+    const identity = providerIdentityLabels[route.providerId];
+    const kind = providerAccountKind(providers.find(({ id }) => id === route.providerId));
+    const routeLabel = [identity, kind].filter(Boolean).join(" · ");
+    if (!routeLabel) return route;
+    return {
+      ...route,
+      ...(identity ? { providerLabel: identity } : {}),
+      routeLabel,
+    };
+  });
   if (backendProfiles.length === 0) {
     return applyIdentityLabels(
       fallbackNativeRoutes(providers, currentSelection),

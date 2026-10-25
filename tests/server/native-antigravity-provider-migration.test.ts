@@ -79,6 +79,7 @@ function customProfile(): PersistedModelBackendProfile {
     preset: "custom",
     baseUrl: "https://retained.example.test/v1",
     allowInsecureLocalhost: false,
+    allowPrivateNetwork: false,
     credentialGeneration: null,
     models: [{
       id: "retained-model",
@@ -108,6 +109,7 @@ function nativeAntigravityProfile(): PersistedModelBackendProfile {
     preset: "native",
     baseUrl: null,
     allowInsecureLocalhost: false,
+    allowPrivateNetwork: false,
     credentialGeneration: null,
     models: [{
       id: "provider-default",

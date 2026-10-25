@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { startCodexAppServerRun } from "../codex-app-server";
 import { withCodexControlClient } from "../codex/control-client";
+import { codexModelProviderThreadConfig } from "../codex/model-provider-config";
 import {
   codexAccessPolicy,
   codexServiceTierMatches,
@@ -533,17 +534,15 @@ function startCodexCompaction(
           ...(serviceTier !== undefined ? { serviceTier } : {}),
           ...(modelProvider ? {
             modelProvider: modelProvider.providerId,
-            config: {
-              [`model_providers.${modelProvider.providerId}`]: {
-                name: modelProvider.displayName,
-                base_url: modelProvider.baseUrl,
-                wire_api: "responses",
-                requires_openai_auth: false,
-                ...(modelProvider.credentialEnvironmentKey
-                  ? { env_key: modelProvider.credentialEnvironmentKey }
-                  : {}),
-              },
-            },
+            config: codexModelProviderThreadConfig(
+              modelProvider,
+              modelProvider.credentialEnvironmentKey
+                ? await client.request("config/read", {
+                    includeLayers: false,
+                    cwd: options.input.cwd,
+                  })
+                : null,
+            ),
           } : {}),
         };
         const resumed = await client.request("thread/resume", {

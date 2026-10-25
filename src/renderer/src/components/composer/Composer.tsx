@@ -56,6 +56,9 @@ import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
 import { harnessImageInputUnavailableReason } from "../../../../shared/provider";
 import { clearPersistedComposerDraft, persistComposerDraft, readComposerDraft } from "../../utils/composerDraftPersistence";
+import { TurnFailureNotice } from "./TurnFailureNotice";
+import { turnFailure, turnFailureGuidance } from "../../utils/turnFailureGuidance";
+import { backendRouteKind } from "../../utils/backendRouteState";
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
  * the entry chunk. Loading it on demand keeps the picker and its list rendering
@@ -746,7 +749,7 @@ export const Composer = memo(function Composer({
       if (action === "probe" && selectedBackendProfile) {
         await onProbeBackendProfile(
           selectedBackendProfile.id,
-          conversation.modelSelection.modelId,
+          [conversation.modelSelection.modelId],
         );
       } else {
         onRefreshProvider(conversation.providerId);
@@ -943,7 +946,30 @@ export const Composer = memo(function Composer({
     const chip = composerRef.current?.querySelector<HTMLButtonElement>(".selected-model-chip");
     if (chip?.getAttribute("aria-expanded") !== "true") chip?.click();
   };
-  const limitResetRow = onLimitResetCommand && !providerHandoffPending && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
+  const failureGuidance = turnFailureGuidance(
+    turnFailure(latestTurnSummary?.status === "failed" ? latestTurnSummary : latestTurn?.status === "failed" ? latestTurn : null),
+    selectedBackendProfile
+      ? {
+          routeKind: backendRouteKind(selectedBackendProfile),
+          protocol: selectedBackendProfile.protocol,
+          backendProfileId: selectedBackendProfile.id,
+          displayName: selectedBackendProfile.displayName,
+          preset: selectedBackendProfile.preset,
+          endpointHost: selectedBackendProfile.endpointHost,
+        }
+      : null,
+  );
+  const failureRow = failureGuidance && selectedBackendProfile && !providerHandoffPending && (
+    <TurnFailureNotice
+      guidance={failureGuidance}
+      disabled={disabled}
+      onAction={(action) => onOpenBackendSetup(
+        selectedBackendProfile.id,
+        action.kind === "replace-key" ? "key" : "models",
+      )}
+    />
+  );
+  const limitResetRow = !failureRow && onLimitResetCommand && !providerHandoffPending && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
     <LimitResetBanner conversationId={conversation.id} latestTurnId={latestTurn?.id ?? latestTurnSummary?.id ?? null}
       snoozedUntil={conversation.snoozedUntil ?? null} disabled={disabled || running}
       providerState={`${conversationProvider?.canRun ?? false}:${conversationProvider?.metadataState.rateLimits.updatedAt ?? ""}`}
@@ -967,6 +993,7 @@ export const Composer = memo(function Composer({
       >
         <span className="composer-surface" aria-hidden="true" />
         <span className="composer-ultra-glow" aria-hidden="true" />
+        {failureRow}
         {limitResetRow}
         {goal && (
           <Suspense fallback={null}>

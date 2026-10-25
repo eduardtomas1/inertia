@@ -14,14 +14,17 @@ import {
   type BackendProbeAdmissionHighWater,
 } from "../../shared/backend-probe";
 import { modelSelectionSchema } from "../../shared/model-routing";
-import { modelBackendProfileFromRow } from "./backend-profile-codecs";
+import {
+  modelBackendProfileFromRow,
+  parseStoredProbeState,
+} from "./backend-profile-codecs";
 import type { PersistenceContext } from "./context";
 import { RecordNotFoundError } from "./errors";
 import type {
   ModelBackendDefaultRow,
   ModelBackendProfileRow,
 } from "./rows";
-import type { StoredModelBackendProfile } from "./types";
+import type { BackendKeyCheck, StoredModelBackendProfile } from "./types";
 import { backendEndpointIdentityMatches } from "../../shared/backend-endpoint-identity";
 
 type BackendProfilePersistenceContext = Pick<PersistenceContext, "database" | "requireProject">;
@@ -125,7 +128,11 @@ export class BackendProfileRepository {
         createdAt: existing?.created_at ?? profile.createdAt,
         updatedAt: profile.updatedAt,
       });
-      if (invalidatesEvidence) this.clearDefaultsForProfile(profile.id);
+      if (invalidatesEvidence) {
+        this.clearDefaultsForProfile(profile.id);
+      } else if (existing) {
+        this.removeEvidenceForRemovedModels(profile);
+      }
     })();
     return this.profile(profile.id);
   }
@@ -133,18 +140,38 @@ export class BackendProfileRepository {
   reconcileCredentialGeneration(
     profileId: string,
     credentialGeneration: string | null,
+    renewalRequestedAt: string = new Date().toISOString(),
   ): StoredModelBackendProfile {
     const stored = this.profile(profileId);
     if (stored.profile.credentialGeneration === credentialGeneration) return stored;
-    const now = new Date().toISOString();
     const next = persistedModelBackendProfileSchema.parse({
       ...stored.profile,
-      enabled: false,
       credentialGeneration,
-      configurationRevision: stored.profile.configurationRevision + 1,
-      updatedAt: now,
+      updatedAt: new Date().toISOString(),
     });
-    return this.saveProfile(next);
+    this.context.database.transaction(() => {
+      const saved = this.saveProfile(next);
+      if (saved.probeResults.length > 0) {
+        this.writeProbeState(
+          profileId,
+          saved.probeResults,
+          saved.probeAdmissionHighWater,
+          { renewalRequestedAt, keyCheck: saved.probeKeyCheck ?? null },
+        );
+      }
+    }).immediate();
+    return this.profile(profileId);
+  }
+
+  recordKeyCheck(profileId: string, keyCheck: BackendKeyCheck): StoredModelBackendProfile {
+    this.context.database.transaction(() => {
+      const stored = this.profile(profileId);
+      this.writeProbeState(profileId, stored.probeResults, stored.probeAdmissionHighWater, {
+        renewalRequestedAt: stored.probeRenewalRequestedAt ?? null,
+        keyCheck,
+      });
+    }).immediate();
+    return this.profile(profileId);
   }
 
   recordProbe(
@@ -192,12 +219,16 @@ export class BackendProfileRepository {
         ...stored.probeResults.filter(({ modelId }) => modelId !== result.modelId),
       ].sort(compareProbeRecency);
       trimProbeResults(results, result.modelId);
-      let resultJson = serializeProbeResults(results, admissionHighWater);
+      const extras = {
+        renewalRequestedAt: stored.probeRenewalRequestedAt ?? null,
+        keyCheck: stored.probeKeyCheck ?? null,
+      };
+      let resultJson = serializeProbeResults(results, admissionHighWater, extras);
       while (
         Buffer.byteLength(resultJson, "utf8") > MAX_PROBE_RESULT_JSON_BYTES
         && removeOldestOtherModel(results, result.modelId)
       ) {
-        resultJson = serializeProbeResults(results, admissionHighWater);
+        resultJson = serializeProbeResults(results, admissionHighWater, extras);
       }
       if (Buffer.byteLength(resultJson, "utf8") > MAX_PROBE_RESULT_JSON_BYTES) {
         throw new Error("The backend probe result is too large.");
@@ -301,7 +332,60 @@ export class BackendProfileRepository {
     `).run(projectId);
   }
 
-  private clearDefaultsForProfile(profileId: string): void {
+  private writeProbeState(
+    profileId: string,
+    results: readonly BackendCompatibilityProbeResult[],
+    admissionHighWater: readonly BackendProbeAdmissionHighWater[],
+    extras: ProbeEnvelopeExtras,
+  ): void {
+    const resultJson = results.length === 0 && admissionHighWater.length === 0 && extras.keyCheck === null
+      ? null
+      : serializeProbeResults(results, admissionHighWater, extras);
+    if (
+      resultJson !== null
+      && Buffer.byteLength(resultJson, "utf8") > MAX_PROBE_RESULT_JSON_BYTES
+    ) {
+      throw new Error("The backend probe result is too large.");
+    }
+    this.context.database.prepare(`
+      UPDATE model_backend_profiles SET latest_probe_json = ? WHERE profile_id = ?
+    `).run(resultJson, profileId);
+  }
+
+  private removeEvidenceForRemovedModels(profile: PersistedModelBackendProfile): void {
+    const modelIds = new Set(profile.models.map(({ id }) => id));
+    const row = this.context.database.prepare(`
+      SELECT latest_probe_json FROM model_backend_profiles WHERE profile_id = ?
+    `).get(profile.id) as { latest_probe_json: string | null } | undefined;
+    if (row?.latest_probe_json) {
+      let state: ReturnType<typeof parseStoredProbeState>;
+      try {
+        state = parseStoredProbeState(JSON.parse(row.latest_probe_json) as unknown);
+      } catch {
+        throw new Error("The stored model backend profile is invalid.");
+      }
+      const results = state.probeResults.filter(({ modelId }) => modelIds.has(modelId));
+      const admissionHighWater = state.probeAdmissionHighWater
+        .filter(({ modelId }) => modelIds.has(modelId));
+      if (
+        results.length !== state.probeResults.length
+        || admissionHighWater.length !== state.probeAdmissionHighWater.length
+      ) {
+        this.writeProbeState(
+          profile.id,
+          results,
+          admissionHighWater,
+          { renewalRequestedAt: state.probeRenewalRequestedAt, keyCheck: state.probeKeyCheck },
+        );
+      }
+    }
+    this.clearDefaultsForProfile(profile.id, modelIds);
+  }
+
+  private clearDefaultsForProfile(
+    profileId: string,
+    retainedModelIds?: ReadonlySet<string>,
+  ): void {
     const rows = this.context.database.prepare(`
       SELECT rowid AS row_id, selection_json
       FROM model_backend_defaults
@@ -314,7 +398,10 @@ export class BackendProfileRepository {
         const selection = modelSelectionSchema.parse(
           JSON.parse(row.selection_json) as unknown,
         );
-        if (selection.backendProfileId === profileId) remove.run(row.row_id);
+        if (
+          selection.backendProfileId === profileId
+          && !retainedModelIds?.has(selection.modelId)
+        ) remove.run(row.row_id);
       } catch {
         // Invalid defaults fail closed and cannot remain eligible.
         remove.run(row.row_id);
@@ -352,13 +439,23 @@ function removeOldestOtherModel(
   return false;
 }
 
+interface ProbeEnvelopeExtras {
+  renewalRequestedAt: string | null;
+  keyCheck: BackendKeyCheck | null;
+}
+
 function serializeProbeResults(
   results: readonly BackendCompatibilityProbeResult[],
   admissionHighWater: readonly BackendProbeAdmissionHighWater[],
+  extras: ProbeEnvelopeExtras,
 ): string {
-  return JSON.stringify(backendCompatibilityProbeResultCollectionSchema.parse({
-    schemaVersion: 1,
-    results,
-    admissionHighWater,
-  }));
+  return JSON.stringify({
+    ...backendCompatibilityProbeResultCollectionSchema.parse({
+      schemaVersion: 1,
+      results,
+      admissionHighWater,
+    }),
+    ...(extras.renewalRequestedAt === null ? {} : { renewalRequestedAt: extras.renewalRequestedAt }),
+    ...(extras.keyCheck === null ? {} : { keyCheck: extras.keyCheck }),
+  });
 }

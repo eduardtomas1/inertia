@@ -1,4 +1,5 @@
 import { parseAttachmentStorageGiB } from "../../shared/attachment-storage";
+import { TURN_FAILURE_KINDS, type TurnFailureKind } from "../../shared/turn-lifecycle";
 import { snapshotSourceSchema } from "../../shared/snapshots";
 import { parseProjectPreferences } from "../../shared/project-preferences";
 import { isContextCompaction } from "../../shared/context-compaction";
@@ -358,7 +359,12 @@ function conversationTurnSummary(
     terminalReason: turn.terminalReason,
     updatedAt: turn.updatedAt,
     ...(usageLimited ? { usageLimited: true } : {}),
+    ...(turn.failureKind ? { failureKind: turn.failureKind } : {}),
   };
+}
+
+function isTurnFailureKind(value: unknown): value is TurnFailureKind {
+  return typeof value === "string" && (TURN_FAILURE_KINDS as readonly string[]).includes(value);
 }
 
 export function conversationDetailFromRow(
@@ -554,7 +560,9 @@ function persistedSessionRecovery(value: string | null): AgentTurn["sessionRecov
   return isTurnSessionRecovery(parsed) ? parsed : null;
 }
 
-export function agentTurnFromRow(row: AgentTurnRow & { usage_limited?: number }): AgentTurn {
+export function agentTurnFromRow(
+  row: AgentTurnRow & { usage_limited?: number; failure_kind?: string | null },
+): AgentTurn {
   const modelSelection = parseModelSelection(
     row.model_selection_json,
     () => providerModelSelectionFromLegacyFields({
@@ -617,6 +625,7 @@ export function agentTurnFromRow(row: AgentTurnRow & { usage_limited?: number })
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.usage_limited === 1 ? { usageLimited: true as const } : {}),
+    ...(isTurnFailureKind(row.failure_kind) ? { failureKind: row.failure_kind } : {}),
   };
 }
 

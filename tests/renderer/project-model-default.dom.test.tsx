@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { ProjectModelDefault } from "../../src/renderer/src/components/ProjectModelDefault";
 import { defaultSettings, type ModelBackendProfileView, type ModelSelection } from "../../src/shared/contracts";
 import { provider } from "./composer-fixtures";
+import { backendView } from "./backend-view-fixtures";
 
-const profile: ModelBackendProfileView = {
+const profile: ModelBackendProfileView = backendView({
   id: "custom:team", displayName: "Team gateway", protocol: "openai-responses",
   authenticationMode: "api-key", source: "custom", enabled: true, configurationRevision: 4,
   endpointIdentity: "opaque-team-route-4", harnessId: "codex-app-server", preset: "custom",
@@ -19,7 +20,7 @@ const profile: ModelBackendProfileView = {
     backendProtocol: "openai-responses", state: "partially-compatible", provenance: "probe",
     allowsModelSwitchWithinSession: false, reasonCode: "responses-probe-verified", reason: "Verified exact route." },
   latestProbe: null, canDelete: true, canDisable: true,
-};
+});
 const selection: ModelSelection = {
   harnessId: profile.harnessId, backendProfileId: profile.id, backendProfileDisplayName: profile.displayName,
   modelId: "team-alpha", alias: "Team Alpha", reasoningEffort: "medium", contextWindowOverride: 120_000,

@@ -285,7 +285,7 @@ describe("watcher link migration", () => {
     try {
       expect((migrated.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version)
         .toBe(CURRENT_DATABASE_SCHEMA_VERSION);
-      expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(101);
+      expect(CURRENT_DATABASE_SCHEMA_VERSION).toBeGreaterThanOrEqual(101);
       const column = (migrated.pragma("table_info(watcher_links)") as { name: string; type: string; notnull: number; dflt_value: string | null }[])
         .find(({ name }) => name === "read_only");
       expect(column).toMatchObject({ type: "INTEGER", notnull: 1, dflt_value: "1" });

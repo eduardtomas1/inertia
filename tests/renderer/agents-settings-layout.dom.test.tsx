@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,10 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelBackendsSettings } from "../../src/renderer/src/components/ModelBackendsSettings";
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
 import type { ModelBackendProfileDetail } from "../../src/shared/contracts";
+import { backendView } from "./backend-view-fixtures";
 import { settingsProvider, settingsViewProps } from "./settings-view-fixtures";
 
 function profile(overrides: Partial<ModelBackendProfileDetail> = {}): ModelBackendProfileDetail {
-  return {
+  return backendView<ModelBackendProfileDetail>({
     id: "custom:a",
     displayName: "Profile A",
     harnessId: "claude-agent-sdk",
@@ -45,7 +46,7 @@ function profile(overrides: Partial<ModelBackendProfileDetail> = {}): ModelBacke
     canDelete: true,
     canDisable: true,
     ...overrides,
-  };
+  });
 }
 
 function stackedRule(path: string, query: string, selector: string): string {
@@ -65,7 +66,11 @@ function backendProps(
   const missing = profile({ id: "custom:b", displayName: "Profile B", endpointHost: "custom-b.example.test", authState: "missing" });
   return {
     profiles: [ready, missing],
+    providers: [settingsProvider("claude", "Claude")],
     disabled: false,
+    onConnectProvider: vi.fn(),
+    onRefreshProvider: vi.fn(),
+    onDiscoverModels: vi.fn(async () => []),
     onLoadDetail: vi.fn(async (id: string) => (id === missing.id ? missing : ready)),
     onCreate: vi.fn(async () => ready),
     onUpdate: vi.fn(async () => ready),
@@ -160,62 +165,19 @@ describe("Agents empty lists", () => {
     expect(await screen.findByRole("group", { name: "Provider accounts" })).toBeEmptyDOMElement();
     expect(stackedRule("../../src/renderer/src/components/settings/ProvidersSettings.css", "providers", ".provider-settings-rail:empty"))
       .toContain("border-bottom: 0");
-    expect(screen.getByRole("complementary", { name: "Backend profiles" })).toBeEmptyDOMElement();
-    expect(stackedRule("../../src/renderer/src/components/ModelBackendsSettings.css", "backends", ".backend-profile-rail:empty"))
-      .toContain("border-bottom: 0");
+    const codex = await screen.findByRole("region", { name: "Codex" });
+    expect(within(codex).queryByRole("list")).toBeNull();
+    expect(within(codex).getByText("No API keys yet. Add an OpenAI API key to use your API credits.")).toBeVisible();
   });
 });
 
-describe("Agents custom backends layout", () => {
-  it("names each profile's state in words instead of a coloured dot", async () => {
+describe("Agents accounts and API keys layout", () => {
+  it("names each key route's state in words instead of a coloured dot", () => {
     const { container } = render(<ModelBackendsSettings {...backendProps()} />);
-    const rail = screen.getByRole("complementary", { name: "Backend profiles" });
-    const profileA = within(rail).getByRole("button", { description: "Claude harness · Profile A" });
-    const profileB = within(rail).getByRole("button", { description: "Claude harness · Profile B" });
-    expect(within(profileA).getByText("Ready")).toBeInTheDocument();
-    expect(within(profileB).getByText("Needs credential")).toBeInTheDocument();
-    expect(rail.querySelectorAll("[title]")).toHaveLength(0);
+    const claude = screen.getByRole("region", { name: "Claude Code" });
+    expect(within(within(claude).getByRole("listitem", { name: "Profile A" })).getByText("Ready")).toBeInTheDocument();
+    expect(within(within(claude).getByRole("listitem", { name: "Profile B" })).getByText("Needs a key")).toBeInTheDocument();
     expect(container.querySelector(".backend-profile-dot")).toBeNull();
-    expect(await screen.findByRole("switch", { name: "Use this backend" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText("Connected")).toBeInTheDocument();
-    expect(screen.getByText("Verified")).toBeInTheDocument();
-    const details = screen.getByText("Details").closest("details")!;
-    expect(details).not.toHaveAttribute("open");
-    expect(within(details).getByRole("list", { name: "Profile A capabilities" })).toHaveTextContent("Streaming");
-    expect(within(details).getByRole("list", { name: "Profile A capabilities" })).toHaveTextContent("Verified · from the provider");
-  });
-
-  it("keeps Test connection focused and inert while its probe runs", async () => {
-    let finish!: (value: ModelBackendProfileDetail) => void;
-    const onProbe = vi.fn(() => new Promise<ModelBackendProfileDetail>((resolve) => { finish = resolve; }));
-    render(<ModelBackendsSettings {...backendProps({ onProbe })} />);
-    const probe = await screen.findByRole("button", { name: "Test connection" });
-    probe.focus();
-    fireEvent.click(probe);
-    const testing = screen.getByRole("button", { name: "Testing…" });
-    expect(testing).toBe(probe);
-    expect(testing).toHaveFocus();
-    expect(testing).toHaveAttribute("aria-disabled", "true");
-    expect(testing).not.toBeDisabled();
-    fireEvent.click(testing);
-    expect(onProbe).toHaveBeenCalledOnce();
-    await act(async () => finish(profile()));
-    expect(screen.getByRole("button", { name: "Test connection" })).not.toHaveAttribute("aria-disabled");
-  });
-
-  it("keeps Delete permanently focusable and inert while the deletion runs", async () => {
-    let finish!: () => void;
-    const onDelete = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
-    render(<ModelBackendsSettings {...backendProps({ onDelete })} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
-    const confirm = screen.getByRole("button", { name: "Delete permanently" });
-    confirm.focus();
-    fireEvent.click(confirm);
-    expect(confirm).toHaveFocus();
-    expect(confirm).toHaveAttribute("aria-disabled", "true");
-    expect(confirm).not.toBeDisabled();
-    fireEvent.click(confirm);
-    expect(onDelete).toHaveBeenCalledOnce();
-    await act(async () => finish());
+    expect(within(claude).getByRole("listitem", { name: "Profile A" })).toHaveTextContent("Custom · custom-a.example.test");
   });
 });

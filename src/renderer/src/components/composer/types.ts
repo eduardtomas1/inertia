@@ -105,8 +105,8 @@ export interface ComposerProps {
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId: ProviderId) => void;
   onOpenProviderSetup: (providerId: ProviderId) => void;
-  onOpenBackendSetup: (profileId: string) => void;
-  onProbeBackendProfile: (profileId: string, modelId: string) => Promise<unknown>;
+  onOpenBackendSetup: (profileId: string, panel?: "key" | "models") => void;
+  onProbeBackendProfile: (profileId: string, modelIds?: readonly string[]) => Promise<unknown>;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   onOpenResume: () => void;
   resumeOptions?: readonly ProviderTerminalResumeOption[];

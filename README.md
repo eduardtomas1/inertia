@@ -18,7 +18,7 @@ Inertia brings agent conversations, project files, Git review, and terminals int
 
 1. Install the build for your platform: macOS, Windows, or Linux, on Intel/AMD or ARM64.
 2. Add a local folder or clone a repository from its HTTPS or SSH Git URL.
-3. Open **Settings → Agents**, connect a provider, and start a chat.
+3. Open **Settings → Agents**, connect a provider, and start a chat. To use API credits instead of a subscription, add an Anthropic or OpenAI API key in **Accounts and API keys** and choose its route in the model chooser; see [Accounts and API keys](docs/user/getting-started.md#accounts-and-api-keys).
 
 Use **Ctrl/Cmd+K** to find commands, settings, projects, chats, and saved messages. Type at least two characters to search your messages and final agent answers across unarchived chats, then open a snippet to jump to its turn, including in a detached chat window. Message search matches literal phrases, ignores case, and shows up to 20 newest matches. Very large histories may return partial results, which the palette labels explicitly.
 
@@ -28,7 +28,7 @@ Choose **All projects** to search by name or folder path, filter the sidebar, or
 
 Choose **No project** in a new chat’s project selector, or **Start without a project** in the command palette, to work without opening a folder. Each chat gets a separate folder under Inertia’s runtime data directory (`scratch/<date>-<title>-<chat-id>`) when its workspace is first created. These are plain folders, with no automatic Git initialization. Deleting a chat keeps its files. Project-free chats have a separate **No project** sidebar section that appears only when it has chats; they stay out of the project list and filters.
 
-When a stopped chat has a reported subscription reset time, the composer offers **Resume at reset** and **Snooze until reset**. Resuming is an explicit, cancellable action that survives restarts and rechecks the account, chat route and available quota before continuing once; if the provider has not reported new quota within an hour of the reset, nothing is sent and **Resume now** waits for you. Inertia must be running to resume; snoozing alone never sends a message. Supported native accounts include Codex, Claude, Cursor, Kimi Code and OpenCode Go. Other OpenCode backends, custom routes and the current Antigravity CLI do not expose compatible reset data; Limits explains availability for each provider. Accounts without enough identity information still support snoozing but cannot schedule automatic resume.
+When a stopped chat has a reported subscription reset time, the composer offers **Resume at reset** and **Snooze until reset**. Resuming is an explicit, cancellable action that survives restarts and rechecks the account, chat route and available quota before continuing once; if the provider has not reported new quota within an hour of the reset, nothing is sent and **Resume now** waits for you. Inertia must be running to resume; snoozing alone never sends a message. Supported native accounts include Codex, Claude and OpenCode Go. Cursor and Kimi Code don't report usage, and other OpenCode backends, custom routes and the current Antigravity CLI do not expose compatible reset data; Limits explains availability for each provider. Accounts without enough identity information still support snoozing but cannot schedule automatic resume.
 
 ![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
 

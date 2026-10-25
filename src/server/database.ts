@@ -99,6 +99,7 @@ import type {
 } from "./persistence/rows";
 import type {
   AgentTurnLifecycleUpdate,
+  BackendKeyCheck,
   AgentTurnSettlementResult,
   AgentTurnSettlementUpdate,
   BeginAgentTurnInput,
@@ -1178,11 +1179,13 @@ export class RuntimeStore {
   reconcileModelBackendCredentialGeneration(
     profileId: string,
     credentialGeneration: string | null,
+    renewalRequestedAt?: string,
   ): StoredModelBackendProfile {
-    return this.backendProfileRepository.reconcileCredentialGeneration(
-      profileId,
-      credentialGeneration,
-    );
+    return this.backendProfileRepository.reconcileCredentialGeneration(profileId, credentialGeneration, renewalRequestedAt);
+  }
+
+  recordModelBackendKeyCheck(profileId: string, keyCheck: BackendKeyCheck): StoredModelBackendProfile {
+    return this.backendProfileRepository.recordKeyCheck(profileId, keyCheck);
   }
 
   recordModelBackendProbe(

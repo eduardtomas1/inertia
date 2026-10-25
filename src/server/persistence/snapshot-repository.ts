@@ -75,8 +75,9 @@ import { agentContextReadSummaries } from "./conversation-context-turn-reads";
 import { watcherLinkViews, watcherWakeSummaries } from "./watcher-link-codecs";
 
 type ConversationShellRow = ConversationRow & { has_history: number };
-type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number };
+type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number; failure_kind: string | null };
 const TURN_USAGE_LIMITED_SQL = "EXISTS (SELECT 1 FROM usage_limited_turns WHERE usage_limited_turns.turn_id = agent_turns.id)";
+const TURN_FAILURE_KIND_SQL = "(SELECT failure_kind FROM turn_failure_kinds WHERE turn_failure_kinds.turn_id = agent_turns.id)";
 type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewSummaries" | "reviewStates" | "reviewNotes">;
 type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | "attachmentGallery" | keyof ConversationRecords>;
 const EMPTY_CONVERSATION_RECORDS: ConversationRecords = { usage: [], goals: [], reviewSummaries: [], reviewStates: [], reviewNotes: [] };
@@ -169,7 +170,7 @@ export class SnapshotRepository {
     // decoded every turn ever recorded on each coalesced shell snapshot.
     const latestTurns = new Map(
       (this.context.database.prepare(`
-        SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited
+        SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited, ${TURN_FAILURE_KIND_SQL} AS failure_kind
         FROM conversations
         JOIN agent_turns ON agent_turns.id = (
           SELECT id

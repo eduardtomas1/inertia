@@ -10,6 +10,7 @@ import type {
   ProviderInfo,
 } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { backendView } from "./backend-view-fixtures";
 
 function provider(): ProviderInfo {
   return {
@@ -77,7 +78,7 @@ function customProfile(
   state: ModelBackendProfileView["compatibility"]["state"] =
     "partially-compatible",
 ): ModelBackendProfileView {
-  return {
+  return backendView<ModelBackendProfileView>({
     id: "custom:team",
     displayName: "Team gateway",
     protocol: "openai-responses",
@@ -128,11 +129,11 @@ function customProfile(
     latestProbe: null,
     canDelete: true,
     canDisable: true,
-  };
+  });
 }
 
 function nativeProfile(): ModelBackendProfileView {
-  return {
+  return backendView<ModelBackendProfileView>({
     ...customProfile(),
     id: "builtin:openai",
     displayName: "OpenAI",
@@ -155,7 +156,7 @@ function nativeProfile(): ModelBackendProfileView {
     connectionState: "connected",
     canDelete: false,
     canDisable: false,
-  };
+  });
 }
 
 describe("composer model chooser route projection", () => {
@@ -403,10 +404,10 @@ describe("composer model chooser route projection", () => {
     });
   });
 
-  it("keeps unknown routes visible with a truthful disabled reason", () => {
+  it("keeps unknown routes without a key visible with a truthful disabled reason", () => {
     const [route] = buildComposerModelRoutes(
       [provider()],
-      [customProfile("unknown")],
+      [{ ...customProfile("unknown"), authState: "missing" }],
       providerNativeModelSelection({ providerId: "codex" }),
     );
 

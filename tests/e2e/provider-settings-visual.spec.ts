@@ -128,7 +128,7 @@ async function expectBackendRowsMatchProviderRows(): Promise<void> {
   const heights = async (selector: string): Promise<number[]> =>
     page.locator(selector).evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
   const providerRows = await heights(".provider-settings-list-row");
-  const backendRows = await heights(".backend-profile-rail-item");
+  const backendRows = await heights(".backend-key-row");
   expect(backendRows.length).toBeGreaterThan(0);
   expect(Math.min(...backendRows)).toBeGreaterThanOrEqual(Math.min(...providerRows));
 }

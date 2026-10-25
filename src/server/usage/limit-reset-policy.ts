@@ -27,19 +27,13 @@ export function resetQuota(account: UsageAccount, model: string, now = Date.now(
   if (account.status !== "ready" || !Number.isFinite(updatedAt) || updatedAt > now || now - updatedAt > 180_000) return { kind: "unknown" };
   const relevant = account.windows.filter((window) => {
     if (account.providerId === "codex") return window.id === "codex:primary" || window.id === "codex:secondary";
-    if (account.providerId === "cursor") {
-      if (window.id === "cursor:totalPercentUsed") return true;
-      if (model === "auto" || model === "provider-default") return ["cursor:autoPercentUsed", "cursor:apiPercentUsed"].includes(window.id);
-      return window.id === (model.startsWith("composer") ? "cursor:autoPercentUsed" : "cursor:apiPercentUsed");
-    }
     if (account.providerId === "opencode") return model.startsWith("opencode-go/") && /^opencode:go_(rolling|weekly|monthly)$/u.test(window.id);
-    if (account.providerId === "kimi") return /^kimi:(weekly|window_\d+)$/u.test(window.id);
     if (account.providerId !== "claude") return false;
     if (["claude:five_hour", "claude:seven_day", "claude:seven_day_oauth_apps"].includes(window.id)) return true;
     return (window.id === "claude:seven_day_opus" && model.includes("opus"))
       || (window.id === "claude:seven_day_sonnet" && model.includes("sonnet"));
   });
-  const unrelated = new Set(["cursor:autoPercentUsed", "cursor:apiPercentUsed", "claude:seven_day_opus", "claude:seven_day_sonnet", "claude:seven_day_overage_included"]);
+  const unrelated = new Set(["claude:seven_day_opus", "claude:seven_day_sonnet", "claude:seven_day_overage_included"]);
   if (account.windows.some((window) => window.remainingPercent === 0 && !relevant.includes(window) && !unrelated.has(window.id))) return { kind: "unknown" };
   if (!relevant.length || relevant.some(({ remainingPercent }) => remainingPercent === null
     || !Number.isFinite(remainingPercent) || remainingPercent < 0 || remainingPercent > 100)) return { kind: "unknown" };

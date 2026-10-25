@@ -25,6 +25,8 @@ import { conversationTitleLocksMigration } from "./conversation-title-locks";
 import { watcherLinksMigration } from "./watcher-links";
 import { extendTodosMigration } from "./extend-todos";
 import { watcherAccessMigration } from "./watcher-access";
+import { extendBackendPresetsMigration } from "./extend-backend-presets";
+import { persistTurnFailureKindsMigration } from "./persist-turn-failure-kinds";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -53,4 +55,6 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   watcherLinksMigration,
   extendTodosMigration,
   watcherAccessMigration,
+  extendBackendPresetsMigration,
+  persistTurnFailureKindsMigration,
 ];

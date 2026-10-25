@@ -288,6 +288,51 @@ describe("Codex Responses backend launch adapter", () => {
     expect(secretRead).toBe(false);
   });
 
+  it("admits a private network endpoint at launch only with the private network switch", async () => {
+    const profile = customProfile({
+      endpointIdentity: backendEndpointIdentity("https://10.0.0.8:8443/v1"),
+    });
+    const launch = (allowPrivateNetwork: boolean) => createCodexResponsesBackendLaunchResolver({
+      profiles: [{
+        profile,
+        baseUrl: "https://10.0.0.8:8443/v1",
+        secretReference: "secret:lan-gateway",
+        allowPrivateNetwork,
+      }],
+      resolveSecret: async () => "owned-secret",
+    })(
+      customRun(profile),
+      {},
+      { signal: new AbortController().signal },
+    );
+
+    await expect(launch(false)).rejects.toMatchObject({ code: "invalid-profile" });
+    await expect(launch(true)).resolves.toMatchObject({
+      harnessConfiguration: { kind: "codex-responses", baseUrl: "https://10.0.0.8:8443/v1" },
+    });
+  });
+
+  it("passes both network switches to launch-time revalidation", async () => {
+    const profile = customProfile();
+    const policies: unknown[] = [];
+    const resolver = createCodexResponsesBackendLaunchResolver({
+      profiles: [{
+        profile,
+        baseUrl: "https://gateway.example/v1",
+        secretReference: "secret:gateway",
+        allowPrivateNetwork: true,
+      }],
+      validateEndpointNetworkPolicy: async (_endpointUrl, policy) => {
+        policies.push(policy);
+      },
+      resolveSecret: async () => "owned-secret",
+    });
+
+    await resolver(customRun(profile), {}, { signal: new AbortController().signal });
+
+    expect(policies).toEqual([{ allowInsecureLocalhost: false, allowPrivateNetwork: true }]);
+  });
+
   it("rejects a custom profile whose identity names a different endpoint", () => {
     expect(() => createCodexResponsesBackendLaunchResolver({
       profiles: [{

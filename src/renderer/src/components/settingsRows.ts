@@ -135,8 +135,8 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["provider-binary-path", "Executable", ["binary path", "codex path", "use automatic", "cli"]],
       ["provider-updates", "Provider updates", ["maintenance", "upgrade", "update", "version"]],
     ],
-    "Custom backends": [
-      ["model-backends", "Custom backends", ["model backends", "backends", "api key", "token", "openai compatible", "profiles", "endpoint", "model"]],
+    "Accounts and API keys": [
+      ["model-backends", "Accounts and API keys", ["api key", "api keys", "anthropic", "openai", "console", "credits", "billing", "sign in", "account", "custom backends", "model backends", "backends", "token", "openai compatible", "endpoint", "model", "kimi"]],
     ],
   }),
   section("devices", "Devices & integrations", {

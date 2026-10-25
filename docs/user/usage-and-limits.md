@@ -15,7 +15,10 @@ Subscription quota across your accounts:
 - Select a row to list its accounts in the same columns, then select an account to see its plan, sources, freshness and banked reset credits.
 - The **i** next to the title explains how averages work.
 - Email addresses stay hidden until you choose **Reveal**.
-- **Refresh limits** asks the providers again. The page and the **All provider limits** dialog read the providers when they open and refresh themselves at most every three minutes while visible. On macOS, opening either can read a Cursor login from the Keychain.
+- **Refresh limits** asks the providers again. The page and the **All provider limits** dialog read the providers when they open and refresh themselves at most every three minutes while visible.
+- Cursor and Kimi Code don't report usage to Inertia; their rows say *Usage is not reported by this agent.*
+
+Limits cover accounts. A chat that runs on an API key or a custom backend shows **Usage is not available for API keys**; the provider bills that usage to your API account.
 
 An unavailable measurement is never shown as zero, and a countdown reaching zero doesn't refill a bar. The window shows **Reset due** until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset.
 

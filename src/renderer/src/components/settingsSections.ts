@@ -166,15 +166,19 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       memory: context.memory,
       backendProfiles: context.backendProfiles,
       initialProfileId: context.target?.section === "agents" ? context.target.profileId : undefined,
+      initialProfilePanel: context.target?.section === "agents" ? context.target.profilePanel : undefined,
       onLoadBackendProfile: context.onLoadBackendProfile,
       onCreateBackendProfile: context.onCreateBackendProfile,
       onUpdateBackendProfile: context.onUpdateBackendProfile,
       onSetBackendCredential: context.onSetBackendCredential,
       onClearBackendCredential: context.onClearBackendCredential,
       onProbeBackendProfile: context.onProbeBackendProfile,
+      onDiscoverBackendModels: context.onDiscoverBackendModels,
       onDeleteBackendProfile: context.onDeleteBackendProfile,
     }),
-    instanceKey: (context) => context.target?.section === "agents" ? context.target.profileId ?? "all" : "all",
+    instanceKey: (context) => context.target?.section === "agents"
+      ? `${context.target.profileId ?? "all"}:${context.target.profilePanel ?? ""}`
+      : "all",
   }),
   defineSection({
     ...settingsSectionRows("devices"),

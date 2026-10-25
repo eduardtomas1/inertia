@@ -38,7 +38,7 @@ function draft(overrides: Partial<ModelBackendProfileDraft> = {}): ModelBackendP
     displayName: "Team gateway",
     harnessId: "claude-agent-sdk",
     protocol: "anthropic-messages",
-    authenticationMode: "none",
+    authenticationMode: "api-key",
     preset: "custom",
     baseUrl: "https://gateway.example.test/v1",
     allowInsecureLocalhost: false,
@@ -600,7 +600,7 @@ describe("model backend profile controller", () => {
     const detail = await controller.createProfile(draft());
     const shell = controller.profiles([]).find(({ id }) => id === detail.id);
 
-    expect(detail.baseUrl).toBe("https://gateway.example.test/v1");
+    expect(detail.baseUrl).toBe("https://gateway.example.test");
     expect(shell?.endpointHost).toBe("gateway.example.test");
     expect(shell).not.toHaveProperty("baseUrl");
     expect(JSON.stringify(shell)).not.toContain("https://gateway.example.test");
@@ -634,7 +634,11 @@ describe("model backend profile controller", () => {
     expect(runtimeStore.listModelBackendDefaults()).toHaveLength(1);
 
     const unchanged = await controller.updateProfile(created.id, {
-      models: renamed.models,
+      models: renamed.models.map(({
+        compatibility: _compatibility,
+        latestProbe: _latestProbe,
+        ...model
+      }) => model),
     });
     expect(unchanged.configurationRevision).toBe(1);
     expect(unchanged.enabled).toBe(true);
@@ -647,13 +651,13 @@ describe("model backend profile controller", () => {
     });
     expect(changed.configurationRevision).toBe(2);
     expect(changed.enabled).toBe(false);
-    expect(changed.baseUrl).toBe("https://replacement.example.test/v1");
+    expect(changed.baseUrl).toBe("https://replacement.example.test");
     expect(runtimeStore.modelBackendProfile(created.id).latestProbe).toBeNull();
     expect(runtimeStore.listModelBackendDefaults()).toEqual([]);
     runtimeStore.close();
   });
 
-  it("reconciles secure-vault generation changes before exposing profiles", async () => {
+  it("reconciles secure-vault generation changes without retiring chats", async () => {
     const runtimeStore = await store();
     const profile = runtimeStore.saveModelBackendProfile(
       persistedCredentialProfile(),
@@ -671,15 +675,21 @@ describe("model backend profile controller", () => {
       forget: async () => true,
     };
 
+    runtimeStore.recordModelBackendProbe(profile.id, {
+      ...compatibleProbe(profile),
+      modelId: "credential-model",
+    });
+
     await BackendProfileController.create({ store: runtimeStore, credentials });
     const reconciled = runtimeStore.modelBackendProfile(profile.id);
     expect(reconciled.profile).toMatchObject({
-      enabled: false,
+      enabled: true,
       credentialGeneration: "generation:new",
-      configurationRevision: 8,
+      configurationRevision: 7,
     });
-    expect(reconciled.latestProbe).toBeNull();
-    expect(runtimeStore.listModelBackendDefaults()).toEqual([]);
+    expect(reconciled.latestProbe).toMatchObject({ modelId: "credential-model" });
+    expect(reconciled.probeRenewalRequestedAt).toEqual(expect.any(String));
+    expect(runtimeStore.listModelBackendDefaults()).toHaveLength(1);
     runtimeStore.close();
   });
 
@@ -690,7 +700,7 @@ describe("model backend profile controller", () => {
       baseUrl: "http://[::1]:11434/v1",
       allowInsecureLocalhost: true,
     }))).resolves.toMatchObject({
-      baseUrl: "http://[::1]:11434/v1",
+      baseUrl: "http://[::1]:11434",
     });
     await expect(controller.createProfile(draft({
       baseUrl: "http://10.0.0.8:11434/v1",

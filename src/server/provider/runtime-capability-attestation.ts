@@ -83,14 +83,11 @@ export function runtimeProviderCapabilityAttestation(
   if (!input.evidenceTrusted) return null;
   const manifest = providerCapabilityManifest(input.harnessId);
   const protocolVerified = (
-    (
-      input.compatibility.state === "verified"
-      || input.compatibility.state === "partially-compatible"
-    )
-    && input.compatibility.provenance === "built-in"
-  ) || (
-    input.compatibility.state === "partially-compatible"
-    && input.compatibility.provenance === "probe"
+    input.compatibility.state === "verified"
+    || input.compatibility.state === "partially-compatible"
+  ) && (
+    input.compatibility.provenance === "built-in"
+    || input.compatibility.provenance === "probe"
   );
   if (
     !manifest

@@ -88,7 +88,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await providers.click();
   await expect(providers).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { level: 3, name: "Providers" })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 3, name: "Custom backends" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "Accounts and API keys" })).toBeVisible();
 
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(page.locator("aside.terminal-panel").first()).toHaveAttribute("data-terminal-font-size", terminalFontSize ?? "13");
@@ -110,12 +110,13 @@ function globalBackendDefaults(): number {
   return count;
 }
 
-test("manages backend profiles across the responsive theme and scale matrix", async ({ browserName: _browserName }, testInfo) => {
+test("manages accounts and API keys across the responsive theme and scale matrix", async ({ browserName: _browserName }, testInfo) => {
+  const section = page.getByRole("region", { name: "Accounts and API keys" });
   const openBackends = async (): Promise<void> => {
     const backends = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true });
     await backends.click();
     await expect(backends).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("region", { name: "Custom backends" })).toBeVisible();
+    await expect(section).toBeVisible();
   };
   const setAppearance = async (
     theme: "Light" | "Dark" | "System",
@@ -130,68 +131,55 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   };
   const expectBackendLayoutContained = async (): Promise<void> => {
     await expectNoViewportOverflow();
-    const containment = await page.locator(".backend-settings-grid").evaluate((grid) => {
-      const editor = grid.querySelector(".backend-profile-editor");
-      const editorBounds = editor?.getBoundingClientRect();
-      const gridBounds = grid.getBoundingClientRect();
+    const containment = await section.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const cards = [...element.querySelectorAll(".backend-provider-card")]
+        .map((card) => card.getBoundingClientRect());
       const workspaceHeader = document.querySelector(".workspace-header")
         ?.getBoundingClientRect();
-      const newProfile = document.querySelector<HTMLButtonElement>(
-        ".backend-settings-toolbar > button",
-      );
-      const textNode = [...(newProfile?.childNodes ?? [])].find(
-        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
-      );
-      const textRange = textNode ? document.createRange() : null;
-      if (textNode && textRange) textRange.selectNodeContents(textNode);
+      const add = [...element.querySelectorAll<HTMLButtonElement>(".backend-key-list-heading > button")];
+      const lines = add.map((button) => {
+        const textNode = [...button.childNodes].find(
+          (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+        );
+        if (!textNode) return 0;
+        const range = document.createRange();
+        range.selectNodeContents(textNode);
+        return range.getClientRects().length;
+      });
       return {
-        gridWidth: gridBounds.width,
-        gridRight: gridBounds.right,
+        right: bounds.right,
         viewportRight: window.innerWidth,
-        editorWidth: editorBounds?.width ?? 0,
-        editorRight: editorBounds?.right ?? 0,
+        cardsRight: Math.max(...cards.map(({ right }) => right)),
+        cardCount: cards.length,
         workspaceHeader: workspaceHeader
-          ? {
-              top: workspaceHeader.top,
-              bottom: workspaceHeader.bottom,
-              width: workspaceHeader.width,
-            }
+          ? { top: workspaceHeader.top, bottom: workspaceHeader.bottom, width: workspaceHeader.width }
           : null,
-        newProfileTextLines: textRange?.getClientRects().length ?? 0,
-        newProfileRight: newProfile?.getBoundingClientRect().right ?? 0,
+        addButtonLines: lines,
       };
     });
-    expect(containment.gridRight).toBeLessThanOrEqual(containment.viewportRight + 1);
-    expect(containment.editorRight).toBeLessThanOrEqual(containment.gridRight + 1);
-    expect(containment.editorWidth).toBeGreaterThan(0);
+    expect(containment.right).toBeLessThanOrEqual(containment.viewportRight + 1);
+    expect(containment.cardsRight).toBeLessThanOrEqual(containment.right + 1);
+    expect(containment.cardCount).toBe(6);
     expect(containment.workspaceHeader).not.toBeNull();
     expect(containment.workspaceHeader?.top).toBeGreaterThanOrEqual(0);
     expect(containment.workspaceHeader?.bottom).toBeGreaterThan(20);
     expect(containment.workspaceHeader?.width).toBeGreaterThan(200);
-    expect(containment.newProfileTextLines).toBe(1);
-    expect(containment.newProfileRight).toBeLessThanOrEqual(
-      containment.gridRight + 1,
-    );
+    expect(containment.addButtonLines.every((count) => count === 1)).toBe(true);
   };
 
   await resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await openBackends();
-  const profileRail = page.getByLabel("Backend profiles");
-  await expect(profileRail.getByText("OpenAI", { exact: true })).toBeVisible();
-  await expect(profileRail.getByText("Anthropic", { exact: true })).toBeVisible();
-  await expect(profileRail.getByText("Cursor", { exact: true })).toBeVisible();
-  await expect(profileRail.getByText("OpenCode", { exact: true })).toBeVisible();
-  await expect(profileRail.getByText("Kimi", { exact: true })).toBeVisible();
-  const nativeOpenAi = profileRail.locator(".backend-profile-rail-item").filter({ hasText: /^OpenAI/u });
-  await expect(nativeOpenAi).toContainText("Harness managed");
-  await expect(nativeOpenAi.locator(".backend-profile-state")).toHaveCount(0);
-  await expect(profileRail.getByRole("button", {
-    name: /^Kimi api\.kimi\.com/u,
-  }).locator(".backend-profile-state")).not.toHaveText("Ready");
-  await profileRail.getByText("Kimi", { exact: true }).click();
-  await expect(page.locator(".backend-credential-row").getByText("Credential", { exact: true })).toBeVisible();
-  await expect(page.getByPlaceholder("Add credential")).toBeVisible();
+  for (const name of ["Claude Code", "Codex", "OpenCode", "Cursor", "Kimi Code", "Antigravity"]) {
+    await expect(section.getByRole("region", { name, exact: true })).toBeVisible();
+  }
+  const kimi = section.getByRole("region", { name: "Kimi Code" }).getByRole("listitem", { name: "Kimi" });
+  await expect(kimi).toBeVisible();
+  await expect(kimi.locator(".backend-profile-state")).not.toHaveText("Ready");
+  await kimi.getByRole("button", { name: "Add key for Kimi" }).click();
+  await expect(kimi.getByLabel("API key", { exact: true })).toBeFocused();
+  await kimi.getByRole("button", { name: "Cancel" }).click();
 
   const appearances = [
     { theme: "Light", scale: "Compact", slug: "light-compact" },
@@ -225,68 +213,53 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   }
 
   await resizeWindow(760, 760);
-  await page.getByRole("button", { name: "New profile" }).click();
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill(
-    "Visual gateway with an intentionally long profile name for truncation",
-  );
-  await page.locator(".backend-form-section").nth(1).locator("select").selectOption("none");
-  await page.getByLabel("Base URL", { exact: true }).fill(`${previewUrl}backend-probe`);
-  await page.getByRole("switch", { name: "Allow localhost HTTP" }).click();
-  const modelId = page.getByLabel("Model ID", { exact: true });
-  await modelId.first().fill(
+  const longName = "Visual gateway with an intentionally long profile name for truncation";
+  await section.getByRole("button", { name: "Add custom backend…" }).click();
+  const form = section.getByRole("form", { name: "New custom backend" });
+  await form.getByRole("textbox", { name: "Name", exact: true }).fill(longName);
+  await form.getByRole("textbox", { name: "Base URL", exact: true }).fill(`${previewUrl}backend-probe`);
+  await form.getByRole("switch", { name: "Allow localhost HTTP" }).click();
+  await form.getByRole("textbox", { name: "Model 1 ID" }).fill(
     "visual-primary-model-with-a-deliberately-long-identifier",
   );
-  await page.getByLabel("Display name", { exact: true }).first().fill(
+  await form.getByRole("textbox", { name: "Model 1 display name" }).fill(
     "Visual primary model with a deliberately long readable name",
   );
-  await page.getByRole("button", { name: "Add model" }).click();
-  await modelId.nth(1).fill(
+  await form.getByRole("button", { name: "Add model" }).click();
+  await form.getByRole("textbox", { name: "Model 2 ID" }).fill(
     "visual-secondary-model-with-an-even-longer-deliberately-overflowing-identifier",
   );
-  await page.getByLabel("Display name", { exact: true }).nth(1).fill(
-    "Visual secondary model with a very long readable name",
-  );
-  await page.getByRole("button", {
-    name: "Remove Visual secondary model with a very long readable name",
-  }).click();
-  await expect(modelId).toHaveCount(1);
-  await page.getByRole("button", { name: "Add model" }).click();
-  await modelId.nth(1).fill(
+  await form.getByRole("button", { name: /^Remove model 2/u }).click();
+  await expect(form.getByRole("textbox", { name: "Model 2 ID" })).toHaveCount(0);
+  await form.getByRole("button", { name: "Add model" }).click();
+  await form.getByRole("textbox", { name: "Model 2 ID" }).fill(
     "visual-secondary-model-with-an-even-longer-deliberately-overflowing-identifier",
   );
-  await page.getByLabel("Display name", { exact: true }).nth(1).fill(
+  await form.getByRole("textbox", { name: "Model 2 display name" }).fill(
     "Visual secondary model with a very long readable name",
   );
-  await page.getByRole("radiogroup", { name: "Model mapping" })
+  await form.getByRole("radiogroup", { name: "Model mapping" })
     .getByRole("radio", { name: "Advanced", exact: true })
     .click();
-  await page.locator(".backend-tier-grid:not(.backend-primary-model) select")
-    .first()
-    .selectOption(
+  await form.getByRole("combobox", { name: "Fable" }).selectOption(
     "visual-secondary-model-with-an-even-longer-deliberately-overflowing-identifier",
-    );
+  );
+  await form.getByLabel("API key", { exact: true }).fill("visual-fixture-key");
   await expectBackendLayoutContained();
   await page.screenshot({
     path: testInfo.outputPath("model-backends-narrow-editor-long-values.png"),
   });
-  await page.getByRole("button", { name: "Create profile" }).click();
-  await expect(page.getByText("Visual gateway with an intentionally long profile name for truncation", { exact: true }).first()).toBeVisible();
-  const enable = page.getByRole("switch", { name: "Use this backend", exact: true });
-  await expect(enable).toHaveAttribute("aria-checked", "false");
-
-  const probe = page.getByRole("button", { name: "Test connection" });
-  await probe.click();
-  await expect(page.getByRole("button", { name: "Testing…" })).toBeVisible();
+  await form.getByRole("button", { name: "Add custom backend" }).click();
   await page.screenshot({
     path: testInfo.outputPath("model-backends-narrow-probe-loading.png"),
   });
-  await expect(page.locator(".backend-connection-row").getByText("Limited", {
-    exact: true,
-  })).toBeVisible();
-  await expect(probe).toBeVisible();
-  await enable.click();
-  await expect(enable).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByText("Partial", { exact: true }).first()).toBeVisible();
+  await expect(form).toHaveCount(0, { timeout: 60_000 });
+  const row = section.getByRole("listitem", { name: longName });
+  await expect(row.getByRole("button", { name: `Turn off ${longName}` })).toBeVisible();
+  await row.getByRole("button", { name: new RegExp(`^Test ${longName}`, "u") }).click();
+  const results = row.getByRole("list", { name: `Test results for ${longName}` });
+  await expect(results.getByRole("listitem").first()).not.toHaveText(/Testing…/u);
+  await expect(results.getByRole("listitem").nth(1)).toContainText("Failed:");
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
   const globalDefault = page.getByRole("combobox", {
     name: "Model",
@@ -302,27 +275,23 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   });
 
   await openBackends();
-  await profileRail.getByText("Visual gateway with an intentionally long profile name for truncation", { exact: true }).click();
-  await page.getByRole("button", { name: "Edit configuration" }).click();
-  await page.getByLabel("Base URL", { exact: true }).fill("http://127.0.0.1:1/backend-probe");
-  await page.getByRole("button", { name: "Save configuration" }).click();
-  await expect(enable).toHaveAttribute("aria-checked", "false");
+  await row.getByRole("button", { name: `Edit ${longName}` }).click();
+  const editor = row.getByRole("form", { name: `Edit ${longName}` });
+  await editor.getByRole("textbox", { name: "Base URL", exact: true }).fill("http://127.0.0.1:1/backend-probe");
+  await expect(editor.getByText(/Changing the address needs the key again/u)).toBeVisible();
+  await editor.getByLabel("API key", { exact: true }).fill("visual-fixture-key");
+  await editor.getByRole("button", { name: "Save" }).click();
+  await expect(editor).toHaveCount(0, { timeout: 60_000 });
+  await expect(row.getByRole("button", { name: `Turn on ${longName}` })).toBeVisible();
+  await expect(row.locator(".backend-profile-state")).toContainText("Failed:");
   await expect.poll(globalBackendDefaults).toBe(0);
-  await probe.click();
-  await expect(page.locator(".backend-connection-row").getByText("Failed", {
-    exact: true,
-  })).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("model-backends-narrow-probe-failure-disabled.png"),
   });
 
-  await page.getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByRole("button", { name: "Delete permanently" })).toBeVisible();
-  await page.getByRole("button", { name: "Delete permanently" }).click();
-  await expect(profileRail.getByText(
-    "Visual gateway with an intentionally long profile name for truncation",
-    { exact: true },
-  )).toHaveCount(0);
+  await row.getByRole("button", { name: `Remove ${longName}` }).click();
+  await row.getByRole("button", { name: "Remove permanently" }).click();
+  await expect(section.getByRole("listitem", { name: longName })).toHaveCount(0);
   await expectBackendLayoutContained();
   await resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Workspace", exact: true }).click();

@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { Gauge, RefreshCw, Users } from "lucide-react";
 
 import type { EnvironmentUsageSummary } from "../utils/environmentSummary";
+import { API_KEY_USAGE_UNAVAILABLE } from "../utils/usageDisplay";
 import {
   clampRemainingPercent,
   HEADER_METER_LOW_REMAINING_PERCENT,
@@ -22,6 +23,7 @@ function freshnessLabel(
   freshness: EnvironmentUsageSummary["quota"]["freshness"],
   source: EnvironmentUsageSummary["quota"]["source"],
 ): string {
+  if (source === "api-key") return "Not available for API keys";
   if (source === "isolated") return "Unavailable for this backend";
   if (freshness === "current") return "Current";
   if (freshness === "stale") return "Stale";
@@ -94,7 +96,9 @@ export function UsageSurface({
               <p className="workspace-surface-empty">
                 {usage.quota.freshness === "refreshing"
                   ? "Refreshing provider limits…"
-                  : usage.quota.source === "isolated"
+                  : usage.quota.source === "api-key"
+                    ? API_KEY_USAGE_UNAVAILABLE
+                    : usage.quota.source === "isolated"
                     ? "Account limits are not shared with this custom backend route."
                     : "No provider limits reported"}
               </p>

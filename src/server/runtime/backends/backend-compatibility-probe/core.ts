@@ -9,7 +9,9 @@ import type {
   ModelCapabilityProvenance,
 } from "../../../../shared/model-routing";
 
-export const DEFAULT_TIMEOUT_MS = 7_500;
+export const DEFAULT_STAGE_TIMEOUT_MS = 8_000;
+export const PROBE_STAGE_COUNT = 3;
+export const DEFAULT_TIMEOUT_MS = DEFAULT_STAGE_TIMEOUT_MS * PROBE_STAGE_COUNT;
 export const MAX_TIMEOUT_MS = 30_000;
 export const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
 export const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -59,6 +61,7 @@ export interface BackendCompatibilityProbeDependencies {
     NativeBackendProbeAdapter
   >>;
   timeoutMs?: number;
+  stageTimeoutMs?: number;
   maxResponseBytes?: number;
   now?: () => Date;
   /** Exact controller-owned admission. Direct diagnostic probes use sequence 1. */

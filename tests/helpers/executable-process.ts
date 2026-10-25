@@ -1,3 +1,5 @@
+import { connect } from "node:net";
+
 import { linuxProcessCanExecute } from
   "../../src/node/runtime-owned-process-posix";
 
@@ -22,4 +24,30 @@ export function executableProcessExists(pid: number): boolean {
       && "code" in error
       && error.code === "EPERM";
   }
+}
+
+export interface FixtureProcessIdentity {
+  pid: number;
+  endpoint?: string | null;
+}
+
+const ENDPOINT_GONE = new Set(["ENOENT", "ECONNREFUSED"]);
+
+export async function fixtureProcessExists(
+  identity: FixtureProcessIdentity,
+): Promise<boolean> {
+  const { endpoint } = identity;
+  if (!endpoint) return executableProcessExists(identity.pid);
+  return await new Promise<boolean>((resolve) => {
+    const socket = connect(endpoint);
+    const settle = (alive: boolean): void => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(alive);
+    };
+    const timer = setTimeout(() => settle(true), 2_000);
+    socket.once("connect", () => settle(true));
+    socket.once("error", (error: NodeJS.ErrnoException) =>
+      settle(!ENDPOINT_GONE.has(error.code ?? "")));
+  });
 }

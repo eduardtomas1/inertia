@@ -10,6 +10,8 @@ import { focusAppWindow } from "./support/window-focus";
 
 const ACTION_WINDOW_SECONDS = 3_600;
 const RESUME_WINDOW_SECONDS = 90;
+const OFFER_AFTER_LAUNCH_MS = 60_000;
+const OFFER_AFTER_LAUNCH_REASON = "The reset offer appears after launch once the provider's 15 s unavailable-account cache expires and the banner's 1/3/10/30 s retries read the exhausted quota";
 
 interface ResetState { resetsAt: number | null; windowSeconds: number; turns: number }
 
@@ -82,7 +84,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
   try {
     await focusAppWindow(app.electronApp, page);
     const resume = () => page.getByRole("button", { name: "Resume at reset", exact: true });
-    await expect(resume()).toBeEnabled();
+    await expect(resume(), OFFER_AFTER_LAUNCH_REASON).toBeEnabled({ timeout: OFFER_AFTER_LAUNCH_MS });
     await page.screenshot({ path: test.info().outputPath("limit-reset-offer.png"), animations: "disabled" });
     await resume().click();
     await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
@@ -94,7 +96,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
 
     writeFileSync(statePath, JSON.stringify({ ...await readState(), resetsAt: null, windowSeconds: RESUME_WINDOW_SECONDS }));
     page = await restart();
-    await expect(resume()).toBeEnabled();
+    await expect(resume(), OFFER_AFTER_LAUNCH_REASON).toBeEnabled({ timeout: OFFER_AFTER_LAUNCH_MS });
     await resume().click();
     await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
     page = await restart();

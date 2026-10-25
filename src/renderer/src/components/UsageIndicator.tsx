@@ -23,7 +23,7 @@ import { outsidePointerShouldRestoreFocus } from "../utils/dismissibleMenu";
 import { INTERFACE_LOCALE } from "../lib/locale";
 import { promptCacheStatus } from "../utils/compactOnReturn";
 import type { PromptCacheFacts } from "@shared/compact-on-return";
-import { formatUpdatedAge } from "../lib/format";
+import { formatUpdatedAge } from "../utils/quotaAge";
 
 const UsageAccountsHint = lazy(async () => ({ default: (await import("./UsageLimitsPanel")).UsageAccountsHint }));
 

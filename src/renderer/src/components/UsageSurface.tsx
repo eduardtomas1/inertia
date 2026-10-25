@@ -3,7 +3,7 @@ import { Gauge, RefreshCw, Users } from "lucide-react";
 
 import type { EnvironmentUsageSummary } from "../utils/environmentSummary";
 import { API_KEY_USAGE_UNAVAILABLE } from "../utils/usageDisplay";
-import { formatUpdatedAge } from "../lib/format";
+import { formatUpdatedAge } from "../utils/quotaAge";
 import {
   clampRemainingPercent,
   HEADER_METER_LOW_REMAINING_PERCENT,

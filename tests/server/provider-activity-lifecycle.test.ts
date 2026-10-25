@@ -872,6 +872,31 @@ describe("durable provider activity lifecycle contract", () => {
     await finish(value);
   });
 
+  it("records each distinct Codex turn diff once and ignores empty or repeated diffs", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const first = "diff --git a/file.ts b/file.ts\n+one";
+    const second = `${first}\n+two`;
+    const writes = { inserted: 0, updated: 0 };
+    const addActivity = value.store.addActivity.bind(value.store);
+    const updateActivity = value.store.updateActivity.bind(value.store);
+    value.store.addActivity = (...args) => { writes.inserted += 1; return addActivity(...args); };
+    value.store.updateActivity = (...args) => { writes.updated += 1; return updateActivity(...args); };
+    for (const diff of ["", first, first, "", first, second, second]) {
+      codex.handleNotification("turn/diff/updated", { ...owned, diff });
+      runTimers(value.scheduler, 64);
+    }
+    expect(writes).toEqual({ inserted: 2, updated: 0 });
+    const patches = turnActivities(value).filter(({ title }) => title === "Patch updated")
+      .sort((left, right) => (left.detail?.length ?? 0) - (right.detail?.length ?? 0));
+    expect(patches).toEqual([
+      expect.objectContaining({ status: "completed", detail: `Diff:\n${first}` }),
+      expect.objectContaining({ status: "completed", detail: `Diff:\n${second}` }),
+    ]);
+    await finish(value);
+  });
+
   it("redacts a credential split across Codex output chunks", async () => {
     const value = await runtime();
     const codex = codexEvents(value);
@@ -953,6 +978,43 @@ describe("durable provider activity lifecycle contract", () => {
     expect(value.shells.length - shells).toBe(2);
     expect(turnActivities(value)[0]?.detail)
       .toBe(`Command:\nnpm test\n\nOutput:\n${output}`);
+    await finish(value);
+  });
+
+  it("neither saves nor shows a running command again once its output stops changing", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    for (let index = 0; index < 8; index += 1) {
+      value.emitter.activity("command", "completed", `fill ${index}`, {
+        detail: `Output:\n${"x".repeat(index === 7 ? 16_000 : 40_000)}`,
+      });
+    }
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "hot", type: "commandExecution", command: "npm test", status: "inProgress" },
+    });
+    const updates = vi.spyOn(value.store, "updateActivity");
+    const events = value.events.length;
+    const window = () => {
+      for (let index = 0; index < 50; index += 1) {
+        codex.handleNotification("item/commandExecution/outputDelta", {
+          ...owned,
+          itemId: "hot",
+          delta: `${"y".repeat(999)}\n`,
+        });
+      }
+      runTimers(value.scheduler, 64);
+    };
+    window();
+    const frozen = turnActivities(value).find(({ title }) => title === "npm test")?.detail;
+    expect(frozen?.length).toBeGreaterThan(0);
+    const saved = updates.mock.calls.length;
+    const shown = value.events.length - events;
+    for (let index = 0; index < 20; index += 1) window();
+    expect(updates.mock.calls.length - saved).toBe(0);
+    expect(value.events.length - events - shown).toBe(0);
+    expect(turnActivities(value).find(({ title }) => title === "npm test")?.detail).toBe(frozen);
     await finish(value);
   });
 

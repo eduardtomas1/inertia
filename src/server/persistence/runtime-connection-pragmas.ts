@@ -9,3 +9,28 @@ export function applyRuntimeConnectionPragmas(database: Database.Database): void
   database.pragma("mmap_size = 268435456");
   database.pragma("temp_store = MEMORY");
 }
+
+export function optimizeRuntimeConnection(database: Database.Database, mask?: number): void {
+  if (!database.open || database.readonly || database.inTransaction) return;
+  if (database.pragma("query_only", { simple: true }) !== 0) return;
+  try {
+    database.pragma("analysis_limit = 1000");
+    database.pragma(mask === undefined ? "optimize" : `optimize = ${mask}`);
+  } catch {
+    return;
+  }
+}
+
+export function openRuntimeConnection(
+  database: Database.Database,
+  migrate: (database: Database.Database) => void,
+): void {
+  applyRuntimeConnectionPragmas(database);
+  migrate(database);
+  optimizeRuntimeConnection(database, 0x10002);
+}
+
+export function closeRuntimeConnection(database: Database.Database): void {
+  optimizeRuntimeConnection(database);
+  if (database.open) database.close();
+}

@@ -33,6 +33,16 @@ const contextPacketTriggers = [
 ];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < 105) {
+    database.exec(`
+      DROP INDEX activities_turn_idx;
+      DROP INDEX messages_turn_idx;
+      DROP INDEX agent_reasonings_turn_idx;
+      CREATE INDEX activities_conversation_id_idx ON activities(conversation_id, created_at);
+      CREATE INDEX messages_conversation_id_idx ON messages(conversation_id);
+      CREATE INDEX agent_reasonings_conversation_id_idx ON agent_reasonings(conversation_id, created_at);
+    `);
+  }
   if (version < 101 && version >= 99) database.exec("ALTER TABLE watcher_links DROP COLUMN read_only");
   if (version < 100) {
     database.exec("DROP INDEX todos_project_idx");
@@ -140,13 +150,16 @@ describe("database health check for settings and subagent columns", () => {
     { version: 100, sql: "DROP INDEX todos_project_idx" },
     { version: 100, sql: "ALTER TABLE todos DROP COLUMN linked_at" },
     { version: 101, sql: "ALTER TABLE watcher_links DROP COLUMN read_only" },
+    { version: 105, sql: "DROP INDEX activities_turn_idx" },
+    { version: 105, sql: "DROP INDEX messages_turn_idx" },
+    { version: 105, sql: "DROP INDEX agent_reasonings_turn_idx" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100])("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

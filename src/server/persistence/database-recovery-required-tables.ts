@@ -194,6 +194,9 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [99, "watcher_links_project_idx"],
     [99, "watcher_wakes_link_idx"],
     [100, "todos_project_idx"],
+    [105, "activities_turn_idx"],
+    [105, "messages_turn_idx"],
+    [105, "agent_reasonings_turn_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [

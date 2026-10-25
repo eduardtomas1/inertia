@@ -28,6 +28,7 @@ import { watcherAccessMigration } from "./watcher-access";
 import { extendBackendPresetsMigration } from "./extend-backend-presets";
 import { persistTurnFailureKindsMigration } from "./persist-turn-failure-kinds";
 import { persistCompactOnReturnMigration } from "./persist-compact-on-return";
+import { turnScopedIndexesMigration } from "./turn-scoped-indexes";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -59,4 +60,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   extendBackendPresetsMigration,
   persistTurnFailureKindsMigration,
   persistCompactOnReturnMigration,
+  turnScopedIndexesMigration,
 ];

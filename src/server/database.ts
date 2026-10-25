@@ -68,7 +68,7 @@ import {
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
-import { applyRuntimeConnectionPragmas } from "./persistence/runtime-connection-pragmas";
+import { closeRuntimeConnection, openRuntimeConnection } from "./persistence/runtime-connection-pragmas";
 import { requireRow } from "./persistence/required-row";
 import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
 import { ProjectRepository } from "./persistence/project-repository";
@@ -286,8 +286,7 @@ export class RuntimeStore {
       requireProject: (projectId) => this.requireProject(projectId),
     });
     try {
-      applyRuntimeConnectionPragmas(this.database);
-      migrateRuntimeDatabase(this.database);
+      openRuntimeConnection(this.database, migrateRuntimeDatabase);
       this.agentThreadManagement.recoverInterrupted();
       this.contextPackets.recoverInterruptedAgentRequests();
       this.projectRepository.enrollMissingPaths();
@@ -303,7 +302,7 @@ export class RuntimeStore {
   close(): void {
     this.backupManager.stop();
     this.conversationWork.clear();
-    if (this.database.open) this.database.close();
+    closeRuntimeConnection(this.database);
   }
 
   startBackups(): void {

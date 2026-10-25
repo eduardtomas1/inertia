@@ -45,6 +45,12 @@ export class ProviderMetadataRepository {
     const rateLimitsJson = JSON.stringify(metadata.rateLimits);
     if (modelsJson.length > 262_144 || rateLimitsJson.length > 65_536) return;
     const scopeKey = currentProviderMetadataScopeKey(metadata.scope);
+    if (metadata.scope.version !== null) this.database.prepare(`
+      DELETE FROM provider_metadata_scoped_cache
+      WHERE provider_id = @providerId AND harness_id = @harnessId
+        AND backend_profile_id = @backendProfileId AND model_id = @modelId
+        AND version IS NOT @version
+    `).run(metadata.scope);
     this.database.prepare(`
       INSERT INTO provider_metadata_scoped_cache (
         scope_key, provider_id, harness_id, backend_profile_id, model_id,

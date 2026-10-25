@@ -2463,7 +2463,10 @@ describe("TurnController authoritative lifecycle", () => {
       { recoverInterruptedRuns: false },
     );
     reopened.providerRunOwnership.clearRuntimeGeneration(runtimeGenerationId);
+    const fullDetail = vi.spyOn(reopened, "conversationDetail");
     const recovery = recoverInterruptedTurns(reopened);
+    expect(fullDetail).not.toHaveBeenCalled();
+    fullDetail.mockRestore();
     expect(recovery.recoveredTurns).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: queued.turn.id,

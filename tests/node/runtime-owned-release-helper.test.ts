@@ -60,7 +60,7 @@ function fixture() {
       expect(onTerminal(true)).toBe(true);
       void dependencies!.release!(controller.signal);
     });
-    return () => controller.abort();
+    return Object.assign(() => controller.abort(), { wake: () => undefined });
   });
   const journal = RuntimeOwnedProcessJournal.prototype;
   vi.spyOn(journal, "sessionCapability").mockReturnValue({} as never);

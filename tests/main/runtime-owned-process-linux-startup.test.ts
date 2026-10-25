@@ -34,9 +34,9 @@ linuxIt.each([false, true])("accepts exact terminal proof when stop races a dela
   const monitor = linuxGuardian.monitorLinuxGuardianTerminal;
   let resumeMonitor = (): void => {};
   if (!released) vi.spyOn(linuxGuardian, "monitorLinuxGuardianTerminal").mockImplementation((...args) => {
-    let stopMonitor = (): void => {};
+    let stopMonitor: (() => void) & { readonly wake?: () => void } = () => {};
     resumeMonitor = () => { stopMonitor = monitor(...args); };
-    return () => stopMonitor();
+    return Object.assign(() => stopMonitor(), { wake: () => stopMonitor.wake?.() });
   });
   vi.spyOn(linuxGuardian, "signalLinuxGuardianExactAsync").mockImplementation(async (...args) => {
     const result = await signal(...args);

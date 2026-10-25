@@ -105,7 +105,7 @@ describe("cross-platform packaged behavior contract", () => {
     );
 
     const cleanupStart = main.indexOf("function runPrivilegedCleanup()");
-    const cleanupEnd = main.indexOf("\nasync function bootstrap()", cleanupStart);
+    const cleanupEnd = main.indexOf("\nasync function bootstrap(", cleanupStart);
     const cleanupHandler = main.slice(cleanupStart, cleanupEnd);
     expect(cleanupStart).toBeGreaterThanOrEqual(0);
     expect(cleanupHandler).toContain("new RetryablePrivilegedCleanup({");
@@ -141,7 +141,9 @@ describe("cross-platform packaged behavior contract", () => {
       main.indexOf('recordPackageSmokeStage("app-exit")'),
     );
     expect(main.split("app.exit(0)")).toHaveLength(2);
-    expect(main).toContain("(detached) => detached ? app.exit(0) : startApplicationWithUpdateHandoff({");
+    expect(main).toContain(".then((detached) => detached ? null : resolveDesktopRuntimeProcessSafetyAssets())");
+    expect(main).toContain(".then((safetyAssets) => !safetyAssets ? app.exit(0) : startApplicationWithUpdateHandoff({");
+    expect(main.split("resolveDesktopRuntimeProcessSafetyAssets()")).toHaveLength(2);
     expect(main).toContain("attachmentReservation = orphanReservation");
     expect(main).toContain(
       "reservedRecords: attachmentReservation.records",

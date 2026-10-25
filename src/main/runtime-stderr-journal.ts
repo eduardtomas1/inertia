@@ -1,5 +1,11 @@
 import { StringDecoder } from "node:string_decoder";
-import type { RuntimeStderrCode } from "./runtime-diagnostic-events.js";
+import {
+  RUNTIME_CHROMIUM_LOG_LEVELS,
+  RUNTIME_NODE_WARNING_NAMES,
+  type RuntimeChromiumLogLevel,
+  type RuntimeNodeWarningName,
+  type RuntimeStderrCode,
+} from "./runtime-diagnostic-events.js";
 
 const CLASSIFIERS: ReadonlyArray<readonly [string, Exclude<RuntimeStderrCode, "omitted">]> = [
   ["The scheduled database backup failed.", "database-backup-failed"],
@@ -13,8 +19,58 @@ const CLASSIFIERS: ReadonlyArray<readonly [string, Exclude<RuntimeStderrCode, "o
   ["Terminal provider resume rejected.", "terminal-resume-rejected"],
 ];
 
+const SDK_WARNING_PREFIXES = [
+  "SDK debug logs: ",
+  "Tool name validation warning for \"",
+  "Tool registration will proceed, but this may cause compatibility issues.",
+  "Consider updating the tool name to conform to the MCP tool naming",
+  "See SEP: Specify Format for Tool Names",
+  "Warning: OpenAI may not support ",
+  "Could not convert regex pattern at ",
+  "Recursive reference detected at ",
+];
+const NODE_WARNING = /^\([A-Za-z][\w .-]{0,40}:\d+\) (?:\[[A-Z0-9_]+\] )?([A-Za-z]*Warning)(?=[:\s]|$)/u;
+const NODE_WARNING_HINT = /^\(Use `[^`]*--trace-[a-z-]+[^`]*` to show where the warning was created\)$/u;
+const STACK_FRAME = /^at \S/u;
+const CHROMIUM_LOG = /^\[(?:\d+:){0,2}\d{4}\/\d{6}(?:\.\d+)?:([A-Z]+)\d*:[^\]]*\]/u;
+
+type RuntimeStderrShapeCode =
+  | "node-warning-hint" | "stack-frame" | "sdk-warning" | "json" | "other"
+  | `node-warning:${RuntimeNodeWarningName}`
+  | `chromium-log:${RuntimeChromiumLogLevel}`;
+
 export function classifyRuntimeStderrLine(line: string): Exclude<RuntimeStderrCode, "omitted"> | null {
   return CLASSIFIERS.find(([prefix]) => line.startsWith(prefix))?.[1] ?? null;
+}
+
+function closedMember<T extends string>(values: readonly T[], value: string | undefined, fallback: T): T {
+  return value !== undefined && (values as readonly string[]).includes(value) ? value as T : fallback;
+}
+
+function jsonLine(line: string): boolean {
+  if (!/^[[{]/u.test(line)) return false;
+  try {
+    JSON.parse(line);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function classifyRuntimeStderrShape(line: string): RuntimeStderrShapeCode {
+  const warning = NODE_WARNING.exec(line);
+  if (warning) {
+    return `node-warning:${closedMember<RuntimeNodeWarningName>(RUNTIME_NODE_WARNING_NAMES, warning[1], "other")}`;
+  }
+  if (NODE_WARNING_HINT.test(line)) return "node-warning-hint";
+  if (STACK_FRAME.test(line)) return "stack-frame";
+  const chromium = CHROMIUM_LOG.exec(line);
+  if (chromium) {
+    return `chromium-log:${closedMember<RuntimeChromiumLogLevel>(RUNTIME_CHROMIUM_LOG_LEVELS, chromium[1], "other")}`;
+  }
+  if (SDK_WARNING_PREFIXES.some((prefix) => line.startsWith(prefix))) return "sdk-warning";
+  if (jsonLine(line)) return "json";
+  return "other";
 }
 
 interface Timer {
@@ -43,7 +99,7 @@ export class RuntimeStderrJournal {
   private readonly omittedDelayMs: number;
   private pending = "";
   private overflowing = false;
-  private omitted = 0;
+  private readonly deferred = new Map<RuntimeStderrCode, number>();
   private windowStartedAt = Number.NEGATIVE_INFINITY;
   private recordsInWindow = 0;
   private timer: Timer | null = null;
@@ -83,10 +139,8 @@ export class RuntimeStderrJournal {
     this.ended = true;
     if (this.timer) this.clearTimer(this.timer);
     this.timer = null;
-    if (this.omitted > 0) {
-      this.options.record("omitted", Math.min(this.omitted, 1_000_000));
-      this.omitted = 0;
-    }
+    for (const [code, count] of this.deferred) this.options.record(code, Math.min(count, 1_000_000));
+    this.deferred.clear();
   }
 
   private append(text: string): void {
@@ -110,7 +164,11 @@ export class RuntimeStderrJournal {
       this.options.record(code, 1);
       return;
     }
-    this.omitted += 1;
+    this.defer(overflowed || code ? "omitted" : classifyRuntimeStderrShape(line));
+  }
+
+  private defer(code: RuntimeStderrCode): void {
+    this.deferred.set(code, (this.deferred.get(code) ?? 0) + 1);
     this.schedule(this.omittedDelayMs);
   }
 
@@ -127,19 +185,20 @@ export class RuntimeStderrJournal {
 
   private schedule(delayMs: number): void {
     if (this.timer || this.ended) return;
-    this.timer = this.setTimer(() => this.flushOmitted(), delayMs);
+    this.timer = this.setTimer(() => this.flushDeferred(), delayMs);
     this.timer.unref?.();
   }
 
-  private flushOmitted(): void {
+  private flushDeferred(): void {
     this.timer = null;
-    if (this.omitted === 0) return;
-    if (!this.admit()) {
-      this.schedule(Math.max(1, this.windowStartedAt + this.windowMs - this.now()));
-      return;
+    for (const [code, count] of this.deferred) {
+      if (!this.admit()) {
+        this.schedule(Math.max(1, this.windowStartedAt + this.windowMs - this.now()));
+        return;
+      }
+      this.options.record(code, Math.min(count, 1_000_000));
+      this.deferred.delete(code);
     }
-    this.options.record("omitted", Math.min(this.omitted, 1_000_000));
-    this.omitted = 0;
   }
 }
 

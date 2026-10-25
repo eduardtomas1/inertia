@@ -24,6 +24,8 @@ const defaultDependencies: SystemBootIdDependencies = {
   environment: process.env,
 };
 
+const defaultSystemBootIds = new Map<NodeJS.Platform, string>();
+
 function environmentValue(
   environment: NodeJS.ProcessEnv,
   name: string,
@@ -54,6 +56,20 @@ function boundedCommand(
 export function readSystemBootId(
   platform: NodeJS.Platform = process.platform,
   dependencies: SystemBootIdDependencies = defaultDependencies,
+): string | null {
+  if (dependencies !== defaultDependencies) {
+    return readSystemBootIdWith(platform, dependencies);
+  }
+  const remembered = defaultSystemBootIds.get(platform);
+  if (remembered) return remembered;
+  const bootId = readSystemBootIdWith(platform, dependencies);
+  if (bootId) defaultSystemBootIds.set(platform, bootId);
+  return bootId;
+}
+
+function readSystemBootIdWith(
+  platform: NodeJS.Platform,
+  dependencies: SystemBootIdDependencies,
 ): string | null {
   let candidate: string | null = null;
   try {

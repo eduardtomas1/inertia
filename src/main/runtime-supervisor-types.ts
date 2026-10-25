@@ -98,11 +98,6 @@ export interface PendingDatabaseRecoveryRequest {
   reject: (error: Error) => void;
 }
 
-export interface PendingSecureFileRequest {
-  record: RuntimeProcessRecord;
-  controller: AbortController;
-}
-
 export interface RuntimeCredentialBroker {
   resolve(secretReference: string, signal?: AbortSignal): Promise<string | null>;
   status(secretReference: string, signal?: AbortSignal): Promise<BackendCredentialStatus>;

@@ -1,8 +1,3 @@
-import { appendFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-
 export const CHANGE_DOMAINS = Object.freeze([
   "quality_shared",
   "runtime_supervisor",
@@ -401,61 +396,4 @@ export function classifyChangedPaths(inputPaths) {
     domains: CHANGE_DOMAINS.filter((domain) => domains.has(domain)),
     reasons: [...reasons].sort(),
   };
-}
-
-export function githubOutputsForClassification(classification) {
-  const selected = new Set(classification.domains);
-  const outputs = {
-    all_evidence: classification.allEvidence,
-    full_certification: classification.fullCertification,
-    native_architecture: classification.nativeArchitecture,
-    documentation_only: classification.documentationOnly,
-    domains_json: JSON.stringify(classification.domains),
-  };
-  for (const domain of CHANGE_DOMAINS) outputs[domain] = selected.has(domain);
-  return Object.entries(outputs)
-    .map(([key, value]) => `${key}=${String(value)}`)
-    .join("\n") + "\n";
-}
-
-function parseCliArguments(args) {
-  const parsed = { base: "", head: "HEAD" };
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--base") parsed.base = args[++index] ?? "";
-    else if (argument === "--head") parsed.head = args[++index] ?? "";
-    else throw new Error(`Unknown change-classifier argument '${argument}'.`);
-  }
-  return parsed;
-}
-
-async function changedPathsFromCli(args, repositoryRoot) {
-  if (!/^[0-9a-f]{40}$/u.test(args.base) || !/^[0-9a-f]{40}$/u.test(args.head)) {
-    return [];
-  }
-  const result = spawnSync("git", ["diff", "--name-only", "-z", `${args.base}...${args.head}`], {
-    cwd: repositoryRoot,
-    encoding: "utf8",
-    maxBuffer: 4 * 1024 * 1024,
-  });
-  if (result.status !== 0 || result.error) return [];
-  return result.stdout.split("\0").filter(Boolean);
-}
-
-async function main() {
-  const repositoryRoot = process.cwd();
-  const args = parseCliArguments(process.argv.slice(2));
-  const paths = await changedPathsFromCli(args, repositoryRoot);
-  const classification = classifyChangedPaths(paths);
-  const output = githubOutputsForClassification(classification);
-  if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, output, "utf8");
-  process.stdout.write(`${JSON.stringify({ paths, ...classification }, null, 2)}\n`);
-}
-
-const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
-if (invokedPath === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
-  });
 }

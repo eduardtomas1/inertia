@@ -47,7 +47,6 @@ import { attachmentUsage, ConversationAttachmentStorageFullError, ConversationAt
   type ConversationAttachmentEvictionOrder, type ConversationAttachmentUsage } from "./conversation-attachment-store-capacity.js";
 
 export type {
-  ConversationAttachmentStoreOperation,
   ConversationAttachmentStoreOperationRunner,
 } from "./conversation-attachment-store-child.js";
 

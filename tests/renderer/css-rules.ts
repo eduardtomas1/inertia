@@ -94,10 +94,3 @@ export function declarationsFor(
   }
   return merged;
 }
-
-export function rulesMatching(
-  rules: readonly CssRule[],
-  test: (selector: string) => boolean,
-): CssRule[] {
-  return rules.filter((rule) => rule.selectors.some(test));
-}

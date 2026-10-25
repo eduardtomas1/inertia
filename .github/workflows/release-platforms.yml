@@ -228,7 +228,6 @@ jobs:
         run: npm run test:browser-evidence-cpu-budget
 
       - name: Prepare Electron end-to-end binary
-        id: electron_test_binary
         run: node -e "console.log(require('electron'))"
 
       - name: Build the application bundle for the desktop benchmark
@@ -278,7 +277,6 @@ jobs:
       # Package and every subsequent smoke consume this exact bundle. The
       # package commands below deliberately do not rebuild it.
       - name: Build the release application bundle once
-        id: application_bundle
         run: npm run build:packaged
 
       - name: Build macOS release package

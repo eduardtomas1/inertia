@@ -4,7 +4,7 @@ import type { ProviderInfo } from "@shared/contracts";
 import { providerStateLabel, providerVersionLabel, type ProviderSetupAction } from "../utils/providerStatus";
 import { LoadingMark } from "./ui";
 
-export { providerSetupAction, providerStateDetail, providerStateLabel } from "../utils/providerStatus";
+export { providerSetupAction, providerStateLabel } from "../utils/providerStatus";
 export type { ProviderSetupAction } from "../utils/providerStatus";
 
 export function ProviderStatus({ provider, id }: { provider: ProviderInfo; id?: string }): React.JSX.Element {

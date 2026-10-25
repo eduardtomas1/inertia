@@ -59,8 +59,6 @@ export {
   createAttachmentStorageSession,
   removeAttachmentStorageSession,
   type AttachmentStorageReservation,
-  type AttachmentStorageSession,
-  type AttachmentStorageSessionOptions,
 } from "./attachment-storage-session.js";
 
 const ATTACHMENT_HANDOFF_TIMEOUT_MS = 210_000;

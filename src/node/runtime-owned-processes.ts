@@ -67,25 +67,19 @@ export {
   supportedRuntimeOwnedProcessPlatform,
 } from "./runtime-owned-process-journal.js";
 export type {
-  LinuxProcessIdentity,
   ObservedRuntimeOwnedProcessIdentity,
-  ObservedWindowsProcessIdentity,
   RuntimeOwnedDarwinProcessPending,
   RuntimeOwnedLinuxProcessPending,
   RuntimeOwnedProcessClaim,
   RuntimeOwnedProcessContainment,
-  RuntimeOwnedProcessIdentity,
   RuntimeOwnedProcessPlatform,
-  WindowsProcessIdentity,
   WindowsRuntimeJobContainment,
 } from "./runtime-owned-process-journal.js";
 export {
   darwinProcessGuardianReady,
   darwinProcessGuardianReadyAsync,
   darwinProcessSessionEmpty,
-  darwinProcessSessionEmptyAsync,
   readDarwinProcessIdentity,
-  readDarwinProcessIdentityAsync,
 } from "./runtime-owned-process-darwin.js";
 export type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
 export type { RuntimeOwnedProcessInvocation } from "./runtime-owned-process-invocation.js";

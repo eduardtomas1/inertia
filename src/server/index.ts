@@ -138,7 +138,6 @@ import { RuntimeStartupBlockerError } from
   "../shared/runtime-startup-diagnostics";
 export type {
   RunningRuntime,
-  RuntimeBackendCredentialBroker,
   RuntimeOptions,
 } from "./runtime-types";
 export {

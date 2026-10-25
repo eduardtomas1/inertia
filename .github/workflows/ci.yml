@@ -43,7 +43,6 @@ jobs:
       renderer: ${{ steps.changes.outputs.renderer }}
       benchmarks: ${{ steps.changes.outputs.benchmarks }}
       performance_smoke: ${{ steps.changes.outputs.performance_smoke }}
-      full_certification: ${{ steps.changes.outputs.full_certification }}
 
     steps:
       - name: Check out complete comparison history
@@ -246,11 +245,9 @@ jobs:
         run: npm run pretest
 
       - name: Build the application bundle
-        id: application_bundle
         run: npm run build:packaged
 
       - name: Prepare Electron end-to-end binary
-        id: electron_test_binary
         run: node -e "console.log(require('electron'))"
 
       - name: Run compact Electron/core bridge smoke under Xvfb
@@ -361,11 +358,9 @@ jobs:
         run: npm run test:windows-codex
 
       - name: Build the application bundle
-        id: application_bundle
         run: npm run build:packaged
 
       - name: Prepare Electron end-to-end binary
-        id: electron_test_binary
         run: node -e "console.log(require('electron'))"
 
       - name: Run destructive runtime-recovery Electron sentinels
@@ -435,11 +430,9 @@ jobs:
         run: npm run test:portable
 
       - name: Build the application bundle
-        id: application_bundle
         run: npm run build:packaged
 
       - name: Prepare Electron end-to-end binary
-        id: electron_test_binary
         run: node -e "console.log(require('electron'))"
 
       - name: Run destructive runtime-recovery Electron sentinels
@@ -572,7 +565,6 @@ jobs:
       # the quality gate already ran. Everything below consumes this output, so
       # the packaging steps no longer rebuild it from source.
       - name: Build the application bundle
-        id: application_bundle
         run: npm run build:packaged
 
       - name: Package native Windows installer and unpacked app
@@ -825,14 +817,12 @@ jobs:
       # built by prebuild:bundle and the renderer bundle gate, without the
       # typecheck the quality gate already ran.
       - name: Build the application bundle
-        id: application_bundle
         run: npm run build:packaged
 
       # The shared dependency cache deliberately excludes Electron's platform
       # payload. Download it outside Playwright's hook deadline so a cold cache
       # cannot consume the first display-sensitive suite's startup budget.
       - name: Prepare Electron end-to-end binary
-        id: electron_test_binary
         run: node -e "console.log(require('electron'))"
 
       - name: Measure desktop workloads under Xvfb

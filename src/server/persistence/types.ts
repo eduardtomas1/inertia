@@ -34,7 +34,6 @@ import type {
   TurnGitPatchState,
 } from "../../shared/contracts";
 import type {
-  ModelBackendDefault,
   PersistedModelBackendProfile,
 } from "../../shared/backend-profile-settings";
 import type {
@@ -291,5 +290,3 @@ export interface BackendKeyCheck {
   credentialGeneration: string | null;
   checkedAt: string;
 }
-
-export type { ModelBackendDefault };

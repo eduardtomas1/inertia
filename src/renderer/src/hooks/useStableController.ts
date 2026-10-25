@@ -6,8 +6,6 @@ import {
   type StableActionShape,
 } from "../utils/stableController";
 
-export { shallowControllerEqual } from "../utils/stableController";
-
 /**
  * Controller hooks often return object literals whose members are already
  * stable. Retaining the prior envelope prevents unrelated App state from

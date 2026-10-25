@@ -36,7 +36,6 @@ import {
 
 export type {
   WorkspaceEntry,
-  WorkspaceEntryKind,
 } from "./workspace-traversal";
 
 const MAX_PATH_LENGTH = 4_096;

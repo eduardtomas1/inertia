@@ -98,7 +98,6 @@
   --ui-control-height: 32px;
   --transcript-max-width: 720px;
   --final-answer-max-width: 720px;
-  --commentary-max-width: 740px;
   --user-request-max-width: 80%;
   --composer-max-width: 860px;
   --popover-width: 280px;
@@ -138,7 +137,6 @@
   --text-diff: 12px;
   --transcript-max-width: 680px;
   --final-answer-max-width: 680px;
-  --commentary-max-width: 700px;
   --user-request-max-width: 80%;
   --composer-max-width: 760px;
   --popover-width: 260px;
@@ -162,7 +160,6 @@
   --text-diff: 13px;
   --transcript-max-width: 740px;
   --final-answer-max-width: 740px;
-  --commentary-max-width: 760px;
   --user-request-max-width: 80%;
   --composer-max-width: 900px;
   --popover-width: 300px;
@@ -186,7 +183,6 @@
   --text-diff: 14px;
   --transcript-max-width: 740px;
   --final-answer-max-width: 740px;
-  --commentary-max-width: 780px;
   --user-request-max-width: 80%;
   --composer-max-width: 940px;
   --popover-width: 320px;
@@ -2047,33 +2043,6 @@ button.header-breadcrumb-project:hover {
 }
 
 .message-group { min-width: 0; }
-
-.thinking-summary {
-  max-width: 760px;
-  margin: 0 auto 15px;
-  color: var(--text-muted);
-}
-
-.thinking-summary > summary {
-  display: flex;
-  width: fit-content;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 7px;
-  border-radius: var(--radius-xs);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  list-style: none;
-  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
-}
-
-.thinking-summary > summary::-webkit-details-marker { display: none; }
-.thinking-summary > summary:hover { color: var(--text-muted); background: var(--fill); }
-.thinking-summary > summary small { padding: 2px 5px; border-radius: var(--radius-xs); color: var(--text-muted); background: var(--fill); font-size: var(--text-xs); font-weight: 500;}
-.thinking-summary > div { margin: 5px 0 0 6px; padding: 4px 9px 4px 15px; border-left: 1px solid var(--line); color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-prose); white-space: pre-wrap; }
-.thinking-summary.is-live { margin: 0 0 9px; }
-.thinking-summary.is-live > summary { color: var(--accent-strong); }
-.thinking-summary.is-live > div { max-height: 190px; overflow-y: auto; }
 
 .message-meta {
   display: flex;
@@ -6081,8 +6050,7 @@ button.turn-agents-line:hover {
 .diff-line.is-hunk { color: var(--text-muted); background: var(--diff-hunk-surface); }
 .diff-line.is-header { color: var(--text-muted); font-weight: 500; }
 
-.diff-overall-summary,
-.diff-file-summary {
+.diff-overall-summary {
   display: flex;
   flex: 0 0 auto;
   align-items: flex-start;
@@ -6095,10 +6063,8 @@ button.turn-agents-line:hover {
   line-height: var(--leading-chrome);
 }
 
-.diff-overall-summary > span,
-.diff-file-summary { flex-direction: column; }
-.diff-overall-summary strong,
-.diff-file-summary strong { display: block; margin-bottom: 2px; color: var(--text); font-size: var(--text-xs); font-weight: 500; }
+.diff-overall-summary > span { flex-direction: column; }
+.diff-overall-summary strong { display: block; margin-bottom: 2px; color: var(--text); font-size: var(--text-xs); font-weight: 500; }
 .diff-summary-hints { display: flex !important; flex-wrap: wrap; gap: 4px !important; margin-top: 5px; }
 .diff-summary-hints > span {
   display: inline-flex !important;
@@ -8100,7 +8066,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 /* Provider-neutral response timeline */
 .chat-workspace {
   --response-font-size: var(--answer-font-size);
-  --response-line-height: var(--leading-prose);
   --response-turn-gap: var(--turn-spacing);
   --response-block-gap: var(--transcript-section-spacing);
 }
@@ -8360,8 +8325,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .response-turn > .message,
-.response-turn > .agent-run-flow,
-.response-turn > .thinking-summary {
+.response-turn > .agent-run-flow {
   max-width: none;
   margin-right: 0;
   margin-left: 0;
@@ -8574,32 +8538,6 @@ button.sent-attachment-open:hover {
   margin: 0;
 }
 
-.environment-attachments-toggle {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 5px;
-  border: 0;
-  border-radius: var(--radius-xs);
-  color: var(--text-muted);
-  background: transparent;
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-
-.environment-attachments-toggle:hover {
-  color: var(--text);
-  background: var(--fill);
-}
-
-.environment-attachments-chevron {
-  transition: transform var(--dur-fast) var(--ease);
-}
-
-.environment-attachments-toggle[aria-expanded="true"] .environment-attachments-chevron {
-  transform: rotate(180deg);
-}
-
 /* Expanded, the panel becomes a scrollable grid of every attachment in the
    chat rather than the three most recent rows. */
 .environment-attachments[data-expanded="true"] .environment-attachments-gallery {
@@ -8639,12 +8577,6 @@ button.sent-attachment-open:hover {
   margin: -1px;
   clip: rect(0 0 0 0);
   white-space: nowrap;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .environment-attachments-chevron {
-    transition: none;
-  }
 }
 
 @container (max-width: 420px) {
@@ -9019,23 +8951,6 @@ button.sent-attachment-open:hover {
 
 .legacy-exchange > .message:last-of-type {
   margin-bottom: 0;
-}
-
-.agent-run-flow > .thinking-summary {
-  width: 100%;
-  margin: 0;
-}
-
-.agent-run-flow > .thinking-summary > summary {
-  min-height: 28px;
-  padding: 3px 4px;
-}
-
-.agent-run-flow > .thinking-summary > div {
-  margin-top: 2px;
-  margin-left: 5px;
-  padding-top: 3px;
-  padding-bottom: 3px;
 }
 
 .turn-work-log.is-live {
@@ -10727,19 +10642,12 @@ button.sent-attachment-open:hover {
   font-size: var(--text-sm);
 }
 
-.thinking-summary > summary {
-  min-height: var(--ui-control-height);
-  font-size: var(--text-sm);
-}
-
-.thinking-summary > summary small,
 .message-meta .live-label,
 .turn-work-log details > summary small,
 .turn-changed-files > summary small {
   font-size: var(--text-xs);
 }
 
-.thinking-summary > div,
 .agent-activity,
 .turn-work-log .agent-activity {
   font-size: var(--text-sm);
@@ -10809,7 +10717,6 @@ button.sent-attachment-open:hover {
 }
 
 .diff-overall-summary,
-.diff-file-summary,
 .diff-review-toolbar,
 .diff-file-review-heading,
 .diff-review-note,
@@ -10821,7 +10728,6 @@ button.sent-attachment-open:hover {
 }
 
 .diff-overall-summary strong,
-.diff-file-summary strong,
 .diff-summary-hints > span,
 .diff-file-review-heading small,
 .diff-selection-answer > header > small,

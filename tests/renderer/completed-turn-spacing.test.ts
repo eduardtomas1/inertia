@@ -24,7 +24,7 @@ function cssBlock(marker: string): string {
 
 describe("completed-turn spacing", () => {
   it("does not shrink active work or interactive disclosure targets", () => {
-    expect(cssBlock(".agent-run-flow {"))
+    expect(cssBlock("\n.agent-run-flow {"))
       .toContain("margin-bottom: var(--response-block-gap)");
     expect(cssBlock(".turn-working-state {")).toContain("min-height: 28px");
     expect(cssBlock(".turn-changed-files > summary {"))

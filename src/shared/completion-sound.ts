@@ -49,8 +49,6 @@ export const DEFAULT_COMPLETION_SOUND: Readonly<CompletionSoundSettings> = Objec
   longRunSeconds: 60,
 });
 
-export type CompletionSoundAction = "import" | "read" | "remove";
-
 export type CompletionSoundImport =
   | { status: "imported"; sound: CustomCompletionSound }
   | { status: "cancelled" }

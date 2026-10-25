@@ -69,7 +69,6 @@ export interface PrivateConnectTailscaleControllerOptions {
   command?: typeof runTailscaleCommand;
   discover?: typeof discoverTailscaleExecutable;
   fetch?: typeof fetch;
-  now?: () => Date;
 }
 
 export class PrivateConnectTailscaleController {
@@ -78,7 +77,6 @@ export class PrivateConnectTailscaleController {
   private readonly platform: NodeJS.Platform;
   private readonly environment: NodeJS.ProcessEnv;
   private readonly fetchImplementation: typeof fetch;
-  private readonly now: () => Date;
   private executable: string | null = null;
   private owned: PrivateConnectServeOwnership | null = null;
 
@@ -88,7 +86,6 @@ export class PrivateConnectTailscaleController {
     this.platform = options.platform ?? process.platform;
     this.environment = options.environment ?? process.env;
     this.fetchImplementation = options.fetch ?? fetch;
-    this.now = options.now ?? (() => new Date());
   }
 
   async readStatus(): Promise<TailscaleStatus> {

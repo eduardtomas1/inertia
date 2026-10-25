@@ -1,1 +1,1 @@
-export { useAppUpdate, type AppUpdateController } from "./hooks/useAppUpdate";
+export { useAppUpdate } from "./hooks/useAppUpdate";

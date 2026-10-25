@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   CHANGE_DOMAINS,
   classifyChangedPaths,
-  githubOutputsForClassification,
 } from "../../scripts/ci/change-classifier.mjs";
 
 describe("CI change classifier", () => {
@@ -206,18 +205,5 @@ describe("CI change classifier", () => {
     expect(selected.fullCertification).toBe(true);
     expect(selected.documentationOnly).toBe(false);
     expect(selected.domains).toEqual(CHANGE_DOMAINS);
-    expect(githubOutputsForClassification(selected)).toContain("ci_test_infrastructure=true\n");
-  });
-
-  it("emits stable, explicit GitHub job outputs", () => {
-    const output = githubOutputsForClassification(
-      classifyChangedPaths(["src/server/provider/kimi-acp-harness.ts"]),
-    );
-    expect(output).toContain("all_evidence=false\n");
-    expect(output).toContain("full_certification=false\n");
-    expect(output).toContain("native_architecture=false\n");
-    expect(output).toContain("provider_kimi=true\n");
-    expect(output).toContain("provider_codex=false\n");
-    expect(output).toContain('domains_json=["quality_shared","provider_common","provider_kimi","turn_session","agent_management"]\n');
   });
 });

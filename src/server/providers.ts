@@ -59,7 +59,7 @@ import {
   type ProviderRunResult,
   type ProviderSteerInput,
 } from "./provider/contracts";
-import { detectProvider, detectProviders } from "./provider/discovery";
+import { detectProvider } from "./provider/discovery";
 import type {
   ProviderInstallationReadContext,
   ProviderManagerDetectionOptions,
@@ -101,7 +101,7 @@ import {
   type ProviderTerminalResumeLaunch,
 } from "./provider/terminal-resume";
 
-export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider, detectProviders };
+export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider };
 export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
 export type { OwnedProviderStopResult } from "./provider/run-coordinator";
 export type * from "./provider/agent-harness";

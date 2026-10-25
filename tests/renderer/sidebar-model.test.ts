@@ -463,3 +463,53 @@ describe("usage-limited work", () => {
     expect(sidebarThreadView({ ...turn(true), status: "running" }, null).status).toBe("working");
   });
 });
+
+describe("thread view identity", () => {
+  it("reuses equal thread views when only a command run starts and finishes", () => {
+    const conversations = [
+      conversation({ id: "agent", projectId: "p", status: "running" }),
+      conversation({ id: "calm", projectId: "p" }),
+    ];
+    const agentRun = workspaceRun("agent", { status: "running", finishedAt: null });
+    const commandRun = workspaceRun("agent", {
+      id: "command-agent",
+      kind: "check",
+      status: "running",
+      finishedAt: null,
+    });
+    const first = sidebarThreadViewMap(conversations, null, [agentRun]);
+    const started = sidebarThreadViewMap(conversations, null, [commandRun, agentRun]);
+    const finished = sidebarThreadViewMap(
+      conversations,
+      null,
+      [{ ...commandRun, status: "succeeded", finishedAt: "2026-07-22T10:01:00.000Z" }, agentRun],
+    );
+
+    expect(started.get("agent")).toBe(first.get("agent"));
+    expect(started.get("calm")).toBe(first.get("calm"));
+    expect(started).toBe(first);
+    expect(finished).toBe(first);
+  });
+
+  it("replaces only the view whose fields changed", () => {
+    const conversations = [
+      conversation({ id: "agent", projectId: "p", status: "running" }),
+      conversation({ id: "calm", projectId: "p" }),
+    ];
+    const agentRun = workspaceRun("agent", { status: "running", finishedAt: null });
+    const first = sidebarThreadViewMap(conversations, null, [agentRun]);
+    const next = sidebarThreadViewMap(
+      conversations,
+      null,
+      [{ ...agentRun, status: "succeeded", finishedAt: "2026-07-22T10:01:00.000Z" }],
+    );
+
+    expect(next).not.toBe(first);
+    expect(next.get("agent")).not.toBe(first.get("agent"));
+    expect(next.get("agent")?.status).toBe("completed");
+    expect(next.get("calm")).toBe(first.get("calm"));
+    const narrowed = sidebarThreadViewMap(conversations.slice(1), null, []);
+    expect(narrowed).not.toBe(next);
+    expect([...narrowed.keys()]).toEqual(["calm"]);
+  });
+});

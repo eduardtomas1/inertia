@@ -65,6 +65,21 @@ export type WorkIndexItem =
 
 export type PaginatedWorkSectionId = "done" | "no-project-done";
 
+function visibleWorkRange(
+  offsets: readonly number[],
+  estimateSize: (index: number) => number,
+  start: number,
+  height: number,
+): [first: number, last: number] {
+  let first = 0;
+  while (first < offsets.length && offsets[first]! + estimateSize(first) < start) {
+    first += 1;
+  }
+  let last = first;
+  while (last < offsets.length && offsets[last]! <= start + height) last += 1;
+  return [first, last];
+}
+
 export function sidebarWorkLayoutKey(
   compact: boolean,
   items: readonly { id: string }[],
@@ -98,10 +113,6 @@ export function useSidebarWorkIndex({
   watchersByParent,
 }: SidebarWorkIndexOptions) {
   const [retainedIdentity, setRetainedIdentity] = useState<string | null>(null);
-  const [viewport, setViewport] = useState({
-    height: WORK_INDEX_INITIAL_HEIGHT,
-    start: 0,
-  });
   const streamRef = useRef<HTMLDivElement>(null);
   const items = useMemo<WorkIndexItem[]>(() => {
     const next: WorkIndexItem[] = [];
@@ -203,23 +214,33 @@ export function useSidebarWorkIndex({
     }
     return { offsets: nextOffsets, totalSize: total };
   }, [estimateSize, items.length]);
+  const [firstVisible, setFirstVisible] = useState(0);
+  const [lastVisible, setLastVisible] = useState(() => visibleWorkRange(
+    offsets,
+    estimateSize,
+    0,
+    WORK_INDEX_INITIAL_HEIGHT,
+  )[1]);
+  const geometryRef = useRef({ estimateSize, offsets });
   const updateViewport = useCallback((): void => {
     const navigation = navigationRef.current;
     const stream = streamRef.current;
     if (!navigation || !stream) return;
-    const next = {
-      height: navigation.clientHeight || WORK_INDEX_INITIAL_HEIGHT,
-      start: Math.max(0, navigation.scrollTop - stream.offsetTop),
-    };
-    setViewport((current) => (
-      current.height === next.height && current.start === next.start
-        ? current
-        : next
-    ));
+    const [first, last] = visibleWorkRange(
+      geometryRef.current.offsets,
+      geometryRef.current.estimateSize,
+      Math.max(0, navigation.scrollTop - stream.offsetTop),
+      navigation.clientHeight || WORK_INDEX_INITIAL_HEIGHT,
+    );
+    setFirstVisible(first);
+    setLastVisible(last);
   }, [navigationRef]);
   useLayoutEffect(() => {
+    geometryRef.current = { estimateSize, offsets };
+    if (enabled && virtualized) updateViewport();
+  }, [enabled, estimateSize, offsets, updateViewport, virtualized]);
+  useLayoutEffect(() => {
     if (!enabled || !virtualized) return;
-    updateViewport();
     const navigation = navigationRef.current;
     if (!navigation) return;
     const observer = new ResizeObserver(updateViewport);
@@ -234,18 +255,8 @@ export function useSidebarWorkIndex({
   if (!virtualized) {
     renderedItems = items.map((item, index) => ({ item, index, start: undefined }));
   } else {
-    const viewportEnd = viewport.start + viewport.height;
-    let first = 0;
-    while (
-      first < items.length
-      && (offsets[first] ?? 0) + estimateSize(first) < viewport.start
-    ) first += 1;
-    let last = first;
-    while (last < items.length && (offsets[last] ?? 0) <= viewportEnd) {
-      last += 1;
-    }
-    const startIndex = Math.max(0, first - WORK_INDEX_OVERSCAN);
-    const endIndex = Math.min(items.length, last + WORK_INDEX_OVERSCAN);
+    const startIndex = Math.max(0, firstVisible - WORK_INDEX_OVERSCAN);
+    const endIndex = Math.min(items.length, lastVisible + WORK_INDEX_OVERSCAN);
     renderedItems = items.slice(startIndex, endIndex).map((item, offset) => {
       const index = startIndex + offset;
       return { item, index, start: offsets[index] ?? 0 };
@@ -299,7 +310,7 @@ export function useSidebarWorkIndex({
             ? Math.max(0, itemEnd - height)
             : currentStart;
         navigation.scrollTop = stream.offsetTop + nextStart;
-        setViewport({ height, start: nextStart });
+        updateViewport();
       }
     }
     let attempts = 0;
@@ -318,7 +329,7 @@ export function useSidebarWorkIndex({
     };
     focus();
     return true;
-  }, [estimateSize, indexByIdentity, navigationRef, offsets, virtualized]);
+  }, [estimateSize, indexByIdentity, navigationRef, offsets, updateViewport, virtualized]);
   const retainFocusedItem = useCallback((identity: string): void => {
     setRetainedIdentity(identity);
   }, []);

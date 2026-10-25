@@ -250,6 +250,7 @@ export class BackendProfileController {
       models: this.withPresetReasoning(values.preset, values.models),
       routing: values.routing,
       capabilityHints: values.capabilityHints,
+      ...(draft.promptCacheTtl ? { promptCacheTtl: draft.promptCacheTtl } : {}),
       createdAt: now,
       updatedAt: now,
     });

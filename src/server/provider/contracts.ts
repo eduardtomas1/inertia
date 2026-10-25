@@ -725,8 +725,14 @@ export interface CodexResponsesHarnessConfiguration {
   credentialEnvironmentKey: string | null;
 }
 
+export interface ClaudeMessagesHarnessConfiguration {
+  kind: "claude-messages";
+  promptCacheTtl: import("../../shared/compact-on-return").PromptCacheTtl;
+}
+
 export type ProviderHarnessLaunchConfiguration =
-  | CodexResponsesHarnessConfiguration;
+  | CodexResponsesHarnessConfiguration
+  | ClaudeMessagesHarnessConfiguration;
 
 export interface ProviderAuthLaunch {
   executable: string;

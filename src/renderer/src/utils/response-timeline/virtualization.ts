@@ -692,7 +692,11 @@ export function estimateTimelineRowSize(
   item: ResponseTimelineItem,
   options: TimelineRowEstimateOptions = {},
 ): number {
-  if (item.kind === "compaction") return 120 + Math.ceil(item.message.content.length / 80) * 20;
+  if (item.kind === "compaction") {
+    return item.message.compaction?.trigger === "on-return"
+      ? 56
+      : 120 + Math.ceil(item.message.content.length / 80) * 20;
+  }
   if (item.kind === "handoff") return 64;
   if (item.kind === "watcher-note") return WATCHER_NOTE_ROW_HEIGHT;
   if (item.kind === "compatibility") {

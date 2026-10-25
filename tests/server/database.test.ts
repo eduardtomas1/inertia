@@ -2482,11 +2482,14 @@ describe("RuntimeStore conversation lifecycle", () => {
     const insert = legacy.prepare(`INSERT INTO thread_usage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     insert.run(codex.id, 111, 999, 200_000, 100, 10, 11, 1, 1, "2026-07-22T10:00:00.000Z");
     insert.run(claude.id, 222, 888, 200_000, 200, 20, 22, 2, 1, "2026-07-22T10:00:00.000Z");
-    legacy.prepare("DELETE FROM schema_migrations WHERE version = 6").run();
+    legacy.prepare("DELETE FROM schema_migrations WHERE version IN (6, 104)").run();
     legacy.close();
     migrateFixtureInPlace(databasePath);
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
+    expect(migrated.snapshot().usage).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ promptCache: expect.anything() }),
+    ]));
     expect(migrated.snapshot().usage).toEqual(expect.arrayContaining([
       expect.objectContaining({ conversationId: codex.id, usedTokens: 111, totalProcessedTokens: 999, totalProcessedScope: "thread", compactsAutomatically: null }),
       expect.objectContaining({ conversationId: claude.id, usedTokens: null, totalProcessedTokens: null, totalProcessedScope: null, compactsAutomatically: null }),

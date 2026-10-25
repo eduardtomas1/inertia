@@ -312,6 +312,9 @@ export interface ThreadUsageRow {
   output_tokens: number | null;
   reasoning_output_tokens: number | null;
   compacts_automatically: 0 | 1 | null;
+  last_request_started_at?: string | null;
+  prompt_cache_lifetime_ms?: number | null;
+  prompt_cache_source?: string | null;
   updated_at: string;
 }
 
@@ -355,6 +358,7 @@ export interface StateRow {
   quota_warnings_enabled?: number;
   quota_warning_threshold?: number;
   notify_only_in_background?: number;
+  compact_on_return?: string;
   attachment_storage_gib?: number;
   auto_remove_old_attachments?: number;
   active_project_id: string | null;

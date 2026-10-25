@@ -149,6 +149,143 @@ If the provider completes compaction but local receipt storage or timeline refre
 fails, the success notice explains that reporting failure without inviting a
 second compaction.
 
+Every receipt records what started it: `trigger: "manual"` for `/compact` and
+`trigger: "on-return"` for compact on return. While either runs, the chat's
+shell carries `compaction: { state: "compacting", trigger, startedAt }` through
+`snapshot.updated` and `conversation.shell.updated`, so every window, including
+detached chats, shows it; it returns to `{ state: "idle", trigger: null,
+startedAt: null }` when the operation ends, whatever the outcome.
+
+## Compact on return
+
+Provider prompt caches expire. When a long chat on an API key is resumed after
+its cache has expired, the next message pays to re-read the whole context at
+the uncached rate. Compact on return offers to shrink the context first.
+
+**When it is offered.** The composer offers **Compact and send** when all of
+these hold (`compactOnReturnOffer` in `src/shared/compact-on-return.ts`):
+
+- the setting **Compact on return** is `offer` (the default; `never` turns it
+  off, and Restore defaults sets it back to `offer`);
+- the chat's route is eligible (below);
+- the chat holds at least 200,000 tokens of context (`usedTokens`);
+- no turn is running and the chat is not already compacting;
+- the time since the last request started is at least the cache lifetime.
+
+There is no background timer: the offer is computed when the person returns
+to the composer, from the stored prompt-cache facts.
+
+**Eligible routes** (`compactOnReturnEligibility`):
+
+| Route | Cache lifetime |
+| --- | --- |
+| Claude harness on the **Anthropic API key** preset | 5 minutes, or 1 hour when the profile sets `promptCacheTtl: "1h"` |
+| Native Claude when `claude auth status` reports a `Console API key` | 5 minutes |
+| Codex harness on the **OpenAI API key** preset | 30 minutes |
+
+Kimi (it manages its own context), custom gateways (no published cache
+lifetime), native Claude on a Claude account, native Codex, OpenCode, Cursor
+and Antigravity are excluded. The server checks eligibility again against the
+chat's current route and refuses an ineligible request.
+
+**What happens.** `conversation.compact-and-send` carries the full message
+(`content`, `attachments`, `activate`, `context`) and `reason: "on-return"`.
+The runtime:
+
+1. refuses the cases manual compaction refuses (a running turn or workspace
+   operation, a Duo judge, no provider session yet) and also an archived chat,
+   a watcher chat, a chat whose last turn was usage-limited or failed with a
+   `billing`, `authentication` or `rate-limited` failure kind, the setting
+   turned off, and an ineligible route;
+2. claims the message's attachments from the renderer's handoff, before any
+   slow check, so neither the checks nor a compaction that outlasts the
+   210-second handoff can strand them. On native Claude it then reads the
+   sign-in again, so a Console key replaced by a Claude account sign-in in a
+   terminal is refused; if the sign-in cannot be read, it answers
+   `compaction-failed` ("Inertia could not confirm which Claude sign-in this
+   chat uses. Nothing was sent.") and hands the attachments back. Backend
+   readiness is checked after that;
+3. takes the chat lock (the provider and checkout reservation that `/compact`
+   and terminal resume use), marks the chat compacting and runs the provider's
+   own compaction exactly as `/compact` does, with no focus instruction;
+4. records the receipt with `trigger: "on-return"`;
+5. still holding the lock, sends the message through the same path as
+   `message.send`, with the claimed attachments and the workspace context, and
+   answers `{ outcome: "sent", turnId, userMessageId, disposition, compaction }`;
+6. releases the lock and marks the chat idle.
+
+The 630-second compaction deadline starts when the command arrives, so backend
+readiness, the sign-in check and attachment claiming count against it. If the
+provider compaction fails, throws, or the deadline passes before the provider
+reports completion, the answer is `{ outcome: "compaction-failed", message }`
+with a plain message ending in "Nothing was sent." No message is persisted, the
+claimed attachments are handed back, the draft stays in the composer and the
+chat stays usable. Once the provider reports a completed compaction, the
+deadline no longer applies: the receipt is recorded even if cleanup
+confirmation runs past it, and the message is still sent. If the send then
+fails, the compaction and its receipt stand and the send's error is returned
+as a request error. The renderer waits up to
+`CONVERSATION_COMPACT_AND_SEND_REQUEST_TIMEOUT_MS` (780 seconds): 630 for the
+compaction phase, 120 for message preparation, and the rest for cleanup and
+transport.
+
+**Interaction with the lock.**
+
+- Queued messages do not dispatch while the chat is compacting; the queue is
+  rescheduled when the compaction ends. A message sent with Compact and send
+  starts its turn first, so queued messages then wait for that turn as usual.
+- A Private Connect prompt that arrives during compaction is refused with "This
+  chat is compacting its context. Send the prompt again when it finishes."
+- Compaction is not an agent turn. It emits only `agent.usage`, the shell
+  state and the receipt message, none of which wakes a watcher or counts as a
+  watched turn.
+- Detached chats may send `conversation.compact-and-send` for their own chat
+  on the same terms as `message.send` (`activate: false`, no context packets).
+
+**Prompt-cache facts.** Each usage snapshot (`agent.usage` and
+`ConversationDetail.usage[]`) may carry `promptCache: { lastRequestStartedAt,
+lifetimeMs, source }`, stored in `thread_usage.last_request_started_at`,
+`prompt_cache_lifetime_ms` and `prompt_cache_source` (schema migration 104,
+`PersistCompactOnReturn`, which also adds `app_state.compact_on_return`).
+`source` says how the lifetime is known:
+
+- `reported`: Claude's `message_start` usage broke cache writes down by
+  lifetime. A positive `ephemeral_5m_input_tokens` means 5 minutes, even when
+  1-hour tokens were also written: longer-lived breakpoints come first, so the
+  end of the conversation sits in the 5-minute part. Otherwise a positive
+  `ephemeral_1h_input_tokens` means 1 hour. A request that only read the cache
+  keeps the lifetime reported earlier in the same run. This reading of
+  `message_start` comes from the SDK types and fixture streams; whether the
+  Anthropic API sends the breakdown there for every model has not been
+  verified against the live service.
+- `configured`: Claude reported no breakdown, and the profile sets
+  `promptCacheTtl`.
+- `assumed`: Claude reported no breakdown and the profile sets nothing (5
+  minutes), and every Codex chat (30 minutes; Codex does not report cache
+  lifetimes).
+
+When the facts change:
+
+- Claude: `lastRequestStartedAt` is the time Inertia observed the latest
+  main-thread `message_start` stream event (subagent streams are ignored). The
+  facts are written with the usage of each SDK `result`, so the stored value is
+  the start of the last request made before that result. A run with no
+  main-thread request, such as a local command, leaves the stored facts as
+  they were. A manual or on-return compaction run writes its own request start.
+- Codex: each `thread/tokenUsage/updated` notification carries facts stamped
+  with the time Inertia received it. The request that produced the report
+  started earlier, so this is a late estimate of the request start: the cache
+  is treated as expiring no sooner than it really could.
+- Usage from other providers, and the context reset after a compaction that
+  reported no usage, keeps the stored facts.
+
+**What is assumed.** The cache lifetimes are the providers' published
+defaults; providers can evict earlier. Inertia measures from when it observed a
+request start, not from when the provider wrote or last read the cache.
+The 30-minute OpenAI figure and the start time of Codex requests are estimates;
+the Codex start time is the report time, so the idle time is never overstated.
+The offer is a prompt to the person, never an automatic action.
+
 ## T3 Code reference and adaptation
 
 The supplied [SnapShots post](https://x.com/jullerino/status/2097144040076820983)

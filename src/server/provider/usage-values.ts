@@ -1,4 +1,5 @@
 import type { SubagentTaskUsage, ThreadUsageSnapshot } from "../../shared/contracts";
+import { PROMPT_CACHE_FACT_SOURCES, type PromptCacheFacts, type PromptCacheFactSource } from "../../shared/compact-on-return";
 
 export function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -90,7 +91,35 @@ export function validateProviderUsage(value: unknown): ProviderUsage {
     outputTokens: tokenCount(usage.outputTokens),
     reasoningOutputTokens: tokenCount(usage.reasoningOutputTokens),
     compactsAutomatically: typeof usage.compactsAutomatically === "boolean" ? usage.compactsAutomatically : null,
+    ...promptCacheField(usage.promptCache),
   };
+}
+
+const MAX_PROMPT_CACHE_LIFETIME_MS = 24 * 60 * 60_000;
+
+export function validatePromptCacheFacts(value: unknown): PromptCacheFacts | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const facts = value as Partial<Record<keyof PromptCacheFacts, unknown>>;
+  if (!PROMPT_CACHE_FACT_SOURCES.includes(facts.source as PromptCacheFactSource)) return null;
+  const lastRequestStartedAt = facts.lastRequestStartedAt === null
+    ? null
+    : typeof facts.lastRequestStartedAt === "string" ? providerTimestamp(facts.lastRequestStartedAt) : null;
+  if (facts.lastRequestStartedAt !== null && lastRequestStartedAt === null) return null;
+  const lifetimeMs = facts.lifetimeMs === null
+    ? null
+    : typeof facts.lifetimeMs === "number"
+      && Number.isSafeInteger(facts.lifetimeMs)
+      && facts.lifetimeMs > 0
+      && facts.lifetimeMs <= MAX_PROMPT_CACHE_LIFETIME_MS
+      ? facts.lifetimeMs
+      : undefined;
+  if (lifetimeMs === undefined) return null;
+  return { lastRequestStartedAt, lifetimeMs, source: facts.source as PromptCacheFactSource };
+}
+
+function promptCacheField(value: unknown): { promptCache?: PromptCacheFacts } {
+  const promptCache = validatePromptCacheFacts(value);
+  return promptCache ? { promptCache } : {};
 }
 
 const SUBAGENT_TASK_USAGE_KEYS = [

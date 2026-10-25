@@ -34,6 +34,7 @@ import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
 import { ChatWorkspace } from "./components/ChatWorkspace";
+import { compactOnReturnChatState } from "./utils/compactOnReturn";
 import type { ConversationContextSourceOption } from "./components/conversation-context/types";
 import { installWindowCloseShortcut } from "./utils/globalShortcuts";
 import type { ProviderTerminalResumeOption } from "./components/providerResumeOptions";
@@ -447,6 +448,18 @@ export default function DetachedChatApp({
     context,
     false,
   ), [conversationId, sendMessageToConversation]);
+  const compactAndSendToConversation = runtimeActions.compactAndSendToConversation;
+  const compactAndSendMessage = useCallback((
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+  ) => compactAndSendToConversation(
+    conversationId,
+    content,
+    attachments,
+    context,
+    false,
+  ), [compactAndSendToConversation, conversationId]);
   const compactConversationById = runtimeActions.compactConversation;
   const compactConversation = useCallback((instruction?: string) =>
     compactConversationById(conversationId, instruction), [
@@ -569,6 +582,7 @@ export default function DetachedChatApp({
     ({ conversationContextRequest }) => conversationContextRequest !== undefined,
   )?.id ?? null;
   const visibleConversation = projection.detail?.conversation ?? conversation;
+  const compactOnReturnState = compactOnReturnChatState(connection.snapshot, conversation?.id);
   return (
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
@@ -706,6 +720,9 @@ export default function DetachedChatApp({
             onCreateConversation={dockInMain}
             onSendMessage={sendMessage}
             onCompactConversation={compactConversation}
+            compaction={compactOnReturnState.compaction}
+            compactOnReturnSetting={settings.compactOnReturn}
+            {...(compactOnReturnState.watcherChat ? {} : { onCompactAndSendMessage: compactAndSendMessage })}
             onListSkills={workflow.listSkills}
             onRespondToApproval={respondToApproval}
             onRespondToInput={respondToInput}

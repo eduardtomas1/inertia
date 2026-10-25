@@ -2,10 +2,14 @@ import type { ComposerPrimaryActionState } from "../../utils/composerPrimaryActi
 
 export function ComposerSendActionsFallback({
   primaryAction,
+  compactAndSend = false,
+  compacting = false,
   onSubmit,
   onStop,
 }: {
   primaryAction: ComposerPrimaryActionState;
+  compactAndSend?: boolean;
+  compacting?: boolean;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }): React.JSX.Element {
@@ -17,7 +21,9 @@ export function ComposerSendActionsFallback({
     ? "Stop and send"
     : stop
     ? stopping ? "Stopping agent" : "Stop agent"
-    : submitting ? "Sending message" : "Send message";
+    : submitting
+    ? compacting ? "Compacting before sending" : "Sending message"
+    : compactAndSend && primaryAction === "send-ready" ? "Compact and send" : "Send message";
   return (
     <button
         type="button"

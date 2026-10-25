@@ -157,6 +157,19 @@ describe("Private Connect packaged workspace", () => {
     expect(screen.getByRole("textbox", { name: "Send a prompt" })).toHaveValue("Other chat draft");
   });
 
+  it("sends a Private Connect prompt as it is, with no compaction offer", async () => {
+    scopes = ["private:read", "private:prompt"];
+    await openConversation();
+    fireEvent.change(screen.getByRole("textbox", { name: "Send a prompt" }), { target: { value: "From my phone" } });
+    expect(screen.queryByRole("button", { name: /compact/iu })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Send a prompt" })).toHaveValue(""));
+    expect(sent.filter((request) => request.type === "prompt.send")).toEqual([
+      expect.objectContaining({ conversationId: CONVERSATION_ID, content: "From my phone" }),
+    ]);
+    expect(sent.filter((request) => String(request.type).includes("compact"))).toEqual([]);
+  });
+
   it("retains an uncertain delivery receipt while sending in another chat", async () => {
     scopes = ["private:read", "private:prompt"];
     otherConversationAvailable = true;

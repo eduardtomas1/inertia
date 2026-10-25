@@ -1097,6 +1097,70 @@ describe("message attachment ownership transfer", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("starts the turn under the compaction lock it was handed without taking or releasing it", async () => {
+    const queue = vi.fn(() => queuedTurn());
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+      providerTerminalResumeActive: true,
+    });
+    const compactionHandoff = {
+      conversationId,
+      attachments: [{ attachment: trustedAttachment, bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) }],
+      attachmentsTaken: false,
+    };
+    const handler = createTurnInteractionCommandHandler({
+      ...handlerDependencies,
+      compactionHandoff,
+    });
+
+    await expect(handler({} as never, messageCommand(false))).resolves.toBe("handled");
+    expect(handlerDependencies.attachmentResolver!.resolvePayloads).not.toHaveBeenCalled();
+    expect(compactionHandoff.attachmentsTaken).toBe(true);
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({ attachments: [trustedAttachment] }), expect.any(Function), expect.anything());
+    expect(queue).toHaveBeenCalledOnce();
+    expect(handlerDependencies.turns.start).toHaveBeenCalledOnce();
+    expect(handlerDependencies.providerTerminalResumes.acquireWhenAvailable).not.toHaveBeenCalled();
+    expect(handlerDependencies.providerTerminalResumes.release).not.toHaveBeenCalled();
+  });
+
+  it("refuses a compaction handoff when the compaction lock is no longer held", async () => {
+    const queue = vi.fn(() => queuedTurn());
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+      providerTerminalResumeActive: false,
+    });
+    const handler = createTurnInteractionCommandHandler({
+      ...handlerDependencies,
+      compactionHandoff: { conversationId, attachments: [], attachmentsTaken: false },
+    });
+
+    await expect(handler({} as never, messageCommand(false))).rejects.toThrow(
+      "The chat changed while it was compacting.",
+    );
+    expect(queue).not.toHaveBeenCalled();
+    expect(handlerDependencies.attachmentResolver!.resolvePayloads).not.toHaveBeenCalled();
+  });
+
+  it("does not let a handoff for another chat bypass this chat's lock", async () => {
+    const queue = vi.fn(() => queuedTurn());
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+      providerTerminalResumeActive: true,
+    });
+    const handler = createTurnInteractionCommandHandler({
+      ...handlerDependencies,
+      compactionHandoff: { conversationId: "77777777-7777-4777-8777-777777777777", attachments: [], attachmentsTaken: false },
+    });
+
+    await expect(handler({} as never, messageCommand(false))).rejects.toThrow(
+      "Wait for this chat's current operation",
+    );
+    expect(queue).not.toHaveBeenCalled();
+  });
+
   it("rechecks the terminal reservation after asynchronous turn preparation", async () => {
     const queue = vi.fn();
     const relinquishAll = vi.fn(async () => undefined);

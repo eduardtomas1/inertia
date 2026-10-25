@@ -138,6 +138,11 @@ function draftIssue(issue: DraftIssue, draft: unknown): BackendProfileIssue {
         field: "protocol",
         message: authored(issue) ? issue.message : "Choose a supported harness.",
       };
+    case "promptCacheTtl":
+      return {
+        field: "protocol",
+        message: authored(issue) ? issue.message : "Choose a supported prompt cache length.",
+      };
     case "preset":
       return {
         field: "protocol",

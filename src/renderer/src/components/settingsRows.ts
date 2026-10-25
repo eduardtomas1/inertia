@@ -60,6 +60,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["auto-open-plan", "Open plan automatically", ["plan panel", "general"]],
       ["confirm-destructive-actions", "Confirm destructive actions", ["delete", "warning", "confirmation", "general"]],
       ["usage-display", "Usage display", ["quota", "token", "tokens", "limit", "limits", "context", "usage and context", "general"]],
+      ["compact-on-return", "Compact large API chats when you return", ["compact on return", "compaction", "compact", "summarize", "prompt cache", "cache", "api key", "tokens", "cost", "context"]],
     ],
     "Review and terminal": [
       ["wrap-diffs", "Wrap long diff lines", ["diff", "wrap", "review", "source control"]],

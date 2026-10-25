@@ -1,5 +1,7 @@
 import type { ProviderId } from "./provider";
 const PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"];
+export const CONTEXT_COMPACTION_TRIGGERS = ["manual", "on-return"] as const;
+export type ContextCompactionTrigger = (typeof CONTEXT_COMPACTION_TRIGGERS)[number];
 
 /** Provider-confirmed context mutation; it is not an agent turn. */
 export interface ContextCompaction {
@@ -7,6 +9,7 @@ export interface ContextCompaction {
   beforeTokens: number | null;
   afterTokens: number | null;
   instructionForwarded: boolean;
+  trigger?: ContextCompactionTrigger;
 }
 
 export function isContextCompaction(value: unknown): value is ContextCompaction {
@@ -14,7 +17,9 @@ export function isContextCompaction(value: unknown): value is ContextCompaction 
   const row = value as Record<string, unknown>;
   const count = (input: unknown): boolean => input === null
     || (typeof input === "number" && Number.isSafeInteger(input) && input >= 0);
-  return Object.keys(row).length === 4
+  const triggered = "trigger" in row;
+  return Object.keys(row).length === (triggered ? 5 : 4)
+    && (!triggered || CONTEXT_COMPACTION_TRIGGERS.includes(row.trigger as ContextCompactionTrigger))
     && PROVIDER_IDS.includes(row.providerId as ProviderId)
     && count(row.beforeTokens) && count(row.afterTokens)
     && typeof row.instructionForwarded === "boolean";

@@ -75,6 +75,7 @@ export function backendDraftForValidation(
     models: requested.models,
     routing: requested.routing,
     capabilityHints: requested.capabilityHints,
+    ...(requested.promptCacheTtl ? { promptCacheTtl: requested.promptCacheTtl } : {}),
   };
   if (isApiKeyBackendPresetId(requested.preset)) {
     return {

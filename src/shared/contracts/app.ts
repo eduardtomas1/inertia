@@ -27,6 +27,11 @@ import {
   type CompletionSoundSettings,
 } from "../completion-sound";
 import { DEFAULT_QUOTA_WARNINGS, type QuotaWarningSettings } from "../quota-warnings";
+import {
+  DEFAULT_COMPACT_ON_RETURN,
+  type CompactOnReturnSetting,
+  type ConversationCompactionState,
+} from "../compact-on-return";
 import type { AgentTurnStatus } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
@@ -211,6 +216,7 @@ export interface AppSettings {
   desktopNotifications: boolean;
   notifyOnlyInBackground: boolean;
   quotaWarnings: QuotaWarningSettings;
+  compactOnReturn: CompactOnReturnSetting;
   /** Local display aliases only; provider authentication remains provider-owned. */
   providerIdentityLabels: ProviderIdentityLabels;
   /** App-local Cmd/Ctrl chords; the primary modifier is never remapped. */
@@ -293,6 +299,7 @@ export type ConversationShell = Conversation & {
   latestTurn: ConversationLatestTurnSummary | null;
   pendingApproval: boolean;
   pendingInput: boolean;
+  compaction?: ConversationCompactionState;
 };
 
 export interface WorkspaceRun {
@@ -381,6 +388,7 @@ export const defaultSettings: AppSettings = {
   desktopNotifications: true,
   notifyOnlyInBackground: false,
   quotaWarnings: { ...DEFAULT_QUOTA_WARNINGS },
+  compactOnReturn: DEFAULT_COMPACT_ON_RETURN,
   providerIdentityLabels: {},
   keybindings: DEFAULT_APP_KEYBINDINGS,
   workingIndicator: { ...DEFAULT_WORKING_INDICATOR },

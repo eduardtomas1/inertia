@@ -12,6 +12,18 @@
 - **Capture a window.** Turn on [Snapshots](../SNAPSHOTS_AND_COMPACTION.md) in **Settings → Devices & integrations → Snapshots** to attach a screenshot of the foreground window with its accessibility context.
 - **Compact long chats** with `/compact`. A successful compaction leaves a receipt in the timeline with the provider-reported context counts.
 
+### Compact on return
+
+An API key bills every turn for the chat's whole history. While the provider's prompt cache is warm, that history is cheap to resend; once the cache expires, the next turn pays for all of it again. When you come back to a chat of 200K tokens or more on an Anthropic or OpenAI API key and its cache has expired, the composer's send button reads **Compact and send**. Point at it to see *Summarize ‹N› tokens of history, then send*.
+
+- **Compact and send** summarizes the history first, then sends your message on the shorter chat. Enter does the same. The composer and the timeline show *Compacting before sending…* while it runs, and your draft stays in the composer until the message is sent.
+- The **Compact** chip beside the button switches this message to **Full**, which sends it with the full history instead. The next message offers compaction again.
+- If the summary fails, nothing is sent. Your draft stays, the composer shows why, and you can choose **Send without compacting** or **Try again**.
+- The timeline marks it with one line, such as *Compacted on return · 252K → 18.3K tokens*, without a `/compact` message.
+- It applies to Claude on an Anthropic API key, whose cache lasts 5 minutes or 1 hour (see [Prompt cache](getting-started.md#prompt-cache)), to Claude Code signed in for API billing, whose cache always lasts 5 minutes, and to Codex on an OpenAI API key, whose cache lasts 30 minutes. Chats on a subscription, custom backends, Kimi, watcher chats and Duo judge chats are never offered it, nor is a chat whose last turn stopped on a usage limit, a billing or sign-in problem, or a rate limit. Queued messages, limit-reset resumes and messages from Private Connect are sent as they are.
+- The usage meter shows *Cache warm, expires in ‹N› min* or *Cache expired ‹N› min ago* for these chats.
+- To stop the offer, set **Settings → Chats → Compact large API chats when you return** to **Never**.
+
 ## Follow the work
 
 - The **Work** tab lists your chats. Running chats show the agent pixels and elapsed time, and a chat that needs your input or finishes gets a brief cue.

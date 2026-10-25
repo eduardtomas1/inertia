@@ -10,6 +10,7 @@ import type {
   AppSettings,
   ChatAttachment,
   Conversation,
+  ConversationCompactAndSendResult,
   MessageSendAcceptance,
   Project,
   ProviderMaintenanceProviderId,
@@ -108,6 +109,13 @@ interface SplitWorkspaceActions
     message: string;
     instructionForwarded: boolean;
   }>;
+  compactAndSendToConversation?: (
+    conversationId: string,
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+    activate?: boolean,
+  ) => Promise<ConversationCompactAndSendResult>;
   updateConversationById: (
     conversationId: string,
     update: Parameters<WorkspaceSceneActions["updateConversation"]>[0],
@@ -338,6 +346,22 @@ export function useSplitWorkspaceScene({
       return await actions.compactConversation(
         splitConversation.id,
         instruction,
+      );
+    },
+    compactAndSendMessage: async (
+      content: string,
+      attachments: ChatAttachment[],
+      context?: TurnRequestContext,
+    ) => {
+      if (!splitConversation || !actions.compactAndSendToConversation) {
+        throw new Error("This chat is not ready to send.");
+      }
+      return await actions.compactAndSendToConversation(
+        splitConversation.id,
+        content,
+        attachments,
+        context,
+        false,
       );
     },
     listSkills: workflow.listSkills,

@@ -95,6 +95,7 @@ import { createSourceControlCommandHandler } from "./runtime/commands/source-con
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
+import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
 import {
@@ -314,6 +315,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       options.onOwnedProcessCleanupUnconfirmed,
   });
   const providerTerminalResumes = new ProviderTerminalResumeRegistry(store.conversationWork);
+  const compactions = new ConversationCompactionStates();
   const metadataCache = new ProviderMetadataCache({
     persistence: {
       load: () => store.loadProviderMetadata(),
@@ -434,6 +436,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       ...conversation,
       pendingApproval: approvalConversationIds.has(conversation.id),
       pendingInput: inputConversationIds.has(conversation.id),
+      compaction: compactions.state(conversation.id),
     }));
     mascotStatus.replace(conversations, snapshot.projects, snapshot.runs);
     const runs = snapshot.runs.map((run) => ({
@@ -485,6 +488,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         pendingInput: [...pendingInputs.values()].some(
           (request) => request.conversationId === conversationId,
         ),
+        compaction: compactions.state(conversationId),
       },
       runs: store.workspaceRunsForConversation(conversationId).map((run) => ({
         ...run,
@@ -726,7 +730,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {
     signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
     onWatcherNoteUndelivered: (note, reason) => watchers?.delivery.noteUndelivered(note, reason),
+    compacting: (conversationId) => compactions.isCompacting(conversationId),
   });
+  compactions.onSettled((conversationId) => queuedMessages?.onCompactionSettled(conversationId));
   queuedMessages.start();
   watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,
     interaction: turnInteractionDependencies, queuedMessages, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, send,
@@ -779,7 +785,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         contextRequests: agentThreads.contextRequests,
       }),
       queuedMessages.turnInteractionHandler,
-      createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, providerInfo: () => providerInfo, broadcast, send }),
+      createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, interaction: turnInteractionDependencies, settings: () => store.shellSnapshot().settings, refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }),
       createSourceControlCommandHandler({
         store,
         workspaceRuns,
@@ -976,6 +982,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       authority: providerTerminalResumes,
       turns,
       isolatedRuns,
+      compacting: (compactingConversationId) => compactions.isCompacting(compactingConversationId),
       onQueued: (queuedConversationId) => {
         broadcast({
           type: "conversation.detail.invalidated",

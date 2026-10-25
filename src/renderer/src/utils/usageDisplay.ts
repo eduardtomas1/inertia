@@ -4,7 +4,15 @@ import type {
   ThreadUsageSnapshot,
   UsageDisplayMode,
 } from "@shared/contracts";
+import { INTERFACE_LOCALE } from "../lib/locale";
 import { backendRouteKind } from "./backendRouteState";
+
+export function compactTokenCount(value: number): string {
+  return new Intl.NumberFormat(INTERFACE_LOCALE, {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
 
 export const RECOMMENDED_USAGE_DISPLAY_MODE: UsageDisplayMode = "compact";
 

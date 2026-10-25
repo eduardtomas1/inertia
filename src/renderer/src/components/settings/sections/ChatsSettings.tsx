@@ -1,4 +1,5 @@
 import type { AppSettings } from "@shared/contracts";
+import { DEFAULT_COMPACT_ON_RETURN } from "@shared/compact-on-return";
 import { SettingRadioGroup, SettingSwitch, type SettingOption } from "../SettingControls";
 import { SettingsGroup } from "../SettingsLayout";
 import { NewChatDefaults, type NewChatDefaultsProps } from "./NewChatDefaults";
@@ -8,6 +9,11 @@ const USAGE_DISPLAY_MODES: readonly SettingOption<AppSettings["usageDisplayMode"
   { value: "expanded", label: "Expanded" },
   { value: "compact", label: "Compact" },
   { value: "hidden", label: "Hidden" },
+];
+
+const COMPACT_ON_RETURN_CHOICES: readonly SettingOption<AppSettings["compactOnReturn"]>[] = [
+  { value: "offer", label: "Offer" },
+  { value: "never", label: "Never" },
 ];
 
 export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
@@ -34,6 +40,15 @@ export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
           options={USAGE_DISPLAY_MODES}
           disabled={disabled}
           onChange={(usageDisplayMode) => onUpdate({ usageDisplayMode })}
+        />
+        <SettingRadioGroup
+          id="compact-on-return"
+          title="Compact large API chats when you return"
+          description="Offers to summarize a chat of 200K tokens or more on an API key once its prompt cache has expired, so the next turn costs less."
+          value={settings.compactOnReturn ?? DEFAULT_COMPACT_ON_RETURN}
+          options={COMPACT_ON_RETURN_CHOICES}
+          disabled={disabled}
+          onChange={(compactOnReturn) => onUpdate({ compactOnReturn })}
         />
       </SettingsGroup>
 

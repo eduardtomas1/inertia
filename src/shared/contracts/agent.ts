@@ -116,6 +116,7 @@ export interface ThreadUsageSnapshot {
   reasoningOutputTokens: number | null;
   /** Null means the provider has not explicitly reported its auto-compaction state. */
   compactsAutomatically: boolean | null;
+  promptCache?: import("../compact-on-return").PromptCacheFacts;
   updatedAt: string;
 }
 
@@ -201,6 +202,19 @@ export interface MessageSendAcceptance {
   userMessageId: string;
   disposition: "new-turn" | "follow-up";
 }
+
+export type ConversationCompactAndSendResult =
+  | (Omit<MessageSendAcceptance, "kind"> & {
+      kind: "conversation.compact-and-send";
+      outcome: "sent";
+      compaction: import("../context-compaction").ContextCompaction;
+    })
+  | {
+      kind: "conversation.compact-and-send";
+      conversationId: string;
+      outcome: "compaction-failed";
+      message: string;
+    };
 
 /** Definite acknowledgement for one provider-owned session compaction. */
 export interface ConversationCompactionResult {

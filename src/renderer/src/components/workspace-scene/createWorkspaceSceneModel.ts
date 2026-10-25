@@ -10,6 +10,7 @@ import type {
   AgentInputRequest,
   AppSettings,
   ChatAttachment,
+  ConversationCompactAndSendResult,
   CheckpointSummary,
   Conversation,
   ConversationLatestTurnSummary,
@@ -65,6 +66,7 @@ import {
   goalExecutionStatus,
 } from "../../utils/goalExecution";
 import { usageQuotaSourceForSelection } from "../../utils/usageDisplay";
+import { compactOnReturnChatState } from "../../utils/compactOnReturn";
 import { WORKSPACE_BOUND_SURFACES } from "../../utils/rightPanelSurfaces";
 import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 
@@ -193,6 +195,11 @@ export interface WorkspaceSceneActions {
     message: string;
     instructionForwarded: boolean;
   }>;
+  compactAndSendMessage?: (
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+  ) => Promise<ConversationCompactAndSendResult>;
   listSkills: (forceReload?: boolean) => Promise<void>;
   setGoal: (input: {
     source: AgentGoalSource;
@@ -336,6 +343,10 @@ export function createWorkspaceSceneModel({
     conversation,
     projection,
     detailLoading,
+  );
+  const compactOnReturnState = compactOnReturnChatState(
+    connection.snapshot,
+    draftConversation ? null : persistedConversation?.id,
   );
   const currentWorkflow = workflow.state?.conversationId
     === persistedConversation?.id
@@ -667,6 +678,12 @@ export function createWorkspaceSceneModel({
       onCreateConversation: () => actions.createConversation(),
       onSendMessage: actions.sendMessage,
       onCompactConversation: actions.compactConversation,
+      compaction: compactOnReturnState.compaction,
+      compactOnReturnSetting: settings.compactOnReturn,
+      ...(actions.compactAndSendMessage && persistedConversation && !draftConversation
+        && !compactOnReturnState.watcherChat
+        ? { onCompactAndSendMessage: actions.compactAndSendMessage }
+        : {}),
       onListSkills: actions.listSkills,
       onPromptPresetCommand: actions.run,
       onRespondToApproval: actions.respondToApproval,

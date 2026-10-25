@@ -2,6 +2,24 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Compaction on API keys
+
+- Come back to a chat of 200K tokens or more on an Anthropic or OpenAI API
+  key after its prompt cache has expired, and the send button reads
+  **Compact and send**. It summarizes the history first, then sends your
+  message, so the next turn costs less. The **Compact** chip beside it sends
+  this message with the full history instead.
+- If the summary fails, nothing is sent. Your draft stays, with
+  **Send without compacting** and **Try again**.
+- The timeline shows one line, such as *Compacted on return · 252K → 18.3K
+  tokens*, and the usage meter says when the cache expires or expired.
+- An Anthropic API key can keep its prompt cache for **1 hour** instead of
+  5 minutes. It costs more to write and less to resume after a break.
+- Turn the offer off in **Settings → Chats → Compact large API chats when you
+  return**.
+
 ## 0.0.77 — 2026-10-25
 
 Any agent as a watcher with the access you choose, API keys beside your

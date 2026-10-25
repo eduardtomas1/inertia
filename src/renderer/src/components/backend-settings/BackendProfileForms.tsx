@@ -260,7 +260,8 @@ export function BackendProfileEditor({
         }
         return;
       }
-      const routeChanged = needsKeyAgain || Object.keys(update).some((key) => key !== "displayName");
+      const routeChanged = needsKeyAgain
+        || Object.keys(update).some((key) => key !== "displayName" && key !== "promptCacheTtl");
       if (routeChanged && saved.authState !== "missing" && saved.authState !== "unavailable") {
         if (mountedRef.current) setBusy("test");
         saved = await probeEveryModel(actions.onProbe, saved, (counts) => {

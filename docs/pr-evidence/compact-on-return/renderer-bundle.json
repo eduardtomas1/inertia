@@ -1,0 +1,38 @@
+{
+  "baseline": "0c812f8b with the uncommitted compact-on-return shared contract",
+  "runtime": "Node 22.23.1, Windows x64",
+  "method": "Same worktree and installed dependency graph. The baseline restores src/renderer to 0c812f8b and keeps the shared contract change; the branch adds the renderer work. Each is built with electron-vite build and measured with scripts/check-renderer-bundle.mjs.",
+  "notes": [
+    "The shared contract alone (prompt cache, compaction state and compact-and-send validators in the server event schema, the compact-on-return defaults) measures 372 bytes over both first-load caps and 2,176 bytes over core on the unchanged renderer.",
+    "The renderer adds the composer offer (eligibility from the shared helpers, the expiry clock, the failure notice and the shared send path for compact and send), the shell compaction wiring through the workbench, split and detached scenes, the usage meter's prompt cache line and the timeline's on-return row. The chip and the Compact and send label stay in the deferred ComposerSendActions chunk, the setting in the Settings chunk and the Prompt cache choice in the backend settings chunk.",
+    "Moving the compact-on-return wiring out of Composer.tsx to keep it under the architecture line limit adds 226 bytes to each of the three closures; the figures above include it.",
+    "The review round (compact and send without the chat-selection queue, no offer after a usage-limit, billing, sign-in or rate-limit stop) adds 198, 193 and 198 bytes to the workbench, detached and core closures; the figures above include it.",
+    "Each of the three caps was raised by the shared overshoot plus the renderer growth, with no added headroom. Every other measurement stayed within its cap."
+  ],
+  "measurements": {
+    "mainWorkbenchFirstLoadJavaScript": {
+      "previousBudgetBytes": 923000,
+      "baselineBytes": 923372,
+      "branchBytes": 931870,
+      "sharedContractOvershootBytes": 372,
+      "rendererGrowthBytes": 8498,
+      "budgetBytes": 931870
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "previousBudgetBytes": 713024,
+      "baselineBytes": 713396,
+      "branchBytes": 721518,
+      "sharedContractOvershootBytes": 372,
+      "rendererGrowthBytes": 8122,
+      "budgetBytes": 721518
+    },
+    "coreJavaScript": {
+      "previousBudgetBytes": 2408614,
+      "baselineBytes": 2410790,
+      "branchBytes": 2421607,
+      "sharedContractOvershootBytes": 2176,
+      "rendererGrowthBytes": 10817,
+      "budgetBytes": 2421607
+    }
+  }
+}

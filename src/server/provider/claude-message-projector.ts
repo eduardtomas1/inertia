@@ -33,6 +33,11 @@ import { ClaudeMessageStreamCorrelation } from "./claude-message-stream-correlat
 import { isClaudeQueuedCompletionAck } from "./claude-delegate-lifecycle";
 import type { ClaudeChecklistTasks } from "./claude-checklist-projection";
 import { ClaudeToolActivityProjection } from "./claude-tool-activity-projection";
+import {
+  PROMPT_CACHE_LIFETIMES_MS,
+  type PromptCacheFacts,
+  type PromptCacheTtl,
+} from "../../shared/compact-on-return";
 
 export {
   MAX_CLAUDE_STREAM_CORRELATION_BLOCKS,
@@ -52,6 +57,18 @@ interface ClaudeMessageProjectorOptions {
   acceptContextUsage: (usage: unknown) => void;
   refreshContextUsage: () => void;
   checklistTasks?: () => ClaudeChecklistTasks;
+  configuredPromptCacheTtl?: PromptCacheTtl | null;
+}
+
+function reportedPromptCacheLifetime(message: unknown): number | null {
+  const usage = objectValue(objectValue(message)?.usage);
+  const creation = objectValue(usage?.cache_creation);
+  if (!creation) return null;
+  const tokens = (value: unknown): number =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+  if (tokens(creation.ephemeral_5m_input_tokens) > 0) return PROMPT_CACHE_LIFETIMES_MS.anthropic5m;
+  if (tokens(creation.ephemeral_1h_input_tokens) > 0) return PROMPT_CACHE_LIFETIMES_MS.anthropic1h;
+  return null;
 }
 
 
@@ -78,6 +95,8 @@ export class ClaudeMessageProjector {
   private readonly tools: ClaudeToolActivityProjection;
   private readonly rejectedRateLimits = new Set<string>();
   private readonly assistantFailures = new Map<string, ClaudeProjectedFailure>();
+  private lastRequestStartedAt: string | null = null;
+  private reportedPromptCacheLifetimeMs: number | null = null;
   private readonly projectedText = new ClaudeProjectedTextLedger();
   private readonly unknownRuntimeMessages = new BoundedStringSet(256);
   private readonly textItemByProviderMessageId = new BoundedStringMap<string>(
@@ -189,6 +208,19 @@ export class ClaudeMessageProjector {
     return this.rejectedRateLimits.size > 0;
   }
 
+  promptCacheFacts(): PromptCacheFacts | null {
+    if (this.lastRequestStartedAt === null) return null;
+    if (this.reportedPromptCacheLifetimeMs !== null) {
+      return { lastRequestStartedAt: this.lastRequestStartedAt, lifetimeMs: this.reportedPromptCacheLifetimeMs, source: "reported" };
+    }
+    const configured = this.options.configuredPromptCacheTtl ?? null;
+    return {
+      lastRequestStartedAt: this.lastRequestStartedAt,
+      lifetimeMs: configured === "1h" ? PROMPT_CACHE_LIFETIMES_MS.anthropic1h : PROMPT_CACHE_LIFETIMES_MS.anthropic5m,
+      source: configured ? "configured" : "assumed",
+    };
+  }
+
   authoritativeText(): string {
     return this.projectedText.snapshot();
   }
@@ -225,6 +257,9 @@ export class ClaudeMessageProjector {
     switch (event.type) {
       case "message_start":
         this.streams.state(sessionId, sdkUuid, apiMessageId);
+        this.lastRequestStartedAt = new Date().toISOString();
+        this.reportedPromptCacheLifetimeMs = reportedPromptCacheLifetime(event.message)
+          ?? this.reportedPromptCacheLifetimeMs;
         return;
       case "content_block_start": {
         const block = objectValue(event.content_block);
@@ -464,7 +499,10 @@ export class ClaudeMessageProjector {
       contextWindowOverride: this.options.contextWindowOverride,
       contextUsage: this.options.contextUsage(),
     }));
-    if (usage && !isClaudeQueuedCompletionAck(message)) this.options.emitter.rich({ type: "usage", usage });
+    const promptCache = this.promptCacheFacts();
+    if (usage && !isClaudeQueuedCompletionAck(message)) {
+      this.options.emitter.rich({ type: "usage", usage: promptCache ? { ...usage, promptCache } : usage });
+    }
     for (const denial of message.permission_denials ?? []) {
       this.tools.denial({
         tool_use_id: denial.tool_use_id,

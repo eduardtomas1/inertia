@@ -28,6 +28,7 @@ import {
   type HarnessBackendCompatibility,
 } from "../../../shared/model-routing";
 import type { ProviderId, ProviderInfo } from "../../../shared/contracts";
+import { promptCacheTtlAllowed, type PromptCacheTtl } from "../../../shared/compact-on-return";
 import { backendSecretReferenceForProfile } from "../../../node/backend-secret-reference";
 import type { StoredModelBackendProfile } from "../../database";
 import type {
@@ -99,6 +100,7 @@ export class BackendProfileRuntime {
     new Map<string, BackendCredentialStatus | null>();
   private readonly profileHarnessIds = new Map<string, string>();
   private readonly privateNetworkProfiles = new Set<string>();
+  private readonly promptCacheTtls = new Map<string, PromptCacheTtl>();
   private readonly credentialRequiredProfiles = new Set<string>();
   private readonly activeProbes = new Map<string, number>();
   private readonly activeRenewals = new Map<string, number>();
@@ -252,6 +254,7 @@ export class BackendProfileRuntime {
     if (harnessId) this.assertConfigurationMutable(harnessId);
     this.claudeProfiles.delete(profileId);
     this.codexProfiles.delete(profileId);
+    this.promptCacheTtls.delete(profileId);
     this.credentialStatuses.delete(profileId);
     this.profileHarnessIds.delete(profileId);
     this.privateNetworkProfiles.delete(profileId);
@@ -424,6 +427,8 @@ export class BackendProfileRuntime {
     this.profileHarnessIds.set(profile.id, profile.harnessId);
     if (profile.allowPrivateNetwork) this.privateNetworkProfiles.add(profile.id);
     else this.privateNetworkProfiles.delete(profile.id);
+    if (profile.promptCacheTtl && promptCacheTtlAllowed(profile)) this.promptCacheTtls.set(profile.id, profile.promptCacheTtl);
+    else this.promptCacheTtls.delete(profile.id);
     if (claudeBackendRequiresCredential(profile)) {
       this.credentialRequiredProfiles.add(profile.id);
       this.claudeProfiles.delete(profile.id);
@@ -508,7 +513,16 @@ export class BackendProfileRuntime {
           BACKEND_CREDENTIAL_REQUIRED_MESSAGE,
         );
       }
-      return this.resolveClaudeLaunch(input, environment, context);
+      const promptCacheTtl = input.harnessId === "claude-agent-sdk"
+        ? this.promptCacheTtls.get(input.backendProfile.id)
+        : undefined;
+      const launch = this.resolveClaudeLaunch(input, environment, context);
+      if (!promptCacheTtl) return launch;
+      const withPromptCache = (options: ProviderBackendLaunchOptions): ProviderBackendLaunchOptions => ({
+        ...options,
+        harnessConfiguration: { kind: "claude-messages", promptCacheTtl },
+      });
+      return launch instanceof Promise ? launch.then(withPromptCache) : withPromptCache(launch);
     }
     if (
       input.harnessId === "codex-app-server"

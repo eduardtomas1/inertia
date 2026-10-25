@@ -8,12 +8,14 @@ import {
 } from "@shared/backend-presets";
 import { backendCredentialSecretIssue } from "@shared/backend-credentials";
 import { validateBackendProfileDraft } from "@shared/backend-profile-validation";
+import { promptCacheTtlAllowed, type PromptCacheTtl } from "@shared/compact-on-return";
 import type { ModelBackendProfileDetail } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { captureModalFocus } from "../../utils/modalFocus";
 import { DialogShell } from "../DialogShell";
 import { BackendSetupSteps } from "./BackendSetupSteps";
 import { MAX_ROUTE_MODELS, ModelDiscoveryPicker } from "./ModelDiscoveryPicker";
+import { PromptCacheChoice } from "./PromptCacheChoice";
 import type { BackendProfileActions } from "./backendSettingsActions";
 import {
   useBackendSetup,
@@ -56,6 +58,8 @@ export function AddApiKeyDialog({
   const [name, setName] = useState(resume?.profile.displayName ?? definition.displayName);
   const [secret, setSecret] = useState("");
   const [models, setModels] = useState<ModelChoice>(resume ? "discover" : "defaults");
+  const [promptCacheTtl, setPromptCacheTtl] = useState<PromptCacheTtl>("5m");
+  const cacheChoice = promptCacheTtlAllowed(definition);
   const [submitted, setSubmitted] = useState(false);
   const keyRef = useRef<HTMLInputElement>(null);
   const setup = useBackendSetup(actions, onStatus, resume);
@@ -96,7 +100,11 @@ export function AddApiKeyDialog({
       return;
     }
     void setup.run({
-      draft: () => ({ preset, displayName: name.trim() }),
+      draft: () => ({
+        preset,
+        displayName: name.trim(),
+        ...(cacheChoice && promptCacheTtl === "1h" ? { promptCacheTtl } : {}),
+      }),
       secret: secret.trim(),
       discover: models === "discover",
     });
@@ -204,6 +212,7 @@ export function AddApiKeyDialog({
             </span>
           </label>
         </fieldset>
+        {cacheChoice && <PromptCacheChoice value={promptCacheTtl} onChange={setPromptCacheTtl} />}
       </fieldset>
       <BackendSetupSteps steps={setup.steps} label="Setup progress" />
       {setup.phase === "choose-models" && setup.discovered && (

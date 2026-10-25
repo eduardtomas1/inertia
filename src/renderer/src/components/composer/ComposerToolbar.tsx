@@ -53,6 +53,8 @@ import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
 import type { QueueCommandRunner } from "./runtimeQueueClient";
+import type { ComposerCompactOnReturnAction } from "./ComposerSendActions";
+import type { PromptCacheFacts } from "@shared/compact-on-return";
 
 const PromptStashMenu = lazy(async () => ({
   default: (await import("./PromptStashMenu")).PromptStashMenu,
@@ -172,6 +174,9 @@ export interface ComposerToolbarProps {
   latestTurn: AgentTurn | null;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   primaryAction: ComposerPrimaryActionState;
+  compactOnReturn?: ComposerCompactOnReturnAction | null;
+  compacting?: boolean;
+  promptCache?: Pick<PromptCacheFacts, "lastRequestStartedAt" | "lifetimeMs"> | null;
   canSendQueuedNow: boolean;
   queuedTurnId: string | null;
   queuedTurnStatus: AgentTurnStatus | null;
@@ -244,6 +249,9 @@ export function ComposerToolbar({
   latestTurn,
   onUsageDisplayModeChange,
   primaryAction,
+  compactOnReturn = null,
+  compacting = false,
+  promptCache = null,
   canSendQueuedNow,
   queuedTurnId,
   queuedTurnStatus,
@@ -533,6 +541,7 @@ export function ComposerToolbar({
               usage,
               latestTurn?.id ?? null,
             )}
+            promptCache={promptCache}
             onModeChange={onUsageDisplayModeChange}
           />
         ) : null}
@@ -543,6 +552,8 @@ export function ComposerToolbar({
           fallback={(
             <ComposerSendActionsFallback
               primaryAction={primaryAction}
+              compactAndSend={compactOnReturn?.mode === "compact"}
+              compacting={compacting}
               onSubmit={onSubmit}
               onStop={onStop}
             />
@@ -556,6 +567,8 @@ export function ComposerToolbar({
             latestTurnId={queuedTurnId}
             latestTurnStatus={queuedTurnStatus}
             latestTurnAuthoritative={queuedTurnAuthoritative}
+            compactOnReturn={compactOnReturn}
+            compacting={compacting}
             onSendQueued={onSendQueued}
             onQueueCommand={onQueueCommand}
             onReleaseAttachment={onReleaseAttachment}

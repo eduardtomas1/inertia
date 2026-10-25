@@ -9,6 +9,8 @@ import {
   expectComposerEndsAtDock,
 } from "./support/layout-assertions";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { expectBackendSetupFinished } from "./support/backend-accounts-endpoint";
+import { createLinuxSecretService, type LinuxSecretService } from "./support/linux-secret-service";
 import { openTerminalDock } from "./support/workspace-tools";
 import { setAppearance } from "./support/appearance";
 import { expectBorderlessSettingsRows, expectFlatSettingsSections } from "./support/settings-assertions";
@@ -24,11 +26,17 @@ let previewUrl!: AppFixture["previewUrl"];
 let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
 
+let secretService: LinuxSecretService | undefined;
+
 test.beforeAll(async () => {
+  secretService = await createLinuxSecretService();
   app = await createAppFixture({
     name: "settings",
     initialState: "conversation",
     seedAssistantCodeBlock: true,
+    ...(secretService
+      ? { additionalEnvironment: secretService.environment, electronMainEntry: secretService.electronMainEntry }
+      : {}),
   });
   electronApp = app.electronApp;
   page = app.page;
@@ -41,7 +49,8 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await app.close();
+  try { await app.close(); }
+  finally { await secretService?.close(); }
 });
 
 async function ensureTerminalTools(): Promise<void> {
@@ -253,7 +262,7 @@ test("manages accounts and API keys across the responsive theme and scale matrix
   await page.screenshot({
     path: testInfo.outputPath("model-backends-narrow-probe-loading.png"),
   });
-  await expect(form).toHaveCount(0, { timeout: 60_000 });
+  await expectBackendSetupFinished(form, 60_000);
   const row = section.getByRole("listitem", { name: longName });
   await expect(row.getByRole("button", { name: `Turn off ${longName}` })).toBeVisible();
   await row.getByRole("button", { name: new RegExp(`^Test ${longName}`, "u") }).click();

@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import { expect, type Locator } from "@playwright/test";
+
 const BACKEND_ACCOUNTS_FIXTURE_MODELS = [
   { id: "claude-opus-5-5", display_name: "Claude Opus 5.5" },
   { id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5" },
@@ -74,4 +76,13 @@ export function serveBackendAccountsFixture(
     ].join("\n"));
   });
   return true;
+}
+
+export async function expectBackendSetupFinished(form: Locator, timeout: number): Promise<void> {
+  try {
+    await expect(form).toHaveCount(0, { timeout });
+  } catch (error) {
+    const alert = await form.getByRole("alert").allInnerTexts().catch(() => []);
+    throw new Error(`Backend setup did not finish: ${alert.join(" ") || "no error shown"}`, { cause: error });
+  }
 }

@@ -6,6 +6,8 @@ import { expect, test, type Locator, type Page, type TestInfo } from "@playwrigh
 
 import type { AppSnapshot, ServerEvent } from "../../src/shared/contracts";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { expectBackendSetupFinished } from "./support/backend-accounts-endpoint";
+import { createLinuxSecretService, type LinuxSecretService } from "./support/linux-secret-service";
 
 const evidenceDirectory = join(process.cwd(), "docs", "pr-evidence", "backend-accounts");
 const FIXTURE_KEY = "fixture-key-not-a-real-secret";
@@ -13,6 +15,7 @@ const FIXTURE_KEY = "fixture-key-not-a-real-secret";
 let app!: AppFixture;
 let page!: Page;
 let claudeSignedIn = false;
+let secretService: LinuxSecretService | undefined;
 
 function withFixtureProviders(snapshot: AppSnapshot): AppSnapshot {
   return {
@@ -62,7 +65,14 @@ function accounts(): Locator {
 
 test.beforeAll(async () => {
   mkdirSync(evidenceDirectory, { recursive: true });
-  app = await createAppFixture({ name: "backend-accounts-visual", initialState: "conversation" });
+  secretService = await createLinuxSecretService();
+  app = await createAppFixture({
+    name: "backend-accounts-visual",
+    initialState: "conversation",
+    ...(secretService
+      ? { additionalEnvironment: secretService.environment, electronMainEntry: secretService.electronMainEntry }
+      : {}),
+  });
   page = app.page;
   await page.routeWebSocket(/.*/u, (route) => {
     route.connectToServer().onMessage((data) => {
@@ -80,7 +90,8 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await app?.close();
+  try { await app?.close(); }
+  finally { await secretService?.close(); }
 });
 
 test("captures accounts, API keys and the API key route in the model chooser", async ({ browserName: _browserName }, testInfo) => {
@@ -104,7 +115,7 @@ test("captures accounts, API keys and the API key route in the model chooser", a
   const key = form.getByLabel("API key", { exact: true });
   await key.fill(FIXTURE_KEY);
   await key.press("Enter");
-  await expect(form).toHaveCount(0, { timeout: 90_000 });
+  await expectBackendSetupFinished(form, 90_000);
 
   const claude = section.getByRole("region", { name: "Claude Code" });
   const keyRow = claude.getByRole("listitem", { name: "Anthropic API key" });
@@ -137,7 +148,7 @@ test("captures accounts, API keys and the API key route in the model chooser", a
 
   claudeSignedIn = true;
   await page.getByRole("button", { name: "Refresh all providers" }).click();
-  await expect(claude.getByText("Signed in", { exact: true })).toBeVisible();
+  await expect(claude.getByText(/^Signed in(?: |$)/u)).toBeVisible();
 
   for (const theme of ["Light", "Dark"] as const) {
     const slug = theme.toLowerCase();

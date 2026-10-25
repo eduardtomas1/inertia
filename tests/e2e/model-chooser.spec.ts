@@ -169,8 +169,12 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   const claudeSource = modelChooser.getByRole("button", {
     name: /^Claude, \d+ models?$/u,
   });
+  await expect(claudeSource).toBeVisible();
+  const kimiSource = modelChooser.getByRole("button", {
+    name: /^Kimi Code, (?:[2-9]|\d{2,}) models$/u,
+  });
   await expect(modelChooser.getByRole("button", { name: /^Cursor, \d+ models?$/u })).toHaveCount(0);
-  await claudeSource.click();
+  await kimiSource.click();
   await expect(searchModels).toBeFocused();
   const initialActiveDescendant = await searchModels.getAttribute(
     "aria-activedescendant",
@@ -183,6 +187,9 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     "aria-activedescendant",
     initialActiveDescendant!,
   );
+  await claudeSource.click();
+  await expect(claudeSource).toHaveAttribute("aria-pressed", "true");
+  await expect(searchModels).toBeFocused();
   const [headerBounds, modelChooserBounds] = await Promise.all([
     workspaceHeader.boundingBox(),
     modelChooser.boundingBox(),

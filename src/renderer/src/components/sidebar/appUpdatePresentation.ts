@@ -1,6 +1,6 @@
 import type { AppUpdateStatus } from "@shared/desktop";
 
-export type UpdateAction = "check" | "download" | "install" | "release" | "everything" | "none";
+export type UpdateAction = "check" | "download" | "install" | "release" | "everything" | "details" | "none";
 export type UpdateIconState = "idle" | "checking" | "available" | "downloading" | "downloaded" | "installing" | "attention";
 
 export function updatePresentation(status: AppUpdateStatus | null, checking: boolean): {

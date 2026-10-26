@@ -225,8 +225,10 @@
 }
 .sidebar-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  row-gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--line-soft);
 }

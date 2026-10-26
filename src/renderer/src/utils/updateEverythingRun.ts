@@ -8,6 +8,16 @@ export type UpdateEverythingPhase =
   | { kind: "providers"; providerIds: readonly ProviderMaintenanceProviderId[] }
   | { kind: "app" };
 
+export type UpdateEverythingAppOutcome = "installed" | "not-included" | "download-failed" | "restart-refused" | "threw";
+
+export interface UpdateEverythingOutcome {
+  startedAt: number;
+  providers: UpdatesRunResult["providers"];
+  app: UpdateEverythingAppOutcome;
+  appMessage: string | null;
+  error: string | null;
+}
+
 export interface UpdateEverythingRequest {
   providerIds: ProviderMaintenanceProviderId[];
   includeApp: boolean;
@@ -58,13 +68,14 @@ function providerFailures(
     : [`${providerLabels.get(providerId) ?? providerId} update failed${error ? `: ${error}` : "."}`]);
 }
 
-export async function runUpdateEverything({ payload, request, appStatus, providerLabels, onPhase }: {
+export async function runUpdateEverything({ payload, request, appStatus, providerLabels, onPhase, startedAt }: {
   payload: UpdateEverythingRequest;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   appStatus: () => AppUpdateStatus | null;
   providerLabels: ReadonlyMap<ProviderMaintenanceProviderId, string>;
   onPhase: (phase: UpdateEverythingPhase) => void;
-}): Promise<string | null> {
+  startedAt: number;
+}): Promise<UpdateEverythingOutcome> {
   let app = payload.includeApp ? appStatus() : null;
   let run = payload;
   let download: string | null = null;
@@ -93,5 +104,11 @@ export async function runUpdateEverything({ payload, request, appStatus, provide
   if (!installed) await request({ type: "updates.finish", payload: { installed: false } });
   if (failure) throw failure;
   const appMessage = download ?? refusal ?? result.appInstallBlocker;
-  return [...providerFailures(result, providerLabels), ...(appMessage ? [appMessage] : [])].join(" ") || null;
+  return {
+    startedAt,
+    providers: result.providers,
+    app: installed ? "installed" : download ? "download-failed" : payload.includeApp ? "restart-refused" : "not-included",
+    appMessage,
+    error: [...providerFailures(result, providerLabels), ...(appMessage ? [appMessage] : [])].join(" ") || null,
+  };
 }

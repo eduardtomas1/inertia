@@ -172,6 +172,7 @@ function SidebarView({
   onChooseNewChatProject,
   onOpenMultiSpawn,
   onOpenDailyWork,
+  onOpenAgentSettings,
   newChatShortcut,
   dailyWorkOpen,
   onRenameConversation,
@@ -1151,7 +1152,7 @@ function SidebarView({
           </IconButton>
           <SidebarHelpButton />
           {appUpdate && <Suspense fallback={<IconButton label="Loading application updates" className="sidebar-update-button" disabled><RefreshCw size={16} /></IconButton>}>
-            <SidebarUpdateControl controller={appUpdate} everything={updateEverything} snapshot={snapshot} />
+            <SidebarUpdateControl controller={appUpdate} everything={updateEverything} snapshot={snapshot} onOpenAgentSettings={onOpenAgentSettings} />
           </Suspense>}
         </div>
       </aside>

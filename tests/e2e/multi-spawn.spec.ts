@@ -366,6 +366,14 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   const judgeTurn = page.locator(".response-turn").filter({ has: judgeAnswer });
   await expect(judgeTurn.locator('[data-turn-status="completed"]'))
     .toBeVisible();
+  const comparison = judgeTurn.getByRole("article", { name: "Comparing A and B" });
+  await expect(comparison).toBeVisible();
+  await expect(comparison.getByRole("listitem")).toHaveCount(2);
+  await expect(comparison).not.toContainText("# Independent Duo comparison");
+  const fullBrief = comparison.getByRole("button", { name: "Show the full brief" });
+  await expect(fullBrief).toHaveAttribute("aria-expanded", "false");
+  await fullBrief.click();
+  await expect(comparison).toContainText("# Independent Duo comparison");
   expect(app.rendererErrors).toEqual([]);
 });
 

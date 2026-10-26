@@ -32,7 +32,7 @@ import {
   verifyWorktreeSourceIdentity,
   withWorktreeSourceReservations,
 } from "../worktree-source-identity";
-import { buildDuoComparisonPrompt } from "./duo-comparison";
+import { buildDuoComparisonInput } from "./duo-comparison-brief";
 import {
   JUDGE_CHECKOUT_BUSY_NOTICE,
   JudgeRetrySchedule,
@@ -614,9 +614,9 @@ export class DuoLaunchCoordinator {
     if (this.runtimeClosed() || this.turns.isClosing())
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
 
-    let prompt: string;
+    let input: ReturnType<typeof buildDuoComparisonInput>;
     try {
-      prompt = buildDuoComparisonPrompt(this.store, this.store.pairedLaunch(launchId));
+      input = buildDuoComparisonInput(this.store, this.store.pairedLaunch(launchId));
     } catch (error) {
       return publicStatus(this.store, this.store.failPairedLaunchComparison(
         launchId,
@@ -664,7 +664,8 @@ export class DuoLaunchCoordinator {
       const queued = this.turns.queue({
         conversationId: comparison.conversationId,
         authorizedDuoComparisonLaunchId: launchId,
-        content: prompt,
+        ...(input.brief ? { duoComparison: input.brief } : {}),
+        content: input.prompt,
         attachments: [],
         activateConversation: false,
         skills: [],

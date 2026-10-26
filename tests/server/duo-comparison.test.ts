@@ -622,6 +622,21 @@ describe("Duo third-model comparison", () => {
         { role: "user", content: judgePrompt },
         { role: "assistant", content: "Source A is stronger." },
       ]);
+    const side = (index: 0 | 1) => {
+      const conversation = runtime.store.conversation(prepared.sides[index].conversationId);
+      return {
+        conversationId: conversation.id,
+        providerId: conversation.providerId,
+        title: conversation.title,
+        status: "completed",
+        filesChanged: expect.toSatisfy((value: unknown) => value === null || Number.isInteger(value)),
+      };
+    };
+    expect(judgeDetail?.messages[0]?.duoComparison).toEqual({
+      launchId: prepared.launchId,
+      sides: [side(0), side(1)],
+    });
+    expect(judgeDetail?.messages[1]).not.toHaveProperty("duoComparison");
     expect(() => runtime.store.assertConversationDeletionAllowed(
       prepared.sides[0].conversationId,
     )).not.toThrow();

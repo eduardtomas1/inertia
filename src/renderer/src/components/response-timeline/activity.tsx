@@ -27,6 +27,7 @@ import "./ActivityGroup.css";
 import { PlanDetail } from "./PlanDetail";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
 import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
+import { usePhaseLockedAnimations } from "../../hooks/usePhaseLockedAnimations";
 import clsx from "clsx";
 import type {
   AgentActivity,
@@ -79,6 +80,7 @@ import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
+import { StreamingMarkdownText } from "./StreamingMarkdownText";
 import {
   advanceThinkingLine,
   createReasoningLinesReader,
@@ -160,43 +162,6 @@ export function LiveElapsed({
     <span>
       {formatElapsed(Math.max(0, now - Date.parse(startedAt) - excludedMs), true)}
     </span>
-  );
-}
-
-/**
- * Keeps the live fast path as escaped plain text. Each paragraph is a stable
- * keyed block: settled paragraphs are split once and memoised, so an update
- * only re-renders the tail paragraph, and a newly started one fades in.
- */
-const StreamBlock = memo(function StreamBlock({ text }: { text: string }): React.JSX.Element {
-  return <span className="response-stream-block">{text}</span>;
-});
-
-function settledStreamEnd(content: string): number {
-  const separator = content.lastIndexOf("\n\n");
-  if (separator < 0) return 0;
-  let end = separator + 2;
-  while (content[end] === "\n") end += 1;
-  return end;
-}
-
-export function StreamingPlainText({
-  content,
-}: {
-  content: string;
-}): React.JSX.Element {
-  const settledEnd = settledStreamEnd(content);
-  const settled = content.slice(0, settledEnd);
-  const settledParts = useMemo(() => settled.split(/(\n{2,})/u).slice(0, -1), [settled]);
-  return (
-    <p>
-      {[
-        ...settledParts.map((part, index) => index % 2 === 1
-          ? part
-          : <StreamBlock key={index} text={part} />),
-        <StreamBlock key={settledParts.length} text={content.slice(settledEnd)} />,
-      ]}
-    </p>
   );
 }
 
@@ -428,7 +393,14 @@ export const CommentaryRow = memo(function CommentaryRow({
               data-stream-renderer="plain-text"
               data-stream-motion="block-fade"
             >
-              <StreamingPlainText content={entry.content} />
+              <StreamingMarkdownText
+                content={entry.content}
+                projectRoot={projectRoot}
+                projectId={projectId}
+                conversationId={conversationId}
+                defaultCodeWrap={defaultCodeWrap}
+                onOpenProjectFile={onOpenProjectFile}
+              />
             </div>
           )
         : (
@@ -820,10 +792,11 @@ function ThinkingSummary({
   span: ReasoningSpan;
   count: string;
 }): React.JSX.Element {
+  const pulseRef = usePhaseLockedAnimations<HTMLSpanElement>(`${live}:${line.current?.offset}`);
   return (
     <>
-      <span className="turn-thinking-pulse">
-        <Brain size={16} className="turn-thinking-icon" aria-hidden="true" />
+      <span className="turn-thinking-pulse" ref={pulseRef}>
+        <Brain size={14} className="turn-thinking-icon" aria-hidden="true" />
         <span className="turn-thinking-label" key={live ? "live" : "folded"}>
           {live
             ? "Thinking"

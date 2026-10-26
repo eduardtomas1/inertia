@@ -42,6 +42,7 @@ import type {
 } from "../../shared/backend-probe";
 import type { ContinuationReasonCode, TurnSessionRecovery } from "../../shared/continuation-policy";
 import type { PersistedTurnExecutionContext } from "../runtime/turns/request-context";
+import type { DuoComparisonBrief } from "../../shared/duo-comparison-brief";
 import type { ConversationContextDelivery } from "./conversation-context-transport";
 import type { WorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
 import type { WatcherNoteAttribution } from "../../shared/watcher";
@@ -144,6 +145,7 @@ export interface BeginAgentTurnInput
   content: string;
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
+  duoComparison?: DuoComparisonBrief;
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
   /**
@@ -164,6 +166,7 @@ export interface BeginAgentTurnInput
 export interface CreateMessageOptions {
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
+  duoComparison?: DuoComparisonBrief;
   compaction?: import("../../shared/context-compaction").ContextCompaction;
   /** Turn-scoped system messages only; written with its html_renders row. */
   htmlRender?: import("../../shared/html-render").HtmlRenderReference;

@@ -132,6 +132,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "prompt_cache_lifetime_ms",
     "prompt_cache_source",
   ]],
+  [106, "messages", ["duo_comparison_json"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [

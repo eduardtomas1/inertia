@@ -448,7 +448,7 @@ describe("Quiet Ledger settled work summary", () => {
       ),
     );
 
-    expect(summaryRule).toContain("min-height: 26px");
+    expect(summaryRule).toContain("min-height: var(--ledger-row)");
   });
 
   it("separates a failure row from the answer below it by one more 4px step than other settled layers", () => {

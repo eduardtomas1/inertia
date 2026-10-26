@@ -355,9 +355,6 @@ export function UsageIndicator({
           }}
         >
           <ContextRing context={context} quotaRefreshing={quotaRefreshing} />
-          {behavior.showAdjacentValue && ringState !== "unavailable" && (
-            <span className="usage-trigger-value" aria-hidden="true">{context.valueLabel}</span>
-          )}
         </TooltipButton>
 
         <div

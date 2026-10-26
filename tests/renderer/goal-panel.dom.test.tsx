@@ -199,6 +199,29 @@ describe("GoalPanel", () => {
     }
   });
 
+  it("collapses consecutive empty sections into one faint line and keeps skill refresh", async () => {
+    const onRefreshSkills = vi.fn();
+    renderPanel({ workflow: workflow({ skills: [] }), plan: null, subagents: [], onRefreshSkills });
+
+    const summary = document.querySelector(".goal-panel-empty-summary");
+    expect(summary).toHaveTextContent("No plan yet · No enabled skills · No delegated work");
+    expect(document.querySelectorAll(".goal-panel-empty-summary")).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "Current objective" })).toBeInTheDocument();
+    for (const heading of ["Latest conversation plan", "Skills", "Delegated work"]) {
+      expect(screen.queryByRole("heading", { name: heading })).toBeNull();
+    }
+    await userEvent.click(screen.getByRole("button", { name: "Refresh skills" }));
+    expect(onRefreshSkills).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a lone empty section with its heading", () => {
+    renderPanel({ workflow: workflow({ skills: [] }) });
+
+    expect(document.querySelector(".goal-panel-empty-summary")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(screen.getByText("No enabled skills")).toBeInTheDocument();
+  });
+
   it("renders authoritative goal progress and its current plan relationship", () => {
     renderPanel();
 

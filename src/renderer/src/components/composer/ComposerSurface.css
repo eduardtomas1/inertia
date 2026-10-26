@@ -24,6 +24,18 @@
 .composer-shell .composer:focus-within > .composer-surface {
   border-color: var(--line);
 }
+.composer-shell .composer[data-just-sent] > .composer-surface {
+  animation: composer-sent 420ms ease-out;
+}
+@keyframes composer-sent {
+  from { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-shell .composer[data-just-sent] > .composer-surface {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+    animation: none;
+  }
+}
 .composer-shell .composer-input-zone {
   position: relative;
   z-index: 1;

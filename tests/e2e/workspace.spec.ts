@@ -213,7 +213,9 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
     };
   })).toEqual({ left: 0, top: 0, width: 0, pointerEvents: "none", brandOnTop: true });
   const auroraTimes = () => aurora.evaluate((element) =>
-    element.getAnimations({ subtree: true }).map((animation) => Number(animation.currentTime)));
+    element.getAnimations({ subtree: true })
+      .filter((animation) => animation instanceof CSSAnimation && animation.animationName.startsWith("sidebar-aurora-"))
+      .map((animation) => Number(animation.currentTime)));
   const initialAuroraTimes = await auroraTimes();
   expect(initialAuroraTimes).toHaveLength(3);
   await expect.poll(async () => (await auroraTimes())[0]! - initialAuroraTimes[0]!).toBeGreaterThan(500);

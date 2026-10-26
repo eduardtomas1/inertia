@@ -179,7 +179,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       };
     });
     expect(paragraphCaret).toEqual({
-      lastTag: "P",
+      lastTag: "DIV",
       caretContent: "none",
       duplicateCaret: false,
     });
@@ -217,7 +217,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       };
     });
     expect(codeCaret).toEqual({
-      lastTag: "P",
+      lastTag: "DIV",
       literalText: "```ts\nconst verified = true;\n```",
       caretContent: "none",
       duplicateCaret: false,
@@ -395,7 +395,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       expect(supportingGeometry.metadataToArtifact).toBeGreaterThanOrEqual(0);
       expect(supportingGeometry.metadataToArtifact).toBeLessThanOrEqual(6);
       expect(supportingGeometry.runDetailsTargetHeight).toBeGreaterThanOrEqual(26);
-      expect(supportingGeometry.changedFilesTargetHeight).toBeGreaterThanOrEqual(32);
+      expect(supportingGeometry.changedFilesTargetHeight).toBeGreaterThanOrEqual(26);
     }
     await changedFilesSummary.click();
     await expect(changedFilesSummary).toHaveAttribute("aria-expanded", "true");

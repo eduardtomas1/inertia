@@ -15,7 +15,6 @@ import {
   useState,
 } from "react";
 import {
-  ArrowDown,
   FolderPlus,
   MessageCircleQuestion,
   SquarePen,
@@ -102,7 +101,10 @@ import type {
   FinalAnswerAutoScrollEvent,
   ResponseTimelineProps,
 } from "./response-timeline/types";
-import { IconButton, LoadingMark } from "./ui";
+import { LoadingMark } from "./ui";
+import { TimelineJumpToLatest } from "./TimelineJumpToLatest";
+import { afterSmoothScroll } from "../utils/smoothScrollSettle";
+import { markComposerSent, noteRequestSent } from "../utils/requestLiftOff";
 import type { WatcherWakeSummary } from "@shared/watcher";
 import { loadResponseTimeline } from "./chatSurfaceLoaders";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
@@ -392,6 +394,7 @@ export function ChatWorkspace({
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
   const followCorrectionFrameRef = useRef<number | null>(null);
+  const smoothSettleRef = useRef<(() => void) | null>(null);
   const readerIntentReleaseTimerRef = useRef<number | null>(null);
   const goalRef = useRef(goal);
   goalRef.current = goal;
@@ -602,7 +605,9 @@ export function ChatWorkspace({
       || finalAnswerAutoScrollOwnerRef.current !== null
     ) return;
     const element = scrollRef.current;
-    if (!element) return;
+    if (!element || (behavior !== "smooth" && smoothSettleRef.current)) return;
+    smoothSettleRef.current?.();
+    smoothSettleRef.current = null;
     element.scrollTo({ top: element.scrollHeight, behavior });
     onLatestContentVisibilityChange?.(true);
     if (followCorrectionFrameRef.current !== null) {
@@ -636,7 +641,11 @@ export function ChatWorkspace({
     // Virtual-row measurement can refine the total height after the first
     // scroll. Converge for a few frames, but immediately yield to fresh reader
     // intent instead of pinning someone who moved back into history.
-    correctMeasuredBottom(8);
+    if (behavior !== "smooth") return correctMeasuredBottom(8);
+    smoothSettleRef.current = afterSmoothScroll(element, () => {
+      smoothSettleRef.current = null;
+      correctMeasuredBottom(8);
+    });
   }, [onLatestContentVisibilityChange]);
 
   const scrollToLatest = useCallback((
@@ -747,6 +756,7 @@ export function ChatWorkspace({
       if (followCorrectionFrameRef.current !== null) {
         window.cancelAnimationFrame(followCorrectionFrameRef.current);
       }
+      smoothSettleRef.current?.();
       onLatestContentVisibilityChange?.(false);
     },
     [onLatestContentVisibilityChange],
@@ -885,6 +895,8 @@ export function ChatWorkspace({
     context?: TurnRequestContext,
   ): Promise<TranscriptMessageSendAcceptance | null> => {
     const sourceConversationId = conversationId;
+    noteRequestSent(content);
+    markComposerSent(composerRegionRef.current);
     const acceptance = await onSendMessage(
       content,
       attachments,
@@ -901,6 +913,8 @@ export function ChatWorkspace({
     context?: TurnRequestContext,
   ): Promise<ConversationCompactAndSendResult> => {
     const sourceConversationId = conversationId;
+    noteRequestSent(content);
+    markComposerSent(composerRegionRef.current);
     const result = await trackCompaction("on-return", () => onCompactAndSendMessage!(content, attachments, context));
     if (result.outcome === "sent") {
       followAcceptedMessage({
@@ -1099,9 +1113,8 @@ export function ChatWorkspace({
         </div>
       </div>
 
-      {showJump && <div className="timeline-follow-controls"><IconButton label="Jump to latest" onClick={() => scrollToLatest("auto")}><ArrowDown size={16} /></IconButton></div>}
-
       <div ref={composerRegionRef} className="composer-region">
+        <TimelineJumpToLatest visible={showJump} scrollElementRef={scrollRef} onJump={scrollToLatest} />
         {pendingInputRequest && (
           <div
             className="pending-input-notice"

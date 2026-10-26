@@ -23,13 +23,12 @@ export interface PersistedUsageDisplayPreference {
   showUsage?: unknown;
 }
 
-export type UsageDisplaySurface = "hidden" | "circle" | "circle-with-value";
+export type UsageDisplaySurface = "hidden" | "circle";
 
 export interface UsageDisplayBehavior {
   readonly mode: UsageDisplayMode;
   readonly surface: UsageDisplaySurface;
   readonly showCircle: boolean;
-  readonly showAdjacentValue: boolean;
   /** Usage is an anchored control, never a permanently visible detail strip. */
   readonly showPermanentStrip: false;
 }
@@ -51,21 +50,18 @@ const usageDisplayBehaviors: Readonly<Record<UsageDisplayMode, UsageDisplayBehav
     mode: "hidden",
     surface: "hidden",
     showCircle: false,
-    showAdjacentValue: false,
     showPermanentStrip: false,
   },
   compact: {
     mode: "compact",
     surface: "circle",
     showCircle: true,
-    showAdjacentValue: false,
     showPermanentStrip: false,
   },
   expanded: {
     mode: "expanded",
-    surface: "circle-with-value",
+    surface: "circle",
     showCircle: true,
-    showAdjacentValue: true,
     showPermanentStrip: false,
   },
 };

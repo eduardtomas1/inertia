@@ -87,7 +87,7 @@ export function ChangedFilesSummary({
         <span className="turn-changed-files-summary-copy">
           <strong>{artifact.files.length} {artifact.files.length === 1 ? "file" : "files"} changed</strong>
           <small>
-            · +{artifact.insertions} −{artifact.deletions}
+            · <span className="turn-changed-files-insertions">+{artifact.insertions}</span> <span className="turn-changed-files-deletions">−{artifact.deletions}</span>
             {artifact.branch && ` · ${artifact.branch}`}
           </small>
         </span>

@@ -1,10 +1,20 @@
 .project-search-row {
   display: flex;
   align-items: center;
+  border-radius: var(--radius-xs);
+}
+.project-search-row:hover {
+  background: var(--fill);
+}
+.project-search-row:has(> button[role="option"].is-active) {
+  background: var(--fill-strong);
 }
 .project-search-row > button[role="option"] {
   min-width: 0;
   flex: 1;
+}
+.project-search-row > button[role="option"]:is(:hover, .is-active) {
+  background: transparent;
 }
 .project-search-row > .icon-button {
   flex: 0 0 28px;

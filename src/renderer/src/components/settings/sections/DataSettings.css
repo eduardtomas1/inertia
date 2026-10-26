@@ -41,6 +41,7 @@
 .archived-chats {
   display: grid;
   min-width: 0;
+  padding-top: 4px;
 }
 
 .archived-chats-filter {

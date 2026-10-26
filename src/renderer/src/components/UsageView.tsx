@@ -123,17 +123,28 @@ function measuredTokenShare(
   return item.processedTokens.value / total;
 }
 
+function tokenTotalsUnavailable(dashboard: UsageDashboard): boolean {
+  return [
+    dashboard.totals.processedTokens,
+    dashboard.tokens.input,
+    dashboard.tokens.cachedInput,
+    dashboard.tokens.output,
+  ].every(({ value }) => value === null);
+}
+
 function Metric({
   label,
   value,
   detail,
+  hero = false,
 }: {
   label: string;
   value: React.ReactNode;
   detail: string;
+  hero?: boolean;
 }): React.JSX.Element {
   return (
-    <article className="usage-metric">
+    <article className={hero ? "usage-metric is-hero" : "usage-metric"}>
       <span>{label}</span>
       <strong>{value}</strong>
       <small title={detail}>{detail}</small>
@@ -228,6 +239,9 @@ function UsageDashboardContent({
     dashboard.totals.cancelledCount > 0 ? `${formatCount(dashboard.totals.cancelledCount)} cancelled` : "",
     dashboard.totals.interruptedCount > 0 ? `${formatCount(dashboard.totals.interruptedCount)} interrupted` : "",
   ].filter(Boolean).join(" · ");
+  const requestsDetail = `${dashboard.totals.runtime.value === null
+    ? "Runtime unavailable"
+    : `${formatDuration(dashboard.totals.runtime.value)} active runtime`}${statusCopy ? ` · ${statusCopy}` : ""}`;
 
   return (
     <>
@@ -310,6 +324,17 @@ function UsageDashboardContent({
             </div>
           </section>
 
+          {tokenTotalsUnavailable(dashboard) ? (
+            <section className="usage-metric-strip is-requests-only" aria-label="Usage totals">
+              <Metric
+                hero
+                label="Requests"
+                value={formatCount(dashboard.totals.requestCount)}
+                detail={requestsDetail}
+              />
+              <p className="usage-note">Token totals aren't reported by these providers yet.</p>
+            </section>
+          ) : (
           <section className="usage-metric-strip" aria-label="Usage totals">
             <Metric
               label="Processed tokens"
@@ -340,11 +365,10 @@ function UsageDashboardContent({
             <Metric
               label="Requests"
               value={formatCount(dashboard.totals.requestCount)}
-              detail={`${dashboard.totals.runtime.value === null
-                ? "Runtime unavailable"
-                : `${formatDuration(dashboard.totals.runtime.value)} active runtime`}${statusCopy ? ` · ${statusCopy}` : ""}`}
+              detail={requestsDetail}
             />
           </section>
+          )}
 
           <section className="usage-breakdown" aria-labelledby="usage-breakdown-heading">
             <div className="usage-breakdown-heading">

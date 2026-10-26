@@ -3,9 +3,9 @@
   margin-top: 8px;
 }
 
-.backend-settings-toolbar {
+.settings-card-heading.backend-settings-toolbar {
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 .backend-settings-toolbar > span {

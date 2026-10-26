@@ -50,3 +50,28 @@ it.each([
 ])("rejects malformed watcher-note attribution %j", (malformed) => {
   expect(chatMessageSchema({ ...message, watcherNote: malformed })).toBe(false);
 });
+
+const duoComparison = {
+  launchId: "launch-1",
+  sides: [
+    { conversationId: "side-a", providerId: "codex", title: "Simplify sign-up", status: "completed", filesChanged: 2 },
+    { conversationId: "side-b", providerId: null, title: "", status: "interrupted", filesChanged: null },
+  ],
+};
+
+it("accepts the server's Duo comparison brief on user messages only", () => {
+  expect(chatMessageSchema({ ...message, duoComparison })).toBe(true);
+  expect(chatMessageSchema({ ...message, role: "assistant", duoComparison })).toBe(false);
+});
+
+it.each([
+  null,
+  {},
+  { ...duoComparison, sides: [duoComparison.sides[0]] },
+  { ...duoComparison, sides: [{ ...duoComparison.sides[0], status: "running" }, duoComparison.sides[1]] },
+  { ...duoComparison, sides: [{ ...duoComparison.sides[0], filesChanged: -1 }, duoComparison.sides[1]] },
+  { ...duoComparison, sides: [{ ...duoComparison.sides[0], title: "x".repeat(201) }, duoComparison.sides[1]] },
+  { ...duoComparison, kind: "duo-comparison" },
+])("rejects a malformed Duo comparison brief %j", (malformed) => {
+  expect(chatMessageSchema({ ...message, duoComparison: malformed })).toBe(false);
+});

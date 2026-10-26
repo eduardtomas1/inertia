@@ -34,4 +34,28 @@ describe("sidebar aurora", () => {
     expect(SIDEBAR_AURORA_STEP_MS).toBeGreaterThanOrEqual(80);
     expect(SIDEBAR_AURORA_STEP_MS).toBeLessThanOrEqual(200);
   });
+
+  it("registers the work-state strengths so they cross-fade, and mixes them into every light", () => {
+    expect(css).toMatch(/@property --aurora-boost \{\s*syntax: "<percentage>";\s*inherits: true;\s*initial-value: 0%;\s*\}/u);
+    expect(css).toMatch(/@property --aurora-tint \{\s*syntax: "<percentage>";\s*inherits: true;\s*initial-value: 0%;\s*\}/u);
+    expect(css).toContain("--aurora-2-live: color-mix(in srgb, var(--aurora-2), var(--status-approval) var(--aurora-tint));");
+    expect(css).toContain("--aurora-mid-live: calc(var(--aurora-mid) + var(--aurora-boost));");
+    expect(css).toContain("transition: --aurora-boost 1.2s var(--ease), --aurora-tint 1.2s var(--ease);");
+    expect(declaration(block('.sidebar-aurora[data-activity="working"]'), "--aurora-boost")).toBe("4%");
+    expect(declaration(block('.sidebar-aurora[data-activity="attention"]'), "--aurora-tint")).toBe("30%");
+    expect(css).not.toMatch(/var\(--aurora-2\) var\(--aurora-(?:mid|wash)\)|var\(--aurora-mid\), transparent/u);
+  });
+
+  it("lays one static grain under the light that never animates", () => {
+    const grain = block(".sidebar::before");
+    expect(declaration(grain, "z-index")).toBe("-1");
+    expect(declaration(grain, "pointer-events")).toBe("none");
+    expect(declaration(grain, "mix-blend-mode")).toBe("soft-light");
+    expect(declaration(grain, "opacity")).toBe("0.022");
+    expect(declaration(block(':root[data-theme="dark"] .sidebar::before'), "opacity")).toBe("0.035");
+    expect(grain).toContain("feTurbulence");
+    expect(grain).not.toMatch(/animation|transition|will-change/u);
+    expect(css).toMatch(/@media \(forced-colors: active\)\s*\{\s*\.sidebar::before\s*\{\s*display: none;/u);
+  });
 });
+

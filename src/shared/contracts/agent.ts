@@ -240,6 +240,7 @@ export interface ChatMessage {
   /** Authenticated remote origin; attribution only, never an execution authority. */
   privateConnectDeviceId?: string;
   watcherNote?: import("../watcher").WatcherNoteAttribution;
+  duoComparison?: import("../duo-comparison-brief").DuoComparisonBrief;
   /** Confirmed manual compaction, scoped to this conversation without a fabricated turn. */
   compaction?: import("../context-compaction").ContextCompaction;
   /** A visual reply the agent published in this turn; system role, always turn-scoped. */

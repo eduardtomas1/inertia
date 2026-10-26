@@ -16,6 +16,7 @@ import {
   turnGitArtifactPatchAvailable,
 } from "../../src/renderer/src/components/ResponseTimeline";
 import { FollowUpRow } from "../../src/renderer/src/components/response-timeline/activity";
+import { TurnMetadata } from "../../src/renderer/src/components/response-timeline/metadata";
 import {
   activityNeedsAttention,
   buildResponseTimeline,
@@ -763,6 +764,37 @@ describe("authoritative response timeline", () => {
     }));
     expect(failedCaptureHtml).toContain("Turn changes unavailable");
     expect(failedCaptureHtml).toContain("The repository snapshot could not be captured.");
+
+    const unchangedArtifact = artifact("artifact-unchanged", turn.id, "", {
+      files: [],
+      insertions: 0,
+      deletions: 0,
+    });
+    const unchangedHtml = renderArtifact(unchangedArtifact);
+    expect(unchangedHtml).toContain('aria-label="Final answer actions and run metadata"');
+    expect(unchangedHtml).not.toContain("Changed by this turn");
+    expect(unchangedHtml).not.toContain("files changed");
+    expect(unchangedHtml).not.toContain("No file changes");
+
+    const unchangedTurn = timelineTurn(buildResponseTimeline({
+      turns: [turn],
+      messages: [
+        message("user-no-git", turn.id, "user", "Answer this", turn.requestedAt),
+        message("assistant-no-git", turn.id, "assistant", "Done", turn.completedAt!),
+      ],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+      gitArtifacts: [unchangedArtifact],
+    }), turn.id);
+    const runDetailsHtml = renderToStaticMarkup(createElement(TurnMetadata, {
+      turn: unchangedTurn,
+      terminalAnswer: unchangedTurn.terminalAssistantMessage,
+      showTimestamp: false,
+      workDetailsExpandedByDefault: true,
+    }));
+    expect(runDetailsHtml).toContain('<p class="turn-run-no-changes">');
+    expect(runDetailsHtml).toContain("<span>No file changes</span>");
   });
 
   it("renders changed files as a quiet disclosure with exact actions and completeness context", () => {
@@ -824,7 +856,7 @@ describe("authoritative response timeline", () => {
     expect(html).toContain('class="turn-changed-files"');
     expect(html).toContain('aria-label="Changed by this turn"');
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain("<strong>2 files changed</strong><small>· +84 −21 · main</small>");
+    expect(html).toContain('<strong>2 files changed</strong><small>· <span class="turn-changed-files-insertions">+84</span> <span class="turn-changed-files-deletions">−21</span> · main</small>');
     expect(html).toContain("View");
     expect(html).toContain('class="turn-changed-files-list"');
     expect(html).toContain("modified · +64 −9");

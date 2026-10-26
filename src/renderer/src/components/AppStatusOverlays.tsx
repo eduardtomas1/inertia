@@ -88,7 +88,7 @@ export function StatusToastStack({
             aria-label="Database recovery warning"
             role="alert"
           >
-            <ShieldAlert size={14} aria-hidden="true" />
+            <ShieldAlert size={16} aria-hidden="true" />
             <span>
               <strong>{databaseRecoveryNotice.outcome === "created-empty"
                 ? "Inertia started with empty data"
@@ -111,7 +111,7 @@ export function StatusToastStack({
       />
       {duoJudgeNotices && duoJudgeAlerts.map(({ launchId, conversationId, title, state }) => (
         <div key={launchId} className="error-toast duo-judge-toast" role="alert">
-          <Columns2 size={14} aria-hidden="true" />
+          <Columns2 size={16} aria-hidden="true" />
           <span>{`${title ? `“${title}”` : "The Duo judge"} ${state === "interrupted" ? "was interrupted." : "didn't finish."}`}</span>
           {conversationId && <button type="button" className="text-button" onClick={() => {
             duoJudgeNotices.dismissAlert(launchId);
@@ -124,7 +124,7 @@ export function StatusToastStack({
       ))}
       {appUpdate.error && (
         <div className="error-toast" role="alert">
-          <CircleAlert size={14} aria-hidden="true" />
+          <CircleAlert size={16} aria-hidden="true" />
           <span>{appUpdate.error}</span>
           <IconButton label="Dismiss update error" onClick={appUpdate.dismissError}>
             <X size={14} />
@@ -133,7 +133,7 @@ export function StatusToastStack({
       )}
       {error && (
         <div className="error-toast" role="alert">
-          <CircleAlert size={14} aria-hidden="true" />
+          <CircleAlert size={16} aria-hidden="true" />
           <span>{diagnosticError?.message}</span>
           {diagnosticError?.incidentId && <button type="button" className="text-button" onClick={() => navigateDiagnosticContext({ section: "help", anchor: "diagnostics-incidents", selection: { incidentId: diagnosticError.incidentId } })}>View diagnostics</button>}
           <IconButton label="Dismiss error" onClick={onDismissError}>

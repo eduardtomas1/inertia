@@ -260,6 +260,41 @@ describe("UsageView", () => {
     expect(provider).not.toHaveTextContent("Token total unavailable");
   });
 
+  it("replaces the token cells with one plain line when no token metric is reported", async () => {
+    const unreported = dashboard();
+    unreported.totals.processedTokens = metric(null, 0, 6);
+    unreported.tokens = {
+      input: metric(null, 0, 6),
+      cachedInput: metric(null, 0, 6),
+      cacheWriteInput: metric(null, 0, 6),
+      output: metric(null, 0, 6),
+      reasoningOutput: metric(null, 0, 6),
+    };
+    const view = render(<UsageView status="online" request={vi.fn(async () => result(unreported))} />);
+
+    const totals = await screen.findByRole("region", { name: "Usage totals" });
+    expect(totals).toHaveClass("is-requests-only");
+    expect(within(totals).getByText("Token totals aren't reported by these providers yet.")).toBeVisible();
+    expect(within(totals).queryByText("Unavailable")).toBeNull();
+    expect(within(totals).queryByText("No defensible total available")).toBeNull();
+    const metrics = view.container.querySelectorAll(".usage-metric-strip .usage-metric");
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toHaveClass("is-hero");
+    expect(metrics[0]).toHaveTextContent(/^Requests6/u);
+  });
+
+  it("keeps every metric cell while any token metric has data", async () => {
+    const partial = dashboard();
+    partial.totals.processedTokens = metric(null, 0, 6);
+    partial.tokens = { ...partial.tokens, input: metric(null, 0, 6), cachedInput: metric(null, 0, 6) };
+    const view = render(<UsageView status="online" request={vi.fn(async () => result(partial))} />);
+
+    const totals = await screen.findByRole("region", { name: "Usage totals" });
+    expect(totals).not.toHaveClass("is-requests-only");
+    expect(view.container.querySelectorAll(".usage-metric-strip .usage-metric")).toHaveLength(5);
+    expect(view.container.querySelector(".usage-metric.is-hero")).toBeNull();
+  });
+
   it("shows every active period in Day mode even when more than eight are old", async () => {
     const historical = dashboard();
     const last = historical.daily.at(-1)!;

@@ -26,13 +26,24 @@ describe("completed-turn spacing", () => {
   it("does not shrink active work or interactive disclosure targets", () => {
     expect(cssBlock("\n.agent-run-flow {"))
       .toContain("margin-bottom: var(--response-block-gap)");
-    expect(cssBlock(".turn-working-state {")).toContain("min-height: 28px");
+    expect(cssBlock(".turn-working-state {")).toContain("min-height: var(--ledger-row)");
     expect(cssBlock(".turn-changed-files > summary {"))
-      .toContain("min-height: 32px");
+      .toContain("min-height: var(--ledger-row)");
     expect(cssBlock(".turn-meta-primary {")).toContain("min-height: 28px");
-    expect(css).toContain(
-      ".turn-action,\n.turn-changed-files > summary,",
-    );
-    expect(css).toContain("min-height: var(--ui-control-height)");
+    expect(css).toContain(".turn-action,\n.response-details > summary {\n  min-height: var(--ui-control-height);");
+  });
+
+  it("shares one ledger row height that only response density changes", () => {
+    expect(cssBlock(":root {")).toContain("--ledger-row: 28px");
+    expect(cssBlock(".chat-workspace.response-density-compact {")).toContain("--ledger-row: 26px");
+    expect(cssBlock(".chat-workspace.response-density-comfortable {")).toContain("--ledger-row: 30px");
+    for (const selector of [
+      ".turn-work-log.is-live > details > summary {",
+      ".turn-work-log > details.turn-thinking > summary {",
+      ".turn-work-log details > summary {",
+      ".turn-work-log.is-settled .turn-settled-summary {",
+    ]) {
+      expect(cssBlock(selector)).toContain("min-height: var(--ledger-row)");
+    }
   });
 });

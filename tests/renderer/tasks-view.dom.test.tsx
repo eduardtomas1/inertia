@@ -624,10 +624,14 @@ describe("Tasks stylesheet", () => {
     expect(css).toContain("var(--status-failed)");
   });
 
-  it("stays plain: no shadows beyond the popover token, uppercase labels or pill shapes", () => {
+  it("stays plain: no shadows beyond the popover token and the detail card's raised edge, uppercase labels or pill shapes", () => {
     const shadows = css.match(/box-shadow:[^;]*;/gu) ?? [];
     expect(shadows.length).toBeGreaterThan(0);
-    expect(new Set(shadows)).toEqual(new Set(["box-shadow: var(--shadow-float);"]));
+    expect(new Set(shadows)).toEqual(new Set([
+      "box-shadow: var(--shadow-float);",
+      "box-shadow: inset 0 1px 0 var(--raised-edge);",
+    ]));
+    expect(css).toMatch(/\.task-detail \{[^}]*box-shadow: inset 0 1px 0 var\(--raised-edge\);/u);
     expect(css).not.toMatch(/text-transform|999px/u);
   });
 
@@ -662,6 +666,7 @@ describe("Tasks stylesheet", () => {
     expect(reduced).toMatch(/\.task-row-slot/u);
     expect(reduced).toMatch(/\.tasks-toast,?\s/u);
     expect(css).toMatch(/\.task-row-slot\.is-collapsing \{\s*grid-template-rows: 0fr;/u);
-    expect(css).toMatch(/\.tasks-toast \{\s*animation: dialog-surface-in var\(--dur\) var\(--ease\) backwards;/u);
+    expect(css).toMatch(/\.tasks-toast \{\s*animation: tasks-toast-in var\(--dur-slow\) var\(--ease\) backwards;/u);
+    expect(css).toMatch(/@keyframes tasks-toast-in \{\s*from \{\s*opacity: 0;\s*transform: translateY\(6px\) scale\(0\.98\);/u);
   });
 });

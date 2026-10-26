@@ -7,6 +7,7 @@ import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { WatcherWakeRequest } from "./WatcherWakeRequest";
+import { DuoComparisonRequest } from "./DuoComparisonRequest";
 import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
@@ -39,6 +40,7 @@ import {
 } from "../working-indicator/orbMotion";
 import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
 import { TurnAgentsLine } from "./TurnAgentsLine";
+import { useFreshRequest } from "./useFreshRequest";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
   LiveElapsed,
@@ -73,7 +75,7 @@ export function AgentPixelLoader({
     const motion = resolveOrbMotion(indicator, orbMotionForPhase(phase));
     return (
       <WorkingOrb
-        size={18}
+        size={16}
         design={motion.design}
         pace={motion.pace}
         syncKey={workingOrbSyncKey(conversationId)}
@@ -99,6 +101,7 @@ export function UserRequestLayer({
   const collapsible = shouldCollapseUserRequest(turn.userMessage.content);
   const [expanded, setExpanded] = useState(false);
   const [openPacketId, setOpenPacketId] = useState<string | null>(null);
+  const fresh = useFreshRequest(turn.userMessage.content);
   const content = collapsible && !expanded
     ? collapsedUserRequestPreview(turn.userMessage.content)
     : turn.userMessage.content;
@@ -118,6 +121,7 @@ export function UserRequestLayer({
   ) ?? [];
   const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
   if (turn.watcherWake) return <WatcherWakeRequest turn={turn} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
+  if (turn.userMessage.duoComparison) return <DuoComparisonRequest turn={turn} brief={turn.userMessage.duoComparison} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
   const watcherNote = turn.userMessage.role === "user" ? turn.userMessage.watcherNote : undefined;
   return (
     <article
@@ -125,6 +129,7 @@ export function UserRequestLayer({
       aria-label={watcherNote ? WATCHER_NOTE_TITLE : "Your request"}
       data-request-layout={isDocumentLike ? "document" : "content"}
       data-turn-layer="user-request"
+      data-fresh={fresh || undefined}
       data-turn-request-context={turn.id}
       data-turn-jump-target="request"
       data-message-search-id={turn.userMessage.id}

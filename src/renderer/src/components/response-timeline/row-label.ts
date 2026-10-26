@@ -4,6 +4,7 @@ import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { providerHandoffText } from "../../utils/providerHandoff";
 import { watcherCheckTitle } from "../../utils/watcherLinks";
 import { watcherNoteLabel } from "./WatcherNoteRow";
+import { DUO_COMPARISON_REQUEST_LABEL } from "../../utils/response-timeline/virtualization";
 
 const TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS = 96;
 
@@ -19,6 +20,7 @@ export function responseTimelineArticleLabel(
   if (item.kind === "watcher-note") return watcherNoteLabel(item.note);
   const wake = item.turn.watcherWake;
   if (wake) return `Turn ${item.turn.index}: ${watcherCheckTitle(wake)}`;
+  if (item.turn.userMessage.duoComparison) return `Turn ${item.turn.index}: ${DUO_COMPARISON_REQUEST_LABEL}`;
   const request = item.turn.userMessage.content.trim().replace(/\s+/gu, " ");
   const requestLabel = request
     ? request.length > TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS

@@ -327,6 +327,7 @@
   padding: 16px;
   border-radius: var(--radius-md);
   background: var(--fill);
+  box-shadow: inset 0 1px 0 var(--raised-edge);
   scrollbar-gutter: stable;
 }
 
@@ -799,7 +800,14 @@
 }
 
 .tasks-toast {
-  animation: dialog-surface-in var(--dur) var(--ease) backwards;
+  animation: tasks-toast-in var(--dur-slow) var(--ease) backwards;
+}
+
+@keyframes tasks-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
 }
 
 .tasks-toast.is-leaving {

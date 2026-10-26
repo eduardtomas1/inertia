@@ -4,11 +4,15 @@
 }
 
 .diagnostics .settings-card-heading {
-  margin-bottom: 6px;
+  margin-bottom: 0;
 }
 
 .diagnostics-events .settings-card-heading {
-  margin-bottom: 10px;
+  margin-bottom: 4px;
+}
+
+.settings-card .diagnostics-event:last-child {
+  border-bottom: 0;
 }
 
 .diagnostics-capture {

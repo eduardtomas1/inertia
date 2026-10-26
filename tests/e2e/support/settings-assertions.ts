@@ -1,6 +1,6 @@
 import { expect, type Locator } from "@playwright/test";
 
-export async function expectFlatSettingsSections(settings: Locator): Promise<void> {
+export async function expectCardSettingsSections(settings: Locator): Promise<void> {
   await expect(settings.getByText("Make it yours", { exact: true })).toHaveCount(0);
   await expect(settings.getByText("Keep the workspace calm, capable, and predictable.", { exact: true }))
     .toHaveCount(0);
@@ -16,13 +16,15 @@ export async function expectFlatSettingsSections(settings: Locator): Promise<voi
         spacing: Number.parseFloat(computed.marginBottom),
         border: Number.parseFloat(computed.borderTopWidth),
         background: computed.backgroundColor,
-        shadow: computed.boxShadow,
+        radius: computed.borderTopLeftRadius,
+        overflow: computed.overflow,
       };
     });
     expect(style.spacing).toBeGreaterThan(0);
     expect(style.border).toBe(0);
-    expect(style.background).toBe("rgba(0, 0, 0, 0)");
-    expect(style.shadow).toBe("none");
+    expect(style.background).not.toBe("rgba(0, 0, 0, 0)");
+    expect(style.radius).toBe("14px");
+    expect(style.overflow).toBe("visible");
   }
 }
 

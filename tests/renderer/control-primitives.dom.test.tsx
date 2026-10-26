@@ -305,7 +305,9 @@ describe("loading primitives", () => {
     const renderer = sources("src/renderer/src").map((path) => readSourceText(path)).join("\n");
     expect(renderer).not.toMatch(/\bLoaderCircle\b|Loader2|provider-status-spinner|response-stream-word|streaming-caret|beautiful-stream-in/u);
     expect(renderer).toMatch(/\.response-stream-block,\n\.response-markdown\.is-streaming:not\(\.is-plain-stream\) > \* \{\n  animation: beautiful-fade-in var\(--dur-slow\) var\(--ease-fade\) both;/u);
-    expect(css).toMatch(/animation: turn-thinking-sweep 2200ms/u);
+    expect(css).toMatch(/animation: turn-thinking-sweep 2600ms var\(--ease\) infinite/u);
+    expect(css).toContain("mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.45) 40%, #000 50%, rgb(0 0 0 / 0.45) 60%)");
+    expect(css).toMatch(/@keyframes turn-thinking-sweep \{\n  0%,\n  15% \{[^}]*mask-position: 100% 0;\n  \}\n  85%,\n  100% \{[^}]*mask-position: 0 0;/u);
   });
 });
 

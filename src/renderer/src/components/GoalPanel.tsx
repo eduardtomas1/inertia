@@ -1,5 +1,5 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
-import { useId, useMemo, useState } from "react";
+import { Fragment, useId, useMemo, useState } from "react";
 import clsx from "clsx";
 import {
   Check,
@@ -518,6 +518,71 @@ function SkillsSection({
   );
 }
 
+interface GoalPanelSectionEntry {
+  id: string;
+  emptyLabel: string | null;
+  node: React.ReactNode;
+}
+
+function skillsSectionIsEmpty(workflow: AgentWorkflowState): boolean {
+  return workflow.skillsCapability.available
+    && workflow.skills.length === 0
+    && !workflow.skillDiscovery.truncated
+    && workflow.skillDiscovery.warningCount === 0;
+}
+
+function groupEmptySections(
+  entries: readonly GoalPanelSectionEntry[],
+): GoalPanelSectionEntry[][] {
+  const groups: GoalPanelSectionEntry[][] = [];
+  let run: GoalPanelSectionEntry[] = [];
+  const flush = (): void => {
+    if (run.length > 0) groups.push(run);
+    run = [];
+  };
+  for (const entry of entries) {
+    if (entry.emptyLabel) {
+      run.push(entry);
+      continue;
+    }
+    flush();
+    groups.push([entry]);
+  }
+  flush();
+  return groups;
+}
+
+function EmptySectionsSummary({
+  labels,
+  onRefreshSkills,
+}: {
+  labels: readonly string[];
+  onRefreshSkills?: () => void;
+}): React.JSX.Element {
+  return (
+    <div className="goal-panel-empty-summary">
+      <span>
+        {labels.map((label, index) => (
+          <Fragment key={label}>
+            {index > 0 && <span aria-hidden="true"> · </span>}
+            <span>{label}</span>
+          </Fragment>
+        ))}
+      </span>
+      {onRefreshSkills && (
+        <button
+          type="button"
+          className="goal-panel-icon-button"
+          aria-label="Refresh skills"
+          onClick={onRefreshSkills}
+        >
+          <RefreshCw size={14} aria-hidden="true" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function SubagentsSection({
   subagents,
   turns,
@@ -911,40 +976,67 @@ export function GoalPanel({
           </section>
         )}
 
-        <section className="goal-panel-section" aria-labelledby={planHeadingId}>
-          <header className="goal-panel-section-heading">
-            <div>
-              <h3 id={planHeadingId}>Latest conversation plan</h3>
-            </div>
-          </header>
-          <PlanRelationship plan={plan} />
-        </section>
-
-        {workflow && (
-          <SkillsSection
-            workflow={workflow}
-            onInsertSkill={onInsertSkill}
-            onRefreshSkills={onRefreshSkills}
-            headingId={skillsHeadingId}
+        {groupEmptySections([
+          {
+            id: "plan",
+            emptyLabel: plan ? null : "No plan yet",
+            node: (
+              <section className="goal-panel-section" aria-labelledby={planHeadingId}>
+                <header className="goal-panel-section-heading">
+                  <div>
+                    <h3 id={planHeadingId}>Latest conversation plan</h3>
+                  </div>
+                </header>
+                <PlanRelationship plan={plan} />
+              </section>
+            ),
+          },
+          ...(workflow ? [{
+            id: "skills",
+            emptyLabel: skillsSectionIsEmpty(workflow) ? "No enabled skills" : null,
+            node: (
+              <SkillsSection
+                workflow={workflow}
+                onInsertSkill={onInsertSkill}
+                onRefreshSkills={onRefreshSkills}
+                headingId={skillsHeadingId}
+              />
+            ),
+          }] : []),
+          {
+            id: "subagents",
+            emptyLabel: subagentDisclosureRows(subagents, turns).length === 0 ? "No delegated work" : null,
+            node: (
+              <SubagentsSection
+                key={workflow?.conversationId
+                  ?? subagents[0]?.conversationId
+                  ?? turns[0]?.conversationId
+                  ?? "empty"}
+                subagents={subagents}
+                turns={turns}
+                now={now}
+                canFollowUpSubagent={canFollowUpSubagent}
+                onFollowUpSubagent={onFollowUpSubagent}
+                onOpenSubagent={onOpenSubagent}
+                canStopSubagent={canStopSubagent}
+                onStopSubagent={onStopSubagent}
+                headingId={subagentsHeadingId}
+                listId={subagentsListId}
+              />
+            ),
+          },
+        ]).map((group) => group.length === 1 ? (
+          <Fragment key={group[0]!.id}>{group[0]!.node}</Fragment>
+        ) : (
+          <EmptySectionsSummary
+            key={group.map(({ id }) => id).join("-")}
+            labels={group.map(({ emptyLabel }) => emptyLabel ?? "")}
+            onRefreshSkills={group.some(({ id }) => id === "skills")
+              && workflow?.skillsCapability.available
+              ? onRefreshSkills
+              : undefined}
           />
-        )}
-
-        <SubagentsSection
-          key={workflow?.conversationId
-            ?? subagents[0]?.conversationId
-            ?? turns[0]?.conversationId
-            ?? "empty"}
-          subagents={subagents}
-          turns={turns}
-          now={now}
-          canFollowUpSubagent={canFollowUpSubagent}
-          onFollowUpSubagent={onFollowUpSubagent}
-          onOpenSubagent={onOpenSubagent}
-          canStopSubagent={canStopSubagent}
-          onStopSubagent={onStopSubagent}
-          headingId={subagentsHeadingId}
-          listId={subagentsListId}
-        />
+        ))}
       </div>
     </section>
   );

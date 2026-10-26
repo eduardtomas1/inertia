@@ -168,9 +168,9 @@ describe("terminal", () => {
   });
 });
 
-describe("Windows panel tab strip", () => {
+describe("Windows and Linux panel tab strip", () => {
   it("moves a narrow panel's tabs below the caption-button row so they keep room at the 300px minimum", () => {
-    const rule = /@container \(max-width: 400px\) \{\n  \.platform-win32 \.workspace-panel:not\(\.is-stacked\) > \.workspace-panel-tabs \{\n([^}]*)\}\n\}/u.exec(css)?.[1] ?? "";
+    const rule = /@container \(max-width: 400px\) \{\n  :is\(\.platform-win32, \.platform-linux\) \.workspace-panel:not\(\.is-stacked\) > \.workspace-panel-tabs \{\n([^}]*)\}\n\}/u.exec(css)?.[1] ?? "";
     expect(rule).toContain("margin-top: 48px;");
     expect(rule).toContain("padding-right: 16px;");
   });
@@ -378,5 +378,34 @@ describe("diff file heading", () => {
   it("wraps its actions below the path before the path truncates", () => {
     expect(css).toContain(".diff-file-review-heading > span { display: flex; min-width: min(12em, 100%); flex: 1 1 12em; flex-direction: column; }");
     expect(css).toMatch(/\.diff-file-review-heading \{[^}]*flex-wrap: wrap;/u);
+  });
+});
+
+describe("shell chrome and sidebar motion", () => {
+  const motionBlocks = [...css.matchAll(/@media \(min-width: 761px\) and \(prefers-reduced-motion: no-preference\) \{\n([\s\S]*?)\n\}\n/gu)]
+    .map(([, body]) => body!).join("\n");
+
+  it("continues the 48px header hairline across the sidebar resize gutter", () => {
+    expect(block(".workspace-header")).toContain("height: 48px;");
+    expect(block(".workspace-header")).toContain("border-bottom: 1px solid var(--line-soft);");
+    expect(block(".sidebar-resize-handle")).toContain("background: linear-gradient(var(--line-soft), var(--line-soft)) 0 47px / 100% 1px no-repeat;");
+  });
+
+  it("glides the sidebar column only while a collapse or expansion is marked, never while resizing", () => {
+    expect(block(".app-shell")).not.toContain("transition");
+    expect(motionBlocks).toMatch(/\.app-shell\[data-sidebar-collapse\] \{\n    transition: grid-template-columns var\(--dur-slow\) var\(--ease\);/u);
+    expect(motionBlocks).toMatch(/\.app-shell\[data-sidebar-collapse\] \.sidebar \{[^}]*width: var\(--sidebar-open-width\);[^}]*justify-self: unsafe end;[^}]*transition: opacity var\(--dur\) var\(--ease-fade\);/u);
+    expect(motionBlocks).toMatch(/\.app-shell\[data-sidebar-collapse="collapsing"\] \.sidebar \{\n    opacity: 0;/u);
+    expect(motionBlocks).toMatch(/@starting-style \{\n    \.app-shell\[data-sidebar-collapse="expanding"\] \.sidebar \{\n      opacity: 0;/u);
+    expect(css).not.toMatch(/is-resizing-vertical[^{]*\{[^}]*transition/u);
+  });
+
+  it("brings the light up and lifts the first eight work rows once per launch, only with motion allowed", () => {
+    expect(motionBlocks).toContain(".app-shell[data-app-intro] .sidebar-aurora {\n    animation: app-intro-light 900ms var(--ease) 120ms both;");
+    expect(motionBlocks).toMatch(/\.app-shell\[data-app-intro\] \.activity-thread-stream > :nth-child\(-n \+ 8\) \{\n    animation: app-intro-row 240ms var\(--ease\) 160ms both;\n    animation-delay: calc\(160ms \+ \(sibling-index\(\) - 1\) \* var\(--stagger\)\);/u);
+    expect(css).toMatch(/@keyframes app-intro-light \{\n  from \{ opacity: 0; \}/u);
+    expect(css).toMatch(/@keyframes app-intro-row \{\n  from \{\n    opacity: 0;\n    translate: 0 4px;/u);
+    expect(css.split("data-app-intro").length).toBe(motionBlocks.split("data-app-intro").length);
+    expect(css.split("data-sidebar-collapse").length).toBe(motionBlocks.split("data-sidebar-collapse").length);
   });
 });

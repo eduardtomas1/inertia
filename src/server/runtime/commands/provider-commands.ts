@@ -10,6 +10,7 @@ import type { ProviderManager } from "../../providers";
 import { PROVIDER_IDS } from "../../providers";
 import type { TerminalManager } from "../../terminal";
 import { RuntimeRequestError } from "../../runtime-errors";
+import type { ManualUsageRefreshOutcome } from "../provider-usage-refresh";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -26,6 +27,7 @@ export interface ProviderCommandDependencies {
     refreshEnvironment?: boolean,
     forceMetadata?: boolean,
   ): Promise<void>;
+  refreshProviderUsage(providerId: ProviderInfo["id"]): Promise<ManualUsageRefreshOutcome>;
   send(socket: WebSocket, event: ServerEvent): void;
 }
 
@@ -51,7 +53,21 @@ export function createProviderCommandHandler(
           snapshot: dependencies.currentSnapshot(),
         });
         return "handled";
-      case "provider.refresh":
+      case "provider.refresh": {
+        const { providerId, scope } = command.payload;
+        const usage = scope === "usage" && providerId
+          ? await dependencies.refreshProviderUsage(providerId)
+          : "unsupported";
+        if (usage === "failed") {
+          throw new RuntimeRequestError("The provider did not report usage. Try again in a moment.");
+        }
+        if (usage === "updated") {
+          dependencies.send(socket, {
+            type: "request.ok",
+            requestId: command.requestId,
+          });
+          return "handled";
+        }
         await dependencies.refreshProviderInfo(
           command.payload.providerId,
           true,
@@ -68,6 +84,7 @@ export function createProviderCommandHandler(
           requestId: command.requestId,
         });
         return "handled";
+      }
       case "provider.auth.start": {
         const launch = await dependencies.providers.authLaunch(
           command.payload.providerId,

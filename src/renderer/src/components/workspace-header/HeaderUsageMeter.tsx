@@ -1,10 +1,12 @@
 import { useEffect, useId, useState, type CSSProperties } from "react";
 
+import { useQuotaNow } from "../../hooks/useQuotaNow";
 import type { EnvironmentUsageSummary } from "../../utils/environmentSummary";
 import {
   clampRemainingPercent,
   HEADER_METER_LOW_REMAINING_PERCENT,
   headerUsageMeterModel,
+  isQuotaResetDue,
   quotaResetLabel,
   quotaWindowLabel,
 } from "../../utils/headerUsageMeter";
@@ -18,12 +20,12 @@ export function HeaderUsageMeter({
 }): React.JSX.Element | null {
   const popoverId = useId();
   const [open, setOpen] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
-  const model = headerUsageMeterModel(usage);
+  const [now, setNow] = useQuotaNow(usage?.quota.limits ?? []);
+  const model = headerUsageMeterModel(usage, now);
   useEffect(() => {
     if (!open) return;
     setNow(Date.now());
-  }, [open]);
+  }, [open, setNow]);
   if (!model || !usage) return null;
   const bars = [model.primary, model.secondary].filter(
     (limit): limit is NonNullable<typeof limit> => limit !== null,
@@ -54,14 +56,18 @@ export function HeaderUsageMeter({
         }}
       >
         <span className="header-usage-meter-bars" aria-hidden="true">
-          {bars.map((limit) => (
-            <i
-              key={limit.id}
-              data-low={limit.remainingPercent < HEADER_METER_LOW_REMAINING_PERCENT || undefined}
-            >
-              <b style={{ "--meter-value": `${clampRemainingPercent(limit.remainingPercent)}%` } as CSSProperties} />
-            </i>
-          ))}
+          {bars.map((limit) => {
+            const resetDue = isQuotaResetDue(limit, now);
+            return (
+              <i
+                key={limit.id}
+                data-low={(!resetDue && limit.remainingPercent < HEADER_METER_LOW_REMAINING_PERCENT) || undefined}
+                data-reset-due={resetDue || undefined}
+              >
+                <b style={{ "--meter-value": `${resetDue ? 100 : clampRemainingPercent(limit.remainingPercent)}%` } as CSSProperties} />
+              </i>
+            );
+          })}
         </span>
         <span aria-hidden="true">{model.valueLabel}</span>
       </button>
@@ -75,17 +81,19 @@ export function HeaderUsageMeter({
           </span>
           {model.limits.map((limit) => {
             const window = quotaWindowLabel(limit.windowMinutes);
+            const resetDue = isQuotaResetDue(limit, now);
             return (
               <span
                 className="header-usage-popover-row"
                 key={limit.id}
-                data-low={limit.remainingPercent < HEADER_METER_LOW_REMAINING_PERCENT || undefined}
+                data-low={(!resetDue && limit.remainingPercent < HEADER_METER_LOW_REMAINING_PERCENT) || undefined}
+                data-reset-due={resetDue || undefined}
               >
                 <span>
                   {window ? `${window.slice(0, 1).toUpperCase()}${window.slice(1)} limit` : limit.label}
                   <small>{quotaResetLabel(limit.resetsAt, now)}</small>
                 </span>
-                <b>{clampRemainingPercent(limit.remainingPercent)}% left</b>
+                <b>{resetDue ? "Reset" : `${clampRemainingPercent(limit.remainingPercent)}% left`}</b>
               </span>
             );
           })}

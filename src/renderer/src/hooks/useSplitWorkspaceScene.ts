@@ -88,6 +88,7 @@ interface SplitWorkspaceActions
     | "updateSettings"
     | "chooseCodexBinary"
     | "refreshProvider"
+    | "refreshUsage"
     | "connectProvider"
     | "openProviderSetup"
     | "openBackendSetup"

@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { Gauge, RefreshCw, Users } from "lucide-react";
 
 import type { EnvironmentUsageSummary } from "../utils/environmentSummary";
@@ -7,24 +7,33 @@ import { formatUpdatedAge } from "../utils/quotaAge";
 import {
   clampRemainingPercent,
   HEADER_METER_LOW_REMAINING_PERCENT,
+  isQuotaResetDue,
   quotaResetLabel,
   quotaWindowLabel,
 } from "../utils/headerUsageMeter";
+import { useQuotaNow } from "../hooks/useQuotaNow";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { useUsageLimitsContext } from "./usage-limits-state";
 import "./WorkspaceSurfaces.css";
 
 export interface UsageSurfaceProps {
   usage: EnvironmentUsageSummary | null;
-  onRefreshUsage?: () => void;
+  onRefreshUsage?: () => Promise<void> | void;
   onOpenUsageView?: () => void;
+}
+
+interface RefreshAttempt {
+  providerId: EnvironmentUsageSummary["providerId"];
+  updatedAt: string | null;
+  status: "pending" | "failed";
 }
 
 function freshnessLabel(
   quota: EnvironmentUsageSummary["quota"],
+  freshness: EnvironmentUsageSummary["quota"]["freshness"],
   now: number,
 ): string {
-  const { freshness, source } = quota;
+  const { source } = quota;
   if (source === "api-key") return "Not available for API keys";
   if (source === "isolated") return "Unavailable for this backend";
   if (freshness === "current") return "Current";
@@ -46,12 +55,34 @@ export function UsageSurface({
   onOpenUsageView,
 }: UsageSurfaceProps): React.JSX.Element {
   const usageLimits = useUsageLimitsContext();
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const [now] = useQuotaNow(usage?.quota.limits ?? []);
+  const [attempt, setAttempt] = useState<RefreshAttempt | null>(null);
   const context = usage?.context ?? null;
+  const providerId = usage?.providerId ?? null;
+  const updatedAt = usage?.quota.updatedAt ?? null;
+  const ownAttempt = attempt?.providerId === providerId
+    && usage?.quota.source === "selected-route"
+    ? attempt
+    : null;
+  const pending = ownAttempt?.status === "pending";
+  const failed = ownAttempt?.status === "failed" && ownAttempt.updatedAt === updatedAt;
+  const freshness = pending ? "refreshing" : usage?.quota.freshness ?? "unavailable";
+  const refreshUsage = (): void => {
+    if (!onRefreshUsage || pending) return;
+    const target = { providerId, updatedAt };
+    setAttempt({ ...target, status: "pending" });
+    void new Promise<void>((resolve) => resolve(onRefreshUsage()))
+      .then(
+        () => setAttempt((current) => (
+          current?.providerId === target.providerId ? null : current
+        )),
+        () => setAttempt((current) => (
+          current?.providerId === target.providerId
+            ? { ...target, status: "failed" }
+            : current
+        )),
+      );
+  };
   return (
     <section className="workspace-surface usage-surface" aria-label="Usage">
       <div className="workspace-surface-scroll">
@@ -60,8 +91,8 @@ export function UsageSurface({
             <header className="workspace-surface-heading">
               <ProviderBrandIcon providerId={usage.providerId} decorative size={14} />
               <h3 title={usage.providerLabel}>{usage.providerLabel}</h3>
-              <small data-freshness={usage.quota.freshness}>
-                {freshnessLabel(usage.quota, now)}
+              <small data-freshness={freshness}>
+                {freshnessLabel(usage.quota, freshness, now)}
               </small>
             </header>
             {usage.quota.limits.length > 0 ? (
@@ -69,17 +100,19 @@ export function UsageSurface({
                 {usage.quota.limits.map((limit) => {
                   const remaining = clampRemainingPercent(limit.remainingPercent);
                   const window = quotaWindowLabel(limit.windowMinutes);
+                  const resetDue = isQuotaResetDue(limit, now);
                   return (
                     <li
                       key={limit.id}
-                      data-low={limit.remainingPercent < HEADER_METER_LOW_REMAINING_PERCENT || undefined}
+                      data-low={(!resetDue && limit.remainingPercent < HEADER_METER_LOW_REMAINING_PERCENT) || undefined}
+                      data-reset-due={resetDue || undefined}
                     >
                       <span className="usage-surface-limit-row">
                         <span>
                           {limit.label}
                           {window && <small>{capitalized(window)}</small>}
                         </span>
-                        <b>{remaining}% left</b>
+                        <b>{resetDue ? "Reset" : `${remaining}% left`}</b>
                       </span>
                       <span
                         className="usage-surface-track"
@@ -87,10 +120,10 @@ export function UsageSurface({
                         aria-label={`${limit.label} remaining`}
                         aria-valuemin={0}
                         aria-valuemax={100}
-                        aria-valuenow={remaining}
-                        aria-valuetext={`${remaining}% left`}
+                        aria-valuenow={resetDue ? undefined : remaining}
+                        aria-valuetext={resetDue ? "Reset due, usage not yet updated" : `${remaining}% left`}
                       >
-                        <i style={{ "--usage-remaining": `${remaining}%` } as CSSProperties} />
+                        <i style={{ "--usage-remaining": `${resetDue ? 100 : remaining}%` } as CSSProperties} />
                       </span>
                       <small>{quotaResetLabel(limit.resetsAt, now)}</small>
                     </li>
@@ -99,7 +132,7 @@ export function UsageSurface({
               </ul>
             ) : (
               <p className="workspace-surface-empty">
-                {usage.quota.freshness === "refreshing"
+                {freshness === "refreshing"
                   ? "Refreshing provider limits…"
                   : usage.quota.source === "api-key"
                     ? API_KEY_USAGE_UNAVAILABLE
@@ -110,16 +143,24 @@ export function UsageSurface({
             )}
             {onRefreshUsage
               && usage.quota.source === "selected-route"
-              && usage.quota.freshness !== "current" && (
-              <button
-                type="button"
-                className="workspace-surface-button"
-                onClick={onRefreshUsage}
-                disabled={usage.quota.freshness === "refreshing"}
-              >
-                <RefreshCw size={14} aria-hidden="true" />
-                <span>{usage.quota.freshness === "refreshing" ? "Refreshing" : "Refresh usage"}</span>
-              </button>
+              && (usage.quota.freshness !== "current" || pending) && (
+              <div className="usage-surface-refresh">
+                <button
+                  type="button"
+                  className="workspace-surface-button"
+                  onClick={refreshUsage}
+                  disabled={freshness === "refreshing"}
+                  data-refreshing={freshness === "refreshing" || undefined}
+                >
+                  <RefreshCw size={14} aria-hidden="true" />
+                  <span>{freshness === "refreshing" ? "Refreshing…" : "Refresh usage"}</span>
+                </button>
+                {failed && (
+                  <small className="usage-surface-refresh-note" role="status">
+                    Could not refresh. Showing cached usage.
+                  </small>
+                )}
+              </div>
             )}
           </>
         ) : (

@@ -25,6 +25,18 @@ The useful changes in each Inertia release, in plain language.
   its prompt cache for **1 hour** instead of 5 minutes. It costs more to write
   and less to resume after a break.
 
+### Usage
+
+- **Refresh usage** in the Usage panel answers in a second or two: it reads only
+  the provider's quota instead of checking the CLI again first. The button
+  says **Refreshing…** while it waits, and a failed read now says so instead
+  of doing nothing.
+- Claude quota stays current during long sessions. It is read while turns are
+  running whenever it would otherwise go stale, and a few seconds after each
+  reset.
+- A window whose reset has passed shows **Reset** with a muted bar until new
+  quota arrives, instead of the old percentage.
+
 ### Performance
 
 - Deleting a chat or project no longer stalls the app for seconds on a large

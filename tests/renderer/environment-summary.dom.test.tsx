@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -264,7 +265,10 @@ async function openRunMenu(): Promise<HTMLElement> {
 }
 
 describe("Environment content in its workspace surfaces", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
   beforeEach(() => {
     window.localStorage.clear();
     vi.stubGlobal("matchMedia", () => ({
@@ -351,6 +355,8 @@ describe("Environment content in its workspace surfaces", () => {
   });
 
   it("shows every provider limit with its window, reset and this chat's context in Usage", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-12T10:00:00.000Z"));
     render(<UsageSurface usage={summary.usage} onRefreshUsage={vi.fn()} />);
     const usage = screen.getByRole("region", { name: "Usage" });
     expect(within(usage).getByRole("heading", { name: "Codex" })).toBeVisible();
@@ -363,6 +369,79 @@ describe("Environment content in its workspace surfaces", () => {
     // visually hidden text instead of an aria-label on a generic element.
     expect(within(usage).getByText("Context 72% remaining").closest("b")).toHaveTextContent("72%");
     expect(within(usage).queryByRole("button", { name: "Refresh usage" })).not.toBeInTheDocument();
+  });
+
+  it("shows a window whose reset has passed as reset instead of its old percentage", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-08-12T12:00:05.000Z"));
+      render(
+        <UsageSurface
+          usage={{
+            ...summary.usage!,
+            quota: {
+              ...summary.usage!.quota,
+              limits: [{ ...summary.usage!.quota.limits[0]!, remainingPercent: 12 }],
+            },
+          }}
+        />,
+      );
+      const meter = screen.getByRole("meter", { name: "Five-hour limit remaining" });
+      expect(meter).not.toHaveAttribute("aria-valuenow");
+      expect(meter).toHaveAttribute("aria-valuetext", "Reset due, usage not yet updated");
+      expect(screen.getByText("Reset")).toBeVisible();
+      expect(screen.getByText("Reset due · updating")).toBeVisible();
+      expect(screen.queryByText("12% left")).not.toBeInTheDocument();
+      expect(meter.closest("li")).not.toHaveAttribute("data-low");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("switches a window to reset at its reset time without waiting for the minute tick", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-08-12T11:59:50.000Z"));
+    render(<UsageSurface usage={summary.usage} />);
+    expect(screen.getByText("64% left")).toBeVisible();
+    act(() => { vi.advanceTimersByTime(10_100); });
+    expect(screen.getByText("Reset")).toBeVisible();
+    expect(screen.getByText("Reset due · updating")).toBeVisible();
+  });
+
+  it("shows a manual usage refresh as pending and reports a failed one", async () => {
+    let settle: { resolve: () => void; reject: (error: Error) => void } | null = null;
+    const onRefreshUsage = vi.fn(() => new Promise<void>((resolve, reject) => {
+      settle = { resolve, reject };
+    }));
+    const stale = {
+      ...summary.usage!,
+      quota: { ...summary.usage!.quota, freshness: "stale" as const },
+    };
+    const view = render(<UsageSurface usage={stale} onRefreshUsage={onRefreshUsage} />);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
+    expect(onRefreshUsage).toHaveBeenCalledOnce();
+    const pending = screen.getByRole("button", { name: "Refreshing…" });
+    expect(pending).toBeDisabled();
+    expect(screen.getByText("Refreshing")).toBeVisible();
+    fireEvent.click(pending);
+    expect(onRefreshUsage).toHaveBeenCalledOnce();
+
+    await act(async () => settle!.reject(new Error("The provider did not report usage.")));
+    expect(await screen.findByRole("status")).toHaveTextContent("Could not refresh. Showing cached usage.");
+    expect(screen.getByRole("button", { name: "Refresh usage" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await act(async () => settle!.resolve());
+    view.rerender(
+      <UsageSurface
+        usage={{ ...stale, quota: { ...stale.quota, freshness: "current", updatedAt: "2026-08-12T10:05:00.000Z" } }}
+        onRefreshUsage={onRefreshUsage}
+      />,
+    );
+    expect(screen.getByText("Current")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Refresh/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("shows current, stale, refreshing, and unavailable Usage without inventing quota", () => {
@@ -400,7 +479,7 @@ describe("Environment content in its workspace surfaces", () => {
       />,
     );
     expect(screen.getByText("Refreshing provider limits…")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Refreshing" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refreshing…" })).toBeDisabled();
 
     view.rerender(
       <UsageSurface

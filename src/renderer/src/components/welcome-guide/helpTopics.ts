@@ -338,7 +338,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Limits",
-        detail: "Each provider shows the remaining quota for every reported window with a countdown to its reset. A window shows Reset due until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset. Refresh limits asks the providers right away.",
+        detail: "Each provider shows the remaining quota for every reported window with a countdown to its reset. A window whose reset has passed shows Reset due · updating until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset, even during a running turn. Refresh limits asks the providers right away.",
         jump: "Open Usage",
       },
       {

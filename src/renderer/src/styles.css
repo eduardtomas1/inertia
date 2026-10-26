@@ -1577,6 +1577,10 @@ button.header-breadcrumb-project:hover {
   background: var(--warning);
 }
 
+.header-usage-meter-bars > i[data-reset-due] > b {
+  background: color-mix(in srgb, var(--text-muted) 35%, transparent);
+}
+
 .header-usage-popover {
   position: absolute;
   z-index: 60;
@@ -1623,6 +1627,10 @@ button.header-breadcrumb-project:hover {
 .header-usage-popover-row[data-low] b,
 .header-usage-popover-title small {
   color: var(--warning);
+}
+
+.header-usage-popover-row[data-reset-due] b {
+  color: var(--text-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {

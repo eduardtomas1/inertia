@@ -134,6 +134,31 @@
   background: var(--text-muted);
 }
 
+.usage-surface-limits > li[data-reset-due] .usage-surface-limit-row b {
+  color: var(--text-muted);
+}
+
+.usage-surface-limits > li[data-reset-due] .usage-surface-track > i {
+  background: color-mix(in srgb, var(--text-muted) 35%, transparent);
+  transition: none;
+}
+
+.usage-surface-refresh {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.workspace-surface-button[data-refreshing] svg {
+  animation: spin 800ms linear infinite;
+}
+
+.usage-surface-refresh-note {
+  color: var(--warning);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}
+
 .workspace-surface-actions {
   display: flex;
   flex-wrap: wrap;
@@ -227,5 +252,9 @@
   .usage-surface-track > i,
   .workspace-surface-button {
     transition: none;
+  }
+
+  .workspace-surface-button[data-refreshing] svg {
+    animation: none;
   }
 }

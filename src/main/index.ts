@@ -908,7 +908,7 @@ function runPrivilegedCleanup(): Promise<boolean> {
     throw error; });
   privilegedCleanup = tracked; return tracked;
 }
-async function bootstrap(): Promise<void> {
+async function bootstrap(safetyAssets: ReturnType<typeof resolveDesktopRuntimeProcessSafetyAssets>): Promise<void> {
   installApplicationMenu();
   runtimeDiagnostics = openRuntimeDiagnostics(app.getPath("userData"));
   setDiagnosticsReportSource(() => runtimeDiagnostics);
@@ -966,7 +966,7 @@ async function bootstrap(): Promise<void> {
   });
   const dataDirectory = configuredRuntimeDataDirectory();
   runtimeDataDirectory = dataDirectory;
-  const { runtimeProcessGuardianPath, windowsRuntimeJobAssembly } = resolveDesktopRuntimeProcessSafetyAssets();
+  const { runtimeProcessGuardianPath, windowsRuntimeJobAssembly } = safetyAssets;
   // Prime the verified launch broker before the short recovery deadline.
   if (windowsRuntimeJobAssembly) await prepareWindowsRuntimeJobExecutableLock(windowsRuntimeJobAssembly);
   const {
@@ -1207,14 +1207,13 @@ const launchRequests = new LaunchRequestQueue(() => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.launchRequestAvailable);
 });
 launchRequests.add(newChatLaunchRequest(process.argv, process.cwd()));
-void (detachedRelaunch ? relaunchDetached(detachedRelaunch, process.env, process.cwd()) : Promise.resolve(false)).then((detached) => detached ? app.exit(0) : startApplicationWithUpdateHandoff({
+void (detachedRelaunch ? relaunchDetached(detachedRelaunch, process.env, process.cwd()) : Promise.resolve(false)).then((detached) => detached ? null : resolveDesktopRuntimeProcessSafetyAssets()).then((safetyAssets) => !safetyAssets ? app.exit(0) : startApplicationWithUpdateHandoff({
   application: app, platform: process.platform, environment: process.env,
   channel: releaseChannel.channel, version: app.getVersion(),
   executablePath: process.execPath, dataDirectory: configuredRuntimeDataDirectory(),
   profileDirectory: app.getPath("userData"), focusMainWindow,
   onSecondInstance: (argv, workingDirectory) => launchRequests.add(newChatLaunchRequest(argv, workingDirectory)),
-  runtimeProcessGuardianPath: resolveDesktopRuntimeProcessSafetyAssets()
-    .runtimeProcessGuardianPath,
+  runtimeProcessGuardianPath: safetyAssets.runtimeProcessGuardianPath,
   updateInstallCoordinator: () => appUpdateInstallCoordinator,
   recordBeforeQuit: () => recordPackageSmokeStage("before-quit"),
   cleanupBeforeQuit: runPrivilegedCleanup,
@@ -1223,7 +1222,7 @@ void (detachedRelaunch ? relaunchDetached(detachedRelaunch, process.env, process
   reportSingletonContention: lifecycleNotices.reportSingletonContention,
   reportCleanupFailure: (error) => reportMainFailure("privileged-shutdown-failed", "Failed to finish privileged shutdown", error),
   validateCandidateBootstrap: async (operationId, expectedActiveRuntimeOwner) => await validateDesktopAppUpdateCandidate({ operationId, dataDirectory: configuredRuntimeDataDirectory(), expectedActiveRuntimeOwner }),
-  bootstrap,
+  bootstrap: async () => await bootstrap(safetyAssets),
   awaitCandidateReadiness: async () => await appUpdateRuntimeReadiness.wait(),
   cleanupFailedCandidate: runPrivilegedCleanup,
   reportCandidateFailure: (message, error) => reportMainFailure("app-update-candidate-failed", message, error),

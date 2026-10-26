@@ -4,6 +4,11 @@ import { describe, expect, it } from "vitest";
 
 import type { WorkspaceEntry } from "../src/shared/contracts";
 import {
+  createReasoningLinesReader,
+  reasoningLines,
+  type ReasoningLine,
+} from "../src/renderer/src/utils/reasoningSummary";
+import {
   isSafeWorkspaceEntryPath,
   sortWorkspaceEntries,
   workspacePathName,
@@ -65,7 +70,69 @@ function workspaceFixture(): WorkspaceEntry[] {
   }));
 }
 
+function reasoningFixture(characters: number): string {
+  const sentence = "I need to inspect the projection hook and check whether the memo hits. ";
+  let content = "";
+  for (let section = 0; content.length < characters; section += 1) {
+    content += `**Step ${section}: checking the module**\n\n${sentence.repeat(6)}\n\n`;
+  }
+  return content.slice(0, characters);
+}
+
+const REASONING_CHUNK = 6;
+const REASONING_CHUNKS = 400;
+
+function reasoningChunkMs(
+  characters: number,
+  createParse: () => (content: string) => ReasoningLine[],
+): number {
+  const full = reasoningFixture(characters);
+  const base = full.slice(0, characters - REASONING_CHUNK * REASONING_CHUNKS);
+  const chunks = Array.from({ length: REASONING_CHUNKS }, (_, index) => full.slice(
+    base.length + index * REASONING_CHUNK,
+    base.length + (index + 1) * REASONING_CHUNK,
+  ));
+  const samples = Array.from({ length: 9 }, () => {
+    const parse = createParse();
+    let content = base;
+    parse(content);
+    const startedAt = performance.now();
+    for (const chunk of chunks) {
+      content = `${content}${chunk}`;
+      parse(content);
+    }
+    return (performance.now() - startedAt) / REASONING_CHUNKS;
+  }).sort((left, right) => left - right);
+  return samples[Math.floor(samples.length / 2)]!;
+}
+
 describe("renderer primitive benchmark", () => {
+  it("keeps the live thinking line's per-chunk parse flat as reasoning grows", () => {
+    const rows = [
+      ["full reparse", () => reasoningLines],
+      ["incremental reader", createReasoningLinesReader],
+      ["append and find the last line", () => (content: string) => {
+        content.lastIndexOf("\n");
+        return [];
+      }],
+    ] as const;
+    const measurements = rows.map(([mode, createParse]) => {
+      const smallMs = reasoningChunkMs(5_000, createParse);
+      const largeMs = reasoningChunkMs(60_000, createParse);
+      return { mode, smallMs, largeMs, ratio: largeMs / smallMs };
+    });
+
+    console.table(measurements.map((measurement) => ({
+      case: `${REASONING_CHUNK}-character reasoning chunk`,
+      mode: measurement.mode,
+      "5 KB median ms": measurement.smallMs.toFixed(4),
+      "60 KB median ms": measurement.largeMs.toFixed(4),
+      "60 KB / 5 KB": measurement.ratio.toFixed(2),
+    })));
+    expect(measurements[1]!.ratio).toBeLessThan(3);
+    expect(measurements[0]!.ratio).toBeGreaterThan(5);
+  });
+
   it("compares per-comparison locale setup with a reusable collator", () => {
     const entries = workspaceFixture();
     expect(sortWorkspaceEntries(entries))

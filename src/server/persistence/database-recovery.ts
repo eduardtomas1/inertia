@@ -827,6 +827,7 @@ export class DatabaseBackupManager {
   private automaticObservedOperation: Promise<DatabaseBackupResult> | null = null;
   private readonly pendingAutomaticTriggers = new Set<AutomaticBackupTrigger>();
   private lastPublicationAt = Number.NEGATIVE_INFINITY;
+  private publishedChanges: string | null = null;
   private quietUntil = 0;
   private retryNotBefore = 0;
   private pendingInitial:
@@ -945,6 +946,7 @@ export class DatabaseBackupManager {
 
   private async createBackupOnce(signal: AbortSignal): Promise<DatabaseBackupResult> {
     if (!this.database.open) throw new Error("The database is closed.");
+    const changes = this.changeMarker();
     const paths = databaseRecoveryPaths(this.databasePath);
     ensureOwnedDirectory(paths.backupsDirectory);
     cleanInterruptedFiles(paths.databasePath);
@@ -991,6 +993,7 @@ export class DatabaseBackupManager {
       };
       this.lastValidatedAt = result.createdAt;
       this.lastPublicationAt = Date.now();
+      this.publishedChanges = changes;
       this.initialBackupComplete = true;
       this.initialEligible = false;
       this.automaticRetryAttempt = 0;
@@ -1057,6 +1060,8 @@ export class DatabaseBackupManager {
     if (!this.started) return;
     if (trigger === "initial" && this.initialBackupComplete) return;
     if (Date.now() - this.lastPublicationAt < this.quietGraceMs()) return;
+    if (trigger === "hourly" && this.publishedChanges !== null
+      && this.publishedChanges === this.changeMarker()) return;
     if (this.pendingAutomaticTriggers.size === 0 && trigger !== "retry") {
       this.automaticRetryAttempt = 0;
       this.retryNotBefore = 0;
@@ -1164,6 +1169,16 @@ export class DatabaseBackupManager {
     if (this.automaticTimer) clearTimeout(this.automaticTimer);
     this.automaticTimer = null;
     this.automaticTimerDeadline = 0;
+  }
+
+  private changeMarker(): string | null {
+    try {
+      const dataVersion = this.database.pragma("data_version", { simple: true });
+      const totalChanges = this.database.prepare("SELECT total_changes()").pluck().get();
+      return `${dataVersion}:${totalChanges}`;
+    } catch {
+      return null;
+    }
   }
 
   private quietGraceMs(): number {

@@ -90,20 +90,30 @@ export function sidebarThreadView(
   );
 }
 
+const previousViews = new WeakMap<
+  readonly SidebarConversation[],
+  readonly [activeConversationId: string | null, views: ReadonlyMap<string, SidebarThreadView>]
+>();
+
 export function sidebarThreadViewMap(
   conversations: readonly SidebarConversation[],
   activeConversationId: string | null,
   runs: readonly WorkspaceRun[] = [],
 ): ReadonlyMap<string, SidebarThreadView> {
   const runsByConversation = indexConversationWorkspaceRuns(runs);
-  return new Map(conversations.map((conversation) => [
-    conversation.id,
-    sidebarThreadViewForRun(
-      conversation,
-      activeConversationId,
-      runsByConversation.get(conversation.id) ?? null,
-    ),
-  ]));
+  const [previousActiveConversationId, previous] = previousViews.get(conversations) ?? [];
+  const prior = previousActiveConversationId === activeConversationId ? previous : undefined;
+  let reused = prior !== undefined;
+  const views = new Map(conversations.map((conversation) => {
+    const run = runsByConversation.get(conversation.id) ?? null;
+    const view = prior?.get(conversation.id);
+    if (view?.run === run) return [conversation.id, view];
+    reused = false;
+    return [conversation.id, sidebarThreadViewForRun(conversation, activeConversationId, run)];
+  }));
+  const result = reused ? prior! : views;
+  previousViews.set(conversations, [activeConversationId, result]);
+  return result;
 }
 
 const statusPriority: Record<SidebarThreadStatus, number> = {
@@ -153,23 +163,13 @@ export function sortSidebarThreadViews(
     ));
 }
 
-function localCalendarDayOffset(value: string, now: number): number {
+function localCalendarDayStart(value: number | string): number {
   const date = new Date(value);
-  const current = new Date(now);
-  if (!Number.isFinite(date.getTime()) || !Number.isFinite(current.getTime())) {
-    return Number.POSITIVE_INFINITY;
-  }
-  const dateDay = new Date(
+  return new Date(
     date.getFullYear(),
     date.getMonth(),
     date.getDate(),
   ).getTime();
-  const currentDay = new Date(
-    current.getFullYear(),
-    current.getMonth(),
-    current.getDate(),
-  ).getTime();
-  return Math.round((currentDay - dateDay) / 86_400_000);
 }
 
 export function groupWorkThreads(
@@ -208,34 +208,41 @@ export function groupWorkThreads(
     && !needsAttention
     && status !== "working"
   );
-  const snoozed = threads.filter(isOrdinarilySnoozed);
-  const active = threads.filter((thread) => (
-    !thread.settled && !thread.hidden && !isOrdinarilySnoozed(thread)
-  ));
-  const done = threads.filter((thread) => (
-    thread.settled && !thread.hidden && !isOrdinarilySnoozed(thread)
-  ));
-  const dayOffset = ({ conversation }: SidebarThreadView) => (
-    localCalendarDayOffset(conversation.updatedAt, now)
-  );
-  const urgent = ({ needsAttention, status }: SidebarThreadView) => (
-    needsAttention || status === "working"
-  );
+  const currentDay = localCalendarDayStart(now);
+  const recent: SidebarThreadView[] = [];
+  const yesterday: SidebarThreadView[] = [];
+  const earlier: SidebarThreadView[] = [];
+  const done: SidebarThreadView[] = [];
+  const snoozed: SidebarThreadView[] = [];
+  for (const thread of threads) {
+    if (isOrdinarilySnoozed(thread)) snoozed.push(thread);
+    else if (thread.hidden) continue;
+    else if (thread.settled) done.push(thread);
+    else if (thread.needsAttention || thread.status === "working") recent.push(thread);
+    else {
+      const offset = Math.round(
+        (currentDay - localCalendarDayStart(thread.conversation.updatedAt)) / 86_400_000,
+      );
+      if (offset <= 0) recent.push(thread);
+      else if (offset === 1) yesterday.push(thread);
+      else earlier.push(thread);
+    }
+  }
   return [
     {
       id: "recent",
       label: "Recent",
-      threads: active.filter((thread) => urgent(thread) || dayOffset(thread) <= 0),
+      threads: recent,
     },
     {
       id: "yesterday",
       label: "Yesterday",
-      threads: active.filter((thread) => !urgent(thread) && dayOffset(thread) === 1),
+      threads: yesterday,
     },
     {
       id: "earlier",
       label: "Earlier",
-      threads: active.filter((thread) => !urgent(thread) && dayOffset(thread) > 1),
+      threads: earlier,
     },
     {
       id: "done",

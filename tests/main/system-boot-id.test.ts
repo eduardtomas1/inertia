@@ -1,5 +1,5 @@
 import type { SpawnSyncReturns } from "node:child_process";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   readSystemBootId,
@@ -31,6 +31,68 @@ function dependencies(
     ...overrides,
   };
 }
+
+describe("system boot identity for the default dependencies", () => {
+  afterEach(() => {
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+  });
+
+  async function importWithSpawn(spawnSync: ReturnType<typeof vi.fn>) {
+    vi.resetModules();
+    vi.doMock("node:child_process", async (importOriginal) => ({
+      ...await importOriginal<typeof import("node:child_process")>(),
+      spawnSync,
+    }));
+    return await import("../../src/main/system-boot-id");
+  }
+
+  it("probes the Darwin boot identity once per process", async () => {
+    const spawnSync = vi.fn(() => spawnResult("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA\n"));
+    const { readSystemBootId: read } = await importWithSpawn(spawnSync);
+
+    expect(read("darwin")).toBe("darwin:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    expect(read("darwin")).toBe("darwin:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    expect(spawnSync).toHaveBeenCalledOnce();
+  });
+
+  it("probes the Windows boot identity once per process", async () => {
+    const spawnSync = vi.fn(() => spawnResult(
+      "    BootId    REG_DWORD    0x2A\n",
+    ));
+    const environment = process.env;
+    process.env = { ...environment, SystemRoot: "C:\\Windows" };
+    try {
+      const { readSystemBootId: read } = await importWithSpawn(spawnSync);
+      expect(read("win32")).toBe("win32:0000002a");
+      expect(read("win32")).toBe("win32:0000002a");
+      expect(spawnSync).toHaveBeenCalledOnce();
+    } finally {
+      process.env = environment;
+    }
+  });
+
+  it("retries a failed probe instead of remembering the failure", async () => {
+    const spawnSync = vi.fn()
+      .mockReturnValueOnce(spawnResult("", 1))
+      .mockReturnValue(spawnResult("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA\n"));
+    const { readSystemBootId: read } = await importWithSpawn(spawnSync);
+
+    expect(read("darwin")).toBeNull();
+    expect(read("darwin")).toBe("darwin:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    expect(read("darwin")).toBe("darwin:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    expect(spawnSync).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps injected dependencies unmemoised", () => {
+    const spawn = vi.fn(() => spawnResult("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA\n"));
+    const injected = dependencies({ spawn });
+
+    readSystemBootId("darwin", injected);
+    readSystemBootId("darwin", injected);
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("system boot identity", () => {
   it("reads and canonicalizes the Linux kernel boot identity", () => {

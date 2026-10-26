@@ -30,9 +30,9 @@ linuxIt.each(["exec", "stop"] as const)(
     const terminalAuthority = linuxGuardian.linuxGuardianTerminalAuthority;
     let resumeMonitor = (): void => {};
     vi.spyOn(linuxGuardian, "monitorLinuxGuardianTerminal").mockImplementation((...args) => {
-      let stop = (): void => {};
+      let stop: (() => void) & { readonly wake?: () => void } = () => {};
       resumeMonitor = () => { stop = monitor(...args); };
-      return () => stop();
+      return Object.assign(() => stop(), { wake: () => stop.wake?.() });
     });
     vi.spyOn(linuxGuardian, "signalLinuxGuardianExactAsync").mockImplementation(async (...args) => {
       if (args[2] !== "exec") return signal(...args);

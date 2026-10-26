@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 import type { MessageQueueResult, QueuedMessage } from "@shared/queued-messages";
+import { isAgentTurnTerminalStatus, type AgentTurnStatus } from "@shared/turn-lifecycle";
 import { RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "./runtimeQueueClient";
 import { setRuntimeQueueLength } from "./runtimeQueueEvents";
 import { IconButton } from "../ui";
@@ -42,11 +43,14 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
   useEffect(() => {
     let current = true;
     let refused = false;
+    let read = false;
+    const turnActive = latestTurnStatus !== null && !isAgentTurnTerminalStatus(latestTurnStatus as AgentTurnStatus);
     const refresh = (): void => {
       if (refused || document.visibilityState === "hidden") return;
       const requestedRevision = revision.current;
       void loadQueue(onCommand, conversationId).then((result) => {
         if (current && revision.current === requestedRevision && document.visibilityState !== "hidden") {
+          read = true;
           updateQueue(result.entries);
           if (latestError.current !== null && result.entries[0]?.id !== errorEntry.current) setError(null);
         }
@@ -66,7 +70,9 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
     };
     window.addEventListener(RUNTIME_QUEUE_CHANGED, changed);
     document.addEventListener("visibilitychange", refresh);
-    const timer = window.setInterval(refresh, 10_000);
+    const timer = window.setInterval(() => {
+      if (!read || turnActive || queueSignature.current !== "[]") refresh();
+    }, 10_000);
     return () => { current = false; window.clearInterval(timer); window.removeEventListener(RUNTIME_QUEUE_CHANGED, changed); document.removeEventListener("visibilitychange", refresh); };
   }, [conversationId, onCommand, latestTurnId, latestTurnStatus, updateQueue]);
   const userQueued = queue.filter(({ watcherNote }) => !watcherNote).length;

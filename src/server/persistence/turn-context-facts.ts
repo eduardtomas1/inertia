@@ -77,15 +77,16 @@ function commandOutcome(providerId: ProviderId, status: string, detail: string |
 }
 
 export function lastTurnCommands(database: Database.Database, turnId: string): string[] {
-  const providerId = (database.prepare("SELECT provider_id FROM agent_turns WHERE id = ?")
-    .get(turnId) as { provider_id: ProviderId } | undefined)?.provider_id;
-  if (!providerId) return [];
+  const turn = database.prepare("SELECT conversation_id, provider_id FROM agent_turns WHERE id = ?")
+    .get(turnId) as { conversation_id: string; provider_id: ProviderId } | undefined;
+  if (!turn?.provider_id) return [];
+  const providerId = turn.provider_id;
   const rows = database.prepare(`
     SELECT title, detail, status FROM activities
-    WHERE turn_id = ? AND kind = 'command'
+    WHERE conversation_id = ? AND turn_id = ? AND kind = 'command'
     ORDER BY created_at DESC, rowid DESC
     LIMIT ?
-  `).all(turnId, COMMAND_ROWS) as Array<{ title: string; detail: string | null; status: string }>;
+  `).all(turn.conversation_id, turnId, COMMAND_ROWS) as Array<{ title: string; detail: string | null; status: string }>;
   const commands: string[] = [];
   let bytes = 2;
   for (const row of rows) {

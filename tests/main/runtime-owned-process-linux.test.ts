@@ -443,6 +443,169 @@ describe("Linux runtime process guardian", () => {
     vi.useRealTimers();
   });
 
+  linuxIt("observes long-lived payload exits within a fast poll of their output closing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-exit-latency-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const generation = "35000000-0000-4000-8000-000000000035:1";
+    const boot = "test:36000000-0000-4000-8000-000000000036";
+    const options = { platform: "linux" as const, darwinGuardianPath: guardian };
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, options);
+    const children = ["2.2", "2.37", "2.54"].map((seconds) => {
+      const invocation = runtimeOwnedProcessInvocation("/bin/sh", ["-c", `sleep ${seconds}; echo done`]);
+      return spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
+        detached: true, stdio: ["ignore", "pipe", "pipe"],
+      }));
+    });
+    try {
+      const delays = await Promise.all(children.map(async (child) => {
+        let outputClosedAt = 0;
+        child.stdout!.resume();
+        child.stderr!.resume();
+        child.stdout!.once("close", () => { outputClosedAt = performance.now(); });
+        const exitedAt = await new Promise<number>((resolve) => {
+          child.once("exit", () => resolve(performance.now()));
+        });
+        expect(child.exitCode).toBe(0);
+        expect(outputClosedAt).toBeGreaterThan(0);
+        return exitedAt - outputClosedAt;
+      }));
+      expect(Math.max(...delays)).toBeLessThan(200);
+      await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+      expect(new RuntimeOwnedProcessJournal(root, options).records(generation)).toEqual([]);
+    } finally {
+      for (const child of children) await stopChild(child);
+      deactivate?.();
+    }
+  }, 30_000);
+
+  it("polls a long-lived running guardian at the idle cadence after the spawn window", () => {
+    vi.useFakeTimers();
+    const readComm = vi.fn(() => "inertia-guard");
+    const stop = monitorLinuxGuardianTerminal({
+      pid: 123, parentPid: 1, processGroupId: 123, startTimeTicks: "456",
+      guardianExecutableDevice: "1", guardianExecutableInode: "2",
+    }, "/trusted/guardian", vi.fn(() => true), vi.fn(), {
+      readComm, terminalAuthority: () => true, release: () => true,
+    });
+    try {
+      vi.advanceTimersByTime(1_000);
+      expect(readComm).toHaveBeenCalledTimes(20);
+      vi.advanceTimersByTime(59_000);
+      expect(readComm.mock.calls.length).toBeLessThanOrEqual(140);
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("observes a terminal marker immediately when woken by a payload exit", () => {
+    vi.useFakeTimers();
+    let comm = "inertia-guard";
+    const onTerminal = vi.fn(() => true);
+    const stop = monitorLinuxGuardianTerminal({
+      pid: 123, parentPid: 1, processGroupId: 123, startTimeTicks: "456",
+      guardianExecutableDevice: "1", guardianExecutableInode: "2",
+    }, "/trusted/guardian", onTerminal, vi.fn(), {
+      readComm: () => comm, terminalAuthority: () => true, release: () => true,
+    });
+    try {
+      vi.advanceTimersByTime(30_250);
+      comm = "inertia-exdone";
+      stop.wake();
+      expect(onTerminal).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(0);
+      expect(onTerminal).toHaveBeenCalledWith(true);
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("polls fast for the spawn window after a wake, then returns to the idle cadence", () => {
+    vi.useFakeTimers();
+    let comm = "inertia-guard";
+    const readComm = vi.fn(() => comm);
+    const onTerminal = vi.fn(() => true);
+    const stop = monitorLinuxGuardianTerminal({
+      pid: 123, parentPid: 1, processGroupId: 123, startTimeTicks: "456",
+      guardianExecutableDevice: "1", guardianExecutableInode: "2",
+    }, "/trusted/guardian", onTerminal, vi.fn(), {
+      readComm, terminalAuthority: () => true, release: () => true,
+    });
+    try {
+      vi.advanceTimersByTime(30_250);
+      const beforeWake = readComm.mock.calls.length;
+      stop.wake();
+      stop.wake();
+      vi.advanceTimersByTime(0);
+      expect(readComm.mock.calls.length - beforeWake).toBe(1);
+      vi.advanceTimersByTime(1_000);
+      expect(readComm.mock.calls.length - beforeWake).toBe(21);
+      vi.advanceTimersByTime(2_000);
+      expect(readComm.mock.calls.length - beforeWake).toBe(25);
+      stop.wake();
+      vi.advanceTimersByTime(30);
+      comm = "inertia-exdone";
+      vi.advanceTimersByTime(19);
+      expect(onTerminal).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(onTerminal).toHaveBeenCalledWith(true);
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds unwoken terminal detection by the idle cadence", () => {
+    vi.useFakeTimers();
+    let comm = "inertia-guard";
+    const onTerminal = vi.fn(() => true);
+    const stop = monitorLinuxGuardianTerminal({
+      pid: 123, parentPid: 1, processGroupId: 123, startTimeTicks: "456",
+      guardianExecutableDevice: "1", guardianExecutableInode: "2",
+    }, "/trusted/guardian", onTerminal, vi.fn(), {
+      readComm: () => comm, terminalAuthority: () => true, release: () => true,
+    });
+    try {
+      vi.advanceTimersByTime(30_001);
+      comm = "inertia-done";
+      vi.advanceTimersByTime(500);
+      expect(onTerminal).toHaveBeenCalledWith(false);
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed after an unproved terminal marker persists for the same bound after idling", () => {
+    vi.useFakeTimers();
+    let comm = "inertia-guard";
+    const onFailure = vi.fn();
+    const terminalAuthority = vi.fn(() => false);
+    const stop = monitorLinuxGuardianTerminal({
+      pid: 123, parentPid: 1, processGroupId: 123, startTimeTicks: "456",
+      guardianExecutableDevice: "1", guardianExecutableInode: "2",
+    }, "/trusted/guardian", vi.fn(() => true), onFailure, {
+      readComm: () => comm, terminalAuthority, release: () => true,
+    });
+    try {
+      vi.advanceTimersByTime(30_000);
+      comm = "inertia-done";
+      stop.wake();
+      vi.advanceTimersByTime(0);
+      expect(terminalAuthority).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(900);
+      expect(onFailure).not.toHaveBeenCalled();
+      expect(terminalAuthority).toHaveBeenCalledTimes(19);
+      vi.advanceTimersByTime(50);
+      expect(terminalAuthority).toHaveBeenCalledTimes(20);
+      expect(onFailure).toHaveBeenCalledOnce();
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
+  });
+
   it("runs a delayed guardian helper without blocking the runtime event loop", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-linux-async-helper-")); roots.push(root);
     const helper = join(root, "guardian");

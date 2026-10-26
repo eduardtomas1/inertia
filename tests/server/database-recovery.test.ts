@@ -285,6 +285,53 @@ describe("database backup and startup recovery", () => {
     await manager.cancelAndWait();
   });
 
+  it("skips an hourly backup until this or another connection changes the database", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store, conversationId } = seed(databasePath);
+    store.close();
+    const live = new Database(databasePath);
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      {
+        open: true,
+        backup,
+        pragma: live.pragma.bind(live),
+        prepare: live.prepare.bind(live),
+      } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 60_000,
+        intervalMs: 1_000,
+        quietGraceMs: 1_000,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await manager.createBackup();
+    expect(backup).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(backup).toHaveBeenCalledTimes(1);
+    live.prepare("UPDATE conversations SET title = 'Changed here' WHERE id = ?").run(conversationId);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(backup).toHaveBeenCalledTimes(2);
+    const other = new Database(databasePath);
+    other.prepare("UPDATE conversations SET title = 'Changed elsewhere' WHERE id = ?").run(conversationId);
+    other.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).toHaveBeenCalledTimes(3);
+    await manager.createBackup();
+    expect(backup).toHaveBeenCalledTimes(4);
+    await manager.cancelAndWait();
+    live.close();
+  });
+
   it("keeps an hourly backup pending throughout recovery import", async () => {
     vi.useFakeTimers();
     const directory = temporaryDirectory();

@@ -1,3 +1,5 @@
+import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
+
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
 )[];
@@ -194,6 +196,12 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [99, "watcher_links_project_idx"],
     [99, "watcher_wakes_link_idx"],
     [100, "todos_project_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "activities_turn_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "messages_turn_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "agent_reasonings_turn_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "messages_conversation_created_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "activities_conversation_created_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "reasonings_conversation_created_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [

@@ -1,4 +1,4 @@
-import { stopExactLinuxGuardian } from "./runtime-owned-process-linux-stop.js";
+import { stopExactLinuxGuardian as signalExactLinuxGuardianStop } from "./runtime-owned-process-linux-stop.js";
 import {
   PROCESS_GROUP_EXIT_WAIT_MS,
   releaseActiveClaim,
@@ -90,6 +90,21 @@ export {
 export type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
 export type { RuntimeOwnedProcessInvocation } from "./runtime-owned-process-invocation.js";
 let activeRegistry: ActiveRuntimeOwnedProcessRegistry | null = null;
+const linuxMonitorWakes = new WeakMap<ActiveRuntimeOwnedProcessClaim, () => void>();
+
+function wakeLinuxMonitor(claim: ActiveRuntimeOwnedProcessClaim): void {
+  linuxMonitorWakes.get(claim)?.();
+}
+
+function stopExactLinuxGuardian(
+  registry: ActiveRuntimeOwnedProcessRegistry,
+  claim: ActiveRuntimeOwnedProcessClaim,
+  identity: LinuxProcessIdentity,
+  isCurrent: () => boolean,
+): Promise<boolean> {
+  wakeLinuxMonitor(claim);
+  return signalExactLinuxGuardianStop(registry, claim, identity, isCurrent);
+}
 
 export function activateRuntimeOwnedProcessRegistry(
   dataDirectory: string,
@@ -233,6 +248,7 @@ export function requestRuntimeOwnedGuardianStop(
   if (!claim || claim.released || !child.pid) return null;
   if (registry.platform === "linux") {
     claim.stopRequested = true;
+    wakeLinuxMonitor(claim);
     if (claim.admission) return claim.admission;
     if (claim.linuxIdentity && registry.darwinGuardianPath) {
       return stopExactLinuxGuardian(registry, claim, claim.linuxIdentity, () => activeRegistry === registry);
@@ -290,7 +306,7 @@ function monitorLinuxGuardian(
     stopMonitor = null;
     stop?.();
   };
-  stopMonitor = monitorLinuxGuardianTerminal(
+  const monitor = monitorLinuxGuardianTerminal(
     durableClaim.process,
     registry.darwinGuardianPath,
     (authorizationObserved) => {
@@ -331,6 +347,8 @@ function monitorLinuxGuardian(
       },
     },
   );
+  stopMonitor = monitor;
+  linuxMonitorWakes.set(claim, monitor.wake);
   claim.stopLinuxMonitor = stopTrackedMonitor;
   registry.activeLinuxMonitors.add(stopTrackedMonitor);
 }
@@ -705,6 +723,9 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
   }
   if (registry.platform === "linux") {
     registry.claims.set(child, claim);
+    const wakeOnPayloadOutputClose = (): void => wakeLinuxMonitor(claim);
+    child.stdout?.once("close", wakeOnPayloadOutputClose);
+    child.stderr?.once("close", wakeOnPayloadOutputClose);
     child.once("close", (code, signal) => {
       if (typeof signal === "string") {
         taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { ...guardianCloseDiagnostic("linux-guardian-close", signal, code), ...(claim.probe ? { probe: claim.probe } : {}) });
@@ -853,6 +874,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         requestGuardianStop: () => {
           if (claim.released) return true;
           claim.stopRequested = true;
+          wakeLinuxMonitor(claim);
           if (!claim.admission && claim.linuxIdentity && registry.darwinGuardianPath) {
             stopBarrier = stopExactLinuxGuardian(registry, claim, claim.linuxIdentity, () => activeRegistry === registry);
           }

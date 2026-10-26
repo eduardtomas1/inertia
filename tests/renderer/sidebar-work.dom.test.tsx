@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadThreadActions } from "../../src/renderer/src/components/sidebar/threadActionLoader";
 
@@ -19,6 +20,19 @@ import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
 import { WATCHED_ID, WATCHER_ID, link } from "./watcher-fixtures";
 import { resetWatcherDockStore, watcherDockStorageKey } from "../../src/renderer/src/hooks/useWatcherDock";
+import { applyConversationShellEvent } from "../../src/renderer/src/utils/runtimeSnapshotProjection";
+
+const workRenders = vi.hoisted(() => ({ statusCue: 0 }));
+vi.mock("../../src/renderer/src/components/sidebar/WorkStatusCue", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/renderer/src/components/sidebar/WorkStatusCue")>();
+  return {
+    ...actual,
+    WorkStatusCue: (props: Parameters<typeof actual.WorkStatusCue>[0]) => {
+      workRenders.statusCue += 1;
+      return actual.WorkStatusCue(props);
+    },
+  };
+});
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 beforeAll(async () => { await loadThreadActions(); });
@@ -135,6 +149,7 @@ function renderSidebar(
     detachedConversationIds?: ReadonlySet<string>;
     dailyWorkOpen?: boolean;
     view?: "workspace" | "settings" | "usage" | "tasks" | "home";
+    onRender?: () => void;
   } = {},
 ) {
   const onSnoozeConversation = vi.fn();
@@ -177,11 +192,14 @@ function renderSidebar(
     onRemoveProject: vi.fn(),
   };
   const initialSnapshot = snapshot(conversations, runs, options.projects);
+  const onRender = options.onRender ?? (() => undefined);
   const view = render(
-    <ScopedSidebar
-      snapshot={initialSnapshot}
-      {...sidebarProps}
-    />,
+    <Profiler id="sidebar" onRender={onRender}>
+      <ScopedSidebar
+        snapshot={initialSnapshot}
+        {...sidebarProps}
+      />
+    </Profiler>,
   );
   return {
     onCreateConversation: sidebarProps.onCreateConversation,
@@ -194,7 +212,11 @@ function renderSidebar(
     onClose,
     onViewChange,
     rerenderSnapshot(nextSnapshot: AppSnapshot, collapsed = false) {
-      view.rerender(<ScopedSidebar snapshot={nextSnapshot} collapsed={collapsed} {...sidebarProps} />);
+      view.rerender(
+        <Profiler id="sidebar" onRender={onRender}>
+          <ScopedSidebar snapshot={nextSnapshot} collapsed={collapsed} {...sidebarProps} />
+        </Profiler>,
+      );
     },
     ...view,
   };
@@ -779,6 +801,84 @@ describe("compact Work sidebar", () => {
     expect(mountedRows[0]).toHaveAttribute("aria-setsize", "80");
     expect(screen.getByRole("button", { name: /^Virtual work 0,/ }))
       .toHaveAttribute("aria-current", "page");
+  });
+
+  it("does not re-render the Work index while scrolling inside one row", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `scroll-${index}`,
+      `Scrolled work ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+    ));
+    let commits = 0;
+    const view = renderSidebar(entries, vi.fn(), [], { onRender: () => { commits += 1; } });
+    const navigation = view.container.querySelector<HTMLElement>(".project-list")!;
+    const mounted = () => [...view.container.querySelectorAll(".activity-thread")]
+      .map((row) => row.getAttribute("data-sidebar-motion-id"));
+    const before = mounted();
+    workRenders.statusCue = 0;
+    commits = 0;
+
+    for (let scrollTop = 1; scrollTop <= 20; scrollTop += 1) {
+      navigation.scrollTop = scrollTop;
+      fireEvent.scroll(navigation);
+    }
+
+    expect({ commits, statusCue: workRenders.statusCue }).toEqual({ commits: 0, statusCue: 0 });
+    expect(mounted()).toEqual(before);
+
+    navigation.scrollTop = 1_500;
+    fireEvent.scroll(navigation);
+    expect(commits).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /^Scrolled work 30,/u })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /^Scrolled work 0,/u })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /^Scrolled work 2,/u })).toBeNull();
+  });
+
+  it("does not re-render Work rows when an agent command run starts and finishes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `command-${index}`,
+      `Command work ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+      index === 1 ? { status: "running" } : {},
+    ));
+    const agentRun: WorkspaceRun = {
+      ...dismissedRun(entries[1]!),
+      status: "running",
+      attentionState: "unseen",
+      canStop: true,
+      finishedAt: null,
+    };
+    const initial = snapshot(entries, [agentRun]);
+    const view = renderSidebar(entries, vi.fn(), [agentRun]);
+    const commandRun: WorkspaceRun = {
+      ...agentRun,
+      id: "command-run",
+      kind: "check",
+      label: "npm test",
+      startedAt: new Date(2026, 7, 11, 11, 59, 30).toISOString(),
+    };
+    const shellEvent = (runs: WorkspaceRun[]) => ({
+      type: "conversation.shell.updated" as const,
+      conversation: structuredClone(entries[1]!),
+      runs: structuredClone(runs),
+    });
+    workRenders.statusCue = 0;
+
+    const started = applyConversationShellEvent(initial, shellEvent([commandRun, agentRun]));
+    view.rerenderSnapshot(started);
+    const finished = applyConversationShellEvent(started, shellEvent([
+      { ...commandRun, status: "succeeded", canStop: false, finishedAt: new Date(2026, 7, 11, 11, 59, 40).toISOString() },
+      agentRun,
+    ]));
+    view.rerenderSnapshot(finished);
+
+    expect(finished).not.toBe(initial);
+    expect(workRenders.statusCue).toBe(0);
+    expect(screen.getByRole("button", { name: /^Command work 1,.*Working/u })).toBeInTheDocument();
   });
 
   it("refreshes a virtualized Work window when its viewport grows", () => {

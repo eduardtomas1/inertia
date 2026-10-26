@@ -27,6 +27,8 @@ export interface ProviderUsageRefreshDependencies<Metadata> {
   canRun(providerId: ProviderId): boolean;
   activeProviderIds(): ReadonlySet<ProviderId>;
   track(operation: () => Promise<void>): Promise<void>;
+  clientPresent?(): boolean;
+  subscribeClientConnected?(listener: () => void): () => void;
   now?(): number;
 }
 
@@ -91,6 +93,15 @@ export function startIdleRateLimitRefresh<Metadata>(
     RATE_LIMIT_PROVIDER_IDS.map((providerId) => [providerId, now()]),
   );
   const lastResetRead = new Map<ProviderId, number>();
+  const cadence = new Map<ProviderId, { delayMs: number; limits: string; updatedAt: string | null }>();
+  const observed = (providerId: ProviderId) => {
+    const cached = dependencies.cachedState(providerId);
+    return {
+      limits: JSON.stringify(cached.rateLimits, (key, value: unknown) => key === "resetsAt" ? undefined : value),
+      updatedAt: cached.metadataState.rateLimits.updatedAt,
+    };
+  };
+  let absent = false;
   let refreshing = false;
   let stopped = false;
   let resetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -129,7 +140,17 @@ export function startIdleRateLimitRefresh<Metadata>(
         const metadata = await dependencies.read(providerId, ["rateLimits"])
           .catch(() => null);
         if (dependencies.isClosed()) return;
-        if (metadata !== null) dependencies.apply(providerId, metadata);
+        if (metadata !== null) {
+          dependencies.apply(providerId, metadata);
+          const previous = cadence.get(providerId);
+          const current = observed(providerId);
+          cadence.set(providerId, {
+            ...current,
+            delayMs: previous?.limits === current.limits
+              ? Math.min(MAX_IDLE_RATE_LIMIT_BACKOFF_MS, previous.delayMs * 2)
+              : intervalMs,
+          });
+        }
         if (dependencies.cachedState(providerId).metadataState.rateLimits.freshness === "fresh") {
           retry.delete(providerId);
         } else {
@@ -168,27 +189,55 @@ export function startIdleRateLimitRefresh<Metadata>(
   }
   const tick = (): void => {
     if (dependencies.isClosed() || refreshing) return;
+    if (dependencies.clientPresent?.() === false) {
+      absent = true;
+      armReset();
+      return;
+    }
+    if (absent) cadence.clear();
+    absent = false;
     const busy = dependencies.activeProviderIds();
     const due = RATE_LIMIT_PROVIDER_IDS.filter((providerId) => {
       const rateLimits = dependencies.cachedState(providerId).metadataState.rateLimits;
+      const current = observed(providerId);
+      const previous = cadence.get(providerId);
+      const delayMs = busy.has(providerId)
+        || previous?.limits !== current.limits
+        || previous.updatedAt !== current.updatedAt
+        ? intervalMs
+        : previous.delayMs;
+      cadence.set(providerId, { ...current, delayMs });
+      if (rateLimits.updatedAt === null) return false;
+      const age = now() - Date.parse(rateLimits.updatedAt);
       return dependencies.canRun(providerId)
         && !busy.has(providerId)
         && (retry.get(providerId)?.at ?? 0) <= now()
-        && rateLimits.updatedAt !== null
-        && (rateLimits.freshness !== "fresh"
-          || now() - Date.parse(rateLimits.updatedAt) + intervalMs + IDLE_READ_WINDOW_MS > RATE_LIMIT_TTL_MS);
+        && ((rateLimits.freshness !== "fresh" && age <= RATE_LIMIT_TTL_MS)
+          || age + intervalMs > delayMs + IDLE_READ_WINDOW_MS);
     });
     if (due.length === 0) armReset();
     else refresh(due);
   };
   const timer = setInterval(tick, intervalMs);
   timer.unref();
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const unsubscribe = dependencies.subscribeClientConnected?.(() => {
+    if (!absent || stopped || reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (!stopped) tick();
+    }, 0);
+    reconnectTimer.unref();
+  });
   armReset();
   const stop = (): void => {
     stopped = true;
     clearInterval(timer);
     if (resetTimer) clearTimeout(resetTimer);
     resetTimer = null;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    unsubscribe?.();
   };
   dependencies.signal.addEventListener("abort", stop, { once: true });
   return stop;

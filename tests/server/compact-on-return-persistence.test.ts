@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
-import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
+import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
 import { defaultSettings } from "../../src/shared/contracts/app";
 import { restoredDefaultSettings } from "../../src/shared/restore-defaults";
 import { removeTemporaryDirectory } from "../helpers/temporary-directory";
@@ -42,8 +42,8 @@ const usage = {
 };
 
 describe("PersistCompactOnReturn migration", () => {
-  it("is the current schema version", () => {
-    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(104);
+  it("is registered at schema version 104", () => {
+    expect(runtimeMigrationCatalog().find(({ version }) => version === 104)?.name).toBe("PersistCompactOnReturn");
   });
 
   it("upgrades a schema-103 database with the offer default and empty cache facts", () => {
@@ -61,7 +61,7 @@ describe("PersistCompactOnReturn migration", () => {
       for (const name of ["last_request_started_at", "prompt_cache_lifetime_ms", "prompt_cache_source"]) {
         expect(usageColumns.filter((column) => column.name === name)).toEqual([expect.objectContaining({ notnull: 0, dflt_value: null })]);
       }
-      expect((database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version).toBe(104);
+      expect((database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
     } finally {
       database.close();
     }

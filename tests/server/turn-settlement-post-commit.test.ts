@@ -66,6 +66,25 @@ describe("terminal commitment survives downstream faults", () => {
     expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
   });
 
+  it("records no turn.failed incident when the account usage limit ended the turn", async () => {
+    const reportIncident = vi.fn();
+    const runtime = await createTurnControllerTestRuntime({ reportIncident });
+    runtimes.push(runtime);
+    const queued = start(runtime);
+    runtime.provider.resolve({
+      status: "failed",
+      error: "Claude reached an account rate limit. Your follow-up was not answered.",
+      failure: { reason: "provider-error", message: "Claude reached an account rate limit. Your follow-up was not answered.",
+        phase: "turn", terminalEvent: "assistant/rate_limit", usageLimited: true },
+    });
+    await expect.poll(() => runtime.store.agentTurn(queued.turn.id).status).toBe("failed");
+    await runtime.controller.drainSettlementTasks();
+    expect(reportIncident.mock.calls.filter(([observation]) => observation.code === "turn.failed")).toEqual([]);
+    expect(runtime.store.conversationDetail(runtime.conversationId)!.activities
+      .filter((activity) => activity.turnId === queued.turn.id && activity.kind === "error")
+      .map((activity) => activity.title)).toEqual(["Claude reached an account rate limit. Your follow-up was not answered."]);
+  });
+
   it("reports a provider authentication failure as an auth incident", async () => {
     const reportIncident = vi.fn();
     const runtime = await createTurnControllerTestRuntime({ reportIncident });

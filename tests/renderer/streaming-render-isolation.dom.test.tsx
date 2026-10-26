@@ -45,6 +45,7 @@ const counting = vi.hoisted(() => {
 const harness = vi.hoisted(() => ({
   connection: null as unknown,
   listeners: new Set<(event: unknown) => void>(),
+  queueReads: [] as string[],
 }));
 
 vi.mock("../../src/renderer/src/hooks/useInertiaConnection", async (importOriginal) => ({
@@ -226,6 +227,7 @@ function emit(event: ServerEvent): void {
 
 beforeEach(async () => {
   harness.listeners.clear();
+  harness.queueReads.length = 0;
   harness.connection = {
     snapshot,
     runtimeGeneration: "streaming-generation",
@@ -245,6 +247,14 @@ beforeEach(async () => {
             state: "ready",
             detail,
           },
+        } as unknown as ServerEvent;
+      }
+      if (command.type === "message.queue.get") {
+        harness.queueReads.push(command.payload.conversationId);
+        return {
+          type: "request.result",
+          requestId: command.requestId,
+          result: { kind: "message.queue", conversationId: command.payload.conversationId, entries: [], receipt: null },
         } as unknown as ServerEvent;
       }
       return await new Promise<ServerEvent>(() => undefined);
@@ -397,6 +407,52 @@ describe("streamed agent text", () => {
     expect(counter.commits).toBeGreaterThan(0);
     expect({ Sidebar: counting.renders.Sidebar ?? 0, Composer: counting.renders.Composer ?? 0 })
       .toEqual({ Sidebar: 0, Composer: 0 });
+    vi.useRealTimers();
+  });
+
+  it("keeps the chat workspace still while transcript scrolls leave navigation unchanged", async () => {
+    vi.useFakeTimers({ toFake: [...STREAMING_TIMERS] });
+    const { view } = await mountQuietApp();
+    const transcript = view.container.querySelector<HTMLElement>(".message-scroll")!;
+    const SCROLLS = 50;
+    for (let index = 0; index < SCROLLS; index += 1) {
+      act(() => { fireEvent.scroll(transcript); });
+    }
+    act(() => { fireEvent.wheel(transcript); });
+    for (let index = 0; index < SCROLLS; index += 1) {
+      act(() => { fireEvent.scroll(transcript); });
+    }
+    expect(counting.renders.ChatWorkspace ?? 0).toBe(0);
+
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 5_000 },
+      clientHeight: { configurable: true, value: 600 },
+    });
+    act(() => { fireEvent.scroll(transcript); });
+    expect(counting.renders.ChatWorkspace ?? 0).toBeGreaterThan(0);
+    vi.useRealTimers();
+  });
+
+  it("polls the queue of a saved running chat but never reads one for an unsaved new chat", async () => {
+    vi.useFakeTimers({ toFake: [...STREAMING_TIMERS] });
+    const { view } = await mountQuietApp();
+    harness.queueReads.length = 0;
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(harness.queueReads.filter((id) => id === conversationId).length).toBeGreaterThanOrEqual(6);
+
+    harness.queueReads.length = 0;
+    act(() => { fireEvent.click(screen.getByRole("button", { name: "Start a new chat" })); });
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(view.container.querySelector(`[data-turn-id="${turn.id}"]`)).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Message" })).toBeInTheDocument();
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(harness.queueReads.filter((id) => id !== conversationId)).toEqual([]);
     vi.useRealTimers();
   });
 

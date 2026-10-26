@@ -60,6 +60,7 @@ interface RuntimeClientSubscription extends RuntimeDetailSubscription {
 export class RuntimeSyncHub<Socket> {
   private readonly clients = new Map<Socket, RuntimeClientSubscription>();
   private readonly pendingMessageFocus = new Map<string, PendingMessageFocus>();
+  private readonly connectionListeners = new Set<() => void>();
 
   constructor(
     private readonly send: (
@@ -73,6 +74,11 @@ export class RuntimeSyncHub<Socket> {
 
   get connectionCount(): number {
     return this.clients.size;
+  }
+
+  onClientConnected(listener: () => void): () => void {
+    this.connectionListeners.add(listener);
+    return () => { this.connectionListeners.delete(listener); };
   }
 
   /** Ephemeral navigation only reaches the native window owning this chat. */
@@ -221,6 +227,7 @@ export class RuntimeSyncHub<Socket> {
         this.pendingMessageFocus.delete(authority.conversationId);
       }
     }
+    for (const listener of this.connectionListeners) listener();
   }
 
   setConversationSubscription(

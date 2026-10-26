@@ -102,16 +102,59 @@ function pushReasoningBody(
   }
 }
 
-export function reasoningLines(content: string): ReasoningLine[] {
-  const lines: ReasoningLine[] = [];
-  let cursor = 0;
-  for (const match of content.matchAll(SEGMENT_PATTERN)) {
+function pushReasoningLines(
+  lines: ReasoningLine[],
+  content: string,
+  start: number,
+  segmentStart = start,
+): number {
+  let cursor = start;
+  SEGMENT_PATTERN.lastIndex = start;
+  for (
+    let match = SEGMENT_PATTERN.exec(content);
+    match !== null;
+    match = SEGMENT_PATTERN.exec(content)
+  ) {
     pushReasoningBody(lines, content, cursor, match.index, true);
     pushReasoningLine(lines, match.index, match[0], true);
     cursor = match.index + match[0].length;
   }
   pushReasoningBody(lines, content, cursor, content.length, false);
+  return cursor === start ? segmentStart : cursor;
+}
+
+export function reasoningLines(content: string): ReasoningLine[] {
+  const lines: ReasoningLine[] = [];
+  pushReasoningLines(lines, content, 0);
   return lines;
+}
+
+function reasoningRestart(content: string, segmentStart: number): number {
+  const star = content.lastIndexOf("*", content.length - 2);
+  const openTitle = star > 0 && content[star - 1] === "*" ? star - 1 : content.length;
+  const from = Math.min(content.lastIndexOf("\n") + 1, openTitle);
+  const lineStart = from <= 0 ? 0 : content.lastIndexOf("\n", from - 1) + 1;
+  return Math.max(segmentStart, lineStart);
+}
+
+export function createReasoningLinesReader(): (content: string) => ReasoningLine[] {
+  let parsed = { content: "", lines: [] as ReasoningLine[], segmentStart: 0 };
+  return (content) => {
+    if (content === parsed.content) return parsed.lines;
+    const extended = content.length > parsed.content.length
+      && content.slice(0, parsed.content.length) === parsed.content;
+    const segmentStart = extended ? parsed.segmentStart : 0;
+    const restart = extended ? reasoningRestart(parsed.content, segmentStart) : 0;
+    let kept = extended ? parsed.lines.length : 0;
+    while (kept > 0 && parsed.lines[kept - 1]!.offset >= restart) kept -= 1;
+    const lines = parsed.lines.slice(0, kept);
+    parsed = {
+      content,
+      lines,
+      segmentStart: pushReasoningLines(lines, content, restart, segmentStart),
+    };
+    return lines;
+  };
 }
 
 export function readableReasoningLine(

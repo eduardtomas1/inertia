@@ -406,6 +406,32 @@ describe("composer chat references", () => {
     });
   });
 
+  it("matches chat titles only while a mention is being typed", async () => {
+    const user = userEvent.setup();
+    let titleReads = 0;
+    const sources = Array.from({ length: 50 }, (_, index) => {
+      const source = { ...sourceOption, conversationId: `44444444-4444-4444-8444-${String(index).padStart(12, "0")}` };
+      Object.defineProperty(source, "conversationTitle", {
+        get: () => { titleReads += 1; return `${sourceOption.conversationTitle} ${index}`; },
+      });
+      return source;
+    });
+    render(<Composer {...composerProps(conversation("chat-reference-filter"), {
+      contextSources: sources,
+      onConversationContextCommand: vi.fn(async () => packetResult()),
+    })} />);
+    const editor = screen.getByRole("textbox", { name: "Message" });
+    await user.click(editor);
+    titleReads = 0;
+    await user.keyboard("plain words");
+    expect(titleReads).toBe(0);
+
+    await user.keyboard(" @Architect");
+    const suggestions = await screen.findByRole("listbox", { name: "Chats and project files" });
+    expect(within(suggestions).getAllByRole("option", { name: /Architecture decisions/u })).toHaveLength(4);
+    expect(titleReads).toBeGreaterThan(0);
+  });
+
   it("shares the whole preselected chat when the agent request is approved", async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn(async () => ({

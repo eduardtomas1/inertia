@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   advanceThinkingLine,
+  createReasoningLinesReader,
   IDLE_THINKING_LINE,
   parseReasoningSummary,
   readableReasoningLine,
@@ -73,6 +74,56 @@ describe("reasoningLines", () => {
       { offset: 0, text: "Reading activity.tsx now.", complete: true },
     ]);
     expect(reasoningLines("")).toEqual([]);
+  });
+});
+
+function seededRandom(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1_664_525 + 1_013_904_223) % 4_294_967_296;
+    return state / 4_294_967_296;
+  };
+}
+
+const REASONING_FIXTURES = [
+  "**Tracing ownership**\nReading the pane reducer. Then the hook! Next \"quoted.\" end\n\n"
+    + "**Checking `activity.tsx`**\n\nThe memo hits… mostly. 5 * 3 is fifteen.\n"
+    + "**Unclosed heading\nthat spans lines** and continues. *emphasis* stays.\r\n"
+    + "Trailing words with *** stars ** and a final sentence?  ",
+  "No headings at all. Just sentences on one long line! And another one. ".repeat(20),
+  "Done.\n\n**Checking the drop plans**\n**A****B**\n\n**\n**C**tail",
+];
+
+const FUZZ_PIECES = ["**", "*", "\n", "\n\n", ". ", "! ", "? ", "\"", ")", "`", " ", "word", "Title", "…", "\r\n"];
+
+describe("createReasoningLinesReader", () => {
+  it("matches a full parse after every chunk for any chunking", () => {
+    const random = seededRandom(7);
+    const fuzzed = Array.from({ length: 40 }, () => Array.from(
+      { length: 120 },
+      () => FUZZ_PIECES[Math.floor(random() * FUZZ_PIECES.length)],
+    ).join(""));
+    for (const fixture of [...REASONING_FIXTURES, ...fuzzed]) {
+      for (let round = 0; round < 6; round += 1) {
+        const read = createReasoningLinesReader();
+        let content = "";
+        while (content.length < fixture.length) {
+          const size = 1 + Math.floor(random() * (round % 2 === 0 ? 4 : 24));
+          content = fixture.slice(0, content.length + size);
+          expect(read(content)).toEqual(reasoningLines(content));
+        }
+      }
+    }
+  });
+
+  it("parses replaced content from the start", () => {
+    const read = createReasoningLinesReader();
+    read("**First turn**\nLong finished thought here. More");
+    expect(read("Second turn starts.")).toEqual(reasoningLines("Second turn starts."));
+    expect(read("Different text that is longer than before. Still going"))
+      .toEqual(reasoningLines("Different text that is longer than before. Still going"));
+    const settled = read("Different text that is longer than before. Still going");
+    expect(read("Different text that is longer than before. Still going")).toBe(settled);
   });
 });
 

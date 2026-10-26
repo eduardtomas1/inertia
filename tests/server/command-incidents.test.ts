@@ -32,9 +32,9 @@ describe("command incidents", () => {
     // Each occurrence still names its own request; the identity is shared.
     expect(sink.mock.calls.map(([observation]) => observation)).toEqual([
       expect.objectContaining({ id: diagnosticIds[0], correlationId: first.requestId,
-        code: "git.command-failed", outcome: "unknown", context: { projectId, requestId: first.requestId } }),
+        code: "git.command-failed", outcome: "unknown", context: { commandType: "git.status", projectId, requestId: first.requestId } }),
       expect.objectContaining({ id: diagnosticIds[0], correlationId: second.requestId,
-        context: { projectId, requestId: second.requestId } }),
+        context: { commandType: "git.status", projectId, requestId: second.requestId } }),
     ]);
     // A different project, command or generation is a different incident.
     expect(stableCommandIncidentId(generation, "git.command-failed", "git.status", { projectId: randomUUID() }))
@@ -43,6 +43,18 @@ describe("command incidents", () => {
       .not.toBe(diagnosticIds[0]);
     expect(stableCommandIncidentId(null, "git.command-failed", "git.status", { projectId }))
       .not.toBe(diagnosticIds[0]);
+  });
+
+  it("records the command type in the validated incident context, and nothing from the payload", () => {
+    const incidents: Array<Parameters<NonNullable<Parameters<typeof CommandIncidents.fromSink>[0]>>[0]> = [];
+    const commandIncidents = CommandIncidents.fromSink((incident) => { incidents.push(incident); }, generation);
+    const conversationId = "33333333-3333-4333-8333-333333333333";
+    const failed = command("message.queue.get", { conversationId, note: "PRIVATE payload text", projectId });
+    commandIncidents.run(failed, () => commandIncidents.observe(requestError(failed)));
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({ code: "command.failed",
+      context: { commandType: "message.queue.get", conversationId, projectId, requestId: failed.requestId } });
+    expect(JSON.stringify(incidents)).not.toContain("PRIVATE");
   });
 
   it("collapses a subsystem report and the request error of one operation into one incident", () => {

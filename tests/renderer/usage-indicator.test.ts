@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ProviderMetadataFieldState,
@@ -74,6 +74,7 @@ function render(
 }
 
 describe("UsageIndicator", () => {
+  afterEach(() => { vi.useRealTimers(); });
   it("never falls back from a missing custom profile to native account quota", () => {
     expect(usageQuotaSourceForSelection({
       backendProfileId: "custom:deleted",
@@ -395,6 +396,26 @@ describe("UsageIndicator", () => {
     expect(cached).not.toContain("Update time unavailable");
     expect(refreshing).toContain("Refreshing · stale");
     expect(refreshing).toContain("shown quota may be out of date");
+  });
+
+  it("shows quota older than the freshness window as cached with its age", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-22T10:12:30.000Z"));
+    const limits: ProviderRateLimit[] = [{
+      id: "quota",
+      label: "Quota",
+      usedPercent: 25,
+      remainingPercent: 75,
+      windowMinutes: 300,
+      resetsAt: null,
+    }];
+    const aged = render(usage(), limits, { ...freshState, freshness: "stale" });
+    const restored = render(usage(), limits, { ...freshState, freshness: "stale", provenance: "persistent-cache", updatedAt: "2026-07-22T08:00:00.000Z" });
+    const moments = render(usage(), limits, { ...freshState, freshness: "stale", updatedAt: "2026-07-22T10:12:00.000Z" });
+    expect(aged).toContain("Cached · updated 12 min ago");
+    expect(aged).not.toContain(">Stale<");
+    expect(restored).toContain("Cached · updated 2 h ago");
+    expect(moments).toContain("Cached · updated just now");
   });
 
   it("isolates native account quota from custom routes even when values are passed", () => {

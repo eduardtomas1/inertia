@@ -199,6 +199,50 @@ describe("GoalPanel", () => {
     }
   });
 
+  it("collapses consecutive empty sections into one faint line and keeps skill refresh", async () => {
+    const onRefreshSkills = vi.fn();
+    renderPanel({ workflow: workflow({ skills: [] }), plan: null, subagents: [], onRefreshSkills });
+
+    const summary = document.querySelector(".goal-panel-empty-summary");
+    expect(summary).toHaveTextContent("No plan yet · No enabled skills · No delegated work");
+    expect(document.querySelectorAll(".goal-panel-empty-summary")).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "Current objective" })).toBeInTheDocument();
+    for (const heading of ["Latest conversation plan", "Skills", "Delegated work"]) {
+      expect(screen.queryByRole("heading", { name: heading })).toBeNull();
+    }
+    await userEvent.click(screen.getByRole("button", { name: "Refresh skills" }));
+    expect(onRefreshSkills).toHaveBeenCalledOnce();
+  });
+
+  it("keeps focus on Refresh skills when the refresh brings skills in", async () => {
+    const onRefreshSkills = vi.fn();
+    const panel = (skills: ReturnType<typeof workflow>): React.JSX.Element => (
+      <GoalPanel
+        workflow={skills}
+        plan={null}
+        subagents={[]}
+        turns={[turn()]}
+        now={Date.parse("2030-01-01T00:00:42.000Z")}
+        onRefreshSkills={onRefreshSkills}
+      />
+    );
+    const view = render(panel(workflow({ skills: [] })));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh skills" }));
+    view.rerender(panel(workflow()));
+
+    expect(document.querySelector(".goal-panel-empty-summary")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Refresh skills" }));
+  });
+
+  it("keeps a lone empty section with its heading", () => {
+    renderPanel({ workflow: workflow({ skills: [] }) });
+
+    expect(document.querySelector(".goal-panel-empty-summary")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(screen.getByText("No enabled skills")).toBeInTheDocument();
+  });
+
   it("renders authoritative goal progress and its current plan relationship", () => {
     renderPanel();
 

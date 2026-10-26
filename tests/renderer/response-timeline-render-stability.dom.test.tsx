@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { ResponseTimelineProps } from "../../src/renderer/src/components/ResponseTimeline";
-import { StreamingPlainText } from "../../src/renderer/src/components/response-timeline/activity";
+import { StreamingMarkdownText } from "../../src/renderer/src/components/response-timeline/StreamingMarkdownText";
 import { CONVERSATION_HISTORY_PREPEND_EVENT } from "../../src/renderer/src/utils/conversationHistoryNavigation";
 import { summarizeActivities } from "../../src/renderer/src/utils/responseTimeline";
 import type {
@@ -193,38 +193,88 @@ describe("response timeline render stability", () => {
       .toEqual([["activity-3", "activity-4", "activity-5"]]);
   });
 
-  it("keeps live paragraphs mounted as text streams and adds one block per new paragraph", () => {
-    const view = render(<StreamingPlainText content="First paragraph" />);
+  it("keeps live paragraphs mounted, renders settled ones as Markdown and adds one block per new paragraph", () => {
+    const Stream = ({ content }: { content: string }) => (
+      <StreamingMarkdownText content={content} projectRoot="" projectId="" defaultCodeWrap={false} />
+    );
+    const view = render(<Stream content="First **paragraph**" />);
     const blocks = () => [...document.querySelectorAll(".response-stream-block")];
     const first = blocks()[0];
     expect(blocks()).toHaveLength(1);
+    expect(first?.textContent).toBe("First **paragraph**");
 
-    view.rerender(<StreamingPlainText content="First paragraph keeps growing" />);
+    view.rerender(<Stream content="First **paragraph** keeps growing" />);
     expect(blocks()).toHaveLength(1);
     expect(blocks()[0]).toBe(first);
 
-    view.rerender(<StreamingPlainText content={"First paragraph keeps growing\n\nSecond"} />);
+    view.rerender(<Stream content={"First **paragraph** keeps growing\n\nSecond"} />);
     expect(blocks()).toHaveLength(2);
     expect(blocks()[0]).toBe(first);
+    expect(first?.getAttribute("data-stream-block")).toBe("settled");
+    expect(first?.querySelector(".response-markdown p strong")?.textContent).toBe("paragraph");
+    expect(first?.textContent).toBe("First paragraph keeps growing");
+    expect(blocks()[1]?.getAttribute("data-stream-block")).toBe("tail");
     expect(blocks()[1]?.textContent).toBe("Second");
-    expect(document.querySelector("p")?.textContent).toBe("First paragraph keeps growing\n\nSecond");
     expect(document.querySelectorAll(".response-stream-word")).toHaveLength(0);
+  });
+
+  it("resolves a reference link in a settled block once its definition settles", () => {
+    const Stream = ({ content }: { content: string }) => (
+      <StreamingMarkdownText content={content} projectRoot="" projectId="" defaultCodeWrap={false} />
+    );
+    const view = render(<Stream content={"See [the docs][docs].\n\nNext"} />);
+    const first = () => document.querySelector(".response-stream-block");
+    expect(first()?.querySelector("a")).toBeNull();
+
+    view.rerender(<Stream content={"See [the docs][docs].\n\n[docs]: https://example.com/docs\n\nStill streaming"} />);
+    expect(first()?.querySelector("a")?.getAttribute("href")).toBe("https://example.com/docs");
+    expect(first()?.textContent).toBe("See the docs.");
+  });
+
+  it("keeps an unclosed fence in the plain tail until it closes", () => {
+    const Stream = ({ content }: { content: string }) => (
+      <StreamingMarkdownText content={content} projectRoot="" projectId="" defaultCodeWrap={false} />
+    );
+    const opened = "Intro\n\n```ts\nconst a = 1;\n\nconst b = 2;";
+    const view = render(<Stream content={opened} />);
+    const blocks = () => [...document.querySelectorAll(".response-stream-block")];
+    expect(blocks()).toHaveLength(2);
+    expect(blocks()[1]?.getAttribute("data-stream-block")).toBe("tail");
+    expect(blocks()[1]?.textContent).toBe("```ts\nconst a = 1;\n\nconst b = 2;");
+    expect(document.querySelector(".response-code-block")).toBeNull();
+    const tail = blocks()[1];
+
+    view.rerender(<Stream content={`${opened}\n\`\`\`\n\nAfter`} />);
+    expect(blocks()).toHaveLength(3);
+    expect(blocks()[1]).toBe(tail);
+    expect(blocks()[1]?.getAttribute("data-stream-block")).toBe("settled");
+    expect(blocks()[1]?.querySelector(".response-code-block")).not.toBeNull();
+    expect(blocks()[2]?.textContent).toBe("After");
   });
 
   it("splits only the newly streamed tail of a long live answer on each update", () => {
     const paragraphs = Array.from({ length: 400 }, (_, index) => `paragraph ${index} ${"word ".repeat(20)}`);
     const content = paragraphs.join("\n\n");
-    const view = render(<StreamingPlainText content={content} />);
+    const Stream = ({ value }: { value: string }) => (
+      <StreamingMarkdownText content={value} projectRoot="" projectId="" defaultCodeWrap={false} />
+    );
+    const view = render(<Stream value={content} />);
     const split = vi.spyOn(String.prototype, "split");
+    const scan = vi.spyOn(String.prototype, "indexOf");
     try {
-      view.rerender(<StreamingPlainText content={`${content} more`} />);
-      view.rerender(<StreamingPlainText content={`${content} more words`} />);
+      view.rerender(<Stream value={`${content} more`} />);
+      view.rerender(<Stream value={`${content} more words`} />);
       const longest = Math.max(0, ...split.mock.contexts.map((value) => String(value).length));
       expect(longest).toBeLessThan(content.length / 10);
+      const newlineScans = scan.mock.calls.filter(([needle]) => needle === "\n").length;
+      expect(newlineScans).toBeLessThanOrEqual(4);
     } finally {
       split.mockRestore();
+      scan.mockRestore();
     }
-    expect(document.querySelectorAll(".response-stream-block")).toHaveLength(400);
-    expect(document.querySelector("p")?.textContent).toBe(`${content} more words`);
+    const blocks = document.querySelectorAll(".response-stream-block");
+    expect(blocks).toHaveLength(400);
+    expect(blocks[399]?.getAttribute("data-stream-block")).toBe("tail");
+    expect(blocks[399]?.textContent).toBe(`${paragraphs[399]} more words`);
   });
 });

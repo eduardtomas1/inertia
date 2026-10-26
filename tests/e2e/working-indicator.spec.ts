@@ -104,8 +104,8 @@ test("changes the indicator from Settings with the keyboard and updates the open
     filter: "none",
   });
   const box = await workingRowOrb().boundingBox();
-  expect(box?.width).toBe(18);
-  expect(box?.height).toBe(18);
+  expect(box?.width).toBe(16);
+  expect(box?.height).toBe(16);
   expect(app.rendererErrors).toEqual([]);
 });
 

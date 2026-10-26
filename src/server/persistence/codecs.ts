@@ -6,6 +6,7 @@ import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
+import { duoComparisonBriefFromJson } from "../../shared/duo-comparison-brief";
 import {
   AGENT_RUN_STATES,
   type AgentActivity,
@@ -780,6 +781,7 @@ export function watcherNoteFromJson(value: string | null | undefined): WatcherNo
 
 export function messageFromRow(row: MessageRow): ChatMessage {
   const watcherNote = row.role === "user" ? watcherNoteFromJson(row.watcher_note_json) : undefined;
+  const duoComparison = row.role === "user" ? duoComparisonBriefFromJson(row.duo_comparison_json) : undefined;
   let compaction: unknown;
   try { compaction = row.compaction_json ? JSON.parse(row.compaction_json) : undefined; } catch { /* Older or malformed optional metadata stays unprojected. */ }
   let htmlRender: unknown;
@@ -788,6 +790,7 @@ export function messageFromRow(row: MessageRow): ChatMessage {
     ...(row.role === "user" && isMessageOriginDeviceId(row.private_connect_device_id)
       ? { privateConnectDeviceId: row.private_connect_device_id } : {}),
     ...(watcherNote ? { watcherNote } : {}),
+    ...(duoComparison ? { duoComparison } : {}),
     ...(row.role === "system" && row.turn_id === null && isContextCompaction(compaction) ? { compaction } : {}),
     ...(row.role === "system" && row.turn_id !== null && isHtmlRenderReference(htmlRender) ? { htmlRender } : {}),
     id: row.id,

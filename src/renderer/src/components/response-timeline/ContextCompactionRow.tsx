@@ -5,6 +5,7 @@ import {
   type ContextCompactionTrigger,
 } from "@shared/context-compaction";
 import type { ResponseTimelineItem } from "../../utils/responseTimeline";
+import { usePhaseLockedAnimations } from "../../hooks/usePhaseLockedAnimations";
 import "./ContextCompactionRow.css";
 
 const COMPACTED_CONTEXT = "Compacted context";
@@ -43,6 +44,7 @@ export function ContextCompactionMarker({
   elapsed?: React.ReactNode;
 }): React.JSX.Element {
   const live = elapsed !== undefined;
+  const markerRef = usePhaseLockedAnimations<HTMLElement>(live);
   const title = live ? label : settledTitle(label);
   const detail = live ? null : label.slice(title.length).trim();
   return (
@@ -53,7 +55,7 @@ export function ContextCompactionMarker({
       aria-label={label}
     >
       <span aria-hidden="true" />
-      <small className="context-compaction-marker" aria-hidden="true">
+      <small ref={markerRef} className="context-compaction-marker" aria-hidden="true">
         <span>{title}</span>
         {detail && <i>·</i>}
         {detail && <span>{detail}</span>}

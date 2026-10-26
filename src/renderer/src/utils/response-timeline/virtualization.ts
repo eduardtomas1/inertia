@@ -33,6 +33,8 @@ export const TIMELINE_MINIMAP_MIN_GUTTER = 48;
 export const TIMELINE_MINIMAP_MAX_MARKERS = 40;
 const WATCHER_NOTE_ROW_HEIGHT = 64;
 const WATCHER_WAKE_REQUEST_HEIGHT = 44;
+const DUO_COMPARISON_REQUEST_HEIGHT = 136;
+export const DUO_COMPARISON_REQUEST_LABEL = "Comparing A and B";
 
 /**
  * Row count alone misses short-but-expensive histories. A turn containing
@@ -101,7 +103,7 @@ function estimatePlanTextChars(plans: ResponseTurn["plans"]): number {
 function estimateResponseTurnRenderWeight(turn: ResponseTurn): number {
   const messageChars = turn.assistantMessages.reduce(
     (total, message) => total + message.content.length,
-    (turn.watcherWake ? 0 : turn.userMessage.content.length)
+    (turn.watcherWake || turn.userMessage.duoComparison ? 0 : turn.userMessage.content.length)
       + turn.followUpMessages.reduce(
         (total, message) => total + message.content.length,
         0,
@@ -148,6 +150,14 @@ export function shouldShowTimelineMinimap(rowCount: number, sideGutter: number):
     && sideGutter >= TIMELINE_MINIMAP_MIN_GUTTER;
 }
 
+export function isTurnGitArtifactWithoutChanges(
+  artifact: TurnGitArtifactSummary,
+): boolean {
+  return artifact.status === "ready"
+    && artifact.completeness === "complete"
+    && artifact.files.length === 0;
+}
+
 export function shouldShowTurnGitArtifactSummary(
   artifact: TurnGitArtifactSummary,
 ): boolean {
@@ -155,7 +165,7 @@ export function shouldShowTurnGitArtifactSummary(
     artifact.status === "unavailable"
     && artifact.completeness === "unavailable"
     && artifact.absenceReason === "not-repository"
-  );
+  ) && !isTurnGitArtifactWithoutChanges(artifact);
 }
 
 export interface TimelineRowEstimateOptions {
@@ -408,14 +418,14 @@ function estimateActivityGroupHeight(
   windowed = false,
 ): number {
   if (activities.length === 0) return 0;
-  if (activities.length === 1) return 27;
-  if (expanded) return 28 + activities.length * 26;
+  if (activities.length === 1) return 31;
+  if (expanded) return 32 + activities.length * 30;
   const live = windowed || activities.some(({ status }) => status === "running");
   const visibleRows = resolveActivityGroupWindow(activities, { expanded: false, settled: !live })
     .filter(({ folded }) => !folded);
   const hiddenRunning = activities.filter(({ status }) => status === "running").length
     - visibleRows.filter(({ activity }) => activity.status === "running").length;
-  return 28 + visibleRows.length * 26 + (hiddenRunning > 0 ? 28 : 0);
+  return 32 + visibleRows.length * 30 + (hiddenRunning > 0 ? 32 : 0);
 }
 
 const FAILURE_PROVIDER_FACTS = /^(?:reason|phase|exit code|signal|terminal event|turn|activity|cleanup|last protocol method):/iu;
@@ -517,7 +527,7 @@ function estimateTurnRowSize(
     || turn.checkpointUnavailableReason !== null
     ? 28
     : 0;
-  const requestHeight = turn.watcherWake ? WATCHER_WAKE_REQUEST_HEIGHT : (24
+  const requestHeight = turn.watcherWake ? WATCHER_WAKE_REQUEST_HEIGHT : turn.userMessage.duoComparison ? DUO_COMPARISON_REQUEST_HEIGHT : (24
     + requestActionsHeight
     + requestLines * 22
     + attachmentRows * 25
@@ -549,7 +559,7 @@ function estimateTurnRowSize(
     turn.agentTurn.status === "failed"
     && turn.importantActivities.length > 1
     && latestFailureIndex(turn.importantActivities) >= 0
-      ? 26
+      ? 28
       : 0
   );
   const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
@@ -577,7 +587,7 @@ function estimateTurnRowSize(
       + (hasSupplementalWork ? 27 : 0)
     : consolidatesSettledWork
       ? 0
-      : 30
+      : 32
         + (settledFailureFolded ? 0 : importantHeight + openFailureHeight)
         + settledExchangeHeight;
   const expandedWorkHeight = (
@@ -611,7 +621,7 @@ function estimateTurnRowSize(
   const metadataHeight = turn.terminalAssistantMessage
     || (!turn.isActive && turn.agentTurn.status !== "completed")
     ? 33 + (options.runDetailsExpanded
-      ? 34
+      ? 34 + (turn.gitArtifact && isTurnGitArtifactWithoutChanges(turn.gitArtifact) ? 28 : 0)
       : 0)
     : 0;
 
@@ -633,7 +643,7 @@ function estimateTurnRowSize(
             answerColumns,
           ) * 18,
         )
-      : 33 + (options.changedFilesExpanded
+      : 29 + (options.changedFilesExpanded
         ? Math.min(12, visibleArtifact.files.length) * 28
           + (visibleArtifact.completeness === "complete" ? 0 : 35)
           + 38
@@ -737,7 +747,9 @@ export function buildTimelineMinimapMarkers(
     const turn = turns[index]!;
     const request = turn.watcherWake
       ? watcherCheckTitle(turn.watcherWake)
-      : turn.userMessage.content.replace(/\s+/gu, " ").trim();
+      : turn.userMessage.duoComparison
+        ? DUO_COMPARISON_REQUEST_LABEL
+        : turn.userMessage.content.replace(/\s+/gu, " ").trim();
     return {
       index,
       id: turn.id,

@@ -59,4 +59,21 @@ describe("sidebar index presentation contracts", () => {
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread-select:focus-visible[\s\S]*?outline-color:\s*Highlight;/u);
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread-status-label \.agent-pixel-loader > span\s*\{[^}]*background:\s*CanvasText;/u);
   });
+
+  it("keeps colour for statuses that need you and lets Completed recede to its green check", () => {
+    expect(css).toContain(".activity-thread.status-completed .activity-thread-status-label {\n  color: var(--text-faint);\n  font-weight: 400;\n}");
+    expect(css).toContain(".activity-thread.status-completed .activity-thread-status-label > [data-work-status] {\n  color: var(--status-completed);\n}");
+    expect(css).toContain(".activity-thread.is-active.status-completed .activity-thread-status-label {\n  color: var(--text-muted);\n}");
+    for (const [status, token] of [["approval", "status-approval"], ["input", "status-input"], ["failed", "status-failed"], ["limited", "warning"]]) {
+      expect(css).toContain(`.activity-thread.status-${status} .activity-thread-status-label { color: var(--${token}); }`);
+    }
+    expect(css).toMatch(/\.activity-thread-status-label \{[^}]*font-weight: 500;/u);
+  });
+
+  it("raises the selected row as a tile whose ring stays inside the clipped list", () => {
+    expect(css).toContain(".activity-thread.is-active {\n  background: var(--paper);\n  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), inset 0 0 0 1px var(--line-soft);\n}");
+    expect(css).toContain(':root[data-theme="dark"] .activity-thread.is-active {\n  background: var(--fill-strong);\n  box-shadow: inset 0 1px 0 var(--raised-edge), inset 0 0 0 1px var(--line-soft);\n}');
+    expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread\.is-active,\n  :root\[data-theme="dark"\] \.activity-thread\.is-active \{[^}]*background: Highlight;[^}]*box-shadow: none;/u);
+  });
 });
+

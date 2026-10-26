@@ -250,7 +250,7 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
       })])
     : { accent, accentHover, accentStrong, accentText };
 
-  const raised = appearance === "light" ? surfaces["surface-strong"] : surfaces["surface-muted"];
+  const raised = appearance === "light" ? "#ffffff" : surfaces["surface-muted"];
   const codeBackgrounds = [surfaces.surface, surfaces["surface-strong"], raised]
     .map((background) => inkOver(text, background, FILL_INK));
   const syntaxOn = (syntaxHue: number, chromaCap = arch.syntaxChroma) => solveLightness({

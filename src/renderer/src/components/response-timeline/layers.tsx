@@ -7,6 +7,7 @@ import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { WatcherWakeRequest } from "./WatcherWakeRequest";
+import { DuoComparisonRequest } from "./DuoComparisonRequest";
 import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
@@ -39,6 +40,7 @@ import {
 } from "../working-indicator/orbMotion";
 import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
 import { TurnAgentsLine } from "./TurnAgentsLine";
+import { useFreshRequest } from "./useFreshRequest";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
   LiveElapsed,
@@ -73,7 +75,7 @@ export function AgentPixelLoader({
     const motion = resolveOrbMotion(indicator, orbMotionForPhase(phase));
     return (
       <WorkingOrb
-        size={18}
+        size={16}
         design={motion.design}
         pace={motion.pace}
         syncKey={workingOrbSyncKey(conversationId)}
@@ -99,6 +101,7 @@ export function UserRequestLayer({
   const collapsible = shouldCollapseUserRequest(turn.userMessage.content);
   const [expanded, setExpanded] = useState(false);
   const [openPacketId, setOpenPacketId] = useState<string | null>(null);
+  const fresh = useFreshRequest(turn.userMessage.conversationId, turn.userMessage.content);
   const content = collapsible && !expanded
     ? collapsedUserRequestPreview(turn.userMessage.content)
     : turn.userMessage.content;
@@ -119,25 +122,39 @@ export function UserRequestLayer({
   const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
   if (turn.watcherWake) return <WatcherWakeRequest turn={turn} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
   const watcherNote = turn.userMessage.role === "user" ? turn.userMessage.watcherNote : undefined;
+  const requestMeta = (turn.userMessage.privateConnectDeviceId || watcherNote || turn.checkpoint || turn.checkpointUnavailableReason !== null) && (
+    <div className="message-meta">
+      <MessageOrigin message={turn.userMessage} />
+      {turn.checkpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</TooltipButton>}
+      {turn.checkpointUnavailableReason !== null && <TooltipText className="message-checkpoint-missing" tooltip={turn.checkpointUnavailableReason || TURN_CHECKPOINT_UNAVAILABLE_TITLE}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</TooltipText>}
+    </div>
+  );
+  const sessionRecoveryNotice = sessionRecovery && (
+    <div className="sent-context" aria-label="Provider session">
+      <span data-session-recovery="">
+        <MessagesSquare size={14} aria-hidden="true" />
+        <span>
+          <strong>New provider session</strong>
+          <small title={sessionRecovery}>{sessionRecovery}</small>
+        </span>
+      </span>
+    </div>
+  );
+  if (turn.userMessage.duoComparison) return <DuoComparisonRequest turn={turn} brief={turn.userMessage.duoComparison} meta={requestMeta} footer={sessionRecoveryNotice} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
   return (
     <article
       className={clsx("message is-user turn-user-request", isDocumentLike && "is-document-like")}
       aria-label={watcherNote ? WATCHER_NOTE_TITLE : "Your request"}
       data-request-layout={isDocumentLike ? "document" : "content"}
       data-turn-layer="user-request"
+      data-fresh={fresh || undefined}
       data-turn-request-context={turn.id}
       data-turn-jump-target="request"
       data-message-search-id={turn.userMessage.id}
       tabIndex={-1}
       {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
     >
-      {(turn.userMessage.privateConnectDeviceId || watcherNote || turn.checkpoint || turn.checkpointUnavailableReason !== null) && (
-        <div className="message-meta">
-          <MessageOrigin message={turn.userMessage} />
-          {turn.checkpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</TooltipButton>}
-          {turn.checkpointUnavailableReason !== null && <TooltipText className="message-checkpoint-missing" tooltip={turn.checkpointUnavailableReason || TURN_CHECKPOINT_UNAVAILABLE_TITLE}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</TooltipText>}
-        </div>
-      )}
+      {requestMeta}
       <div
         className={clsx("message-body", collapsible && !expanded && "is-collapsed")}
         data-request-content={collapsible ? "collapsible" : "complete"}
@@ -158,17 +175,7 @@ export function UserRequestLayer({
         attachments={turn.userMessage.attachments}
         label="Request attachments"
       />
-      {sessionRecovery && (
-        <div className="sent-context" aria-label="Provider session">
-          <span data-session-recovery="">
-            <MessagesSquare size={14} aria-hidden="true" />
-            <span>
-              <strong>New provider session</strong>
-              <small title={sessionRecovery}>{sessionRecovery}</small>
-            </span>
-          </span>
-        </div>
-      )}
+      {sessionRecoveryNotice}
       {contextPackets.length > 0 && (
         <div className="sent-context" aria-label="Shared chat context">
           {contextPackets.map((packet) => {

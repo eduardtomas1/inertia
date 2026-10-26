@@ -57,6 +57,8 @@ import {
   type WorkspaceSceneProps,
 } from "./WorkspaceScene";
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
+import { useLaunchIntro } from "../hooks/useLaunchIntro";
+import { useSidebarCollapseMotion } from "../hooks/useSidebarCollapseMotion";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
 import type { AppView } from "../appView";
 import type { UsageViewProps } from "./UsageView";
@@ -620,6 +622,8 @@ export const AppLayout = memo(function AppLayout({
     const frame = requestAnimationFrame(() => setAppBooted(true));
     return () => cancelAnimationFrame(frame);
   }, []);
+  const launchIntro = useLaunchIntro(Boolean(connection.snapshot));
+  const sidebarMotion = useSidebarCollapseMotion(sidebarCollapsed, mobileNavigation, appShellRef);
 
   return (
     <div
@@ -628,6 +632,8 @@ export const AppLayout = memo(function AppLayout({
         sidebarCollapsed && !mobileNavigation ? " is-sidebar-collapsed" : ""
       }`}
       data-app-boot={appBooted ? "ready" : "initial"}
+      data-app-intro={launchIntro ? "" : undefined}
+      data-sidebar-collapse={sidebarMotion ?? undefined}
       data-interface-scale={settings.interfaceScale}
       data-runtime-generation={connection.runtimeGeneration ?? undefined}
       data-connection-status={connection.status}
@@ -646,7 +652,7 @@ export const AppLayout = memo(function AppLayout({
         />
         {settings.completionSound.enabled && <CompletionSounds snapshot={connection.snapshot} settings={settings.completionSound} />}
       </Suspense>
-      {(mobileNavigation || !sidebarCollapsed) && (
+      {(mobileNavigation || !sidebarCollapsed || sidebarMotion === "collapsing") && (
         <Suspense
           fallback={(
             <aside
@@ -663,12 +669,13 @@ export const AppLayout = memo(function AppLayout({
             connectionStatus={connection.status}
             view={view}
             open={sidebarOpen}
+            concealed={sidebarMotion === "collapsing"}
             busy={busyAction === "project.create"}
             projectScopeId={projectScopeId}
             onProjectScopeChange={setProjectScopeId}
             appUpdate={appUpdate}
             updateEverything={updateEverything}
-            layoutWidth={sidebarLayout.value}
+            layoutWidth={sidebarMotion === "collapsing" ? sidebarLayout.openValue : sidebarLayout.value}
             onClose={sidebarActions.close}
             onViewChange={sidebarActions.viewChange}
             onOpenHome={sidebarActions.openHome}

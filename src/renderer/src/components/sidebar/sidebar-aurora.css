@@ -28,7 +28,7 @@
   pointer-events: none;
   contain: strict;
   background:
-    radial-gradient(150px 64px at 100% 0%, color-mix(in srgb, var(--aurora-2) var(--aurora-wash), transparent), transparent 80%),
+    radial-gradient(150px 64px at 100% 0%, color-mix(in srgb, var(--aurora-2-live) var(--aurora-wash), transparent), transparent 80%),
     linear-gradient(180deg, color-mix(in srgb, var(--aurora-1) var(--aurora-wash), transparent), transparent 88%);
 }
 
@@ -36,6 +36,32 @@
   --aurora-peak: 40%;
   --aurora-mid: 16%;
   --aurora-wash: 8%;
+}
+
+@property --aurora-boost {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 0%;
+}
+
+@property --aurora-tint {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 0%;
+}
+
+.sidebar-aurora {
+  --aurora-2-live: color-mix(in srgb, var(--aurora-2), var(--status-approval) var(--aurora-tint));
+  --aurora-mid-live: calc(var(--aurora-mid) + var(--aurora-boost));
+  transition: --aurora-boost 1.2s var(--ease), --aurora-tint 1.2s var(--ease);
+}
+
+.sidebar-aurora[data-activity="working"] {
+  --aurora-boost: 4%;
+}
+
+.sidebar-aurora[data-activity="attention"] {
+  --aurora-tint: 30%;
 }
 
 .sidebar-aurora > span {
@@ -57,7 +83,7 @@
 /* A mid stop at 45% keeps each light rounded and soft instead of conical. */
 .sidebar-aurora-near {
   --aurora-light-a: color-mix(in srgb, var(--aurora-1) var(--aurora-peak), transparent);
-  --aurora-light-b: color-mix(in srgb, var(--aurora-2) var(--aurora-mid), transparent);
+  --aurora-light-b: color-mix(in srgb, var(--aurora-2-live) var(--aurora-mid-live), transparent);
   width: calc(100% + 400px);
   background-image:
     radial-gradient(72px 26px at 92px 28px, var(--aurora-light-a), color-mix(in srgb, var(--aurora-light-a) 45%, transparent) 45%, transparent),
@@ -68,8 +94,8 @@
 }
 
 .sidebar-aurora-far {
-  --aurora-light-c: color-mix(in srgb, var(--aurora-3) var(--aurora-mid), transparent);
-  --aurora-light-d: color-mix(in srgb, var(--aurora-1) var(--aurora-mid), transparent);
+  --aurora-light-c: color-mix(in srgb, var(--aurora-3) var(--aurora-mid-live), transparent);
+  --aurora-light-d: color-mix(in srgb, var(--aurora-1) var(--aurora-mid-live), transparent);
   width: calc(100% + 560px);
   background-image:
     radial-gradient(116px 22px at 138px 17px, var(--aurora-light-c), color-mix(in srgb, var(--aurora-light-c) 45%, transparent) 45%, transparent),
@@ -84,7 +110,7 @@
   right: -44px;
   width: 230px;
   height: 120px;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--aurora-2) var(--aurora-mid), transparent), transparent);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--aurora-2-live) var(--aurora-mid-live), transparent), transparent);
   animation: sidebar-aurora-breathe 11s ease-in-out infinite alternate paused;
 }
 
@@ -105,5 +131,27 @@
 @media (prefers-reduced-motion: reduce) {
   .sidebar-aurora > span {
     animation: none;
+  }
+}
+
+.sidebar::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 0.022;
+  mix-blend-mode: soft-light;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 160px 160px repeat;
+  contain: strict;
+}
+
+:root[data-theme="dark"] .sidebar::before {
+  opacity: 0.035;
+}
+
+@media (forced-colors: active) {
+  .sidebar::before {
+    display: none;
   }
 }

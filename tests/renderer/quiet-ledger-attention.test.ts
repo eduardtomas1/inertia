@@ -174,7 +174,7 @@ describe("Quiet Ledger warning and failure attention", () => {
     const row = cssBlock(".turn-activity-group .agent-activity {");
     const disclosure = cssBlock(".turn-activity-group .agent-activity-disclosure {");
 
-    expect(row).toContain("min-height: 24px");
+    expect(row).toContain("min-height: var(--ledger-row)");
     expect(disclosure).toContain("min-height: 20px");
   });
 });

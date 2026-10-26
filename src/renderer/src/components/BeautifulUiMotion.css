@@ -106,11 +106,6 @@
   animation-delay: var(--pixel-orbit-delay);
 }
 .agent-pixel-loader[data-animated="true"][data-phase="thinking"] > span:nth-child(5) { animation: none; opacity: .07; }
-@keyframes agent-pixel-shimmer {
-  0%, 100% { opacity: .15; }
-  18%, 42% { opacity: 1; }
-  62% { opacity: .15; }
-}
 
 .turn-work-chevron { transition: transform var(--dur-slow) var(--ease); }
 .turn-work-log details[open] > .turn-work-details,

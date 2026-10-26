@@ -28,6 +28,7 @@ import { watcherAccessMigration } from "./watcher-access";
 import { extendBackendPresetsMigration } from "./extend-backend-presets";
 import { persistTurnFailureKindsMigration } from "./persist-turn-failure-kinds";
 import { persistCompactOnReturnMigration } from "./persist-compact-on-return";
+import { duoComparisonBriefsMigration } from "./duo-comparison-briefs";
 import { turnScopedIndexesMigration } from "./turn-scoped-indexes";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
@@ -61,4 +62,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   persistTurnFailureKindsMigration,
   persistCompactOnReturnMigration,
   turnScopedIndexesMigration,
+  duoComparisonBriefsMigration,
 ];

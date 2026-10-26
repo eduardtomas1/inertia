@@ -17,6 +17,7 @@ export interface SidebarProps {
   connectionStatus: ConnectionStatus;
   view: AppView;
   open: boolean;
+  concealed?: boolean;
   busy: boolean;
   appUpdate?: AppUpdateController;
   updateEverything?: UpdateEverythingController;

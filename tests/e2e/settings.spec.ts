@@ -13,7 +13,7 @@ import { expectBackendSetupFinished } from "./support/backend-accounts-endpoint"
 import { createLinuxSecretService, type LinuxSecretService } from "./support/linux-secret-service";
 import { openTerminalDock } from "./support/workspace-tools";
 import { setAppearance } from "./support/appearance";
-import { expectBorderlessSettingsRows, expectFlatSettingsSections } from "./support/settings-assertions";
+import { expectBorderlessSettingsRows, expectCardSettingsSections } from "./support/settings-assertions";
 import { expectContextRingFitsItsNumber } from "./support/usage-ring";
 
 let app!: AppFixture;
@@ -70,7 +70,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await expect(page.getByRole("main", { name: "Settings" })).toBeFocused();
   await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance", exact: true }))
     .toHaveAttribute("aria-current", "page");
-  await expectFlatSettingsSections(page.getByRole("main", { name: "Settings" }));
+  await expectCardSettingsSections(page.getByRole("main", { name: "Settings" }));
   await page.getByRole("radio", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect.poll(async () => {
@@ -568,14 +568,15 @@ test("persists composer usage modes without losing the followed transcript", asy
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
   const usageModes = page.getByRole("radiogroup", { name: "Usage display" });
   await expect(usageModes.getByRole("radio", { name: "Hidden" })).toHaveAttribute("aria-checked", "true");
-  await usageModes.getByRole("radio", { name: "Expanded" }).click();
+  await expect(usageModes.getByRole("radio", { name: "Expanded" })).toHaveCount(0);
+  await usageModes.getByRole("radio", { name: "Compact" }).click();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   const expanded = page.getByRole("region", { name: "Usage and context" });
-  await expect(expanded).toHaveAttribute("data-mode", "expanded");
+  await expect(expanded).toHaveAttribute("data-mode", "compact");
   await expectComposerEndsAtDock(page.getByRole("region", {
     name: "Message composer",
   }));
-  await expect(expanded.locator(".usage-trigger-value")).toBeVisible();
+  await expect(expanded.locator(".usage-popover-trigger .usage-context-ring-value")).toBeVisible();
   const expandedTrigger = expanded.locator(".usage-popover-trigger");
   await expect(expandedTrigger).toHaveAccessibleName(/^Open usage and context\./u);
   await expandedTrigger.click();
@@ -602,7 +603,7 @@ test("persists composer usage modes without losing the followed transcript", asy
   await expect(page.locator("html")).toHaveAttribute("data-interface-scale", "large");
   await expect(page.locator(".chat-workspace")).toHaveClass(/response-density-comfortable/u);
   const narrowUsage = page.getByRole("region", { name: "Usage and context" });
-  await expect(narrowUsage).toHaveAttribute("data-mode", "expanded");
+  await expect(narrowUsage).toHaveAttribute("data-mode", "compact");
   await expectComposerEndsAtDock(page.getByRole("region", {
     name: "Message composer",
   }));

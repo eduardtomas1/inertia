@@ -6,6 +6,7 @@ import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
+import { DUO_COMPARISON_BRIEF_MAX_BYTES, duoComparisonBriefSchema, type DuoComparisonBrief } from "../../shared/duo-comparison-brief";
 import { AGENT_TURN_STATUSES, isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { randomUUID } from "node:crypto";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
@@ -51,6 +52,13 @@ function projectAttachments(
 function validWatcherNote(role: ChatMessage["role"], note: WatcherNoteAttribution): WatcherNoteAttribution {
   const parsed = watcherNoteAttributionSchema.safeParse(note);
   if (role !== "user" || !parsed.success) throw new Error("Invalid watcher note attribution.");
+  return parsed.data;
+}
+
+function validDuoComparison(role: ChatMessage["role"], turnId: string | null, brief: DuoComparisonBrief): DuoComparisonBrief {
+  const parsed = duoComparisonBriefSchema.safeParse(brief);
+  if (role !== "user" || turnId !== null || !parsed.success
+    || Buffer.byteLength(JSON.stringify(parsed.data)) > DUO_COMPARISON_BRIEF_MAX_BYTES) throw new Error("Invalid Duo comparison brief.");
   return parsed.data;
 }
 
@@ -167,12 +175,14 @@ export class TranscriptRepository {
     if (options.privateConnectDeviceId !== undefined
       && (role !== "user" || !isMessageOriginDeviceId(options.privateConnectDeviceId))) throw new Error("Invalid remote message origin.");
     const watcherNote = options.watcherNote === undefined ? undefined : validWatcherNote(role, options.watcherNote);
+    const duoComparison = options.duoComparison === undefined ? undefined : validDuoComparison(role, turnId, options.duoComparison);
     const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}), ...(options.htmlRender ? { htmlRender: { ...options.htmlRender } } : {}) };
     if (options.privateConnectDeviceId !== undefined) message.privateConnectDeviceId = options.privateConnectDeviceId;
     if (watcherNote) message.watcherNote = watcherNote;
+    if (duoComparison) message.duoComparison = duoComparison;
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null });
+      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null });
       this.context.database.prepare(`
         UPDATE conversations
         SET updated_at = ?, settled_at = NULL,

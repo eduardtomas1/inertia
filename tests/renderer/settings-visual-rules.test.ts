@@ -186,6 +186,20 @@ describe("mascot overlay", () => {
     expect(lines.reduce((total, line) => total + line, 0)).toBeLessThanOrEqual(116 - 16);
   });
 
+  it("speaks Inertia's dark palette and font stack instead of its own slate", () => {
+    const root = rule(mascot, ":root");
+    for (const token of [
+      "--bubble: #1f1f22;", "--bubble-border: rgb(255 255 255 / 0.10);", "--text: #ededf7;", "--muted: #9d9da7;",
+      "--faint: #8e8e97;", "--live: #5eb8e7;", "--attention: #d9a05a;", "--done: #70c18e;", "--problem: #ea9088;", "--focus: #a3a3fa;",
+    ]) expect(root).toContain(token);
+    expect(root).toContain("font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif;");
+    expect(source(mascot)).not.toMatch(/#(?:1d2229|f1f2e9|a9b5c2|9fb4c6|7fb0b3|d27e75|8d99a6|e4cb90|b8c4d0|d7dde3|2b323b|6f7a86|5d6773|b68e42|557e81|ffffff24)\b/u);
+    const status = rule(mascot, ".mascot-status");
+    expect(status).toContain("border: 1px solid var(--bubble-border);");
+    expect(status).toContain("background: var(--bubble)");
+    expect(status).toContain("border-radius: 14px;");
+  });
+
   it("draws the keyboard focus ring in the accent, inset like other rows", () => {
     expect(source(mascot)).not.toContain("#f5ce69");
     expect(source(mascot)).not.toContain("outline-offset: -3px");
@@ -194,12 +208,27 @@ describe("mascot overlay", () => {
 });
 
 describe("settings shell rules", () => {
-  it("keeps group headings small, muted and medium weight", () => {
+  it("anchors each group with a small semibold heading in the text colour", () => {
     const heading = rule(settings, ".settings-card-heading h3");
     expect(heading).toContain("font-size: var(--text-sm);");
-    expect(heading).toContain("font-weight: 500;");
-    expect(heading).toContain("color: var(--text-muted);");
+    expect(heading).toContain("font-weight: 600;");
+    expect(heading).toContain("color: var(--text);");
     expect(heading).not.toMatch(/text-transform|letter-spacing/u);
+  });
+
+  it("draws groups as filled cards with the raised edge and keeps the navigation on the page background", () => {
+    const card = rule(settings, ".settings-card");
+    expect(card).toContain("padding: 4px 16px 14px;");
+    expect(card).toContain("border-radius: var(--radius-md);");
+    expect(card).toContain("background: var(--fill);");
+    expect(card).toContain("box-shadow: inset 0 1px 0 var(--raised-edge);");
+    expect(card).toContain("margin-bottom: 20px;");
+    expect(card).not.toMatch(/overflow:/u);
+    expect(source(settings)).toMatch(/\.settings-card:has\([^{]*\.setting-row[^{]*\)\s*\{\s*padding-bottom: 4px;/u);
+    expect(rule(settings, ".settings-card-heading")).toContain("padding: 14px 0 6px;");
+    expect(rule(settings, ".settings-navigation")).toContain("background: var(--bg);");
+    expect(rule(settings, ".settings-content")).toContain("scroll-padding-block: 24px;");
+    expect(source(styles)).not.toMatch(/\n\s*\.settings-card\s*\{/u);
   });
 
   it("gives action rows the same title weight, gap and divider as other rows", () => {

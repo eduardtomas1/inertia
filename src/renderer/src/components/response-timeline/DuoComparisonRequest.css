@@ -1,0 +1,169 @@
+.duo-comparison-request {
+  container: duo-comparison / inline-size;
+  display: grid;
+  box-sizing: border-box;
+  width: min(100%, max(var(--user-request-max-width), 320px), 480px);
+  min-width: 0;
+  gap: 6px;
+  margin-left: auto;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  background: var(--fill);
+}
+
+.duo-comparison-heading {
+  margin: 0;
+  color: var(--text);
+  font-size: calc(var(--text-sm) + 1.5px);
+  font-weight: 500;
+  line-height: var(--leading-chrome);
+}
+
+.duo-comparison-sides {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.duo-comparison-side {
+  display: grid;
+  min-width: 0;
+  min-height: 28px;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+}
+
+.duo-comparison-role {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: var(--fill-strong);
+  font: 600 10.5px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+.duo-comparison-chat {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.duo-comparison-chat > .provider-brand-icon {
+  flex: 0 0 auto;
+}
+
+.duo-comparison-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duo-comparison-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.duo-comparison-side[data-status="completed"] .duo-comparison-status > svg {
+  color: var(--status-completed);
+}
+
+.duo-comparison-side[data-status="failed"] .duo-comparison-status > svg {
+  color: var(--status-failed);
+}
+
+.duo-comparison-side[data-status="interrupted"] .duo-comparison-status > svg {
+  color: var(--warning);
+}
+
+.duo-comparison-files {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.duo-comparison-request .duo-comparison-disclosure {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 0 -5px;
+  color: var(--text-muted);
+}
+
+.duo-comparison-request .duo-comparison-disclosure:hover,
+.duo-comparison-request .duo-comparison-disclosure:focus-visible {
+  color: var(--text);
+}
+
+.duo-comparison-disclosure > svg {
+  flex: 0 0 auto;
+}
+
+.duo-comparison-disclosure[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+
+.duo-comparison-brief {
+  max-height: min(480px, 60vh);
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--fill);
+  font-size: var(--text-sm);
+  line-height: var(--leading-prose);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.duo-comparison-brief[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .duo-comparison-disclosure > svg {
+    transition: transform var(--dur-fast) var(--ease);
+  }
+}
+
+@container duo-comparison (max-width: 300px) {
+  .duo-comparison-side {
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+    row-gap: 0;
+    padding-block: 4px;
+  }
+
+  .duo-comparison-files {
+    grid-column: 2 / -1;
+    text-align: left;
+  }
+}
+
+@media (forced-colors: active) {
+  .duo-comparison-request {
+    border: 1px solid CanvasText;
+  }
+
+  .duo-comparison-role {
+    forced-color-adjust: none;
+    color: CanvasText;
+    background: Canvas;
+    outline: 1px solid CanvasText;
+  }
+}

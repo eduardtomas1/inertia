@@ -3,12 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   SIDEBAR_AURORA_STEP_MS,
+  SIDEBAR_AURORA_WORKING_BREATH_RATE,
   SidebarAurora,
 } from "../../src/renderer/src/components/sidebar/SidebarAurora";
 
 interface FakeLayer {
   currentTime: number;
   playState: AnimationPlayState;
+  animationName?: string;
+  effect?: { target: Element | null };
 }
 
 let visibility: DocumentVisibilityState;
@@ -119,4 +122,37 @@ describe("sidebar aurora", () => {
     expect(replacement.currentTime).toBe(125);
     expect(cancelled.currentTime).toBe(125);
   });
+
+  it("names the work state for the light and defaults to idle", () => {
+    const view = render(<SidebarAurora moving />);
+    const aurora = view.container.querySelector(".sidebar-aurora")!;
+    expect(aurora).toHaveAttribute("data-activity", "idle");
+    view.rerender(<SidebarAurora moving activity="attention" />);
+    expect(aurora).toHaveAttribute("data-activity", "attention");
+  });
+
+  it("breathes faster while work runs and keeps the breath continuous when the state changes", async () => {
+    layers[2]!.animationName = "sidebar-aurora-breathe";
+    const view = render(<SidebarAurora moving activity="working" />);
+    await step(6);
+    expect(times()).toEqual([750, 1_750, 500 + 750 * SIDEBAR_AURORA_WORKING_BREATH_RATE]);
+    const breathAtSwitch = layers[2]!.currentTime;
+    view.rerender(<SidebarAurora moving activity="idle" />);
+    await step(2);
+    expect(times()).toEqual([1_000, 2_000, breathAtSwitch + 250]);
+  });
+
+  it("leaves the light's own intro and colour transitions to the browser", async () => {
+    const view = render(<SidebarAurora moving />);
+    const aurora = view.container.querySelector(".sidebar-aurora")!;
+    const own: FakeLayer = { currentTime: 40, playState: "running", effect: { target: aurora } };
+    layers = [...layers, own];
+    layers[0]!.playState = "idle";
+    await step();
+    layers[0]!.playState = "paused";
+    await step();
+    expect(own.currentTime).toBe(40);
+    expect(layers[1]!.currentTime).toBe(1_125);
+  });
 });
+

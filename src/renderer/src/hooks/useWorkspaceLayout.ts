@@ -181,6 +181,7 @@ export interface WorkspaceLayout extends WorkspacePanelActions {
   workspaceBodyStyle: CSSProperties;
   sidebar: {
     value: number;
+    openValue: number;
     max: number;
     onChange: (value: number) => void;
     onCommit: (value: number) => void;
@@ -378,9 +379,10 @@ export function useWorkspaceLayout(
       workspaceBodySize.height - CHAT_MIN_HEIGHT - RESIZE_HANDLE_SIZE,
     ),
   );
+  const openSidebarWidth = clamp(sidebarWidth, SIDEBAR_MIN_WIDTH, sidebarDynamicMax);
   const effectiveSidebarWidth = !mobileNavigation && sidebarCollapsed
     ? 0
-    : clamp(sidebarWidth, SIDEBAR_MIN_WIDTH, sidebarDynamicMax);
+    : openSidebarWidth;
   useLayoutEffect(() => {
     renderedSidebarWidthRef.current = effectiveSidebarWidth;
   }, [effectiveSidebarWidth]);
@@ -412,6 +414,7 @@ export function useWorkspaceLayout(
     workspaceBodyRef,
     appShellStyle: {
       "--sidebar-width": `${effectiveSidebarWidth}px`,
+      "--sidebar-open-width": `${openSidebarWidth}px`,
     } as CSSProperties,
     workspaceBodyStyle: {
       "--workspace-tools-width": `${effectiveToolsWidth}px`,
@@ -419,6 +422,7 @@ export function useWorkspaceLayout(
     } as CSSProperties,
     sidebar: {
       value: effectiveSidebarWidth,
+      openValue: openSidebarWidth,
       max: sidebarDynamicMax,
       onChange: setSidebarWidth,
       onCommit: setPersistedSidebarWidth,
@@ -440,6 +444,7 @@ export function useWorkspaceLayout(
     effectiveToolsHeight,
     effectiveToolsWidth,
     mobileNavigation,
+    openSidebarWidth,
     panelActions,
     panelPresentation,
     panelState,

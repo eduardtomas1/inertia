@@ -6,6 +6,7 @@ import {
 } from "react";
 import {
   ChevronDown,
+  Files,
 } from "lucide-react";
 import type {
   AgentTurn,
@@ -16,6 +17,7 @@ import { useCopiedState } from "../../hooks/useCopiedState";
 import { renderedAnswerText } from "../../utils/answerPlainText";
 import {
   formatElapsed,
+  isTurnGitArtifactWithoutChanges,
   turnExecutionElapsedMs,
   turnQueueElapsedMs,
   turnStatusLabel,
@@ -148,6 +150,7 @@ export function turnMetadataPresentation(
   if (
     turn.gitArtifact === null
     || shouldShowChangedFilesSummary(turn.gitArtifact)
+    || isTurnGitArtifactWithoutChanges(turn.gitArtifact)
   ) {
     details.push({
       label: "Artifact completeness",
@@ -277,6 +280,12 @@ export function TurnMetadata({
       >
         {detailsExpanded && settledWorkDetails && (
           <div className="turn-run-work-details">{settledWorkDetails}</div>
+        )}
+        {detailsExpanded && turn.gitArtifact && isTurnGitArtifactWithoutChanges(turn.gitArtifact) && (
+          <p className="turn-run-no-changes">
+            <Files size={14} aria-hidden="true" />
+            <span>No file changes</span>
+          </p>
         )}
         {detailsExpanded && (
           <button

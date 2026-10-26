@@ -2,9 +2,9 @@
   container: providers / inline-size;
 }
 
-.provider-settings-heading {
+.settings-card-heading.provider-settings-heading {
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 .provider-settings-heading > span {

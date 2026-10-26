@@ -90,6 +90,13 @@ function auroraStrengths(appearance: string): { peak: number; mid: number; wash:
   return { peak: read("peak"), mid: read("mid"), wash: read("wash") };
 }
 
+function auroraActivityStates(): { boost: number; tint: number }[] {
+  const source = repoFile("src/renderer/src/components/sidebar/sidebar-aurora.css");
+  const read = (activity: string, name: string): number =>
+    Number(new RegExp(`\\.sidebar-aurora\\[data-activity="${activity}"\\] \\{\\s*--aurora-${name}:\\s*([\\d.]+)%`, "u").exec(source)?.[1]) / 100;
+  return [{ boost: 0, tint: 0 }, { boost: read("working", "boost"), tint: 0 }, { boost: 0, tint: read("attention", "tint") }];
+}
+
 function brandHoverStrengths(): number[] {
   const styles = repoFile("src/renderer/src/styles.css");
   return [...styles.matchAll(/\.brand-lockup:hover\s*\{\s*background:\s*var\(--([\w-]+)\);/gu)]
@@ -123,7 +130,7 @@ describe("generated color palettes", () => {
     for (const source of [families, styles]) {
       expect(source).not.toMatch(/--(?:app-bg|sidebar-bg|surface-hover):/u);
     }
-    expect(styles).toMatch(/\n  --bg: var\(--surface-strong\);\n  --surface-raised: var\(--surface-strong\);/u);
+    expect(styles).toMatch(/\n  --bg: var\(--surface-strong\);\n  --surface-raised: var\(--paper\);/u);
     expect(styles).toMatch(/:root\[data-theme="dark"\] \{[^}]*--surface-raised: var\(--surface-muted\);[^}]*--scrollbar-thumb:[^}]*--shadow-float-alpha: 0\.56;[^}]*--raised-edge:/u);
     expect(families).not.toMatch(/--(?:bg|surface-raised|fill|fill-strong|line|scrollbar-thumb|shadow-float-alpha|raised-edge):/u);
   });
@@ -191,25 +198,32 @@ describe("generated color palettes", () => {
 
   it.each(cases)("keeps the brand name readable over the %s %s aurora", (family, appearance) => {
     const tokens = palette(family, appearance);
-    const { peak, mid, wash } = auroraStrengths(appearance);
-    expect([peak, mid, wash].every((strength) => strength > 0 && strength < 1)).toBe(true);
-    const [first, second, third] = [1, 2, 3].map((index) => tokens[`aurora-${index}`]!);
-    const sidebar = rgbOf(tokens.surface!);
-    const washed = over(second!, wash, over(first!, wash, sidebar));
-    const hoverStrengths = brandHoverStrengths();
-    expect(hoverStrengths).toHaveLength(2);
-    expect(hoverStrengths.every((strength) => strength > 0 && strength < 1)).toBe(true);
-    for (const light of [first!, second!, third!]) {
-      expect(contrastRatio(tokens.text!, hexOf(over(light, peak, washed))), `${family} ${appearance} single light`)
-        .toBeGreaterThanOrEqual(4.5);
-    }
-    for (const far of [third!, first!]) {
-      for (const [near, strength] of [[first!, peak], [second!, mid]] as const) {
-        const stacked = over(second!, mid, over(near, strength, over(far, mid, washed)));
-        for (const hover of [0, ...hoverStrengths]) {
-          expect(contrastRatio(tokens.text!, hexOf(over(tokens.text!, hover, stacked))),
-            `${family} ${appearance} stacked lights, hover ${hover}`)
-            .toBeGreaterThanOrEqual(4.5);
+    const { peak, mid: restingMid, wash } = auroraStrengths(appearance);
+    expect([peak, restingMid, wash].every((strength) => strength > 0 && strength < 1)).toBe(true);
+    const states = auroraActivityStates();
+    expect(states[1]!.boost).toBeGreaterThan(0);
+    expect(states[2]!.tint).toBeGreaterThan(0);
+    for (const { boost, tint } of states) {
+      const mid = restingMid + boost;
+      const [first, restingSecond, third] = [1, 2, 3].map((index) => tokens[`aurora-${index}`]!);
+      const second = hexOf(over(tokens["status-approval"]!, tint, rgbOf(restingSecond!)));
+      const sidebar = rgbOf(tokens.surface!);
+      const washed = over(second!, wash, over(first!, wash, sidebar));
+      const hoverStrengths = brandHoverStrengths();
+      expect(hoverStrengths).toHaveLength(2);
+      expect(hoverStrengths.every((strength) => strength > 0 && strength < 1)).toBe(true);
+      for (const light of [first!, second!, third!]) {
+        expect(contrastRatio(tokens.text!, hexOf(over(light, peak, washed))), `${family} ${appearance} single light`)
+          .toBeGreaterThanOrEqual(4.5);
+      }
+      for (const far of [third!, first!]) {
+        for (const [near, strength] of [[first!, peak], [second!, mid]] as const) {
+          const stacked = over(second!, mid, over(near, strength, over(far, mid, washed)));
+          for (const hover of [0, ...hoverStrengths]) {
+            expect(contrastRatio(tokens.text!, hexOf(over(tokens.text!, hover, stacked))),
+              `${family} ${appearance} stacked lights, hover ${hover}, boost ${boost}, tint ${tint}`)
+              .toBeGreaterThanOrEqual(4.5);
+          }
         }
       }
     }

@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import clsx from "clsx";
+import { usePhaseLockedAnimations } from "../../hooks/usePhaseLockedAnimations";
 import type {
   AgentSkillSummary,
   ChatAttachment,
@@ -262,6 +263,7 @@ export function ComposerInputZone({
   const suggestionMenuVisible = skillOpen || mentionMenuVisible;
   const compactWorking = compactNotice?.kind === "working";
   const compactError = compactNotice?.kind === "error";
+  const compactNoticeRef = usePhaseLockedAnimations<HTMLDivElement>(compactWorking);
 
   const moveMentionHighlight = (
     key: SidebarNavigationKey,
@@ -490,6 +492,7 @@ export function ComposerInputZone({
         )}
         {compactNotice && (
           <div
+            ref={compactNoticeRef}
             className={clsx(
               "composer-compact-notice",
               `is-${compactNotice.kind}`,

@@ -41,5 +41,8 @@ export function removeWatcherLinksFromLegacyFixture(database: Database.Database)
       database.exec(`ALTER TABLE ${table} DROP COLUMN watcher_note_json`);
     }
   }
+  if ((database.pragma("table_info(messages)") as Array<{ name: string }>).some(({ name }) => name === "duo_comparison_json")) {
+    database.exec("ALTER TABLE messages DROP COLUMN duo_comparison_json");
+  }
   database.exec("DELETE FROM schema_migrations WHERE version >= 99");
 }

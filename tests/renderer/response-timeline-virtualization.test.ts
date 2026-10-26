@@ -22,6 +22,7 @@ import {
   estimateCompletedTurnSpacing,
   estimateTimelineRenderWeight,
   estimateTimelineRowSize,
+  isTurnGitArtifactWithoutChanges,
   shouldAdjustTimelineScrollPosition,
   shouldFollowTimeline,
   shouldShowTurnGitArtifactSummary,
@@ -379,6 +380,36 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimateTimelineRenderWeight([checkItem])).toBeLessThan(estimateTimelineRenderWeight([plain]));
     expect(buildTimelineMinimapMarkers(checkItem.kind === "turn" ? [checkItem.turn] : [])[0]?.label)
       .toBe("Check 4 · 9 events");
+  });
+
+  it("sizes a flagged Duo judge brief as its compact card, not as the long prompt", () => {
+    const prompt = "# Independent Duo comparison\n".repeat(600);
+    const judge = agentTurn("duo-judge-turn");
+    const [item] = buildResponseTimeline({
+      turns: [judge],
+      messages: [
+        {
+          ...message("duo-judge-turn-request", "duo-judge-turn", "user", prompt),
+          duoComparison: {
+            launchId: "launch-1",
+            sides: [
+              { conversationId: "side-a", providerId: "codex", title: "A", status: "completed", filesChanged: 1 },
+              { conversationId: "side-b", providerId: "claude", title: "B", status: "completed", filesChanged: 2 },
+            ],
+          },
+        },
+        message("duo-judge-turn-answer", "duo-judge-turn", "assistant", "A is stronger."),
+      ],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+    });
+    const plain = buildItem({ id: "duo-plain", request: prompt, answer: "A is stronger." });
+    const flagged = estimateTimelineRowSize(item!);
+    expect(flagged).toBeLessThan(estimateTimelineRowSize(plain));
+    expect(flagged).toBeLessThan(estimateTimelineRowSize(buildItem({ id: "duo-short", answer: "A is stronger." })) + 136);
+    expect(responseTimelineArticleLabel(item!)).toBe("Turn 1: Comparing A and B");
+    expect(buildTimelineMinimapMarkers(item!.kind === "turn" ? [item!.turn] : [])[0]?.label).toBe("Comparing A and B");
   });
 
   it("virtualizes short histories with bounded input scans when content is heavy", () => {
@@ -854,6 +885,26 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(shouldShowTurnGitArtifactSummary(unavailable)).toBe(false);
     expect(estimateTimelineRowSize(item, { showChangedFiles: true }))
       .toBe(estimateTimelineRowSize(item, { showChangedFiles: false }));
+  });
+
+  it("does not reserve a changed-files row for a complete capture without changes", () => {
+    const unchanged = artifact("unchanged", 0);
+    const pending = { ...artifact("pending", 0), status: "pending" as const, completeness: "partial" as const };
+    const partial = { ...artifact("partial", 0), status: "partial" as const, completeness: "partial" as const };
+    const item = buildItem({ id: "unchanged", gitArtifact: unchanged });
+
+    expect(isTurnGitArtifactWithoutChanges(unchanged)).toBe(true);
+    expect(shouldShowTurnGitArtifactSummary(unchanged)).toBe(false);
+    expect(shouldShowTurnGitArtifactSummary(artifact("changed", 2))).toBe(true);
+    expect(shouldShowTurnGitArtifactSummary(pending)).toBe(true);
+    expect(shouldShowTurnGitArtifactSummary(partial)).toBe(true);
+    expect(estimateTimelineRowSize(item, { showChangedFiles: true }))
+      .toBe(estimateTimelineRowSize(item, { showChangedFiles: false }));
+    expect(estimateTimelineRowSize(item, { runDetailsExpanded: true }))
+      .toBeGreaterThan(estimateTimelineRowSize(buildItem({ id: "changed", gitArtifact: artifact("changed", 2) }), {
+        runDetailsExpanded: true,
+        showChangedFiles: false,
+      }));
   });
 
   it("preserves user-controlled scroll during streaming and resize measurement changes", () => {

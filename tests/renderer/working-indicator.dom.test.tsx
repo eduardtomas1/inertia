@@ -107,7 +107,7 @@ describe("working indicator placements", () => {
     const orb = view.container.querySelector(".working-orb");
     expect(orb).toHaveAttribute("data-orb-design", "searching");
     expect(orb).toHaveAttribute("aria-hidden", "true");
-    expect(orb).toHaveStyle({ width: "18px", height: "18px" });
+    expect(orb).toHaveStyle({ width: "16px", height: "16px" });
     const canvas = await waitFor(() => {
       const element = view.container.querySelector("canvas");
       expect(element).not.toBeNull();

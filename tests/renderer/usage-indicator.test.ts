@@ -119,8 +119,9 @@ describe("UsageIndicator", () => {
     expect(compact).toContain('hidden=""');
 
     expect(expanded).toContain('data-mode="expanded"');
-    expect(expanded).toContain('class="usage-trigger-value"');
-    expect(expanded).toContain(">50%</span>");
+    expect(expanded).toContain('class="usage-context-ring-value"');
+    expect(expanded).not.toContain("usage-trigger-value");
+    expect(expanded).not.toContain(">50%</span>");
     expect(render(usage(), [], freshState, "hidden")).toBe("");
   });
 

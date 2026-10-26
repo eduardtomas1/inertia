@@ -9,26 +9,23 @@ import {
 } from "../../src/renderer/src/utils/usageDisplay";
 
 describe("usage display behavior", () => {
-  it("formalizes hidden, compact, and expanded without a permanent strip", () => {
+  it("formalizes hidden and compact, shows a legacy expanded preference as the compact ring, and never a permanent strip", () => {
     expect(usageDisplayBehavior("hidden")).toEqual({
       mode: "hidden",
       surface: "hidden",
       showCircle: false,
-      showAdjacentValue: false,
       showPermanentStrip: false,
     });
     expect(usageDisplayBehavior("compact")).toEqual({
       mode: "compact",
       surface: "circle",
       showCircle: true,
-      showAdjacentValue: false,
       showPermanentStrip: false,
     });
     expect(usageDisplayBehavior("expanded")).toEqual({
       mode: "expanded",
-      surface: "circle-with-value",
+      surface: "circle",
       showCircle: true,
-      showAdjacentValue: true,
       showPermanentStrip: false,
     });
     expect(RECOMMENDED_USAGE_DISPLAY_MODE).toBe("compact");

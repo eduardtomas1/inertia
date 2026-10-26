@@ -483,6 +483,9 @@ export function resolveTurnRequest(
     activateConversation: request.activateConversation,
     privateConnectDeviceId: request.privateConnectDeviceId,
     ...(request.watcherNote ? { watcherNote: request.watcherNote } : {}),
+    ...(request.duoComparison && request.duoComparison.launchId === request.authorizedDuoComparisonLaunchId
+      ? { duoComparison: request.duoComparison }
+      : {}),
     executionContext: assembled.persistence,
     ...(contextPacketIds.length > 0
       ? {

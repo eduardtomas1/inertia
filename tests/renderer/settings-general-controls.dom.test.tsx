@@ -23,7 +23,7 @@ describe("Settings radio controls", () => {
   it.each([
     ["appearance", "Interface scale", "Default", "Comfortable", "Compact", { interfaceScale: "comfortable" }],
     ["projects", "Group projects", "Keep separate", "By repository", "By repository and folder", { projectGrouping: "repository" }],
-    ["chats", "Usage display", "Compact", "Hidden", "Expanded", { usageDisplayMode: "hidden" }],
+    ["chats", "Usage display", "Compact", "Hidden", "Hidden", { usageDisplayMode: "hidden" }],
     ["appearance", "Text density", "Default", "Comfortable", "Compact", { responseDensity: "comfortable" }],
   ] as const)("moves the %s › %s choice with arrow keys and a single tab stop", async (section: SettingsSection, group, checked, next, previous, update) => {
     const onUpdate = vi.fn(async () => undefined);

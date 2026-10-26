@@ -6,7 +6,6 @@ import { NewChatDefaults, type NewChatDefaultsProps } from "./NewChatDefaults";
 import { TerminalFontSize } from "./TerminalFontSize";
 
 const USAGE_DISPLAY_MODES: readonly SettingOption<AppSettings["usageDisplayMode"]>[] = [
-  { value: "expanded", label: "Expanded" },
   { value: "compact", label: "Compact" },
   { value: "hidden", label: "Hidden" },
 ];
@@ -36,7 +35,7 @@ export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
         <SettingRadioGroup
           id="usage-display"
           title="Usage display"
-          value={settings.usageDisplayMode}
+          value={settings.usageDisplayMode === "expanded" ? "compact" : settings.usageDisplayMode}
           options={USAGE_DISPLAY_MODES}
           disabled={disabled}
           onChange={(usageDisplayMode) => onUpdate({ usageDisplayMode })}

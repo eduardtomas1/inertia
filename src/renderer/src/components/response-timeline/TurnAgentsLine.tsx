@@ -2,6 +2,7 @@ import type { SubagentTrace } from "@shared/contracts";
 import type { WorkspacePanelTab } from "../workspacePanelTypes";
 import { requestBackgroundTaskReveal } from "../../utils/backgroundTaskReveal";
 import { turnAgentStatus, turnAgentStatusText } from "../../utils/turnAgentStatus";
+import { usePhaseLockedAnimations } from "../../hooks/usePhaseLockedAnimations";
 
 const MAX_FOCUS_FRAMES = 30;
 
@@ -44,11 +45,12 @@ export function TurnAgentsLine({
   onOpenSurface?: (surface: WorkspacePanelTab) => void;
 }): React.JSX.Element | null {
   const status = turnAgentStatus(subagents);
+  const liveRef = usePhaseLockedAnimations<HTMLSpanElement>((status?.running ?? 0) > 0);
   if (!status) return null;
   const { text, failed } = turnAgentStatusText(status);
   const content = (
     <>
-      <span className={status.running > 0 ? "background-task-live" : undefined}>{text}</span>
+      <span ref={liveRef} className={status.running > 0 ? "background-task-live" : undefined}>{text}</span>
       {failed && <>{" · "}<span className="turn-agents-danger">{failed}</span></>}
     </>
   );

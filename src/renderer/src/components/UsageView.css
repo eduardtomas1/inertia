@@ -479,6 +479,33 @@
 
 .usage-metric-unavailable { font-size: var(--text-sm); font-weight: 500; }
 
+.usage-metric-strip.is-requests-only {
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+}
+
+.usage-metric.is-hero {
+  padding-right: 32px;
+}
+
+.usage-metric.is-hero > strong {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-heading);
+}
+
+.usage-note {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--text-muted);
+  background: var(--bg);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+}
+
 .usage-breakdown { margin-top: 29px; }
 .usage-breakdown-heading { justify-content: space-between; gap: 18px; }
 .usage-table-wrap {

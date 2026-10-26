@@ -11,6 +11,7 @@ import { ChevronDown, Square } from "lucide-react";
 
 import type { AgentTurn, SubagentTrace, WorkspaceRun } from "@shared/contracts";
 import { useDocumentVisibility } from "../hooks/useDocumentPresence";
+import { usePhaseLockedAnimations } from "../hooks/usePhaseLockedAnimations";
 import { formatCompact } from "../lib/compactFormat";
 import { formatCount } from "../lib/usageFormat";
 import { backgroundCommandIsLive } from "../utils/backgroundTaskRuns";
@@ -246,6 +247,7 @@ export const AgentCard = memo(function AgentCard({
   const doing = backgroundTaskDoingNow(trace);
   const live = isLiveSubagentTrace(trace);
   const running = live && (trace.status === "running" || trace.status === "spawned");
+  const liveLineRef = usePhaseLockedAnimations<HTMLSpanElement>(running);
   const current = backgroundTaskCurrentActivity(trace);
   const line = expanded && current === null && doing === (live ? trace.progress : trace.result) ? null : doing;
   const elapsed = live ? 0 : backgroundTaskElapsedMs(trace, now ?? Date.now());
@@ -280,7 +282,7 @@ export const AgentCard = memo(function AgentCard({
       </div>
       {canStop && <StopButton title={title} stopping={stopping} onStop={() => onStop(trace.id)} />}
       <p className="background-task-doing">
-        {line && <span className={running ? "background-task-line background-task-live" : "background-task-line"}>{line}</span>}
+        {line && <span ref={liveLineRef} className={running ? "background-task-line background-task-live" : "background-task-line"}>{line}</span>}
         <button
           type="button"
           className="background-task-link background-task-transcript-toggle"

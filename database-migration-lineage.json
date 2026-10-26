@@ -782,6 +782,11 @@
       "version": 105,
       "name": "IndexTurnScopedRows",
       "digest": "833d5c6ddbc877e71f7790a3259dd8ad55552b46a5f904a966684974ddff0d11"
+    },
+    {
+      "version": 106,
+      "name": "PersistDuoComparisonBriefs",
+      "digest": "5f178914d0fa96fece0a0ad3c5dab4c1362971ed3c93d02d0a923457f0aec920"
     }
   ]
 }

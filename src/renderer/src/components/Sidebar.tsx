@@ -79,6 +79,7 @@ import { sidebarTasksLabel, tasksNeedingYou } from "./sidebar/sidebarTaskCount";
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
 import { SidebarAurora } from "./sidebar/SidebarAurora";
+import { sidebarAuroraActivity } from "./sidebar/sidebarAuroraActivity";
 import { SidebarHelpButton } from "./sidebar/SidebarHelpButton";
 import "./sidebar/workspace-navigation.css";
 import type { SidebarProps } from "./sidebar/SidebarProps";
@@ -155,6 +156,7 @@ function SidebarView({
   connectionStatus,
   view,
   open,
+  concealed = false,
   busy,
   layoutWidth,
   onClose,
@@ -335,6 +337,7 @@ function SidebarView({
       snapshot?.runs,
     ],
   );
+  const auroraActivity = useMemo(() => sidebarAuroraActivity(threadViewsById.values()), [threadViewsById]);
   const scopedProjectId = projectScopeId && regularProjects.some(({ id }) => id === projectScopeId) ? projectScopeId : null;
   const tasksNeedYou = useMemo(() => tasksNeedingYou({
     todos: snapshot?.todos,
@@ -1005,8 +1008,8 @@ function SidebarView({
           "sidebar-mode-activity",
         )}
         aria-label="Project navigation"
-        aria-hidden={mobile && !open ? true : undefined}
-        inert={mobile && !open ? true : undefined}
+        aria-hidden={concealed || (mobile && !open) ? true : undefined}
+        inert={concealed || (mobile && !open) ? true : undefined}
         onFocusCapture={(event) => {
           const target = event.target instanceof HTMLElement ? event.target : null;
           const focusOwner = target?.closest<HTMLElement>(
@@ -1033,7 +1036,7 @@ function SidebarView({
           workFocusIndexRef.current = identityIndex >= 0 ? identityIndex : null;
         }}
       >
-        <SidebarAurora moving={!reducedMotion && (!mobile || open)} />
+        <SidebarAurora moving={!reducedMotion && (!mobile || open)} activity={auroraActivity} />
         <div className="sidebar-brand drag-region">
           {preview.preview}
           <button type="button" className="brand-lockup no-drag" aria-label="Start a new chat" onClick={onOpenHome}>

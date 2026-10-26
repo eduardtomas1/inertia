@@ -1370,13 +1370,12 @@ async function streamingResponsivenessSample(
     const finalTurn = finalAnswer.locator(
       "xpath=ancestor::section[@data-turn-id][1]",
     );
-    const finalArtifact = finalTurn.locator("[data-turn-git-artifact-id]");
-    await finalArtifact.waitFor({ state: "attached" });
+    await finalTurn.locator(".turn-run-details-toggle").waitFor({ state: "attached" });
+    const pendingArtifact = finalTurn.locator("[data-turn-git-artifact-id].is-pending");
     await expect.poll(
-      () => finalArtifact.evaluate((element) =>
-        element.classList.contains("is-pending")),
+      () => pendingArtifact.count(),
       { timeout: TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS },
-    ).toBe(false);
+    ).toBe(0);
     await expect.poll(() => liveViewport.evaluate(
       (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
     )).toBeLessThanOrEqual(2);

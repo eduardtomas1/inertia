@@ -1,4 +1,5 @@
 import type { ActiveAgentPhase } from "../utils/response-timeline/active-state";
+import { usePhaseLockedAnimations } from "../hooks/usePhaseLockedAnimations";
 
 const AGENT_PIXEL_GRID_CELLS = Array.from({ length: 9 }, (_, index) => index);
 
@@ -16,8 +17,10 @@ export function AgentPixelGrid({
   phase?: ActiveAgentPhase;
   rhythm?: "orbit";
 }): React.JSX.Element {
+  const ref = usePhaseLockedAnimations<HTMLSpanElement>(`${animated}:${phase}:${rhythm}`);
   return (
     <span
+      ref={ref}
       className="agent-pixel-loader"
       aria-hidden="true"
       data-animated={animated ? "true" : "false"}

@@ -218,6 +218,19 @@ describe("response timeline render stability", () => {
     expect(document.querySelectorAll(".response-stream-word")).toHaveLength(0);
   });
 
+  it("resolves a reference link in a settled block once its definition settles", () => {
+    const Stream = ({ content }: { content: string }) => (
+      <StreamingMarkdownText content={content} projectRoot="" projectId="" defaultCodeWrap={false} />
+    );
+    const view = render(<Stream content={"See [the docs][docs].\n\nNext"} />);
+    const first = () => document.querySelector(".response-stream-block");
+    expect(first()?.querySelector("a")).toBeNull();
+
+    view.rerender(<Stream content={"See [the docs][docs].\n\n[docs]: https://example.com/docs\n\nStill streaming"} />);
+    expect(first()?.querySelector("a")?.getAttribute("href")).toBe("https://example.com/docs");
+    expect(first()?.textContent).toBe("See the docs.");
+  });
+
   it("keeps an unclosed fence in the plain tail until it closes", () => {
     const Stream = ({ content }: { content: string }) => (
       <StreamingMarkdownText content={content} projectRoot="" projectId="" defaultCodeWrap={false} />

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  markdownReferenceDefinitions,
   splitStreamingMarkdown,
   streamingMarkdownTail,
   type StreamingMarkdownSplit,
@@ -124,6 +125,17 @@ describe("streaming Markdown split", () => {
     const replaced = splitStreamingMarkdown("Intro\n\n  indented", first);
     expect(replaced.blocks).toEqual([]);
     expect(streamingMarkdownTail(replaced)).toBe("Intro\n\n  indented");
+  });
+
+  it("collects link reference definitions from settled blocks, never from code or footnotes", () => {
+    expect(markdownReferenceDefinitions([
+      "See [the docs][docs].",
+      "[docs]: https://example.com/docs\n  [api]: https://example.com/api \"API\"",
+      "```md\n[fake]: https://example.com/fake\n```",
+      "    [indented]: https://example.com/indented",
+      "[^1]: A footnote",
+    ])).toBe("[docs]: https://example.com/docs\n  [api]: https://example.com/api \"API\"");
+    expect(markdownReferenceDefinitions(["Plain text"])).toBe("");
   });
 
   it("treats CRLF line endings like LF", () => {

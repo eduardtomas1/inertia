@@ -19,6 +19,8 @@ interface HtmlBlock {
 const FENCE = /^[ \t]*(`{3,}|~{3,})/u;
 const LIST_ITEM = /^ {0,3}(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)/u;
 const LIST_MARKER_START = /^[-+*0-9]/u;
+const REFERENCE_DEFINITION = /^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*\S.*$/gmu;
+const INDENTED_CODE = /^(?: {4}|\t)/u;
 const HTML_BLOCK_OPEN = /^ {0,3}<(details|div|table|section|article|aside|figure|pre|ul|ol|dl|blockquote|center|nav|header|footer|main)(?=[\s/>]|$)/iu;
 const EMPTY_SPLIT: StreamingMarkdownSplit = {
   content: "",
@@ -130,4 +132,11 @@ export function splitStreamingMarkdown(
 
 export function streamingMarkdownTail(split: StreamingMarkdownSplit): string {
   return split.content.slice(split.settledEnd);
+}
+
+export function markdownReferenceDefinitions(blocks: readonly string[]): string {
+  return blocks
+    .filter((block) => !FENCE.test(block) && !INDENTED_CODE.test(block))
+    .flatMap((block) => block.match(REFERENCE_DEFINITION) ?? [])
+    .join("\n");
 }

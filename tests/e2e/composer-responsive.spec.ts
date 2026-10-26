@@ -274,7 +274,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
     const raisedHex = /^#[0-9a-f]{3}$/iu.test(wideGeometry.raisedSurface)
-      ? `#${[...wideGeometry.raisedSurface.slice(1)].map((digit) => digit + digit).join("")}`
+      ? `#${wideGeometry.raisedSurface.slice(1).split("").map((digit) => digit + digit).join("")}`
       : wideGeometry.raisedSurface;
     const raisedChannels = [1, 3, 5].map((offset) => Number.parseInt(raisedHex.slice(offset, offset + 2), 16));
     expect([wideGeometry.surfaceImage, wideGeometry.surfaceColor]).toEqual(["none", `rgb(${raisedChannels.join(", ")})`]);

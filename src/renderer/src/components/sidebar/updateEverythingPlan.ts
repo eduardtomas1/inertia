@@ -8,6 +8,7 @@ import type { AppUpdateStatus } from "@shared/desktop";
 import { PROVIDER_MAINTENANCE_PROVIDER_IDS } from "@shared/provider-maintenance";
 import { agentRunStateForTurn, agentTurnStatusForRunState, isAgentRunTerminalState } from "@shared/run-state";
 import type { UpdateEverythingPhase } from "../../utils/updateEverythingRun";
+import { pendingReleaseCount } from "./appUpdatePresentation";
 
 export interface UpdateEverythingProvider {
   providerId: ProviderMaintenanceProviderId;
@@ -17,7 +18,7 @@ export interface UpdateEverythingProvider {
 }
 
 export interface UpdateEverythingPlan {
-  app: { from: string; to: string } | null;
+  app: { from: string; to: string; releases: number } | null;
   releasePageVersion: string | null;
   providers: readonly UpdateEverythingProvider[];
   runningChats: number;
@@ -43,10 +44,10 @@ function providerLabel(snapshot: AppSnapshot | null, providerId: ProviderMainten
     ?? providerId;
 }
 
-function inAppUpdate(status: AppUpdateStatus | null): { from: string; to: string } | null {
+function inAppUpdate(status: AppUpdateStatus | null): UpdateEverythingPlan["app"] {
   if (!status?.latestVersion || status.delivery !== "in-app" || status.installBlocker) return null;
   return status.state === "available" || status.state === "downloaded"
-    ? { from: status.currentVersion, to: status.latestVersion }
+    ? { from: status.currentVersion, to: status.latestVersion, releases: pendingReleaseCount(status) }
     : null;
 }
 

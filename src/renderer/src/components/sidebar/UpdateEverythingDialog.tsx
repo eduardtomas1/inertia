@@ -26,9 +26,9 @@ function saveContinueChats(value: boolean): void {
   }
 }
 
-function versionLine(label: string, from: string | null, to: string | null): string {
+function versionLine(label: string, from: string | null, to: string | null, releases = 1): string {
   if (!to) return `${label} (provider-managed update)`;
-  return from ? `${label} ${from} → ${to}` : `${label} ${to}`;
+  return `${from ? `${label} ${from} → ${to}` : `${label} ${to}`}${releases >= 2 ? ` · ${releases} releases` : ""}`;
 }
 
 export function UpdateEverythingDialog({ plan, onClose, onUpdate, restoreFocus }: {
@@ -67,7 +67,7 @@ export function UpdateEverythingDialog({ plan, onClose, onUpdate, restoreFocus }
         })}>Update</button>
       </>}>
       <ul className="update-everything-items">
-        {plan.app && <li>{versionLine("Inertia", plan.app.from, plan.app.to)}</li>}
+        {plan.app && <li>{versionLine("Inertia", plan.app.from, plan.app.to, plan.app.releases)}</li>}
         {plan.providers.map((provider) => <li key={provider.providerId}>{versionLine(provider.label, provider.from, provider.to)}</li>)}
       </ul>
       {!plan.app && plan.releasePageVersion && <p>Inertia {plan.releasePageVersion} is on the release page; this build cannot update itself.</p>}

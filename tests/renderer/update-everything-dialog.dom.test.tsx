@@ -8,7 +8,7 @@ const STORAGE_KEY = "inertia:update-everything:continue";
 
 function plan(overrides: Partial<UpdateEverythingPlan> = {}): UpdateEverythingPlan {
   return {
-    app: { from: "0.0.71", to: "0.0.72" },
+    app: { from: "0.0.71", to: "0.0.72", releases: 1 },
     releasePageVersion: null,
     providers: [
       { providerId: "codex", label: "Codex", from: "0.112.0", to: "0.113.0" },
@@ -153,5 +153,16 @@ describe("update everything dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Update" }));
     expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ providerIds: ["codex", "claude"], includeApp: true, continueChats: true });
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("update everything with skipped releases", () => {
+  it("says how many releases the Inertia update covers only when it is more than one", () => {
+    show(plan({ app: { from: "0.0.74", to: "0.0.77", releases: 3 } }));
+    expect(body()).toHaveTextContent("Inertia 0.0.74 → 0.0.77 · 3 releases");
+    cleanup();
+    show();
+    expect(body()).toHaveTextContent("Inertia 0.0.71 → 0.0.72");
+    expect(body()).not.toHaveTextContent("releases");
   });
 });

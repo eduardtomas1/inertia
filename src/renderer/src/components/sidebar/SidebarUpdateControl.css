@@ -23,7 +23,7 @@
 }
 .sidebar-update-details header { display: flex; align-items: flex-start; gap: 12px; }
 .sidebar-update-details header > div { flex: 1; min-width: 0; }
-.sidebar-update-details strong { display: block; font-weight: 500; line-height: var(--leading-chrome); overflow-wrap: anywhere; }
+.sidebar-update-details header strong { display: block; font-weight: 500; line-height: var(--leading-chrome); overflow-wrap: anywhere; }
 .sidebar-update-details small { display: block; color: var(--text-muted); font-size: var(--text-xs); margin-top: 4px; }
 .sidebar-update-details header .icon-button { flex: 0 0 auto; width: var(--control-height-small); height: var(--control-height-small); margin: -4px -4px 0 0; }
 .update-detail-message, .update-detail-muted { margin: 12px 0 0; line-height: var(--leading-prose); overflow-wrap: anywhere; }
@@ -42,6 +42,15 @@
 .update-release-body pre, .update-release-plain { white-space: pre-wrap; }
 .update-release-body blockquote { border-left: 2px solid var(--line); padding-left: 10px; color: var(--text-muted); }
 .update-release-body > :last-child { margin-bottom: 0; }
+.update-release-body.is-stacked { max-height: min(360px, 44vh); }
+.update-release-group + .update-release-group,
+.update-release-more { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.update-release-group h3 { margin: 0 0 8px; font-size: inherit; font-weight: 600; font-variant-numeric: tabular-nums; }
+.update-release-markdown > :last-child { margin-bottom: 0; }
+.update-release-link { display: inline-flex; align-items: center; gap: 4px; margin: 8px 0 0; padding: 0; border: 0; border-radius: var(--radius-xs); background: none; color: var(--text-muted); font: inherit; font-size: var(--text-xs); line-height: var(--leading-chrome); cursor: pointer; transition: color var(--dur-fast) var(--ease); }
+.update-release-more .update-release-link { margin-top: 0; }
+.update-release-link:is(:hover, :focus-visible):not(:disabled) { color: var(--text); }
+.update-release-link:disabled { cursor: default; opacity: 0.6; }
 .update-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
 .update-detail-actions > button { margin: 0; }
 .update-detail-actions .text-button { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
@@ -51,6 +60,7 @@
 @media (prefers-reduced-motion: reduce) {
   .update-status-icon.is-checking { animation: none; }
   .update-progress-value { transition: none; }
+  .update-release-link { transition: none; }
 }
 @media (forced-colors: active) {
   .sidebar-update-details, .update-restart-dialog { border-color: ButtonText; }

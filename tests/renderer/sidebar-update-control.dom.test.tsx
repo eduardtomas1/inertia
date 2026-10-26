@@ -20,7 +20,7 @@ const check = vi.fn<() => Promise<AppUpdateStatus>>();
 const download = vi.fn<() => Promise<AppUpdateStatus>>();
 const install = vi.fn<() => Promise<AppUpdateStatus>>();
 const cancel = vi.fn<() => Promise<AppUpdateStatus>>();
-const external = vi.fn<() => Promise<void>>();
+const external = vi.fn<(url: string) => Promise<void>>();
 function publish(overrides: Partial<AppUpdateStatus> = {}): void {
   act(() => listener(updateStatus({ ...overrides, revision: ++sequence })));
 }
@@ -336,5 +336,54 @@ describe("update everything mode in the sidebar", () => {
     publish({ state: "downloaded", installBlocker: "maintenance", message });
     fireEvent.keyDown(trigger(), { key: "ArrowUp" });
     expect([...details().querySelectorAll(".update-detail-message")].map((node) => node.textContent)).toEqual([message]);
+  });
+});
+
+describe("releases skipped since the installed version", () => {
+  const history = [
+    { version: "1.2.2", releaseUrl: "https://github.com/eduardtomas1/inertia/releases/tag/v1.2.2", notes: "Calmer **Tasks** and a steadier judge.", omittedItems: 3 },
+    { version: "1.2.1", releaseUrl: "https://github.com/eduardtomas1/inertia/releases/tag/v1.2.1", notes: "- One fix", omittedItems: 0 },
+  ];
+  it("stacks the newest notes with condensed earlier releases and counts them in the header", () => {
+    render(<Harness />);
+    publish({ currentVersion: "1.2.0", releaseHistory: history, releaseHistoryOmitted: 2,
+      releasesUrl: "https://github.com/eduardtomas1/inertia/releases" });
+    fireEvent.pointerEnter(trigger().parentElement!);
+    expect(details()).toHaveTextContent("Inertia · Installed 1.2.0 · 5 releases ago");
+    expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent))
+      .toEqual(["What’s changed in 1.2.3", "Also in 1.2.2", "Also in 1.2.1"]);
+    expect(details().querySelector(".update-release-body")).toHaveClass("is-stacked");
+    expect(details().querySelectorAll(".update-release-group")).toHaveLength(3);
+    expect(details().querySelector("a")).toBeNull();
+    expect(screen.getByRole("button", { name: "2 older releases on the release page" })).toBeEnabled();
+  });
+  it("opens only main-authored pages, one at a time", async () => {
+    const opened = deferred<void>();
+    external.mockReturnValueOnce(opened.promise);
+    render(<Harness />);
+    publish({ currentVersion: "1.2.0", releaseHistory: history, releaseHistoryOmitted: 1,
+      releasesUrl: "https://github.com/eduardtomas1/inertia/releases" });
+    fireEvent.pointerEnter(trigger().parentElement!);
+    fireEvent.click(screen.getByRole("button", { name: "3 more changes for 1.2.2" }));
+    expect(external).toHaveBeenCalledExactlyOnceWith("https://github.com/eduardtomas1/inertia/releases/tag/v1.2.2");
+    expect(screen.getByRole("button", { name: "View release for 1.2.1" })).toBeDisabled();
+    await act(async () => opened.resolve());
+    fireEvent.click(screen.getByRole("button", { name: "View release for 1.2.1" }));
+    await act(async () => undefined);
+    fireEvent.click(screen.getByRole("button", { name: "1 older release on the release page" }));
+    await act(async () => undefined);
+    expect(external.mock.calls.map(([url]) => url)).toEqual([
+      "https://github.com/eduardtomas1/inertia/releases/tag/v1.2.2",
+      "https://github.com/eduardtomas1/inertia/releases/tag/v1.2.1",
+      "https://github.com/eduardtomas1/inertia/releases",
+    ]);
+  });
+  it("keeps today's single-release layout when nothing was skipped", () => {
+    render(<Harness />); publish();
+    fireEvent.pointerEnter(trigger().parentElement!);
+    expect(details()).toHaveTextContent("Inertia · Installed 1.2.2");
+    expect(details()).not.toHaveTextContent("releases ago");
+    expect(screen.getByRole("heading", { name: "What’s changed in 1.2.3" })).toBeInTheDocument();
+    expect(details().querySelector(".update-release-group, .is-stacked, .update-release-link")).toBeNull();
   });
 });

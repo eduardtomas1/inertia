@@ -48,3 +48,13 @@ export function restartBlockersSentence(workspaceRuns: number): string | null {
   if (workspaceRuns === 0) return null;
   return `${workspaceRuns} workspace ${workspaceRuns === 1 ? "run" : "runs"} must finish before Inertia restarts.`;
 }
+
+export function pendingReleaseCount(status: AppUpdateStatus | null): number {
+  if (!status?.latestVersion || status.latestVersion === status.currentVersion) return 0;
+  return 1 + (status.releaseHistory?.length ?? 0) + (status.releaseHistoryOmitted ?? 0);
+}
+
+export function installedLine(status: AppUpdateStatus): string {
+  const releases = pendingReleaseCount(status);
+  return `${status.channel === "canary" ? "Inertia Canary" : "Inertia"} · Installed ${status.currentVersion}${releases >= 2 ? ` · ${releases} releases ago` : ""}`;
+}

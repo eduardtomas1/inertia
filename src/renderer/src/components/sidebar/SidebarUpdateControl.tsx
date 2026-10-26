@@ -1,20 +1,18 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
 import type { AppSnapshot } from "@shared/contracts";
 import type { AppUpdateController } from "../../hooks/useAppUpdate";
 import type { UpdateEverythingController } from "../../hooks/useUpdateEverything";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
-import { updateEverythingLabel, updatePercent, updatePresentation, type UpdateAction } from "./appUpdatePresentation";
+import { installedLine, updateEverythingLabel, updatePercent, updatePresentation, type UpdateAction } from "./appUpdatePresentation";
 import { IconButton } from "../ui";
 import { UpdateStatusIcon } from "./UpdateStatusIcon";
 import { UpdateRestartConfirmation } from "./UpdateRestartConfirmation";
 import { UpdateEverythingDialog } from "./UpdateEverythingDialog";
+import { UpdateReleaseSection } from "./UpdateReleaseSection";
 import { updateEverythingPlan, updateEverythingProgress } from "./updateEverythingPlan";
 import "./SidebarUpdateControl.css";
-const UpdateReleaseNotes = lazy(async () => ({
-  default: (await import("./UpdateReleaseNotes")).UpdateReleaseNotes,
-}));
 
 /** Presentation only. The existing main-process updater remains the authority. */
 export function SidebarUpdateControl({ controller, everything, snapshot = null }: {
@@ -137,14 +135,17 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
     setOpen(false);
     if (restore) focusTrigger();
   };
+  const openPage = async (open: () => Promise<void>): Promise<void> => {
+    if (releaseInFlight.current) return;
+    releaseInFlight.current = true;
+    setOpeningRelease(true);
+    try { await open(); } catch { /* Sanitized by the controller. */ }
+    finally { releaseInFlight.current = false; setOpeningRelease(false); }
+  };
   const run = async (action: UpdateAction): Promise<void> => {
     // Opening notes must remain possible while a download invocation is pending.
     if (action === "release") {
-      if (releaseInFlight.current) return;
-      releaseInFlight.current = true;
-      setOpeningRelease(true);
-      try { await controller.openRelease(); } catch { /* Sanitized by the controller. */ }
-      finally { releaseInFlight.current = false; setOpeningRelease(false); }
+      await openPage(() => controller.openRelease());
       return;
     }
     if (actionInFlight.current || action === "none" || action === "everything") return;
@@ -179,7 +180,6 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
     try { await controller.cancelDownload(); } catch { /* Sanitized by the controller. */ }
     finally { cancelInFlight.current = false; setCancelling(false); }
   };
-  const currentVersion = status?.currentVersion;
   const readyToConfirm = status?.state === "downloaded" && status.latestVersion === confirmation;
   return <div className="sidebar-update-control" onPointerEnter={pointerEnter} onPointerLeave={leave}
     onBlur={(event) => {
@@ -211,7 +211,7 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
       aria-label="Application update details" onPointerEnter={pointerEnter} onPointerLeave={leave}
       onToggle={(event) => { if (event.newState === "closed") close(); }}>
       <header><div><strong>{presentation.label}</strong>
-        {currentVersion && <small>{status?.channel === "canary" ? "Inertia Canary" : "Inertia"} · Installed {currentVersion}</small>}</div>
+        {status?.currentVersion && <small>{installedLine(status)}</small>}</div>
         <IconButton label="Close update details" onClick={() => close(true)}><X size={16} /></IconButton></header>
       {(controller.error ?? status?.message) && <p className="update-detail-message">{controller.error ?? status?.message}</p>}
       {everythingError && everythingError !== (controller.error ?? status?.message) && <p className="update-detail-message">{everythingError}</p>}
@@ -219,14 +219,9 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
       {status?.state === "downloading" && <div className="update-detail-progress" role="progressbar" aria-label="Update download progress"
         aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} aria-valuetext={percent === null ? "Waiting for download progress" : `${percent}%`}>
         <span style={{ width: `${percent ?? 0}%` }} /></div>}
-      {status?.releaseNotes && <section className="update-release-notes" aria-label="Release notes">
-        <h3>What’s changed{status.latestVersion ? ` in ${status.latestVersion}` : ""}</h3>
-        <div className="update-release-body" tabIndex={0} role="region" aria-label="Release changes">
-          <Suspense fallback={<p className="update-release-plain">{status.releaseNotes}</p>}>
-            <UpdateReleaseNotes text={status.releaseNotes} />
-          </Suspense>
-        </div>
-      </section>}
+      {status?.releaseNotes && <UpdateReleaseSection status={status} notes={status.releaseNotes} opening={openingRelease}
+        onOpenRelease={(version) => { void openPage(() => controller.openRelease(version)); }}
+        onOpenReleases={() => { void openPage(() => controller.openReleases()); }} />}
       <footer className="update-detail-actions">
         {presentation.action !== "none" && <button type="button" className="secondary-button" disabled={disabled} onClick={activate}>{presentation.actionLabel}</button>}
         {status?.state === "downloading" && <button type="button" className="secondary-button" disabled={cancelling} onClick={() => { void cancel(); }}>{cancelling ? "Cancelling…" : "Cancel download"}</button>}

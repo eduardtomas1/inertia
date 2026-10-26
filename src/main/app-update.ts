@@ -1,5 +1,6 @@
 import type {
   AppUpdateDeliveryReason,
+  AppUpdateReleaseNote,
   AppUpdateInstallBlocker,
   AppUpdateProgress,
   AppUpdateStatus,
@@ -13,15 +14,19 @@ import type {
 import {
   channelConfiguration,
   releasePageUrl,
+  releasesPageUrl,
   type InertiaReleaseChannel,
 } from "./release-channel.js";
-import { appUpdateReleaseNotes } from "./app-update-release-notes.js";
+import { appUpdateReleaseHistory, appUpdateReleaseNotes } from "./app-update-release-notes.js";
 
 const RELEASES_URL = "https://api.github.com/repos/eduardtomas1/inertia/releases";
 const LATEST_RELEASE_URL = `${RELEASES_URL}/latest`;
 const DEFAULT_CACHE_MS = 6 * 60 * 60 * 1_000;
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 64 * 1_024;
+const MAX_RELEASE_LIST_BYTES = 2 * 1_024 * 1_024;
+const RELEASE_LIST_PAGE_SIZE = 20;
+const MAX_RELEASE_HISTORY = 5;
 const VERSION_PATTERN =
   /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 
@@ -52,6 +57,9 @@ interface CachedCheck {
   latestVersion: string;
   releaseUrl: string;
   releaseNotes: string | null;
+  releaseHistory: AppUpdateReleaseNote[];
+  releaseHistoryOmitted: number;
+  releasesUrl: string;
   checkedAt: string;
   message: string;
 }
@@ -87,9 +95,9 @@ export function compareAppVersions(left: string, right: string): number {
   return 0;
 }
 
-async function boundedJson(response: Response): Promise<unknown> {
+async function boundedJson(response: Response, maxBytes: number): Promise<unknown> {
   const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
     await response.body?.cancel();
     throw new Error("The update response was too large.");
   }
@@ -102,7 +110,7 @@ async function boundedJson(response: Response): Promise<unknown> {
       const { done, value } = await reader.read();
       if (done) break;
       length += value.byteLength;
-      if (length > MAX_RESPONSE_BYTES) {
+      if (length > maxBytes) {
         await reader.cancel("The update response was too large.");
         throw new Error("The update response was too large.");
       }
@@ -160,6 +168,7 @@ function snapshot(status: AppUpdateStatus): AppUpdateStatus {
   return {
     ...status,
     progress: status.progress ? { ...status.progress } : null,
+    releaseHistory: status.releaseHistory?.map((release) => ({ ...release })) ?? [],
   };
 }
 
@@ -211,6 +220,9 @@ export class AppUpdateService {
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,
+      releaseHistory: [],
+      releaseHistoryOmitted: 0,
+      releasesUrl: null,
       checkedAt: null,
       lastAttemptedAt: null,
       message: this.capability.delivery === "in-app"
@@ -385,25 +397,21 @@ export class AppUpdateService {
         : null;
       const release = native ?? await this.manualLatestVersion();
       const latestVersion = release.version;
-      let notes = appUpdateReleaseNotes(release.releaseNotes, latestVersion);
-      // Generic updater feeds may omit notes. Fetch the exact tag, never "latest":
-      // a newer release appearing during the check must not change the candidate.
-      if (!notes) {
-        try {
-          const tag = `${channelConfiguration(this.channel).releaseTagPrefix}${latestVersion}`;
-          const metadata = await this.releaseMetadata(`${RELEASES_URL}/tags/${tag}`);
-          if (typeof metadata === "object" && metadata !== null && "tag_name" in metadata
-            && metadata.tag_name === tag && "body" in metadata) notes = appUpdateReleaseNotes(metadata.body, latestVersion);
-        } catch { /* Optional notes never make an otherwise valid update unavailable. */ }
-      }
-      const checkedAt = new Date(this.now()).toISOString();
       const available = (native?.available ?? true)
         && compareAppVersions(latestVersion, this.currentVersion) > 0;
+      const [notes, history] = await Promise.all([
+        this.latestReleaseNotes(release.releaseNotes, latestVersion),
+        available ? this.releaseHistory(latestVersion) : { releases: [], omitted: 0 },
+      ]);
+      const checkedAt = new Date(this.now()).toISOString();
       const cached: CachedCheck = {
         state: available ? "available" : "current",
         latestVersion,
         releaseUrl: releasePageUrl(this.channel, latestVersion),
         releaseNotes: notes,
+        releaseHistory: history.releases,
+        releaseHistoryOmitted: history.omitted,
+        releasesUrl: releasesPageUrl(),
         checkedAt,
         message: this.capability.delivery === "manual"
           && this.capability.reason === "windows-signing-unavailable"
@@ -439,12 +447,55 @@ export class AppUpdateService {
         latestVersion: null,
         releaseUrl: null,
         releaseNotes: null,
+        releaseHistory: [],
+        releaseHistoryOmitted: 0,
+        releasesUrl: null,
         checkedAt: null,
         lastAttemptedAt,
         installBlocker: null,
         progress: null,
         message: "Inertia could not check for updates right now.",
       });
+    }
+  }
+
+  private async latestReleaseNotes(native: unknown, latestVersion: string): Promise<string | null> {
+    const notes = appUpdateReleaseNotes(native, latestVersion);
+    if (notes) return notes;
+    // Generic updater feeds may omit notes. Fetch the exact tag, never "latest":
+    // a newer release appearing during the check must not change the candidate.
+    try {
+      const tag = `${channelConfiguration(this.channel).releaseTagPrefix}${latestVersion}`;
+      const metadata = await this.releaseMetadata(`${RELEASES_URL}/tags/${tag}`);
+      if (typeof metadata === "object" && metadata !== null && "tag_name" in metadata
+        && metadata.tag_name === tag && "body" in metadata) return appUpdateReleaseNotes(metadata.body, latestVersion);
+    } catch { /* Optional notes never make an otherwise valid update unavailable. */ }
+    return null;
+  }
+
+  private async releaseHistory(latestVersion: string): Promise<{ releases: AppUpdateReleaseNote[]; omitted: number }> {
+    const installed = parsedVersion(this.currentVersion)!;
+    const latest = parsedVersion(latestVersion)!;
+    if (latest.major === installed.major && latest.minor === installed.minor && latest.patch === installed.patch + 1) {
+      return { releases: [], omitted: 0 };
+    }
+    try {
+      const list = await this.releaseMetadata(`${RELEASES_URL}?per_page=${RELEASE_LIST_PAGE_SIZE}`, MAX_RELEASE_LIST_BYTES);
+      const { releases, omitted } = appUpdateReleaseHistory(list, {
+        tagPrefix: channelConfiguration(this.channel).releaseTagPrefix,
+        prerelease: this.channel === "canary",
+        version: (text) => parsedVersion(text)?.text ?? null,
+        compare: compareAppVersions,
+        installed: this.currentVersion,
+        latest: latestVersion,
+        limit: MAX_RELEASE_HISTORY,
+      });
+      return {
+        releases: releases.map((release) => ({ ...release, releaseUrl: releasePageUrl(this.channel, release.version) })),
+        omitted,
+      };
+    } catch {
+      return { releases: [], omitted: 0 };
     }
   }
 
@@ -463,7 +514,7 @@ export class AppUpdateService {
       ?? (metadata as { releaseNotes?: unknown }).releaseNotes };
   }
 
-  private async releaseMetadata(url: string): Promise<unknown> {
+  private async releaseMetadata(url: string, maxBytes = MAX_RESPONSE_BYTES): Promise<unknown> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     timeout.unref?.();
@@ -484,7 +535,7 @@ export class AppUpdateService {
         await response.body?.cancel();
         throw new Error(`Update request failed (${response.status}).`);
       }
-      return await boundedJson(response);
+      return await boundedJson(response, maxBytes);
     } finally {
       clearTimeout(timeout);
     }

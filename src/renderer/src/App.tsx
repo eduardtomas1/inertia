@@ -735,6 +735,12 @@ export default function App(): React.JSX.Element {
       payload: providerId ? { providerId } : {},
     }).catch(() => undefined);
   }, [run]);
+  const refreshUsage = useCallback(async (providerId: ProviderId): Promise<void> => {
+    await run("provider.refresh", {
+      type: "provider.refresh",
+      payload: { providerId, scope: "usage" },
+    });
+  }, [run]);
   const connectProvider = useCallback((
     providerId: ProviderId,
     method: ProviderAuthMethod = "account",
@@ -808,6 +814,7 @@ export default function App(): React.JSX.Element {
       clearPromptContext: () => workspaceTools.setPendingDiffContext(null),
       chooseCodexBinary,
       refreshProvider,
+      refreshUsage,
       connectProvider,
       openProviderSetup,
       openBackendSetup,
@@ -929,6 +936,7 @@ export default function App(): React.JSX.Element {
         updateSettings,
         chooseCodexBinary,
         refreshProvider,
+        refreshUsage,
         connectProvider,
         openProviderSetup,
         openBackendSetup,

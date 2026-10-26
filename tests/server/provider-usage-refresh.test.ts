@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { claudeRateLimitReadResult } from "../../src/server/provider/claude-agent-sdk-metadata";
 import { ProviderMetadataCache } from "../../src/server/provider/metadata";
 import {
+  createManualUsageRefresh,
+  createRateLimitChangeSignal,
   createTurnUsageRefresh,
   IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS,
   RATE_LIMIT_TTL_MS,
@@ -213,12 +215,11 @@ describe("quota read after a reported reset", () => {
     expect(value.reads).toHaveLength(2);
   });
 
-  it("follows a reset reported by the read and skips busy or unrunnable providers", async () => {
-    const busy = new Set<ProviderId>(["claude"]);
+  it("follows a reset reported by the read, reads busy providers too and skips unrunnable ones", async () => {
     const value = fixture({
       now: () => Date.now(),
-      canRun: (providerId) => providerId !== "cursor",
-      activeProviderIds: () => busy,
+      canRun: (providerId) => providerId !== "claude",
+      activeProviderIds: () => new Set<ProviderId>(["codex"]),
       apply: (providerId) => {
         value.states.set(providerId as ProviderId, value.fresh([new Date(Date.now() + 20_000).toISOString()]));
       },
@@ -229,12 +230,32 @@ describe("quota read after a reported reset", () => {
     startIdleRateLimitRefresh(value.dependencies, hour);
     await vi.advanceTimersByTimeAsync(6_000);
     expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
-    busy.clear();
     await vi.advanceTimersByTimeAsync(25_000);
     expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
     await vi.advanceTimersByTimeAsync(35_000);
     expect(value.reads).toEqual([["codex", ["rateLimits"]], ["codex", ["rateLimits"]]]);
     value.abort.abort();
+  });
+
+  it("schedules the reset read for quota that arrived outside its own reads", async () => {
+    const changes = createRateLimitChangeSignal();
+    const value = fixture({ now: () => Date.now(), subscribeRateLimitsChanged: changes.subscribe });
+    startIdleRateLimitRefresh(value.dependencies, hour);
+    await vi.advanceTimersByTimeAsync(1_000);
+    value.states.set("claude", value.fresh([new Date(Date.now() + 2_000).toISOString()]));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(value.reads).toEqual([]);
+    value.states.set("claude", value.fresh([new Date(Date.now() + 2_000).toISOString()]));
+    changes.notify();
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(value.reads).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(value.reads).toEqual([["claude", ["rateLimits"]]]);
+    value.abort.abort();
+    value.states.set("codex", value.fresh([new Date(Date.now() + 1_000).toISOString()]));
+    changes.notify();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(value.reads).toEqual([["claude", ["rateLimits"]]]);
   });
 
   it("bounds reset reads when every read reports another reset a moment away", async () => {
@@ -406,11 +427,29 @@ describe("idle usage cadence", () => {
     await vi.advanceTimersByTimeAsync(22 * minute);
     expect(value.readsAt.get("codex")).toEqual([3, 9, 21]);
     value.busy.add("codex");
-    await vi.advanceTimersByTimeAsync(2 * minute);
+    await vi.advanceTimersByTimeAsync(minute);
     value.busy.clear();
     await value.read("codex", ["rateLimits"]);
-    await vi.advanceTimersByTimeAsync(4 * minute);
-    expect(value.readsAt.get("codex")).toEqual([3, 9, 21, 24, 27]);
+    await vi.advanceTimersByTimeAsync(5 * minute);
+    expect(value.readsAt.get("codex")).toEqual([3, 9, 21, 23, 27]);
+    value.abort.abort();
+  });
+
+  it("reads a busy provider only when its quota would go stale before the next read", async () => {
+    const value = cadenceFixture();
+    value.busy.add("claude");
+    await value.start();
+    await vi.advanceTimersByTimeAsync(13 * minute);
+    expect(value.readsAt.get("claude")).toEqual([3, 6, 9, 12]);
+    value.cache.learn("claude", "/tools/claude", {
+      rateLimits: [{ id: "claude:primary", label: "claude", usedPercent: 45, remainingPercent: 55, windowMinutes: 300, resetsAt: null }],
+    }, "session", { merge: true });
+    await vi.advanceTimersByTimeAsync(6 * minute);
+    expect(value.readsAt.get("claude")).toEqual([3, 6, 9, 12, 18]);
+    for (let elapsed = 0; elapsed < 30 * minute; elapsed += 10_000) {
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(value.cache.current("claude").metadataState.rateLimits.freshness).toBe("fresh");
+    }
     value.abort.abort();
   });
 
@@ -446,5 +485,71 @@ describe("idle usage cadence", () => {
     expect(value.readsAt.get("codex")).toEqual([60]);
     value.abort.abort();
     expect(connected.size).toBe(0);
+  });
+});
+
+describe("manual usage refresh", () => {
+  const limit = (usedPercent: number) => ({
+    rateLimits: [{ id: "claude:five_hour", label: "Claude", usedPercent, remainingPercent: 100 - usedPercent, windowMinutes: 300, resetsAt: null }],
+  });
+
+  function manualFixture(reader: () => Promise<{ rateLimits: ReturnType<typeof limit>["rateLimits"] }>) {
+    let reads = 0;
+    let broadcasts = 0;
+    const cache = new ProviderMetadataCache({
+      read: async () => {
+        reads += 1;
+        return await reader();
+      },
+    });
+    const refresh = createManualUsageRefresh({
+      enabled: true,
+      isClosed: () => false,
+      cachedState: (providerId) => cache.current(providerId),
+      read: (providerId, fields) => cache.metadata(providerId, `/tools/${providerId}`, {}, "/workspace", { fields, force: true }),
+      apply: () => undefined,
+      broadcastSnapshot: () => { broadcasts += 1; },
+      canRun: (providerId) => providerId !== "codex",
+    });
+    return { cache, refresh, reads: () => reads, broadcasts: () => broadcasts };
+  }
+
+  it("reads only quota and joins a read already in flight", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const value = manualFixture(async () => {
+      await gate;
+      return limit(6);
+    });
+    const first = value.refresh("claude");
+    const second = value.refresh("claude");
+    release();
+    await expect(Promise.all([first, second])).resolves.toEqual(["updated", "updated"]);
+    expect(value.reads()).toBe(1);
+    expect(value.broadcasts()).toBe(2);
+    expect(value.cache.current("claude").rateLimits[0]?.remainingPercent).toBe(94);
+  });
+
+  it("reports a failed read and keeps the cached quota as stale", async () => {
+    let fail = false;
+    const value = manualFixture(async () => {
+      if (fail) throw new Error("usage read timed out");
+      return limit(52);
+    });
+    await expect(value.refresh("claude")).resolves.toBe("updated");
+    fail = true;
+    await expect(value.refresh("claude")).resolves.toBe("failed");
+    const current = value.cache.current("claude");
+    expect(current.rateLimits[0]?.remainingPercent).toBe(48);
+    expect(current.metadataState.rateLimits.freshness).toBe("stale");
+    expect(value.broadcasts()).toBe(2);
+  });
+
+  it("leaves providers without readable quota to the full refresh", async () => {
+    const value = manualFixture(async () => limit(1));
+    await expect(value.refresh("cursor")).resolves.toBe("unsupported");
+    await expect(value.refresh("codex")).resolves.toBe("unsupported");
+    expect(value.reads()).toBe(0);
+    expect(value.broadcasts()).toBe(0);
   });
 });

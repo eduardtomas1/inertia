@@ -686,8 +686,15 @@ describe("client command contract", () => {
       payload: { providerId: "codex" },
     };
 
+    const refreshUsage = {
+      type: "provider.refresh",
+      requestId: crypto.randomUUID(),
+      payload: { providerId: "claude", scope: "usage" },
+    };
+
     expect(clientCommandSchema.parse(refreshAll)).toEqual(refreshAll);
     expect(clientCommandSchema.parse(refreshOne)).toEqual(refreshOne);
+    expect(clientCommandSchema.parse(refreshUsage)).toEqual(refreshUsage);
   });
 
   it("accepts only bounded provider maintenance commands", () => {
@@ -823,6 +830,7 @@ describe("client command contract", () => {
       { type: "provider.refresh", requestId },
       { type: "provider.refresh", requestId, payload: { providerId: "unknown" } },
       { type: "provider.refresh", requestId, payload: { providerId: "codex", unexpected: true } },
+      { type: "provider.refresh", requestId, payload: { providerId: "codex", scope: "models" } },
       { type: "provider.auth.start", requestId, payload: { providerId: "unknown", cols: 80, rows: 24 } },
       { type: "provider.auth.start", requestId, payload: { providerId: "codex", cols: 39, rows: 24 } },
       { type: "provider.auth.start", requestId, payload: { providerId: "codex", cols: 80, rows: 81 } },

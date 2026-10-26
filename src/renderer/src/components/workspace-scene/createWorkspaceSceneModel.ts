@@ -254,6 +254,7 @@ export interface WorkspaceSceneActions {
   clearPromptContext: () => void;
   chooseCodexBinary: () => Promise<void>;
   refreshProvider: (providerId?: ProviderId) => void;
+  refreshUsage: (providerId: ProviderId) => Promise<void>;
   connectProvider: (providerId: ProviderId) => void;
   openProviderSetup: (providerId: ProviderId) => void;
   openBackendSetup: (profileId: string) => void;
@@ -828,7 +829,7 @@ export function createWorkspaceSceneModel({
       usage: {
         usage: environmentSummary.usage,
         ...(usageProvider && usageQuotaSource === "selected-route"
-          ? { onRefreshUsage: () => actions.refreshProvider(usageProvider.id) }
+          ? { onRefreshUsage: () => actions.refreshUsage(usageProvider.id) }
           : {}),
         ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },

@@ -7,6 +7,7 @@ type MetadataField = "models" | "rateLimits";
 interface MetadataFieldState {
   freshness: string;
   updatedAt: string | null;
+  lastAttemptedAt?: string | null;
 }
 
 export interface ProviderUsageRefreshDependencies<Metadata> {
@@ -29,6 +30,7 @@ export interface ProviderUsageRefreshDependencies<Metadata> {
   track(operation: () => Promise<void>): Promise<void>;
   clientPresent?(): boolean;
   subscribeClientConnected?(listener: () => void): () => void;
+  subscribeRateLimitsChanged?(listener: () => void): () => void;
   now?(): number;
 }
 
@@ -40,6 +42,51 @@ export const RATE_LIMIT_TTL_MS = IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS + 2 * IDLE_
 const MAX_IDLE_RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1_000;
 export const RESET_READ_DELAY_MS = 5 * 1_000;
 const MAX_TIMER_MS = 2_147_483_647;
+
+export function createRateLimitChangeSignal(): {
+  notify(): void;
+  subscribe(listener: () => void): () => void;
+} {
+  const listeners = new Set<() => void>();
+  return {
+    notify: () => {
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+}
+
+export type ManualUsageRefreshOutcome = "updated" | "failed" | "unsupported";
+
+export function createManualUsageRefresh<Metadata>(
+  dependencies: Pick<
+    ProviderUsageRefreshDependencies<Metadata>,
+    "enabled" | "isClosed" | "cachedState" | "read" | "apply" | "broadcastSnapshot" | "canRun"
+  >,
+): (providerId: ProviderId) => Promise<ManualUsageRefreshOutcome> {
+  return async (providerId) => {
+    if (
+      !dependencies.enabled
+      || !RATE_LIMIT_PROVIDER_IDS.includes(providerId)
+      || !dependencies.canRun(providerId)
+    ) {
+      return "unsupported";
+    }
+    const metadata = await dependencies.read(providerId, ["rateLimits"])
+      .catch(() => null);
+    if (dependencies.isClosed()) return "failed";
+    if (metadata !== null) dependencies.apply(providerId, metadata);
+    dependencies.broadcastSnapshot();
+    const { freshness, updatedAt, lastAttemptedAt } = dependencies.cachedState(providerId)
+      .metadataState.rateLimits;
+    return freshness !== "stale" && updatedAt !== null && updatedAt === lastAttemptedAt
+      ? "updated"
+      : "failed";
+  };
+}
 
 /**
  * Refreshes provider usage after a settled turn (#344). Failed, cancelled and
@@ -80,7 +127,8 @@ export function createTurnUsageRefresh<Metadata>(
 /**
  * Account quota also changes between turns (#344). Refreshes stale rate limits
  * for idle, runnable providers that have reported limits before, and backs off
- * after failures. Live rate-limit events cover providers with active turns.
+ * after failures. A provider with active turns is read only when its quota
+ * would go stale before the next tick, and once after each reset (#595).
  * Returns a stop function; aborting the signal also stops it.
  */
 export function startIdleRateLimitRefresh<Metadata>(
@@ -174,7 +222,6 @@ export function startIdleRateLimitRefresh<Metadata>(
   function readResets(): void {
     resetTimer = null;
     if (stopped || dependencies.isClosed() || refreshing) return;
-    const busy = dependencies.activeProviderIds();
     const due: ProviderId[] = [];
     for (const providerId of RATE_LIMIT_PROVIDER_IDS) {
       const reset = unreadReset(providerId);
@@ -182,7 +229,7 @@ export function startIdleRateLimitRefresh<Metadata>(
       if ((retry.get(providerId)?.at ?? 0) > now()) continue;
       if ((lastResetRead.get(providerId) ?? -Infinity) + IDLE_READ_WINDOW_MS > now()) continue;
       resetsReadThrough.set(providerId, now() - RESET_READ_DELAY_MS);
-      if (dependencies.canRun(providerId) && !busy.has(providerId)) due.push(providerId);
+      if (dependencies.canRun(providerId)) due.push(providerId);
     }
     if (due.length === 0) armReset();
     else refresh(due, true);
@@ -209,11 +256,10 @@ export function startIdleRateLimitRefresh<Metadata>(
       cadence.set(providerId, { ...current, delayMs });
       if (rateLimits.updatedAt === null) return false;
       const age = now() - Date.parse(rateLimits.updatedAt);
-      return dependencies.canRun(providerId)
-        && !busy.has(providerId)
-        && (retry.get(providerId)?.at ?? 0) <= now()
-        && ((rateLimits.freshness !== "fresh" && age <= RATE_LIMIT_TTL_MS)
-          || age + intervalMs > delayMs + IDLE_READ_WINDOW_MS);
+      if (!dependencies.canRun(providerId) || (retry.get(providerId)?.at ?? 0) > now()) return false;
+      if (busy.has(providerId)) return age + intervalMs > RATE_LIMIT_TTL_MS;
+      return (rateLimits.freshness !== "fresh" && age <= RATE_LIMIT_TTL_MS)
+        || age + intervalMs > delayMs + IDLE_READ_WINDOW_MS;
     });
     if (due.length === 0) armReset();
     else refresh(due);
@@ -229,6 +275,9 @@ export function startIdleRateLimitRefresh<Metadata>(
     }, 0);
     reconnectTimer.unref();
   });
+  const unsubscribeRateLimits = dependencies.subscribeRateLimitsChanged?.(() => {
+    if (!refreshing) armReset();
+  });
   armReset();
   const stop = (): void => {
     stopped = true;
@@ -238,6 +287,7 @@ export function startIdleRateLimitRefresh<Metadata>(
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = null;
     unsubscribe?.();
+    unsubscribeRateLimits?.();
   };
   dependencies.signal.addEventListener("abort", stop, { once: true });
   return stop;

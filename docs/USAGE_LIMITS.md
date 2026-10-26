@@ -19,12 +19,21 @@ popover names it and says how old that reading is. It reads the cache only; it
 never refreshes providers.
 
 An unavailable measurement is never treated as zero. A reset countdown reaching
-zero does not refill a quota bar; the window shows **Reset due** until the
-provider reports new quota. Codex and Claude quota is read once about five
-seconds after the earliest reported reset. Between turns their quota is read
-every three minutes and stays current for five, so the composer, the
+zero does not refill a quota bar, and it no longer shows the old percentage
+either: the window shows **Reset** and **Reset due · updating** with a muted bar
+until the provider reports new quota. Codex and Claude quota is read once about
+five seconds after the earliest reported reset, even while a turn is running.
+Between turns their quota is read every three minutes and stays current for
+five. While a provider has turns running, Inertia reads its quota only when no
+live update arrived recently enough to keep it current until the next check, so
+a long Claude session no longer leaves the quota stale. The composer, the
 Environment panel and the header meter mark it stale only after a failed read
 or when no read was possible.
+
+**Refresh usage** in the Usage panel reads only that provider's quota, without
+checking the CLI installation again, and joins a read that is already running.
+The button shows **Refreshing…** until the answer arrives; if the provider
+does not answer, the panel says **Could not refresh. Showing cached usage.**
 
 Failed reads retain stale observations only for the same account: a verified
 account identity or the same login's private credential fingerprint. When a subscription quota endpoint answers HTTP 429,

@@ -28,11 +28,19 @@ export function quotaWindowLabel(windowMinutes: number | null): string | null {
   return `${windowMinutes}-minute`;
 }
 
+export function isQuotaResetDue(
+  limit: Pick<HeaderMeterLimit, "resetsAt">,
+  now: number,
+): boolean {
+  const time = Date.parse(limit.resetsAt ?? "");
+  return Number.isFinite(time) && time <= now;
+}
+
 export function quotaResetLabel(resetsAt: string | null, now: number): string {
   const time = Date.parse(resetsAt ?? "");
   if (!Number.isFinite(time)) return "Reset time unavailable";
+  if (time <= now) return "Reset due · updating";
   const minutes = Math.ceil((time - now) / 60_000);
-  if (minutes <= 0) return "Reset due";
   if (minutes < 60) return `Resets in ${minutes}m`;
   if (minutes < 1440) return `Resets in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   return `Resets in ${Math.floor(minutes / 1440)}d ${Math.floor((minutes % 1440) / 60)}h`;
@@ -50,6 +58,7 @@ function windowOrder(limit: HeaderMeterLimit): number {
 
 export function headerUsageMeterModel(
   usage: EnvironmentUsageSummary | null,
+  now = Date.now(),
 ): HeaderUsageMeterModel | null {
   if (!usage || usage.quota.source !== "selected-route") return null;
   const limits = usage.quota.limits
@@ -58,13 +67,26 @@ export function headerUsageMeterModel(
   const primary = limits[0];
   if (!primary) return null;
   const secondary = limits.length > 1 ? limits[limits.length - 1]! : null;
-  const tightest = limits.reduce(
-    (lowest, limit) => limit.remainingPercent < lowest.remainingPercent ? limit : lowest,
-    primary,
+  const freshness = usage.quota.freshness;
+  const current = limits.filter((limit) => !isQuotaResetDue(limit, now));
+  const tightest = current.reduce<HeaderMeterLimit | null>(
+    (lowest, limit) => !lowest || limit.remainingPercent < lowest.remainingPercent ? limit : lowest,
+    null,
   );
+  if (!tightest) {
+    return {
+      primary,
+      secondary,
+      tightest: primary,
+      limits,
+      low: false,
+      valueLabel: "—",
+      accessibleLabel: "Usage: reset due, updating",
+      freshness,
+    };
+  }
   const remaining = clampRemainingPercent(tightest.remainingPercent);
   const window = quotaWindowLabel(tightest.windowMinutes);
-  const freshness = usage.quota.freshness;
   const qualifier = freshness === "stale"
     ? ", may be out of date"
     : freshness === "refreshing" ? ", refreshing" : "";

@@ -68,6 +68,9 @@ describe("app update checks", () => {
       currentVersion: "0.0.10",
       latestVersion: "0.0.11",
       releaseNotes: "Improved update controls.",
+      releaseHistory: [],
+      releaseHistoryOmitted: 0,
+      releasesUrl: "https://github.com/eduardtomas1/inertia/releases",
       releaseUrl:
         "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.11",
       checkedAt: "2030-01-02T03:04:05.000Z",

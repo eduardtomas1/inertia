@@ -61,7 +61,7 @@ test("sidebar updater uses real main actions, bounded notes and safe restart in 
         () => (globalThis as FixtureGlobal).sidebarUpdateFixture.counts.checks,
       )).toBe(1);
       await expect(button).toHaveAttribute("data-update-state", "checking");
-      await expect(page.locator(".update-status-icon.is-checking")).toHaveCSS("animation-name", "sidebar-update-check");
+      await expect(page.locator(".update-status-icon:is(.is-spin-start, .is-spinning)")).toHaveCSS("animation-name", "sidebar-update-half-turn");
       await capture("update-checking-dark");
       await app.electronApp.evaluate(() => (globalThis as FixtureGlobal).sidebarUpdateFixture.finishCheck());
       await expect(button).toHaveAttribute("data-update-state", "available");

@@ -124,6 +124,13 @@ export interface AppUpdateProgress {
   bytesPerSecond: number;
 }
 
+export interface AppUpdateReleaseNote {
+  version: string;
+  releaseUrl: string;
+  notes: string;
+  omittedItems: number;
+}
+
 export interface AppUpdateStatus {
   /** Monotonic within one desktop process; rejects stale invoke responses. */
   revision: number;
@@ -139,6 +146,9 @@ export interface AppUpdateStatus {
   releaseUrl: string | null;
   /** Bounded plain text from the exact release; absent in older desktop snapshots. */
   releaseNotes?: string | null;
+  releaseHistory?: AppUpdateReleaseNote[];
+  releaseHistoryOmitted?: number;
+  releasesUrl?: string | null;
   checkedAt: string | null;
   lastAttemptedAt: string | null;
   message: string;

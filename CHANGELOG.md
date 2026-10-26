@@ -65,6 +65,20 @@ The useful changes in each Inertia release, in plain language.
   chat as soon as the runtime reports it.
 - Repeated or empty Codex diff updates no longer add duplicate activity rows.
 
+### Dependencies
+
+- Updated Electron to 45.0.0, with Chromium 156. It keeps the eMudhra
+  certificate fix from 44.9.3. Windows builds no longer ship `dxil.dll`, which
+  Electron 45 dropped.
+- Updated the Agent Client Protocol SDK used by Cursor and Kimi to 2.0.1. The
+  protocol they speak is unchanged.
+- Updated the Claude Agent SDK to 0.3.309, the OpenCode SDK to 1.19.4,
+  electron-builder to 26.18.0, esbuild to 0.28.2, lucide-react to 1.61.0,
+  the virtual list to 3.14.22 and the accessibility reader to 0.15.3, whose
+  Linux build now also loads on RHEL 9 and Debian 12.
+- `@napi-rs/canvas` stays at 1.0.11: 1.0.12 and 1.0.13 crash the app on Linux
+  because their font code clashes with Electron's own copy.
+
 ## 0.0.77 — 2026-10-25
 
 Any agent as a watcher with the access you choose, API keys beside your

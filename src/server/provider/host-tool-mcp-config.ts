@@ -1,4 +1,4 @@
-import type { McpServer } from "@agentclientprotocol/sdk";
+import type { McpServer } from "@agentclientprotocol/sdk/unstable";
 import type { McpRemoteConfig } from "@opencode-ai/sdk/v2";
 
 import {

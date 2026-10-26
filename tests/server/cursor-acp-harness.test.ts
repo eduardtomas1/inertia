@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PermissionOption, ToolKind } from "@agentclientprotocol/sdk";
+import type { PermissionOption, ToolKind } from "@agentclientprotocol/sdk/unstable";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {

@@ -1,4 +1,4 @@
-import type { AuthMethod, AuthMethodAgent } from "@agentclientprotocol/sdk";
+import type { AuthMethod, AuthMethodAgent } from "@agentclientprotocol/sdk/unstable";
 
 /**
  * Inertia does not advertise ACP terminal authentication. A conforming agent

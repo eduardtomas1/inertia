@@ -2,7 +2,7 @@ import type {
   PermissionOption,
   RequestPermissionRequest,
   ToolKind,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 
 import {
   interactionDisplayIdentity,

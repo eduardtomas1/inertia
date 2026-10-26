@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type {
   CompactionSummaryChunk,
   CompactionUpdate,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 
 import type { AgentHarnessEmitter } from "./agent-harness";
 import type { ProviderRunFailure } from "./contracts";

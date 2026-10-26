@@ -1,4 +1,4 @@
-import { RequestError, type ClientContext } from "@agentclientprotocol/sdk";
+import { RequestError, type ClientContext } from "@agentclientprotocol/sdk/unstable";
 import { expect, it, vi } from "vitest";
 import { configureKimiSession } from "../../src/server/provider/kimi-acp-session";
 

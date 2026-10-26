@@ -1,4 +1,4 @@
-import type { SessionNotification } from "@agentclientprotocol/sdk";
+import type { SessionNotification } from "@agentclientprotocol/sdk/unstable";
 
 import { sanitizeProviderFailureSummary } from "./activity-detail";
 import type { ProviderRunFailure } from "./contracts";

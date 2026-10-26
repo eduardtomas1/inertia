@@ -1,4 +1,4 @@
-import type { SessionNotification } from "@agentclientprotocol/sdk";
+import type { SessionNotification } from "@agentclientprotocol/sdk/unstable";
 import { redactHostToolPayload } from "./host-tool-redaction";
 
 const CREDENTIAL_ENVIRONMENT_KEY =

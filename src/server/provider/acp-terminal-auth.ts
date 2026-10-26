@@ -1,4 +1,4 @@
-import type { AuthMethodAgent, AuthMethodTerminal } from "@agentclientprotocol/sdk";
+import type { AuthMethodAgent, AuthMethodTerminal } from "@agentclientprotocol/sdk/unstable";
 
 // Kimi's published ACP login-only contract: same configured invocation, plus
 // --login. Only its existing data-root override is replayable; descriptors may

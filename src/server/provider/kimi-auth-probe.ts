@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 
 import { runtimeOwnedProcessInvocation, spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 import { INERTIA_VERSION } from "../../shared/version";

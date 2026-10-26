@@ -8,7 +8,6 @@ import {
 import {
   PRIVATE_CONNECT_RUNTIME_GRANT_LIMITS,
   privateConnectRuntimeGrantSchema,
-  type PrivateConnectRuntimeGrant,
 } from "./runtime-grants";
 
 export const PRIVATE_CONNECT_RUNTIME_LIMITS = Object.freeze({
@@ -164,5 +163,3 @@ export const privateConnectRuntimeProjectionValidatorSchema = projectionValidato
 export type PrivateConnectRuntimeProjectionValidator = z.infer<
   typeof privateConnectRuntimeProjectionValidatorSchema
 >;
-
-export type { PrivateConnectRuntimeGrant };

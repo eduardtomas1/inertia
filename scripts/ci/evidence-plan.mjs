@@ -15,10 +15,12 @@ export const EVIDENCE_JOBS = Object.freeze({
   test: "native matrix",
   electron: "native Electron matrix",
   "windows-unit": "Windows unit shards",
+  "macos-x64-unit": "macOS x64 unit shards",
 });
 export const ELECTRON_CHECK_SUFFIX = " Electron";
 
 export const PRIMARY_PLATFORM_ARTIFACTS = Object.freeze(["linux-x64", "windows-x64", "macos-arm64"]);
+const UNIT_SHARD_PLATFORM_ARTIFACTS = Object.freeze(["windows-x64", "macos-x64"]);
 const SHA = /^[0-9a-f]{40}$/u;
 
 function validReusedRun(reusedRun) {
@@ -69,10 +71,12 @@ export function createEvidencePlan({
   const recoveryOnly = (platform) => !completeSiblings
     && !PRIMARY_PLATFORM_ARTIFACTS.includes(platform.artifact);
   const electronPlatforms = [
-    ...selectedPlatforms.filter((platform) => !recoveryOnly(platform)).flatMap((platform) => [
-      phaseEntry(platform, "display-sensitive"),
-      ...isolatedShards(platform).map((shard) => phaseEntry(platform, "isolated", shard)),
-    ]),
+    ...(completeSiblings ? [...selectedPlatforms].reverse() : selectedPlatforms)
+      .filter((platform) => !recoveryOnly(platform)).flatMap((platform) => {
+        const display = phaseEntry(platform, "display-sensitive");
+        const isolated = isolatedShards(platform).map((shard) => phaseEntry(platform, "isolated", shard));
+        return completeSiblings ? [...isolated, display] : [display, ...isolated];
+      }),
     ...selectedPlatforms.filter(recoveryOnly).map((platform) => phaseEntry(platform, "runtime-recovery")),
   ];
   const code = lane !== "main-reused" && (!changes.documentationOnly || full);
@@ -92,6 +96,7 @@ export function createEvidencePlan({
     // units and package proof. Both jobs build the same candidate from source.
     electron: platforms.length > 0,
     "windows-unit": platforms.includes("windows-x64"),
+    "macos-x64-unit": platforms.includes("macos-x64"),
   };
   const requiredJobs = Object.keys(jobs).filter((job) => jobs[job]);
   const requiredChecks = requiredJobs.flatMap((job) => job === "test"
@@ -100,6 +105,8 @@ export function createEvidencePlan({
       ? electronPlatforms.map(({ check }) => check)
     : job === "windows-unit"
       ? [1, 2, 3, 4].map((shard) => `Windows unit tests (${shard}/4)`)
+    : job === "macos-x64-unit"
+      ? [1, 2].map((shard) => `macOS x64 unit tests (${shard}/2)`)
       : [EVIDENCE_JOBS[job]]);
   return {
     schemaVersion: 1, head, sourceHead, base, baselineReason, event, lane, reusedRun: certifiedRun,
@@ -120,7 +127,9 @@ export function createEvidencePlan({
       ...(jobs["pr-linux-lifecycle"] ? [domains.has("renderer_ui") ? "linux-full-electron" : "linux-core-bridge", "linux-recovery"] : []),
       ...(jobs["pr-windows-lifecycle"] ? ["windows-portable-and-lifecycle", "windows-codex-discovery"] : []),
       ...(jobs["pr-macos-lifecycle"] ? ["macos-portable-and-lifecycle"] : []),
-      ...platforms.map((platform) => `${platform}:native-units-package-smoke`),
+      ...platforms.flatMap((platform) => UNIT_SHARD_PLATFORM_ARTIFACTS.includes(platform)
+        ? [`${platform}:unit-shards`, `${platform}:native-package-smoke`]
+        : [`${platform}:native-units-package-smoke`]),
       ...selectedPlatforms.flatMap((platform) => recoveryOnly(platform)
         ? [`${platform.artifact}:electron-recovery`]
         : [`${platform.artifact}:electron-display-sensitive`, ...isolatedShards(platform).map((shard) => (
@@ -149,7 +158,6 @@ export function outputsForEvidencePlan(plan) {
     plan_json: JSON.stringify(plan),
     matrix_json: JSON.stringify(plan.matrix),
     electron_matrix_json: JSON.stringify(plan.electronMatrix),
-    full_certification: plan.fullCertification,
     renderer: plan.renderer,
     benchmarks: plan.benchmarks,
     performance_smoke: plan.performanceSmoke,

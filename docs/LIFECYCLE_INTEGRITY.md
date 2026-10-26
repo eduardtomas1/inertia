@@ -446,7 +446,8 @@ tools, and the classifier itself select broad evidence.
   Scheduled runs attempt selected lifecycle invariants up to three times per
   target, stopping early only when cleanup is unconfirmed, retain every attempted
   run, fail on mixed results, and update a bounded tracked issue
-  on certification failure. Stable Windows x64 installs a checksummed published
+  on certification failure, closing it only after two consecutive green
+  nightlies. Stable Windows x64 installs a checksummed published
   N-1 artifact, smokes it, installs N over the same directory, reopens the same
   profile/database state, verifies N against the unpacked candidate, and
   uninstalls it.

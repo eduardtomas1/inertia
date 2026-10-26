@@ -79,6 +79,7 @@ it.each([
   expect(JSON.parse(outputs.electron_matrix_json!)).toEqual(selected.electronMatrix);
   expect(workflow.jobs.test.strategy.matrix).toBe("${{ fromJSON(needs.classify.outputs.matrix_json) }}");
   expect(workflow.jobs["windows-unit"].strategy.matrix.shard).toEqual([1, 2, 3, 4]);
+  expect(workflow.jobs["macos-x64-unit"].strategy.matrix.shard).toEqual([1, 2]);
 });
 
 it("binds every checkout to the candidate and makes migration lineage part of the stable aggregate", () => {
@@ -161,16 +162,20 @@ it("splits every complete Electron target into display-sensitive and isolated-pl
     "linux-arm64:runtime-recovery", "windows-arm64:runtime-recovery", "macos-x64:runtime-recovery",
   ]);
   const nightly = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["README.md"], event: "schedule" });
-  expect(nightly.electronMatrix.include.map(entry)).toEqual(
-    PLATFORMS.flatMap(({ artifact }) => [`${artifact}:display-sensitive`, ...(artifact.startsWith("windows-")
-      ? [`${artifact}:isolated 1/2`, `${artifact}:isolated 2/2`] : [`${artifact}:isolated`])]),
-  );
+  expect(nightly.electronMatrix.include.map(entry)).toEqual([
+    "macos-x64:isolated", "macos-x64:display-sensitive",
+    "macos-arm64:isolated", "macos-arm64:display-sensitive",
+    "windows-arm64:isolated 1/2", "windows-arm64:isolated 2/2", "windows-arm64:display-sensitive",
+    "windows-x64:isolated 1/2", "windows-x64:isolated 2/2", "windows-x64:display-sensitive",
+    "linux-arm64:isolated", "linux-arm64:display-sensitive",
+    "linux-x64:isolated", "linux-x64:display-sensitive",
+  ]);
   expect(nightly.electronMatrix.include.filter(({ shard }) => shard).map(({ check, evidence_artifact }) => [check, evidence_artifact]))
     .toEqual([
-      ["Windows x64 Electron (isolated 1/2)", "windows-x64-isolated-1-of-2"],
-      ["Windows x64 Electron (isolated 2/2)", "windows-x64-isolated-2-of-2"],
       ["Windows ARM64 Electron (isolated 1/2)", "windows-arm64-isolated-1-of-2"],
       ["Windows ARM64 Electron (isolated 2/2)", "windows-arm64-isolated-2-of-2"],
+      ["Windows x64 Electron (isolated 1/2)", "windows-x64-isolated-1-of-2"],
+      ["Windows x64 Electron (isolated 2/2)", "windows-x64-isolated-2-of-2"],
     ]);
   for (const plan of [pullRequest, nightly]) {
     expect(new Set(plan.electronMatrix.include.map(({ evidence_artifact }) => evidence_artifact)).size)
@@ -332,4 +337,15 @@ it("hands the main ref to the release validator for stable ancestry and compares
   expect(lineage.run).toContain("git tag --merged \"$RELEASE_SHA\" --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname");
   expect(lineage.run).toContain('node scripts/verify-database-lineage.mjs --base-ref "refs/tags/$previous_tag"');
   expect(lineage.run).toContain("exit 1");
+});
+
+it("reports every scheduled nightly through the candidate reporter with read-only run access", () => {
+  const job = workflow.jobs["report-nightly"];
+  expect(job.if).toBe("always() && github.event_name == 'schedule'");
+  expect(job.permissions).toEqual({ actions: "read", contents: "read", issues: "write" });
+  const steps = job.steps as Array<{ uses?: string; with?: { ref?: string; script?: string } }>;
+  expect(steps[0]!.uses).toMatch(/^actions\/checkout@/u);
+  expect(steps[1]!.uses).toMatch(/^actions\/github-script@/u);
+  expect(steps[1]!.with?.script).toContain("/scripts/ci/nightly-report.mjs");
+  expect(steps[1]!.with?.script).toContain("workflowId: \"ci.yml\"");
 });

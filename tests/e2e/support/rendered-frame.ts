@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { test, type ElectronApplication, type Page } from "@playwright/test";
+import { test, type ElectronApplication } from "@playwright/test";
 
 import { electronHelperProcesses, gpuMainThreadStall } from "./electron-main-process-diagnostic";
 
@@ -39,21 +39,6 @@ export interface FrameStallMonitorDependencies {
 
 export interface FrameStallMonitor {
   stop: () => void;
-}
-
-export async function renderedFrame(page: Page): Promise<boolean> {
-  try {
-    return await page.evaluate((timeout) => new Promise<boolean>((resolve) => {
-      if (document.visibilityState === "hidden") return resolve(true);
-      const timer = setTimeout(() => resolve(false), timeout);
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        clearTimeout(timer);
-        resolve(true);
-      }));
-    }), FRAME_TIMEOUT_MS);
-  } catch {
-    return true;
-  }
 }
 
 async function runTool(command: string, args: string[], timeout: number, signal: AbortSignal): Promise<string | null> {

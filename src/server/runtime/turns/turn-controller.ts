@@ -98,11 +98,7 @@ export type {
   QueueTurnRequest,
   TurnAdmissionLease,
   TurnControllerHooks,
-  TurnGitArtifactHookInput,
-  TurnMetadataRefreshHookInput,
   TurnProviderRuntime,
-  TurnStructuredContextCapture,
-  TurnStructuredContextRecord,
   TurnTerminalCause,
   TurnTimerScheduler,
 } from "./turn-controller-types";

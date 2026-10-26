@@ -4,9 +4,7 @@ export {
   activityNeedsAttention,
   buildTurnExecutionStream,
   isInterruptedActivity,
-  isTranscriptActivity,
   type ActivityAttentionSeverity,
-  type ActivityDetailPresentation,
   type TurnExecutionStreamEntry,
 } from "./response-timeline/execution";
 export {
@@ -17,13 +15,8 @@ export {
   activityWorkKind,
   commandDisplayText,
   hostToolActivityTitle,
-  latestFailureIndex,
   resolveActivityGroupWindow,
   summarizeActivities,
-  type ActivityCommandLine,
-  type ActivityGroupRowPresentation,
-  type ActivityGroupSummary,
-  type ActivitySummaryPart,
   type ActivityWorkKind,
 } from "./response-timeline/activity-summary";
 export {
@@ -51,8 +44,6 @@ export {
   activeAgentPresentation,
   activityExecutionCategory,
   type ActiveAgentPhase,
-  type ActiveAgentPresentation,
-  type ActivityExecutionCategory,
   type StreamingAgentChannel,
 } from "./response-timeline/active-state";
 export {
@@ -67,12 +58,6 @@ export {
   shouldShowTimelineMinimap,
   shouldShowTurnGitArtifactSummary,
   shouldVirtualizeTimeline,
-  TIMELINE_MINIMAP_MAX_MARKERS,
-  TIMELINE_MINIMAP_MIN_GUTTER,
   TIMELINE_VIRTUALIZATION_MIN_ROWS,
   TIMELINE_VIRTUALIZATION_MIN_WEIGHT,
-  type TimelineKeyboardIntent,
-  type TimelineMinimapMarker,
-  type TimelineRowEstimateOptions,
-  type TimelineSizeChangeAnchor,
 } from "./response-timeline/virtualization";

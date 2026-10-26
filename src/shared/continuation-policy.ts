@@ -8,7 +8,6 @@ import type {
 import type { ContinuationReasonCode } from "./continuation-reason-codes";
 
 export {
-  CONTINUATION_REASON_CODES,
   isContinuationReasonCode,
   isTurnSessionRecovery,
   type ContinuationReasonCode,

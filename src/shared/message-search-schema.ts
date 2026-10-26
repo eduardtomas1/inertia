@@ -10,7 +10,6 @@ export const messageSearchTargetSchema = z.strictObject({
   turnId: z.string().min(1).max(200).nullable(),
   messageId: z.string().min(1).max(200),
 });
-export type MessageSearchTarget = z.infer<typeof messageSearchTargetSchema>;
 
 export const messageSearchHitSchema = messageSearchTargetSchema.extend({
   role: z.enum(["user", "assistant"]),
@@ -19,7 +18,6 @@ export const messageSearchHitSchema = messageSearchTargetSchema.extend({
   matchStart: z.number().int().min(0).max(MESSAGE_SEARCH_SNIPPET_MAX),
   matchEnd: z.number().int().min(1).max(MESSAGE_SEARCH_SNIPPET_MAX),
 }).refine((hit) => hit.matchStart < hit.matchEnd && hit.matchEnd <= hit.snippet.length);
-export type MessageSearchHit = z.infer<typeof messageSearchHitSchema>;
 
 export const messageSearchResultSchema = z.strictObject({
   kind: z.literal("conversation.messages.search"),
@@ -28,4 +26,3 @@ export const messageSearchResultSchema = z.strictObject({
   hasMore: z.boolean(),
   incomplete: z.boolean(),
 }).refine((result) => new Set(result.hits.map((hit) => hit.messageId)).size === result.hits.length);
-export type MessageSearchResult = z.infer<typeof messageSearchResultSchema>;

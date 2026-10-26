@@ -955,7 +955,15 @@ export async function disposeWindowsRuntimeJobExecutableLock(): Promise<void> {
     try {
       await state.lock.release();
     } catch (error) {
-      await state.lock.abort();
+      try {
+        await state.lock.abort();
+      } catch (abortError) {
+        throw new AggregateError(
+          [error, abortError],
+          "The Windows runtime executable broker could not be aborted after its release failed: "
+            + (error instanceof Error ? error.message : String(error)),
+        );
+      }
       throw error;
     }
     return;

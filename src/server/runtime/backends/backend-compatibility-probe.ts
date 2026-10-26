@@ -38,9 +38,6 @@ import {
 
 export type {
   BackendCompatibilityProbeDependencies,
-  BackendProbeResolvedAddress,
-  NativeBackendProbeAdapter,
-  NativeBackendProbeObservation,
 } from "./backend-compatibility-probe/core";
 export { nativeModelCatalogProbeAdapter };
 

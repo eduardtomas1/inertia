@@ -68,8 +68,6 @@ export {
 export type {
   LinuxProcessIdentity,
   RuntimeOwnedProcessPlatform,
-  WindowsProcessIdentity,
-  ObservedWindowsProcessIdentity,
   RuntimeOwnedProcessIdentity,
   ObservedRuntimeOwnedProcessIdentity,
   WindowsRuntimeJobContainment,

@@ -71,6 +71,7 @@ interface BrokerChildOptions {
   readonly malformedResult?: string;
   readonly shutdownDelayMs?: number;
   readonly retainedHelperExitUnconfirmable?: boolean;
+  readonly ignoreTermination?: boolean;
 }
 
 function verifiedExecutableBrokerChild(
@@ -81,11 +82,15 @@ function verifiedExecutableBrokerChild(
 const fs = require("node:fs");
 const readline = require("node:readline");
 const options = JSON.parse(Buffer.from("${configuration}", "base64").toString("utf8"));
+if (options.ignoreTermination) {
+  process.on("SIGTERM", () => undefined);
+  setInterval(() => undefined, 1_000);
+}
 const encode = (value) => Buffer.from((value ?? "").slice(0, 2048), "utf8").toString("base64");
 const respond = (line) => {
   if (options.commandLogPath) fs.appendFileSync(options.commandLogPath, line + "\\n");
   if (line === "SHUTDOWN") {
-    if (options.retainedHelperExitUnconfirmable) return;
+    if (options.retainedHelperExitUnconfirmable || options.ignoreTermination) return;
     setTimeout(() => {
       process.stdout.write("BYE\\n", () => process.exit(0));
     }, options.shutdownDelayMs ?? 0);
@@ -571,6 +576,33 @@ describe("Windows runtime Job Object containment", () => {
     await closeChild(broker);
     expect(broker.exitCode).toBe(0);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "keeps the release failure when the broker also cannot be aborted",
+    async () => {
+      await disposeWindowsRuntimeJobExecutableLock();
+      const broker = verifiedExecutableBrokerChild({ ignoreTermination: true });
+      await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+        spawnLockBroker: () => broker,
+      });
+      const failure = await disposeWindowsRuntimeJobExecutableLock().then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect((failure as AggregateError).message).toContain(
+        "broker did not close during shutdown",
+      );
+      expect((failure as AggregateError).message).toContain("could not be aborted");
+      expect((failure as AggregateError).errors.map((error: Error) => error.message)).toEqual([
+        expect.stringContaining("broker did not close during shutdown"),
+        "The Windows runtime executable broker could not be aborted.",
+      ]);
+      broker.kill("SIGKILL");
+      await closeChild(broker);
+      expect(broker.signalCode).toBe("SIGKILL");
+    },
+  );
 
   it("fails closed after the prepared broker is lost", async () => {
     await disposeWindowsRuntimeJobExecutableLock();

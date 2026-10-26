@@ -48,5 +48,3 @@ export const todoCommandSchemas = [
     }).strict(),
   }).strict(),
 ] as const;
-
-export type TodoStartConversation = z.infer<typeof todoStartConversationSchema>;

@@ -112,7 +112,6 @@ export {
 } from "./opencode-sdk-support";
 export {
   readOpenCodeSdkModels,
-  type OpenCodeSdkMetadataOptions,
 } from "./opencode-sdk-metadata";
 const MAX_EVENT_FRAME_BYTES = 2 * MAX_OPENCODE_EVENT_BYTES;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;

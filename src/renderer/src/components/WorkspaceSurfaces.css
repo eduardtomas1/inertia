@@ -204,10 +204,6 @@
   font-size: var(--text-xs);
 }
 
-.agents-surface .goal-panel-section {
-  margin: 0;
-}
-
 .attachments-surface .workspace-surface-scroll {
   display: flex;
   flex-direction: column;

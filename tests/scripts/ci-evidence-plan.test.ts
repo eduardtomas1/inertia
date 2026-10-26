@@ -106,9 +106,13 @@ describe("explainable CI plan", () => {
       "macOS x64 Electron (runtime-recovery)",
       "Windows unit tests (1/4)", "Windows unit tests (2/4)",
       "Windows unit tests (3/4)", "Windows unit tests (4/4)",
+      "macOS x64 unit tests (1/2)", "macOS x64 unit tests (2/2)",
     ]);
     expect(selected.omittedPlatforms).toEqual([]);
-    for (const missingName of ["Linux ARM64", "Windows ARM64", "macOS x64", "Windows ARM64 Electron (runtime-recovery)"]) {
+    for (const missingName of [
+      "Linux ARM64", "Windows ARM64", "macOS x64", "Windows ARM64 Electron (runtime-recovery)",
+      "macOS x64 unit tests (2/2)",
+    ]) {
       const missingNative = evidence(selected);
       missingNative.jobs = missingNative.jobs.filter(({ name }) => name !== missingName);
       expect(evaluateMergeEvidence(selected, missingNative))
@@ -141,9 +145,13 @@ describe("explainable CI plan", () => {
   ])("keeps native and uncertain verifier changes on all six targets: %s", (path) => {
     const selected = plan([path]);
     expect(selected.platforms).toEqual(PLATFORMS.map(({ artifact }: { artifact: string }) => artifact));
-    expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
+    expect(selected.requiredJobs).toEqual([
+      "gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit", "macos-x64-unit",
+    ]);
     expect(selected.requiredChecks.filter((name: string) => name.startsWith("Windows unit tests")))
       .toHaveLength(4);
+    expect(selected.requiredChecks.filter((name: string) => name.startsWith("macOS x64 unit tests")))
+      .toHaveLength(2);
     expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(10);
   });
 
@@ -166,7 +174,12 @@ describe("explainable CI plan", () => {
   it("describes nightly documentation coverage and actual published upgrade proof truthfully", () => {
     const selected = plan(["README.md"], { event: "schedule" });
     expect(selected.suites).toContain("linux-all-source-coverage");
-    expect(selected.suites).toContain("linux-x64:native-units-package-smoke");
+    expect(selected.suites.filter((suite) => /:(?:native-|unit-shards)/u.test(suite))).toEqual([
+      "linux-x64:native-units-package-smoke", "linux-arm64:native-units-package-smoke",
+      "windows-x64:unit-shards", "windows-x64:native-package-smoke",
+      "windows-arm64:native-units-package-smoke", "macos-arm64:native-units-package-smoke",
+      "macos-x64:unit-shards", "macos-x64:native-package-smoke",
+    ]);
     expect(selected.suites).toContain("linux-x64:electron-display-sensitive");
     expect(selected.suites).toContain("linux-x64:electron-isolated-recovery");
     expect(selected.suites).not.toContain("macos-x64:electron-recovery");
@@ -178,13 +191,15 @@ describe("explainable CI plan", () => {
       "windows-x64:published-N-1-installed-upgrade",
       "windows-arm64:published-N-1-installed-upgrade",
     ]);
-    expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
+    expect(selected.requiredJobs).toEqual([
+      "gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit", "macos-x64-unit",
+    ]);
     expect(selected.electronMatrix.include.map(({ check }) => check)).toEqual(
-      ["Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64"].flatMap((label) => [
-        `${label} Electron (display-sensitive)`,
+      ["macOS x64", "macOS arm64", "Windows ARM64", "Windows x64", "Linux ARM64", "Linux x64"].flatMap((label) => [
         ...(label.startsWith("Windows")
           ? [`${label} Electron (isolated 1/2)`, `${label} Electron (isolated 2/2)`]
           : [`${label} Electron (isolated)`]),
+        `${label} Electron (display-sensitive)`,
       ]),
     );
   });

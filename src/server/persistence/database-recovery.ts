@@ -54,8 +54,6 @@ import {
 } from "../../shared/storage-policy";
 export {
   DATABASE_BACKUP_INTERVAL_MS,
-  DATABASE_BACKUP_MAX_COUNT,
-  DATABASE_BACKUP_MAX_TOTAL_BYTES,
 } from "../../shared/storage-policy";
 
 export const DATABASE_INITIAL_BACKUP_QUIET_MS = 30 * 1_000;

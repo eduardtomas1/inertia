@@ -33,5 +33,3 @@ export interface ChangeClassification {
 export const CHANGE_DOMAINS: readonly ChangeDomain[];
 
 export function classifyChangedPaths(inputPaths: readonly string[]): ChangeClassification;
-
-export function githubOutputsForClassification(classification: ChangeClassification): string;

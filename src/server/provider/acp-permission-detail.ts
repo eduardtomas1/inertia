@@ -1,4 +1,4 @@
-import type { RequestPermissionRequest } from "@agentclientprotocol/sdk";
+import type { RequestPermissionRequest } from "@agentclientprotocol/sdk/unstable";
 
 /** Include edit patches and targets even when the provider omits rawInput. */
 export function acpPermissionDetail(

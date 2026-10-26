@@ -1,4 +1,4 @@
-import type { AnyMessage, JsonRpcId, Stream } from "@agentclientprotocol/sdk";
+import type { AnyMessage, JsonRpcId, Stream } from "@agentclientprotocol/sdk/unstable";
 
 const PROMPT_METHOD = "session/prompt";
 

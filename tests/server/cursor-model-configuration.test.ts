@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { resolve } from "node:path";
 
-import type { ClientContext, SessionConfigOption } from "@agentclientprotocol/sdk";
+import type { ClientContext, SessionConfigOption } from "@agentclientprotocol/sdk/unstable";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderInfo, ProviderModel } from "../../src/shared/contracts";

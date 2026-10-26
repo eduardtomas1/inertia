@@ -9,7 +9,7 @@ import type {
   PermissionOption,
   RequestPermissionRequest,
   ToolKind,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {

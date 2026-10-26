@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import type { RequestPermissionRequest } from "@agentclientprotocol/sdk";
+import type { RequestPermissionRequest } from "@agentclientprotocol/sdk/unstable";
 
 export const MAX_ATTACHMENT_READ_ROOTS = 4_096;
 

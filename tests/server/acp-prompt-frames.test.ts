@@ -1,4 +1,4 @@
-import type { AnyMessage, Stream } from "@agentclientprotocol/sdk";
+import type { AnyMessage, Stream } from "@agentclientprotocol/sdk/unstable";
 import { describe, expect, it } from "vitest";
 
 import { AcpPromptFrames } from "../../src/server/provider/acp-prompt-frames";

@@ -1,12 +1,12 @@
 import { extname } from "node:path";
 
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import type {
   ContentBlock,
   InitializeResponse,
   SessionConfigOption,
   SessionModeState,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 
 import { imageMediaType, readBoundedProviderImage } from "./provider-image-read";
 import { acpConfigSelected, assertAcpConfigSelection } from "./acp-config-options";

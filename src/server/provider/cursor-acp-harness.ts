@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import { Readable, Writable } from "node:stream";
 
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import type {
   ContentBlock,
   InitializeResponse,
@@ -16,7 +16,7 @@ import type {
   ToolCallStatus,
   ToolKind,
   Usage,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 
 import { INERTIA_VERSION } from "../../shared/version";
 import { runtimeOwnedProcessInvocation, spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";

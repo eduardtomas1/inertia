@@ -12,6 +12,19 @@
 - **Capture a window.** Turn on [Snapshots](../SNAPSHOTS_AND_COMPACTION.md) in **Settings → Devices & integrations → Snapshots** to attach a screenshot of the foreground window with its accessibility context.
 - **Compact long chats** with `/compact`. A successful compaction leaves a receipt in the timeline with the provider-reported context counts.
 
+### Compact on return
+
+An API key bills every turn for the chat's whole history. While the provider's prompt cache is warm, that history is cheap to resend; once the cache expires, the next turn pays for all of it again. When you come back to a chat of 200K tokens or more on an Anthropic or OpenAI API key and its cache has expired, the composer's send button reads **Compact and send**. Point at it to see *Summarize ‹N› tokens of history, then send*.
+
+- **Compact and send** summarizes the history first, then sends your message on the shorter chat. Enter follows the button, so it does the same. The composer and the timeline show *Compacting before sending…* while it runs, and your draft stays in the composer until the message is sent.
+- Compacting is itself a model call, and the summary keeps less detail than the full chat; choose **Full history** when you need exact earlier details. Press **Full history** beside the button and it reads **Send**: this message goes with the whole history. The next message offers compaction again.
+- If compacting fails, nothing is sent. Your draft stays, the composer shows why, and you can choose **Send without compacting** or **Try again**.
+- The timeline marks it with one line, such as *Compacted on return · 252K → 18.3K tokens*, without a `/compact` message.
+- It applies to Claude on an Anthropic API key, whose cache lasts 5 minutes or 1 hour (see [Prompt cache](getting-started.md#prompt-cache)); to Claude Code signed in for API billing, which uses Claude Code's 5-minute default unless Claude reports a longer one; and to Codex on an OpenAI API key. Inertia assumes about 30 minutes for OpenAI keys; OpenAI does not publish a fixed lifetime. If you often come back within the hour, a 1-hour Prompt cache avoids most of these offers.
+- Chats on a subscription, custom backends, Kimi, watcher chats and Duo judge chats are never offered it, nor is a chat whose last turn stopped on a usage limit, a billing or sign-in problem, or a rate limit. Queued messages and limit-reset resumes are sent as they are. A message from Private Connect is sent as it is too, and one that arrives while the chat is compacting is refused until compacting ends.
+- The usage meter shows *Prompt cache warm, expires in ‹N› min* or *Prompt cache expired ‹N› min ago* for these chats, with *about* before the time when Inertia assumes the lifetime.
+- To stop the offer, set **Settings → Chats → Compact large API chats when you return** to **Never**.
+
 ## Follow the work
 
 - The **Work** tab lists your chats. Running chats show the agent pixels and elapsed time, and a chat that needs your input or finishes gets a brief cue.

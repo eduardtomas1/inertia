@@ -54,6 +54,19 @@ function fixture() {
 describe("Private Connect prompt admission", () => {
   afterEach(() => release());
 
+  it("says the chat is compacting when compaction holds the chat lock", () => {
+    const subject = fixture();
+    subject.acquire.mockReturnValue(false);
+    const compacting = vi.fn(() => true);
+    expect(() => queuePrivateConnectPrompt({ ...subject.dependencies, compacting }, conversationId, "Continue", deviceId))
+      .toThrow("This chat is compacting its context. Send the prompt again when it finishes.");
+    compacting.mockReturnValue(false);
+    expect(() => queuePrivateConnectPrompt({ ...subject.dependencies, compacting }, conversationId, "Continue", deviceId))
+      .toThrow("End the resumed provider terminal before sending a remote prompt.");
+    expect(subject.queue).not.toHaveBeenCalled();
+    expect(subject.release).not.toHaveBeenCalled();
+  });
+
   it("refuses a remote prompt while Inertia is updating", () => {
     const subject = fixture();
     hold();

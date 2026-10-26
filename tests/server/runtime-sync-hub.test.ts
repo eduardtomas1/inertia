@@ -276,6 +276,21 @@ describe("runtime sync hub", () => {
     expect(runtime.events.has("broken")).toBe(false);
   });
 
+  it("tells connection listeners after a client is hydrated, until they unsubscribe", () => {
+    const runtime = fixture();
+    const counts: number[] = [];
+    const unsubscribe = runtime.hub.onClientConnected(() => counts.push(runtime.hub.connectionCount));
+    const hydration = { snapshot, approvals: [], inputs: [], plans: [] };
+    runtime.hub.connect("first", { kind: "none" }, hydration);
+    expect(() => runtime.hub.connect("broken", { kind: "none" }, {
+      ...hydration,
+      beforeFreshSnapshot: () => { throw new Error("flush failed"); },
+    })).toThrow("flush failed");
+    unsubscribe();
+    runtime.hub.connect("second", { kind: "none" }, hydration);
+    expect(counts).toEqual([1]);
+  });
+
   it("hydrates a fresh connection in order and embeds the authoritative cursor", () => {
     const runtime = fixture();
     const beforeFreshSnapshot = vi.fn();

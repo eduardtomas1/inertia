@@ -32,6 +32,7 @@ import type {
   AgentReasoning,
   AgentTurn,
   ChatAttachment,
+  ConversationCompactAndSendResult,
   ChatMessage,
   CheckpointSummary,
   ConversationLatestTurnSummary,
@@ -53,6 +54,8 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { CompactOnReturnSetting, ConversationCompactionState } from "@shared/compact-on-return";
+import type { ContextCompactionTrigger } from "@shared/context-compaction";
 import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
@@ -75,6 +78,7 @@ import {
   initialTranscriptNavigation,
   isTranscriptReaderNavigationKey,
   type TranscriptMessageSendAcceptance,
+  type TranscriptNavigationAction,
   transcriptNavigationFollowsContent,
   transcriptNavigationReducer,
 } from "../utils/transcriptNavigation";
@@ -222,6 +226,13 @@ type ChatWorkspaceProps = {
     message: string;
     instructionForwarded: boolean;
   }>;
+  compaction?: ConversationCompactionState | null;
+  compactOnReturnSetting?: CompactOnReturnSetting;
+  onCompactAndSendMessage?: (
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+  ) => Promise<ConversationCompactAndSendResult>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onPromptPresetCommand?: PromptPresetCommandRunner;
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
@@ -326,6 +337,9 @@ export function ChatWorkspace({
   onCreateConversation,
   onSendMessage,
   onCompactConversation,
+  compaction = null,
+  compactOnReturnSetting,
+  onCompactAndSendMessage,
   onListSkills,
   onPromptPresetCommand,
   onRespondToApproval,
@@ -420,21 +434,30 @@ export function ChatWorkspace({
     setChatGoal,
   ]);
   const conversationId = conversation?.id ?? null;
-  const [compacting, setCompacting] = useState<ReadonlyMap<string | null, string>>(() => new Map());
-  const compactConversation = useCallback(async (instruction?: string) => {
-    const since = new Date().toISOString();
-    setCompacting((current) => new Map(current).set(conversationId, since));
+  const [compacting, setCompacting] = useState<ReadonlyMap<string | null, { since: string; trigger: ContextCompactionTrigger }>>(() => new Map());
+  const trackCompaction = useCallback(async <Result,>(
+    trigger: ContextCompactionTrigger,
+    operation: () => Promise<Result>,
+  ): Promise<Result> => {
+    const entry = { since: new Date().toISOString(), trigger };
+    setCompacting((current) => new Map(current).set(conversationId, entry));
     try {
-      return await onCompactConversation!(instruction);
+      return await operation();
     } finally {
       setCompacting((current) => {
-        if (current.get(conversationId) !== since) return current;
+        if (current.get(conversationId) !== entry) return current;
         const next = new Map(current);
         next.delete(conversationId);
         return next;
       });
     }
-  }, [conversationId, onCompactConversation]);
+  }, [conversationId]);
+  const compactConversation = useCallback((instruction?: string) =>
+    trackCompaction("manual", () => onCompactConversation!(instruction)), [onCompactConversation, trackCompaction]);
+  const localCompacting = compacting.get(conversationId) ?? null;
+  const shellCompacting = compaction?.state === "compacting" && compaction.startedAt ? compaction : null;
+  const compactingSince = localCompacting?.since ?? shellCompacting?.startedAt ?? null;
+  const compactingTrigger = localCompacting?.trigger ?? shellCompacting?.trigger ?? null;
   const [navigation, dispatchNavigation] = useReducer(
     transcriptNavigationReducer,
     conversationId,
@@ -445,6 +468,10 @@ export function ChatWorkspace({
     : initialTranscriptNavigation(conversationId, readTranscriptPosition(conversationId)?.wasFollowing === false);
   const navigationRef = useRef(activeNavigation);
   navigationRef.current = activeNavigation;
+  const navigate = useCallback((action: TranscriptNavigationAction): void => {
+    navigationRef.current = transcriptNavigationReducer(navigationRef.current, action);
+    dispatchNavigation(action);
+  }, []);
   const readerIntentRef = useRef(false);
   const finalAnswerAutoScrollOwnerRef = useRef<string | null>(null);
   const pendingFinalAnswerNavigationRef = useRef<{
@@ -619,7 +646,7 @@ export function ChatWorkspace({
     clearReaderIntent();
     clearPendingFinalAnswerNavigation();
     forgetTranscriptPosition(conversationId);
-    dispatchNavigation({
+    navigate({
       type: "latest.requested",
       conversationId,
     });
@@ -628,6 +655,7 @@ export function ChatWorkspace({
     clearPendingFinalAnswerNavigation,
     clearReaderIntent,
     conversationId,
+    navigate,
     performScrollToLatest,
   ]);
 
@@ -658,14 +686,14 @@ export function ChatWorkspace({
         followsLatest: event.followsLatest,
       };
     }
-    dispatchNavigation({
+    navigate({
       type: "reader.scrolled",
       conversationId: event.conversationId,
       followsLatest: event.followsLatest,
       intentional: true,
     });
     onLatestContentVisibilityChange?.(event.followsLatest);
-  }, [clearPendingFinalAnswerNavigation, onLatestContentVisibilityChange]);
+  }, [clearPendingFinalAnswerNavigation, navigate, onLatestContentVisibilityChange]);
 
   const revealPendingInput = useCallback((): void => {
     if (!pendingInputRequest) return;
@@ -687,7 +715,7 @@ export function ChatWorkspace({
     finalAnswerAutoScrollOwnerRef.current = null;
     clearPendingFinalAnswerNavigation();
     clearReaderIntent();
-    dispatchNavigation({
+    navigate({
       type: "conversation.changed",
       conversationId,
       readingHistory: readTranscriptPosition(conversationId)?.wasFollowing === false,
@@ -699,6 +727,7 @@ export function ChatWorkspace({
     clearPendingFinalAnswerNavigation,
     clearReaderIntent,
     conversationId,
+    navigate,
     performScrollToLatest,
   ]);
 
@@ -781,11 +810,7 @@ export function ChatWorkspace({
   const noteResponseTimelineNavigationIntent = useCallback((): void => {
     noteReaderIntent();
     if (!conversationId) return;
-    navigationRef.current = {
-      mode: "reading-history",
-      conversationId,
-    };
-    dispatchNavigation({
+    navigate({
       type: "reader.scrolled",
       conversationId,
       followsLatest: false,
@@ -794,6 +819,7 @@ export function ChatWorkspace({
     onLatestContentVisibilityChange?.(false);
   }, [
     conversationId,
+    navigate,
     noteReaderIntent,
     onLatestContentVisibilityChange,
   ]);
@@ -827,14 +853,31 @@ export function ChatWorkspace({
     // wheel intent. Keep the bounded gesture guard until it expires: neither
     // that event nor a small upward movement within the follow tolerance
     // proves that the reader has finished navigating.
-    dispatchNavigation({
+    const scrolled = {
       type: "reader.scrolled",
       conversationId: conversationId ?? "",
       followsLatest: follows,
       intentional,
-    });
+    } as const;
+    if (transcriptNavigationReducer(navigationRef.current, scrolled) !== navigationRef.current) {
+      navigate(scrolled);
+    }
     onLatestContentVisibilityChange?.(follows);
   };
+
+  const followAcceptedMessage = useCallback((
+    acceptance: TranscriptMessageSendAcceptance,
+    sourceConversationId: string | null,
+  ): void => {
+    if (acceptance.disposition === "new-turn") forgetTranscriptPosition(acceptance.conversationId);
+    clearPendingFinalAnswerNavigation();
+    clearReaderIntent();
+    navigate({
+      type: "message.accepted",
+      acceptance,
+      sourceConversationId,
+    });
+  }, [clearPendingFinalAnswerNavigation, clearReaderIntent, navigate]);
 
   const sendMessage = useCallback(async (
     content: string,
@@ -848,43 +891,50 @@ export function ChatWorkspace({
       context,
     );
     if (!acceptance) return null;
-    if (acceptance.disposition === "new-turn") forgetTranscriptPosition(acceptance.conversationId);
-    clearPendingFinalAnswerNavigation();
-    clearReaderIntent();
-    dispatchNavigation({
-      type: "message.accepted",
-      acceptance,
-      sourceConversationId,
-    });
+    followAcceptedMessage(acceptance, sourceConversationId);
     return acceptance;
-  }, [
-    clearPendingFinalAnswerNavigation,
-    clearReaderIntent,
-    conversationId,
-    onSendMessage,
-  ]);
+  }, [conversationId, followAcceptedMessage, onSendMessage]);
+
+  const compactAndSendMessage = useCallback(async (
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+  ): Promise<ConversationCompactAndSendResult> => {
+    const sourceConversationId = conversationId;
+    const result = await trackCompaction("on-return", () => onCompactAndSendMessage!(content, attachments, context));
+    if (result.outcome === "sent") {
+      followAcceptedMessage({
+        kind: "message.accepted",
+        conversationId: result.conversationId,
+        turnId: result.turnId,
+        userMessageId: result.userMessageId,
+        disposition: result.disposition,
+      }, sourceConversationId);
+    }
+    return result;
+  }, [conversationId, followAcceptedMessage, onCompactAndSendMessage, trackCompaction]);
 
   const turnAnchorId = activeNavigation.mode === "await-turn"
     ? activeNavigation.turnId
     : null;
   const onTurnAnchorSettled = useCallback((turnId: string): void => {
     if (!conversationId) return;
-    dispatchNavigation({
+    navigate({
       type: "turn.anchored",
       conversationId,
       turnId,
     });
     onLatestContentVisibilityChange?.(true);
-  }, [conversationId, onLatestContentVisibilityChange]);
+  }, [conversationId, navigate, onLatestContentVisibilityChange]);
   const onTurnAnchorCancelled = useCallback((turnId: string): void => {
     if (!conversationId) return;
-    dispatchNavigation({
+    navigate({
       type: "turn.anchor-cancelled",
       conversationId,
       turnId,
     });
     onLatestContentVisibilityChange?.(false);
-  }, [conversationId, onLatestContentVisibilityChange]);
+  }, [conversationId, navigate, onLatestContentVisibilityChange]);
 
   if (loading && !detailLoading) {
     return (
@@ -1024,7 +1074,8 @@ export function ChatWorkspace({
               autoScrollToFinalAnswer={autoScrollToFinalAnswer
                 && transcriptNavigationFollowsContent(activeNavigation)}
               detailLoading={detailLoading}
-              compactingSince={compacting.get(conversationId) ?? null}
+              compactingSince={compactingSince}
+              compactingTrigger={compactingTrigger}
               turnAnchorId={turnAnchorId}
               followsLatest={transcriptNavigationFollowsContent(activeNavigation)}
               onTurnAnchorSettled={onTurnAnchorSettled}
@@ -1132,6 +1183,9 @@ export function ChatWorkspace({
           queuedTurnAuthoritative={queuedTurnAuthoritative}
           onSend={sendMessage}
           {...(onCompactConversation ? { onCompact: compactConversation } : {})}
+          {...(onCompactAndSendMessage ? { onCompactAndSend: compactAndSendMessage } : {})}
+          compaction={compaction}
+          compactOnReturnSetting={compactOnReturnSetting}
           onListSkills={onListSkills}
           promptPresets={promptPresets}
           promptPresetsEnabled={promptPresetsEnabled}

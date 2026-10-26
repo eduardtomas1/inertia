@@ -222,10 +222,10 @@ export function ComposerInputZone({
   );
   const mentionListboxId = `${skillListboxId}-files`;
   const mentionQuery = (mentionMatch?.[1] ?? "").toLowerCase();
-  const chatMentionResults = chatSuggestions
+  const chatMentionResults = mentionMatch ? chatSuggestions
     .filter(({ conversationTitle, archived }) =>
       !archived && conversationTitle.toLowerCase().includes(mentionQuery))
-    .slice(0, 4);
+    .slice(0, 4) : [];
   const thisChatMatches = thisChatTitle !== null && mentionQuery.length > 0 && (
     "this-chat".startsWith(mentionQuery)
     || "this chat".startsWith(mentionQuery)

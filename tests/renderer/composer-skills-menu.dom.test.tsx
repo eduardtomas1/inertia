@@ -131,6 +131,26 @@ describe("ComposerSkillsMenu", () => {
     expect(result.current.skillQuery).toBe("reviews");
   });
 
+  it("follows the last of several caret moves reported before a re-render", () => {
+    const review = { ...skill(0), id: "skill-review", name: "review" };
+    const message = "Use $rev for this change";
+    const editor = (caret: number) => ({
+      value: message,
+      selectionStart: caret,
+      selectionEnd: caret,
+    }) as HTMLTextAreaElement;
+    const { result } = renderHook(() => useComposerSkillCompletion([review], message, true));
+    act(() => result.current.onSkillSelectionChange(editor(8)));
+    expect(result.current.skillQuery).toBe("rev");
+
+    act(() => {
+      const { onSkillSelectionChange } = result.current;
+      onSkillSelectionChange(editor(2));
+      onSkillSelectionChange(editor(8));
+    });
+    expect(result.current.skillQuery).toBe("rev");
+  });
+
   it("has no skills button, and only opens suggestions for a typed dollar query", () => {
     const view = render(<Harness {...defaults} />);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();

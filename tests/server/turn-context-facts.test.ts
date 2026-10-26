@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { recordedCommandExitCode } from "../../src/server/persistence/command-exit-code";
@@ -56,7 +56,18 @@ async function commandsFor(providerId: ProviderId, detail: string, status: "comp
     });
     const database = new Database(databasePath, { readonly: true });
     try {
-      return lastTurnCommands(database, turn.id);
+      const prepare = database.prepare.bind(database);
+      const statements: string[] = [];
+      vi.spyOn(database, "prepare").mockImplementation((sql: string) => {
+        statements.push(sql);
+        return prepare(sql);
+      });
+      const commands = lastTurnCommands(database, turn.id);
+      const plans = statements.filter((sql) => sql.includes("FROM activities")).map((sql) =>
+        (prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...Array.from(sql.match(/\?/gu) ?? [], () => "x")) as Array<{
+          detail: string;
+        }>).map(({ detail }) => detail).join("\n"));
+      return Object.assign(commands, { plans });
     } finally {
       database.close();
     }
@@ -72,7 +83,14 @@ describe("turn command outcomes", () => {
     ["claude", "Command:\n./release.sh\n\nOutput:\nExit code: 7", "completed", "./release.sh (ok)"],
     ["claude", "Command:\n./release.sh\n\nError:\nExit code 1\nupload failed: 403", "failed", "./release.sh (exit 1)"],
   ] as const)("takes a %s exit code only from the adapter's prefix line", async (providerId, detail, status, line) => {
-    expect(await commandsFor(providerId, detail, status)).toEqual([line]);
+    expect([...await commandsFor(providerId, detail, status)]).toEqual([line]);
+  });
+
+  it("reads the turn's commands through the conversation's turn index instead of scanning every activity", async () => {
+    const { plans } = await commandsFor("codex", "Command:\n./release.sh\n\nOutput:\nok", "completed");
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).not.toMatch(/SCAN activities/u);
+    expect(plans[0]).toMatch(/SEARCH activities USING INDEX activities_conversation_turn_created_idx \(conversation_id=\? AND turn_id=\?\)/u);
   });
 
   it("never reads an exit code from output or from another provider", () => {

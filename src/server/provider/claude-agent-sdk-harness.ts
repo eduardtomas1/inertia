@@ -243,6 +243,15 @@ function startClaudeRun(
     ? requestedFastMode === "fast" ? "on" : "off"
     : null;
   let fastModeVerified = requestedFastModeState === null;
+  const promptCacheTtl = options.harnessConfiguration?.kind === "claude-messages"
+    ? options.harnessConfiguration.promptCacheTtl
+    : null;
+  const launchSettings = {
+    ...(supportsFastMode
+      ? { fastMode: requestedFastMode === "fast", fastModePerSessionOptIn: true }
+      : {}),
+    ...(promptCacheTtl ? { promptCacheTtl } : {}),
+  };
   let sessionUnavailable = false;
   const ownedProcess = createClaudeOwnedQueryProcess(
     "Claude Code process tree",
@@ -315,6 +324,7 @@ function startClaudeRun(
     },
     refreshContextUsage,
     checklistTasks: () => checklistTasks,
+    configuredPromptCacheTtl: promptCacheTtl,
   });
   const providerResult = (async (): Promise<ProviderRunResult> => {
     try {
@@ -377,14 +387,7 @@ function startClaudeRun(
           settingSources: [],
           ...claudeIdentityOptions(identity, options.input.systemInstruction),
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
-          ...(supportsFastMode
-            ? {
-                settings: {
-                  fastMode: requestedFastMode === "fast",
-                  fastModePerSessionOptIn: true,
-                },
-              }
-            : {}),
+          ...(Object.keys(launchSettings).length > 0 ? { settings: launchSettings } : {}),
           permissionMode: options.input.readOnlyProfile === "watcher"
             ? "default"
             : options.input.interactionMode === "plan"
@@ -544,6 +547,13 @@ function startClaudeRun(
         if (commandLifecycle && (commandLifecycle.state === "refused"
           || commandLifecycle.state === "cancelled" || commandLifecycle.state === "discarded")) {
           if (pendingFollowUpIds.has(commandLifecycle.command_uuid)) {
+            const projectedFailure = messageProjector.preferredFailure();
+            if (projectedFailure?.usageLimited || messageProjector.rateLimitRejected) {
+              const error = `${routeFailure(projectedFailure?.usageLimited ? projectedFailure.message : "Claude reached an account rate limit.")} Your follow-up was not answered.`;
+              return finishResult("failed", error, projectedFailure?.usageLimited
+                ? { ...projectedFailure, message: error }
+                : claudeFailure(error, `lifecycle/follow-up-${commandLifecycle.state}`));
+            }
             throw new Error(`Claude ${commandLifecycle.state} an accepted follow-up before returning an answer.`);
           }
           if (commandLifecycle.command_uuid === prompt.uuid) break;

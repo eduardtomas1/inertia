@@ -9,6 +9,8 @@ import {
   parseSetBackendCredentialRequest,
 } from "../../src/shared/backend-credentials";
 import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
+import { validateBackendProfileDraft } from "../../src/shared/backend-profile-validation";
+import { PROMPT_CACHE_TTL_UNAVAILABLE_MESSAGE } from "../../src/shared/compact-on-return";
 import {
   MAX_BACKEND_PROBE_MODELS,
   MAX_DISCOVERED_BACKEND_MODELS,
@@ -440,5 +442,65 @@ describe("pasted backend credentials", () => {
       secret: "sk-test",
       extra: true,
     })).toBeNull();
+  });
+});
+
+describe("backend prompt cache lifetime", () => {
+  const gateway = "https://gateway.example.test";
+  const openaiGateway = anthropicKeyProfile({
+    preset: "custom",
+    harnessId: "codex-app-server",
+    protocol: "openai-responses",
+    authenticationMode: "bearer-token",
+    baseUrl: `${gateway}/v1`,
+    endpointIdentity: backendEndpointIdentity(`${gateway}/v1`),
+  });
+  const refusal = (result: { success: boolean; error?: { issues: readonly { message: string }[] } }) => {
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map(({ message }) => message)).toContain(PROMPT_CACHE_TTL_UNAVAILABLE_MESSAGE);
+  };
+
+  it("stores the optional lifetime on Claude Agent SDK profiles using Anthropic Messages", () => {
+    expect(persistedModelBackendProfileSchema.parse(anthropicKeyProfile())).not.toHaveProperty("promptCacheTtl");
+    for (const promptCacheTtl of ["5m", "1h"]) {
+      expect(persistedModelBackendProfileSchema.parse(anthropicKeyProfile({ promptCacheTtl })).promptCacheTtl).toBe(promptCacheTtl);
+    }
+    expect(persistedModelBackendProfileSchema.safeParse(anthropicKeyProfile({ promptCacheTtl: "2h" })).success).toBe(false);
+  });
+
+  it("refuses the lifetime outside Claude Agent SDK and Anthropic Messages", () => {
+    expect(persistedModelBackendProfileSchema.safeParse(openaiGateway).success).toBe(true);
+    refusal(persistedModelBackendProfileSchema.safeParse({ ...openaiGateway, promptCacheTtl: "1h" }));
+    refusal(persistedModelBackendProfileSchema.safeParse(anthropicKeyProfile({
+      preset: "custom", harnessId: "claude-cli", baseUrl: gateway, endpointIdentity: backendEndpointIdentity(gateway), promptCacheTtl: "5m",
+    })));
+  });
+
+  it("exposes the lifetime on views and details", () => {
+    const view = anthropicKeyView({ promptCacheTtl: "1h" });
+    expect(modelBackendProfileViewSchema.parse(view).promptCacheTtl).toBe("1h");
+    expect(modelBackendProfileDetailSchema.parse({ ...view, baseUrl: "https://api.anthropic.com" }).promptCacheTtl).toBe("1h");
+    expect(modelBackendProfileViewSchema.safeParse(anthropicKeyView({ promptCacheTtl: "forever" })).success).toBe(false);
+  });
+
+  it("accepts the lifetime in Claude drafts and refuses it elsewhere with a plain message", () => {
+    expect(modelBackendProfileDraftSchema.parse({ preset: "anthropic-api-key", promptCacheTtl: "1h" }))
+      .toEqual({ preset: "anthropic-api-key", promptCacheTtl: "1h" });
+    const claudeDraft = { ...customDraft, harnessId: "claude-agent-sdk", protocol: "anthropic-messages", authenticationMode: "api-key" };
+    expect(modelBackendProfileDraftSchema.safeParse({ ...claudeDraft, promptCacheTtl: "1h" }).success).toBe(true);
+    refusal(modelBackendProfileDraftSchema.safeParse({ preset: "openai-api-key", promptCacheTtl: "1h" }));
+    refusal(modelBackendProfileDraftSchema.safeParse({ ...customDraft, promptCacheTtl: "5m" }));
+    refusal(modelBackendProfileDraftSchema.safeParse({ ...claudeDraft, harnessId: "claude-cli", promptCacheTtl: "1h" }));
+    expect(validateBackendProfileDraft({ ...customDraft, promptCacheTtl: "1h" }))
+      .toEqual([{ field: "protocol", message: PROMPT_CACHE_TTL_UNAVAILABLE_MESSAGE }]);
+  });
+
+  it("accepts the lifetime in updates unless the same update names another route", () => {
+    expect(modelBackendProfileUpdateSchema.parse({ promptCacheTtl: "1h" })).toEqual({ promptCacheTtl: "1h" });
+    expect(modelBackendProfileUpdateSchema.parse({ promptCacheTtl: "5m", harnessId: "claude-agent-sdk", protocol: "anthropic-messages" }))
+      .toMatchObject({ promptCacheTtl: "5m" });
+    expect(modelBackendProfileUpdateSchema.safeParse({ promptCacheTtl: "2h" }).success).toBe(false);
+    refusal(modelBackendProfileUpdateSchema.safeParse({ promptCacheTtl: "1h", harnessId: "codex-app-server" }));
+    refusal(modelBackendProfileUpdateSchema.safeParse({ promptCacheTtl: "1h", protocol: "openai-responses" }));
   });
 });

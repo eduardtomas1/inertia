@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   BACKEND_PROFILE_DISCOVERY_REQUEST_TIMEOUT_MS,
   BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
+  CONVERSATION_COMPACT_AND_SEND_REQUEST_TIMEOUT_MS,
+  CONVERSATION_COMPACTION_REQUEST_TIMEOUT_MS,
   CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
   GIT_MUTATION_REQUEST_TIMEOUT_MS,
   GIT_READ_OPERATION_TIMEOUT_MS,
@@ -63,6 +65,18 @@ describe("runtime command delivery policy", () => {
       timeoutMs: 15_000,
       timeoutDelivery: "ambiguous",
     });
+  });
+
+  it("keeps compact and send pending through compaction and send preparation without retrying it", () => {
+    expect(runtimeCommandPolicy("conversation.compact-and-send")).toEqual({
+      timeoutMs: CONVERSATION_COMPACT_AND_SEND_REQUEST_TIMEOUT_MS,
+      timeoutDelivery: "ambiguous",
+    });
+    expect(CONVERSATION_COMPACT_AND_SEND_REQUEST_TIMEOUT_MS).toBe(780_000);
+    expect(runtimeCommandPolicy("conversation.compact-and-send").timeoutMs)
+      .toBeGreaterThan(CONVERSATION_COMPACTION_REQUEST_TIMEOUT_MS);
+    expect(runtimeCommandPolicy("conversation.compact").timeoutDelivery)
+      .toBe(runtimeCommandPolicy("conversation.compact-and-send").timeoutDelivery);
   });
 
   it("refreshes packet summaries after draft context changes", () => {

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import type { AgentSkillSummary } from "@shared/contracts";
 import {
@@ -12,6 +12,7 @@ export function useComposerSkillCompletion(
   menuOpen: boolean,
 ) {
   const [selection, setSelection] = useState<{ value: string; start: number; end: number } | null>(null);
+  const latestSelection = useRef(selection);
   const [accepted, setAccepted] = useState<{ value: string; caret: number } | null>(null);
   const caret = selection?.value === message ? selection.start : message.length;
   const selectedText = selection?.value === message && selection.start !== selection.end;
@@ -22,7 +23,11 @@ export function useComposerSkillCompletion(
     setAccepted({ value, caret: acceptedCaret });
   };
   const onSkillSelectionChange = (editor: HTMLTextAreaElement): void => {
-    setSelection({ value: editor.value, start: editor.selectionStart, end: editor.selectionEnd });
+    const { value, selectionStart: start, selectionEnd: end } = editor;
+    const current = latestSelection.current;
+    if (current?.value === value && current.start === start && current.end === end) return;
+    latestSelection.current = { value, start, end };
+    setSelection(latestSelection.current);
   };
   const skillListboxId = `${useId()}-skills`;
   const [highlightedSkillId, setHighlightedSkillId] = useState<string | null>(null);

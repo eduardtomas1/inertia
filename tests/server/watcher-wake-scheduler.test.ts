@@ -120,6 +120,38 @@ describe("watcher wake scheduler", () => {
     expect(scheduler.pendingEvents(LINK)).toBe(0);
   });
 
+  it("never wakes or counts a watched turn for a compaction of the watched chat", () => {
+    const { scheduler, timers, wakes, quiet } = harness();
+    const compactionEvents = [
+      {
+        type: "conversation.shell.updated",
+        conversation: { id: WATCHED, archivedAt: null, compaction: { state: "compacting", trigger: "on-return", startedAt: "2026-10-25T09:00:00.000Z" } },
+        runs: [],
+      },
+      {
+        type: "agent.usage",
+        usage: { conversationId: WATCHED, turnId: null, usedTokens: 12_000, promptCache: { lastRequestStartedAt: "2026-10-25T09:00:01.000Z", lifetimeMs: 300_000, source: "reported" } },
+      },
+      {
+        type: "conversation.message.persisted",
+        message: {
+          id: "receipt", conversationId: WATCHED, turnId: null, role: "system", content: "/compact", attachments: [], createdAt: "2026-10-25T09:00:02.000Z",
+          compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: 12_000, instructionForwarded: false, trigger: "on-return" },
+        },
+      },
+      {
+        type: "conversation.shell.updated",
+        conversation: { id: WATCHED, archivedAt: null, compaction: { state: "idle", trigger: null, startedAt: null } },
+        runs: [],
+      },
+    ] as unknown as RuntimeMutationEvent[];
+    for (const event of compactionEvents) expect(scheduler.observe(LINK, event)).toBe(false);
+    timers.advance(30 * 60_000);
+    expect(wakes).toEqual([]);
+    expect(quiet).toEqual([]);
+    expect(scheduler.pendingEvents(LINK)).toBe(0);
+  });
+
   it("waits for the settle delay and coalesces events into one wake", () => {
     const { scheduler, timers, wakes, start } = harness();
     expect(scheduler.observe(LINK, settled("tool"))).toBe(true);

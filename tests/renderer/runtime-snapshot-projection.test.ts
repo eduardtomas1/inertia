@@ -204,6 +204,36 @@ describe("bounded conversation shell projection", () => {
     expect(event({ ...primary, pendingApproval: true }, [primaryRun]))
       .not.toBe(snapshot);
   });
+
+  it("keeps unchanged conversation and run identities when a command run starts", () => {
+    const primary = conversation("primary", "2026-07-30T10:00:00.000Z");
+    const secondary = conversation("secondary", "2026-07-30T10:01:00.000Z");
+    const primaryRun = run("primary-run", primary.id, "2026-07-30T10:00:00.000Z");
+    const snapshot: AppSnapshot = {
+      projects: [],
+      conversations: [secondary, primary],
+      runs: [primaryRun],
+      providers: [],
+      settings: { ...defaultSettings },
+      activeProjectId: primary.projectId,
+      activeConversationId: primary.id,
+    };
+    const command: WorkspaceRun = {
+      ...run("command", primary.id, "2026-07-30T10:00:30.000Z"),
+      kind: "check",
+    };
+
+    const next = applyConversationShellEvent(snapshot, {
+      type: "conversation.shell.updated",
+      conversation: structuredClone(primary),
+      runs: [command, structuredClone(primaryRun)],
+    });
+
+    expect(next).not.toBe(snapshot);
+    expect(next.conversations).toBe(snapshot.conversations);
+    expect(next.runs).toEqual([command, primaryRun]);
+    expect(next.runs[1]).toBe(primaryRun);
+  });
 });
 
 describe("task list projection", () => {

@@ -33,6 +33,7 @@ import type {
   AgentInputRequest,
   AgentPlan,
   ChatMessage,
+  ConversationCompactAndSendResult,
   ConversationCompactionResult,
   MessageSendAcceptance,
   SubagentTrace,
@@ -239,6 +240,7 @@ export type ServerEvent =
         | UpdatesRunResult
         | BackgroundTasksResult
         | ConversationCompactionResult
+        | ConversationCompactAndSendResult
         | DuoPreparedResult
         | DuoPendingResult
         | DuoStatusResult

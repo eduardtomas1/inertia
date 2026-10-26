@@ -116,6 +116,8 @@ export class CommandIncidents {
     // The request id is kept for correlation but excluded from the incident
     // identity, so repeats of one failing operation aggregate.
     const context: DiagnosticContext = { requestId: command.requestId };
+    const commandType = diagnosticContextSchema.shape.commandType.safeParse(command.type);
+    if (commandType.success && commandType.data) context.commandType = commandType.data;
     const payload = "payload" in command && command.payload && typeof command.payload === "object"
       ? command.payload : {};
     for (const key of ["projectId", "conversationId", "turnId", "providerId"] as const) {

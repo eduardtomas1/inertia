@@ -65,6 +65,7 @@ export class SettingsRepository {
         completion_sound_json = ?,
         quota_warnings_enabled = ?, quota_warning_threshold = ?,
         notify_only_in_background = ?,
+        compact_on_return = ?,
         muted_custom_colors = ?
       WHERE id = 1
     `).run(
@@ -108,6 +109,7 @@ export class SettingsRepository {
         : state.completion_sound_json ?? "{}",
       Number(next.quotaWarnings.enabled), next.quotaWarnings.firstThreshold,
       Number(next.notifyOnlyInBackground),
+      next.compactOnReturn,
       Number(mutedCustomColors),
     );
   }

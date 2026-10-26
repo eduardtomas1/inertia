@@ -14,6 +14,7 @@ import {
   type BackendProfileIssue,
 } from "@shared/backend-profile-validation";
 import type { BackendProfileUpdateInput } from "../lib/backendProfileCommands";
+import { promptCacheTtlAllowed } from "@shared/compact-on-return";
 
 export type BackendDraftModelField =
   | "id"
@@ -89,6 +90,11 @@ export function backendProfileSemanticUpdate(
       : {}),
     ...(!semanticallyEqual(current.capabilityHints, next.capabilityHints)
       ? { capabilityHints: next.capabilityHints }
+      : {}),
+    ...(next.promptCacheTtl !== undefined
+      && current.promptCacheTtl !== next.promptCacheTtl
+      && promptCacheTtlAllowed(next)
+      ? { promptCacheTtl: next.promptCacheTtl }
       : {}),
   };
 }
@@ -246,6 +252,7 @@ export function backendEditDraftFromDetail(
       ? { ...profile.routing }
       : { ...profile.routing, tierModels: { ...profile.routing.tierModels } },
     capabilityHints: profile.capabilityHints.map((capability) => ({ ...capability })),
+    ...(promptCacheTtlAllowed(profile) ? { promptCacheTtl: profile.promptCacheTtl ?? "5m" } : {}),
   };
 }
 
@@ -262,6 +269,7 @@ export function customCreateDraft(draft: BackendProfileEditDraft): ModelBackendP
     models: trimmedModels(draft.models),
     routing: draft.routing,
     capabilityHints: draft.capabilityHints,
+    ...(draft.promptCacheTtl === "1h" && promptCacheTtlAllowed(draft) ? { promptCacheTtl: draft.promptCacheTtl } : {}),
   };
 }
 

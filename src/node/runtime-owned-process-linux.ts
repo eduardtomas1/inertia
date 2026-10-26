@@ -9,6 +9,16 @@ export const LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS = 1_500;
 export const LINUX_RUNTIME_OWNED_GUARDIAN_IMMEDIATE_STOP_ADMISSION_TIMEOUT_MS =
   5 * LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS;
 const LINUX_GUARDIAN_HELPER_OUTPUT_BYTES = 4 * 1024;
+const LINUX_GUARDIAN_MONITOR_FAST_POLL_MS = 50;
+const LINUX_GUARDIAN_MONITOR_IDLE_POLL_MS = 500;
+const LINUX_GUARDIAN_MONITOR_FAST_WINDOW_MS = 1_000;
+const LINUX_GUARDIAN_MONITOR_WAKE_POLL_MS = 0;
+const LINUX_GUARDIAN_UNPROVED_TERMINAL_MS = 19 * LINUX_GUARDIAN_MONITOR_FAST_POLL_MS;
+
+export interface LinuxGuardianTerminalMonitor {
+  (): void;
+  readonly wake: () => void;
+}
 
 /**
  * Identity of the packaged reporting/signalling helper executable. These fields
@@ -488,20 +498,50 @@ export function monitorLinuxGuardianTerminal(
     readonly release?: (abortSignal: AbortSignal) => boolean | Promise<boolean>;
     readonly missing?: () => boolean;
   } = {},
-): () => void {
-  let unprovedTerminalPolls = 0;
+): LinuxGuardianTerminalMonitor {
+  let unprovedTerminalMs: number | null = null;
+  let fastPollBudgetMs = LINUX_GUARDIAN_MONITOR_FAST_WINDOW_MS;
+  let delayMs = LINUX_GUARDIAN_MONITOR_FAST_POLL_MS;
+  let timer: NodeJS.Timeout | null = null;
   let stopped = false;
   let releasePending = false;
   let releaseController: AbortController | null = null;
   const stop = (): void => {
     if (stopped) return;
     stopped = true;
-    clearInterval(timer);
+    if (timer) clearTimeout(timer);
+    timer = null;
     releaseController?.abort();
     releaseController = null;
   };
-  const timer = setInterval(() => {
-    if (stopped || releasePending) return;
+  const schedule = (nextDelayMs = fastPollBudgetMs > 0
+    ? LINUX_GUARDIAN_MONITOR_FAST_POLL_MS
+    : LINUX_GUARDIAN_MONITOR_IDLE_POLL_MS): void => {
+    if (stopped) return;
+    delayMs = nextDelayMs;
+    timer = setTimeout(tick, delayMs);
+    timer.unref();
+  };
+  const wake = (): void => {
+    if (stopped) return;
+    fastPollBudgetMs = LINUX_GUARDIAN_MONITOR_FAST_WINDOW_MS;
+    if (!timer || delayMs <= LINUX_GUARDIAN_MONITOR_FAST_POLL_MS) return;
+    clearTimeout(timer);
+    schedule(LINUX_GUARDIAN_MONITOR_WAKE_POLL_MS);
+  };
+  const tick = (): void => {
+    timer = null;
+    const elapsedMs = delayMs;
+    fastPollBudgetMs = Math.max(0, fastPollBudgetMs - elapsedMs);
+    poll(elapsedMs);
+    schedule();
+  };
+  const poll = (elapsedMs: number): void => {
+    if (stopped) return;
+    if (releasePending) {
+      fastPollBudgetMs = LINUX_GUARDIAN_MONITOR_FAST_WINDOW_MS;
+      return;
+    }
     let comm: string;
     try {
       comm = dependencies.readComm?.()
@@ -521,13 +561,14 @@ export function monitorLinuxGuardianTerminal(
       return;
     }
     if (comm !== "inertia-done" && comm !== "inertia-exdone") {
-      unprovedTerminalPolls = 0;
+      unprovedTerminalMs = null;
       return;
     }
+    fastPollBudgetMs = LINUX_GUARDIAN_MONITOR_FAST_WINDOW_MS;
     if (!(dependencies.terminalAuthority?.()
       ?? linuxGuardianTerminalAuthority(expected, guardianPath, "/proc", comm))) {
-      unprovedTerminalPolls += 1;
-      if (unprovedTerminalPolls >= 20) {
+      unprovedTerminalMs = unprovedTerminalMs === null ? 0 : unprovedTerminalMs + elapsedMs;
+      if (unprovedTerminalMs >= LINUX_GUARDIAN_UNPROVED_TERMINAL_MS) {
         // A claimed terminal marker without exact hardened authority is unsafe.
         stop();
         onFailure();
@@ -556,7 +597,7 @@ export function monitorLinuxGuardianTerminal(
         releaseController = null;
       },
     );
-  }, 50);
-  timer.unref();
-  return stop;
+  };
+  schedule();
+  return Object.assign(stop, { wake });
 }

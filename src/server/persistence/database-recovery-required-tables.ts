@@ -1,3 +1,5 @@
+import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
+
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
 )[];
@@ -124,6 +126,12 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
   ]],
   [100, "todos", ["due_time", "project_id", "linked_at"]],
   [101, "watcher_links", ["read_only"]],
+  [104, "app_state", ["compact_on_return"]],
+  [104, "thread_usage", [
+    "last_request_started_at",
+    "prompt_cache_lifetime_ms",
+    "prompt_cache_source",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -188,6 +196,12 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [99, "watcher_links_project_idx"],
     [99, "watcher_wakes_link_idx"],
     [100, "todos_project_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "activities_turn_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "messages_turn_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "agent_reasonings_turn_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "messages_conversation_created_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "activities_conversation_created_idx"],
+    [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "reasonings_conversation_created_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [

@@ -81,10 +81,10 @@ import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
 import {
   advanceThinkingLine,
+  createReasoningLinesReader,
   IDLE_THINKING_LINE,
   parseReasoningSummary,
   reasoningLineAt,
-  reasoningLines,
   thinkingLineWakeAt,
   type ReasoningLine,
 } from "../../utils/reasoningSummary";
@@ -749,10 +749,11 @@ export function useReadableThinkingLine(
   active: boolean,
 ): ThinkingLineView {
   const [state, setState] = useState(IDLE_THINKING_LINE);
+  const [readReasoningLines] = useState(createReasoningLinesReader);
   const reading = active || state.offset !== null;
   const lines = useMemo(
-    () => reading ? reasoningLines(content) : NO_REASONING_LINES,
-    [content, reading],
+    () => reading ? readReasoningLines(content) : NO_REASONING_LINES,
+    [content, reading, readReasoningLines],
   );
   const next = advanceThinkingLine(state, lines, {
     active,

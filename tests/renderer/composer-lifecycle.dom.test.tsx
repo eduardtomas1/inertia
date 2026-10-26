@@ -7,7 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { useState } from "react";
+import { Profiler, useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -288,6 +288,26 @@ describe("composer asynchronous ownership", () => {
       [],
       undefined,
     ));
+  });
+
+  it("commits the composer once per typed character", async () => {
+    const user = userEvent.setup();
+    let commits = 0;
+    render(<Profiler id="composer" onRender={() => { commits += 1; }}>
+      <Composer {...composerProps(conversation("keystroke-commits"))} />
+    </Profiler>);
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+    await user.click(textbox);
+    await user.keyboard("warm ");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    commits = 0;
+    const typed = "steady typing";
+    await user.keyboard(typed);
+    expect(textbox).toHaveValue(`warm ${typed}`);
+    expect(commits).toBe(typed.length);
   });
 
   it.each([

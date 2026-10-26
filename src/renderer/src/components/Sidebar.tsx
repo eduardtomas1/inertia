@@ -86,8 +86,9 @@ import {
   EMPTY_DETACHED_CONVERSATION_IDS,
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
-import { WorkStatusCue } from "./sidebar/WorkStatusCue";
+import { WorkStatusCue as LiveWorkStatusCue } from "./sidebar/WorkStatusCue";
 import { INTERFACE_LOCALE } from "../lib/locale";
+const WorkStatusCue = memo(LiveWorkStatusCue);
 const SidebarUpdateControl = lazy(async () => ({
   default: (await import("./sidebar/SidebarUpdateControl")).SidebarUpdateControl,
 }));

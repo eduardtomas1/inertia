@@ -11,6 +11,9 @@ import {
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
 
+const keepEmptyResults = (current: WorkspaceEntry[]): WorkspaceEntry[] =>
+  current.length === 0 ? current : [];
+
 interface WorkspaceMentionsOptions {
   enabled: boolean;
   project: Project | null;
@@ -46,7 +49,7 @@ export function useWorkspaceMentions({
 
   useLayoutEffect(() => {
     invalidate();
-    setMentionResults([]);
+    setMentionResults(keepEmptyResults);
     return invalidate;
   }, [scope, enabled, request, invalidate]);
 
@@ -55,7 +58,7 @@ export function useWorkspaceMentions({
     invalidate();
     const generation = requestGenerationRef.current;
     if (!enabled || !scope.projectId || !normalizedQuery) {
-      setMentionResults([]);
+      setMentionResults(keepEmptyResults);
       return;
     }
     timerRef.current = setTimeout(() => {
@@ -75,7 +78,7 @@ export function useWorkspaceMentions({
           setMentionResults(event.result.entries.slice(0, 8));
         }
       }).catch(() => {
-        if (generation === requestGenerationRef.current) setMentionResults([]);
+        if (generation === requestGenerationRef.current) setMentionResults(keepEmptyResults);
       });
     }, 200);
   }, [scope, enabled, request, invalidate]);

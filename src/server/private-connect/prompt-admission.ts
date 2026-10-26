@@ -21,6 +21,7 @@ export interface PrivateConnectPromptAdmissionDependencies {
     "failBeforeStart" | "isActive" | "queue" | "start"
   >;
   isolatedRuns: PrivateConnectIsolatedRuns;
+  compacting?(conversationId: string): boolean;
   onQueued(conversationId: string): void;
 }
 
@@ -36,9 +37,9 @@ export function queuePrivateConnectPrompt(
   let reserved = false;
   try {
     if (!dependencies.authority.acquire(conversationId)) {
-      throw new Error(
-        "End the resumed provider terminal before sending a remote prompt.",
-      );
+      throw new Error(dependencies.compacting?.(conversationId)
+        ? "This chat is compacting its context. Send the prompt again when it finishes."
+        : "End the resumed provider terminal before sending a remote prompt.");
     }
     reserved = true;
     if (

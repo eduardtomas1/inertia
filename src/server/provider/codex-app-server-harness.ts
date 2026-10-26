@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { startCodexAppServerRun } from "../codex-app-server";
 import { withCodexControlClient } from "../codex/control-client";
 import { codexModelProviderThreadConfig } from "../codex/model-provider-config";
+import { createCodexPromptCacheClock } from "../codex/usage";
 import {
   codexAccessPolicy,
   codexServiceTierMatches,
@@ -134,6 +135,7 @@ function startCodexRun(
   };
 
   let codexRun: ReturnType<typeof startCodexAppServerRun>;
+  const promptCacheClock = createCodexPromptCacheClock();
   try {
     const serviceTier = codexServiceTier(options.input);
     if (
@@ -208,7 +210,7 @@ function startCodexRun(
       onGoalUpdated: emitter.goalUpdated,
       onGoalCleared: emitter.goalCleared,
       onReasoning: (text) => emitter.codex({ type: "reasoning-summary", text }),
-      onUsage: (usage) => emitter.codex({ type: "usage", usage }),
+      onUsage: (usage) => emitter.codex({ type: "usage", usage: promptCacheClock.attach(usage) }),
       onRateLimits: (rateLimits, complete) => {
         emitter.capability("rate-limits", true);
         emitter.codex({ type: "metadata", metadata: { rateLimits }, source: "provider", complete });

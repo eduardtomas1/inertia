@@ -29,6 +29,7 @@ import { validAppearanceSettings } from "./appearance-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 import { subagentTrace } from "./subagent-trace-schema";
 import { watcherMutationEvent, watcherRequestResultValidators, watcherWakeSummariesCoherent } from "./watcher-schema";
+import { compactOnReturnResultValidators, isConversationCompactionState, isPromptCacheFacts, validCompactOnReturnSetting } from "./compact-on-return-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
@@ -225,7 +226,8 @@ function conversationShell(value: unknown): boolean {
   return conversation(value)
     && (value.latestTurn === null || latestTurn(value.latestTurn))
     && booleanField(value, "pendingApproval")
-    && booleanField(value, "pendingInput");
+    && booleanField(value, "pendingInput")
+    && (value.compaction === undefined || isConversationCompactionState(value.compaction));
 }
 
 function workspaceRun(value: unknown): boolean {
@@ -359,7 +361,7 @@ function appSettings(value: unknown): boolean {
     && validAttachmentStorageSettings(value)
     && (value.workingIndicator === undefined || isWorkingIndicatorSettings(value.workingIndicator))
     && (value.completionSound === undefined || isCompletionSoundSettings(value.completionSound))
-    && validNotificationSettings(value);
+    && validNotificationSettings(value) && validCompactOnReturnSetting(value);
 }
 function appSnapshot(value: unknown): boolean {
   if (!(record(value)
@@ -395,7 +397,8 @@ function threadUsage(value: unknown): boolean {
     && (value.totalProcessedScope === null
       || oneOf(value, "totalProcessedScope", USAGE_SCOPES))
     && (value.compactsAutomatically === null
-      || booleanField(value, "compactsAutomatically"));
+      || booleanField(value, "compactsAutomatically"))
+    && (value.promptCache === undefined || isPromptCacheFacts(value.promptCache));
 }
 
 function activity(value: unknown): boolean {
@@ -1111,6 +1114,7 @@ const REQUEST_RESULT_VALIDATORS = {
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
     && oneOf(value, "disposition", ["new-turn", "follow-up"]),
   "conversation.compacted": (value) => recordWithStrings(value, "conversationId", "providerId", "message") && oneOf(value, "providerId", PROVIDER_IDS) && booleanField(value, "instructionForwarded"),
+  ...compactOnReturnResultValidators,
   ...backendProfileResultValidators,
   "provider.maintenance": (value) => arrayOf(value.providers, providerMaintenanceStatus)
     && uniqueRecordField(value.providers as unknown[], "providerId"),

@@ -95,6 +95,22 @@ describe("useWorkspaceMentions", () => {
     } finally { hook.unmount(); vi.useRealTimers(); }
   });
 
+  it("keeps empty results and the owning render still when a closed mention clears again", () => {
+    const owner = conversation("22222222-2222-4222-8222-222222222222", project, "/tree");
+    const request = vi.fn(async (): Promise<ServerEvent> => new Promise(() => undefined));
+    let renders = 0;
+    const { result } = renderHook(() => {
+      renders += 1;
+      return useWorkspaceMentions({ enabled: true, project, conversation: owner, request });
+    });
+    const empty = result.current.mentionResults;
+    renders = 0;
+    act(() => result.current.searchMentions(""));
+    act(() => result.current.searchMentions("  "));
+    expect(renders).toBe(0);
+    expect(result.current.mentionResults).toBe(empty);
+  });
+
   it("queries the selected project before a local draft has a saved conversation", async () => {
     const request = vi.fn(async (): Promise<ServerEvent> => ({
       type: "request.result",

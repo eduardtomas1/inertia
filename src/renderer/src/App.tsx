@@ -76,6 +76,7 @@ import { forgetWorkspaceBoundLastTool } from "./utils/workspaceStartup";
 import type { SplitDropZone } from "./utils/splitConversation";
 import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
+import { activeChatCompactAndSend } from "./utils/activeChatCompactAndSend";
 import { useConversationWorkspaceOptions } from "./hooks/useConversationWorkspaceOptions";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
 import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
@@ -266,6 +267,7 @@ export default function App(): React.JSX.Element {
     openProjectPath,
     sendMessageToConversation,
     compactConversation: compactConversationById,
+    compactAndSendToConversation,
     runQueueCommand,
     runLimitResetCommand,
     loadBackgroundTasks,
@@ -792,6 +794,7 @@ export default function App(): React.JSX.Element {
         }
         return await compactConversationById(conversation.id, instruction);
       },
+      compactAndSendMessage: activeChatCompactAndSend(conversation?.id ?? null, compactAndSendToConversation),
       listSkills: agentWorkflows.listSkills,
       setGoal: agentWorkflows.setGoal,
       clearGoal: agentWorkflows.clearGoal,
@@ -934,6 +937,7 @@ export default function App(): React.JSX.Element {
         openProjectPath,
         sendMessageToConversation,
         compactConversation: compactConversationById,
+        compactAndSendToConversation,
         runQueueCommand,
         runLimitResetCommand,
         loadBackgroundTasks,

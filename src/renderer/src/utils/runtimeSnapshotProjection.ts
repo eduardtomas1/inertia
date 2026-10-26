@@ -11,31 +11,17 @@ type ConversationShellEvent = Extract<
 >;
 type TodosEvent = Extract<RuntimeMutationEvent, { type: "todos.updated" }>;
 
-function descendingTimestamp(
-  left: { id: string; startedAt?: string; updatedAt?: string },
-  right: { id: string; startedAt?: string; updatedAt?: string },
-): number {
-  const leftTime = Date.parse(left.startedAt ?? left.updatedAt ?? "");
-  const rightTime = Date.parse(right.startedAt ?? right.updatedAt ?? "");
-  return (Number.isFinite(rightTime) ? rightTime : 0)
-    - (Number.isFinite(leftTime) ? leftTime : 0)
-    || left.id.localeCompare(right.id, "en");
-}
-
-function unchangedShell(
-  snapshot: AppSnapshot,
-  event: ConversationShellEvent,
-): boolean {
-  const current = snapshot.conversations.find(
-    ({ id }) => id === event.conversation.id,
-  );
-  if (!current || !structurallyEqual(current, event.conversation)) return false;
-  const currentRuns = snapshot.runs.filter(
-    ({ conversationId }) => conversationId === event.conversation.id,
-  );
-  if (currentRuns.length !== event.runs.length) return false;
-  const runsById = new Map(currentRuns.map((run) => [run.id, run]));
-  return event.runs.every((run) => structurallyEqual(runsById.get(run.id), run));
+function sortDescendingTimestamp<
+  Item extends { id: string; startedAt?: string; updatedAt?: string },
+>(items: Item[]): Item[] {
+  const times = new Map(items.map((item) => [
+    item,
+    Date.parse(item.startedAt ?? item.updatedAt ?? "") || 0,
+  ]));
+  return items.sort((left, right) => (
+    times.get(right)! - times.get(left)!
+    || left.id.localeCompare(right.id, "en")
+  ));
 }
 
 /**
@@ -46,21 +32,33 @@ export function applyConversationShellEvent(
   snapshot: AppSnapshot,
   event: ConversationShellEvent,
 ): AppSnapshot {
-  if (unchangedShell(snapshot, event)) return snapshot;
-  const conversations = [
-    ...snapshot.conversations.filter(({ id }) => id !== event.conversation.id),
-    event.conversation,
-  ].sort(descendingTimestamp);
-  const runs = [
-    ...snapshot.runs.filter(
-      ({ conversationId }) => conversationId !== event.conversation.id,
-    ),
-    ...event.runs,
-  ].sort(descendingTimestamp).slice(0, 200);
+  const conversationId = event.conversation.id;
+  const current = snapshot.conversations.find(({ id }) => id === conversationId);
+  const conversation = current && structurallyEqual(current, event.conversation)
+    ? current
+    : event.conversation;
+  const currentRuns = snapshot.runs.filter((run) => run.conversationId === conversationId);
+  const eventRuns = event.runs.map((run) => currentRuns.find((existing) => (
+    existing.id === run.id && structurallyEqual(existing, run)
+  )) ?? run);
+  if (
+    conversation === current
+    && currentRuns.length === eventRuns.length
+    && eventRuns.every((run) => currentRuns.includes(run))
+  ) return snapshot;
+  const conversations = sortDescendingTimestamp([
+    ...snapshot.conversations.filter(({ id }) => id !== conversationId),
+    conversation,
+  ]);
   return {
     ...snapshot,
-    conversations,
-    runs,
+    conversations: conversations.every((item, index) => item === snapshot.conversations[index])
+      ? snapshot.conversations
+      : conversations,
+    runs: sortDescendingTimestamp([
+      ...snapshot.runs.filter((run) => run.conversationId !== conversationId),
+      ...eventRuns,
+    ]).slice(0, 200),
   };
 }
 

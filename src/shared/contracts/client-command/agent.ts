@@ -9,6 +9,16 @@ import { AGENT_GOAL_STATUSES } from "../agent-workflows";
 
 export const MAX_AGENT_INPUT_QUESTIONS = 4;
 
+export const messageSendPayloadSchema = z
+  .object({
+    conversationId: z.string().uuid(),
+    content: z.string().trim().min(1).max(20_000),
+    attachments: attachmentsSchema,
+    activate: z.boolean().optional(),
+    context: turnRequestContextSchema.optional(),
+  })
+  .strict();
+
 export const agentCommandSchemas = [
   z.strictObject({ ...requestBase, type: z.literal("conversation.limit-reset.get"), payload: z.strictObject({ conversationId: z.uuid() }) }),
   z.strictObject({ ...requestBase, type: z.literal("conversation.limit-reset.schedule"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid(), failedTurnId: z.uuid(), resetsAt: z.iso.datetime() }) }),
@@ -28,17 +38,17 @@ export const agentCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("message.send"),
-      payload: z
-        .object({
-          conversationId: z.string().uuid(),
-          content: z.string().trim().min(1).max(20_000),
-          attachments: attachmentsSchema,
-          activate: z.boolean().optional(),
-          context: turnRequestContextSchema.optional(),
-        })
-        .strict(),
+      payload: messageSendPayloadSchema,
     })
     .strict(),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.compact-and-send"),
+    payload: z.strictObject({
+      ...messageSendPayloadSchema.shape,
+      reason: z.literal("on-return"),
+    }),
+  }),
   z.strictObject({
     ...requestBase,
     type: z.literal("conversation.compact"),

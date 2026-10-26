@@ -68,9 +68,50 @@ const RUNTIME_STDERR_PRESENTATION = {
   "turn-diagnostic-unpersisted": { severity: "warning", title: "A turn diagnostic could not be saved" },
   "turn-update-unpublished": { severity: "warning", title: "A turn update could not be published" },
   omitted: { severity: "info", title: "Runtime stderr line omitted" },
+  "node-warning-hint": { severity: "info", title: "The runtime printed a Node.js warning hint" },
+  "stack-frame": { severity: "info", title: "The runtime printed a stack frame" },
+  "sdk-warning": { severity: "warning", title: "An agent SDK printed a warning" },
+  json: { severity: "info", title: "The runtime printed a structured line" },
+  other: { severity: "info", title: "The runtime printed an unrecognized line" },
 } as const satisfies Record<string, Presentation>;
-export type RuntimeStderrCode = keyof typeof RUNTIME_STDERR_PRESENTATION;
-export const RUNTIME_STDERR_CODES = Object.keys(RUNTIME_STDERR_PRESENTATION) as RuntimeStderrCode[];
+export const RUNTIME_NODE_WARNING_NAMES = [
+  "Warning",
+  "DeprecationWarning",
+  "ExperimentalWarning",
+  "MaxListenersExceededWarning",
+  "TimeoutOverflowWarning",
+  "TimeoutNegativeWarning",
+  "UnhandledPromiseRejectionWarning",
+  "PromiseRejectionHandledWarning",
+  "SecurityWarning",
+  "other",
+] as const;
+export const RUNTIME_CHROMIUM_LOG_LEVELS = ["VERBOSE", "INFO", "WARNING", "ERROR", "FATAL", "other"] as const;
+export type RuntimeNodeWarningName = (typeof RUNTIME_NODE_WARNING_NAMES)[number];
+export type RuntimeChromiumLogLevel = (typeof RUNTIME_CHROMIUM_LOG_LEVELS)[number];
+export type RuntimeStderrCode =
+  | keyof typeof RUNTIME_STDERR_PRESENTATION
+  | `node-warning:${RuntimeNodeWarningName}`
+  | `chromium-log:${RuntimeChromiumLogLevel}`;
+export const RUNTIME_STDERR_CODES: readonly RuntimeStderrCode[] = [
+  ...Object.keys(RUNTIME_STDERR_PRESENTATION) as Array<keyof typeof RUNTIME_STDERR_PRESENTATION>,
+  ...RUNTIME_NODE_WARNING_NAMES.map((name) => `node-warning:${name}` as const),
+  ...RUNTIME_CHROMIUM_LOG_LEVELS.map((level) => `chromium-log:${level}` as const),
+];
+
+function runtimeStderrPresentation(code: RuntimeStderrCode): Presentation {
+  if (code.startsWith("node-warning:")) {
+    return code === "node-warning:MaxListenersExceededWarning"
+      ? { severity: "warning", title: "The runtime reported a possible listener leak" }
+      : { severity: "warning", title: "The runtime printed a Node.js warning" };
+  }
+  if (code.startsWith("chromium-log:")) {
+    return code === "chromium-log:ERROR" || code === "chromium-log:FATAL"
+      ? { severity: "warning", title: "The runtime process printed a Chromium error" }
+      : { severity: "info", title: "The runtime process printed a Chromium log line" };
+  }
+  return RUNTIME_STDERR_PRESENTATION[code as keyof typeof RUNTIME_STDERR_PRESENTATION];
+}
 
 const MAIN_FAILURE_PRESENTATION = {
   "app-update-candidate-failed": "An app update could not start",
@@ -117,7 +158,7 @@ function presentation(record: Record<string, unknown>): Presentation & { subsyst
   const event = record.event as RuntimeDiagnosticEvent;
   const base = EVENT_PRESENTATION[event];
   if (event === "runtime.stderr") {
-    return { ...RUNTIME_STDERR_PRESENTATION[record.code as RuntimeStderrCode], subsystem: base.subsystem };
+    return { ...runtimeStderrPresentation(record.code as RuntimeStderrCode), subsystem: base.subsystem };
   }
   if (event === "main.failure") {
     return { ...base, title: MAIN_FAILURE_PRESENTATION[record.code as MainFailureCode] };

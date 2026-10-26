@@ -59,6 +59,9 @@ import { clearPersistedComposerDraft, persistComposerDraft, readComposerDraft } 
 import { TurnFailureNotice } from "./TurnFailureNotice";
 import { turnFailure, turnFailureGuidance } from "../../utils/turnFailureGuidance";
 import { backendRouteKind } from "../../utils/backendRouteState";
+import { DEFAULT_COMPACT_ON_RETURN } from "@shared/compact-on-return";
+import { useCompactOnReturn } from "./useCompactOnReturn";
+import { CompactOnReturnFailure } from "./CompactOnReturnFailure";
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
  * the entry chunk. Loading it on demand keeps the picker and its list rendering
@@ -109,6 +112,9 @@ export const Composer = memo(function Composer({
   goal,
   onSend,
   onCompact = unavailableCompaction,
+  compaction: shellCompaction = null,
+  compactOnReturnSetting = DEFAULT_COMPACT_ON_RETURN,
+  onCompactAndSend,
   onListSkills, promptPresets = [], promptPresetsEnabled = true,
   promptStashEnabled = true,
   onPromptPresetCommand = ignorePromptPresetMutation,
@@ -447,7 +453,8 @@ export const Composer = memo(function Composer({
     textareaRef.current?.focus();
   };
 
-  const submit = async () => {
+  const submit = (): Promise<void> => submitWith(undefined);
+  const submitWith = async (historyOverride: "compact" | "full" | undefined): Promise<void> => {
     if (attachmentImportingRef.current || conversationContext.isReferencing()) return;
     const compactCommand = parseCompactComposerCommand(message);
     if (compactCommand) {
@@ -484,6 +491,9 @@ export const Composer = memo(function Composer({
           contextPacketIds,
         );
     if ((!canSend && followUpState !== "ready") || submittingRef.current || stopClaimRef.current || stopping) return;
+    const compactAndSend = !running && onCompactAndSend !== undefined && (
+      historyOverride === "compact" || (historyOverride === undefined && compactOnReturn.active)
+    );
     flushDraftPersistence();
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
@@ -504,53 +514,8 @@ export const Composer = memo(function Composer({
     attachmentsRef.current = [];
     submittingRef.current = true;
     setSubmitting(true);
-    try {
-      await onSend(
-        running ? request.visibleContent || attachmentFallback : request.visibleContent,
-        submittedAttachments,
-        request.context,
-      );
-      const ownsSubmission =
-        activeSubmissionsRef.current.get(submittedConversationId)
-        === submissionSequence;
-      if (!ownsSubmission) return;
-      activeSubmissionsRef.current.delete(submittedConversationId);
-      const editorUnchanged =
-        (editorRevisionsRef.current.get(submittedConversationId) ?? 0)
-          === submittedRevision
-        && promptContextsRef.current.get(submittedConversationId)
-          === (submittedPromptContext ?? null)
-        && selectedPreviewUrlRef.current === submittedPreviewUrl;
-      if (editorUnchanged) {
-        clearPersistedComposerDraft(submittedConversationId, submittedDraft);
-      }
-      if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
-      const acceptedIds = new Set(submittedAttachments.map(({ id }) => id));
-      setAttachments((current) => current.filter(({ id }) => !acceptedIds.has(id)));
-      if (editorUnchanged) {
-        promptHistoryController.reset(""); draftValueRef.current = "";
-        setMessage("");
-        setAttachmentError(null);
-        setFileReferences([]);
-        selectedPreviewUrlRef.current = null;
-        setPreviewContextSelected(false);
-        promptContextsRef.current.set(submittedConversationId, null);
-        onClearPromptContext?.();
-      }
-      textareaRef.current?.focus();
-      if (running) {
-        submittingRef.current = false;
-        setSubmitting(false);
-        return;
-      }
-      submissionReleaseTimerRef.current = window.setTimeout(() => {
-        submissionReleaseTimerRef.current = null;
-        submittingRef.current = false;
-        if (mountedRef.current && conversationIdRef.current === submittedConversationId) {
-          setSubmitting(false);
-        }
-      }, COMPOSER_ACTION_STALE_FALLBACK_MS);
-    } catch {
+    compactOnReturn.begin(submittedConversationId, compactAndSend);
+    const restoreSubmission = (): boolean => {
       const ownsSubmission =
         activeSubmissionsRef.current.get(submittedConversationId)
         === submissionSequence;
@@ -592,6 +557,71 @@ export const Composer = memo(function Composer({
         setSubmitting(false);
         textareaRef.current?.focus();
       }
+      return ownsCurrentComposer;
+    };
+    try {
+      if (compactAndSend) {
+        const result = await onCompactAndSend(
+          request.visibleContent,
+          submittedAttachments,
+          request.context,
+        );
+        if (result.outcome === "compaction-failed") {
+          if (restoreSubmission()) compactOnReturn.fail(submittedConversationId, result.message);
+          return;
+        }
+      } else {
+        await onSend(
+          running ? request.visibleContent || attachmentFallback : request.visibleContent,
+          submittedAttachments,
+          request.context,
+        );
+      }
+      const ownsSubmission =
+        activeSubmissionsRef.current.get(submittedConversationId)
+        === submissionSequence;
+      if (!ownsSubmission) return;
+      activeSubmissionsRef.current.delete(submittedConversationId);
+      const editorUnchanged =
+        (editorRevisionsRef.current.get(submittedConversationId) ?? 0)
+          === submittedRevision
+        && promptContextsRef.current.get(submittedConversationId)
+          === (submittedPromptContext ?? null)
+        && selectedPreviewUrlRef.current === submittedPreviewUrl;
+      if (editorUnchanged) {
+        clearPersistedComposerDraft(submittedConversationId, submittedDraft);
+      }
+      if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
+      const acceptedIds = new Set(submittedAttachments.map(({ id }) => id));
+      setAttachments((current) => current.filter(({ id }) => !acceptedIds.has(id)));
+      if (editorUnchanged) {
+        promptHistoryController.reset(""); draftValueRef.current = "";
+        setMessage("");
+        setAttachmentError(null);
+        setFileReferences([]);
+        selectedPreviewUrlRef.current = null;
+        setPreviewContextSelected(false);
+        promptContextsRef.current.set(submittedConversationId, null);
+        onClearPromptContext?.();
+      }
+      compactOnReturn.reset();
+      textareaRef.current?.focus();
+      if (running) {
+        submittingRef.current = false;
+        setSubmitting(false);
+        return;
+      }
+      submissionReleaseTimerRef.current = window.setTimeout(() => {
+        submissionReleaseTimerRef.current = null;
+        submittingRef.current = false;
+        if (mountedRef.current && conversationIdRef.current === submittedConversationId) {
+          setSubmitting(false);
+        }
+      }, COMPOSER_ACTION_STALE_FALLBACK_MS);
+    } catch {
+      restoreSubmission();
+    } finally {
+      compactOnReturn.end(submittedConversationId);
     }
   };
 
@@ -655,14 +685,31 @@ export const Composer = memo(function Composer({
     && !attachmentImporting
     && !conversationContext.referencing
     && !conversationUpdatePending;
+  const compaction = shellCompaction ?? conversation.compaction ?? null;
+  const shellCompacting = compaction?.state === "compacting";
   const primaryAction = composerPrimaryActionState({
     sendEligible,
     submitting,
-    sending,
+    sending: sending || shellCompacting,
     running,
     stopping,
   });
   const canSend = primaryAction === "send-ready";
+  const compactOnReturn = useCompactOnReturn({
+    conversationId: conversation.id,
+    selection: conversation.modelSelection,
+    profile: selectedBackendProfile,
+    provider: selectedProvider,
+    usage,
+    compaction,
+    setting: compactOnReturnSetting,
+    available: onCompactAndSend !== undefined,
+    providerHandoffPending: Boolean(latestKnownTurn && latestKnownTurn.providerId !== conversation.providerId),
+    latestTurn: latestKnownTurn,
+    message,
+    running,
+    sendable: canSend,
+  });
   const attachmentsAreImages = attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image");
   const { compactNotice, clearCompactNotice, compact, compactUnavailableReason } = useComposerCompaction({
     conversationId: conversation.id, providerId: conversation.providerId, message, canSend, running,
@@ -758,7 +805,7 @@ export const Composer = memo(function Composer({
       if (mountedRef.current) setRouteRepairing(false);
     }
   };
-  const submissionPending = primaryAction === "submitting";
+  const submissionPending = !running && (submitting || sending);
   const followUpPending = followUpState === "pending";
   const reasoningLabel = selectedModel?.reasoningOptions.find(({ value }) => value === selectedReasoning)?.label ?? "Provider default";
   const updateConversation = async (
@@ -1018,6 +1065,14 @@ export const Composer = memo(function Composer({
           </Suspense>
         )}
         {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
+        {compactOnReturn.failure && (
+          <CompactOnReturnFailure
+            message={compactOnReturn.failure}
+            disabled={submissionPending || running}
+            onSendWithoutCompacting={() => void submitWith("full")}
+            onTryAgain={() => void submitWith("compact")}
+          />
+        )}
         <ComposerInputZone
           contextCards={<>{agentContextRequestEnabled && (
             <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} onClosed={() => textareaRef.current?.focus()} />
@@ -1066,7 +1121,7 @@ export const Composer = memo(function Composer({
           slashMatch={slashMatch}
           onCompactCommand={() => void compact({ kind: "compact" })}
           compactUnavailableReason={compactUnavailableReason}
-          compactNotice={compactNotice}
+          compactNotice={compactOnReturn.notice(compactNotice)}
           handoffNotice={handoffNotice}
           goalAvailable={Boolean(goal)}
           onOpenGoal={() => {
@@ -1159,6 +1214,9 @@ export const Composer = memo(function Composer({
           latestTurn={latestTurn}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           primaryAction={visiblePrimaryAction}
+          compactOnReturn={compactOnReturn.action}
+          compacting={compactOnReturn.compactingOnReturn}
+          promptCache={compactOnReturn.promptCache}
           canSendQueuedNow={!disabled && !sending && !attachmentImporting
             && (!running || (!stopping && !submitting && supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)))}
           queuedTurnId={latestKnownTurn?.id ?? null}

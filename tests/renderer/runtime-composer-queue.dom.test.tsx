@@ -6,6 +6,9 @@ import { enqueueRuntimePrompt, finishQueueIntent, queueIntent, RUNTIME_QUEUE_CHA
 import type { MessageQueueResult, QueuedMessage } from "../../src/shared/queued-messages";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import { readSourceText } from "../helpers/source-text";
+import { chatQueueRunner } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
+import type { Conversation } from "../../src/shared/contracts";
+import { announceRuntimeQueueChanged } from "../../src/renderer/src/components/composer/runtimeQueueEvents";
 
 const conversationId = "40404040-4040-4040-8040-404040404040";
 const queued: QueuedMessage = { id: "50505050-5050-4050-8050-505050505050", conversationId, content: "Next task", attachments: [], state: "waiting", createdAt: "2026-09-26T00:00:00.000Z", error: null, turnId: null, userMessageId: null };
@@ -38,7 +41,7 @@ describe("runtime queue presentation and durable draft identity", () => {
       let commits = 0;
       const view = render(<Profiler id="queue" onRender={() => { commits += 1; }}>
         <RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
-          latestTurnId="first" latestTurnStatus="completed" queueHost={null} />
+          latestTurnId="first" latestTurnStatus="running" queueHost={null} />
       </Profiler>);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       const initialCommits = commits;
@@ -76,6 +79,61 @@ describe("runtime queue presentation and durable draft identity", () => {
       expect(run).toHaveBeenCalledTimes(5);
       view.unmount();
     } finally { vi.useRealTimers(); }
+  });
+
+  it.each([
+    ["an idle chat with an empty queue", "completed", false, 1],
+    ["a chat with no turns and an empty queue", null, false, 1],
+    ["a running turn with an empty queue", "running", false, 7],
+    ["an idle chat with a queued message", "completed", true, 7],
+  ] as const)("polls %s only while it can change", async (_case, latestTurnStatus, hasEntry, reads) => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn<QueueCommandRunner>().mockImplementation(async () => response(hasEntry ? [queued] : []));
+      const view = render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
+        latestTurnId={latestTurnStatus ? "first" : null} latestTurnStatus={latestTurnStatus} queueHost={null} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(run).toHaveBeenCalledTimes(reads);
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId }));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(run).toHaveBeenCalledTimes(reads + 1);
+      view.unmount();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("shows a message queued elsewhere in an idle chat once the runtime announces the change", async () => {
+    vi.useFakeTimers();
+    try {
+      let entries: QueuedMessage[] = [];
+      const run = vi.fn<QueueCommandRunner>().mockImplementation(async () => response(entries));
+      render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
+        latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(screen.queryByRole("list", { name: "Queued messages" })).not.toBeInTheDocument();
+      entries = [queued];
+      await act(async () => {
+        announceRuntimeQueueChanged(conversationId);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByRole("list", { name: "Queued messages" })).toHaveTextContent("Next task");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("answers an unsaved chat's queue reads locally and forwards receipt checks and edits", async () => {
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([]));
+    const draft = { id: conversationId } as Conversation;
+    expect(chatQueueRunner(run, null, [])).toBe(run);
+    expect(chatQueueRunner(run, draft, [{ id: conversationId }])).toBe(run);
+    const unsaved = chatQueueRunner(run, draft, [])!;
+    expect(chatQueueRunner(run, draft, undefined)).toBe(unsaved);
+    await expect(unsaved({ type: "message.queue.get", payload: { conversationId } }))
+      .resolves.toEqual({ kind: "message.queue", conversationId, entries: [], receipt: null });
+    expect(run).not.toHaveBeenCalled();
+    await unsaved({ type: "message.queue.get", payload: { conversationId, id: queued.id } });
+    await unsaved({ type: "message.queue.remove", payload: { conversationId, id: queued.id } });
+    expect(run.mock.calls.map(([command]) => command.type)).toEqual(["message.queue.get", "message.queue.remove"]);
   });
 
   it("keeps polling after a read whose delivery is unknown", async () => {

@@ -83,6 +83,7 @@ export function backendProfileCreatePayload(
     ...(draft.capabilityHints !== undefined
       ? { capabilityHints: mutableCapabilities(draft.capabilityHints) }
       : {}),
+    ...(draft.promptCacheTtl !== undefined ? { promptCacheTtl: draft.promptCacheTtl } : {}),
   };
 }
 
@@ -115,6 +116,7 @@ export function backendProfileUpdatePayload(
     ...(update.capabilityHints !== undefined
       ? { capabilityHints: mutableCapabilities(update.capabilityHints) }
       : {}),
+    ...(update.promptCacheTtl !== undefined ? { promptCacheTtl: update.promptCacheTtl } : {}),
     ...(update.enabled !== undefined ? { enabled: update.enabled } : {}),
   };
 }

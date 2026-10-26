@@ -1225,7 +1225,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
           </div>
         )
         : timeline.map((item) => <div className="response-static-item" key={item.id}>{renderItem(item)}</div>)}
-      {props.compactingSince && <PendingContextCompaction since={props.compactingSince} items={timeline} elapsed={<LiveElapsed startedAt={props.compactingSince} />} />}
+      {props.compactingSince && <PendingContextCompaction since={props.compactingSince} trigger={props.compactingTrigger ?? "manual"} items={timeline} elapsed={<LiveElapsed startedAt={props.compactingSince} />} />}
     </>
   );
 }

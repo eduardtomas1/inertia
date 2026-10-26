@@ -1,0 +1,610 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`hot query plans on a seeded runtime database > snapshots every app snapshot plan with and without planner statistics 1`] = `
+[
+  {
+    "query": "SELECT * FROM app_state WHERE id = 1",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH app_state USING INTEGER PRIMARY KEY (rowid=?)",
+    ],
+  },
+  {
+    "query": "SELECT agent_turns.*, EXISTS (SELECT 1 FROM usage_limited_turns WHERE usage_limited_turns.turn_id = agent_turns.id) AS usage_limited, (SELECT failure_kind FROM …",
+    "withStatistics": [
+      "SCAN conversations USING COVERING INDEX sqlite_autoindex_conversations_1",
+      "SEARCH agent_turns USING INDEX agent_turns_provider_run_identity_idx (id=?)",
+      "CORRELATED SCALAR SUBQUERY 3",
+      "SEARCH latest USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH usage_limited_turns USING COVERING INDEX sqlite_autoindex_usage_limited_turns_1 (turn_id=?)",
+      "CORRELATED SCALAR SUBQUERY 2",
+      "SEARCH turn_failure_kinds USING INDEX sqlite_autoindex_turn_failure_kinds_1 (turn_id=?)",
+    ],
+    "withoutStatistics": [
+      "SCAN conversations USING COVERING INDEX sqlite_autoindex_conversations_1",
+      "SEARCH agent_turns USING INDEX sqlite_autoindex_agent_turns_1 (id=?)",
+      "CORRELATED SCALAR SUBQUERY 3",
+      "SEARCH latest USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH usage_limited_turns USING COVERING INDEX sqlite_autoindex_usage_limited_turns_1 (turn_id=?)",
+      "CORRELATED SCALAR SUBQUERY 2",
+      "SEARCH turn_failure_kinds USING INDEX sqlite_autoindex_turn_failure_kinds_1 (turn_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT * FROM projects ORDER BY updated_at DESC, id ASC",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN projects",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT conversations.*, ( conversations.provider_session_id IS NOT NULL OR conversations.continuation_identity_json IS NOT NULL OR EXISTS (SELECT 1 FROM message…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN conversations",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH messages USING COVERING INDEX messages_conversation_created_idx (conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 2",
+      "SEARCH agent_turns USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN workspace_runs USING INDEX workspace_runs_started_at_idx",
+    ],
+  },
+  {
+    "query": "SELECT id, name, body, route_json, position, revision, created_at, updated_at FROM prompt_presets ORDER BY position ASC, id ASC",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN prompt_presets USING INDEX prompt_presets_position_idx",
+    ],
+  },
+  {
+    "query": "SELECT id, title, note, priority, due_date, due_time, project_id, completed_at, conversation_id, linked_at, created_at, updated_at FROM todos ORDER BY created_a…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN todos",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT link.*, latest.outcome AS latest_outcome, latest.settled_at AS latest_at, substr(latest.finding_preview, 1, 1024) AS latest_finding, ( SELECT finding.set…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN link USING INDEX watcher_links_active_watched_idx",
+      "SEARCH latest USING INDEX sqlite_autoindex_watcher_wakes_1 (id=?) LEFT-JOIN",
+      "CORRELATED SCALAR SUBQUERY 2",
+      "SEARCH candidate USING INDEX watcher_wakes_link_idx (link_id=?)",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH finding USING INDEX watcher_wakes_link_idx (link_id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+]
+`;
+
+exports[`hot query plans on a seeded runtime database > snapshots every history page plan with and without planner statistics 1`] = `
+[
+  {
+    "query": "SELECT conversations.*, ( conversations.provider_session_id IS NOT NULL OR conversations.continuation_identity_json IS NOT NULL OR EXISTS (SELECT 1 FROM message…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH conversations USING INDEX sqlite_autoindex_conversations_1 (id=?)",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH messages USING COVERING INDEX messages_conversation_created_idx (conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 2",
+      "SEARCH agent_turns USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT * FROM ( SELECT id, requested_at AS at, 'turn' AS kind FROM agent_turns WHERE conversation_id = ? UNION ALL SELECT id, created_at AS at, 'message' AS kin…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MERGE (UNION ALL)",
+      "LEFT",
+      "SEARCH agent_turns USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
+      "USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "RIGHT",
+      "SEARCH messages USING COVERING INDEX messages_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("used_tokens" AS BLOB)), 0) + COALESCE(length(CAST("total_proces…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH thread_usage USING INDEX sqlite_autoindex_thread_usage_1 (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("source" AS BLOB)), 0) + COALESCE(length(CAST("provider_session_…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH agent_goals USING INDEX sqlite_autoindex_agent_goals_1 (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("fingerprint" AS BLOB)), 0) + COALESCE(length(CAST("provider_id"…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH diff_review_summaries USING INDEX sqlite_autoindex_diff_review_summaries_1 (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("repository_path" AS BLOB)), 0) + COALESCE(length(CAST("scope" A…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH diff_review_states USING INDEX diff_review_states_conversation_idx (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("path" AS BLOB)), 0) +…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH diff_review_notes USING INDEX diff_review_notes_conversation_idx (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT json_extract(item.value, '$.id') AS id, json_extract(item.value, '$.name') AS name, json_extract(item.value, '$.mimeType') AS mimeType, json_extract(item…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH message USING INDEX messages_conversation_created_idx (conversation_id=?)",
+      "SCAN item VIRTUAL TABLE INDEX 1:",
+      "USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT * FROM thread_usage WHERE conversation_id = ? ORDER BY updated_at ASC",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH thread_usage USING INDEX sqlite_autoindex_thread_usage_1 (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT * FROM agent_goals WHERE conversation_id = ? ORDER BY updated_at ASC, source ASC",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH agent_goals USING INDEX sqlite_autoindex_agent_goals_1 (conversation_id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT * FROM diff_review_summaries WHERE conversation_id = ? ORDER BY generated_at ASC",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH diff_review_summaries USING INDEX sqlite_autoindex_diff_review_summaries_1 (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT * FROM diff_review_states WHERE conversation_id = ? ORDER BY updated_at ASC",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH diff_review_states USING INDEX diff_review_states_conversation_idx (conversation_id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT * FROM diff_review_notes WHERE conversation_id = ? ORDER BY created_at ASC",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH diff_review_notes USING INDEX diff_review_notes_conversation_idx (conversation_id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("run_id" AS BLOB)), 0)…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH agent_turns USING INDEX agent_turns_provider_run_identity_idx (id=? AND conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("turn_id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH turn_git_artifacts USING INDEX turn_git_artifacts_conversation_created_idx (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("role" AS BLOB)), 0) +…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH messages USING INDEX messages_conversation_created_idx (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) AS bytes FROM message_content_chunks WHERE message_id IN (SELECT id FROM messages WHERE (messages.convers…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH message_content_chunks USING INDEX message_content_chunks_message_sequence_idx (message_id=?)",
+      "LIST SUBQUERY 1",
+      "SEARCH messages USING COVERING INDEX messages_conversation_turn_created_idx (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("run_id" AS BLOB)), 0)…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH activities USING INDEX activities_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH activities USING INDEX activities_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("run_id" AS BLOB)), 0)…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH subagent_traces USING INDEX subagents_conversation_created_idx (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("run_id" AS BLOB)), 0)…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH agent_reasonings USING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH agent_reasonings USING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) AS bytes FROM reasoning_content_chunks WHERE reasoning_id IN (SELECT id FROM agent_reasonings WHERE ((age…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH reasoning_content_chunks USING INDEX reasoning_content_chunks_reasoning_sequence_idx (reasoning_id=?)",
+      "LIST SUBQUERY 1",
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH agent_reasonings USING COVERING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH agent_reasonings USING COVERING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("run_id" AS BLOB)), 0) + COALESCE(length(CAST("turn_id" AS BLOB)…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH agent_plans USING INDEX agent_plans_conversation_turn_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH agent_plans USING INDEX agent_plans_conversation_updated_idx (conversation_id=? AND updated_at>?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("ref" AS BLOB)), 0) + …",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH checkpoints USING INDEX checkpoints_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH checkpoints USING INDEX checkpoints_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("source_conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("target_convers…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH conversation_context_packets USING INDEX conversation_context_packets_target_state_idx (target_conversation_id=?)",
+      "LIST SUBQUERY 1",
+      "SCAN messages USING COVERING INDEX messages_conversation_turn_created_idx",
+      "CREATE BLOOM FILTER",
+    ],
+  },
+  {
+    "query": "SELECT messages.id, messages.conversation_id, messages.turn_id, messages.role, messages.content || COALESCE(( SELECT group_concat(ordered_chunks.content, '') FR…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH messages USING INDEX messages_conversation_created_idx (conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 2",
+      "CO-ROUTINE ordered_chunks",
+      "SEARCH message_content_chunks USING INDEX message_content_chunks_message_sequence_idx (message_id=?)",
+      "SCAN ordered_chunks",
+    ],
+  },
+  {
+    "query": "SELECT agent_turns.*, EXISTS (SELECT 1 FROM usage_limited_turns WHERE usage_limited_turns.turn_id = agent_turns.id) AS usage_limited FROM agent_turns WHERE (age…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH agent_turns USING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH usage_limited_turns USING COVERING INDEX sqlite_autoindex_usage_limited_turns_1 (turn_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT * FROM turn_git_artifacts WHERE (turn_git_artifacts.conversation_id = ? AND turn_git_artifacts.turn_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH turn_git_artifacts USING INDEX turn_git_artifacts_conversation_created_idx (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT * FROM activities WHERE ((activities.conversation_id = ? AND activities.turn_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH activities USING INDEX activities_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH activities USING INDEX activities_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT * FROM subagent_traces WHERE (subagent_traces.conversation_id = ? AND subagent_traces.turn_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH subagent_traces USING INDEX subagents_conversation_created_idx (conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT agent_reasonings.id, agent_reasonings.conversation_id, agent_reasonings.run_id, agent_reasonings.turn_id, agent_reasonings.content || COALESCE(( SELECT g…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH agent_reasonings USING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH agent_reasonings USING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>?)",
+      "CORRELATED SCALAR SUBQUERY 2",
+      "CO-ROUTINE ordered_chunks",
+      "SEARCH reasoning_content_chunks USING INDEX reasoning_content_chunks_reasoning_sequence_idx (reasoning_id=?)",
+      "SCAN ordered_chunks",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT conversation_id, run_id, turn_id, explanation, steps_json FROM agent_plans WHERE ((agent_plans.conversation_id = ? AND agent_plans.turn_id IN (?,?,?,?,?,…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH agent_plans USING INDEX agent_plans_conversation_turn_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH agent_plans USING INDEX agent_plans_conversation_updated_idx (conversation_id=? AND updated_at>?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT * FROM checkpoints WHERE ((checkpoints.conversation_id = ? AND checkpoints.turn_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH checkpoints USING INDEX checkpoints_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH checkpoints USING INDEX checkpoints_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT packet.id, packet.source_conversation_id, packet.target_conversation_id, packet.source_project_id, packet.target_project_id, packet.source_conversation_t…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH packet USING INDEX conversation_context_packets_target_state_idx (target_conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH source USING COVERING INDEX sqlite_autoindex_conversations_1 (id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT packet_id FROM agent_context_requests WHERE target_conversation_id = ? AND status = 'completed'",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH agent_context_requests USING INDEX agent_context_requests_target_status_idx (target_conversation_id=? AND status=?)",
+    ],
+  },
+  {
+    "query": "SELECT target_user_message_id, target_turn_id, source_conversation_id, source_conversation_title, source_turn_id, access, created_at, updated_at, EXISTS( SELECT…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH reads USING INDEX agent_context_reads_target_idx (target_conversation_id=? AND target_user_message_id=?)",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH source USING COVERING INDEX sqlite_autoindex_conversations_1 (id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT id FROM watcher_links WHERE watcher_conversation_id = ?",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH watcher_links USING INDEX sqlite_autoindex_watcher_links_2 (watcher_conversation_id=?)",
+    ],
+  },
+  {
+    "query": "WITH newest AS ( SELECT conversation_id, run_id, turn_id, explanation, steps_json FROM agent_plans WHERE conversation_id = ? ORDER BY updated_at DESC, run_id DE…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "COMPOUND QUERY",
+      "LEFT-MOST SUBQUERY",
+      "MATERIALIZE newest",
+      "SEARCH agent_plans USING INDEX agent_plans_conversation_updated_idx (conversation_id=?)",
+      "SCAN newest",
+      "UNION ALL",
+      "CO-ROUTINE documented",
+      "SEARCH agent_turns USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 5",
+      "CO-ROUTINE gap",
+      "SEARCH agent_turns USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 3",
+      "SEARCH agent_plans USING COVERING INDEX agent_plans_conversation_turn_idx (conversation_id=? AND turn_id=?)",
+      "SEARCH agent_turns USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=? AND requested_at>?)",
+      "SEARCH newest USING AUTOMATIC COVERING INDEX (turn_id=?)",
+      "SCAN gap",
+      "SEARCH agent_turns USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=? AND requested_at>?)",
+      "SEARCH newest USING AUTOMATIC COVERING INDEX (turn_id=?)",
+      "SEARCH agent_plans USING INDEX agent_plans_conversation_turn_idx (conversation_id=? AND turn_id=?)",
+      "SCAN documented",
+    ],
+  },
+  {
+    "query": "SELECT * FROM ( SELECT id, requested_at AS at, 'turn' AS kind FROM agent_turns WHERE conversation_id = ? UNION ALL SELECT id, created_at AS at, 'message' AS kin…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MERGE (UNION ALL)",
+      "LEFT",
+      "SEARCH agent_turns USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=? AND (requested_at,id)<(?,?))",
+      "USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "RIGHT",
+      "SEARCH messages USING COVERING INDEX messages_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND (created_at,id)<(?,?))",
+      "USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("run_id" AS BLOB)), 0)…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH activities USING INDEX activities_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH activities USING INDEX activities_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>? AND created_at<?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("run_id" AS BLOB)), 0)…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH agent_reasonings USING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH agent_reasonings USING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>? AND created_at<?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) AS bytes FROM reasoning_content_chunks WHERE reasoning_id IN (SELECT id FROM agent_reasonings WHERE ((age…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH reasoning_content_chunks USING INDEX reasoning_content_chunks_reasoning_sequence_idx (reasoning_id=?)",
+      "LIST SUBQUERY 1",
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH agent_reasonings USING COVERING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH agent_reasonings USING COVERING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>? AND created_at<?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("run_id" AS BLOB)), 0) + COALESCE(length(CAST("turn_id" AS BLOB)…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH agent_plans USING INDEX agent_plans_conversation_turn_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH agent_plans USING INDEX agent_plans_conversation_updated_idx (conversation_id=? AND updated_at>? AND updated_at<?)",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(SUM(COALESCE(length(CAST("id" AS BLOB)), 0) + COALESCE(length(CAST("conversation_id" AS BLOB)), 0) + COALESCE(length(CAST("ref" AS BLOB)), 0) + …",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH checkpoints USING INDEX checkpoints_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH checkpoints USING INDEX checkpoints_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>? AND created_at<?)",
+    ],
+  },
+  {
+    "query": "SELECT * FROM activities WHERE ((activities.conversation_id = ? AND activities.turn_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH activities USING INDEX activities_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH activities USING INDEX activities_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>? AND created_at<?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT agent_reasonings.id, agent_reasonings.conversation_id, agent_reasonings.run_id, agent_reasonings.turn_id, agent_reasonings.content || COALESCE(( SELECT g…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH agent_reasonings USING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH agent_reasonings USING INDEX agent_reasonings_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>? AND created_at<?)",
+      "CORRELATED SCALAR SUBQUERY 2",
+      "CO-ROUTINE ordered_chunks",
+      "SEARCH reasoning_content_chunks USING INDEX reasoning_content_chunks_reasoning_sequence_idx (reasoning_id=?)",
+      "SCAN ordered_chunks",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT conversation_id, run_id, turn_id, explanation, steps_json FROM agent_plans WHERE ((agent_plans.conversation_id = ? AND agent_plans.turn_id IN (?,?,?,?,?,…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH agent_plans USING INDEX agent_plans_conversation_turn_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH agent_plans USING INDEX agent_plans_conversation_updated_idx (conversation_id=? AND updated_at>? AND updated_at<?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT * FROM checkpoints WHERE ((checkpoints.conversation_id = ? AND checkpoints.turn_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH checkpoints USING INDEX checkpoints_conversation_turn_created_idx (conversation_id=? AND turn_id=?)",
+      "INDEX 2",
+      "SEARCH checkpoints USING INDEX checkpoints_conversation_turn_created_idx (conversation_id=? AND turn_id=? AND created_at>? AND created_at<?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+]
+`;
+
+exports[`hot query plans on a seeded runtime database > snapshots every message search plan with and without planner statistics 1`] = `
+[
+  {
+    "query": "SELECT id AS messageId FROM messages INDEXED BY messages_created_id_idx ORDER BY created_at DESC, id DESC",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN messages USING COVERING INDEX messages_created_id_idx",
+    ],
+  },
+  {
+    "query": "SELECT m.id AS messageId, m.conversation_id AS conversationId, c.project_id AS projectId, m.turn_id AS turnId, m.role, m.created_at AS createdAt FROM messages m…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH m USING INDEX sqlite_autoindex_messages_1 (id=?)",
+      "SEARCH c USING INDEX sqlite_autoindex_conversations_1 (id=?)",
+      "SEARCH p USING COVERING INDEX sqlite_autoindex_projects_1 (id=?)",
+      "SEARCH t USING INDEX agent_turns_provider_run_identity_idx (id=? AND conversation_id=?) LEFT-JOIN",
+    ],
+  },
+  {
+    "query": "SELECT COALESCE(substr(CAST(content AS BLOB), 1, ?), x'') AS content FROM messages WHERE id = ?",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH messages USING INDEX sqlite_autoindex_messages_1 (id=?)",
+    ],
+  },
+  {
+    "query": "SELECT substr(CAST(content AS BLOB), 1, ?) AS content FROM message_content_chunks INDEXED BY message_content_chunks_message_sequence_idx WHERE message_id = ? OR…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH message_content_chunks USING INDEX message_content_chunks_message_sequence_idx (message_id=?)",
+    ],
+  },
+]
+`;

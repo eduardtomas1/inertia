@@ -57,6 +57,11 @@ export class TurnActivityProjection {
         detail: this.eventDetail(active, identified.id, identified.detail, event),
         status,
       };
+      if (
+        activity.title === identified.title
+        && activity.detail === identified.detail
+        && activity.status === identified.status
+      ) return null;
       active.providerActivitiesById.set(event.activityId!, activity);
       if (pendingIndex >= 0) candidates[pendingIndex] = activity;
       active.pendingActivityUpdates.set(activity.id, activity);

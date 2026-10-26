@@ -2161,6 +2161,8 @@ describe("runtime migration catalog", () => {
       { version: 101 },
       { version: 102 },
       { version: 103 },
+      { version: 104 },
+      { version: 105 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2208,6 +2210,16 @@ describe("runtime migration catalog", () => {
       "PRAGMA table_info(app_state)",
     ).all() as Array<{ name: string }>).map(({ name }) => name));
     expect(appStateColumns.has("discord_release_repository_url")).toBe(true);
+    expect(migrated.prepare(
+      "SELECT compact_on_return AS compactOnReturn FROM app_state WHERE id = 1",
+    ).get()).toEqual({ compactOnReturn: "offer" });
+    expect((migrated.prepare("PRAGMA table_info(thread_usage)").all() as Array<{
+      name: string;
+    }>).map(({ name }) => name)).toEqual(expect.arrayContaining([
+      "last_request_started_at",
+      "prompt_cache_lifetime_ms",
+      "prompt_cache_source",
+    ]));
     expect(appStateColumns.has("discord_webhook_url")).toBe(false);
     expect(appStateColumns.has("discord_release_provider")).toBe(false);
     expect(appStateColumns.has("discord_release_model")).toBe(false);

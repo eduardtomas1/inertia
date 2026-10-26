@@ -1,5 +1,6 @@
 import type { AgentTurn } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
+import { RecordNotFoundError } from "../../persistence/errors";
 
 export interface TurnRecoveryResult {
   recoveredTurns: AgentTurn[];
@@ -20,8 +21,7 @@ export function recoverInterruptedTurns(store: RuntimeStore): TurnRecoveryResult
       status === "interrupted" && terminalReason === "runtime-restart");
   const recoveredAttachmentIds = new Set<string>();
   for (const turn of recoveredTurns) {
-    const message = store.conversationDetail(turn.conversationId)?.messages
-      .find(({ id }) => id === turn.userMessageId);
+    const message = userMessage(store, turn);
     for (const attachment of message?.attachments ?? []) {
       recoveredAttachmentIds.add(attachment.id);
     }
@@ -30,4 +30,14 @@ export function recoverInterruptedTurns(store: RuntimeStore): TurnRecoveryResult
     recoveredTurns,
     recoveredAttachmentIds: [...recoveredAttachmentIds],
   };
+}
+
+function userMessage(store: RuntimeStore, turn: AgentTurn) {
+  try {
+    const message = store.message(turn.userMessageId);
+    return message.conversationId === turn.conversationId ? message : null;
+  } catch (error) {
+    if (error instanceof RecordNotFoundError) return null;
+    throw error;
+  }
 }

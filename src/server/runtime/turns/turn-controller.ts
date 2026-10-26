@@ -183,6 +183,8 @@ export class TurnController {
       inactivityMs: turnTimeoutMs,
       reportIncident: this.hooks.reportIncident,
       now: () => this.clock().getTime(),
+      suspendedMs: (fromMs, toMs) => this.store.systemSuspends.read(new Date(fromMs).toISOString(), new Date(toMs).toISOString())
+        .reduce((total, { suspendedAt, resumedAt }) => total + Math.max(0, Math.min(toMs, Date.parse(resumedAt)) - Math.max(fromMs, Date.parse(suspendedAt))), 0),
       maxLifetimeMs: turnMaxLifetimeMs,
       status: (active) => this.store.agentTurn(active.turn.id).status,
       cancel: (active) => {

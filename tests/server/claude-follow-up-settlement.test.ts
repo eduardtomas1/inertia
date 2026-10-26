@@ -102,6 +102,62 @@ describe("Claude accepted follow-up settlement", () => {
     },
   );
 
+  it.each(["assistant-error", "rate-limit-event"] as const)(
+    "reports the usage limit instead of a cancelled follow-up when Claude cancels it after a %s",
+    async (signal) => {
+      const root = portableFixtureRoot("Claude follow-up usage limit");
+      roots.push(root);
+      let ready!: () => void;
+      const initialConsumed = new Promise<void>((resolve) => { ready = resolve; });
+      const limitNotice = "You've hit your session limit · resets 2:30pm (Europe/Madrid)";
+      const harness = createClaudeAgentSdkHarness({
+        createQuery: ({ prompt }) => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+          await iterator.next();
+          ready();
+          const followUp = (await iterator.next()).value!;
+          yield {
+            type: "rate_limit_event", session_id: CLAUDE_PROTOCOL_SESSION_ID,
+            rate_limit_info: { status: "rejected", rateLimitType: "five_hour", overageStatus: "rejected" },
+          } as unknown as SDKMessage;
+          if (signal === "assistant-error") {
+            yield {
+              type: "assistant", uuid: "assistant-session-limit", session_id: CLAUDE_PROTOCOL_SESSION_ID, parent_tool_use_id: null,
+              message: { id: "api-session-limit", type: "message", role: "assistant", model: "<synthetic>",
+                content: [{ type: "text", text: limitNotice }], stop_reason: "stop_sequence", stop_sequence: "",
+                usage: { input_tokens: 0, output_tokens: 0 } },
+              error: "rate_limit",
+            } as unknown as SDKMessage;
+          }
+          yield {
+            type: "command_lifecycle", command_uuid: followUp.uuid, state: "cancelled",
+            uuid: "follow-up-cancelled", session_id: CLAUDE_PROTOCOL_SESSION_ID,
+          } as unknown as SDKMessage;
+        })()),
+      });
+      const run = harness.start({
+        input: nativeProviderRunInput({ providerId: "claude", conversationId: "follow-up-usage-limit",
+          cwd: root, prompt: "Start the request", interactionMode: "build", access: "supervised" }),
+        executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+      });
+      await initialConsumed;
+      if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
+      await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [] }))
+        .resolves.toBe(true);
+      const result = await run.result;
+      expect(result).toMatchObject({
+        status: "failed",
+        error: "Claude reached an account rate limit. Your follow-up was not answered.",
+        failure: {
+          message: "Claude reached an account rate limit. Your follow-up was not answered.",
+          terminalEvent: signal === "assistant-error" ? "assistant/rate_limit" : "lifecycle/follow-up-cancelled",
+          usageLimited: true,
+        },
+      });
+      expect(result.error).not.toContain("cancelled");
+    },
+  );
+
   it.each(["foreign-refusal", "child-refusal", "settled-refusal", "unknown-state", "completed-before-result", "eof"] as const)(
     "preserves accepted follow-up correlation after %s",
     async (ending) => {

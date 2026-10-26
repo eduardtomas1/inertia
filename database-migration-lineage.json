@@ -772,6 +772,16 @@
       "version": 103,
       "name": "PersistTurnFailureKinds",
       "digest": "98486ccd5b5e5954822f6f26be83bc6714a760983778e104006dd894086e48fb"
+    },
+    {
+      "version": 104,
+      "name": "PersistCompactOnReturn",
+      "digest": "02fea7e13c2f5e185cc97d0f30792cb5d3b281d089200f97ceb323696c4ee748"
+    },
+    {
+      "version": 105,
+      "name": "IndexTurnScopedRows",
+      "digest": "833d5c6ddbc877e71f7790a3259dd8ad55552b46a5f904a966684974ddff0d11"
     }
   ]
 }

@@ -67,7 +67,7 @@ Each key row has **Test (uses a little credit)**, **Replace key**, **Models…**
 
 - **Test** sends a short request to every model and lists each result, with the reason when one fails, so it uses a small amount of credit. A model that fails stays unavailable in the model chooser; the others keep working. **Test** never turns on a route you turned off.
 - **Replace key** stores a new key and tests it. The route, its chats and its models stay as they are. The field shows *Stored secret, enter a new value to replace*; leaving it empty keeps the saved key.
-- **Models…** lets you add, rename or remove models, or **Discover models** from the endpoint and choose which to add.
+- **Models…** lets you add, rename or remove models, or **Discover models** from the endpoint and choose which to add. On an Anthropic API key it also has the **Prompt cache** choice.
 - Inertia re-tests a working route about once a day in the background. A route whose last test has expired, or that has not been tested yet, can still send: Inertia checks it just before the chat starts and stops only if that check fails. While a background check runs for a model that cannot be used yet, the composer shows **Checking the backend…**.
 
 **Test** checks models 16 at a time, so a long list is tested in several passes, and the progress shows how many are done, such as *Tested 16 of 40 models…*. If the backend runs out of time, Inertia carries on with the models it has not reached yet.
@@ -75,6 +75,14 @@ Each key row has **Test (uses a little credit)**, **Replace key**, **Models…**
 When a chat on an API key fails, the composer says what to do: add credits in the Anthropic Console or at platform.openai.com for an Anthropic or OpenAI key, or check your credits with a custom backend's provider; **Replace key** for a rejected key; wait until the time shown for a rate limit; or **Edit models** for a model the provider no longer offers. Chats on a subscription keep the usage-limit notice.
 
 Usage and limits are not available for API keys; the API key's provider bills it to your API account.
+
+### Prompt cache
+
+An Anthropic API key has a **Prompt cache** choice in **Add API key** and in **Models…**: **5 minutes (default)** or **1 hour**. A 1-hour cache costs more to write and less to resume after a break; worth it when you return to a chat after 5 to 60 minutes. If you often come back within the hour, a 1-hour Prompt cache avoids most compaction offers. The key row shows the length, such as *1-hour prompt cache*.
+
+The same choice is offered when you add a custom backend on the Claude harness, and in its **Edit…**. The gateway must accept the 1-hour cache. Custom backends are never offered compaction on return. Claude Code signed in for API billing uses Claude Code's 5-minute default unless Claude reports a longer one, and has no choice. Inertia assumes about 30 minutes for OpenAI keys; OpenAI does not publish a fixed lifetime.
+
+When you come back to a large chat on an API key after its cache has expired, the composer offers **Compact and send**, with **Full history** beside it to send with the whole history instead. Enter follows the button. See [Compact on return](chats-and-agents.md#compact-on-return).
 
 ### Custom backends
 

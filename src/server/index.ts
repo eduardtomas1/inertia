@@ -26,7 +26,7 @@ import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
 import { resolveAuthoritativeProjectPath } from "./project-path";
 import { PROVIDER_IDS, ProviderManager } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
-import { createTurnUsageRefresh, startIdleRateLimitRefresh, type ProviderUsageRefreshDependencies } from "./runtime/provider-usage-refresh";
+import { createManualUsageRefresh, createRateLimitChangeSignal, createTurnUsageRefresh, startIdleRateLimitRefresh, type ProviderUsageRefreshDependencies } from "./runtime/provider-usage-refresh";
 import { ProviderMaintenanceController } from "./provider/maintenance-controller";
 import type { ProviderMaintenanceTarget } from "./provider/maintenance-capabilities";
 import {
@@ -532,6 +532,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       && !recoveryImportAdmission.isActive() && turns.activeConversationIds().length === 0 && isolatedRuns.activeCount() === 0 && !terminals.hasUpdateBlockingActivity(),
     reportIncident: commandIncidents.report, cleanupFailed: options.onOwnedProcessCleanupUnconfirmed,
   });
+  const rateLimitChanges = createRateLimitChangeSignal();
   const applyProviderMetadata = (providerId: ProviderInfo["id"], metadata: ProviderMetadata): void => {
     providerInfo = providerInfo.map((current) => current.id === providerId ? {
       ...current,
@@ -539,6 +540,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       rateLimits: metadata.rateLimits,
       metadataState: metadata.metadataState,
     } : current);
+    rateLimitChanges.notify();
   };
   let activeProviderRefreshes = 0;
   const refreshProviderInfo = createProviderInfoRefresh({
@@ -547,7 +549,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     defaultWorkspacePath: options.defaultWorkspacePath,
     lifetimeSignal: runtimeLifetimeAbort.signal,
     providerInfo: () => providerInfo,
-    replaceProviderInfo: (value) => { providerInfo = value; },
+    replaceProviderInfo: (value) => { providerInfo = value; rateLimitChanges.notify(); },
     reportIncident: commandIncidents.report,
     broadcastSnapshot,
     isClosed: () => closed,
@@ -635,6 +637,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     track: trackRuntimeOperation,
     clientPresent: () => runtimeSync.connectionCount > 0,
     subscribeClientConnected: (listener) => runtimeSync.onClientConnected(listener),
+    subscribeRateLimitsChanged: rateLimitChanges.subscribe,
   };
   const conversationTitles = createConversationTitleRuntime({
     store, providers, backendProfileController, broadcastSnapshot, signal: runtimeLifetimeAbort.signal,
@@ -757,13 +760,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
       }),
       createProviderCommandHandler({
-        providers,
-        providerMaintenance,
-        terminals,
-        defaultWorkspacePath: options.defaultWorkspacePath,
-        currentSnapshot,
-        refreshProviderInfo,
-        send,
+        providers, providerMaintenance, terminals, defaultWorkspacePath: options.defaultWorkspacePath, currentSnapshot,
+        refreshProviderInfo, refreshProviderUsage: createManualUsageRefresh(providerUsage), send,
       }),
       ...createReadCommandHandlers({ store, send, databasePath, lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target), canStopWorkspaceRun }),
       createConversationCommandHandler({

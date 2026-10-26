@@ -125,7 +125,10 @@ export const appCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("provider.refresh"),
-      payload: z.object({ providerId: providerIdSchema.optional() }).strict(),
+      payload: z.object({
+        providerId: providerIdSchema.optional(),
+        scope: z.literal("usage").optional(),
+      }).strict(),
     })
     .strict(),
   z

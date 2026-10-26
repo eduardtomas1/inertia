@@ -11,11 +11,11 @@
   background: var(--bg);
 }
 
-.detached-chat-shell:is(.platform-win32, .platform-linux) {
+.detached-chat-shell.platform-win32 {
   --titlebar-overlay-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
 }
 
-.detached-chat-shell:is(.platform-darwin, .platform-win32, .platform-linux) .detached-chat-header {
+.detached-chat-shell:is(.platform-darwin, .platform-win32) .detached-chat-header {
   min-height: 48px;
   padding-block: 0;
 }
@@ -24,7 +24,7 @@
   padding-left: var(--mac-titlebar-brand-safe-inset);
 }
 
-.detached-chat-shell:is(.platform-win32, .platform-linux) .detached-chat-header {
+.detached-chat-shell.platform-win32 .detached-chat-header {
   padding-right: calc(8px + var(--titlebar-overlay-inset));
 }
 

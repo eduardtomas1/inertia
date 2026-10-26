@@ -60,19 +60,10 @@ describe("window appearance", () => {
       titleBarStyle: "hidden",
       titleBarOverlay: { color: "#00000000", symbolColor: "#ededf7", height: 48 },
     });
+    expect(windowChromeOptions("linux", "light")).toEqual({ backgroundColor: "#fafafd" });
   });
 
-  it("makes the Linux header the title bar with a near-transparent overlay, since fully transparent breaks there", () => {
-    expect(windowChromeOptions("linux", "light")).toEqual({
-      backgroundColor: "#fafafd",
-      titleBarStyle: "hidden",
-      titleBarOverlay: { color: "#01000000", symbolColor: "#212126", height: 48 },
-    });
-    expect(windowChromeOptions("linux", "dark").titleBarOverlay).toEqual({ color: "#01000000", symbolColor: "#ededf7", height: 48 });
-    expect(windowChromeOptions("freebsd", "light")).toEqual({ backgroundColor: "#fafafd" });
-  });
-
-  it("repaints the background and the Windows and Linux overlay symbols when the theme changes", () => {
+  it("repaints the background and Windows overlay symbols when the theme changes", () => {
     const calls: unknown[] = [];
     const window = {
       setBackgroundColor: (color: string) => calls.push(["background", color]),
@@ -84,14 +75,8 @@ describe("window appearance", () => {
       ["overlay", { color: "#00000000", symbolColor: "#212126", height: 48 }],
     ]);
     calls.length = 0;
-    applyWindowTheme(window, "linux", "dark");
-    expect(calls).toEqual([
-      ["background", "#18181b"],
-      ["overlay", { color: "#01000000", symbolColor: "#ededf7", height: 48 }],
-    ]);
-    calls.length = 0;
     applyWindowTheme(window, "darwin", "dark");
-    applyWindowTheme(window, "freebsd", "dark");
+    applyWindowTheme(window, "linux", "dark");
     expect(calls).toEqual([["background", "#18181b"], ["background", "#18181b"]]);
   });
 

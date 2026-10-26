@@ -679,36 +679,40 @@ button:disabled,
   background: var(--bg);
 }
 
-.app-shell:is(.platform-win32, .platform-linux) {
+.app-shell.platform-linux {
+  --composer-bottom-breathing-room: 20px;
+}
+
+.app-shell.platform-win32 {
   --composer-bottom-breathing-room: 20px;
   --titlebar-overlay-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
 }
 
-:is(.platform-win32, .platform-linux) .workspace-frame:not(.has-right-panel) > .workspace-header {
+.platform-win32 .workspace-frame:not(.has-right-panel) > .workspace-header {
   padding-right: calc(14px + var(--workspace-corner-controls-width, 0px) + var(--titlebar-overlay-inset));
 }
 
-:is(.platform-win32, .platform-linux) .workspace-panel:not(.is-stacked) > .workspace-panel-tabs {
+.platform-win32 .workspace-panel:not(.is-stacked) > .workspace-panel-tabs {
   padding-right: calc(var(--workspace-corner-controls-width, 0px) + 16px + var(--titlebar-overlay-inset));
 }
 
 @container (max-width: 400px) {
-  :is(.platform-win32, .platform-linux) .workspace-panel:not(.is-stacked) > .workspace-panel-tabs {
+  .platform-win32 .workspace-panel:not(.is-stacked) > .workspace-panel-tabs {
     margin-top: 48px;
     padding-right: 16px;
   }
 }
 
-:is(.platform-win32, .platform-linux) .workspace-corner-controls {
+.platform-win32 .workspace-corner-controls {
   right: calc(12px + var(--titlebar-overlay-inset));
 }
 
-:root:is([data-platform="win32"], [data-platform="linux"]) .dialog-backdrop {
+:root[data-platform="win32"] .dialog-backdrop {
   padding-top: calc(env(titlebar-area-height, 48px) + 8px);
   grid-template-rows: minmax(0, 1fr);
 }
 
-:root:is([data-platform="win32"], [data-platform="linux"]) .dialog-backdrop > * {
+:root[data-platform="win32"] .dialog-backdrop > * {
   max-height: 100%;
 }
 
@@ -1798,7 +1802,7 @@ button.header-breadcrumb-project:hover {
   min-width: 0;
   min-height: 0;
   flex: 1;
-  overflow: hidden;
+  overflow: clip;
   background: var(--bg);
 }
 
@@ -11445,7 +11449,7 @@ button.sent-attachment-open:hover {
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .conversation-pane-workspace:has(> .conversation-pane-chat > .terminal-dock:not([hidden])) {

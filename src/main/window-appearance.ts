@@ -47,26 +47,8 @@ export function resolveWindowBackground(theme: WindowThemePreference, systemDark
   return WINDOW_BACKGROUND[resolveWindowTheme(theme, systemDark)];
 }
 
-export const WINDOW_TITLE_BAR_OVERLAY_COLOR = {
-  win32: "#00000000",
-  linux: "#01000000",
-} as const;
-
-type OverlayPlatform = keyof typeof WINDOW_TITLE_BAR_OVERLAY_COLOR;
-
-export function usesWindowTitleBarOverlay(platform: NodeJS.Platform): platform is OverlayPlatform {
-  return platform === "win32" || platform === "linux";
-}
-
-export function windowTitleBarOverlay(
-  theme: ResolvedWindowTheme,
-  platform: OverlayPlatform,
-): TitleBarOverlayOptions {
-  return {
-    color: WINDOW_TITLE_BAR_OVERLAY_COLOR[platform],
-    symbolColor: WINDOW_TITLE_BAR_SYMBOL[theme],
-    height: WINDOW_HEADER_HEIGHT,
-  };
+export function windowTitleBarOverlay(theme: ResolvedWindowTheme): TitleBarOverlayOptions {
+  return { color: "#00000000", symbolColor: WINDOW_TITLE_BAR_SYMBOL[theme], height: WINDOW_HEADER_HEIGHT };
 }
 
 export function windowChromeOptions(
@@ -77,8 +59,8 @@ export function windowChromeOptions(
   if (platform === "darwin") {
     return { backgroundColor, titleBarStyle: "hiddenInset", trafficLightPosition: MAC_TRAFFIC_LIGHT_POSITION };
   }
-  if (usesWindowTitleBarOverlay(platform)) {
-    return { backgroundColor, titleBarStyle: "hidden", titleBarOverlay: windowTitleBarOverlay(theme, platform) };
+  if (platform === "win32") {
+    return { backgroundColor, titleBarStyle: "hidden", titleBarOverlay: windowTitleBarOverlay(theme) };
   }
   return { backgroundColor };
 }
@@ -90,5 +72,5 @@ export interface ThemedWindow {
 
 export function applyWindowTheme(window: ThemedWindow, platform: NodeJS.Platform, theme: ResolvedWindowTheme): void {
   window.setBackgroundColor(WINDOW_BACKGROUND[theme]);
-  if (usesWindowTitleBarOverlay(platform)) window.setTitleBarOverlay(windowTitleBarOverlay(theme, platform));
+  if (platform === "win32") window.setTitleBarOverlay(windowTitleBarOverlay(theme));
 }

@@ -6,22 +6,22 @@ const read = (path: string) => readSourceText(new URL(`../../src/renderer/src/${
 const css = read("styles.css");
 const detachedCss = read("detached-chat.css");
 
-describe("Windows and Linux title bar overlay clearance", () => {
+describe("Windows title bar overlay clearance", () => {
   it("marks the document with its platform so portalled surfaces can clear the caption buttons", () => {
     expect(read("main.tsx")).toMatch(/document\.documentElement\.dataset\.platform = window\.inertia\.getPlatform\(\);/u);
   });
 
   it("measures the overlay inset from the window controls overlay geometry", () => {
     expect(css).not.toContain("@property --titlebar-overlay-inset");
-    expect(css).toMatch(/\.app-shell:is\(\.platform-win32, \.platform-linux\) \{[^}]*--titlebar-overlay-inset: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u);
-    expect(detachedCss).toMatch(/\.detached-chat-shell:is\(\.platform-win32, \.platform-linux\) \{\n  --titlebar-overlay-inset: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u);
+    expect(css).toMatch(/\.app-shell\.platform-win32 \{[^}]*--titlebar-overlay-inset: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u);
+    expect(detachedCss).toMatch(/\.detached-chat-shell\.platform-win32 \{\n  --titlebar-overlay-inset: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u);
   });
 
   it("pads the header, panel tabs, corner controls and detached header by the overlay inset", () => {
-    expect(css).toMatch(/:is\(\.platform-win32, \.platform-linux\) \.workspace-frame:not\(\.has-right-panel\) > \.workspace-header \{\n  padding-right: calc\(14px \+ var\(--workspace-corner-controls-width, 0px\) \+ var\(--titlebar-overlay-inset\)\);/u);
-    expect(css).toMatch(/:is\(\.platform-win32, \.platform-linux\) \.workspace-panel:not\(\.is-stacked\) > \.workspace-panel-tabs \{\n  padding-right: calc\(var\(--workspace-corner-controls-width, 0px\) \+ 16px \+ var\(--titlebar-overlay-inset\)\);/u);
-    expect(css).toMatch(/:is\(\.platform-win32, \.platform-linux\) \.workspace-corner-controls \{\n  right: calc\(12px \+ var\(--titlebar-overlay-inset\)\);/u);
-    expect(detachedCss).toMatch(/\.detached-chat-shell:is\(\.platform-win32, \.platform-linux\) \.detached-chat-header \{\n  padding-right: calc\(8px \+ var\(--titlebar-overlay-inset\)\);/u);
+    expect(css).toMatch(/\.platform-win32 \.workspace-frame:not\(\.has-right-panel\) > \.workspace-header \{\n  padding-right: calc\(14px \+ var\(--workspace-corner-controls-width, 0px\) \+ var\(--titlebar-overlay-inset\)\);/u);
+    expect(css).toMatch(/\.platform-win32 \.workspace-panel:not\(\.is-stacked\) > \.workspace-panel-tabs \{\n  padding-right: calc\(var\(--workspace-corner-controls-width, 0px\) \+ 16px \+ var\(--titlebar-overlay-inset\)\);/u);
+    expect(css).toMatch(/\.platform-win32 \.workspace-corner-controls \{\n  right: calc\(12px \+ var\(--titlebar-overlay-inset\)\);/u);
+    expect(detachedCss).toMatch(/\.detached-chat-shell\.platform-win32 \.detached-chat-header \{\n  padding-right: calc\(8px \+ var\(--titlebar-overlay-inset\)\);/u);
   });
 
   it("keeps the right panel at 300px on Windows and clears the caption buttons only in its tab strip", () => {
@@ -32,15 +32,9 @@ describe("Windows and Linux title bar overlay clearance", () => {
     expect(readSourceText(new URL("../../src/renderer/src/hooks/useWorkspaceLayout.ts", import.meta.url))).toContain("export const TOOLS_MIN_WIDTH = 300;");
   });
 
-  it("draws the Linux header as the title bar with the same overlay clearance as Windows", () => {
-    expect(css).not.toMatch(/(?:^|\n)\.app-shell\.platform-(?:win32|linux) \{/u);
-    expect(read("components/MultiSpawnDialog.css")).toContain(':root:is([data-platform="win32"], [data-platform="linux"]) .multi-spawn-dialog {');
-    expect(detachedCss).toContain(".detached-chat-shell:is(.platform-darwin, .platform-win32, .platform-linux) .detached-chat-header {");
-  });
-
   it("keeps the recovery notice in the toast stack and every dialog below the caption buttons", () => {
     expect(css).not.toContain(":root[data-platform=\"win32\"] .database-recovery-notice");
     expect(css).not.toMatch(/\.database-recovery-notice \{[^}]*position: fixed/u);
-    expect(css).toMatch(/:root:is\(\[data-platform="win32"\], \[data-platform="linux"\]\) \.dialog-backdrop \{\n  padding-top: calc\(env\(titlebar-area-height, 48px\) \+ 8px\);\n  grid-template-rows: minmax\(0, 1fr\);\n\}\n\n:root:is\(\[data-platform="win32"\], \[data-platform="linux"\]\) \.dialog-backdrop > \* \{\n  max-height: 100%;\n\}/u);
+    expect(css).toMatch(/:root\[data-platform="win32"\] \.dialog-backdrop \{\n  padding-top: calc\(env\(titlebar-area-height, 48px\) \+ 8px\);\n  grid-template-rows: minmax\(0, 1fr\);\n\}\n\n:root\[data-platform="win32"\] \.dialog-backdrop > \* \{\n  max-height: 100%;\n\}/u);
   });
 });

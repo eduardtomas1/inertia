@@ -385,6 +385,7 @@ export const AppLayout = memo(function AppLayout({
     },
     openMultiSpawn: multiSpawn.openDialog,
     openDailyWork: () => setDailyWorkOpen(true),
+    openAgentSettings: () => actions.openSettingsSection("agents"),
     renameConversation: (thread: Conversation, title: string) => {
       void actions.run("conversation.update", {
         type: "conversation.update",
@@ -691,6 +692,7 @@ export const AppLayout = memo(function AppLayout({
             onChooseNewChatProject={sidebarActions.chooseNewChatProject}
             onOpenMultiSpawn={sidebarActions.openMultiSpawn}
             onOpenDailyWork={sidebarActions.openDailyWork}
+            onOpenAgentSettings={sidebarActions.openAgentSettings}
             newChatShortcut={formatAppShortcutLabel(platform, settings.keybindings["new-chat"])}
             dailyWorkOpen={dailyWorkOpen}
             onRenameConversation={sidebarActions.renameConversation}

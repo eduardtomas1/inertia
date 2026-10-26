@@ -40,6 +40,7 @@ export interface SidebarProps {
   onChooseNewChatProject: () => void;
   onOpenMultiSpawn: () => void;
   onOpenDailyWork: () => void;
+  onOpenAgentSettings?: () => void;
   newChatShortcut?: string;
   dailyWorkOpen: boolean;
   onRenameConversation: (conversation: Conversation, title: string) => void;

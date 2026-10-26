@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarUpdateControl } from "../../src/renderer/src/components/sidebar/SidebarUpdateControl";
 import { useAppUpdate } from "../../src/renderer/src/hooks/useAppUpdate";
 import { useUpdateEverything, type UpdateEverythingController } from "../../src/renderer/src/hooks/useUpdateEverything";
-import type { AppSnapshot, ProviderMaintenanceProviderId, ProviderMaintenanceStatus, ServerEvent } from "../../src/shared/contracts";
+import type { AppSnapshot, ProviderMaintenanceOperation, ProviderMaintenanceProviderId, ProviderMaintenanceStatus, ServerEvent } from "../../src/shared/contracts";
 import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 import type { AppUpdateStatus } from "../../src/shared/desktop";
 import { updateStatus } from "../support/app-update-fixture";
@@ -20,12 +20,21 @@ const check = vi.fn<() => Promise<AppUpdateStatus>>();
 const download = vi.fn<() => Promise<AppUpdateStatus>>();
 const install = vi.fn<() => Promise<AppUpdateStatus>>();
 const cancel = vi.fn<() => Promise<AppUpdateStatus>>();
-const external = vi.fn<() => Promise<void>>();
+const external = vi.fn<(url: string) => Promise<void>>();
 function publish(overrides: Partial<AppUpdateStatus> = {}): void {
   act(() => listener(updateStatus({ ...overrides, revision: ++sequence })));
 }
 function trigger(): HTMLButtonElement { return document.querySelector<HTMLButtonElement>(".sidebar-update-button")!; }
 function details(): HTMLElement { return screen.getByRole("dialog", { name: "Application update details" }); }
+function icon(): Element { return document.querySelector(".update-status-icon")!; }
+function finishSpin(): void {
+  for (let step = 0; step < 4; step++) {
+    const node = icon();
+    if (node.classList.contains("is-spinning")) fireEvent.animationIteration(node);
+    else if (node.classList.contains("is-spin-start") || node.classList.contains("is-spin-settle")) fireEvent.animationEnd(node);
+    else return;
+  }
+}
 beforeEach(() => {
   vi.useFakeTimers(); sequence = 0;
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
@@ -58,16 +67,14 @@ describe("real update controller in the sidebar", () => {
     await act(async () => background.resolve(updateStatus({
       revision: ++sequence, state: "current", latestVersion: "1.2.2", freshness: "cached",
     })));
-    // Checking remains visible until its rotation finishes, although no manual
-    // request was admitted. Releasing a test adapter gate here would do nothing.
     expect(trigger()).toHaveAttribute("data-update-state", "checking");
-    fireEvent.animationIteration(document.querySelector(".update-status-icon")!);
+    finishSpin();
     expect(trigger()).toHaveAttribute("data-update-state", "idle");
     fireEvent.click(trigger());
     expect(check).toHaveBeenCalledTimes(2);
     expect(check).toHaveBeenNthCalledWith(2, true);
     await act(async () => manual.resolve(updateStatus({ revision: ++sequence })));
-    fireEvent.animationIteration(document.querySelector(".update-status-icon")!);
+    finishSpin();
     expect(trigger()).toHaveAttribute("data-update-state", "available");
   });
   it("checks directly, prevents duplicate clicks, and finishes the current rotation without a timer", async () => {
@@ -78,7 +85,7 @@ describe("real update controller in the sidebar", () => {
     expect(trigger()).toHaveAttribute("data-update-state", "checking");
     await act(async () => request.resolve(updateStatus({ state: "current" })));
     expect(trigger()).toHaveAttribute("data-update-state", "checking");
-    fireEvent.animationIteration(document.querySelector(".update-status-icon")!);
+    finishSpin();
     expect(trigger()).toHaveAttribute("data-update-state", "idle");
     expect(nativePreviewSuspended()).toBe(false);
   });
@@ -86,7 +93,7 @@ describe("real update controller in the sidebar", () => {
     vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     const request = deferred<AppUpdateStatus>(); check.mockReturnValue(request.promise);
     render(<Harness />); fireEvent.click(trigger());
-    expect(document.querySelector(".is-checking")).toBeNull();
+    expect(document.querySelector(".is-spin-start, .is-spin-settle")).toBeNull();
     await act(async () => request.resolve(updateStatus()));
     expect(trigger()).toHaveAttribute("data-update-state", "available");
   });
@@ -174,7 +181,8 @@ describe("real update controller in the sidebar", () => {
     render(<Harness />); publish({ state: "downloading" });
     fireEvent.keyDown(trigger(), { key: "ArrowUp" });
     expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
-    expect(trigger()).toHaveAccessibleName("Downloading update…");
+    expect(trigger()).toHaveAccessibleName("Update details");
+    expect(screen.getByRole("button", { name: "Downloading Inertia 1.2.3…" })).toBeInTheDocument();
     publish({ delivery: "manual", deliveryReason: "windows-signing-unavailable" });
     await act(async () => fireEvent.click(trigger()));
     expect(external).toHaveBeenCalledOnce(); expect(download).not.toHaveBeenCalled();
@@ -224,7 +232,7 @@ const CLAUDE = providerStatus("claude", "2.1.283", "2.1.295");
 const labelSnapshot = { conversations: [], providers: [{ id: "codex", label: "Codex" }, { id: "claude", label: "Claude" }],
   settings: { providerIdentityLabels: { claude: "Claude Code" } } } as unknown as AppSnapshot;
 function everythingController(overrides: Partial<UpdateEverythingController> = {}, statuses = [CODEX]): UpdateEverythingController {
-  return { statuses: new Map(statuses.map((status) => [status.providerId, status])), operations: new Map(), phase: null, error: null,
+  return { statuses: new Map(statuses.map((status) => [status.providerId, status])), operations: new Map(), phase: null, error: null, outcome: null, activeRun: null,
     run: vi.fn(async () => undefined), dismissError: vi.fn(), ...overrides };
 }
 function EverythingHarness({ everything }: { everything: UpdateEverythingController }): React.JSX.Element {
@@ -266,14 +274,18 @@ describe("update everything mode in the sidebar", () => {
     const { rerender } = render(<EverythingHarness everything={everythingController({
       phase: { kind: "providers", providerIds: ["codex", "claude"] },
     }, [CODEX, CLAUDE])} />); publish();
-    expect(trigger()).toHaveAccessibleName("Updating Codex…");
-    expect(trigger()).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(trigger());
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Updating Codex…, 0 of 2" })).toBeInTheDocument();
+    expect(trigger()).toHaveAccessibleName("Update details");
+    expect(trigger()).not.toHaveAttribute("aria-disabled");
+    expect(document.querySelector(".update-status-icon.is-spinning, .update-status-icon.is-spin-start")).toBeNull();
+    act(() => { fireEvent.click(trigger()); });
+    expect(details()).toHaveTextContent("Updating Codex…");
+    expect(details()).not.toHaveTextContent("Inertia 1.2.3 is available.");
+    expect([...details().querySelectorAll(".update-run-items li")].map((row) => row.textContent)).toEqual(["CodexQueued", "Claude CodeQueued"]);
     expect(download).not.toHaveBeenCalled();
     expect(document.querySelector(".update-status-announcement")).toHaveTextContent("Updating Codex…");
     rerender(<EverythingHarness everything={everythingController({ phase: { kind: "app" } })} />);
-    expect(trigger()).toHaveAccessibleName("Updating Inertia…");
+    expect(screen.getByRole("button", { name: "Preparing Inertia to restart…" })).toBeInTheDocument();
     rerender(<EverythingHarness everything={everythingController({ error: "Inertia is updating." })} />);
     fireEvent.keyDown(trigger(), { key: "ArrowUp" });
     expect(details()).toHaveTextContent("Inertia is updating.");
@@ -319,14 +331,15 @@ describe("update everything mode in the sidebar", () => {
     const { rerender } = render(<LiveHarness statuses={[CODEX]} />);
     publish({ state: "current", message: "Inertia is up to date." });
     await failRun();
-    expect(messages()).toEqual(["Inertia is up to date.", "Inertia is updating."]);
+    expect(messages()).toEqual(["Inertia is updating."]);
+    expect(screen.getByRole("button", { name: "Update couldn’t finish" })).toBeInTheDocument();
     rerender(<LiveHarness statuses={[{ ...CODEX, latestVersion: "0.114.0" }]} />);
     expect(messages()).toEqual(["Inertia is up to date."]);
     fireEvent.keyDown(details(), { key: "Escape" });
     await failRun();
-    expect(messages()).toEqual(["Inertia is up to date.", "Inertia is updating."]);
+    expect(messages()).toEqual(["Inertia is updating."]);
     publish({ state: "current", message: "Inertia is up to date.", freshness: "cached" });
-    expect(messages()).toEqual(["Inertia is up to date.", "Inertia is updating."]);
+    expect(messages()).toEqual(["Inertia is updating."]);
     rerender(<LiveHarness statuses={[{ ...CODEX, latestVersion: "0.115.0" }]} />);
     expect(messages()).toEqual(["Inertia is up to date."]);
   });
@@ -338,3 +351,160 @@ describe("update everything mode in the sidebar", () => {
     expect([...details().querySelectorAll(".update-detail-message")].map((node) => node.textContent)).toEqual([message]);
   });
 });
+
+describe("releases skipped since the installed version", () => {
+  const history = [
+    { version: "1.2.2", releaseUrl: "https://github.com/eduardtomas1/inertia/releases/tag/v1.2.2", notes: "Calmer **Tasks** and a steadier judge.", omittedItems: 3 },
+    { version: "1.2.1", releaseUrl: "https://github.com/eduardtomas1/inertia/releases/tag/v1.2.1", notes: "- One fix", omittedItems: 0 },
+  ];
+  it("stacks the newest notes with condensed earlier releases and counts them in the header", () => {
+    render(<Harness />);
+    publish({ currentVersion: "1.2.0", releaseHistory: history, releaseHistoryOmitted: 2,
+      releasesUrl: "https://github.com/eduardtomas1/inertia/releases" });
+    fireEvent.pointerEnter(trigger().parentElement!);
+    expect(details()).toHaveTextContent("Inertia · Installed 1.2.0 · 5 releases ago");
+    expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent))
+      .toEqual(["What’s changed in 1.2.3", "Also in 1.2.2", "Also in 1.2.1"]);
+    expect(details().querySelector(".update-release-body")).toHaveClass("is-stacked");
+    expect(details().querySelectorAll(".update-release-group")).toHaveLength(3);
+    expect(details().querySelector("a")).toBeNull();
+    expect(screen.getByRole("button", { name: "2 older releases on the release page" })).toBeEnabled();
+  });
+  it("opens only main-authored pages, one at a time", async () => {
+    const opened = deferred<void>();
+    external.mockReturnValueOnce(opened.promise);
+    render(<Harness />);
+    publish({ currentVersion: "1.2.0", releaseHistory: history, releaseHistoryOmitted: 1,
+      releasesUrl: "https://github.com/eduardtomas1/inertia/releases" });
+    fireEvent.pointerEnter(trigger().parentElement!);
+    fireEvent.click(screen.getByRole("button", { name: "3 more changes for 1.2.2" }));
+    expect(external).toHaveBeenCalledExactlyOnceWith("https://github.com/eduardtomas1/inertia/releases/tag/v1.2.2");
+    expect(screen.getByRole("button", { name: "View release for 1.2.1" })).toBeDisabled();
+    await act(async () => opened.resolve());
+    fireEvent.click(screen.getByRole("button", { name: "View release for 1.2.1" }));
+    await act(async () => undefined);
+    fireEvent.click(screen.getByRole("button", { name: "1 older release on the release page" }));
+    await act(async () => undefined);
+    expect(external.mock.calls.map(([url]) => url)).toEqual([
+      "https://github.com/eduardtomas1/inertia/releases/tag/v1.2.2",
+      "https://github.com/eduardtomas1/inertia/releases/tag/v1.2.1",
+      "https://github.com/eduardtomas1/inertia/releases",
+    ]);
+  });
+  it("keeps today's single-release layout when nothing was skipped", () => {
+    render(<Harness />); publish();
+    fireEvent.pointerEnter(trigger().parentElement!);
+    expect(details()).toHaveTextContent("Inertia · Installed 1.2.2");
+    expect(details()).not.toHaveTextContent("releases ago");
+    expect(screen.getByRole("heading", { name: "What’s changed in 1.2.3" })).toBeInTheDocument();
+    expect(details().querySelector(".update-release-group, .is-stacked, .update-release-link")).toBeNull();
+  });
+});
+
+describe("refresh icon choreography", () => {
+  it("winds up, runs in half turns and coasts to rest instead of snapping", async () => {
+    const request = deferred<AppUpdateStatus>(); check.mockReturnValue(request.promise);
+    render(<Harness />);
+    fireEvent.click(trigger());
+    expect(icon()).toHaveClass("is-spin-start");
+    fireEvent.animationEnd(icon());
+    expect(icon()).toHaveClass("is-spinning");
+    fireEvent.animationIteration(icon());
+    expect(icon()).toHaveClass("is-spinning");
+    await act(async () => request.resolve(updateStatus({ state: "current" })));
+    expect(icon()).toHaveClass("is-spinning");
+    fireEvent.animationIteration(icon());
+    expect(icon()).toHaveClass("is-spin-settle");
+    expect(trigger()).toHaveAttribute("data-update-state", "checking");
+    fireEvent.animationEnd(icon());
+    expect(icon().className).toBe("update-status-icon");
+    expect(trigger()).toHaveAttribute("data-update-state", "idle");
+  });
+  it("goes straight from wind-up to the coast when a check returns at once", async () => {
+    check.mockResolvedValue(updateStatus({ state: "current" }));
+    render(<Harness />);
+    await act(async () => fireEvent.click(trigger()));
+    expect(icon()).toHaveClass("is-spin-start");
+    fireEvent.animationEnd(icon());
+    expect(icon()).toHaveClass("is-spin-settle");
+    fireEvent.animationEnd(icon());
+    expect(trigger()).toHaveAttribute("data-update-state", "idle");
+  });
+  it("keeps the refresh glyph until the coast ends when a provider update appears mid-check", async () => {
+    const request = deferred<AppUpdateStatus>(); check.mockReturnValue(request.promise);
+    const { rerender } = render(<EverythingHarness everything={everythingController({}, [])} />);
+    publish({ state: "current" });
+    fireEvent.click(trigger());
+    fireEvent.animationEnd(icon());
+    rerender(<EverythingHarness everything={everythingController({}, [CODEX])} />);
+    expect(trigger()).toHaveAttribute("data-update-state", "checking");
+    await act(async () => request.resolve(updateStatus({ revision: ++sequence, state: "current" })));
+    fireEvent.animationIteration(icon());
+    expect(trigger()).toHaveAttribute("data-update-state", "checking");
+    fireEvent.animationEnd(icon());
+    expect(trigger()).toHaveAccessibleName("Update Codex");
+    expect(trigger()).toHaveAttribute("data-update-state", "available");
+  });
+  it("never spins for a background check while a provider update is already offered", () => {
+    render(<EverythingHarness everything={everythingController({}, [CODEX])} />);
+    publish({ state: "checking" });
+    expect(trigger()).toHaveAttribute("data-update-state", "available");
+    expect(document.querySelector(".is-spin-start, .is-spinning")).toBeNull();
+  });
+});
+
+describe("update strip in the sidebar footer", () => {
+  function op(status: ProviderMaintenanceOperation["status"], extra: Partial<ProviderMaintenanceOperation> = {}): ProviderMaintenanceOperation {
+    return { id: "codex-op", providerId: "codex", status, startedAt: new Date(Date.now() - 20_000).toISOString(), finishedAt: null,
+      beforeVersion: "0.112.0", afterVersion: null, targetVersion: "0.113.0", message: "", output: null, outputTruncated: false, ...extra };
+  }
+  const strip = (): HTMLElement | null => document.querySelector(".sidebar-update-strip");
+  it("says what is updating, then drains a success away and hands focus back to the icon", () => {
+    const { rerender } = render(<EverythingHarness everything={everythingController({ operations: new Map([["codex", op("running")]]) })} />);
+    publish({ state: "current" });
+    expect(screen.getByRole("button", { name: "Updating Codex…" })).toBeInTheDocument();
+    expect(strip()).toHaveAttribute("data-tone", "loading");
+    rerender(<EverythingHarness everything={everythingController({ operations: new Map([["codex",
+      op("succeeded", { finishedAt: new Date(Date.now() + 1_000).toISOString(), afterVersion: "0.113.0" })]]) })} />);
+    const main = screen.getByRole("button", { name: "Codex updated to 0.113.0" });
+    expect(strip()).toHaveAttribute("data-tone", "success");
+    act(() => main.focus());
+    fireEvent.animationEnd(document.querySelector(".sidebar-update-strip-drain")!, { animationName: "sidebar-update-drain" });
+    expect(document.querySelector(".sidebar-update-strip-slot")).not.toHaveClass("is-open");
+    expect(trigger()).toHaveFocus();
+    act(() => { vi.advanceTimersByTime(250); });
+    expect(strip()).toBeNull();
+  });
+  it("keeps a failure until it is dismissed and lists the reason in the details", () => {
+    const onOpenAgentSettings = vi.fn();
+    render(<SidebarUpdateControl controller={useAppUpdateStub()} everything={everythingController({ operations: new Map([["codex",
+      op("failed", { finishedAt: new Date(Date.now() + 1_000).toISOString(), message: "npm exited with code 1" })]]) })}
+      snapshot={labelSnapshot} onOpenAgentSettings={onOpenAgentSettings} />);
+    fireEvent.click(screen.getByRole("button", { name: "Codex update failed" }));
+    expect(details()).toHaveTextContent("npm exited with code 1");
+    fireEvent.click(screen.getByRole("button", { name: "Agent settings" }));
+    expect(onOpenAgentSettings).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss update notice" }));
+    expect(document.querySelector(".sidebar-update-strip-slot")).not.toHaveClass("is-open");
+  });
+  it("does not open the details when the pointer only passes over the strip", () => {
+    render(<EverythingHarness everything={everythingController({ operations: new Map([["codex", op("running")]]) })} />);
+    publish({ state: "current" });
+    fireEvent.pointerEnter(strip()!);
+    act(() => { vi.advanceTimersByTime(200); });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  it("offers a restart after a download the user started, through the usual confirmation", () => {
+    render(<Harness />);
+    publish({ state: "downloading" });
+    publish({ state: "downloaded" });
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(screen.getByRole("dialog", { name: "Restart to install Inertia 1.2.3?" })).toBeInTheDocument();
+  });
+});
+
+function useAppUpdateStub(): ReturnType<typeof useAppUpdate> {
+  return { status: updateStatus({ state: "current" }), checking: false, error: null, check: vi.fn(), download: vi.fn(),
+    cancelDownload: vi.fn(), install: vi.fn(), dismissError: vi.fn(), openRelease: vi.fn(), openReleases: vi.fn() } as unknown as ReturnType<typeof useAppUpdate>;
+}

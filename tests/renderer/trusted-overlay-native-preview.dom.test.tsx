@@ -245,6 +245,7 @@ describe("trusted overlay native preview suspension", () => {
       dismiss: vi.fn(),
       dismissError: vi.fn(),
       openRelease: vi.fn(async () => undefined),
+      openReleases: vi.fn(async () => undefined),
     };
     const providerQuotaNotices = {
       notices: [],

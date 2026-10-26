@@ -676,6 +676,8 @@ export function ChatWorkspace({
       if (navigationRef.current.conversationId !== event.conversationId) return;
       clearPendingFinalAnswerNavigation();
       finalAnswerAutoScrollOwnerRef.current = owner;
+      smoothSettleRef.current?.();
+      smoothSettleRef.current = null;
       if (followCorrectionFrameRef.current !== null) {
         window.cancelAnimationFrame(followCorrectionFrameRef.current);
         followCorrectionFrameRef.current = null;
@@ -721,6 +723,8 @@ export function ChatWorkspace({
   }, [pendingInputRequest, scrollToLatest]);
 
   useLayoutEffect(() => {
+    smoothSettleRef.current?.();
+    smoothSettleRef.current = null;
     finalAnswerAutoScrollOwnerRef.current = null;
     clearPendingFinalAnswerNavigation();
     clearReaderIntent();
@@ -757,6 +761,7 @@ export function ChatWorkspace({
         window.cancelAnimationFrame(followCorrectionFrameRef.current);
       }
       smoothSettleRef.current?.();
+      smoothSettleRef.current = null;
       onLatestContentVisibilityChange?.(false);
     },
     [onLatestContentVisibilityChange],
@@ -895,7 +900,7 @@ export function ChatWorkspace({
     context?: TurnRequestContext,
   ): Promise<TranscriptMessageSendAcceptance | null> => {
     const sourceConversationId = conversationId;
-    noteRequestSent(content);
+    noteRequestSent(sourceConversationId, content);
     markComposerSent(composerRegionRef.current);
     const acceptance = await onSendMessage(
       content,
@@ -913,7 +918,7 @@ export function ChatWorkspace({
     context?: TurnRequestContext,
   ): Promise<ConversationCompactAndSendResult> => {
     const sourceConversationId = conversationId;
-    noteRequestSent(content);
+    noteRequestSent(sourceConversationId, content);
     markComposerSent(composerRegionRef.current);
     const result = await trackCompaction("on-return", () => onCompactAndSendMessage!(content, attachments, context));
     if (result.outcome === "sent") {

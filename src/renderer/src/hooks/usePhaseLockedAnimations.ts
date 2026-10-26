@@ -6,6 +6,7 @@ export function lockAnimationPhase(element: Element | null): void {
   for (const animation of element.getAnimations({ subtree: true })) {
     if (!("animationName" in animation)) continue;
     if (animation.playState !== "running" || animation.startTime === 0) continue;
+    if (animation.effect?.getComputedTiming().iterations !== Infinity) continue;
     animation.startTime = 0;
   }
 }

@@ -1,6 +1,8 @@
 import type { Conversation, TurnGitArtifact } from "../../../shared/contracts";
 import {
+  DUO_COMPARISON_BRIEF_MAX_BYTES,
   DUO_COMPARISON_BRIEF_TITLE_MAX_CHARS,
+  isDuoComparisonBrief,
   type DuoComparisonBrief,
   type DuoComparisonBriefSide,
 } from "../../../shared/duo-comparison-brief";
@@ -12,6 +14,15 @@ function recordedFileCount(artifact: TurnGitArtifact | null): number | null {
   if (!artifact || artifact.absenceReason === "not-repository") return null;
   if (artifact.status !== "ready" || artifact.completeness !== "complete") return null;
   return artifact.files.length;
+}
+
+function boundedTitle(title: string): string {
+  let bounded = "";
+  for (const character of title.trim()) {
+    if (bounded.length + character.length > DUO_COMPARISON_BRIEF_TITLE_MAX_CHARS) break;
+    bounded += character;
+  }
+  return bounded;
 }
 
 function knownConversation(store: DuoComparisonPromptStore, conversationId: string): Conversation | null {
@@ -33,7 +44,7 @@ function briefSide(
   return {
     conversationId,
     providerId: conversation?.providerId ?? null,
-    title: (conversation?.title ?? "").trim().slice(0, DUO_COMPARISON_BRIEF_TITLE_MAX_CHARS),
+    title: boundedTitle(conversation?.title ?? ""),
     status: turn.status,
     filesChanged: recordedFileCount(store.turnGitArtifact(turnId)),
   };
@@ -48,7 +59,12 @@ export function buildDuoComparisonBrief(
   try {
     const a = briefSide(store, first.conversationId, first.turnId);
     const b = briefSide(store, second.conversationId, second.turnId);
-    return a && b ? { launchId: launch.launchId, sides: [a, b] } : undefined;
+    if (!a || !b) return undefined;
+    const brief: DuoComparisonBrief = { launchId: launch.launchId, sides: [a, b] };
+    return isDuoComparisonBrief(brief)
+      && Buffer.byteLength(JSON.stringify(brief), "utf8") <= DUO_COMPARISON_BRIEF_MAX_BYTES
+      ? brief
+      : undefined;
   } catch {
     return undefined;
   }

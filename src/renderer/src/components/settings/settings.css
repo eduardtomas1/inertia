@@ -142,12 +142,19 @@
   padding: 14px 0 6px;
 }
 
-.settings-card-heading:has(h3.visually-hidden):not(:has(.setting-status:not(:empty))) {
+.settings-card:has(> .settings-card-heading h3.visually-hidden) {
+  position: relative;
+}
+
+.settings-card-heading:has(h3.visually-hidden) {
   padding: 0;
 }
 
-.settings-card-heading:has(h3.visually-hidden):has(.setting-status:not(:empty)) {
-  padding: 10px 0 0;
+.settings-card-heading:has(h3.visually-hidden) .setting-status {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  max-width: 50%;
 }
 
 .settings-card-heading > div {

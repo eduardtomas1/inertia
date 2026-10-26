@@ -190,7 +190,7 @@ describe("mascot overlay", () => {
     const root = rule(mascot, ":root");
     for (const token of [
       "--bubble: #1f1f22;", "--bubble-border: rgb(255 255 255 / 0.10);", "--text: #ededf7;", "--muted: #9d9da7;",
-      "--faint: #81818a;", "--live: #5eb8e7;", "--attention: #d9a05a;", "--done: #70c18e;", "--problem: #ea9088;", "--focus: #a3a3fa;",
+      "--faint: #8e8e97;", "--live: #5eb8e7;", "--attention: #d9a05a;", "--done: #70c18e;", "--problem: #ea9088;", "--focus: #a3a3fa;",
     ]) expect(root).toContain(token);
     expect(root).toContain("font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif;");
     expect(source(mascot)).not.toMatch(/#(?:1d2229|f1f2e9|a9b5c2|9fb4c6|7fb0b3|d27e75|8d99a6|e4cb90|b8c4d0|d7dde3|2b323b|6f7a86|5d6773|b68e42|557e81|ffffff24)\b/u);

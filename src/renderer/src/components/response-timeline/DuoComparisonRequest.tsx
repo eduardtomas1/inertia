@@ -50,11 +50,15 @@ function ComparedSide({ label, side }: { label: "A" | "B"; side: DuoComparisonBr
 export function DuoComparisonRequest({
   turn,
   brief,
+  meta,
+  footer,
   onBeforeToggle,
   onAfterToggle,
 }: {
   turn: ResponseTurn;
   brief: DuoComparisonBrief;
+  meta?: React.ReactNode;
+  footer?: React.ReactNode;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
@@ -77,6 +81,7 @@ export function DuoComparisonRequest({
       tabIndex={-1}
       {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
     >
+      {meta}
       <p id={headingId} className="duo-comparison-heading">{DUO_COMPARISON_REQUEST_LABEL}</p>
       <ul className="duo-comparison-sides" aria-label="Compared chats">
         <ComparedSide label="A" side={brief.sides[0]} />
@@ -95,6 +100,7 @@ export function DuoComparisonRequest({
       <div id={briefId} className="duo-comparison-brief" hidden={!expanded}>
         {expanded ? turn.userMessage.content : null}
       </div>
+      {footer}
     </article>
   );
 }

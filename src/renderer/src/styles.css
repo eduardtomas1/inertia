@@ -119,7 +119,7 @@
   --settled-footer-spacing: 8px;
   --settled-artifact-spacing: 2px;
   --turn-spacing: 36px;
-  --ledger-row: 28px;
+  --ledger-row: max(28px, calc(var(--ui-control-height) - 6px));
   --markdown-paragraph-spacing: 0.95em;
   --control-height: var(--ui-control-height);
   --control-height-small: calc(var(--ui-control-height) - 4px);
@@ -4666,8 +4666,7 @@ button.turn-agents-line:hover {
     animation: workspace-panel-content-in 200ms var(--ease);
   }
 
-  .workspace-panel.is-stacked:not([hidden]) > .workspace-panel-content,
-  .terminal-dock:not([hidden]) > .terminal-dock-slot {
+  .workspace-panel.is-stacked:not([hidden]) > .workspace-panel-content {
     animation: workspace-panel-content-rise 200ms var(--ease);
   }
 
@@ -8056,7 +8055,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   --settled-artifact-spacing: 1px;
   --markdown-paragraph-spacing: 0.82em;
   --turn-spacing: 28px;
-  --ledger-row: 26px;
+  --ledger-row: max(26px, calc(var(--ui-control-height) - 8px));
 }
 
 .chat-workspace.response-density-comfortable {
@@ -8067,7 +8066,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   --settled-artifact-spacing: 3px;
   --markdown-paragraph-spacing: 1.05em;
   --turn-spacing: 44px;
-  --ledger-row: 30px;
+  --ledger-row: max(30px, calc(var(--ui-control-height) - 4px));
 }
 
 .chat-workspace.response-density-compact .composer {
@@ -9727,6 +9726,12 @@ button.sent-attachment-open:hover {
 .timeline-jump .icon-button:active {
   color: var(--text);
   background: color-mix(in srgb, var(--text) 8%, var(--surface-raised));
+}
+
+@media (forced-colors: active) {
+  .timeline-jump .icon-button {
+    border: 1px solid ButtonText;
+  }
 }
 
 .turn-changed-files {

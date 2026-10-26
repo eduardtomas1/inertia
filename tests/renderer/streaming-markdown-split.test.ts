@@ -76,6 +76,56 @@ describe("streaming Markdown split", () => {
     expect(streamingMarkdownTail(replaced)).toBe("Text");
   });
 
+  it("keeps an indented fence inside a list item whole across blank lines", () => {
+    const content = "1. Install\n\n    ```bash\n    npm ci\n\n    npm test\n    ```\n\n2. Run\n\nDone";
+    const split = splitStreamingMarkdown(content);
+    expect(split.blocks).toEqual(["1. Install\n\n    ```bash\n    npm ci\n\n    npm test\n    ```\n\n2. Run"]);
+    expect(streamingMarkdownTail(split)).toBe("Done");
+    expect(splitStreamingMarkdown("- Step\n\n   ```\n   a\n\n   b\n").fence).toBe("```");
+  });
+
+  it("keeps indented continuations and loose list items with their list", () => {
+    const split = splitStreamingMarkdown("- **First**\n\n  More about it\n\n- Second\n\nAfter the list\n\nTail");
+    expect(split.blocks).toEqual(["- **First**\n\n  More about it\n\n- Second", "After the list"]);
+    expect(streamingMarkdownTail(split)).toBe("Tail");
+    expect(splitStreamingMarkdown("Intro\n\n    indented code\n\nNext").blocks)
+      .toEqual(["Intro\n\n    indented code"]);
+  });
+
+  it("waits for a whole list marker before settling a list", () => {
+    expect(splitStreamingMarkdown("1. One\n\n2").blocks).toEqual([]);
+    expect(splitStreamingMarkdown("1. One\n\n2. Two\n\nAfter").blocks).toEqual(["1. One\n\n2. Two"]);
+    expect(splitStreamingMarkdown("- One\n\nWord").blocks).toEqual(["- One"]);
+  });
+
+  it("keeps a raw HTML block whole until its closing tag", () => {
+    const content = "<details>\n<summary>Log</summary>\n\nbody\n\n<details>\ninner\n\n</details>\n\nstill\n</details>\n\nAfter";
+    const split = splitStreamingMarkdown(content);
+    expect(split.blocks).toEqual(["<details>\n<summary>Log</summary>\n\nbody\n\n<details>\ninner\n\n</details>\n\nstill\n</details>"]);
+    expect(streamingMarkdownTail(split)).toBe("After");
+    expect(splitStreamingMarkdown("<kbd>Ctrl</kbd> first\n\nSecond").blocks).toEqual(["<kbd>Ctrl</kbd> first"]);
+  });
+
+  it("matches one pass for lists, indented fences and HTML whatever the chunking", () => {
+    const content = "- a\n\n  ```\n  x\n\n  y\n  ```\n\n- b\n\n<div>\n\nz\n\n</div>\n\n1. c\n\n2. d\n\nEnd";
+    const whole = splitStreamingMarkdown(content);
+    for (const size of [1, 2, 3, 5, 11]) {
+      const chunks = Array.from({ length: Math.ceil(content.length / size) }, (_, index) =>
+        content.slice(index * size, (index + 1) * size));
+      const incremental = streamed(chunks);
+      expect(incremental.blocks).toEqual(whole.blocks);
+      expect(streamingMarkdownTail(incremental)).toBe(streamingMarkdownTail(whole));
+    }
+  });
+
+  it("starts over when the first character of a pending line is replaced", () => {
+    const first = splitStreamingMarkdown("Intro\n\nNext");
+    expect(first.blocks).toEqual(["Intro"]);
+    const replaced = splitStreamingMarkdown("Intro\n\n  indented", first);
+    expect(replaced.blocks).toEqual([]);
+    expect(streamingMarkdownTail(replaced)).toBe("Intro\n\n  indented");
+  });
+
   it("treats CRLF line endings like LF", () => {
     const split = splitStreamingMarkdown("One\r\n\r\n```\r\na\r\n\r\nb\r\n```\r\n\r\nTwo");
     expect(split.blocks).toEqual(["One", "```\r\na\r\n\r\nb\r\n```"]);

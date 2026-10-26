@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
-import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
+import type { AgentActivity, AgentTurn, ChatMessage } from "../../src/shared/contracts";
 import type { DuoComparisonBrief } from "../../src/shared/duo-comparison-brief";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
@@ -83,12 +83,12 @@ function brief(overrides: Partial<DuoComparisonBrief["sides"][number]>[] = [{}, 
   };
 }
 
-function renderTimeline(messages: ChatMessage[], turns = [agentTurn(1)]): void {
+function renderTimeline(messages: ChatMessage[], turns = [agentTurn(1)], activities: AgentActivity[] = []): void {
   render(
     <ResponseTimeline
       turns={turns}
       messages={messages}
-      activities={[]}
+      activities={activities}
       reasonings={[]}
       plans={[]}
       checkpoints={[]}
@@ -159,6 +159,24 @@ describe("Duo comparison request card", () => {
     expect(first).toHaveTextContent("Interrupted");
     expect(first).not.toHaveTextContent(/file|changes/u);
     expect(within(first!).queryByRole("img")).toBeNull();
+  });
+
+  it("keeps the request's checkpoint notice on the card", async () => {
+    const missingCheckpoint: AgentActivity = {
+      id: "activity-checkpoint",
+      conversationId,
+      runId: "run-1",
+      turnId: "turn-1",
+      kind: "status",
+      title: "No checkpoint for this turn",
+      detail: "Checkpoint operation timed out.",
+      status: "completed",
+      createdAt: "2026-07-29T10:00:01.000Z",
+    };
+    renderTimeline([{ ...userMessage(1, JUDGE_PROMPT), duoComparison: brief() }], [agentTurn(1)], [missingCheckpoint]);
+    const card = await screen.findByRole("article", { name: "Comparing A and B" });
+    expect(card.querySelector(".message-checkpoint-missing")?.textContent)
+      .toBe("No checkpoint for this turn: Checkpoint operation timed out.");
   });
 
   it("keeps a plain prompt with the same text as an ordinary request", async () => {

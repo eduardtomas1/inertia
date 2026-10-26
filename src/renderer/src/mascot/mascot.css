@@ -1,4 +1,4 @@
-:root { --bubble: #1f1f22; --bubble-hover: #27272a; --bubble-border: rgb(255 255 255 / 0.10); --text: #ededf7; --muted: #9d9da7; --faint: #81818a; --live: #5eb8e7; --attention: #d9a05a; --done: #70c18e; --problem: #ea9088; --focus: #a3a3fa; color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+:root { --bubble: #1f1f22; --bubble-hover: #27272a; --bubble-border: rgb(255 255 255 / 0.10); --text: #ededf7; --muted: #9d9da7; --faint: #8e8e97; --live: #5eb8e7; --attention: #d9a05a; --done: #70c18e; --problem: #ea9088; --focus: #a3a3fa; color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body, #root { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
@@ -84,7 +84,7 @@ body { user-select: none; }
 .mascot-option:hover { background: #ffffff0f; }
 .mascot-option[aria-pressed="true"] { background: #ffffff14; color: var(--text); }
 .mascot-option-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.mascot-option-project { flex: 0 1 auto; max-width: 40%; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--faint); }
+.mascot-option-project { flex: 0 1 auto; max-width: 40%; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); }
 .mascot-option-project:empty { display: none; }
 .mascot-option-state { flex: none; font-size: 12px; color: var(--muted); }
 .mascot-option[data-tone="attention"] .mascot-option-state { color: var(--attention); }

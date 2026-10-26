@@ -16,23 +16,32 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function fakeAnimation(overrides: Partial<{ playState: string; startTime: number | null; animationName: string }>) {
-  return { playState: "running", startTime: 412, animationName: "agent-pixel-shimmer", ...overrides };
+function fakeAnimation(overrides: Partial<{ playState: string; startTime: number | null; animationName: string; iterations: number }>) {
+  const { iterations = Infinity, ...rest } = overrides;
+  return {
+    playState: "running",
+    startTime: 412,
+    animationName: "agent-pixel-shimmer",
+    effect: { getComputedTiming: () => ({ iterations }) },
+    ...rest,
+  };
 }
 
 describe("phase-locked loaders", () => {
-  it("restarts only running CSS animations from the shared timeline origin", () => {
+  it("restarts only running looping CSS animations from the shared timeline origin and leaves one-shot entrances alone", () => {
     const element = document.createElement("span");
     const running = fakeAnimation({});
     const paused = fakeAnimation({ playState: "paused", startTime: null });
     const transition = { playState: "running", startTime: 90 };
+    const settle = fakeAnimation({ animationName: "turn-thinking-settle", startTime: 120, iterations: 1 });
     Object.defineProperty(element, "getAnimations", {
-      value: () => [running, paused, transition],
+      value: () => [running, paused, transition, settle],
     });
     lockAnimationPhase(element);
     expect(running.startTime).toBe(0);
     expect(paused.startTime).toBeNull();
     expect(transition.startTime).toBe(90);
+    expect(settle.startTime).toBe(120);
   });
 
   it("is a no-op where the Web Animations API is missing", () => {

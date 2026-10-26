@@ -34,9 +34,9 @@ describe("completed-turn spacing", () => {
   });
 
   it("shares one ledger row height that only response density changes", () => {
-    expect(cssBlock(":root {")).toContain("--ledger-row: 28px");
-    expect(cssBlock(".chat-workspace.response-density-compact {")).toContain("--ledger-row: 26px");
-    expect(cssBlock(".chat-workspace.response-density-comfortable {")).toContain("--ledger-row: 30px");
+    expect(cssBlock(":root {")).toContain("--ledger-row: max(28px, calc(var(--ui-control-height) - 6px))");
+    expect(cssBlock(".chat-workspace.response-density-compact {")).toContain("--ledger-row: max(26px, calc(var(--ui-control-height) - 8px))");
+    expect(cssBlock(".chat-workspace.response-density-comfortable {")).toContain("--ledger-row: max(30px, calc(var(--ui-control-height) - 4px))");
     for (const selector of [
       ".turn-work-log.is-live > details > summary {",
       ".turn-work-log > details.turn-thinking > summary {",

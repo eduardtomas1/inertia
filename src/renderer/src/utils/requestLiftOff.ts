@@ -2,6 +2,7 @@ export const FRESH_REQUEST_WINDOW_MS = 1_500;
 export const COMPOSER_SENT_MS = 420;
 
 interface SentRequest {
+  conversationId: string | null;
   content: string;
   sentAt: number;
 }
@@ -13,21 +14,26 @@ function liveRequests(now: number): SentRequest[] {
   return sentRequests.filter(({ sentAt }) => now - sentAt >= 0 && now - sentAt < FRESH_REQUEST_WINDOW_MS);
 }
 
-export function noteRequestSent(content: string, now = Date.now()): void {
+function matches(request: SentRequest, conversationId: string, content: string): boolean {
+  return (request.conversationId === null || request.conversationId === conversationId)
+    && request.content === content;
+}
+
+export function noteRequestSent(conversationId: string | null, content: string, now = Date.now()): void {
   const normalized = content.trim();
   if (!normalized) return;
-  sentRequests = [...liveRequests(now), { content: normalized, sentAt: now }];
+  sentRequests = [...liveRequests(now), { conversationId, content: normalized, sentAt: now }];
 }
 
-export function isFreshRequest(content: string, now = Date.now()): boolean {
+export function isFreshRequest(conversationId: string, content: string, now = Date.now()): boolean {
   const normalized = content.trim();
-  return normalized !== "" && liveRequests(now).some((request) => request.content === normalized);
+  return normalized !== "" && liveRequests(now).some((request) => matches(request, conversationId, normalized));
 }
 
-export function claimFreshRequest(content: string, now = Date.now()): boolean {
+export function claimFreshRequest(conversationId: string, content: string, now = Date.now()): boolean {
   const normalized = content.trim();
   const live = liveRequests(now);
-  const index = live.findIndex((request) => request.content === normalized);
+  const index = live.findIndex((request) => matches(request, conversationId, normalized));
   sentRequests = index < 0 ? live : live.filter((_, candidate) => candidate !== index);
   return index >= 0;
 }

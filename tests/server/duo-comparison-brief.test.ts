@@ -86,6 +86,23 @@ describe("Duo comparison brief", () => {
     expect(duoComparisonBriefSchema.safeParse(brief).success).toBe(true);
   });
 
+  it("never splits an emoji when bounding a title", () => {
+    const { store, launch } = fixture([{ title: "😀".repeat(150) }, {}]);
+    const title = buildDuoComparisonBrief(store, launch)!.sides[0].title;
+    expect(title).toBe("😀".repeat(100));
+    expect(title.length).toBeLessThanOrEqual(200);
+  });
+
+  it("omits the brief instead of failing the judge when a side would not satisfy the contract", () => {
+    const { store, launch } = fixture([{}, {}]);
+    const unknownProvider = {
+      ...store,
+      conversation: (conversationId: string) => ({ ...store.conversation(conversationId), providerId: "not-a-provider" }),
+    } as unknown as typeof store;
+    expect(buildDuoComparisonBrief(store, launch)).toBeDefined();
+    expect(buildDuoComparisonBrief(unknownProvider, launch)).toBeUndefined();
+  });
+
   it("omits the brief rather than flag a comparison whose sources are not terminal or not identified", () => {
     const running = fixture([{ status: "running" }, {}]);
     expect(buildDuoComparisonBrief(running.store, running.launch)).toBeUndefined();

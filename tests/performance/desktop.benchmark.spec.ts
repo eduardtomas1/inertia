@@ -1370,6 +1370,7 @@ async function streamingResponsivenessSample(
     const finalTurn = finalAnswer.locator(
       "xpath=ancestor::section[@data-turn-id][1]",
     );
+    await finalTurn.locator(".turn-run-details-toggle").waitFor({ state: "attached" });
     const pendingArtifact = finalTurn.locator("[data-turn-git-artifact-id].is-pending");
     await expect.poll(
       () => pendingArtifact.count(),

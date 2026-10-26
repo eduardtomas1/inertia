@@ -214,6 +214,27 @@ describe("GoalPanel", () => {
     expect(onRefreshSkills).toHaveBeenCalledOnce();
   });
 
+  it("keeps focus on Refresh skills when the refresh brings skills in", async () => {
+    const onRefreshSkills = vi.fn();
+    const panel = (skills: ReturnType<typeof workflow>): React.JSX.Element => (
+      <GoalPanel
+        workflow={skills}
+        plan={null}
+        subagents={[]}
+        turns={[turn()]}
+        now={Date.parse("2030-01-01T00:00:42.000Z")}
+        onRefreshSkills={onRefreshSkills}
+      />
+    );
+    const view = render(panel(workflow({ skills: [] })));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh skills" }));
+    view.rerender(panel(workflow()));
+
+    expect(document.querySelector(".goal-panel-empty-summary")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Refresh skills" }));
+  });
+
   it("keeps a lone empty section with its heading", () => {
     renderPanel({ workflow: workflow({ skills: [] }) });
 

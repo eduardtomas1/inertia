@@ -1,5 +1,5 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
-import { Fragment, useId, useMemo, useState } from "react";
+import { Fragment, useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   Check,
@@ -555,10 +555,18 @@ function groupEmptySections(
 function EmptySectionsSummary({
   labels,
   onRefreshSkills,
+  onRefreshRemovedWhileFocused,
 }: {
   labels: readonly string[];
   onRefreshSkills?: () => void;
+  onRefreshRemovedWhileFocused: () => void;
 }): React.JSX.Element {
+  const refreshRef = useCallback((node: HTMLButtonElement | null) => {
+    if (!node) return undefined;
+    return () => {
+      if (node.ownerDocument.activeElement === node) onRefreshRemovedWhileFocused();
+    };
+  }, [onRefreshRemovedWhileFocused]);
   return (
     <div className="goal-panel-empty-summary">
       <span>
@@ -571,6 +579,7 @@ function EmptySectionsSummary({
       </span>
       {onRefreshSkills && (
         <button
+          ref={refreshRef}
           type="button"
           className="goal-panel-icon-button"
           aria-label="Refresh skills"
@@ -854,8 +863,22 @@ export function GoalPanel({
     ({ source }) => source === capabilitySource,
   ) ?? false;
   const controlsBusy = busy || executionStatus === "starting";
+  const panelRef = useRef<HTMLElement>(null);
+  const refreshFocusLostRef = useRef(false);
+  const noteRefreshFocusLost = useCallback(() => {
+    refreshFocusLostRef.current = true;
+  }, []);
+  useLayoutEffect(() => {
+    if (!refreshFocusLostRef.current) return;
+    refreshFocusLostRef.current = false;
+    const panel = panelRef.current;
+    const active = panel?.ownerDocument.activeElement;
+    if (!panel || (active && active !== panel.ownerDocument.body)) return;
+    panel.querySelector<HTMLElement>('button[aria-label="Refresh skills"]')?.focus();
+  });
   return (
     <section
+      ref={panelRef}
       className="goal-panel"
       aria-label="Goals and agent workflows"
       data-goal-source={capabilitySource ?? "unavailable"}
@@ -1035,6 +1058,7 @@ export function GoalPanel({
               && workflow?.skillsCapability.available
               ? onRefreshSkills
               : undefined}
+            onRefreshRemovedWhileFocused={noteRefreshFocusLost}
           />
         ))}
       </div>

@@ -5,7 +5,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import type {
   PermissionOption,
   RequestPermissionRequest,
@@ -15,7 +15,7 @@ import type {
   SessionNotification,
   ToolCallStatus,
   ToolKind,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 
 import {
   runtimeOwnedProcessInvocation,

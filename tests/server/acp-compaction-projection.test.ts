@@ -2,7 +2,7 @@
 import type {
   CompactionSummaryChunk,
   CompactionUpdate,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 import { describe, expect, it } from "vitest";
 
 import {

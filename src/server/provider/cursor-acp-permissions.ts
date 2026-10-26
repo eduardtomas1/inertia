@@ -6,7 +6,7 @@ import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
   ToolKind,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 
 import type {
   AgentHarnessStartOptions,

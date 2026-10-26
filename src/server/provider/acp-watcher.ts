@@ -1,4 +1,4 @@
-import type { ToolCallStatus, ToolKind } from "@agentclientprotocol/sdk";
+import type { ToolCallStatus, ToolKind } from "@agentclientprotocol/sdk/unstable";
 
 import type { ProviderRunInput } from "./contracts";
 

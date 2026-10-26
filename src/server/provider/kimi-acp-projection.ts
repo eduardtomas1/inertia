@@ -3,7 +3,7 @@ import type {
   SessionConfigOption,
   ToolCallStatus,
   Usage,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 
 import type { ProviderModel } from "../../shared/contracts";
 import type { createAgentHarnessEmitter } from "./agent-harness";

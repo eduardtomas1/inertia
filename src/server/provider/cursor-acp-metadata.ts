@@ -1,4 +1,4 @@
-import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import type { SessionConfigOption } from "@agentclientprotocol/sdk/unstable";
 
 import type { ProviderModel } from "../../shared/contracts";
 import type { createAgentHarnessEmitter } from "./agent-harness";

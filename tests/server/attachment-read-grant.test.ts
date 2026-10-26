@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { RequestPermissionRequest } from "@agentclientprotocol/sdk";
+import type { RequestPermissionRequest } from "@agentclientprotocol/sdk/unstable";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {

@@ -15,7 +15,8 @@ export interface AppUpdateController {
   cancelDownload: () => Promise<void>;
   install: () => Promise<void>;
   dismissError: () => void;
-  openRelease: () => Promise<void>;
+  openRelease: (version?: string) => Promise<void>;
+  openReleases: () => Promise<void>;
 }
 
 export function useAppUpdate(): AppUpdateController {
@@ -73,16 +74,23 @@ export function useAppUpdate(): AppUpdateController {
     };
   }, [acceptStatus, check]);
 
-  const openRelease = useCallback(async (): Promise<void> => {
-    if (!status?.releaseUrl) return;
+  const openPage = useCallback(async (url: string | null | undefined): Promise<void> => {
+    if (!url) return;
     setError(null);
     try {
-      await window.inertia.openExternal(status.releaseUrl);
+      await window.inertia.openExternal(url);
     } catch (cause) {
       setError("The release page could not be opened. Try again or check your default browser.");
       throw cause;
     }
-  }, [status]);
+  }, []);
+  const openRelease = useCallback(async (version?: string): Promise<void> => {
+    await openPage(version === undefined ? status?.releaseUrl
+      : status?.releaseHistory?.find((release) => release.version === version)?.releaseUrl);
+  }, [openPage, status]);
+  const openReleases = useCallback(async (): Promise<void> => {
+    await openPage(status?.releasesUrl);
+  }, [openPage, status]);
   const download = useCallback(async (): Promise<void> => {
     setError(null);
     try {
@@ -122,5 +130,6 @@ export function useAppUpdate(): AppUpdateController {
     install,
     dismissError,
     openRelease,
+    openReleases,
   };
 }

@@ -219,6 +219,10 @@ export function releasePageUrl(
   return `https://github.com/eduardtomas1/inertia/releases/tag/${CHANNELS[channel].releaseTagPrefix}${version}`;
 }
 
+export function releasesPageUrl(): string {
+  return "https://github.com/eduardtomas1/inertia/releases";
+}
+
 export function channelConfiguration(
   channel: InertiaReleaseChannel,
 ): InertiaReleaseChannelConfiguration {

@@ -1,24 +1,28 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
 import type { AppSnapshot } from "@shared/contracts";
 import type { AppUpdateController } from "../../hooks/useAppUpdate";
 import type { UpdateEverythingController } from "../../hooks/useUpdateEverything";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
-import { updateEverythingLabel, updatePercent, updatePresentation, type UpdateAction } from "./appUpdatePresentation";
+import { installedLine, updateEverythingLabel, updatePercent, updatePresentation, type UpdateAction } from "./appUpdatePresentation";
 import { IconButton } from "../ui";
 import { UpdateStatusIcon } from "./UpdateStatusIcon";
 import { UpdateRestartConfirmation } from "./UpdateRestartConfirmation";
 import { UpdateEverythingDialog } from "./UpdateEverythingDialog";
-import { updateEverythingPlan, updateEverythingProgress } from "./updateEverythingPlan";
+import { UpdateReleaseSection } from "./UpdateReleaseSection";
+import { providerLabel, updateEverythingPlan } from "./updateEverythingPlan";
+import { SidebarUpdateStrip } from "./SidebarUpdateStrip";
+import { updateStripView, type UpdateStripView } from "./updateStripView";
 import "./SidebarUpdateControl.css";
-const UpdateReleaseNotes = lazy(async () => ({
-  default: (await import("./UpdateReleaseNotes")).UpdateReleaseNotes,
-}));
 
 /** Presentation only. The existing main-process updater remains the authority. */
-export function SidebarUpdateControl({ controller, everything, snapshot = null }: {
+const NO_OPERATIONS: UpdateEverythingController["operations"] = new Map();
+const STRIP_TICK_MS = 30_000;
+
+export function SidebarUpdateControl({ controller, everything, snapshot = null, onOpenAgentSettings }: {
   controller: AppUpdateController; everything?: UpdateEverythingController; snapshot?: AppSnapshot | null;
+  onOpenAgentSettings?: () => void;
 }): React.JSX.Element {
   const { status } = controller;
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
@@ -28,7 +32,12 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
   const [pending, setPending] = useState<UpdateAction | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [openingRelease, setOpeningRelease] = useState(false);
-  const [latched, setLatched] = useState(false);
+  const [spinMoving, setSpinMoving] = useState(false);
+  const [watermark] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
+  const [downloadedVersion, setDownloadedVersion] = useState<string | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
   const actionInFlight = useRef(false);
   const cancelInFlight = useRef(false);
   const releaseInFlight = useRef(false);
@@ -39,7 +48,6 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const popupId = useId();
   const checking = controller.checking || status?.state === "checking" || pending === "check";
-  const showChecking = checking || (latched && !reducedMotion);
   const offeredPlan = useMemo(() => everything ? updateEverythingPlan({
     snapshot, statuses: everything.statuses, operations: everything.operations, appStatus: status,
   }) : null, [everything, snapshot, status]);
@@ -48,26 +56,49 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
   const dismissEverythingError = everything?.dismissError;
   const everythingError = everything?.error ?? null;
   const errorPlan = useRef<string | null | undefined>(undefined);
-  const everythingProgress = everything?.phase ? updateEverythingProgress(everything.phase, everything.operations, snapshot) : null;
+  const phase = everything?.phase ?? null;
+  const activeRun = everything?.activeRun ?? null;
+  const outcome = everything?.outcome ?? null;
+  const operations = everything?.operations ?? NO_OPERATIONS;
+  const stripView = useMemo(() => updateStripView({
+    phase, activeRun, outcome, operations, appStatus: status, now, watermark, dismissed, downloadedVersion,
+    label: (providerId) => providerLabel(snapshot, providerId),
+  }), [phase, activeRun, outcome, operations, status, now, watermark, dismissed, downloadedVersion, snapshot]);
+  const stripActive = stripView?.active === true;
   const everythingLabel = everythingPlan
     ? updateEverythingLabel(everythingPlan.app !== null, everythingPlan.providers.map((provider) => provider.label)) : null;
-  const presentation: ReturnType<typeof updatePresentation> = everythingProgress
-    ? { icon: "installing", action: "none", label: everythingProgress, actionLabel: everythingProgress }
-    : everythingLabel && pending === null ? { icon: "available", action: "everything", label: everythingLabel, actionLabel: everythingLabel }
-      : updatePresentation(status, showChecking);
+  const spinWanted = checking && !stripActive && (spinMoving || !everythingLabel);
+  const holdSpin = spinWanted || spinMoving;
+  const appPresentation = updatePresentation(status, holdSpin);
+  const presentation: ReturnType<typeof updatePresentation> = stripActive
+    ? { icon: appPresentation.icon === "checking" ? "idle" : appPresentation.icon, action: "details", label: "Update details", actionLabel: "Update details" }
+    : holdSpin ? appPresentation
+      : everythingLabel && pending === null ? { icon: "available", action: "everything", label: everythingLabel, actionLabel: everythingLabel }
+        : appPresentation;
   const percent = updatePercent(status?.progress?.percent);
   const disabled = pending !== null || presentation.action === "none" || (presentation.action === "release" && openingRelease);
   useNativePreviewSuspension(open || confirmation !== null);
   const focusTrigger = useCallback(() => {
     restoringFocus.current = true;
-    trigger.current?.focus({ preventScroll: true });
+    const target = opener.current?.isConnected ? opener.current : trigger.current;
+    opener.current = null;
+    target?.focus({ preventScroll: true });
     restoringFocus.current = false;
   }, []);
+  const focusIcon = useCallback(() => {
+    opener.current = null;
+    focusTrigger();
+  }, [focusTrigger]);
 
   useEffect(() => {
-    if (reducedMotion) setLatched(false);
-    else if (checking) setLatched(true);
-  }, [checking, reducedMotion]);
+    if (!stripActive) return;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), STRIP_TICK_MS);
+    return () => clearInterval(tick);
+  }, [stripActive]);
+  useEffect(() => {
+    if (status?.state === "downloading" && !phase && status.latestVersion) setDownloadedVersion(status.latestVersion);
+  }, [status?.state, status?.latestVersion, phase]);
   useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
   useEffect(() => {
     if (!everythingError) errorPlan.current = undefined;
@@ -136,18 +167,32 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
     if (closeTimer.current) clearTimeout(closeTimer.current);
     setOpen(false);
     if (restore) focusTrigger();
+    else opener.current = null;
+  };
+  const openDetails = (from?: HTMLElement): void => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    if (confirmation !== null || everythingOpen) return;
+    opener.current = from ?? null;
+    setOpen(true);
+    requestAnimationFrame(() => popup.current?.querySelector<HTMLButtonElement>("button")?.focus());
+  };
+  const dismissStrip = (view: UpdateStripView): void => {
+    setDismissed((current) => new Set([...current, view.key, ...view.key.split("|")]));
+  };
+  const openPage = async (open: () => Promise<void>): Promise<void> => {
+    if (releaseInFlight.current) return;
+    releaseInFlight.current = true;
+    setOpeningRelease(true);
+    try { await open(); } catch { /* Sanitized by the controller. */ }
+    finally { releaseInFlight.current = false; setOpeningRelease(false); }
   };
   const run = async (action: UpdateAction): Promise<void> => {
     // Opening notes must remain possible while a download invocation is pending.
     if (action === "release") {
-      if (releaseInFlight.current) return;
-      releaseInFlight.current = true;
-      setOpeningRelease(true);
-      try { await controller.openRelease(); } catch { /* Sanitized by the controller. */ }
-      finally { releaseInFlight.current = false; setOpeningRelease(false); }
+      await openPage(() => controller.openRelease());
       return;
     }
-    if (actionInFlight.current || action === "none" || action === "everything") return;
+    if (actionInFlight.current || action === "none" || action === "everything" || action === "details") return;
     actionInFlight.current = true;
     setPending(action);
     try {
@@ -159,6 +204,10 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
   };
   const activate = (): void => {
     if (disabled) return;
+    if (presentation.action === "details") {
+      openDetails();
+      return;
+    }
     if (presentation.action === "everything") {
       close();
       setEverythingOpen(true);
@@ -169,7 +218,6 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
       setConfirmation(status.latestVersion);
       return;
     }
-    if (presentation.action === "check" && !reducedMotion) setLatched(true);
     void run(presentation.action);
   };
   const cancel = async (): Promise<void> => {
@@ -179,9 +227,18 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
     try { await controller.cancelDownload(); } catch { /* Sanitized by the controller. */ }
     finally { cancelInFlight.current = false; setCancelling(false); }
   };
-  const currentVersion = status?.currentVersion;
   const readyToConfirm = status?.state === "downloaded" && status.latestVersion === confirmation;
-  return <div className="sidebar-update-control" onPointerEnter={pointerEnter} onPointerLeave={leave}
+  const providerRows = stripView?.items.some((item) => item.id !== "inertia") === true;
+  const restartFromStrip = (): void => {
+    if (stripView) dismissStrip(stripView);
+    if (status?.state === "downloaded" && status.latestVersion) {
+      close();
+      setConfirmation(status.latestVersion);
+    }
+  };
+  return <><SidebarUpdateStrip view={stripView} expanded={open} popupId={popupId}
+    onOpen={(element) => openDetails(element)} onDismiss={dismissStrip} onRestart={restartFromStrip} onFocusLost={focusIcon} />
+  <div className="sidebar-update-control" onPointerEnter={pointerEnter} onPointerLeave={leave}
     onBlur={(event) => {
       // Native focus can return to the document when a download action is
       // disabled/removed. Hover still owns the panel until the pointer leaves.
@@ -202,33 +259,38 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
           requestAnimationFrame(() => popup.current?.querySelector<HTMLButtonElement>("button")?.focus());
         }
       }}>
-      <UpdateStatusIcon state={presentation.icon} percent={percent}
-        animate={!reducedMotion && (presentation.icon === "checking" || presentation.icon === "installing")}
-        onIteration={() => { if (!checking) setLatched(false); }} />
+      <UpdateStatusIcon state={presentation.icon} percent={percent} spinning={spinWanted}
+        reducedMotion={reducedMotion} onMovingChange={setSpinMoving} />
     </button>
-    <span className="update-status-announcement" role="status" aria-live="polite">{everythingProgress ?? status?.message ?? ""}</span>
+    <span className="update-status-announcement" role="status" aria-live="polite">{stripView?.title ?? status?.message ?? ""}</span>
     {open && <div ref={popup} id={popupId} popover="manual" className="sidebar-update-details" role="dialog"
       aria-label="Application update details" onPointerEnter={pointerEnter} onPointerLeave={leave}
       onToggle={(event) => { if (event.newState === "closed") close(); }}>
-      <header><div><strong>{presentation.label}</strong>
-        {currentVersion && <small>{status?.channel === "canary" ? "Inertia Canary" : "Inertia"} · Installed {currentVersion}</small>}</div>
+      <header><div><strong>{stripView?.title ?? presentation.label}</strong>
+        {status?.currentVersion && <small>{installedLine(status)}</small>}</div>
         <IconButton label="Close update details" onClick={() => close(true)}><X size={16} /></IconButton></header>
-      {(controller.error ?? status?.message) && <p className="update-detail-message">{controller.error ?? status?.message}</p>}
-      {everythingError && everythingError !== (controller.error ?? status?.message) && <p className="update-detail-message">{everythingError}</p>}
+      {stripView ? <>
+        {controller.error && <p className="update-detail-message">{controller.error}</p>}
+        {stripView.items.length > 0 && <ul className="update-run-items" aria-label="Update progress">
+          {stripView.items.map((item) => <li key={item.id} className={item.failed ? "is-failed" : undefined}>
+            <span>{item.label}</span><span>{item.status}</span>{item.detail && <small>{item.detail}</small>}
+          </li>)}
+        </ul>}
+        {stripView.items.length === 0 && !stripView.active && everythingError && <p className="update-detail-message">{everythingError}</p>}
+      </> : <>
+        {(controller.error ?? status?.message) && <p className="update-detail-message">{controller.error ?? status?.message}</p>}
+        {everythingError && everythingError !== (controller.error ?? status?.message) && <p className="update-detail-message">{everythingError}</p>}
+      </>}
       {status?.freshness === "cached" && <p className="update-detail-muted">Showing the last successful check. Release information may be out of date.</p>}
       {status?.state === "downloading" && <div className="update-detail-progress" role="progressbar" aria-label="Update download progress"
         aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} aria-valuetext={percent === null ? "Waiting for download progress" : `${percent}%`}>
         <span style={{ width: `${percent ?? 0}%` }} /></div>}
-      {status?.releaseNotes && <section className="update-release-notes" aria-label="Release notes">
-        <h3>What’s changed{status.latestVersion ? ` in ${status.latestVersion}` : ""}</h3>
-        <div className="update-release-body" tabIndex={0} role="region" aria-label="Release changes">
-          <Suspense fallback={<p className="update-release-plain">{status.releaseNotes}</p>}>
-            <UpdateReleaseNotes text={status.releaseNotes} />
-          </Suspense>
-        </div>
-      </section>}
+      {status?.releaseNotes && <UpdateReleaseSection status={status} notes={status.releaseNotes} opening={openingRelease}
+        onOpenRelease={(version) => { void openPage(() => controller.openRelease(version)); }}
+        onOpenReleases={() => { void openPage(() => controller.openReleases()); }} />}
       <footer className="update-detail-actions">
-        {presentation.action !== "none" && <button type="button" className="secondary-button" disabled={disabled} onClick={activate}>{presentation.actionLabel}</button>}
+        {presentation.action !== "none" && presentation.action !== "details" && <button type="button" className="secondary-button" disabled={disabled} onClick={activate}>{presentation.actionLabel}</button>}
+        {providerRows && onOpenAgentSettings && <button type="button" className="text-button" onClick={() => { close(); onOpenAgentSettings(); }}>Agent settings</button>}
         {status?.state === "downloading" && <button type="button" className="secondary-button" disabled={cancelling} onClick={() => { void cancel(); }}>{cancelling ? "Cancelling…" : "Cancel download"}</button>}
         {status?.releaseUrl && presentation.action !== "release" && <button type="button" className="text-button" onClick={() => { void run("release"); }} disabled={openingRelease}>Release notes <ExternalLink size={14} aria-hidden="true" /></button>}
       </footer>
@@ -245,5 +307,5 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
         setEverythingOpen(false);
         void everything.run(request, new Map(everythingPlan.providers.map(({ providerId, label }) => [providerId, label])));
       }} />}
-  </div>;
+  </div></>;
 }

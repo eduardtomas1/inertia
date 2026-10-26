@@ -128,6 +128,7 @@ const appUpdate = {
   dismiss: vi.fn(),
   dismissError: vi.fn(),
   openRelease: vi.fn(async () => undefined),
+  openReleases: vi.fn(async () => undefined),
 };
 
 function setup({

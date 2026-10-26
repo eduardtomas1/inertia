@@ -7,7 +7,8 @@ import { updateStatus } from "../../support/app-update-fixture";
 
 /** Real main service/coordinator/IPC; only release transport and native download are controlled.
  * No installer, provider request, or personal profile is used by this fixture. */
-export async function installUpdateFixture(ipcMain: IpcMain, owner: WebContents) {
+export async function installUpdateFixture(ipcMain: IpcMain, owner: WebContents,
+  { installedVersion, releases }: { installedVersion?: string; releases?: unknown[] } = {}) {
   const counts = { checks: 0, downloads: 0, installs: 0, quits: 0, cleanup: 0 };
   let available = false;
   let releaseCheck: (() => void) | null = null;
@@ -16,9 +17,12 @@ export async function installUpdateFixture(ipcMain: IpcMain, owner: WebContents)
   let finish: (() => void) | null = null;
   let fail: ((error: Error) => void) | null = null;
   let progress: ((value: AppUpdaterDownloadProgress) => void) | null = null;
-  const metadata = updateStatus();
+  const metadata = updateStatus(installedVersion ? { currentVersion: installedVersion } : {});
   const service = new AppUpdateService({ currentVersion: metadata.currentVersion, capability: { delivery: "in-app" },
-    fetch: async () => { throw new Error("No release network in fixture"); },
+    fetch: async (input) => {
+      if (releases && String(input).endsWith("/releases?per_page=20")) return new Response(JSON.stringify(releases));
+      throw new Error("No release network in fixture");
+    },
     loadUpdater: async () => ({
       check: async () => {
         counts.checks++; if (gateCheck) { checkEntered = true; await gateCheck; }

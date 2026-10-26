@@ -183,11 +183,11 @@ async function openDialog(page: Page): Promise<Locator> {
   return dialog;
 }
 
-async function capture(page: Page, name: string, hover?: Locator): Promise<void> {
+async function capture(page: Page, name: string, hover?: Locator, animations: "disabled" | "allow" = "disabled"): Promise<void> {
   if (!evidenceDirectory) return;
   if (hover) await hover.hover();
   else await page.mouse.move(0, 0);
-  await page.screenshot({ path: join(evidenceDirectory, `${name}.png`), animations: "disabled" });
+  await page.screenshot({ path: join(evidenceDirectory, `${name}.png`), animations });
 }
 
 function recordFrames(page: Page): () => Promise<void> {
@@ -229,19 +229,23 @@ test("updates Codex, interrupts the running chat and continues it on the same th
     await dialog.getByRole("button", { name: "Update", exact: true }).click();
     await expect(dialog).toHaveCount(0);
 
-    await expect(updateControl(page)).toHaveAttribute("aria-label", "Updating Codex…");
+    await expect(page.getByRole("button", { name: "Updating Codex…", exact: true })).toBeVisible();
+    await expect(updateControl(page)).toHaveAttribute("aria-label", "Update details");
     await expect(interruption(page)).toContainText("Stopped to update Codex. The chat continues after the update.");
     await expect.poll(async () => (await brewCalls(fake)).some((args) => args[0] === "upgrade")).toBe(true);
     expect((await brewCalls(fake)).filter((args) => args[0] === "upgrade")).toEqual([["upgrade", "codex"]]);
     if (evidenceDirectory) await page.waitForTimeout(1_000);
     await capture(page, "updating", updateControl(page));
     await page.mouse.move(0, 0);
+    await capture(page, "updating-strip");
     await writeFile(fake.brewGatePath, "release\n", "utf8");
 
     await expect(page.getByText(`Updated to ${latestVersion}`, { exact: true })).toBeVisible();
     const continued = turnRow(page, continuation);
+    await expect(page.getByRole("button", { name: `Codex updated to ${latestVersion}`, exact: true })).toBeVisible();
+    await capture(page, "updated-strip", undefined, "allow");
     await expect(continued.getByText(continuedAnswer, { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(updateControl(page)).not.toHaveAttribute("aria-label", "Updating Codex…");
+    await expect(updateControl(page)).not.toHaveAttribute("aria-label", "Update details");
     if (evidenceDirectory) await page.waitForTimeout(1_200);
     await stopFrames();
     await capture(page, "continued");

@@ -397,8 +397,8 @@ test("gates the exact runtime-selected and fallback node-pty binaries per Window
     const releaseRoot = join(nodePtyRoot, "build", "Release");
     const prebuildRoot = join(nodePtyRoot, "prebuilds", `win32-${architecture}`);
 
-    expect(paths).toHaveLength(24);
-    expect(new Set(paths).size).toBe(24);
+    expect(paths).toHaveLength(23);
+    expect(new Set(paths).size).toBe(23);
     expect(paths.filter((path) => path.includes(releaseRoot))).toEqual(
       expect.arrayContaining([
         expect.stringContaining(join(releaseRoot, "pty.node")),
@@ -955,9 +955,9 @@ test("pins the reviewed builder and gates installed Windows binaries", async () 
     "utf8",
   );
 
-  expect(manifest.devDependencies["electron-builder"]).toBe("26.17.0");
-  expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.17.0");
-  expect(lock.packages["node_modules/app-builder-lib"]?.version).toBe("26.17.0");
+  expect(manifest.devDependencies["electron-builder"]).toBe("26.18.0");
+  expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.18.0");
+  expect(lock.packages["node_modules/app-builder-lib"]?.version).toBe("26.18.0");
   expect(manifest.scripts["test:windows-installer-smoke"])
     .toBe("node scripts/windows-installer-smoke.mjs");
   expect(source).toContain("NSIS application archive verified");
@@ -979,6 +979,7 @@ test("pins the reviewed builder and gates installed Windows binaries", async () 
   expect(source).toContain('"d3dcompiler_47.dll"');
   expect(source).not.toContain('"libEGL.dll"');
   expect(source).not.toContain('"libGLESv2.dll"');
+  expect(source).not.toContain('"dxil.dll"');
   expect(source).toContain('"prebuilds", `win32-${architecture}`');
   expect(source).toContain('["conpty.dll", "OpenConsole.exe"]');
   expect(source).not.toContain('"build", "Release", "conpty", name');

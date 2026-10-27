@@ -8,10 +8,11 @@ import { AgentBrowserRefusal, changedGeometry, stopForAbort } from "./preview-ag
 import type { BrowserApprovalGuard } from "./preview-agent-approvals.js";
 import { hoverAgentPageRef } from "./preview-agent-input.js";
 import { locateAgentPageRef, showAgentPageCursor, type PreviewAgentTarget } from "./preview-agent-page.js";
-import { blankTabRefusal, type AgentOperationSession, type PreviewAgentOperations } from "./preview-agent-operations.js";
+import { blankTabRefusal, OUTSIDE_VIEWPORT_MESSAGE, type AgentOperationSession, type PreviewAgentOperations } from "./preview-agent-operations.js";
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
 import type { AgentOperationScope } from "./preview-agent-scope.js";
 import { selectAgentPageOption, type AgentPageSelection } from "./preview-agent-select.js";
+import { agentPageViewPoint } from "./preview-agent-viewport.js";
 
 const MAX_LOG_ENTRIES = 100;
 const MAX_FAILURE_MESSAGE_CHARS = 1_000;
@@ -108,14 +109,18 @@ export async function hoverAgentPageElement<Session extends AgentOperationSessio
   const approached = await approachAgentPageRef(operations, session, command.ref, "Agent hover", changed, scope, validate);
   if (!("generation" in approached)) return approached;
   let target = approached.target;
+  const map = await operations.pointMap(session, contents, scope);
+  if (session.boundsGeneration !== approached.generation) return changedGeometry();
+  if (!agentPageViewPoint(map, target.x, target.y)) return failure("not-found", OUTSIDE_VIEWPORT_MESSAGE);
   const deliveryRefusal = await operations.deliverInput(contents, async () => {
     scope.inputSent = true;
     const hovered = await operations.rendererOperation(
       contents,
-      () => hoverAgentPageRef(contents, command.ref, target.x, target.y, scope.signal),
+      () => hoverAgentPageRef(contents, command.ref, target.x, target.y, scope.signal, map),
       { scope, phase: "page-hover" },
     );
     target = deliveredTarget(session, approached.generation, hovered, changed, validate);
+    if (!agentPageViewPoint(map, target.x, target.y)) throw new AgentBrowserRefusal(failure("not-found", OUTSIDE_VIEWPORT_MESSAGE));
   }, scope);
   if (deliveryRefusal === "retargeted") {
     return failure("not-found", "That page element changed during the hover. Take a new inertia_browser_snapshot for current refs.");
@@ -160,6 +165,10 @@ function selectionFailure(selection: Exclude<AgentPageSelection, { outcome: "sel
       return failure("invalid", "That option is disabled.");
     case "too-large":
       return failure("too-large", "That list has too many options for Inertia to search.");
+    case "reverted":
+      return failure("invalid", selection.label
+        ? `The page did not keep that option. The list shows ${JSON.stringify(selection.label)}.`
+        : "The page did not keep that option.");
   }
 }
 

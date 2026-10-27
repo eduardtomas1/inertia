@@ -12,6 +12,7 @@ const MAX_CASE_FOLD_CHARS = 1_000;
 export type AgentPageSelection =
   | { outcome: "selected"; value: string; label: string }
   | { outcome: "not-found"; options: string[]; total: number }
+  | { outcome: "reverted"; label: string }
   | { outcome: "stale" | "not-select" | "nested" | "multiple" | "disabled" | "option-disabled" | "too-large" };
 
 async function execute(contents: WebContents, code: string): Promise<unknown> {
@@ -43,6 +44,8 @@ function selection(value: unknown): AgentPageSelection {
           ? result.total
           : 0,
       };
+    case "reverted":
+      return { outcome: "reverted", label: boundedText(result.label, MAX_CHOSEN_TEXT_CHARS) };
     case "not-select":
     case "nested":
     case "multiple":
@@ -119,6 +122,10 @@ export async function selectAgentPageOption(
     element.selectedIndex = index;
     element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
+    const kept = element.options?.[element.selectedIndex];
+    if (element.isConnected && kept !== option) {
+      return { outcome: "reverted", label: redact(text(kept?.label), ${MAX_CHOSEN_TEXT_CHARS}) };
+    }
     return {
       outcome: "selected",
       value: redact(text(option.value), ${MAX_CHOSEN_TEXT_CHARS}),

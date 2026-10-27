@@ -30,6 +30,7 @@ import {
 import {
   agentViewportLayout,
   agentViewportState,
+  emulateAgentPreviewPage,
   nextAgentViewport,
   PARKED_PREVIEW_BOUNDS,
   sameAgentViewport,
@@ -721,17 +722,12 @@ export class PreviewBroker {
     await this.#emulate(session);
   }
 
-  async #emulate(session: PreviewSession): Promise<void> {
-    const emulated = session.viewport !== null || session.colorScheme !== "system";
-    await Promise.all([...session.tabs.values()].map(async (tab) => {
+  async #emulate(session: PreviewSession, tabs = [...session.tabs.values()]): Promise<void> {
+    await Promise.all(tabs.map(async (tab) => {
       const contents = liveContents(tab);
       if (!contents) return;
       try {
-        await setAgentPageEmulation(contents, session, session.viewportScale);
-        const url = contents.getURL();
-        if (emulated && url && url !== "about:blank" && !contents.debugger.isAttached()) {
-          await ensureAgentFileChooserBlock(contents);
-        }
+        await emulateAgentPreviewPage(contents, session, session.viewportScale, ensureAgentFileChooserBlock);
       } catch (error) {
         if (tab.id === session.activeTabId) throw error;
       }
@@ -889,6 +885,7 @@ export class PreviewBroker {
           sameDocument,
           this.#evidenceAuthority(session, currentTab.id),
         );
+        if (!sameDocument) void this.#emulate(session, [currentTab]).catch(() => undefined);
       },
       allowUnload: (currentTab) => this.#allowUnload(session, currentTab),
       userInput: () => {

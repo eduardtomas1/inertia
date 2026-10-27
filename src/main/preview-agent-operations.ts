@@ -44,7 +44,7 @@ const BLANK_TAB_NEXT_STEP = "This tab is blank. Open a page with the navigate to
 const STILL_LOADING_NOTE = "The page is still loading. Wait for it with the wait tool, or take a snapshot to read what has rendered so far.";
 const FAILED_LOAD_MESSAGE = "This tab is showing a browser error page because its last navigation failed. Check that the development server is running, then navigate again.";
 const CANCELLED_NAVIGATION_MESSAGE = "The navigation was cancelled before a page loaded, usually because it redirected to an address outside this machine or started a download. The tab still shows its previous page.";
-const OUTSIDE_VIEWPORT_MESSAGE = "That control is outside the visible part of the page. Scroll it into view with inertia_browser_scroll and its ref, then try again.";
+export const OUTSIDE_VIEWPORT_MESSAGE = "That control is outside the visible part of the page. Scroll it into view with inertia_browser_scroll and its ref, then try again.";
 const CRASHED_PAGE_MESSAGE = "This tab's page crashed. Navigate to the page again to reload it.";
 const NAVIGATION_REPLACED_NOTE = "The page replaced this navigation before it finished. Take a snapshot to see which page is showing.";
 const VIEWPORT_CHANGED_NOTE = "The page layout may have changed, so earlier refs may be stale. Take a new inertia_browser_snapshot before using them.";
@@ -1023,6 +1023,10 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
 
   async locateInView(contents: PreviewContents, ref: string, scope: AgentOperationScope): Promise<PreviewAgentTarget> {
     return await this.#locateInView(contents, ref, scope);
+  }
+
+  async pointMap(session: Session, contents: PreviewContents, scope: AgentOperationScope): Promise<AgentPagePointMap> {
+    return await this.#pointMap(session, contents, scope);
   }
 
   async deliverInput(

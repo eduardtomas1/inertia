@@ -213,6 +213,32 @@ describe("Browser hover", () => {
       .resolves.toMatchObject({ ok: true, state: { controller: "user" } });
   });
 
+  it("moves the pointer in view coordinates under a fixed viewport and refuses targets outside it", async () => {
+    const { broker, contents } = await loadedHarness();
+    broker.connect({ ownerId: "primary", contextId: conversationId, connectionId });
+    broker.setBounds({
+      ownerId: "primary", contextId: conversationId, connectionId,
+      bounds: { x: 100, y: 50, width: 600, height: 500 },
+    });
+    await broker.perform(runIdentity, { action: "resize", preset: "desktop" });
+    pageTools.locateAgentPageRef.mockResolvedValue({ ...shippingTarget, role: "button", label: "Help", x: 1_230, y: 720 });
+
+    await expect(broker.perform(runIdentity, { action: "hover", ref: "e2" })).resolves.toMatchObject({
+      ok: true,
+      state: { activity: { action: "hover", x: 1_230, y: 720 } },
+    });
+    expect(contents.sentInputs).toEqual([{ type: "mouseMove", x: 576.5625, y: 337.5 }]);
+    expect(pageTools.showAgentPageCursor).toHaveBeenLastCalledWith(contents, 1_230, 720, "Agent hover");
+
+    pageTools.locateAgentPageRef.mockResolvedValue({ ...shippingTarget, x: 1_300, y: 720 });
+    await expect(broker.perform(runIdentity, { action: "hover", ref: "e2" })).resolves.toEqual({
+      ok: false,
+      code: "not-found",
+      message: "That control is outside the visible part of the page. Scroll it into view with inertia_browser_scroll and its ref, then try again.",
+    });
+    expect(contents.sentInputs).toHaveLength(1);
+  });
+
   it("binds a Supervised hover approval to the inspected element", async () => {
     const { broker, contents } = await loadedHarness();
     pageTools.locateAgentPageRef.mockResolvedValue({ ...shippingTarget, role: "button", label: "Help" });
@@ -283,6 +309,51 @@ describe("Browser select", () => {
     expect(page.select.selectedIndex).toBe(0);
     await broker.perform(runIdentity, { action: "select", ref: "e4", value: "ALSO FAST" });
     expect(page.select.selectedIndex).toBe(2);
+  });
+
+  it("reports the option a controlled list kept when its change handler accepts or rejects the choice", async () => {
+    const { broker, contents } = await loadedHarness();
+    const page = selectPage(contents, shipping);
+    let kept = 0;
+    let accept = true;
+    page.select.dispatchEvent = (event: Event) => {
+      page.events.push({ type: event.type, bubbles: event.bubbles });
+      if (event.type === "change") {
+        if (accept) kept = page.select.selectedIndex as number;
+        page.select.selectedIndex = kept;
+      }
+      return true;
+    };
+
+    await expect(broker.perform(runIdentity, { action: "select", ref: "e4", value: "express" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(page.select.selectedIndex).toBe(1);
+
+    accept = false;
+    const rejected = await broker.perform(runIdentity, { action: "select", ref: "e4", value: "Overnight" });
+    expect(rejected).toEqual({
+      ok: false,
+      code: "invalid",
+      message: "The page did not keep that option. The list shows \"Express\".",
+    });
+    expect(parseAgentBrowserResult(rejected)).toEqual(rejected);
+    expect(page.select.selectedIndex).toBe(1);
+    await expect(broker.perform(runIdentity, { action: "tabs" }))
+      .resolves.toMatchObject({ state: { activity: { action: "select" } } });
+  });
+
+  it("redacts the kept option of a list Inertia withholds", async () => {
+    const { broker, contents } = await loadedHarness();
+    const page = selectPage(contents, shipping, {}, ["Standard"]);
+    page.select.dispatchEvent = (event: Event) => {
+      if (event.type === "change") page.select.selectedIndex = 0;
+      return true;
+    };
+    await expect(broker.perform(runIdentity, { action: "select", ref: "e4", value: "express" })).resolves.toEqual({
+      ok: false,
+      code: "invalid",
+      message: "The page did not keep that option. The list shows \"[redacted]\".",
+    });
   });
 
   it("lists up to twenty redacted option labels when nothing matches and changes nothing", async () => {

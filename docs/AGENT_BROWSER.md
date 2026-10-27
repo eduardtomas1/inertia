@@ -31,9 +31,9 @@ local runtime receives only a narrow command broker.
   to open in the system browser; remote plaintext HTTP is rejected.
 - The Browser chrome shows pages, the active page and a **Viewport** menu. Its
   **Evidence** view keeps a bounded local timeline of navigation, page
-  failures, screenshots, and fixed agent-action labels. Click and type
-  actions also render a pointer with a fixed bounded label inside the visible
-  page.
+  failures, screenshots, and fixed agent-action labels. Click, type, hover and
+  select actions also render a pointer with a fixed bounded label inside the
+  visible page.
 - Browser tools are injected automatically into the existing exact-turn host
   bridge for Codex, Claude, Cursor, Kimi Code, and OpenCode. No skill
   install is required. Claude, Cursor, Kimi Code, and OpenCode advertise the
@@ -97,13 +97,27 @@ listen for, so they never insert a line break.
 `inertia_browser_hover` moves the pointer onto one element from the latest
 snapshot without pressing a button, so a menu or tooltip that opens on hover
 can be read with a new snapshot. `inertia_browser_select` chooses an option of
-a native `<select>` element: `value` is matched against each option's value
-and then its label, exactly first and then ignoring case. A custom dropdown
-built from other elements is opened with a click and its option clicked.
-`inertia_browser_logs` reads nothing from the page. It returns the chat's
-Evidence ledger as bounded text: console errors, failed requests by origin,
-method and resource type, navigations, and agent actions, with the same
+a native `<select>` element. `value` is compared with each option's exact
+value, then its exact label, then its value and then its label ignoring case,
+and the first option that matches is chosen. Lists that allow several choices,
+disabled lists, disabled options and options in a disabled group are refused.
+When nothing matches, the error lists up to 20 option labels, each cut to 30
+characters with remembered sensitive values redacted, and the total number of
+options. The page receives `input` and `change` events for the choice; when
+its change handler puts another option back, as a controlled component that
+rejects the value does, the call fails and names the option the list kept. A
+custom dropdown built from other elements is opened with a click and its
+option clicked. The activity labels are "Agent hovered a page element" and
+"Agent chose an option".
+
+`inertia_browser_logs` reads nothing from the page. It returns the newest
+entries of the chat's Evidence ledger, at most 100 and within the 32 KiB
+result limit: navigations, console errors, failed requests by origin, method
+and resource type, agent actions and screenshot captures, with the same
 sanitization as the Evidence view (see [Local evidence](#local-evidence)).
+Each entry has `kind`, `at`, `tabId` and `summary`, plus `detail` when there
+is one and `occurrences` when repeats were coalesced. `omitted: true` says
+older entries were left out.
 
 Pages cannot open native dialogs. The Browser preload replaces `alert`,
 `confirm` and `prompt` in the page's main world before page scripts run,
@@ -472,7 +486,8 @@ label; an ordinary input without a label may be named by its own value, with
 remembered values redacted. Typed text is hidden from an approval request when
 the target is a sensitive field, an editable region or textbox whose name
 words name a credential, or any control while the document holds a remembered
-value or could not be scanned completely.
+value or could not be scanned completely. The option named by a select
+approval ("Choose an option in" a list) is hidden by the same rules.
 
 ### Screenshots and local capture
 

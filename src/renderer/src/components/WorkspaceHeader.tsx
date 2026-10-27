@@ -100,7 +100,7 @@ type WorkspaceHeaderProps = {
   conversationMenu?: HeaderConversationMenu | null;
   linkedTask?: { id: string; title: string } | null;
   onOpenTask?: (taskId: string) => void;
-  onOpenSidebar: () => void;
+  onOpenSidebar?: () => void;
   onOpenSettings: () => void;
   onCloseSettings: () => void;
   onCreateConversationInProject?: () => void;
@@ -332,9 +332,11 @@ export function WorkspaceHeader({
   return (
     <header ref={headerRef} className="workspace-header drag-region">
       <div className="header-leading no-drag">
-        <IconButton label="Toggle project navigation" shortcut={sidebarShortcut} className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
-          {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-        </IconButton>
+        {onOpenSidebar && (
+          <IconButton label="Toggle project navigation" shortcut={sidebarShortcut} className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
+            {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </IconButton>
+        )}
         <nav className="header-breadcrumb" aria-label="Chat breadcrumb">
           {showProjectCrumb && (
             <>

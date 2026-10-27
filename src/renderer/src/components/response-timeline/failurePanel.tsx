@@ -16,7 +16,7 @@ import {
   type FailureDiagnosticFact,
 } from "../../utils/failureDiagnostics";
 import { useCopiedState } from "../../hooks/useCopiedState";
-import { navigateDiagnosticContext } from "../../utils/diagnosticNavigation";
+import { diagnosticNavigationAvailable, navigateDiagnosticContext } from "../../utils/diagnosticNavigation";
 import { TooltipButton } from "../TooltipButton";
 import "./failureDiagnostics.css";
 
@@ -57,7 +57,7 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
       <div className="turn-failure-summary">
         <p id={headingId}>{presentation.summary}</p>
         <div className="turn-failure-actions" aria-label="Failure diagnostic actions">
-          {typeof window.inertia?.queryDiagnostics === "function" && <button type="button" className="turn-failure-action" onClick={() => navigateDiagnosticContext({
+          {diagnosticNavigationAvailable() && <button type="button" className="turn-failure-action" onClick={() => navigateDiagnosticContext({
             section: "help", anchor: "diagnostics-incidents", selection: { turnId: turn.id },
           })}>View diagnostics</button>}
           <TooltipButton

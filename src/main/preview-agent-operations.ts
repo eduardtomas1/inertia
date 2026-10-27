@@ -16,7 +16,7 @@ import {
   agentPageActivationFailureMessage, agentPageBoundaryGaps, agentPageKeyInput, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, resetAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import {
-  agentPageEvidencePrivacy, agentPageHasSensitiveScreenshotEvidence, agentPageInputRefusal, agentPageRefHasFocus,
+  agentPageEvidencePrivacy, agentPageInputRefusal, agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
   type AgentPageEvidencePrivacy, type AgentPageNotInspected, type PreviewAgentTarget,
@@ -27,7 +27,7 @@ import { navigationFailureMessage, withheldEvidenceMessage } from "./preview-age
 import { previewAgentPhaseTimeoutMessage, type PreviewAgentOperationFailure, type PreviewAgentOperationPhase } from "./preview-agent-phase.js";
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
 import { agentHistoryNavigation, agentHistoryRefusal, withLoopbackScheme, type AgentHistoryDirection } from "./preview-agent-history.js";
-import { captureAgentPageScreenshot, capturedAgentScreenshotResult, type AgentPageCapture } from "./preview-agent-screenshot.js";
+import { agentPageScreenshotPrivacy, captureAgentPageScreenshot, capturedAgentScreenshotResult, type AgentPageCapture } from "./preview-agent-screenshot.js";
 import { agentPageRefOutsideViewport, describeAgentPageRef, scrollAgentPageRefIntoView } from "./preview-agent-scroll.js";
 import { AgentBrowserTimeout, agentOperationDelay, type AgentOperationScope } from "./preview-agent-scope.js";
 import type { PreviewTab } from "./preview-tab.js";
@@ -315,17 +315,21 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     let shot: AgentPageCapture | null = null;
     let capturedUrl = "";
     let capturedState: AgentBrowserState | null = null;
+    let unreadable = false;
     try {
       await this.rendererOperation(contents, () => setAgentPageFrozen(contents, true), { scope, phase: "page-freeze" });
       const privacy = await this.rendererOperation(contents, () => agentPageEvidencePrivacy(contents), { scope, phase: "privacy-check" });
       if (privacy.withheld) return failure("sensitive", withheldEvidenceMessage(privacy.withheld, "Screenshots are"));
-      if (await this.rendererOperation(contents, () => agentPageHasSensitiveScreenshotEvidence(contents), { scope, phase: "privacy-check" })) {
+      const before = await this.rendererOperation(contents, () => agentPageScreenshotPrivacy(contents), { scope, phase: "privacy-check" });
+      if (before === "sensitive") {
         return failure("sensitive", "Screenshots are unavailable because the visible page shows a secret, or is too large for Inertia to check for one.");
       }
       shot = await this.rendererOperation(contents, () => captureAgentPageScreenshot(contents), { scope, phase: "screenshot-capture" });
-      if (await this.rendererOperation(contents, () => agentPageHasSensitiveScreenshotEvidence(contents), { scope, phase: "privacy-check" })) {
+      const after = await this.rendererOperation(contents, () => agentPageScreenshotPrivacy(contents), { scope, phase: "privacy-check" });
+      if (after === "sensitive") {
         return failure("sensitive", "Screenshots are unavailable because the visible page shows a secret, or is too large for Inertia to check for one.");
       }
+      unreadable = before === "unreadable" || after === "unreadable";
       capturedUrl = contents.getURL();
       capturedState = this.host.agentState(session);
     } finally {
@@ -347,7 +351,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       return failure("not-found", "The captured Browser tab was closed before its screenshot completed.");
     }
     const result = capturedAgentScreenshotResult(
-      shot, tabId, providerVisiblePageUrl(capturedUrl), capturedState,
+      shot, tabId, providerVisiblePageUrl(capturedUrl), capturedState, unreadable,
     );
     if (!result.ok || shot === null || typeof shot === "string") return result;
     session.activity = this.host.recordScreenshot(session, tab, capturedUrl, shot.image);

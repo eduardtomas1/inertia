@@ -12,6 +12,7 @@ interface AgentPageBoundaryState {
   documentGeneration: number;
   framesObserved: boolean;
   shadowRootsObserved: boolean;
+  closedShadowRootsObserved: boolean;
 }
 
 interface FrozenAgentPage {
@@ -49,6 +50,7 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
     documentGeneration: 0,
     framesObserved: false,
     shadowRootsObserved: false,
+    closedShadowRootsObserved: false,
   };
   agentPageBoundaryStates.set(contents, state);
   const listener: AgentPageDebuggerListener = (_event, method, params) => {
@@ -61,6 +63,7 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
         state.documentGeneration += 1;
         state.framesObserved = false;
         state.shadowRootsObserved = false;
+        state.closedShadowRootsObserved = false;
       }
       return;
     }
@@ -71,6 +74,7 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
     if (method === "DOM.shadowRootPushed") {
       const root = objectRecord(payload?.root);
       if (root?.shadowRootType !== "user-agent") state.shadowRootsObserved = true;
+      if (root?.shadowRootType === "closed") state.closedShadowRootsObserved = true;
     }
   };
   agentPageDebuggerListeners.set(contents, listener);
@@ -126,6 +130,10 @@ export function agentPageBoundaryGaps(contents: WebContents): AgentPageBoundaryG
     frames: state?.framesObserved === true,
     shadowRoots: state?.shadowRootsObserved === true,
   };
+}
+
+export function agentPageHasClosedShadowRoots(contents: WebContents): boolean {
+  return agentPageBoundaryStates.get(contents)?.closedShadowRootsObserved === true;
 }
 
 export async function agentPageFocusIsHidden(contents: WebContents): Promise<boolean> {

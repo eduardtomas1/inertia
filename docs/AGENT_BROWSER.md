@@ -248,7 +248,7 @@ source text), the counts are lower bounds and `nextStep` says that more of the
 page exists than is listed. A snapshot that left nothing out has neither
 field.
 
-Inertia reads only the top-level document's own DOM. Content inside embedded
+A snapshot reads only the top-level document's own DOM. Content inside embedded
 frames (`iframe`, `frame`, `object`, `embed`) and shadow roots is never read,
 and a click whose target is one of those frame elements is refused. When a page has them, the snapshot says
 so in `notInspected` (`frames`, `shadow-roots`), and each visible frame is
@@ -373,7 +373,9 @@ does not fit. The local Evidence thumbnail, at most 512 by 320 pixels and 256
 KiB, is made from the same image.
 
 The result text is `{"captured":true,"tabId","url","width","height","providerImage"}`
-with the tab state, where `url` is only the page's origin. The PNG is attached
+with the tab state, where `url` is only the page's origin, plus `withheld` when
+the page has a region Inertia cannot inspect (see
+[Screenshots and local capture](#screenshots-and-local-capture)). The PNG is attached
 to the result for the model only when the turn runs on Claude or Codex with
 the provider's own backend, not a custom backend, and the selected model, or
 the provider's default model, accepts image input. This is the same rule the
@@ -494,11 +496,40 @@ approval ("Choose an option in" a list) is hidden by the same rules.
 Screenshots and local capture are withheld while the document holds any
 remembered sensitive value, and for every reason that withholds a snapshot.
 The refusal message names the reason and that navigating to the page again
-starts a new document. A screenshot is also withheld when, immediately before
-or immediately after the capture, the visible text looks like a credential, a
-control named for a credential shows a value, or the page is too large to
-check. A withheld screenshot returns `sensitive` and no image, and nothing is
-added to Evidence.
+starts a new document.
+
+Immediately before and immediately after the capture, Inertia checks what the
+image could show:
+
+- the top-level document's visible text and controls, read as a snapshot
+  reads them;
+- all text and form controls inside every open shadow root and every
+  same-origin frame or `object` document, following them into each other,
+  with no visibility filter. Their inputs and text areas go through the
+  same sensitive-field rules, so a filled password field in a frame is
+  remembered like one in the top-level document.
+
+The screenshot is withheld when any of that text looks like a credential, a
+control named for a credential shows a value, a value is remembered, or a
+check stops early because the content is too large: more than 4,000 elements
+in the top-level document, or more than 4,000 nodes, 12,000 characters of
+text or 200 controls inside shadow roots and frames. A withheld screenshot
+returns `sensitive` and no image, and nothing is added to Evidence.
+
+Some regions cannot be read at all: a closed shadow root, and a frame,
+`object` or `embed` with a non-zero size whose document Inertia cannot reach,
+such as a cross-origin frame. Inertia knows about a closed shadow root when
+the page's own script creates one (through `attachShadow`, `attachInternals`,
+or markup given to `setHTML`, `setHTMLUnsafe` or `parseHTMLUnsafe`) or when
+Chromium reports one, and it keeps that knowledge until the document is
+replaced. When the page has such a region and nothing above withholds the
+capture, the screenshot still succeeds and is added to Evidence, but the
+result has no image and its text adds
+`"withheld":"The page has frames or shadow roots Inertia cannot inspect."`, so
+the model is told `providerImage: false`. A closed shadow root that the HTML
+parser builds from a declarative template in the page's own markup, or that a
+frame's own script creates, is not detected, and a screenshot of such a page is
+sent like any other.
 
 ### Accepted limits
 
@@ -520,7 +551,8 @@ added to Evidence.
 ### Frames, shadow roots and large pages
 
 Frames, shadow roots, large documents, and large markup writes do not withhold
-evidence. Earlier versions refused every page that had any of them, which made
+snapshots or other text evidence; screenshots follow
+[Screenshots and local capture](#screenshots-and-local-capture). Earlier versions refused every page that had any of them, which made
 most framework development servers and any application with an embedded frame
 unusable, and reported the refusal as a password. They are now treated as
 regions Inertia does not read.

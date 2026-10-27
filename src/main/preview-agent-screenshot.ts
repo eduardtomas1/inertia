@@ -6,11 +6,18 @@ import {
   type AgentBrowserResult,
   type AgentBrowserState,
 } from "../shared/agent-browser.js";
-import { agentPageDevicePixelRatio } from "./preview-agent-page.js";
+import { agentPageHasClosedShadowRoots } from "./preview-agent-boundary.js";
+import type { AgentPageNestedEvidence } from "./preview-agent-nested-evidence.js";
+import {
+  agentPageDevicePixelRatio,
+  agentPageHasSensitiveScreenshotEvidence,
+  agentPageNestedScreenshotEvidence,
+} from "./preview-agent-page.js";
 import { agentPageVisualViewport } from "./preview-agent-viewport.js";
 
 const MAX_SCREENSHOT_REDUCTIONS = 5;
 const OVERSIZED_REDUCTION = 0.72;
+const UNREADABLE_SCREENSHOT = "The page has frames or shadow roots Inertia cannot inspect.";
 
 export interface AgentPageScreenshot {
   image: NativeImage;
@@ -45,6 +52,14 @@ function boundedAgentScreenshot(source: Buffer): AgentPageCapture {
   return "too-large";
 }
 
+export async function agentPageScreenshotPrivacy(
+  contents: WebContents,
+): Promise<AgentPageNestedEvidence> {
+  if (await agentPageHasSensitiveScreenshotEvidence(contents)) return "sensitive";
+  const nested = await agentPageNestedScreenshotEvidence(contents);
+  return nested === "clear" && agentPageHasClosedShadowRoots(contents) ? "unreadable" : nested;
+}
+
 export async function captureAgentPageScreenshot(
   contents: WebContents,
 ): Promise<AgentPageCapture> {
@@ -71,6 +86,7 @@ export function capturedAgentScreenshotResult(
   tabId: string,
   url: string,
   state: AgentBrowserState,
+  unreadable = false,
 ): AgentBrowserResult {
   if (shot === "too-large") {
     return { ok: false, code: "too-large", message: "The Browser screenshot was too large to return. Take a snapshot instead." };
@@ -86,8 +102,11 @@ export function capturedAgentScreenshotResult(
       url,
       width: shot.width,
       height: shot.height,
+      ...(unreadable ? { withheld: UNREADABLE_SCREENSHOT } : {}),
     }),
     state,
-    image: { mimeType: "image/png", data: shot.data, width: shot.width, height: shot.height },
+    ...(unreadable ? {} : {
+      image: { mimeType: "image/png", data: shot.data, width: shot.width, height: shot.height },
+    }),
   };
 }

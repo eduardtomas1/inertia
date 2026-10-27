@@ -132,6 +132,7 @@ export async function expectStructuralCoverage(
     notInspected: string[];
     present?: string;
     absent: string[];
+    screenshot: "image" | "local" | "sensitive";
   },
 ): Promise<void> {
   const evidence = await app.electronApp.evaluate(
@@ -142,6 +143,7 @@ export async function expectStructuralCoverage(
         | { action: "tab-activate" | "tab-close"; tabId: string };
       type Result = {
         code?: string;
+        image?: unknown;
         message?: string;
         ok: boolean;
         state?: { activeTabId: string };
@@ -171,7 +173,7 @@ export async function expectStructuralCoverage(
   expect(evidence, `page evidence was refused for ${url}`).toMatchObject({
     opened: { ok: true },
     snapshot: { ok: true },
-    screenshot: { ok: true },
+    screenshot: expected.screenshot === "sensitive" ? { ok: false, code: "sensitive" } : { ok: true },
     closed: { ok: true },
     restored: { ok: true },
   });
@@ -180,6 +182,17 @@ export async function expectStructuralCoverage(
     text?: string;
   };
   expect(page.notInspected ?? [], url).toEqual(expected.notInspected);
+  if (expected.screenshot === "image") {
+    expect(evidence.screenshot?.image, url).toMatchObject({ mimeType: "image/png" });
+  } else {
+    expect(evidence.screenshot, url).not.toHaveProperty("image");
+  }
+  if (expected.screenshot === "local") {
+    expect(JSON.parse(evidence.screenshot?.text ?? "{}"), url).toMatchObject({
+      captured: true,
+      withheld: "The page has frames or shadow roots Inertia cannot inspect.",
+    });
+  }
   if (expected.present) expect(page.text, url).toContain(expected.present);
   for (const absent of expected.absent) {
     expect(JSON.stringify(evidence), url).not.toContain(absent);

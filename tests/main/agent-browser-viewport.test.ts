@@ -37,6 +37,7 @@ import {
   createPreviewBrokerHarness,
   runIdentity,
   SCREENSHOT_PNG_BASE64,
+  type PreviewBrokerHarnessContents,
 } from "./support/preview-broker-harness";
 
 const owner = { ownerId: "primary", contextId: conversationId, connectionId };
@@ -498,6 +499,42 @@ describe("agent Browser screenshots", () => {
     const screenshot = await broker.perform(runIdentity, { action: "screenshot" });
     expect(screenshot).toMatchObject({ ok: false, code: "sensitive" });
     expect(screenshot).not.toHaveProperty("image");
+  });
+
+  it("withholds the capture when a frame or shadow root shows a secret", async () => {
+    const { broker } = await shownBrowser();
+    pageTools.agentPageNestedScreenshotEvidence.mockResolvedValueOnce("sensitive");
+    const screenshot = await broker.perform(runIdentity, { action: "screenshot" });
+    expect(screenshot).toMatchObject({ ok: false, code: "sensitive" });
+    expect(screenshot).not.toHaveProperty("image");
+    expect(broker.connect(owner).evidence.entries.filter((entry) => entry.kind === "screenshot")).toEqual([]);
+  });
+
+  it.each([
+    ["a region the scan cannot read", () => {
+      pageTools.agentPageNestedScreenshotEvidence.mockResolvedValueOnce("clear").mockResolvedValueOnce("unreadable");
+    }],
+    ["a closed shadow root Chromium reported", (contents: PreviewBrokerHarnessContents) => {
+      contents.debugger.emitMessage("DOM.shadowRootPushed", { hostId: 4, root: { shadowRootType: "closed" } });
+    }],
+  ])("keeps the capture local with no image for %s", async (_name, arrange) => {
+    const { broker, contents } = await shownBrowser();
+    arrange(contents);
+    const screenshot = await broker.perform(runIdentity, { action: "screenshot" });
+    expect(screenshot).toMatchObject({ ok: true, state: { activity: { action: "screenshot" } } });
+    expect(screenshot).not.toHaveProperty("image");
+    expect(parseAgentBrowserResult(screenshot)).toEqual(screenshot);
+    if (screenshot.ok) {
+      expect(JSON.parse(screenshot.text)).toEqual({
+        captured: true,
+        tabId: screenshot.state.activeTabId,
+        url: "http://127.0.0.1:3000",
+        width: 4,
+        height: 3,
+        withheld: "The page has frames or shadow roots Inertia cannot inspect.",
+      });
+    }
+    expect(broker.connect(owner).evidence.entries).toContainEqual(expect.objectContaining({ kind: "screenshot" }));
   });
 });
 

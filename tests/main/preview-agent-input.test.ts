@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { agentPageHasClosedShadowRoots } from "../../src/main/preview-agent-boundary";
 import {
   agentPageActivationBlock,
   agentPageBoundaryGaps,
@@ -103,6 +104,12 @@ describe("agent Browser structural boundaries", () => {
       root: { shadowRootType: "closed" },
     });
     expect(agentPageBoundaryGaps(contents as never)).toEqual({ frames: false, shadowRoots: true });
+    expect(agentPageHasClosedShadowRoots(contents as never)).toBe(true);
+    debuggerEvents.emit("message", {}, "Page.frameNavigated", { frame: { id: "after-closed" } });
+    expect(agentPageHasClosedShadowRoots(contents as never)).toBe(false);
+    debuggerEvents.emit("message", {}, "DOM.shadowRootPushed", { root: { shadowRootType: "open" } });
+    expect(agentPageBoundaryGaps(contents as never)).toEqual({ frames: false, shadowRoots: true });
+    expect(agentPageHasClosedShadowRoots(contents as never)).toBe(false);
     expect(sendCommand).not.toHaveBeenCalledWith("Page.getFrameTree");
     expect(sendCommand).not.toHaveBeenCalledWith("DOMSnapshot.captureSnapshot", expect.anything());
     expect(sendCommand).not.toHaveBeenCalledWith("DOM.performSearch", expect.anything());

@@ -100,6 +100,7 @@ export function releaseAgentPageDebugger(contents: WebContents): void {
   agentPageBoundaryStates.delete(contents);
   frozenAgentPages.delete(contents);
   agentPageFreezeGenerations.set(contents, (agentPageFreezeGenerations.get(contents) ?? 0) + 1);
+  resetAgentPageEmulation(contents);
   if (contents.isDestroyed()) return;
   if (listener) contents.debugger.removeListener("message", listener);
   if (collector) contents.debugger.removeListener("message", collector);

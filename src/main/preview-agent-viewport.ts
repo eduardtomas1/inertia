@@ -59,6 +59,7 @@ const DEFAULT_EMULATION: AgentPageEmulation = { viewport: null, colorScheme: "sy
 const desiredEmulations = new WeakMap<WebContents, AgentPageEmulation>();
 const appliedEmulations = new WeakMap<WebContents, AgentPageEmulation | "unknown">();
 const emulationQueues = new WeakMap<WebContents, Promise<void>>();
+const emulationGenerations = new WeakMap<WebContents, number>();
 
 export function agentViewportState(
   session: AgentViewportSetting & { bounds: Rectangle | null },
@@ -154,7 +155,13 @@ function sameMetrics(left: AgentPageEmulation, right: AgentPageEmulation): boole
     && left.scale === right.scale;
 }
 
-async function sendAgentPageEmulation(contents: WebContents): Promise<void> {
+function emulationGeneration(contents: WebContents): number {
+  return emulationGenerations.get(contents) ?? 0;
+}
+
+async function sendAgentPageEmulation(contents: WebContents, generation: number): Promise<void> {
+  const current = (): boolean => emulationGeneration(contents) === generation;
+  if (!current()) return;
   const desired = desiredEmulations.get(contents) ?? DEFAULT_EMULATION;
   const applied = appliedEmulations.get(contents) ?? DEFAULT_EMULATION;
   const metricsChanged = applied === "unknown" || !sameMetrics(applied, desired);
@@ -169,15 +176,17 @@ async function sendAgentPageEmulation(contents: WebContents): Promise<void> {
   } else if (metricsChanged) {
     await contents.debugger.sendCommand("Emulation.clearDeviceMetricsOverride");
   }
+  if (!current()) return;
   if (mediaChanged) {
     await contents.debugger.sendCommand("Emulation.setEmulatedMedia", agentEmulatedMedia(desired.colorScheme));
   }
-  appliedEmulations.set(contents, desired);
+  if (current()) appliedEmulations.set(contents, desired);
 }
 
 function queueAgentPageEmulation(contents: WebContents): Promise<void> {
   const previous = emulationQueues.get(contents) ?? Promise.resolve();
-  const next = previous.catch(() => undefined).then(() => sendAgentPageEmulation(contents));
+  const generation = emulationGeneration(contents);
+  const next = previous.catch(() => undefined).then(() => sendAgentPageEmulation(contents, generation));
   emulationQueues.set(contents, next);
   return next;
 }
@@ -211,7 +220,9 @@ export async function emulateAgentPreviewPage(
 }
 
 export function resetAgentPageEmulation(contents: WebContents): void {
+  emulationGenerations.set(contents, emulationGeneration(contents) + 1);
   appliedEmulations.delete(contents);
+  emulationQueues.delete(contents);
 }
 
 export function restoreAgentPageEmulation(contents: WebContents): Promise<void> {

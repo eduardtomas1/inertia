@@ -723,15 +723,15 @@ export class PreviewBroker {
   }
 
   async #emulate(session: PreviewSession, tabs = [...session.tabs.values()]): Promise<void> {
-    await Promise.all(tabs.map(async (tab) => {
+    let active: Promise<void> = Promise.resolve();
+    for (const tab of tabs) {
       const contents = liveContents(tab);
-      if (!contents) return;
-      try {
-        await emulateAgentPreviewPage(contents, session, session.viewportScale, ensureAgentFileChooserBlock);
-      } catch (error) {
-        if (tab.id === session.activeTabId) throw error;
-      }
-    }));
+      if (!contents) continue;
+      const emulated = emulateAgentPreviewPage(contents, session, session.viewportScale, ensureAgentFileChooserBlock);
+      if (tab.id === session.activeTabId) active = emulated;
+      else void emulated.catch(() => undefined);
+    }
+    await active;
   }
 
   #dropDeadTabs(session: PreviewSession, gone?: PreviewTab): void {

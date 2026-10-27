@@ -368,7 +368,12 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     stopForAbort(scope.signal);
     validate?.();
     scope.inputSent = true;
-    await this.host.setViewport(session, nextAgentViewport(session, command));
+    const contents = this.host.active(session).view.webContents;
+    await this.rendererOperation(
+      contents,
+      () => this.host.setViewport(session, nextAgentViewport(session, command)),
+      { scope, phase: "page-viewport", cancel: () => resetAgentFileChooserBlock(contents) },
+    );
     stopForAbort(scope.signal);
     this.host.record(session, "resize", agentViewportActivityLabel(command, agentViewportState(session)));
     return this.#stateResult(session, { note: VIEWPORT_CHANGED_NOTE });

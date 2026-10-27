@@ -392,6 +392,54 @@ describe("agent Browser viewport in the broker", () => {
     ]);
   });
 
+  it("does not wait for an inactive tab whose page never answers the emulation", async () => {
+    const { broker, contents } = await shownBrowser();
+    const firstTabId = (await broker.perform(runIdentity, { action: "tabs" })).state!.activeTabId;
+    await broker.perform(runIdentity, { action: "tab-open", url: "http://127.0.0.1:3000/busy" });
+    const busy = electronState.contents.at(-1)!;
+    await broker.perform(runIdentity, { action: "tab-activate", tabId: firstTabId });
+    electronState.stalledCommands.push((method, _params, contentsId) => (
+      method === "Emulation.setEmulatedMedia" && contentsId === busy.id
+    ));
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const resized = broker.perform(runIdentity, { action: "resize", colorScheme: "dark" });
+      void resized.finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(settled).toBe(true);
+      await expect(resized).resolves.toMatchObject({ ok: true, state: { viewport: { colorScheme: "dark" } } });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(electronState.emulation).toContainEqual({
+      contentsId: contents.id, method: "Emulation.setEmulatedMedia", params: agentEmulatedMedia("dark"),
+    });
+    await expect(broker.perform(runIdentity, { action: "tabs" })).resolves.toMatchObject({ ok: true });
+  });
+
+  it("bounds a resize whose active page never answers and keeps the Browser usable", async () => {
+    const { broker, contents } = await shownBrowser();
+    electronState.stalledCommands.push((method, _params, contentsId) => (
+      method === "Emulation.setDeviceMetricsOverride" && contentsId === contents.id
+    ));
+    vi.useFakeTimers();
+    try {
+      const resized = broker.perform(runIdentity, { action: "resize", preset: "desktop" });
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect(resized).resolves.toMatchObject({ ok: false, code: "timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
+    await expect(broker.perform(runIdentity, { action: "resize", preset: "desktop" }))
+      .resolves.toMatchObject({ ok: true, state: { viewport: { width: 1_280, fit: false } } });
+    expect(electronState.emulation.filter((call) => call.contentsId === contents.id).at(-1)).toEqual({
+      contentsId: contents.id,
+      method: "Emulation.setDeviceMetricsOverride",
+      params: agentDeviceMetricsOverride(desktop, 0.46875),
+    });
+  });
+
   it("lets the user choose the viewport through the validated preview command", async () => {
     const { broker, contents, view, emulation, window } = await shownBrowser();
     const chosen = await broker.command({ ...owner, action: "viewport", viewport: { width: 1_024, height: 768 } });

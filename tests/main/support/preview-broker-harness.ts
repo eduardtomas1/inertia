@@ -20,7 +20,7 @@ export function createPreviewBrokerElectronState() {
     emulation: [] as Array<{ contentsId: number; method: string; params?: Record<string, unknown> }>,
     loadOverrides: [] as Array<(url: string) => Promise<void>>,
     focusedShadowRoots: undefined as Array<{ shadowRootType: string }> | undefined,
-    stalledCommands: [] as Array<(method: string, params?: Record<string, unknown>) => boolean>,
+    stalledCommands: [] as Array<(method: string, params?: Record<string, unknown>, contentsId?: number) => boolean>,
     interactionTimeline: [] as string[],
     viewOptions: [] as Array<Record<string, unknown>>,
     contents: [] as Array<{
@@ -188,7 +188,7 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
         for (const handler of this.debuggerMessageHandlers.slice()) handler({}, method, params);
       },
       sendCommand: vi.fn(async (method: string, params?: Record<string, unknown>) => {
-        const stalled = electronState.stalledCommands.findIndex((matches) => matches(method, params));
+        const stalled = electronState.stalledCommands.findIndex((matches) => matches(method, params, this.id));
         if (stalled >= 0) {
           electronState.stalledCommands.splice(stalled, 1);
           return await new Promise<never>(() => undefined);

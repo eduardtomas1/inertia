@@ -20,6 +20,7 @@ function panel(props: Partial<PreviewPanelProps> = {}) {
       onOpenTab={vi.fn()}
       onActivateTab={vi.fn()}
       onCloseTab={vi.fn()}
+      onViewportChange={vi.fn()}
       {...props}
     />
   );
@@ -36,6 +37,7 @@ describe("browser chrome", () => {
       expect(row.getByRole("button", { name })).toBeInTheDocument();
     }
     expect(row.getByRole("textbox", { name: "Preview address" })).toBeInTheDocument();
+    expect(row.getByRole("combobox", { name: "Viewport" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Go" })).toBeNull();
     expect(screen.queryByText("Browser")).toBeNull();
     expect(screen.queryByText("Evidence")).toBeNull();

@@ -272,4 +272,36 @@ describe("desktop preview evidence projection", () => {
     });
     expect(changed.navigation.evidence).toBe(changedEvidence);
   });
+
+  it("carries the published viewport and drops it when an update no longer has one", () => {
+    const viewport = { width: 1_280, height: 800, fit: false, mobile: false, colorScheme: "system" as const };
+    const current = {
+      contextId: "chat-one",
+      url: "http://127.0.0.1:3000/",
+      navigation: {
+        url: "http://127.0.0.1:3000/",
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        activeTabId: "tab-one",
+        tabs: [],
+        agentActivity: null,
+        evidence: { revision: 1, entries: [], omitted: false },
+      },
+    };
+    const update = {
+      ownerId: "primary" as const,
+      contextId: "chat-one",
+      url: current.url,
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      activeTabId: "tab-one",
+      tabs: [],
+      agentActivity: null,
+    };
+    const fixed = mergePreviewStateUpdate(current, { ...update, viewport });
+    expect(fixed.navigation.viewport).toEqual(viewport);
+    expect(mergePreviewStateUpdate(fixed, update).navigation.viewport).toBeUndefined();
+  });
 });

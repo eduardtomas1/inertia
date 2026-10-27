@@ -7,6 +7,11 @@ import type {
   BrowserEvidenceSnapshot,
 } from "@shared/browser-evidence";
 import {
+  AGENT_BROWSER_VIEWPORT_SIZES,
+  type AgentBrowserViewport,
+  type AgentBrowserViewportRequest,
+} from "@shared/agent-browser";
+import {
   previewNavigationTarget,
   type PreviewNavigationTarget,
 } from "@shared/preview-url";
@@ -38,6 +43,7 @@ export type PreviewPanelProps = {
   activeTabId?: string | null;
   evidence?: BrowserEvidenceSnapshot;
   pageFocused?: boolean;
+  viewport?: AgentBrowserViewport;
   onNavigate: (url: string) => void;
   onOpenExternal: (url: string) => void;
   onBack?: () => void;
@@ -46,6 +52,7 @@ export type PreviewPanelProps = {
   onOpenTab?: () => void;
   onActivateTab?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void;
+  onViewportChange?: (request: AgentBrowserViewportRequest) => void;
   onInspectEvidenceImage?: (evidenceId: string) => Promise<boolean>;
   onBoundsChange?: (bounds: PreviewBounds | null) => void;
 };
@@ -92,6 +99,21 @@ export function safePreviewUrl(
   }
 }
 
+const VIEWPORT_PRESET_OPTIONS = [
+  { value: "desktop", label: "Desktop" },
+  { value: "tablet", label: "Tablet" },
+  { value: "mobile", label: "Mobile" },
+] as const;
+
+function viewportSelection(viewport: AgentBrowserViewport | undefined): string {
+  if (!viewport || viewport.fit) return "fit";
+  const preset = VIEWPORT_PRESET_OPTIONS.find(({ value }) => {
+    const size = AGENT_BROWSER_VIEWPORT_SIZES[value];
+    return size.width === viewport.width && size.height === viewport.height && size.mobile === viewport.mobile;
+  });
+  return preset?.value ?? "custom";
+}
+
 function previewTabHost(url: string): string {
   try {
     return new URL(url).hostname;
@@ -111,6 +133,7 @@ export function PreviewPanel({
   activeTabId = null,
   evidence = { revision: 0, entries: [], omitted: false },
   pageFocused = false,
+  viewport,
   onNavigate,
   onOpenExternal,
   onBack,
@@ -119,6 +142,7 @@ export function PreviewPanel({
   onOpenTab,
   onActivateTab,
   onCloseTab,
+  onViewportChange,
   onInspectEvidenceImage,
   onBoundsChange,
 }: PreviewPanelProps): React.JSX.Element {
@@ -135,6 +159,7 @@ export function PreviewPanel({
     registerWorkspacePreviewAddress(owner, address);
   }, [owner]);
   const currentLocation = useMemo(() => safePreviewUrl(url), [url]);
+  const selectedViewport = viewportSelection(viewport);
   const prepareTabCloseFocus = usePreviewTabCloseFocus(tabs, activeTabId, tabRefs, addressElementRef);
   const tabRow = usePanelTabRow({ keys: tabs.map((tab) => tab.id), activeKey: activeTabId });
 
@@ -334,6 +359,29 @@ export function PreviewPanel({
         <IconButton label="Open in system browser" onClick={openExternal} disabled={!url && !draftUrl.trim()}>
           <ExternalLink size={14} />
         </IconButton>
+        {onViewportChange && (
+          <select
+            className="preview-viewport-select"
+            aria-label="Viewport"
+            value={selectedViewport}
+            onChange={(event) => {
+              const preset = event.currentTarget.value;
+              if (preset === "fit" || preset === "desktop" || preset === "tablet" || preset === "mobile") {
+                onViewportChange({ preset });
+              }
+            }}
+          >
+            <option value="fit">Fit</option>
+            {VIEWPORT_PRESET_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {`${label} ${AGENT_BROWSER_VIEWPORT_SIZES[value].width}×${AGENT_BROWSER_VIEWPORT_SIZES[value].height}`}
+              </option>
+            ))}
+            {selectedViewport === "custom" && viewport && (
+              <option value="custom">{`${viewport.width}×${viewport.height}`}</option>
+            )}
+          </select>
+        )}
         <TooltipButton
           ref={evidenceToggleRef}
           tooltip="Browser evidence"
@@ -379,13 +427,15 @@ export function PreviewPanel({
           {loading ? (
             <div className="panel-loading"><LoadingMark label="Connecting to preview" /><span>Connecting to preview…</span></div>
           ) : currentLocation && !("error" in currentLocation) ? (
-            <div className="panel-empty preview-safe-card">
-              <h3>{currentLocation.parsed.origin}</h3>
-              <p>This page loads outside the Inertia window.</p>
-              <button type="button" className="secondary-button" onClick={openExternal}>
-                Open externally
-              </button>
-            </div>
+            currentLocation.target === "embed" ? null : (
+              <div className="panel-empty preview-safe-card">
+                <h3>{currentLocation.parsed.origin}</h3>
+                <p>This page loads outside the Inertia window.</p>
+                <button type="button" className="secondary-button" onClick={openExternal}>
+                  Open externally
+                </button>
+              </div>
+            )
           ) : (
             <div className="panel-empty preview-empty">
               <h3>Open a local preview</h3>

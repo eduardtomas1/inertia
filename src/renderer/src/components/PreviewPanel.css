@@ -3,6 +3,14 @@
 .preview-evidence-toggle:hover { color: var(--text); background: var(--fill); }
 .preview-evidence-toggle.is-active { color: var(--text); background: var(--fill-strong); }
 .preview-evidence-toggle.has-failures:not(.is-active) svg { color: var(--danger); }
+.preview-viewport-select { min-width: 0; max-width: 136px; height: var(--control-height-small); flex: 0 1 auto; padding: 0 24px 0 7px; border: 1px solid transparent; border-radius: var(--radius-xs); color: var(--text-muted); background-color: transparent; font-size: var(--text-sm); text-overflow: ellipsis; }
+.preview-viewport-select:hover,
+.preview-viewport-select:focus-visible { border-color: var(--line); color: var(--text); background-color: var(--fill); }
+.preview-safe-stage { background: var(--surface); }
+
+@container (max-width: 480px) {
+  .preview-viewport-select { max-width: 76px; }
+}
 
 @media (forced-colors: active) {
   .preview-evidence-toggle.is-active { outline: 1px solid CanvasText; }

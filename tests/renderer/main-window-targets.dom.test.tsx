@@ -13,6 +13,7 @@ const sourceId = "11111111-1111-4111-8111-111111111111";
 const otherId = "44444444-4444-4444-8444-444444444444";
 const missingId = "55555555-5555-4555-8555-555555555555";
 const turnId = "66666666-6666-4666-8666-666666666666";
+const incidentId = "77777777-7777-4777-8777-777777777777";
 
 function conversation(id: string, overrides: Partial<Conversation> = {}): Conversation {
   return {
@@ -64,8 +65,8 @@ const openUsageLimits = vi.fn();
 
 function actions() {
   return {
+    activateConversation: vi.fn(),
     selectConversation: vi.fn(),
-    showWorkspace: vi.fn(),
     createConversation: vi.fn(),
     openSettings: vi.fn(),
     connectProvider: vi.fn(),
@@ -78,10 +79,16 @@ function renderTargets(
   value: AppSnapshot | null,
   targetActions = actions(),
   limits: UsageLimitsContextValue | null = { open: openUsageLimits } as unknown as UsageLimitsContextValue,
+  detached: ReadonlySet<string> = new Set(),
 ) {
   const view = (next: AppSnapshot | null) => (
     <UsageLimitsContext.Provider value={limits}>
-      <MainWindowTargets snapshot={next} actions={targetActions} />
+      <MainWindowTargets
+        snapshot={next}
+        detachedConversationIds={detached}
+        activateConversation={targetActions.activateConversation}
+        actions={targetActions}
+      />
     </UsageLimitsContext.Provider>
   );
   const rendered = render(view(value));
@@ -115,13 +122,21 @@ afterEach(() => {
 });
 
 describe("main-window targets from detached chats", () => {
-  it("shows the workspace and selects another chat through normal navigation", () => {
+  it("activates another chat through the main window's normal activation", () => {
     const other = conversation(otherId);
     const { actions: performed } = renderTargets(snapshot([conversation(sourceId), other]));
     send({ kind: "conversation", conversationId: otherId });
-    expect(performed.showWorkspace).toHaveBeenCalledOnce();
-    expect(performed.selectConversation).toHaveBeenCalledExactlyOnceWith(other);
+    expect(performed.activateConversation).toHaveBeenCalledExactlyOnceWith(other);
+    expect(performed.selectConversation).not.toHaveBeenCalled();
     expect(performed.reportUnavailable).not.toHaveBeenCalled();
+  });
+
+  it("selects a chat that has its own window instead of activating the main workspace", () => {
+    const other = conversation(otherId);
+    const { actions: performed } = renderTargets(snapshot([conversation(sourceId), other]), actions(), undefined, new Set([otherId]));
+    send({ kind: "conversation", conversationId: otherId });
+    expect(performed.selectConversation).toHaveBeenCalledExactlyOnceWith(other);
+    expect(performed.activateConversation).not.toHaveBeenCalled();
   });
 
   it("creates new chats only in the detached chat's own project and checkout", () => {
@@ -149,11 +164,13 @@ describe("main-window targets from detached chats", () => {
     send({ kind: "backend-setup" });
     send({ kind: "diagnostics" });
     send({ kind: "diagnostics", turnId });
+    send({ kind: "diagnostics", incidentId });
     expect(performed.openSettings.mock.calls).toEqual([
       [{ section: "keyboard" }],
       [{ section: "agents", anchor: "model-backends" }],
       [{ section: "help", anchor: "diagnostics-incidents" }],
       [{ section: "help", anchor: "diagnostics-incidents", selection: { turnId } }],
+      [{ section: "help", anchor: "diagnostics-incidents", selection: { incidentId } }],
     ]);
     send({ kind: "provider-setup", providerId: "codex" });
     send({ kind: "provider-setup", providerId: "claude", method: "console" });
@@ -187,8 +204,8 @@ describe("main-window targets from detached chats", () => {
       ["That model backend is no longer available."],
     ]);
     for (const action of [
+      performed.activateConversation,
       performed.selectConversation,
-      performed.showWorkspace,
       performed.createConversation,
       performed.connectProvider,
       performed.openBackendSetup,
@@ -207,13 +224,13 @@ describe("main-window targets from detached chats", () => {
     const { actions: performed, rerender, unmount } = renderTargets(null);
     send({ kind: "settings", page: "agents" });
     send({ kind: "conversation", conversationId: otherId });
-    expect(performed.selectConversation).not.toHaveBeenCalled();
+    expect(performed.activateConversation).not.toHaveBeenCalled();
     expect(performed.openSettings).not.toHaveBeenCalled();
     rerender(snapshot([conversation(sourceId), other]));
-    expect(performed.selectConversation).toHaveBeenCalledExactlyOnceWith(other);
+    expect(performed.activateConversation).toHaveBeenCalledExactlyOnceWith(other);
     expect(performed.openSettings).not.toHaveBeenCalled();
     rerender(snapshot([conversation(sourceId), other]));
-    expect(performed.selectConversation).toHaveBeenCalledOnce();
+    expect(performed.activateConversation).toHaveBeenCalledOnce();
     unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
   });

@@ -13,7 +13,7 @@ export type MainWindowTargetDependencies = Omit<
 >;
 
 export interface MainWindowTargetHandlers {
-  onDock(conversationId: string, target?: MainWindowTarget): Promise<void>;
+  onDock(conversationId: string): Promise<void>;
   onOpenInMainWindow(
     sourceConversationId: string,
     target: MainWindowTarget,
@@ -23,21 +23,14 @@ export interface MainWindowTargetHandlers {
 export function mainWindowTargetHandlers(
   dependencies: MainWindowTargetDependencies,
 ): MainWindowTargetHandlers {
-  const deliver = (
-    sourceConversationId: string,
-    target: MainWindowTarget,
-  ): Promise<void> => activateMainWindow(
-    { sourceConversationId, target } satisfies MainWindowTargetRequest,
-    { ...dependencies, channel: DETACHED_CHAT_IPC.mainWindowTarget },
-  );
   return {
-    onDock: async (conversationId, target) => {
-      await activateThreadNotification(conversationId, {
-        ...dependencies,
-        channel: DESKTOP_IPC.threadNotificationActivated,
-      });
-      if (target) await deliver(conversationId, target);
-    },
-    onOpenInMainWindow: deliver,
+    onDock: (conversationId) => activateThreadNotification(conversationId, {
+      ...dependencies,
+      channel: DESKTOP_IPC.threadNotificationActivated,
+    }),
+    onOpenInMainWindow: (sourceConversationId, target) => activateMainWindow(
+      { sourceConversationId, target } satisfies MainWindowTargetRequest,
+      { ...dependencies, channel: DETACHED_CHAT_IPC.mainWindowTarget },
+    ),
   };
 }

@@ -792,9 +792,8 @@ describe("detached chat main-process boundary", () => {
     }
   });
 
-  it("keeps a validated main-window target with an explicit dock", async () => {
+  it("docks with the draft alone and rejects any extra argument", async () => {
     const value = fixture();
-    const target = { kind: "settings", page: "agents" };
     try {
       await value.ipc.invoke(
         DETACHED_CHAT_IPC.open,
@@ -806,39 +805,11 @@ describe("detached chat main-process boundary", () => {
         DETACHED_CHAT_IPC.dock,
         eventFor(popup.webContents),
         "draft",
-        { kind: "settings", page: "secrets" },
-      )).rejects.toThrow("Invalid main-window target");
-      await expect(value.ipc.invoke(
-        DETACHED_CHAT_IPC.dock,
-        eventFor(popup.webContents),
-        "draft",
-        target,
-        "extra",
-      )).rejects.toThrow("Rejected untrusted renderer request");
-      await expect(value.ipc.invoke(
-        DETACHED_CHAT_IPC.dock,
-        eventFor(value.main.webContents),
-        "draft",
-        target,
+        { kind: "settings", page: "agents" },
       )).rejects.toThrow("Rejected untrusted renderer request");
       await afterIpcReply();
       expect(popup.destroyed).toBe(false);
-      const draftHandoffs = () => value.main.webContents.sent
-        .filter(({ channel }) => channel === DETACHED_CHAT_IPC.draftChanged);
-      expect(draftHandoffs()).toEqual([]);
-
-      await value.ipc.invoke(
-        DETACHED_CHAT_IPC.dock,
-        eventFor(popup.webContents),
-        "docked draft",
-        { ...target },
-      );
-      await afterIpcReply();
-      expect(popup.destroyed).toBe(true);
-      expect(value.docked).toHaveBeenCalledExactlyOnceWith(FIRST_ID, target);
-      expect(draftHandoffs().map(({ args }) => args[0])).toEqual([
-        expect.objectContaining({ conversationId: FIRST_ID, draft: "docked draft" }),
-      ]);
+      expect(value.docked).not.toHaveBeenCalled();
     } finally {
       await cleanup(value);
     }
@@ -918,6 +889,68 @@ describe("detached chat main-process boundary", () => {
       expect(second!.destroyed).toBe(false);
       expect(first!.closeCalls + first!.destroyCalls + second!.closeCalls + second!.destroyCalls).toBe(0);
       expect(value.docked).not.toHaveBeenCalled();
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("refuses main-window targets from a chat window that is already closing", async () => {
+    const value = fixture();
+    const target = { kind: "settings", page: "agents" };
+    try {
+      for (const [conversationId, title] of [[FIRST_ID, "First"], [SECOND_ID, "Second"]] as const) {
+        await value.ipc.invoke(
+          DETACHED_CHAT_IPC.open,
+          eventFor(value.main.webContents),
+          { conversationId, title, draft: "" },
+        );
+      }
+      const [first, second] = value.popups;
+      await value.ipc.invoke(DETACHED_CHAT_IPC.close, eventFor(first!.webContents), "closing draft");
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(first!.webContents),
+        target,
+      )).rejects.toThrow("This chat window is closing.");
+      await value.ipc.invoke(DETACHED_CHAT_IPC.dock, eventFor(second!.webContents), "docking draft");
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(second!.webContents),
+        { kind: "conversation", conversationId: FIRST_ID },
+      )).rejects.toThrow("This chat window is closing.");
+      expect(value.openedInMain).not.toHaveBeenCalled();
+      await afterIpcReply();
+      expect(first!.destroyed).toBe(true);
+      expect(second!.destroyed).toBe(true);
+      expect(value.openedInMain).not.toHaveBeenCalled();
+      expect(value.docked).toHaveBeenCalledExactlyOnceWith(SECOND_ID);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("refuses main-window targets once detached chats are shutting down", async () => {
+    const value = fixture();
+    try {
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.open,
+        eventFor(value.main.webContents),
+        { conversationId: FIRST_ID, title: "First", draft: "" },
+      );
+      const popup = value.popups[0]!;
+      popup.close = () => {
+        popup.closeCalls += 1;
+      };
+      const stopping = value.coordinator.shutdown();
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(popup.webContents),
+        { kind: "usage-limits" },
+      )).rejects.toThrow("Detached chats are shutting down.");
+      expect(popup.closeCalls).toBe(1);
+      popup.destroy();
+      await stopping;
+      expect(value.openedInMain).not.toHaveBeenCalled();
     } finally {
       await cleanup(value);
     }

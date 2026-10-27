@@ -112,6 +112,7 @@ function props(conversation: Conversation, mutateRemote: LayoutProps["actions"][
     splitConversationIds: new Set(),
     splitViewFull: false,
     detachedConversationIds: new Set(),
+    mainWindowTargetActions: {} as LayoutProps["mainWindowTargetActions"],
     detachedChatLimitReached: false,
     conversationSuppressedInMain: false,
     scenePanel: {} as LayoutProps["scenePanel"],

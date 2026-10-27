@@ -52,22 +52,7 @@ describe("main-window targets from detached chats", () => {
     );
   });
 
-  it("selects a docked chat first and then forwards its target", async () => {
-    const { window, steps } = mainWindow(false);
-    const handlers = mainWindowTargetHandlers({ currentWindow: () => window, createWindow: async () => undefined });
-    const target = { kind: "settings", page: "agents" } as const;
-
-    await handlers.onDock(conversationId, target);
-
-    expect(window.restore).not.toHaveBeenCalled();
-    expect(window.webContents.send.mock.calls).toEqual([
-      [DESKTOP_IPC.threadNotificationActivated, conversationId],
-      [DETACHED_CHAT_IPC.mainWindowTarget, { sourceConversationId: conversationId, target }],
-    ]);
-    expect(steps.filter((step) => step === "focus")).toHaveLength(2);
-  });
-
-  it("docks without a target exactly as before", async () => {
+  it("docks by activating the chat in the main window", async () => {
     const { window } = mainWindow(false);
     const handlers = mainWindowTargetHandlers({ currentWindow: () => window, createWindow: async () => undefined });
 

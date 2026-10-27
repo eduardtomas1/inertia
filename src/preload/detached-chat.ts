@@ -54,12 +54,8 @@ const bridge = Object.freeze({
     DETACHED_CHAT_IPC.retarget,
     request,
   ) as ReturnType<DesktopBridge["retargetDetachedChat"]>,
-  dockDetachedChat: (
-    draft: string,
-    target?: Parameters<DesktopBridge["dockDetachedChat"]>[1],
-  ) => (target === undefined
-    ? ipcRenderer.invoke(DETACHED_CHAT_IPC.dock, draft)
-    : ipcRenderer.invoke(DETACHED_CHAT_IPC.dock, draft, target)) as ReturnType<
+  dockDetachedChat: (draft: string) =>
+    ipcRenderer.invoke(DETACHED_CHAT_IPC.dock, draft) as ReturnType<
       DesktopBridge["dockDetachedChat"]
     >,
   openInMainWindow: (

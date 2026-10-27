@@ -261,4 +261,25 @@ describe("detached chat hand-offs", () => {
       { kind: "diagnostics", turnId: "66666666-6666-4666-8666-666666666666" },
     ]);
   });
+
+  it("keeps the selected incident and the requested settings page when handing off", async () => {
+    await renderWindow();
+    const { navigateDiagnosticContext } = await import("../../src/renderer/src/utils/diagnosticNavigation");
+    act(() => {
+      navigateDiagnosticContext({
+        section: "help",
+        anchor: "diagnostics-incidents",
+        selection: { incidentId: "77777777-7777-4777-8777-777777777777" },
+      });
+      navigateDiagnosticContext({ section: "providers" });
+      navigateDiagnosticContext({ section: "discord" });
+      navigateDiagnosticContext({ section: "support" });
+    });
+    expect(bridge.openedInMain).toEqual([
+      { kind: "diagnostics", incidentId: "77777777-7777-4777-8777-777777777777" },
+      { kind: "settings", page: "agents" },
+      { kind: "settings", page: "devices" },
+      { kind: "settings", page: "help" },
+    ]);
+  });
 });

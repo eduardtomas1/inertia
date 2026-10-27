@@ -67,7 +67,7 @@ describe("real update controller in the sidebar", () => {
     await act(async () => background.resolve(updateStatus({
       revision: ++sequence, state: "current", latestVersion: "1.2.2", freshness: "cached",
     })));
-    expect(trigger()).toHaveAttribute("data-update-state", "checking");
+    expect(trigger()).toHaveAttribute("data-update-state", "idle");
     finishSpin();
     expect(trigger()).toHaveAttribute("data-update-state", "idle");
     fireEvent.click(trigger());
@@ -84,7 +84,7 @@ describe("real update controller in the sidebar", () => {
     expect(check).toHaveBeenCalledTimes(1); expect(check).toHaveBeenCalledWith(true);
     expect(trigger()).toHaveAttribute("data-update-state", "checking");
     await act(async () => request.resolve(updateStatus({ state: "current" })));
-    expect(trigger()).toHaveAttribute("data-update-state", "checking");
+    expect(trigger()).toHaveAttribute("data-update-state", "idle");
     finishSpin();
     expect(trigger()).toHaveAttribute("data-update-state", "idle");
     expect(nativePreviewSuspended()).toBe(false);
@@ -415,7 +415,7 @@ describe("refresh icon choreography", () => {
     expect(icon()).toHaveClass("is-spinning");
     fireEvent.animationIteration(icon());
     expect(icon()).toHaveClass("is-spin-settle");
-    expect(trigger()).toHaveAttribute("data-update-state", "checking");
+    expect(trigger()).toHaveAttribute("data-update-state", "idle");
     fireEvent.animationEnd(icon());
     expect(icon().className).toBe("update-status-icon");
     expect(trigger()).toHaveAttribute("data-update-state", "idle");
@@ -430,7 +430,7 @@ describe("refresh icon choreography", () => {
     fireEvent.animationEnd(icon());
     expect(trigger()).toHaveAttribute("data-update-state", "idle");
   });
-  it("keeps the refresh glyph until the coast ends when a provider update appears mid-check", async () => {
+  it("keeps the refresh glyph coasting while the label moves to a provider update that appeared mid-check", async () => {
     const request = deferred<AppUpdateStatus>(); check.mockReturnValue(request.promise);
     const { rerender } = render(<EverythingHarness everything={everythingController({}, [])} />);
     publish({ state: "current" });
@@ -439,9 +439,13 @@ describe("refresh icon choreography", () => {
     rerender(<EverythingHarness everything={everythingController({}, [CODEX])} />);
     expect(trigger()).toHaveAttribute("data-update-state", "checking");
     await act(async () => request.resolve(updateStatus({ revision: ++sequence, state: "current" })));
+    expect(trigger()).toHaveAccessibleName("Update Codex");
+    expect(trigger()).toHaveAttribute("data-update-state", "available");
+    expect(icon()).toHaveClass("is-spinning");
     fireEvent.animationIteration(icon());
-    expect(trigger()).toHaveAttribute("data-update-state", "checking");
+    expect(icon()).toHaveClass("is-spin-settle");
     fireEvent.animationEnd(icon());
+    expect(icon().querySelector("svg")?.getAttribute("class")).toContain("download");
     expect(trigger()).toHaveAccessibleName("Update Codex");
     expect(trigger()).toHaveAttribute("data-update-state", "available");
   });
@@ -450,6 +454,65 @@ describe("refresh icon choreography", () => {
     publish({ state: "checking" });
     expect(trigger()).toHaveAttribute("data-update-state", "available");
     expect(document.querySelector(".is-spin-start, .is-spinning")).toBeNull();
+  });
+});
+
+describe("update state without animation frames", () => {
+  const glyph = (): string | null | undefined => icon().querySelector("svg")?.getAttribute("class");
+  it("enables the control as up to date at once and lets a later coast settle the icon without changing it back", async () => {
+    const request = deferred<AppUpdateStatus>(); check.mockReturnValue(request.promise);
+    render(<Harness />);
+    fireEvent.click(trigger());
+    expect(trigger()).toHaveAttribute("aria-disabled", "true");
+    expect(icon()).toHaveClass("is-spin-start");
+    await act(async () => request.resolve(updateStatus({ state: "current", message: "Inertia is up to date." })));
+    expect(trigger()).toHaveAttribute("data-update-state", "idle");
+    expect(trigger()).toHaveAccessibleName("Up to date — check again");
+    expect(trigger()).not.toHaveAttribute("aria-disabled");
+    expect(icon()).toHaveClass("is-spin-start");
+    fireEvent.pointerEnter(trigger().parentElement!);
+    expect(details().querySelector("header strong")).toHaveTextContent("Up to date — check again");
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
+    fireEvent.animationEnd(icon());
+    expect(icon()).toHaveClass("is-spin-settle");
+    fireEvent.animationEnd(icon());
+    expect(icon().className).toBe("update-status-icon");
+    expect(trigger()).toHaveAttribute("data-update-state", "idle");
+    expect(trigger()).toHaveAccessibleName("Up to date — check again");
+    check.mockResolvedValue(updateStatus({ state: "current" }));
+    await act(async () => fireEvent.click(trigger()));
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+  it("offers a found update at once, downloads on click and swaps the glyph only after the coast", async () => {
+    const request = deferred<AppUpdateStatus>(); check.mockReturnValue(request.promise);
+    download.mockReturnValue(new Promise(() => undefined));
+    render(<Harness />);
+    fireEvent.click(trigger());
+    await act(async () => request.resolve(updateStatus()));
+    expect(trigger()).toHaveAttribute("data-update-state", "available");
+    expect(trigger()).toHaveAccessibleName("Update 1.2.3 ready to download");
+    expect(trigger()).not.toHaveAttribute("aria-disabled");
+    expect(glyph()).toContain("refresh-cw");
+    finishSpin();
+    expect(glyph()).toContain("download");
+    expect(trigger()).toHaveAccessibleName("Update 1.2.3 ready to download");
+    await act(async () => fireEvent.click(trigger()));
+    expect(download).toHaveBeenCalledOnce();
+  });
+  it("offers a provider update that appears during the automatic check at once", async () => {
+    const request = deferred<AppUpdateStatus>(); check.mockReturnValue(request.promise);
+    const { rerender } = render(<EverythingHarness everything={everythingController({}, [])} />);
+    publish({ state: "current" });
+    await act(async () => vi.advanceTimersByTime(2_500));
+    expect(check).toHaveBeenCalledExactlyOnceWith(false);
+    expect(trigger()).toHaveAttribute("data-update-state", "checking");
+    expect(icon()).toHaveClass("is-spin-start");
+    rerender(<EverythingHarness everything={everythingController({}, [CODEX])} />);
+    expect(trigger()).toHaveAccessibleName("Update Codex");
+    expect(trigger()).toHaveAttribute("data-update-state", "available");
+    expect(trigger()).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(trigger());
+    expect(screen.getByRole("heading", { name: "Update Codex?" })).toBeInTheDocument();
   });
 });
 

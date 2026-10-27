@@ -183,13 +183,18 @@ export function PreviewPanel({
       const bounds = stage.getBoundingClientRect();
       onBoundsChange({ x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) });
     };
+    const settle = (event: Event) => {
+      if (event.target instanceof Node && event.target.contains(stage)) update();
+    };
     const observer = new ResizeObserver(update);
     observer.observe(stage);
     window.addEventListener("resize", update);
     window.addEventListener(NATIVE_PREVIEW_SUSPENSION_CHANGED, update);
+    document.addEventListener("animationend", settle, true);
     update();
     return () => {
       observer.disconnect();
+      document.removeEventListener("animationend", settle, true);
       window.removeEventListener("resize", update);
       window.removeEventListener(NATIVE_PREVIEW_SUSPENSION_CHANGED, update);
       onBoundsChange(null);

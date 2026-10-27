@@ -13,6 +13,7 @@ const sourceId = "11111111-1111-4111-8111-111111111111";
 const otherId = "44444444-4444-4444-8444-444444444444";
 const missingId = "55555555-5555-4555-8555-555555555555";
 const turnId = "66666666-6666-4666-8666-666666666666";
+const incidentId = "77777777-7777-4777-8777-777777777777";
 
 function conversation(id: string, overrides: Partial<Conversation> = {}): Conversation {
   return {
@@ -149,11 +150,13 @@ describe("main-window targets from detached chats", () => {
     send({ kind: "backend-setup" });
     send({ kind: "diagnostics" });
     send({ kind: "diagnostics", turnId });
+    send({ kind: "diagnostics", incidentId });
     expect(performed.openSettings.mock.calls).toEqual([
       [{ section: "keyboard" }],
       [{ section: "agents", anchor: "model-backends" }],
       [{ section: "help", anchor: "diagnostics-incidents" }],
       [{ section: "help", anchor: "diagnostics-incidents", selection: { turnId } }],
+      [{ section: "help", anchor: "diagnostics-incidents", selection: { incidentId } }],
     ]);
     send({ kind: "provider-setup", providerId: "codex" });
     send({ kind: "provider-setup", providerId: "claude", method: "console" });

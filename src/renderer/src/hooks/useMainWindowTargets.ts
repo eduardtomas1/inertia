@@ -70,12 +70,16 @@ export function performMainWindowTarget(
         return actions.reportUnavailable("That model backend is no longer available.");
       }
       return actions.openBackendSetup(target.profileId, target.panel);
-    case "diagnostics":
+    case "diagnostics": {
+      const { incidentId, turnId } = target;
       return actions.openSettings({
         section: "help",
         anchor: "diagnostics-incidents",
-        ...(target.turnId ? { selection: { turnId: target.turnId } } : {}),
+        ...(incidentId || turnId
+          ? { selection: { ...(incidentId ? { incidentId } : {}), ...(turnId ? { turnId } : {}) } }
+          : {}),
       });
+    }
     case "usage-limits":
       return actions.openUsageLimits();
   }

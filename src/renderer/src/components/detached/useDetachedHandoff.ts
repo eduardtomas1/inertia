@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, type Dispatch, type SetStateAction } f
 import { prepareComposerDetachment } from "../../utils/composerOwnership";
 import { dockInMainWith, openInMain, type MainWindowTarget } from "../../utils/detachedHandoff";
 import { UUID_PATTERN } from "@shared/request-identifiers";
+import { legacySettingsTarget } from "../../lib/settingsTarget";
 import {
   DIAGNOSTIC_NAVIGATION_EVENT,
   parseDiagnosticNavigation,
+  type DiagnosticNavigation,
 } from "../../utils/diagnosticNavigation";
 
 export interface DetachedHandoff {
@@ -15,6 +17,24 @@ export interface DetachedHandoff {
 
 function publicError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function mainWindowIdentifier(value: string | undefined): value is string {
+  return value !== undefined && UUID_PATTERN.test(value);
+}
+
+function diagnosticHandoffTarget(target: DiagnosticNavigation): MainWindowTarget {
+  if ("conversationId" in target) return { kind: "conversation", conversationId: target.conversationId };
+  const diagnostics = legacySettingsTarget("diagnostics");
+  if (target.section !== diagnostics.section || target.anchor !== diagnostics.anchor) {
+    return { kind: "settings", page: target.section };
+  }
+  const { incidentId, turnId } = target.selection ?? {};
+  return {
+    kind: "diagnostics",
+    ...(mainWindowIdentifier(incidentId) ? { incidentId } : {}),
+    ...(mainWindowIdentifier(turnId) ? { turnId } : {}),
+  };
 }
 
 export function useDetachedHandoff(
@@ -44,11 +64,7 @@ export function useDetachedHandoff(
   useEffect(() => {
     const navigate = (event: Event): void => {
       const target = parseDiagnosticNavigation((event as CustomEvent<unknown>).detail);
-      if (!target) return;
-      const turnId = "conversationId" in target ? undefined : target.selection?.turnId;
-      openTarget("conversationId" in target
-        ? { kind: "conversation", conversationId: target.conversationId }
-        : turnId && UUID_PATTERN.test(turnId) ? { kind: "diagnostics", turnId } : { kind: "diagnostics" });
+      if (target) openTarget(diagnosticHandoffTarget(target));
     };
     window.addEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigate);
     return () => window.removeEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigate);

@@ -116,6 +116,7 @@ describe("desktop detached-chat contract", () => {
 
 describe("desktop main-window target contract", () => {
   const turnId = "44444444-4444-4444-8444-444444444444";
+  const incidentId = "55555555-5555-4555-8555-555555555555";
 
   it.each([
     { kind: "conversation", conversationId },
@@ -135,6 +136,8 @@ describe("desktop main-window target contract", () => {
     { kind: "backend-setup", profileId: "openrouter:main", panel: "models" },
     { kind: "diagnostics" },
     { kind: "diagnostics", turnId },
+    { kind: "diagnostics", incidentId },
+    { kind: "diagnostics", incidentId, turnId },
     { kind: "usage-limits" },
   ])("accepts the exact target %j", (target) => {
     const parsed = parseMainWindowTarget(target);
@@ -174,7 +177,8 @@ describe("desktop main-window target contract", () => {
     ["a backend panel without a profile", { kind: "backend-setup", panel: "key" }],
     ["an unknown backend panel", { kind: "backend-setup", profileId: "local", panel: "secret" }],
     ["a malformed diagnostics turn", { kind: "diagnostics", turnId: "turn-1" }],
-    ["a diagnostics incident", { kind: "diagnostics", incidentId: turnId }],
+    ["a malformed diagnostics incident", { kind: "diagnostics", incidentId: "incident-1" }],
+    ["a diagnostics request", { kind: "diagnostics", requestId: turnId }],
     ["usage limits with a provider", { kind: "usage-limits", providerId: "codex" }],
   ])("rejects %s", (_name, target) => {
     expect(parseMainWindowTarget(target)).toBeNull();

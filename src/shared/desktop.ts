@@ -315,7 +315,7 @@ export type MainWindowTarget =
   | { kind: "settings"; page: SettingsSection }
   | { kind: "provider-setup"; providerId: ProviderId; method?: ProviderAuthMethod }
   | { kind: "backend-setup"; profileId?: string; panel?: "key" | "models" }
-  | { kind: "diagnostics"; turnId?: string }
+  | { kind: "diagnostics"; incidentId?: string; turnId?: string }
   | { kind: "usage-limits" };
 
 export interface MainWindowTargetRequest {
@@ -499,10 +499,18 @@ export function parseMainWindowTarget(value: unknown): MainWindowTarget | null {
         ...(hasPanel ? { panel: panel as "key" | "models" } : {}),
       };
     }
-    case "diagnostics":
-      if (!exactTargetKeys(value, ["kind"], ["turnId"])) return null;
-      if (!Object.hasOwn(value, "turnId")) return { kind: "diagnostics" };
-      return uuidValue(value.turnId) ? { kind: "diagnostics", turnId: value.turnId } : null;
+    case "diagnostics": {
+      if (!exactTargetKeys(value, ["kind"], ["incidentId", "turnId"])) return null;
+      const { incidentId, turnId } = value;
+      const hasIncident = Object.hasOwn(value, "incidentId");
+      const hasTurn = Object.hasOwn(value, "turnId");
+      if ((hasIncident && !uuidValue(incidentId)) || (hasTurn && !uuidValue(turnId))) return null;
+      return {
+        kind: "diagnostics",
+        ...(hasIncident ? { incidentId: incidentId as string } : {}),
+        ...(hasTurn ? { turnId: turnId as string } : {}),
+      };
+    }
     case "usage-limits":
       return exactTargetKeys(value, ["kind"]) ? { kind: "usage-limits" } : null;
     default:

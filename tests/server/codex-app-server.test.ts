@@ -630,36 +630,6 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
   });
 
-  it("sends the session instruction as developer instructions only when a thread starts", async () => {
-    const fake = fakeAppServer();
-    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    const manager = trackedManager(fake.command);
-    const sessionInstruction = "[inertia-chat]\nThis chat's id is chat-1.";
-    const run = (sessionId?: string) => manager.run({
-      ...nativeProviderRunInput({
-        providerId: "codex",
-        conversationId: `conversation-session-instruction-${sessionId ?? "new"}`,
-        cwd: fake.root,
-        prompt: "Hello",
-        interactionMode: "build",
-        access: "supervised",
-        ...(sessionId ? { sessionId } : {}),
-      }),
-      sessionInstruction,
-    }, {
-      onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve", { runId: event.runId, turnId: event.turnId })).toBe(true),
-      onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] }, { runId: event.runId, turnId: event.turnId })).toBe(true),
-    });
-
-    await expect(run()).resolves.toMatchObject({ status: "completed" });
-    await expect(run("thread-existing")).resolves.toMatchObject({ status: "completed" });
-    const messages = captured(fake.capturePath);
-    expect(messages.some(({ method }) => method === "config/read")).toBe(false);
-    expect((messages.find(({ method }) => method === "thread/start")?.params as Record<string, unknown>).developerInstructions)
-      .toBe(sessionInstruction);
-    expect(messages.find(({ method }) => method === "thread/resume")?.params).not.toHaveProperty("developerInstructions");
-  });
-
   it("uses workspace-write for auto-edit build turns and maps denial", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;

@@ -5,10 +5,8 @@ import { ConversationActionsMenu } from "../../src/renderer/src/components/Conve
 import { ConversationSplitView } from "../../src/renderer/src/components/ConversationSplitView";
 import { Sidebar } from "../../src/renderer/src/components/Sidebar";
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
-import {
-  DetachedContextHandoffNotice,
-  preserveDetachedDraftBeforeUnload,
-} from "../../src/renderer/src/DetachedChatApp";
+import { preserveDetachedDraftBeforeUnload } from "../../src/renderer/src/DetachedChatApp";
+import { DetachedContextHandoffNotice } from "../../src/renderer/src/components/detached/detachedContextRequests";
 import {
   defaultSettings,
   type AppSnapshot,

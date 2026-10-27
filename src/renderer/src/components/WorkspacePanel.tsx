@@ -39,6 +39,7 @@ export type WorkspacePanelProps = {
   surfaces: readonly WorkspacePanelTab[];
   activeSurface: WorkspacePanelTab | null;
   unavailable?: Partial<Record<WorkspacePanelTab, string>>;
+  hiddenSurfaces?: readonly WorkspacePanelTab[];
   badges?: Partial<Record<WorkspacePanelTab, number>>;
   activeBackgroundTaskCount?: number;
   presentation?: WorkspacePanelPresentation;
@@ -60,6 +61,8 @@ const TAB_KEYSHORTCUTS_WITH_MOVE = [
   "Meta+Shift+ArrowRight",
 ].join(" ");
 
+const NO_HIDDEN_SURFACES: readonly WorkspacePanelTab[] = [];
+
 const loadWorkspacePanelLauncher = () => import("./WorkspacePanelLauncher");
 const RightPanelLauncher = lazy(async () => ({
   default: (await loadWorkspacePanelLauncher()).RightPanelLauncher,
@@ -72,8 +75,9 @@ function surfaceActions(
   unavailable: Partial<Record<WorkspacePanelTab, string>>,
   badges: Partial<Record<WorkspacePanelTab, number>>,
   activeBackgroundTaskCount: number,
+  hiddenSurfaces: readonly WorkspacePanelTab[],
 ): SurfaceAction[] {
-  return RIGHT_PANEL_SURFACES.map((surface) => ({
+  return RIGHT_PANEL_SURFACES.filter((surface) => !hiddenSurfaces.includes(surface)).map((surface) => ({
     surface,
     ...RIGHT_PANEL_SURFACE_META[surface],
     available: !unavailable[surface],
@@ -86,6 +90,7 @@ export function WorkspacePanel({
   surfaces,
   activeSurface,
   unavailable = {},
+  hiddenSurfaces = NO_HIDDEN_SURFACES,
   badges = {},
   activeBackgroundTaskCount = 0,
   presentation = "inline",
@@ -99,11 +104,12 @@ export function WorkspacePanel({
 }: WorkspacePanelProps): React.JSX.Element {
   const panelId = useId();
   const panelRef = useRef<HTMLElement>(null);
-  const visibleSurfaces = surfaces.filter((surface) => !unavailable[surface]);
+  const visibleSurfaces = surfaces.filter((surface) =>
+    !unavailable[surface] && !hiddenSurfaces.includes(surface));
   const selected = activeSurface && visibleSurfaces.includes(activeSurface)
     ? activeSurface
     : null;
-  const actions = surfaceActions(unavailable, badges, activeBackgroundTaskCount);
+  const actions = surfaceActions(unavailable, badges, activeBackgroundTaskCount, hiddenSurfaces);
   const [moveAnnouncement, setMoveAnnouncement] = useState("");
   const moveSurface = (surface: WorkspacePanelTab, toIndex: number): void => {
     const position = Math.min(Math.max(toIndex, 0), visibleSurfaces.length - 1);

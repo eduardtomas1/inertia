@@ -6,70 +6,27 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  MessagesSquare,
-  PanelTopOpen,
-  Pin,
-  PinOff,
-  X,
-} from "lucide-react";
-import type {
-  AgentApprovalDecision,
-  AgentApprovalRequest,
-  AgentInputRequest,
-  AgentSkillSummary,
-  AppSettings,
-  ChatAttachment,
-  CheckpointSummary,
-  ConversationContextPacketSummary,
-  ModelBackendProfileView,
-  ProjectAction,
-  ProviderId,
-  TurnRequestContext,
-  UsageDisplayMode,
-} from "@shared/contracts";
+import type { AppSettings } from "@shared/contracts";
 import type { DesktopWindowContext } from "@shared/desktop";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
 import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
-import { ChatWorkspace } from "./components/ChatWorkspace";
-import { compactOnReturnChatState } from "./utils/compactOnReturn";
-import type { ConversationContextSourceOption } from "./components/conversation-context/types";
-import { installWindowCloseShortcut } from "./utils/globalShortcuts";
-import type { ProviderTerminalResumeOption } from "./components/providerResumeOptions";
 import { clearMessageSearchFocus, requestMessageSearchFocus } from "./utils/messageSearchFocus";
 import "./detached-chat.css";
-import { ConversationDetailState } from "./components/ConversationDetailState";
-import { ProjectIcon, ProjectName } from "./components/ProjectIcon";
-import { IconButton, LoadingMark } from "./components/ui";
-import {
-  withRequestId,
-  type CommandWithoutId,
-} from "./lib/runtimeCommands";
-import {
-  agentWorkflowRouteIdentity,
-  useAgentWorkflows,
-} from "./hooks/useAgentWorkflows";
-import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
-import { useBackendProfiles } from "./hooks/useBackendProfiles";
-import { useConversationProjection } from "./hooks/useConversationProjection";
-import { useDesktopTools } from "./hooks/useDesktopTools";
+import { DetachedWorkspace } from "./components/detached/DetachedWorkspace";
+import { newChatTarget } from "./components/detached/detachedTargets";
+import { useDetachedHandoff } from "./components/detached/useDetachedHandoff";
+import { useDetachedShortcuts } from "./components/detached/useDetachedShortcuts";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useStableController } from "./hooks/useStableController";
 import { useTheme } from "./hooks/useTheme";
-import { useWorkspaceMentions } from "./hooks/workspace-tools/useWorkspaceMentions";
+import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { onComposerDraftPersisted, persistComposerDraft } from "./utils/composerDraftPersistence";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
-import { dockInMainWith } from "./utils/detachedHandoff";
-import {
-  goalControlsBusy,
-  goalExecutionStatus,
-} from "./utils/goalExecution";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { cachedAppSettings } from "./utils/cachedSettings";
-import { useMarkRunSeen } from "./hooks/useMarkRunSeen";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { WatcherContext } from "./components/watcher/watcherContext";
 import { DuoJudgeNoticeContext } from "./components/DuoJudgeNoticeContext";
@@ -95,17 +52,7 @@ interface DetachedChatBeforeUnloadEvent {
 
 const DRAFT_PERSISTENCE_FAILURE =
   "This window stayed open because its draft could not be preserved.";
-const NO_PROJECT_ACTIONS: ProjectAction[] = [];
-const NO_RESUME_OPTIONS: readonly ProviderTerminalResumeOption[] = [];
-const NO_SKILLS: AgentSkillSummary[] = [];
-const NO_BACKEND_PROFILES: ModelBackendProfileView[] = [];
-const NO_CONTEXT_PACKETS: readonly ConversationContextPacketSummary[] = [];
-const NO_CONTEXT_SOURCES: readonly ConversationContextSourceOption[] = [];
-const resolveProviderMaintenance = (): Promise<void> => Promise.resolve();
 const ignoreDuoStatusUpdate = (): void => undefined;
-const openProviderUpdateInstructions = (url: string): void => {
-  void window.inertia.openExternal(url).catch(() => undefined);
-};
 
 void loadResponseTimeline();
 
@@ -140,70 +87,6 @@ function publicError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-export interface DetachedContextRequests {
-  inputRequests: AgentInputRequest[];
-  contextSources: readonly ConversationContextSourceOption[];
-  mainWindowReviewPending: boolean;
-}
-
-export function detachedContextRequests(
-  pendingInputs: AgentInputRequest[],
-): DetachedContextRequests {
-  const contextSources: ConversationContextSourceOption[] = [];
-  const inputRequests = pendingInputs.filter((request) => {
-    const context = request.conversationContextRequest;
-    if (!context) return true;
-    const source = context.requestedSource;
-    if (
-      !source
-      || context.requestedSourceConversationId === null
-      || source.conversationId !== context.requestedSourceConversationId
-    ) return false;
-    if (!contextSources.some(({ conversationId }) => conversationId === source.conversationId)) {
-      contextSources.push({
-        conversationId: source.conversationId,
-        conversationTitle: source.conversationTitle,
-        projectName: source.projectName,
-        workspaceLabel: source.workspaceLabel,
-        targetWorkspaceLabel: source.targetWorkspaceLabel,
-        workspaceRelation: source.workspaceRelation,
-        archived: false,
-      });
-    }
-    return true;
-  });
-  const mainWindowReviewPending = inputRequests.length !== pendingInputs.length;
-  return {
-    inputRequests: mainWindowReviewPending ? inputRequests : pendingInputs,
-    contextSources: contextSources.length > 0 ? contextSources : NO_CONTEXT_SOURCES,
-    mainWindowReviewPending,
-  };
-}
-
-export function DetachedContextHandoffNotice({
-  onReturnToMain,
-}: {
-  onReturnToMain: () => void;
-}): React.JSX.Element {
-  return (
-    <div
-      className="pending-input-notice detached-chat-context-handoff"
-      role="status"
-      aria-live="polite"
-    >
-      <MessagesSquare size={14} aria-hidden="true" />
-      <span>
-        <strong>Agent requested chat context</strong>
-        <small>Review this request in the main window.</small>
-      </span>
-      <button type="button" onClick={onReturnToMain}>
-        <PanelTopOpen size={14} aria-hidden="true" />
-        Return to main
-      </button>
-    </div>
-  );
-}
-
 export default function DetachedChatApp({
   initialWindowContext,
 }: DetachedChatAppProps): React.JSX.Element {
@@ -216,9 +99,9 @@ export default function DetachedChatApp({
   });
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [latestContentVisible, setLatestContentVisible] = useState(false);
   const [pinning, setPinning] = useState(false);
   const nativeTitleRef = useRef<string | null>(null);
+  const terminalToggleRef = useRef<(() => void) | null>(null);
   const documentPresence = useDocumentPresence();
   const connection = useStableController(useInertiaConnection({ applyTodos: false }));
   const conversationId = windowContext.conversationId;
@@ -271,60 +154,16 @@ export default function DetachedChatApp({
     );
   }, [conversationId]);
 
-  const projection = useStableController(useConversationProjection({
-    snapshot: connection.snapshot,
-    status: connection.status,
-    request,
-    subscribe: connection.subscribe,
-    targetConversationId: conversationId,
-    enabled: true,
-    autoOpenPlan: false,
-    onOpenPlan: () => undefined,
-    onTerminal: () => undefined,
-  }));
-  const conversation = projection.conversation;
-  const project = useMemo(
-    () => connection.snapshot?.projects.find(
-      ({ id }) => id === conversation?.projectId,
-    ) ?? null,
-    [connection.snapshot?.projects, conversation?.projectId],
-  );
-  const workflow = useStableController(useAgentWorkflows({
-    conversationId: conversation?.id ?? null,
-    routeIdentity: agentWorkflowRouteIdentity(conversation, project),
-    status: connection.status,
-    enabled: Boolean(conversation),
-    request,
-    subscribe: connection.subscribe,
-  }));
-  const runtimeActions = useStableController(useAppRuntimeActions({
-    sendCommand,
-    refreshDetail: projection.refreshDetail,
-    setBusyAction,
-    setActionError,
-  }));
-  const backendProfiles = useStableController(useBackendProfiles({
-    request,
-    run: runtimeActions.run,
-  }));
-  const desktopTools = useStableController(useDesktopTools({
-    setActionError,
-    previewContextId: null,
-  }));
-  const mentions = useStableController(useWorkspaceMentions({
-    enabled: Boolean(project && conversation),
-    project,
-    conversation,
-    request,
-  }));
-
-  const projectedConversationId = conversation?.id ?? null;
-  const conversationTitle = conversation?.title ?? null;
+  const snapshotConversation = connection.snapshot?.conversations.find(
+    ({ id }) => id === conversationId,
+  ) ?? null;
+  const projectId = snapshotConversation?.projectId ?? null;
+  const conversationTitle = snapshotConversation?.title ?? null;
   useEffect(() => {
     const nativeTitle = detachedChatWindowTitle(conversationTitle ?? "");
     document.title = `${nativeTitle} — ${applicationProductName(window.location.protocol)}`;
     if (
-      !projectedConversationId
+      conversationTitle === null
       || nativeTitleRef.current === nativeTitle
     ) {
       return;
@@ -336,22 +175,9 @@ export default function DetachedChatApp({
     }).catch(() => {
       nativeTitleRef.current = null;
     });
-  }, [conversationId, conversationTitle, projectedConversationId]);
+  }, [conversationId, conversationTitle]);
 
-  const dockInMain = useCallback(() => {
-    setActionError(null);
-    const preparation = prepareComposerDetachment(conversationId);
-    if (preparation.status === "blocked") {
-      setActionError(preparation.reason);
-      return;
-    }
-    void dockInMainWith(preparation.draft).catch((error: unknown) => {
-      setActionError(publicError(
-        error,
-        "This chat could not be returned to the main window.",
-      ));
-    });
-  }, [conversationId]);
+  const handoff = useDetachedHandoff(conversationId, setActionError);
   const closeWindow = useCallback(() => {
     setActionError(null);
     const preparation = prepareComposerDetachment(conversationId);
@@ -363,15 +189,19 @@ export default function DetachedChatApp({
       setActionError(publicError(error, "This window could not be closed."));
     });
   }, [conversationId]);
-  const closeWindowRef = useRef(closeWindow);
-  useEffect(() => {
-    closeWindowRef.current = closeWindow;
-  }, [closeWindow]);
-  useEffect(() => installWindowCloseShortcut(
-    window,
-    window.inertia?.getPlatform?.() ?? "unknown",
-    () => closeWindowRef.current(),
-  ), []);
+  const openInMain = handoff.openInMain;
+  useDetachedShortcuts({
+    keybindings: settings.keybindings,
+    toggleTerminal: () => terminalToggleRef.current?.(),
+    createConversation: () => {
+      if (projectId) openInMain(newChatTarget(projectId));
+    },
+    openSettings: () => openInMain({ kind: "settings", page: "appearance" }),
+    closeWindow,
+  });
+  const setTerminalToggle = useCallback((toggle: (() => void) | null) => {
+    terminalToggleRef.current = toggle;
+  }, []);
   const toggleAlwaysOnTop = useCallback(() => {
     if (pinning) return;
     setPinning(true);
@@ -389,172 +219,14 @@ export default function DetachedChatApp({
       })
       .finally(() => setPinning(false));
   }, [pinning, windowContext.alwaysOnTop]);
+  const windowActions = useMemo(() => ({
+    alwaysOnTop: windowContext.alwaysOnTop,
+    pinning,
+    onToggleAlwaysOnTop: toggleAlwaysOnTop,
+    onDock: handoff.dockInMain,
+    onClose: closeWindow,
+  }), [closeWindow, handoff.dockInMain, pinning, toggleAlwaysOnTop, windowContext.alwaysOnTop]);
 
-  const respondToApproval = useCallback(async (
-    approval: AgentApprovalRequest,
-    decision: AgentApprovalDecision,
-  ): Promise<void> => {
-    await runtimeActions.run("agent.approval.respond", {
-      type: "agent.approval.respond",
-      payload: {
-        conversationId: approval.conversationId,
-        requestId: approval.id,
-        decision,
-      },
-    });
-  }, [runtimeActions]);
-  const respondToInput = useCallback(async (
-    input: AgentInputRequest,
-    answers: Record<string, string[]>,
-  ): Promise<void> => {
-    await runtimeActions.run("agent.input.respond", {
-      type: "agent.input.respond",
-      payload: {
-        conversationId: input.conversationId,
-        requestId: input.id,
-        answers,
-      },
-    });
-  }, [runtimeActions]);
-  const updateConversation = useCallback(async (
-    update: Parameters<
-      typeof runtimeActions.updateConversationById
-    >[1],
-  ): Promise<void> => {
-    await runtimeActions.updateConversationById(conversationId, update);
-  }, [conversationId, runtimeActions]);
-  const updateSettings = useCallback(async (
-    update: Partial<AppSettings>,
-  ): Promise<void> => {
-    await runtimeActions.run("settings.update", {
-      type: "settings.update",
-      payload: update,
-    });
-  }, [runtimeActions]);
-  const refreshProvider = useCallback((providerId: ProviderId): void => {
-    void runtimeActions.run("provider.refresh", {
-      type: "provider.refresh",
-      payload: { providerId },
-    }).catch(() => undefined);
-  }, [runtimeActions]);
-  const sendMessageToConversation = runtimeActions.sendMessageToConversation;
-  const sendMessage = useCallback((
-    content: string,
-    attachments: ChatAttachment[],
-    context?: TurnRequestContext,
-  ) => sendMessageToConversation(
-    conversationId,
-    content,
-    attachments,
-    context,
-    false,
-  ), [conversationId, sendMessageToConversation]);
-  const compactAndSendToConversation = runtimeActions.compactAndSendToConversation;
-  const compactAndSendMessage = useCallback((
-    content: string,
-    attachments: ChatAttachment[],
-    context?: TurnRequestContext,
-  ) => compactAndSendToConversation(
-    conversationId,
-    content,
-    attachments,
-    context,
-    false,
-  ), [compactAndSendToConversation, conversationId]);
-  const compactConversationById = runtimeActions.compactConversation;
-  const compactConversation = useCallback((instruction?: string) =>
-    compactConversationById(conversationId, instruction), [
-    compactConversationById,
-    conversationId,
-  ]);
-  const probeBackendProfile = backendProfiles.probeBackendProfile;
-  const probeConversationBackendProfile = useCallback(async (
-    profileId: string,
-    modelIds?: readonly string[],
-  ): Promise<void> => {
-    await probeBackendProfile(profileId, modelIds);
-  }, [probeBackendProfile]);
-  const changeUsageDisplayMode = useCallback((mode: UsageDisplayMode): void => {
-    void updateSettings({ usageDisplayMode: mode }).catch(() => undefined);
-  }, [updateSettings]);
-  const stopAgent = useCallback(async (): Promise<void> => {
-    await runtimeActions.run("agent.stop", {
-      type: "agent.stop",
-      payload: { conversationId },
-    });
-  }, [conversationId, runtimeActions]);
-  const revertCheckpoint = useCallback((checkpoint: CheckpointSummary): void => {
-    const confirmed = !settings.confirmDestructiveActions
-      || window.confirm(
-        "Restore the project to this checkpoint? "
-        + "A recovery checkpoint will save current edits first. Untracked files created later will be left in place.",
-      );
-    if (!confirmed) return;
-    void runtimeActions.run("checkpoint.revert", {
-      type: "checkpoint.revert",
-      payload: {
-        conversationId,
-        checkpointId: checkpoint.id,
-      },
-    }).catch(() => undefined);
-  }, [conversationId, runtimeActions, settings.confirmDestructiveActions]);
-  const openProjectFile = useCallback((path: string): void => {
-    if (!project) return;
-    void window.inertia.openProjectPath({
-      projectId: project.id,
-      conversationId,
-      relativePath: path,
-      action: "open-externally",
-    }).catch((error: unknown) => {
-      setActionError(publicError(error, "The project file could not be opened."));
-    });
-  }, [conversationId, project]);
-
-  useMarkRunSeen({
-    request,
-    runs: connection.snapshot?.runs,
-    conversationId,
-    workspaceVisible: documentPresence > 0,
-    latestContentVisible,
-    obstructed: false,
-    refresh: documentPresence,
-  });
-
-  const workflowState = workflow.state?.conversationId === conversationId
-    ? workflow.state
-    : null;
-  const conversationRunning = conversation?.status === "running"
-    || conversation?.status === "needs-input";
-  const workflowSafetyLocked = workflow.error
-    ?.includes("recovery safety mode") === true;
-  const executionStatus = workflowSafetyLocked
-    ? "idle"
-    : conversationRunning
-      ? goalExecutionStatus(projection.turns)
-      : "idle";
-  const goalBusy = goalControlsBusy({
-    connectionStatus: connection.status,
-    workflowLoading: workflow.loading,
-    safetyLocked: workflowSafetyLocked,
-    executionStatus,
-    busyAction,
-  }) || workflow.mutating;
-  const detailState = projection.detailState?.conversationId === conversationId
-    ? projection.detailState
-    : null;
-  const unavailableDetail = detailState
-    && detailState.state !== "loading"
-    && detailState.state !== "ready"
-      ? detailState
-      : null;
-  const detailLoading = Boolean(
-    conversation
-    && (!detailState || detailState.state === "loading"),
-  );
-  const contextRequests = useMemo(
-    () => detachedContextRequests(projection.pendingInputs),
-    [projection.pendingInputs],
-  );
   const watchers = useWatcherSurfaceController({
     snapshot: connection.snapshot,
     surface: "detached",
@@ -563,13 +235,9 @@ export default function DetachedChatApp({
     primaryConversationId: conversationId,
   });
   const duoVisibleConversationIds = useMemo(() => [conversationId], [conversationId]);
-  const runAction = runtimeActions.run;
   const openDuoConversation = useCallback((targetId: string): void => {
-    void runAction("duo:open-judge", {
-      type: "conversation.select",
-      payload: { conversationId: targetId },
-    });
-  }, [runAction]);
+    openInMain({ kind: "conversation", conversationId: targetId });
+  }, [openInMain]);
   const duoLaunches = useDuoLaunchWatch({
     snapshot: connection.snapshot,
     request,
@@ -579,182 +247,30 @@ export default function DetachedChatApp({
     onError: setActionError,
     openConversation: openDuoConversation,
   });
-  const namedContextRequestId = [...contextRequests.inputRequests].reverse().find(
-    ({ conversationContextRequest }) => conversationContextRequest !== undefined,
-  )?.id ?? null;
-  const visibleConversation = projection.detail?.conversation ?? conversation;
-  const compactOnReturnState = compactOnReturnChatState(connection.snapshot, conversation?.id);
+  const platform = window.inertia?.getPlatform?.() ?? "unknown";
   return (
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <WatcherContext.Provider value={watchers.surface}>
     <DuoJudgeNoticeContext.Provider value={duoLaunches.notices}>
     <div
-      className={`detached-chat-shell platform-${window.inertia?.getPlatform?.() ?? "unknown"}`}
+      className={`detached-chat-shell platform-${platform}`}
       data-interface-scale={settings.interfaceScale}
       style={{ "--mac-titlebar-brand-safe-inset": `${MAC_BRAND_SAFE_INSET}px` } as CSSProperties}
     >
-      <header className="detached-chat-header drag-region">
-        <div className="detached-chat-title">
-          <span className="detached-chat-project">
-            {project && <ProjectIcon project={project} size={14} />}
-            <ProjectName project={project}>{project?.name ?? "Inertia"}</ProjectName>
-          </span>
-          <h1>{conversation?.title ?? "Detached chat"}</h1>
-        </div>
-        <div className="detached-chat-window-actions no-drag">
-          <IconButton
-            label={windowContext.alwaysOnTop
-              ? "Unpin chat window"
-              : "Keep chat window on top"}
-            aria-pressed={windowContext.alwaysOnTop}
-            disabled={pinning}
-            onClick={toggleAlwaysOnTop}
-          >
-            {windowContext.alwaysOnTop
-              ? <PinOff size={16} />
-              : <Pin size={16} />}
-          </IconButton>
-          <IconButton label="Return chat to main window" onClick={dockInMain}>
-            <PanelTopOpen size={16} />
-          </IconButton>
-          <IconButton label="Close chat window" onClick={closeWindow}>
-            <X size={16} />
-          </IconButton>
-        </div>
-      </header>
-
-      <div className="detached-chat-content">
-        {contextRequests.mainWindowReviewPending && (
-          <DetachedContextHandoffNotice onReturnToMain={dockInMain} />
-        )}
-        {namedContextRequestId && (
-          <p key={namedContextRequestId} className="visually-hidden" role="status" aria-live="polite">
-            The agent asked to read another chat.
-          </p>
-        )}
-        {unavailableDetail ? (
-          <ConversationDetailState
-            embedded
-            state={unavailableDetail.state}
-            {...(unavailableDetail.state === "failed"
-              ? { message: unavailableDetail.message }
-              : {})}
-            onRetry={projection.refreshDetail}
-          />
-        ) : !connection.snapshot ? (
-          <div className="detached-chat-loading" aria-busy="true">
-            <LoadingMark label="Connecting to chat" />
-          </div>
-        ) : !conversation || !project ? (
-          <ConversationDetailState
-            embedded
-            state="missing"
-            onRetry={projection.refreshDetail}
-          />
-        ) : (
-          <ChatWorkspace
-            embedded
-            project={project}
-            conversation={visibleConversation}
-            showCheckoutContext={false}
-            latestTurnSummary={projection.latestTurnSummary}
-            turns={projection.turns}
-            messages={projection.messages}
-            activities={projection.activities}
-            subagents={projection.subagents}
-            reasonings={projection.reasonings}
-            plans={projection.plans}
-            checkpoints={projection.checkpoints}
-            turnGitArtifacts={projection.turnGitArtifacts}
-            streaming={projection.streaming}
-            terminalProjections={projection.terminalProjections}
-            usage={projection.usage}
-            skills={workflowState?.skills ?? NO_SKILLS}
-            skillsCapability={workflowState?.skillsCapability ?? null}
-            skillsLoading={workflow.loading}
-            skillsError={workflow.error}
-            promptPresetsEnabled={false}
-            promptStashEnabled={false}
-            onQueueCommand={runtimeActions.runQueueCommand}
-            onLimitResetCommand={runtimeActions.runLimitResetCommand}
-            conversationContextHandoffEnabled={false}
-            agentContextRequestEnabled
-            contextSources={contextRequests.contextSources}
-            onConversationContextCommand={runtimeActions.run}
-            goal={{
-              workflow: workflowState,
-              executionStatus,
-              loading: workflow.loading,
-              busy: goalBusy,
-              error: workflow.error,
-              onRetry: () => workflow.refresh(true),
-              onSetGoal: workflow.setGoal,
-              onClearGoal: workflow.clearGoal,
-            }}
-            approvals={projection.pendingApprovals}
-            inputRequests={contextRequests.inputRequests}
-            providers={connection.snapshot.providers}
-            backendProfiles={connection.snapshot.backendProfiles ?? NO_BACKEND_PROFILES}
-            maintenanceStatus={null}
-            maintenanceOperation={null}
-            actions={NO_PROJECT_ACTIONS}
-            mentionResults={mentions.mentionResults}
-            showTimestamps={settings.showTimestamps}
-            showThinking={settings.showThinking}
-            usageDisplayMode={settings.usageDisplayMode}
-            responseDensity={settings.responseDensity}
-            defaultCodeWrap={settings.defaultCodeWrap}
-            autoCollapseWorkLog={settings.autoCollapseWorkLog}
-            showChangedFileSummaries={settings.showChangedFileSummaries}
-            autoScrollToFinalAnswer={settings.autoScrollToFinalAnswer}
-            promptContext={null}
-            contextPackets={projection.detail?.contextPackets ?? NO_CONTEXT_PACKETS}
-            watcherWakes={projection.detail?.watcherWakes}
-            previewContextUrl={null}
-            providerIdentityLabels={settings.providerIdentityLabels}
-            loading={false}
-            detailLoading={detailLoading}
-            history={projection.history}
-            sending={runtimeActions.sendingConversationIds.has(conversationId)}
-            onAddProject={dockInMain}
-            onCreateConversation={dockInMain}
-            onSendMessage={sendMessage}
-            onCompactConversation={compactConversation}
-            compaction={compactOnReturnState.compaction}
-            compactOnReturnSetting={settings.compactOnReturn}
-            {...(compactOnReturnState.watcherChat ? {} : { onCompactAndSendMessage: compactAndSendMessage })}
-            onListSkills={workflow.listSkills}
-            onRespondToApproval={respondToApproval}
-            onRespondToInput={respondToInput}
-            onUpdateConversation={updateConversation}
-            onChooseAttachments={desktopTools.chooseComposerAttachments}
-            onImportAttachments={desktopTools.importComposerAttachments}
-            onReleaseAttachment={desktopTools.releaseComposerAttachment}
-            onRunAction={dockInMain}
-            onMentionQuery={mentions.searchMentions}
-            onConnectProvider={dockInMain}
-            onRefreshProvider={refreshProvider}
-            onOpenProviderSetup={dockInMain}
-            onOpenBackendSetup={dockInMain}
-            onProbeBackendProfile={probeConversationBackendProfile}
-            onRefreshProviderMaintenance={resolveProviderMaintenance}
-            onUpdateProvider={resolveProviderMaintenance}
-            onCancelProviderUpdate={resolveProviderMaintenance}
-            onOpenProviderUpdateInstructions={openProviderUpdateInstructions}
-            onOpenResume={dockInMain}
-            resumeOptions={NO_RESUME_OPTIONS}
-            onResumeConversation={dockInMain}
-            onUsageDisplayModeChange={changeUsageDisplayMode}
-            onStop={stopAgent}
-            onRevertCheckpoint={revertCheckpoint}
-            onOpenTurnDiff={dockInMain}
-            onCompareTurnArtifacts={dockInMain}
-            onOpenTurnFile={openProjectFile}
-            onLatestContentVisibilityChange={setLatestContentVisible}
-          />
-        )}
-      </div>
+      <DetachedWorkspace
+        conversationId={conversationId}
+        connection={connection}
+        settings={settings}
+        handoff={handoff}
+        platform={platform}
+        documentPresence={documentPresence}
+        busyAction={busyAction}
+        setBusyAction={setBusyAction}
+        setActionError={setActionError}
+        windowActions={windowActions}
+        onTerminalToggleChange={setTerminalToggle}
+      />
 
       {(actionError || connection.error) && (
         <div className="detached-chat-error" role="alert">

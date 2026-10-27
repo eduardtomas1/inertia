@@ -16,7 +16,7 @@ import {
   buildNewConversationPayload,
 } from "../../src/renderer/src/lib/newConversation";
 import type { InertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
-import { taskTrace, taskTurn } from "./background-task-fixtures";
+import { taskTurn } from "./background-task-fixtures";
 
 const counting = vi.hoisted(() => ({ composerRenders: 0 }));
 const harness = vi.hoisted(() => ({ connection: null as unknown }));
@@ -566,7 +566,7 @@ describe("detached chat window", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
   });
 
-  it("closes the window with Command+W only when it has no panel tab to close", async () => {
+  it("closes the window with Command+W and ignores other W chords", async () => {
     const closes: string[] = [];
     const bridge = window.inertia as unknown as object;
     Object.defineProperty(window, "inertia", {
@@ -589,19 +589,6 @@ describe("detached chat window", () => {
     fireEvent.keyDown(message, { key: "w", code: "KeyW", metaKey: true, shiftKey: true });
     expect(closes).toEqual([]);
 
-    const panel = document.createElement("aside");
-    panel.className = "workspace-panel";
-    const closedTabs: string[] = [];
-    panel.addEventListener("inertia:close-active-panel-surface", (event) => {
-      closedTabs.push("tab");
-      event.preventDefault();
-    });
-    document.body.append(panel);
-    fireEvent.keyDown(message, { key: "w", code: "KeyW", metaKey: true });
-    expect(closedTabs).toEqual(["tab"]);
-    expect(closes).toEqual([]);
-    panel.remove();
-
     const shortcut = new KeyboardEvent("keydown", { key: "w", code: "KeyW", metaKey: true, bubbles: true, cancelable: true });
     message.dispatchEvent(shortcut);
     expect(shortcut.defaultPrevented).toBe(true);
@@ -620,40 +607,6 @@ describe("detached chat window", () => {
     } finally {
       storage.mockRestore();
     }
-  });
-
-  it("shows a turn's agents as plain status that cannot close the window", async () => {
-    const turn = taskTurn({
-      id: "detached-turn",
-      conversationId,
-      userMessageId: "detached-message",
-      status: "completed",
-      completedAt: "2030-01-01T00:02:00.000Z",
-    });
-    harnessDetail.current = {
-      ...detail,
-      agentTurns: [turn],
-      messages: [{
-        id: "detached-message",
-        conversationId,
-        turnId: turn.id,
-        role: "user",
-        content: "Split the work across helpers.",
-        attachments: [],
-        createdAt: turn.requestedAt,
-      }],
-      subagents: [
-        taskTrace({ id: "done", conversationId, turnId: turn.id, runId: turn.runId, status: "completed" }),
-        taskTrace({ id: "broken", conversationId, turnId: turn.id, runId: turn.runId, status: "failed" }),
-      ],
-    };
-    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
-    render(<DetachedChatApp initialWindowContext={context} />);
-    await act(async () => { await vi.dynamicImportSettled(); });
-    const status = await screen.findByText("2 agents finished");
-    expect(status.closest("button")).toBeNull();
-    expect(status.parentElement).toHaveTextContent(/^2 agents finished · 1 failed$/u);
-    expect(screen.queryByRole("button", { name: /agents finished/u })).toBeNull();
   });
 
   it("opens with the carried draft when this window's storage rejects writes", async () => {

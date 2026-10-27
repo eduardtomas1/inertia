@@ -103,7 +103,7 @@ interface ConversationActionsMenuProps {
   onDeleteConversation: (conversation: Conversation) => void;
   onDismiss: (reason: DismissReason) => void;
   onDismissRun: (run: WorkspaceRun) => void;
-  onOpenConversationInSplit: (conversation: Conversation) => void;
+  onOpenConversationInSplit?: (conversation: Conversation) => void;
   onOpenConversationInWindow?: (conversation: Conversation) => void;
   onPinConversation: (conversation: Conversation, pinned: boolean) => void;
   onRestoreConversation: (conversation: Conversation) => void;
@@ -206,6 +206,14 @@ export function ConversationActionsMenu({
   const watcherEntry = watcherSurface?.openAttachDialog
     ? watcherEntryFor(watcherSurface, conversation)
     : null;
+  const placementGroupVisible = Boolean(
+    onOpenConversationInWindow
+    || onOpenConversationInSplit
+    || splitConversationIds.has(conversation.id)
+    || (watcherEntry && watcherSurface)
+    || (activeRun && thread.needsAttention && runAttention?.canAcknowledge)
+    || (activity && activeRun && runAttention?.canDismiss),
+  );
   const conversationTrigger = (): HTMLElement | null => document.querySelector<HTMLElement>(
     `[aria-controls="conversation-actions-${conversation.id}"]`,
   );
@@ -261,7 +269,7 @@ export function ConversationActionsMenu({
       </ThreadSubmenu>
       {copyError && <p className="thread-menu-error" role="alert">{copyError}</p>}
       {onProjectSettings && <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onProjectSettings}><Settings size={14} />Project settings</ConversationMenuItem>}
-      <div role="separator" />
+      {placementGroupVisible && <div role="separator" />}
       {onOpenConversationInWindow && (
         <ConversationMenuItem
           {...itemProps}
@@ -282,7 +290,7 @@ export function ConversationActionsMenu({
         >
           <Columns2 size={14} />Remove from split view
         </ConversationMenuItem>
-      ) : (
+      ) : onOpenConversationInSplit && (
         <ConversationMenuItem
           {...itemProps}
           disabled={!canOpenInSplit}

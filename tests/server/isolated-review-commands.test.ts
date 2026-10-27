@@ -354,6 +354,35 @@ describe("isolated review revision authority", () => {
     });
   });
 
+  it("queues the revision without moving the main window's selected chat", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    reviewSupport.selectedReviewContext.mockResolvedValue({
+      visibleContent: "Revise this selection",
+      requestContext: { diffSelections: [] },
+      patch: "",
+      filePath: "src/example.ts",
+      hunkHeader: "@@ -1 +1 @@",
+      selectedLineCount: 1,
+    });
+    reviewSupport.captureRequiredCheckpoint.mockResolvedValue({
+      id: "checkpoint-1",
+      label: "Before revision",
+    });
+    const { dependencies, queue } = fixture(authority);
+
+    await expect(createIsolatedReviewCommandHandler(dependencies)(
+      {} as WebSocket,
+      command,
+    )).resolves.toBe("handled");
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId,
+      activateConversation: false,
+    }));
+  });
+
   it("holds conversation ownership from diff read through turn start", async () => {
     const authority = new ConversationWorkAuthority(() => ({
       projectId,

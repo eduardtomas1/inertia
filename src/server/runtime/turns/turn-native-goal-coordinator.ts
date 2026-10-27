@@ -71,6 +71,7 @@ export class TurnNativeGoalCoordinator {
     const queued = this.options.queue({
       conversationId: input.conversationId,
       content: `/goal ${visibleObjective}`,
+      activateConversation: false,
       goalStart: {
         ...(input.objective !== undefined
           ? { objective: input.objective }

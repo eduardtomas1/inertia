@@ -2,6 +2,7 @@ import type { z } from "zod";
 
 const MAX_PROBLEMS = 6;
 const MAX_LINE_CHARS = 200;
+const MAX_ECHOED_KEY_CHARS = 80;
 
 type Issue = z.ZodError["issues"][number];
 
@@ -25,7 +26,7 @@ function problem(issue: Issue, args: unknown): string {
     case "invalid_format":
       return issue.format === "uuid"
         ? "expected a chat id (UUID) from inertia_list_conversations"
-        : `expected ${issue.format}`;
+        : issue.message;
     case "too_big":
       return `at most ${String(issue.maximum)}${issue.origin === "string" ? " characters" : ""}`;
     case "too_small":
@@ -39,11 +40,17 @@ function problem(issue: Issue, args: unknown): string {
   }
 }
 
+function quotedKey(key: string): string {
+  return JSON.stringify(key)
+    .replace(/[\u007f-\uffff]/gu, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`)
+    .slice(0, MAX_ECHOED_KEY_CHARS);
+}
+
 function lines(issue: Issue, args: unknown, schema: unknown): string[] {
   const prefix = issue.path.map(String).join(".");
   if (issue.code === "unrecognized_keys") {
     const accepted = Object.keys(child(schemaAt(schema, issue.path), "properties") ?? {});
-    return issue.keys.map((key) => `${prefix ? `${prefix}.` : ""}${key}: unknown field; accepted: ${accepted.join(", ") || "none"}`);
+    return issue.keys.map((key) => `${prefix ? `${prefix}.` : ""}${quotedKey(key)}: unknown field; accepted: ${accepted.join(", ") || "none"}`);
   }
   return [`${prefix || "arguments"}: ${problem(issue, args)}`];
 }

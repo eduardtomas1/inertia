@@ -3,6 +3,7 @@ import { type JsonObject, type RpcId } from "./protocol";
 import {
   providerHostToolAccepted,
   type ProviderHostToolResult,
+  UNSAFE_HOST_TOOL_NAME_CHARACTERS,
   unknownProviderHostToolMessage,
 } from "../provider/contracts";
 import type { AgentApprovalDecision } from "../provider/interactions";
@@ -102,6 +103,7 @@ export class CodexHostToolRuntime {
       || !this.host.isOwnedTurn(providerThreadId, providerTurnId)
       || !toolCallId
       || !tool
+      || UNSAFE_HOST_TOOL_NAME_CHARACTERS.test(tool)
     ) {
       this.writeOrCancel({
         id,

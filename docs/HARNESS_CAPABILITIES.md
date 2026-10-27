@@ -49,15 +49,19 @@ delegation, and inspection of the status and latest result, and states that
 Inertia asks the user before every call that changes a chat, whatever the access mode.
 Starting a child chat is explicitly not treated as evidence that its work
 completed. A latest-result read on a chat that is still running returns
-`result: null` with a `next` line pointing to the status tool. An approval
+`result: null` with a `next` line pointing to the status tool; one whose
+latest turn ended without a reply says so in `next`. An approval
 the user leaves unanswered for five minutes resolves as a denial on the card
 and returns `approval_timed_out` to the agent, which may ask the user to try
 again. Chat and context tool arguments that fail Inertia's validation return
 `invalid_arguments` with one `<field>: <problem>` line per problem and a final
-line naming the tool to call again; Claude's in-process MCP server still
+line naming the tool to call again; an unknown field name is echoed as a JSON
+string with non-ASCII characters escaped and cut at 80 characters; Claude's in-process MCP server still
 answers schema failures itself before Inertia sees them. On Codex and the HTTP
 MCP bridge, a call to a tool the chat does not have names the closest tool and
-lists the tools it does have.
+lists the tools it does have; it repeats the requested name only when it is
+plain ASCII (letters, digits, `_`, `.`, `:`, `-`), and a name with control
+characters or Unicode line separators is rejected as malformed.
 
 `inertia.frontend-workbench` composes the Browser tools described in
 `docs/AGENT_BROWSER.md`. Its guidance holds only what the tool descriptions do

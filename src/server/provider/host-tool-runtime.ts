@@ -12,6 +12,7 @@ import {
   type ProviderHostToolBridge,
   type ProviderHostToolImage,
   type ProviderHostToolResult,
+  UNSAFE_HOST_TOOL_NAME_CHARACTERS,
   unknownProviderHostToolMessage,
 } from "./contracts";
 import type {
@@ -82,7 +83,7 @@ function failure(message: string): ProviderHostToolResult {
 function validIdentity(value: string, maximum: number): boolean {
   return value.length > 0
     && value.length <= maximum
-    && !/[\u0000-\u001f\u007f]/u.test(value);
+    && !UNSAFE_HOST_TOOL_NAME_CHARACTERS.test(value);
 }
 
 const HOST_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([

@@ -93,16 +93,16 @@
       "opencode": 959
     },
     "inertia_create_conversation": {
-      "claude": 1443,
-      "codex": 1299,
-      "cursorKimi": 1405,
-      "opencode": 1405
+      "claude": 1440,
+      "codex": 1296,
+      "cursorKimi": 1402,
+      "opencode": 1402
     },
     "inertia_send_message": {
-      "claude": 589,
-      "codex": 445,
-      "cursorKimi": 551,
-      "opencode": 551
+      "claude": 584,
+      "codex": 440,
+      "cursorKimi": 546,
+      "opencode": 546
     },
     "inertia_get_conversation_status": {
       "claude": 456,
@@ -111,10 +111,10 @@
       "opencode": 418
     },
     "inertia_get_latest_result": {
-      "claude": 544,
-      "codex": 402,
-      "cursorKimi": 506,
-      "opencode": 506
+      "claude": 520,
+      "codex": 378,
+      "cursorKimi": 482,
+      "opencode": 482
     },
     "inertia_stop_conversation": {
       "claude": 452,
@@ -143,20 +143,20 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 17230,
-      "withoutBrowser": 7843
+      "withBrowser": 17198,
+      "withoutBrowser": 7811
     },
     "codex": {
-      "withBrowser": 14085,
-      "withoutBrowser": 6412
+      "withBrowser": 14053,
+      "withoutBrowser": 6380
     },
     "cursorKimi": {
-      "withBrowser": 16400,
-      "withoutBrowser": 7463
+      "withBrowser": 16368,
+      "withoutBrowser": 7431
     },
     "opencode": {
-      "withBrowser": 16394,
-      "withoutBrowser": 7463
+      "withBrowser": 16362,
+      "withoutBrowser": 7431
     }
   }
 }

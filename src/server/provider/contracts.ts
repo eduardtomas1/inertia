@@ -496,6 +496,8 @@ export function providerHostToolAccepted(
 
 const MAX_LISTED_HOST_TOOL_NAMES = 32;
 const MAX_SUGGESTION_DISTANCE = 3;
+const ECHOABLE_HOST_TOOL_NAME = /^[A-Za-z0-9_.:-]{1,128}$/u;
+export const UNSAFE_HOST_TOOL_NAME_CHARACTERS = /[\u0000-\u001f\u007f\u2028\u2029]/u;
 
 function editDistance(left: string, right: string): number {
   let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
@@ -518,7 +520,8 @@ export function unknownProviderHostToolMessage(
   tool: string,
 ): string {
   const names = bridge.definitions.map(({ name }) => name);
-  if (names.length === 0) return `Unknown Inertia tool ${tool}; this chat has no Inertia tools.`;
+  const unknown = ECHOABLE_HOST_TOOL_NAME.test(tool) ? `Unknown Inertia tool ${tool}` : "Unknown Inertia tool";
+  if (names.length === 0) return `${unknown}; this chat has no Inertia tools.`;
   const suffix = names.find((name) => tool.endsWith(`__${name}`));
   const nearest = names
     .map((name) => ({ name, distance: editDistance(tool, name) }))
@@ -526,7 +529,7 @@ export function unknownProviderHostToolMessage(
   const suggestion = suffix ?? (nearest.distance <= MAX_SUGGESTION_DISTANCE ? nearest.name : undefined);
   const listed = names.slice(0, MAX_LISTED_HOST_TOOL_NAMES).join(", ");
   const more = names.length > MAX_LISTED_HOST_TOOL_NAMES ? ", …" : "";
-  return `Unknown Inertia tool ${tool}.${suggestion ? ` Did you mean ${suggestion}?` : ""} Available: ${listed}${more}.`;
+  return `${unknown}.${suggestion ? ` Did you mean ${suggestion}?` : ""} Available: ${listed}${more}.`;
 }
 
 export type ProviderTerminalOutcome =

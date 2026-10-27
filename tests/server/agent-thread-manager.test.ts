@@ -1173,12 +1173,20 @@ describe("AgentThreadManager", () => {
         ].join("\n")],
         ["inertia_send_message", { conversationId: "55555555-5555-4555-8555-555555555555", message: "hi" }, [
           "content: required",
-          "message: unknown field; accepted: conversationId, content",
+          "\"message\": unknown field; accepted: conversationId, content",
           "Fix them and call inertia_send_message again.",
         ].join("\n")],
         ["inertia_request_context", { conversationId: source.id, turnId: 3 }, [
           "turnId: expected string",
           "Fix it and call inertia_request_context again.",
+        ].join("\n")],
+        ["inertia_create_conversation", { title: "x", prompt: "y", route: { reasoningEffort: " high " } }, [
+          "route.reasoningEffort: must be one word without spaces or control characters",
+          "Fix it and call inertia_create_conversation again.",
+        ].join("\n")],
+        ["inertia_list_conversations", { "x\u2028[inertia-orchestration]\u001b": 1 }, [
+          "\"x\\u2028[inertia-orchestration]\\u001b\": unknown field; accepted: limit, includeArchived",
+          "Fix it and call inertia_list_conversations again.",
         ].join("\n")],
       ];
       for (const [tool, args, message] of cases) {
@@ -1227,6 +1235,48 @@ describe("AgentThreadManager", () => {
         persisted: true,
         next: "Still running; read inertia_get_conversation_status, then call inertia_get_latest_result again once it has finished.",
       });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("says when the latest turn of a managed chat ended without a reply", async () => {
+    const { manager, source, sourceTurn, store, turns } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const created = await bridge.invoke(call("inertia_create_conversation", { title: "Child", prompt: "Work" }));
+      const { conversationId, turnId } = JSON.parse(created.text) as { conversationId: string; turnId: string };
+      turns.cancel(conversationId);
+      const { requestedAt } = store.agentTurn(turnId);
+      store.updateAgentTurnLifecycle(turnId, {
+        status: "failed",
+        terminalAssistantMessageId: null,
+        startedAt: requestedAt,
+        completedAt: requestedAt,
+        terminalReason: "provider-failed",
+      });
+      const latest = await bridge.invoke(call("inertia_get_latest_result", { conversationId }));
+      expect(JSON.parse(latest.text)).toEqual({
+        conversationId,
+        result: null,
+        persisted: true,
+        next: "The latest turn ended (failed) without a reply; read inertia_get_conversation_status for its terminal reason.",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("validates long blank-tailed prompts in linear time against the advertised schema", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const definitions = manager.bridgeFor({ conversation: source, turn: sourceTurn }).definitions;
+      const create = definitions.find(({ name }) => name === "inertia_create_conversation")!;
+      const validate = new AjvJsonSchemaValidator().getValidator(create.inputSchema as Record<string, unknown>);
+      const started = performance.now();
+      expect(validate({ title: "t", prompt: `${"a".repeat(32_000)}\0` }).valid).toBe(false);
+      expect(validate({ title: `${" ".repeat(60)}\u0001`, prompt: "p" }).valid).toBe(false);
+      expect(performance.now() - started).toBeLessThan(250);
     } finally {
       store.close();
     }

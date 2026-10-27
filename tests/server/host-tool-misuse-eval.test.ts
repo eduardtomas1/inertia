@@ -30,6 +30,7 @@ import {
   type MisuseCase,
   type MisuseExpectation,
   type MisuseSetup,
+  type PendingGap,
 } from "./host-tool-misuse-cases";
 
 const ALL_TRANSPORTS: readonly ToolTransport[] = ["codex", "mcp", "claude"];
@@ -146,8 +147,9 @@ function shortfalls(reply: TransportReply, expected: MisuseExpectation): string[
   return problems;
 }
 
-function pendingReason(misuse: MisuseCase, transport: ToolTransport): string | undefined {
-  return typeof misuse.pending === "string" ? misuse.pending : misuse.pending?.[transport];
+function pendingGap(misuse: MisuseCase, transport: ToolTransport): PendingGap | undefined {
+  if (!misuse.pending) return undefined;
+  return "reason" in misuse.pending ? misuse.pending : misuse.pending[transport];
 }
 
 function expectation(misuse: MisuseCase, transport: ToolTransport): MisuseExpectation {
@@ -162,21 +164,25 @@ describe("host tool misuse eval: recorded wrong and right calls replayed through
     for (const misuse of MISUSE_CASES) {
       expect(misuse.mistake, misuse.id).toMatch(/^[A-Z].*\.$/u);
       if (misuse.kind === "control") expect(misuse.pending, misuse.id).toBeUndefined();
+      for (const transport of misuse.transports ?? ALL_TRANSPORTS) {
+        const pending = pendingGap(misuse, transport);
+        if (pending) expect(pending.shortfalls, `${misuse.id} ${transport}`).not.toEqual([]);
+      }
     }
   });
 
   for (const misuse of MISUSE_CASES) {
     describe(`${misuse.kind} ${misuse.id}: ${misuse.mistake}`, () => {
       for (const transport of misuse.transports ?? ALL_TRANSPORTS) {
-        const pending = pendingReason(misuse, transport);
-        const title = pending ? `${transport} (known gap: ${pending})` : transport;
+        const pending = pendingGap(misuse, transport);
+        const title = pending ? `${transport} (known gap: ${pending.reason})` : transport;
         it(title, async () => {
           const reply = await replay(misuse, transport);
           expect(reply.text, "The reply leaks an internal failure.").not.toMatch(INTERNAL_FAILURE);
           const problems = shortfalls(reply, expectation(misuse, transport));
           if (pending) {
-            expect(problems, `The known gap is closed; remove its pending mark. Reply: ${reply.text}`)
-              .not.toEqual([]);
+            expect(problems, `The known gap changed. If it closed, remove its pending mark; otherwise record its new shortfalls. Reply: ${reply.text}`)
+              .toEqual(pending.shortfalls);
           } else {
             expect(problems, `Reply: ${reply.text}`).toEqual([]);
           }

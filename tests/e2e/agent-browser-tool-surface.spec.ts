@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { agentBrowserToolSurfacePostCount } from "./support/agent-browser-tool-surface-pages";
+import { closeWorkspaceTools, ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 interface Result {
   ok: boolean;
@@ -12,6 +13,7 @@ interface Result {
   message?: string;
   text?: string;
   state?: { controller?: string };
+  image?: { mimeType: string; data: string; width: number; height: number };
 }
 
 interface PageSnapshot {
@@ -189,5 +191,39 @@ test("the user takes over the page during an agent command", async () => {
 
   await interruptedWhile("agent-browser-confirm", { type: "keyDown", keyCode: "a" });
   expect(await browser({ action: "tabs" })).toMatchObject({ ok: true, state: { controller: "user" } });
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("an agent lays the page out at a desktop size inside a narrower panel and still clicks precisely", async () => {
+  const path = "agent-browser-viewport";
+  const panel = await ensureWorkspaceTools(app.page);
+  try {
+    await selectWorkspaceTool(panel, "Browser");
+    await navigate(path);
+    await expect.poll(() => app.nativePreviewIsVisible(`${app.previewUrl}${path}`)).toBe(true);
+    const panelWidth = await pageValue<number>(path, "innerWidth");
+    expect(panelWidth).toBeLessThan(1_280);
+
+    expect(await browser({ action: "resize", preset: "desktop" })).toMatchObject({
+      ok: true,
+      state: { viewport: { width: 1_280, height: 800, fit: false, mobile: false } },
+    });
+    await expect.poll(() => pageValue<number>(path, "innerWidth")).toBe(1_280);
+    expect(await pageValue<number>(path, "innerHeight")).toBe(800);
+    const snapshot = parsed(await browser({ action: "snapshot" }));
+    expect(await browser({ action: "click", ref: refFor(snapshot, "Far corner") })).toMatchObject({ ok: true });
+    await expect.poll(() => pageValue<string>(path, "window.__clicked ?? ''")).toBe("far");
+
+    const screenshot = await browser({ action: "screenshot" });
+    expect(screenshot).toMatchObject({ ok: true, image: { mimeType: "image/png" } });
+    expect(screenshot.image).toMatchObject({
+      width: await pageValue<number>(path, "document.documentElement.clientWidth"),
+      height: await pageValue<number>(path, "document.documentElement.clientHeight"),
+    });
+  } finally {
+    expect(await browser({ action: "resize", preset: "fit" })).toMatchObject({ ok: true });
+    await closeWorkspaceTools(app.page);
+  }
+  await expect.poll(() => pageValue<number>(path, "innerWidth")).not.toBe(1_280);
   expect(app.rendererErrors).toEqual([]);
 });

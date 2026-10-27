@@ -19,6 +19,10 @@ const pages: Record<string, string> = {
     + "<button id='delete' type='button'>Delete item</button>"
     + "<script>document.querySelector('#delete').addEventListener('click',()=>{"
     + "if(confirm('Delete?'))document.querySelector('#status').textContent='Deleted'})</script>",
+  "/agent-browser-viewport": "<title>Viewport</title><style>body{margin:0}"
+    + "#far{position:absolute;left:1150px;top:700px;width:100px;height:40px}</style>"
+    + "<p>Viewport page</p><button id='far' type='button'>Far corner</button>"
+    + "<script>document.querySelector('#far').addEventListener('click',()=>{window.__clicked='far'})</script>",
   "/agent-browser-post-form": "<title>Post form</title>"
     + "<form method='post' action='/agent-browser-post-count'><button type='submit'>Send post</button></form>",
   "/agent-browser-closed-shadow-alert": "<title>Closed code entry</title><div id='host'></div>"

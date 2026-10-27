@@ -304,6 +304,7 @@ export function resolveTurnRequest(
       : [...capabilityInstructions, chatInstruction(conversation.id)],
     resumedSessionId: canResume ? conversation.providerSessionId : null,
     latestTurn,
+    promptWithheld: request.goalStart !== undefined,
   });
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
   const interruptedTurnId = dependencies.store.turnLedgerRepository

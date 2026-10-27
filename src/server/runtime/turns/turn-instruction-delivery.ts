@@ -41,6 +41,7 @@ export interface HiddenInstructionDeliveryInput {
   pack: readonly HiddenProviderInstruction[];
   resumedSessionId: string | null;
   latestTurn: AgentTurn | null;
+  promptWithheld: boolean;
 }
 
 export interface HiddenInstructionDelivery {
@@ -57,6 +58,8 @@ export function resolveHiddenInstructionDelivery(
 ): HiddenInstructionDelivery {
   const { store, conversation, resumedSessionId } = input;
   const ledger = store.turnLedgerRepository;
+  const nativeGoalSession = resumedSessionId !== null && store.agentGoals(conversation.id)
+    .some((goal) => goal.source === "codex-native" && goal.providerSessionId === resumedSessionId);
   const settledOnSession = (turn: AgentTurn | null): boolean => turn !== null
     && turn.status === "completed"
     && turn.providerSessionAfter === resumedSessionId
@@ -89,10 +92,11 @@ export function resolveHiddenInstructionDelivery(
     promptPack,
     freshSessionPromptPack: text !== undefined && !systemChannel ? input.pack : [],
     buildModeDue: resumedSessionId === null
+      || nativeGoalSession
       || input.latestTurn?.interactionMode !== conversation.interactionMode
       || !settledOnSession(input.latestTurn),
     recordPromptPack: (turnId) => {
-      if (promptPack.length > 0) input.deliveries?.record(conversation.id, turnId, digest);
+      if (promptPack.length > 0 && !input.promptWithheld) input.deliveries?.record(conversation.id, turnId, digest);
     },
   };
 }

@@ -358,6 +358,7 @@ describe("TurnController native goal lifecycle", () => {
       prompt: expect.stringContaining("Report current progress."),
       goalContinuationExpected: true,
     });
+    expect(runtime.provider.input?.prompt).toContain("[build-mode]");
     expect(runtime.provider.input).not.toHaveProperty("goalStart");
   });
 

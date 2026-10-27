@@ -16,7 +16,7 @@ import {
   agentPageActivationFailureMessage, agentPageBoundaryGaps, agentPageKeyInput, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, resetAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import {
-  agentPageEvidencePrivacy, agentPageInputRefusal, agentPageRefHasFocus,
+  agentPageEvidencePrivacy, agentPageInnerSize, agentPageInputRefusal, agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
   type AgentPageEvidencePrivacy, type AgentPageNotInspected, type PreviewAgentTarget,
@@ -48,6 +48,7 @@ export const OUTSIDE_VIEWPORT_MESSAGE = "That control is outside the visible par
 const CRASHED_PAGE_MESSAGE = "This tab's page crashed. Navigate to the page again to reload it.";
 const NAVIGATION_REPLACED_NOTE = "The page replaced this navigation before it finished. Take a snapshot to see which page is showing.";
 const VIEWPORT_CHANGED_NOTE = "The page layout may have changed, so earlier refs may be stale. Take a new inertia_browser_snapshot before using them.";
+const WIDER_LAYOUT_NOTE = "The page has no viewport meta tag, so it laid out wider than the viewport.";
 
 type PreviewContents = PreviewTab["view"]["webContents"];
 
@@ -374,9 +375,17 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       () => this.host.setViewport(session, nextAgentViewport(session, command)),
       { scope, phase: "page-viewport", cancel: () => resetAgentFileChooserBlock(contents) },
     );
+    const page = blankTab(contents)
+      ? null
+      : await this.rendererOperation(contents, () => agentPageInnerSize(contents), { scope, phase: "page-viewport" });
     stopForAbort(scope.signal);
-    this.host.record(session, "resize", agentViewportActivityLabel(command, agentViewportState(session)));
-    return this.#stateResult(session, { note: VIEWPORT_CHANGED_NOTE });
+    const viewport = agentViewportState(session);
+    this.host.record(session, "resize", agentViewportActivityLabel(command, viewport));
+    const wider = page !== null && viewport.mobile && page.width > viewport.width;
+    return this.#stateResult(session, {
+      ...(page ? { page } : {}),
+      note: wider ? `${VIEWPORT_CHANGED_NOTE} ${WIDER_LAYOUT_NOTE}` : VIEWPORT_CHANGED_NOTE,
+    });
   }
 
   async navigate(

@@ -180,6 +180,34 @@ describe("agent Browser viewport in the broker", () => {
       .resolves.toMatchObject({ state: { viewport: { width: 1_280, fit: false } } });
   });
 
+  it("reports the size the page laid out at and says when it ignored a mobile viewport", async () => {
+    const { broker } = await shownBrowser();
+    pageTools.agentPageInnerSize.mockResolvedValueOnce({ width: 980, height: 2_122 });
+    const mobile = await broker.perform(runIdentity, { action: "resize", preset: "mobile" });
+    expect(mobile.ok && JSON.parse(mobile.text)).toMatchObject({
+      page: { width: 980, height: 2_122 },
+      note: "The page layout may have changed, so earlier refs may be stale. Take a new inertia_browser_snapshot before using them. The page has no viewport meta tag, so it laid out wider than the viewport.",
+      state: { viewport: { width: 375, height: 812, mobile: true } },
+    });
+
+    pageTools.agentPageInnerSize.mockResolvedValueOnce({ width: 1_280, height: 800 });
+    const desktopResult = await broker.perform(runIdentity, { action: "resize", preset: "desktop" });
+    expect(desktopResult.ok && JSON.parse(desktopResult.text)).toMatchObject({
+      page: { width: 1_280, height: 800 },
+      note: "The page layout may have changed, so earlier refs may be stale. Take a new inertia_browser_snapshot before using them.",
+    });
+  });
+
+  it("reports no page size for a blank tab", async () => {
+    const created = createPreviewBrokerHarness(PreviewBroker);
+    created.broker.connect(owner);
+    created.broker.setBounds({ ...owner, bounds: { x: 0, y: 0, width: 600, height: 500 } });
+    pageTools.agentPageInnerSize.mockClear();
+    const resized = await created.broker.perform(runIdentity, { action: "resize", preset: "mobile" });
+    expect(resized.ok && JSON.parse(resized.text)).not.toHaveProperty("page");
+    expect(pageTools.agentPageInnerSize).not.toHaveBeenCalled();
+  });
+
   it("reports the panel size while the viewport fits the panel", async () => {
     const { broker, emulation } = await shownBrowser({ x: 0, y: 0, width: 640, height: 480 });
     await expect(broker.perform(runIdentity, { action: "tabs" })).resolves.toMatchObject({
@@ -455,7 +483,9 @@ describe("agent Browser viewport in the broker", () => {
 
   it("does not wait for an inactive tab whose page never answers the emulation", async () => {
     const { broker, contents } = await shownBrowser();
-    const firstTabId = (await broker.perform(runIdentity, { action: "tabs" })).state!.activeTabId;
+    const tabs = await broker.perform(runIdentity, { action: "tabs" });
+    if (!tabs.ok) throw new Error(tabs.message);
+    const firstTabId = tabs.state.activeTabId;
     await broker.perform(runIdentity, { action: "tab-open", url: "http://127.0.0.1:3000/busy" });
     const busy = electronState.contents.at(-1)!;
     await broker.perform(runIdentity, { action: "tab-activate", tabId: firstTabId });

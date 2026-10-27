@@ -659,6 +659,15 @@ export async function agentPageDevicePixelRatio(contents: WebContents): Promise<
   return value;
 }
 
+export async function agentPageInnerSize(contents: WebContents): Promise<{ width: number; height: number }> {
+  const value = await execute(contents, "({ width: innerWidth, height: innerHeight })");
+  const { width, height } = plainObject(value) ? value : {};
+  if (typeof width !== "number" || typeof height !== "number" || !Number.isFinite(width) || !Number.isFinite(height)) {
+    throw new Error("Inertia could not read the Browser page size. Reload the page, then try again.");
+  }
+  return { width, height };
+}
+
 export async function agentPageHasSensitiveEvidence(contents: WebContents): Promise<boolean> {
   return (await agentPageEvidencePrivacy(contents)).withheld !== null;
 }

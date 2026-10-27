@@ -235,10 +235,12 @@ test("an agent lays the page out at a desktop size inside a narrower panel and s
     const panelWidth = await pageValue<number>(path, "innerWidth");
     expect(panelWidth).toBeLessThan(1_280);
 
-    expect(await browser({ action: "resize", preset: "desktop" })).toMatchObject({
+    const resized = await browser({ action: "resize", preset: "desktop" });
+    expect(resized).toMatchObject({
       ok: true,
       state: { viewport: { width: 1_280, height: 800, fit: false, mobile: false } },
     });
+    expect(JSON.parse(resized.text ?? "{}")).toMatchObject({ page: { width: 1_280, height: 800 } });
     await expect.poll(() => pageValue<number>(path, "innerWidth")).toBe(1_280);
     expect(await pageValue<number>(path, "innerHeight")).toBe(800);
     const snapshot = parsed(await browser({ action: "snapshot" }));

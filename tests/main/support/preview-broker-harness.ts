@@ -354,6 +354,7 @@ export function createPreviewBrokerPageTools() {
     agentPageHasSensitiveEvidence: vi.fn(async () => false),
     agentPageHasSensitiveScreenshotEvidence: vi.fn(async () => false),
     agentPageNestedScreenshotEvidence: vi.fn<() => Promise<"clear" | "sensitive" | "unreadable">>(async () => "clear"),
+    agentPageInnerSize: vi.fn<() => Promise<{ width: number; height: number }>>(async () => ({ width: 1_280, height: 800 })),
     agentPageInputRefusal: vi.fn<() => Promise<"disabled" | "file" | "nested" | "retargeted" | null>>(async () => null),
     agentPageRefHasFocus: vi.fn(async () => true),
     installAgentPagePrivacyGuard: vi.fn(async () => undefined),

@@ -90,6 +90,7 @@ function initializeRepository(path: string): void {
 function createLaunch(
   store: RuntimeStore,
   sides: readonly [{ projectId: string; conversationId: string }, { projectId: string; conversationId: string }],
+  comparisonConversationId: string | null = null,
 ): string {
   const launchId = randomUUID();
   store.createPairedLaunch(launchId, sides.map((side, ordinal) => ({
@@ -99,8 +100,32 @@ function createLaunch(
     plannedWorktreePath: null,
     plannedBranch: null,
     ownsWorktree: false,
-  })) as Parameters<RuntimeStore["createPairedLaunch"]>[1]);
+  })) as Parameters<RuntimeStore["createPairedLaunch"]>[1], undefined, comparisonConversationId
+    ? { plannedConversationId: comparisonConversationId }
+    : null);
   return launchId;
+}
+
+function createTurn(store: RuntimeStore, conversationId: string): string {
+  return store.beginAgentTurn({
+    id: randomUUID(),
+    conversationId,
+    runId: randomUUID(),
+    content: "Change the readme",
+    activateConversation: false,
+    providerId: "codex",
+    harnessId: "codex-app-server",
+    backendProfileId: "codex-local",
+    model: "provider-default",
+    modelAlias: null,
+    reasoningEffort: "high",
+    interactionMode: "build",
+    accessMode: "supervised",
+    providerSessionBefore: null,
+    usageAtStart: null,
+    configurationRevision: 0,
+    association: "authoritative",
+  }).turn.id;
 }
 
 async function rejectedUpgrade(url: string): Promise<number> {
@@ -275,6 +300,10 @@ describe("detached runtime websocket", () => {
     const projectA = store.createProject("Visible project", workspaceA);
     const conversationA = store.createConversation(projectA.id, "Visible chat");
     const siblingA = store.createConversation(projectA.id, "Sibling chat");
+    const thirdA = store.createConversation(projectA.id, "Third chat");
+    const fourthA = store.createConversation(projectA.id, "Fourth chat");
+    const fifthA = store.createConversation(projectA.id, "Fifth chat");
+    const sixthA = store.createConversation(projectA.id, "Sixth chat");
     const projectB = store.createProject("Secret project", workspaceB);
     const conversationB = store.createConversation(projectB.id, "Secret chat");
     const otherB = store.createConversation(projectB.id, "Other secret chat");
@@ -293,9 +322,20 @@ describe("detached runtime websocket", () => {
       { projectId: projectB.id, conversationId: conversationB.id },
       { projectId: projectB.id, conversationId: otherB.id },
     ]);
+    const unrelatedLaunch = createLaunch(store, [
+      { projectId: projectA.id, conversationId: thirdA.id },
+      { projectId: projectA.id, conversationId: fourthA.id },
+    ]);
+    const judgedLaunch = createLaunch(store, [
+      { projectId: projectA.id, conversationId: fifthA.id },
+      { projectId: projectA.id, conversationId: sixthA.id },
+    ], conversationA.id);
+    const ownTurn = createTurn(store, conversationA.id);
+    const siblingTurn = createTurn(store, siblingA.id);
     store.close();
     const database = new Database(databasePath);
     database.prepare("UPDATE paired_launch_sides SET conversation_id = planned_conversation_id").run();
+    database.prepare("UPDATE paired_launches SET status = 'interrupted', comparison_conversation_id = comparison_planned_conversation_id").run();
     database.close();
 
     const runtime = await startTestRuntime({
@@ -412,11 +452,21 @@ describe("detached runtime websocket", () => {
       "projected prompt preset",
     );
 
-    expect(await result(detached, { type: "duo.pending", payload: { projectIds: [projectA.id] } }, "duo.pending"))
-      .toMatchObject({ kind: "duo.pending", hasMore: false });
+    const detachedPending = await result(detached, { type: "duo.pending", payload: { projectIds: [projectA.id] } }, "duo.pending");
+    expect(detachedPending).toMatchObject({ kind: "duo.pending", hasMore: false });
+    expect([...detachedPending.launchIds].sort()).toEqual([ownedLaunch, judgedLaunch].sort());
+    const mainPending = await result(main, { type: "duo.pending", payload: { projectIds: [projectA.id] } }, "duo.pending");
+    expect([...mainPending.launchIds].sort()).toEqual([ownedLaunch, judgedLaunch, unrelatedLaunch].sort());
     const duoStatus = await result(detached, { type: "duo.status", payload: { launchId: ownedLaunch } }, "duo.status");
     expect(duoStatus.sides.map(({ conversationId }) => conversationId)).toEqual([conversationA.id, siblingA.id]);
+    const judgedStatus = await result(detached, { type: "duo.status", payload: { launchId: judgedLaunch } }, "duo.status");
+    expect(judgedStatus.comparison?.conversationId).toBe(conversationA.id);
     expect(await rejected(detached, { type: "duo.status", payload: { launchId: foreignLaunch } })).toBe(REJECTED);
+    expect(await rejected(detached, { type: "duo.status", payload: { launchId: unrelatedLaunch } })).toBe(REJECTED);
+    expect(await rejected(detached, { type: "git.turn.diff", payload: { ...own, turnId: siblingTurn } })).toBe(REJECTED);
+    expect(await rejected(detached, { type: "git.turn.diff", payload: { ...own, turnId: randomUUID() } })).toBe(REJECTED);
+    expect(await reply(detached, { type: "git.turn.diff", payload: { ...own, turnId: ownTurn } }))
+      .not.toMatchObject({ type: "request.error", message: REJECTED });
     expect(await rejected(detached, { type: "duo.pending", payload: { projectIds: [projectB.id] } })).toBe(REJECTED);
 
     const terminal = await reply(detached, { type: "terminal.create", payload: { ...own, cols: 80, rows: 24 } });

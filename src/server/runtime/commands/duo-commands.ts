@@ -4,12 +4,20 @@ import type { DuoStatusResult, ServerEvent } from "../../../shared/contracts";
 import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import { RuntimeRequestError } from "../../runtime-errors";
 import {
+  MAIN_RUNTIME_CLIENT_AUTHORITY,
+  type RuntimeClientAuthority,
+} from "../runtime-client-authority";
+import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
 } from "./command-router";
 
 export interface DuoCommandDependencies {
   coordinator: DuoLaunchCoordinator;
+  visibleLaunchIds(
+    authority: RuntimeClientAuthority,
+    launchIds: readonly string[],
+  ): string[];
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
 }
@@ -35,7 +43,7 @@ export function createDuoCommandHandler(
     "duo.acknowledge",
     "duo.comparison.retry",
     "duo.comparison.cancel",
-  ], async (socket, command) => {
+  ], async (socket, command, authority = MAIN_RUNTIME_CLIENT_AUTHORITY) => {
     switch (command.type) {
       case "duo.prepare": {
         const prepared = await dependencies.coordinator.prepare(command.payload);
@@ -74,19 +82,25 @@ export function createDuoCommandHandler(
         });
         return "handled";
       }
-      case "duo.pending":
+      case "duo.pending": {
+        const pending = dependencies.coordinator.pending(
+          command.payload.projectIds,
+          command.payload.page,
+        );
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
           result: {
             kind: "duo.pending",
-            ...dependencies.coordinator.pending(
-              command.payload.projectIds,
-              command.payload.page,
+            launchIds: dependencies.visibleLaunchIds(
+              authority,
+              pending.launchIds,
             ),
+            hasMore: pending.hasMore,
           },
         });
         return "handled";
+      }
       case "duo.status":
         dependencies.send(socket, {
           type: "request.result",

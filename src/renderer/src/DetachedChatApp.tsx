@@ -62,6 +62,7 @@ import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceMentions } from "./hooks/workspace-tools/useWorkspaceMentions";
 import { onComposerDraftPersisted, persistComposerDraft } from "./utils/composerDraftPersistence";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
+import { dockInMainWith } from "./utils/detachedHandoff";
 import {
   goalControlsBusy,
   goalExecutionStatus,
@@ -344,7 +345,7 @@ export default function DetachedChatApp({
       setActionError(preparation.reason);
       return;
     }
-    void window.inertia.dockDetachedChat(preparation.draft).catch((error: unknown) => {
+    void dockInMainWith(preparation.draft).catch((error: unknown) => {
       setActionError(publicError(
         error,
         "This chat could not be returned to the main window.",

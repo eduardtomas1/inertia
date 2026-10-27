@@ -16,7 +16,9 @@ import {
   parseDetachedChatDraftHandoff,
   parseDetachedChatWindowOpenRequest,
   parseDetachedChatWindowRequest,
+  parseMainWindowTarget,
   type DesktopWindowContext,
+  type MainWindowTarget,
   type PendingDetachedChatDraft,
   type DetachedChatWindowSummary,
 } from "../shared/desktop.js";
@@ -80,7 +82,16 @@ export interface DetachedChatMainOptions {
   onDraftStoreDiagnostic?: (
     diagnostic: DetachedChatDraftStoreDiagnostic,
   ) => void;
-  onDock(conversationId: string): void | Promise<void>;
+  onDock(conversationId: string, target?: MainWindowTarget): void | Promise<void>;
+  onOpenInMainWindow(
+    sourceConversationId: string,
+    target: MainWindowTarget,
+  ): void | Promise<void>;
+}
+
+interface ScheduledDock {
+  conversationId: string;
+  target?: MainWindowTarget;
 }
 
 type TrustedWindowRole = DesktopWindowContext["role"];
@@ -115,6 +126,12 @@ function conversationId(value: unknown): string {
   return value;
 }
 
+function mainWindowTarget(value: unknown): MainWindowTarget {
+  const target = parseMainWindowTarget(value);
+  if (!target) throw new Error("Invalid main-window target");
+  return target;
+}
+
 function liveWindow(window: BrowserWindow | null): window is BrowserWindow {
   return Boolean(window && !window.isDestroyed());
 }
@@ -133,7 +150,7 @@ export class DetachedChatMain {
   #ipcRegistered = false;
   #shuttingDown = false;
   readonly #drafts = new Map<string, string>();
-  readonly #scheduledClosures = new Map<WebContents, string | null>();
+  readonly #scheduledClosures = new Map<WebContents, ScheduledDock | null>();
   readonly #persistDraftListener = (
     event: IpcMainEvent,
     ...args: unknown[]
@@ -272,11 +289,24 @@ export class DetachedChatMain {
     this.#options.ipcMain.handle(
       DETACHED_CHAT_IPC.dock,
       (event, ...args) => {
-        const context = this.#persistDraftForEvent(event, args);
-        this.#scheduleCloseAfterIpcReply(
-          event.sender,
-          context.conversationId,
-        );
+        const target = this.#dockTarget(event, args);
+        const context = this.#persistDraftForEvent(event, args.slice(0, 1));
+        this.#scheduleCloseAfterIpcReply(event.sender, {
+          conversationId: context.conversationId,
+          ...(target ? { target } : {}),
+        });
+      },
+    );
+    this.#options.ipcMain.handle(
+      DETACHED_CHAT_IPC.openInMain,
+      async (event, ...args) => {
+        const context = this.#assertDetachedIpc(event, args.length, 1);
+        const target = mainWindowTarget(args[0]);
+        if (
+          target.kind === "conversation"
+          && this.#manager.focus(target.conversationId)
+        ) return;
+        await this.#options.onOpenInMainWindow(context.conversationId, target);
       },
     );
     this.#options.ipcMain.handle(
@@ -304,6 +334,7 @@ export class DetachedChatMain {
     for (const channel of Object.values(DETACHED_CHAT_IPC)) {
       if (
         channel !== DETACHED_CHAT_IPC.windowsChanged
+        && channel !== DETACHED_CHAT_IPC.mainWindowTarget
         && channel !== DETACHED_CHAT_IPC.draftChanged
         && channel !== DETACHED_CHAT_IPC.draftMirrored
         && channel !== DETACHED_CHAT_IPC.persistDraft
@@ -520,20 +551,32 @@ export class DetachedChatMain {
     return window;
   }
 
+  #dockTarget(
+    event: IpcMainInvokeEvent,
+    args: unknown[],
+  ): MainWindowTarget | undefined {
+    if (args.length === 1) return undefined;
+    this.#assertDetachedIpc(event, args.length, 2);
+    return mainWindowTarget(args[1]);
+  }
+
   #scheduleCloseAfterIpcReply(
     sender: WebContents,
-    dockConversationId?: string,
+    dock?: ScheduledDock,
   ): void {
     const window = this.#manager.windowForSender(sender);
     if (!liveWindow(window)) throw new Error(UNTRUSTED_RENDERER_ERROR);
     if (this.#scheduledClosures.has(sender)) return;
-    this.#scheduledClosures.set(sender, dockConversationId ?? null);
+    this.#scheduledClosures.set(sender, dock ?? null);
     window.once("closed", () => {
       const scheduledDock = this.#scheduledClosures.get(sender) ?? null;
       this.#scheduledClosures.delete(sender);
       if (scheduledDock) {
+        const { conversationId: dockedId, target } = scheduledDock;
         void Promise.resolve()
-          .then(() => this.#options.onDock(scheduledDock))
+          .then(() => target
+            ? this.#options.onDock(dockedId, target)
+            : this.#options.onDock(dockedId))
           .catch(() => undefined);
       }
     });

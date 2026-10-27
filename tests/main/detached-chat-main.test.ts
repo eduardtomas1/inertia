@@ -185,6 +185,7 @@ interface Fixture {
   protocolSessions: Session[];
   protocolConversationIds: string[];
   docked: ReturnType<typeof vi.fn>;
+  openedInMain: ReturnType<typeof vi.fn>;
   coordinator: DetachedChatMain;
 }
 
@@ -202,6 +203,7 @@ function fixture(
   const protocolSessions: Session[] = [];
   const protocolConversationIds: string[] = [];
   const docked = vi.fn(onDock ?? (() => undefined));
+  const openedInMain = vi.fn(() => undefined);
   const coordinator = new DetachedChatMain({
     ipcMain: ipc,
     mainWindow: () => main as unknown as BrowserWindow,
@@ -229,6 +231,7 @@ function fixture(
     theme: "dark",
     platform: "win32",
     onDock: docked,
+    onOpenInMainWindow: openedInMain,
   });
   coordinator.registerIpc();
   return {
@@ -240,6 +243,7 @@ function fixture(
     protocolSessions,
     protocolConversationIds,
     docked,
+    openedInMain,
     coordinator,
   };
 }
@@ -788,10 +792,141 @@ describe("detached chat main-process boundary", () => {
     }
   });
 
+  it("keeps a validated main-window target with an explicit dock", async () => {
+    const value = fixture();
+    const target = { kind: "settings", page: "agents" };
+    try {
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.open,
+        eventFor(value.main.webContents),
+        { conversationId: FIRST_ID, title: "First", draft: "" },
+      );
+      const popup = value.popups[0]!;
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.dock,
+        eventFor(popup.webContents),
+        "draft",
+        { kind: "settings", page: "secrets" },
+      )).rejects.toThrow("Invalid main-window target");
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.dock,
+        eventFor(popup.webContents),
+        "draft",
+        target,
+        "extra",
+      )).rejects.toThrow("Rejected untrusted renderer request");
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.dock,
+        eventFor(value.main.webContents),
+        "draft",
+        target,
+      )).rejects.toThrow("Rejected untrusted renderer request");
+      await afterIpcReply();
+      expect(popup.destroyed).toBe(false);
+      const draftHandoffs = () => value.main.webContents.sent
+        .filter(({ channel }) => channel === DETACHED_CHAT_IPC.draftChanged);
+      expect(draftHandoffs()).toEqual([]);
+
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.dock,
+        eventFor(popup.webContents),
+        "docked draft",
+        { ...target },
+      );
+      await afterIpcReply();
+      expect(popup.destroyed).toBe(true);
+      expect(value.docked).toHaveBeenCalledExactlyOnceWith(FIRST_ID, target);
+      expect(draftHandoffs().map(({ args }) => args[0])).toEqual([
+        expect.objectContaining({ conversationId: FIRST_ID, draft: "docked draft" }),
+      ]);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("opens a target in the main window only for a detached sender and keeps the popup open", async () => {
+    const value = fixture();
+    const target = { kind: "new-chat", projectId: SECOND_ID, checkout: { kind: "isolated-worktree" } };
+    try {
+      for (const [conversationId, title] of [[FIRST_ID, "First"], [SECOND_ID, "Second"]] as const) {
+        await value.ipc.invoke(
+          DETACHED_CHAT_IPC.open,
+          eventFor(value.main.webContents),
+          { conversationId, title, draft: "" },
+        );
+      }
+      const [first, second] = value.popups;
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(value.main.webContents),
+        target,
+      )).rejects.toThrow("Rejected untrusted renderer request");
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(first!.webContents, { url: RENDERER_URL }),
+        target,
+      )).rejects.toThrow("Rejected untrusted renderer request");
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(first!.webContents),
+      )).rejects.toThrow("Rejected untrusted renderer request");
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(first!.webContents),
+        target,
+        "extra",
+      )).rejects.toThrow("Rejected untrusted renderer request");
+      for (const malformed of [
+        null,
+        { kind: "browser", url: "https://example.com/" },
+        { ...target, worktreePath: "/tmp/elsewhere" },
+        { kind: "conversation", conversationId: "../other" },
+      ]) {
+        await expect(value.ipc.invoke(
+          DETACHED_CHAT_IPC.openInMain,
+          eventFor(first!.webContents),
+          malformed,
+        )).rejects.toThrow("Invalid main-window target");
+      }
+      expect(value.openedInMain).not.toHaveBeenCalled();
+
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(first!.webContents),
+        target,
+      );
+      expect(value.openedInMain).toHaveBeenCalledExactlyOnceWith(FIRST_ID, target);
+
+      second!.focused = false;
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(first!.webContents),
+        { kind: "conversation", conversationId: SECOND_ID },
+      );
+      expect(second!.focused).toBe(true);
+      expect(value.openedInMain).toHaveBeenCalledOnce();
+
+      const conversationTarget = { kind: "conversation", conversationId: "00000003-1111-4111-8111-111111111111" };
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(second!.webContents),
+        conversationTarget,
+      );
+      expect(value.openedInMain).toHaveBeenLastCalledWith(SECOND_ID, conversationTarget);
+      await afterIpcReply();
+      expect(first!.destroyed).toBe(false);
+      expect(second!.destroyed).toBe(false);
+      expect(first!.closeCalls + first!.destroyCalls + second!.closeCalls + second!.destroyCalls).toBe(0);
+      expect(value.docked).not.toHaveBeenCalled();
+    } finally {
+      await cleanup(value);
+    }
+  });
+
   it("removes only its invoke handlers during shutdown", async () => {
     const value = fixture();
     try {
-      expect(value.ipc.handlers.size).toBe(10);
+      expect(value.ipc.handlers.size).toBe(11);
       expect(value.ipc.listeners.get(DETACHED_CHAT_IPC.persistDraft)?.size)
         .toBe(1);
       expect(value.ipc.listeners.get(DETACHED_CHAT_IPC.mirrorDraft)?.size)

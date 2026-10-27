@@ -105,6 +105,7 @@ export function commandMayChangeWorkspaceAuthority(
   }
 }
 const AddProjectDialog = lazy(async () => ({ default: (await import("./components/AddProjectDialog")).AddProjectDialog }));
+const MainWindowTargets = lazy(async () => ({ default: (await import("./hooks/useMainWindowTargets")).MainWindowTargets }));
 export default function App(): React.JSX.Element {
   const connection = useStableController(useInertiaConnection());
   const detachedChats = useDetachedChatWindows();
@@ -1077,6 +1078,10 @@ export default function App(): React.JSX.Element {
     acknowledgeActivity,
     dismissActivity,
   });
+  const mainWindowTargetActions = useStableActions({
+    selectConversation, showWorkspace: () => setView("workspace"), createConversation,
+    openSettings, connectProvider, openBackendSetup, reportUnavailable: setActionError,
+  });
   const multiSpawnActions = useStableActions({
     openDialog: multiSpawn.openDialog,
     closeDialog: multiSpawn.closeDialog,
@@ -1164,6 +1169,7 @@ export default function App(): React.JSX.Element {
       providerAuth={layoutProviderAuth}
       actions={layoutActions}
     />
+    <Suspense fallback={null}><MainWindowTargets snapshot={connection.snapshot} actions={mainWindowTargetActions} /></Suspense>
     </WatcherContext.Provider>
     </DuoJudgeNoticeContext.Provider>
     </HtmlRenderRuntimeStatusContext.Provider>

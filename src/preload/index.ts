@@ -5,6 +5,7 @@ import type {
   DesktopBridge,
   DetachedChatDraftHandoff,
   DetachedChatWindowSummary,
+  MainWindowTargetRequest,
   PendingDetachedChatDraft,
   PreviewStateUpdate,
   RuntimeConnectionResult,
@@ -22,6 +23,15 @@ ipcRenderer.on(
   (_event, conversationId: unknown) => {
     if (typeof conversationId === "string") {
       threadNotificationActivations.receive(conversationId);
+    }
+  },
+);
+const mainWindowTargets = new ThreadNotificationActivationBuffer<MainWindowTargetRequest>();
+ipcRenderer.on(
+  DETACHED_CHAT_IPC.mainWindowTarget,
+  (_event, request: unknown) => {
+    if (typeof request === "object" && request !== null) {
+      mainWindowTargets.receive(request as MainWindowTargetRequest);
     }
   },
 );
@@ -98,6 +108,7 @@ type MainWindowBridge = Omit<
   | "setDetachedChatAlwaysOnTop"
   | "retargetDetachedChat"
   | "dockDetachedChat"
+  | "openInMainWindow"
   | "closeDetachedChat"
   | "persistDetachedChatDraft"
   | "mirrorDetachedChatDraft"
@@ -295,6 +306,8 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.invoke(IPC.showThreadNotification, request) as Promise<boolean>,
   onThreadNotificationActivated: (listener: (conversationId: string) => void) =>
     threadNotificationActivations.subscribe(listener),
+  onMainWindowTarget: (listener: (request: MainWindowTargetRequest) => void) =>
+    mainWindowTargets.subscribe(listener),
   importCompletionSound: (keep: readonly string[]) =>
     ipcRenderer.invoke(COMPLETION_SOUND_IPC, "import", [...keep]) as ReturnType<DesktopBridge["importCompletionSound"]>,
   readCompletionSound: (file: string) =>

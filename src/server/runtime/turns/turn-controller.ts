@@ -68,6 +68,7 @@ import { hasActiveTurnCheckout, providerConversationIds } from "./turn-checkout-
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
+import { PromptInstructionDeliveries } from "./turn-instruction-delivery";
 import {
   providerEventMatchesActiveTurn,
   providerFailureCause,
@@ -126,6 +127,7 @@ export class TurnController {
   private readonly followUps: TurnFollowUpCoordinator;
   private readonly timeouts: TurnTimeoutCoordinator;
   private readonly nativeGoalMutations = new TurnNativeGoalMutationGate();
+  private readonly instructionDeliveries = new PromptInstructionDeliveries();
   private closing = false;
 
   constructor(
@@ -577,6 +579,7 @@ export class TurnController {
       store: this.store,
       providers: this.providers,
       hooks: this.hooks,
+      instructionDeliveries: this.instructionDeliveries,
       id: this.id,
       now: () => this.now(),
       clock: this.clock,
@@ -599,6 +602,7 @@ export class TurnController {
       store: this.store,
       providers: this.providers,
       hooks: this.hooks,
+      instructionDeliveries: this.instructionDeliveries,
       id: this.id,
       now: () => this.now(),
       clock: this.clock,

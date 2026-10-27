@@ -131,6 +131,7 @@ interface ProviderRunRequest {
   maxBudgetUsd?: number;
   readOnlyProfile?: "watcher";
   systemInstruction?: string;
+  sessionInstruction?: string;
   /** Provider-owned control operation that must never become a durable turn. */
   operation?: {
     kind: "compact";

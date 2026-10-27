@@ -156,7 +156,7 @@ export interface TurnControllerHooks {
    */
   broadcastConversationShell?(conversationId: string): void;
   providerInfo(): readonly ProviderInfo[];
-  /** Reviewed Inertia capability instructions, re-injected on every turn. */
+  /** Reviewed Inertia capability instructions, delivered once per provider session. */
   harnessInstructionsForTurn?(input: {
     conversation: Conversation;
   }): readonly HiddenProviderInstruction[];

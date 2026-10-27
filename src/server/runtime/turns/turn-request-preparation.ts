@@ -33,6 +33,12 @@ import {
   sharesInterruptionEndpoint,
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
+import {
+  chatInstruction,
+  resolveHiddenInstructionDelivery,
+  systemInstructionText,
+  type PromptInstructionDeliveries,
+} from "./turn-instruction-delivery";
 import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
 import type {
   ActiveTurn,
@@ -54,6 +60,7 @@ export interface PrepareTurnRequestDependencies {
   store: RuntimeStore;
   providers: TurnProviderRuntime;
   hooks: TurnControllerHooks;
+  instructionDeliveries?: PromptInstructionDeliveries;
   id(): string;
   now(): string;
   clock(): Date;
@@ -202,8 +209,8 @@ export function resolveTurnRequest(
     ?? (watcherTurn?.wakeId === null
       ? dependencies.hooks.watcherInstructionsForTurn?.({ conversation, hostTools: hostToolBridgeAttested }) ?? []
       : []);
-  const systemInstruction = roleInstructions.length > 0 && watcherHarnessProfile(route.harnessId).systemInstruction
-    ? roleInstructions.map(({ label, text }) => `[${label}]\n${text}`).join("\n\n")
+  const systemInstruction = watcherHarnessProfile(route.harnessId).systemInstruction
+    ? systemInstructionText(roleInstructions)
     : undefined;
   const watcherInstructions = systemInstruction === undefined ? roleInstructions : [];
 
@@ -286,11 +293,36 @@ export function resolveTurnRequest(
     : resolvedContinuation;
   const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
     && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
+  const canResume = continuation.action === "resume-session";
+  const instructionDelivery = resolveHiddenInstructionDelivery({
+    store: dependencies.store,
+    deliveries: dependencies.instructionDeliveries,
+    conversation,
+    harnessId: route.harnessId,
+    pack: resumesImportedCodex || capabilityInstructions.length === 0
+      ? []
+      : [...capabilityInstructions, chatInstruction(conversation.id)],
+    resumedSessionId: canResume ? conversation.providerSessionId : null,
+    latestTurn,
+    promptWithheld: request.goalStart !== undefined,
+  });
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
   const interruptedTurnId = dependencies.store.turnLedgerRepository
     .runtimeInterruptionSource(conversation.id);
   const requestedAt = dependencies.now();
   let conversationContexts: ConversationContextMaterialization | undefined;
+  const turnInstructions = [
+    ...watcherInstructions,
+    ...(interruptedTurnId === null ? [] : [runtimeInterruptionInstruction(
+      sharesInterruptionEndpoint(
+        dependencies.store.agentTurn(interruptedTurnId).continuationIdentity,
+        route.continuationIdentity,
+      )
+        ? dependencies.store.turnLedgerRepository.runtimeInterruption(interruptedTurnId)
+        : null,
+    )]),
+    ...(request.internalInstructions ?? []),
+  ];
   const assemblyInput = {
     ...(contextPacketIds.length > 0
       ? {
@@ -301,24 +333,15 @@ export function resolveTurnRequest(
       : {}),
     cwd: dependencies.store.conversationPath(conversation.id),
     visibleContent: request.content,
-    interactionMode: conversation.interactionMode,
+    ...(instructionDelivery.buildModeDue ? { interactionMode: conversation.interactionMode } : {}),
     attachments,
     imagePaths: request.imagePaths,
     documentContexts: request.documentContexts,
     context: request.context,
-    internalInstructions: [
-      ...(resumesImportedCodex ? [] : capabilityInstructions),
-      ...watcherInstructions,
-      ...(interruptedTurnId === null ? [] : [runtimeInterruptionInstruction(
-        sharesInterruptionEndpoint(
-          dependencies.store.agentTurn(interruptedTurnId).continuationIdentity,
-          route.continuationIdentity,
-        )
-          ? dependencies.store.turnLedgerRepository.runtimeInterruption(interruptedTurnId)
-          : null,
-      )]),
-      ...(request.internalInstructions ?? []),
-    ],
+    internalInstructions: [...instructionDelivery.promptPack, ...turnInstructions],
+    ...(instructionDelivery.sessionInstructionBytes === undefined
+      ? {}
+      : { sessionInstructionBytes: instructionDelivery.sessionInstructionBytes }),
   } satisfies AssembleTurnRequestInput;
   const ownChatPacketId = dependencies.store.contextPackets
     .ownConversationPacketId(conversation.id, contextPacketIds);
@@ -376,6 +399,8 @@ export function resolveTurnRequest(
   };
   const assembleOnFreshSession = (excludedMessageId?: string) => assembleTurnRequest({
     ...assemblyInput,
+    interactionMode: conversation.interactionMode,
+    internalInstructions: [...instructionDelivery.freshSessionPromptPack, ...turnInstructions],
     restoredHistory: ownChatPacketId === null
       ? (capacityBytes: number) => dependencies.store.continuationHistory(
           conversation.id,
@@ -386,7 +411,6 @@ export function resolveTurnRequest(
         )
       : referencedHistory,
   });
-  const canResume = continuation.action === "resume-session";
   const importNote = latestTurn?.origin === "cli-import"
     ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
     : null;
@@ -458,6 +482,9 @@ export function resolveTurnRequest(
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
     ...(readOnlyWatcher ? { readOnlyProfile: "watcher" as const } : {}),
     ...(systemInstruction !== undefined ? { systemInstruction } : {}),
+    ...(instructionDelivery.sessionInstruction !== undefined
+      ? { sessionInstruction: instructionDelivery.sessionInstruction }
+      : {}),
   } satisfies ActiveTurn["providerInput"];
   const harnessId = dependencies.providers.harnessIdFor(providerInput);
   if (harnessId !== route.harnessId) {
@@ -520,6 +547,7 @@ export function resolveTurnRequest(
     importNote,
     handoffFromTurnId: providerHandoff ? latestTurn.id : null,
     adopt: (queued) => {
+      instructionDelivery.recordPromptPack(queued.turn.id);
       const runningActivities =
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
       const activeConversation = providerSessionInvalidation

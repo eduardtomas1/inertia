@@ -174,6 +174,7 @@ function startCodexRun(
       access: options.input.access,
       ...(options.input.readOnlyProfile ? { readOnlyProfile: options.input.readOnlyProfile } : {}),
       ...(options.input.systemInstruction ? { developerInstructions: options.input.systemInstruction } : {}),
+      ...(options.input.sessionInstruction ? { sessionDeveloperInstructions: options.input.sessionInstruction } : {}),
       onText: emitter.text,
       onTextBoundary: emitter.textBoundary,
       onActivity: emitter.activity,

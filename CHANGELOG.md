@@ -2,7 +2,53 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Unreleased
+## 0.0.78 — 2026-10-27
+
+A calmer, more polished look across the app, a sidebar strip that says what
+is updating, Compact and send for large API-key chats, faster deletes and
+streaming, and Electron 45.
+
+### Look and feel
+
+- The sidebar has a faint grain, the selected chat sits on a raised tile, and
+  the sidebar glides closed instead of snapping. Only states that need you
+  stay coloured: Completed keeps its green check with quieter text.
+- The aurora brightens while an agent works and warms toward amber when
+  something needs you. Once per launch it fades in and the first chats rise
+  into place.
+- Replies render their Markdown while they stream, paragraph by paragraph, so
+  nothing jumps when the turn ends. Code reads at full contrast, and
+  narration, activity and summaries share the answer's left edge.
+- The transcript fades into the composer, **Jump to latest** floats above it
+  without moving the chat, and the minimap marks where you are. Turns that
+  changed no files no longer say "0 files changed".
+- The thinking strip has a calmer shimmer, still led by the brain icon, and a
+  message you send rises into place.
+- In light mode, menus, the palette, dialogs, toasts and the composer sit on
+  white with a little more lift. Added and removed lines are green and red
+  everywhere, and the dark diff is easier to read.
+- Settings sections are cards with clear headings. Empty states are centred
+  and quiet, toasts ease in, and the right panel's content slides in as it
+  opens.
+- The composer's usage display shows the ring once instead of repeating its
+  number beside it.
+- A Duo judge chat opens on a **Comparing A and B** card instead of the raw
+  prompt, with the full brief one click away.
+- The desktop mascot's bubble uses Inertia's colours and fonts, with readable
+  contrast everywhere.
+
+### Updates
+
+- A strip above the sidebar footer says what is updating as it happens, such
+  as "Downloading Inertia… 42%", "Updating Codex… 1 of 3" or "Preparing
+  Inertia to restart…". Successes fade out after five seconds; warnings and
+  failures stay until you dismiss them. Click it for each item's result and a
+  link to **Agent settings**.
+- The update popover lists every release you skipped, not only the newest,
+  and its header says how many releases behind you are.
+- The refresh icon winds up and coasts to rest instead of snapping, and spins
+  only while Inertia checks for its own update.
+- Bold text in release notes no longer breaks onto its own line.
 
 ### Chats
 
@@ -36,6 +82,9 @@ The useful changes in each Inertia release, in plain language.
   reset.
 - A window whose reset has passed shows **Reset** with a muted bar until new
   quota arrives, instead of the old percentage.
+- When a provider doesn't report token totals, the Usage panel shows one
+  plain line instead of four "Unavailable" cells, and Requests becomes the
+  main number.
 
 ### Performance
 
@@ -76,6 +125,8 @@ The useful changes in each Inertia release, in plain language.
 - A message queued from another window or by a watcher now appears in an idle
   chat as soon as the runtime reports it.
 - Repeated or empty Codex diff updates no longer add duplicate activity rows.
+- On Windows, an error about releasing Inertia's runtime helper now says why
+  the release failed, instead of only that it "could not be aborted".
 
 ### Dependencies
 

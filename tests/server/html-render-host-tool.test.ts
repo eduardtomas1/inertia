@@ -29,6 +29,7 @@ import {
   HTML_RENDER_MAX_HTML_BYTES,
   HTML_RENDER_MAX_PER_TURN,
   HTML_RENDER_THEME_GUIDE,
+  HTML_RENDER_THEME_VARIABLES,
   HTML_RENDER_TOOL_NAME,
   htmlRenderPlaceholderText,
   isHtmlRenderTitle,
@@ -120,6 +121,7 @@ describe("inertia_render_html definition", () => {
     expect(HTML_RENDER_TOOL_DEFINITION).toMatchObject({ name: "inertia_render_html", readOnly: true, destructive: false });
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(HTML_RENDER_LAYOUT_GUIDE);
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(HTML_RENDER_THEME_GUIDE);
+    for (const [alias] of HTML_RENDER_THEME_VARIABLES) expect(HTML_RENDER_THEME_GUIDE).toMatch(new RegExp(`${alias}[,.]`, "u"));
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain("call it before writing the reply");
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(`${HTML_RENDER_MAX_PER_TURN} pages per turn`);
     expect(HTML_RENDER_TOOL_DEFINITION.description).not.toContain("say in one sentence what the page shows");

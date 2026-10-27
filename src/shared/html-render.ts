@@ -106,7 +106,7 @@ export function defaultHtmlRenderTheme(scheme: HtmlRenderScheme): HtmlRenderThem
 }
 
 /** Variables the page can rely on, in agent-facing words for tool guidance. */
-export const HTML_RENDER_THEME_GUIDE = `Theme variables on :root follow the user's theme live: ${HTML_RENDER_THEME_VARIABLES.map(([alias]) => alias).join(", ")}.`;
+export const HTML_RENDER_THEME_GUIDE = "Theme variables on :root follow the user's theme live: --background, --foreground, --muted, --muted-foreground, --card, --card-foreground, --border, --accent, --accent-foreground, --accent-strong, --destructive, --warning, --success, --info, --code-background, --radius, --font-sans, --font-mono.";
 
 export const HTML_RENDER_LAYOUT_GUIDE = "Layout: fluid width; no outer card, border, page background or banner title; no 100vh; fixed pixel heights for charts.";
 

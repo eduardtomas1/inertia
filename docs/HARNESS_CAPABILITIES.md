@@ -80,10 +80,14 @@ The frontend loop is therefore:
 4. inspect the snapshot again after the user or layout changes the viewport; and
 5. report only the evidence actually observed.
 
-The local screenshot remains useful evidence for the user, but its pixels are
-not currently visible to the provider model. The pack tells the model this
-directly so it cannot quietly convert “capture succeeded” into a visual claim.
-The current Browser also has no agent-owned viewport-resize command.
+`inertia_browser_screenshot` returns its image to the model only when the
+turn's provider and model accept images, as described in
+`docs/AGENT_BROWSER.md`; otherwise the pixels stay in the user's local
+Evidence timeline. The pack tells the model this, and the result's
+`providerImage` says which case applied, so the model cannot quietly convert
+“capture succeeded” into a visual claim about pixels it never saw. An agent can
+set a fixed viewport, such as 1280 by 800 for a desktop layout, with
+`inertia_browser_resize`, independently of the Browser panel's size.
 
 `inertia.visual-replies` adds one tool, `inertia_render_html`, for every
 provider that has Inertia host tools. The agent passes one self-contained HTML
@@ -752,7 +756,8 @@ three layers that the account route does not need:
   the projector, the transcript or the failure path sees it. It masks the
   exact key and these forms of it: URL and JSON escaping, base64 and base64url
   of the key alone and followed by `
-` or `
+` or `
+
 ` (what `echo $KEY | base64`
   prints), and lower- and upper-case hex. Spaces, tabs and line breaks
   between characters are ignored, so wrapped base64 (`base64` wraps at 76
@@ -991,7 +996,8 @@ harness feature is finished. It deliberately does not:
 - replace or emulate provider-native protocol features;
 - grant a model permission to approve its own action;
 - execute third-party or repository-provided packs;
-- expose screenshots to models or infer visual quality from semantic boxes;
+- send screenshots to a model that does not accept images, or infer visual
+  quality from semantic boxes;
 - invent completion after provider failure; or
 - merge Cursor and Kimi into a generic ACP behavior layer before their actual
   protocol differences are covered.

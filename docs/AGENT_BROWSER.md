@@ -13,10 +13,13 @@ local runtime receives only a narrow command broker.
   chats, closes the Browser panel, opens Settings, or reloads the window, and
   the same pages are shown again when that chat's Browser panel returns.
 - An authorized agent can use its chat's Browser whether or not the panel is
-  showing, including from a background chat or a detached chat window. A page
-  with no visible panel is laid out at 1280 by 800 CSS pixels; once a panel has
-  shown it, the page keeps that panel's size while hidden. A Browser remains
-  unavailable to stale turns and while the main window is closed.
+  showing, including from a background chat or a detached chat window. Its
+  pages are laid out at the chat's viewport (see [Viewport](#viewport)). In
+  the default, **Fit**, a page with no visible panel is laid out at 1280 by
+  800 CSS pixels, and once a panel has shown it, the page keeps that panel's
+  size while hidden. A fixed viewport keeps its size whether or not the panel
+  is showing. A Browser remains unavailable to stale turns and while the main
+  window is closed.
 - A chat may hold at most eight ephemeral pages in one non-persistent browser
   session. Inertia keeps the Browsers of at most four chats that are not on
   screen, closes the least recently used one beyond that, and closes any that
@@ -26,10 +29,11 @@ local runtime receives only a narrow command broker.
 - Only loopback development origins accepted by the existing preview URL
   policy may be embedded or agent-controlled. Remote HTTPS addresses continue
   to open in the system browser; remote plaintext HTTP is rejected.
-- The Browser chrome shows pages and the active page. Its **Evidence** view
-  keeps a bounded local timeline of navigation, page failures, screenshots,
-  and fixed agent-action labels. Click and type actions also render a pointer
-  with a fixed bounded label inside the visible page.
+- The Browser chrome shows pages, the active page and a **Viewport** menu. Its
+  **Evidence** view keeps a bounded local timeline of navigation, page
+  failures, screenshots, and fixed agent-action labels. Click and type
+  actions also render a pointer with a fixed bounded label inside the visible
+  page.
 - Browser tools are injected automatically into the existing exact-turn host
   bridge for Codex, Claude, Cursor, Kimi Code, and OpenCode. No skill
   install is required. Claude, Cursor, Kimi Code, and OpenCode advertise the
@@ -57,7 +61,11 @@ advertises the same arguments the runtime validates:
 | `inertia_browser_press` | `key`, optional `dialog` | Send one allowlisted key to the focused element. |
 | `inertia_browser_scroll` | exactly one of `deltaY` or `ref` | Scroll the page vertically, or scroll one element to the centre of the view and return the viewport. |
 | `inertia_browser_wait_for` | optional `text`, `state`, `timeoutMs` | Wait for text to appear or disappear, or for loading to finish. |
-| `inertia_browser_screenshot` | none | Capture one local Evidence image. |
+| `inertia_browser_screenshot` | none | Capture the visible part of the active page into the local Evidence timeline, and return the image to a model that accepts images (see [Screenshots](#screenshots)). |
+| `inertia_browser_resize` | `preset`, or `width` and `height`, each with optional `colorScheme`; or `colorScheme` alone | Set the chat's viewport and colour scheme (see [Viewport](#viewport)). |
+| `inertia_browser_hover` | `ref` | Move the pointer over one element from the latest snapshot, for example to open a menu or tooltip. |
+| `inertia_browser_select` | `ref`, `value` | Choose an option of one `<select>` element by its value or label. |
+| `inertia_browser_logs` | none | Read the chat's recent Browser evidence as text. |
 | `inertia_browser_tabs` | none | List the chat's pages. |
 | `inertia_browser_open_tab` | optional `url` | Open and activate a new page. |
 | `inertia_browser_select_tab` | `tabId` | Activate a page. |
@@ -85,6 +93,17 @@ and Meta+Enter, sent as trusted input with their modifiers. Every Enter
 variant goes through the same guarded activation path as Enter. Control+Enter
 and Meta+Enter send key down and key up only, which is what shortcut handlers
 listen for, so they never insert a line break.
+
+`inertia_browser_hover` moves the pointer onto one element from the latest
+snapshot without pressing a button, so a menu or tooltip that opens on hover
+can be read with a new snapshot. `inertia_browser_select` chooses an option of
+a native `<select>` element: `value` is matched against each option's value
+and then its label, exactly first and then ignoring case. A custom dropdown
+built from other elements is opened with a click and its option clicked.
+`inertia_browser_logs` reads nothing from the page. It returns the chat's
+Evidence ledger as bounded text: console errors, failed requests by origin,
+method and resource type, navigations, and agent actions, with the same
+sanitization as the Evidence view (see [Local evidence](#local-evidence)).
 
 Pages cannot open native dialogs. The Browser preload replaces `alert`,
 `confirm` and `prompt` in the page's main world before page scripts run,
@@ -129,7 +148,8 @@ that keeps trying to reload cannot reopen the box.
 
 Text limits are counted in Unicode code points, the unit JSON Schema
 `maxLength` uses: `url` holds at most 4,096, `inertia_browser_type` `text` at
-most 4,000, and `inertia_browser_wait_for` `text` at most 200. The runtime tool
+most 4,000, and `inertia_browser_wait_for` `text` and
+`inertia_browser_select` `value` at most 200 each, on one line. The runtime tool
 validator and the main-process parser call the same counting function, and a
 request that reaches main with arguments it does not accept is answered with
 an `invalid` tool error instead of restarting the runtime.
@@ -139,7 +159,10 @@ an `invalid` tool error instead of restarting the runtime.
 provider session that registered them before this change can still call them.
 Codex App Server stores a thread's tools when the thread starts, so existing
 Codex threads keep working with the retired tools and new threads receive the
-current ones; no native continuation is cleared.
+current ones; no native continuation is cleared. For the same reason, a Codex
+thread that started before `inertia_browser_resize`, `inertia_browser_hover`,
+`inertia_browser_select` and `inertia_browser_logs` were added does not have
+them until a new thread starts.
 
 Every successful result is JSON that includes the tab state, and a snapshot
 names the tab it describes. Every failure is
@@ -241,21 +264,125 @@ Disabled and off-screen controls are excluded. The result covers only the
 current visible viewport and semantic element set; it cannot judge color, typography, imagery,
 canvas, animation, or pixel-level visual quality. Agents are instructed to
 repeat the snapshot after the user or layout changes the viewport and to report
-only evidence they actually observed. Inertia does not currently give an agent
-an autonomous viewport-resize command.
+only evidence they actually observed. An agent can choose the viewport itself
+with `inertia_browser_resize`, for example to check a desktop layout while the
+panel is narrow.
 
-Screenshots are reduced to a local thumbnail of at most 512 by 320 pixels and
-256 KiB. Inertia does not write them to the repository, attachment store,
-diagnostics, or its application database, and no provider transport receives
-their bitmap bytes. The tool result contains only bounded capture metadata;
-providers use the semantic snapshot for page inspection.
+## Viewport
 
-That separation is deliberate. CSS boxes, shadows, canvas, SVG, video, and
-other rendering primitives can encode arbitrary pixels without a corresponding
-secret string or enumerable source property. OCR, visual heuristics, and a
-growing CSS-property blacklist cannot prove such a bitmap safe. Inertia keeps
-the useful local capture while placing the provider boundary before all bitmap
-bytes.
+Each chat's Browser has one viewport setting, shared by all of its pages. The
+agent sets it with `inertia_browser_resize` and the user with the **Viewport**
+menu in the Browser chrome. Both write the same setting, and the last change
+wins.
+
+| Preset | Size in CSS pixels | Mobile |
+| --- | --- | --- |
+| `fit` (default) | the Browser panel's size | no |
+| `desktop` | 1280 by 800 | no |
+| `tablet` | 768 by 1024 | yes |
+| `mobile` | 375 by 812 | yes |
+
+`width` and `height` set a custom, non-mobile viewport: whole CSS pixels, a
+width from 320 to 2,560 and a height from 240 to 2,560. A size outside those
+bounds is refused as `invalid`, never clamped, and `preset` cannot be combined
+with `width` or `height`. The **Viewport** menu offers Fit and the three
+presets; a custom size the agent chose appears in it as its own entry, such as
+1440×900.
+
+In Fit the page is the size of the panel's page area, and resizing the panel
+resizes the page. A fixed viewport does not depend on the panel. Inertia
+applies it to each page through the page's inspection connection with the
+Chrome DevTools Protocol command `Emulation.setDeviceMetricsOverride`, using
+the display's own pixel ratio and a screen the size of the viewport, never
+with page zoom. The page therefore lays out at the chosen size at any panel
+width: `innerWidth`, `innerHeight` and media queries report it. The panel
+shows the page scaled to fit and centred in its page area, with the plain
+panel background around it. The scale is never above 1, so a viewport smaller
+than the panel is shown at its own size rather than enlarged. Inertia sends the
+override again whenever a panel resize changes the scale and after each new
+inspection connection to a page. Choosing a fixed viewport or a colour scheme
+also opens that connection for every loaded page of the chat that does not
+have one yet, so the user sees the layout the agent will get. Returning to Fit
+clears the size override and keeps the colour scheme.
+
+While the panel is not showing, a fixed viewport keeps its size: a page that
+has never been shown is laid out at the viewport size at scale 1, and one that
+has been shown keeps its last scale.
+
+Snapshots, offscreen marking and scroll results read the page's own viewport
+and so follow the chosen size. Element positions stay in CSS pixels. Inertia
+converts a point to the panel's coordinates once, when it sends input: the
+page position minus the visual viewport's offset, multiplied by the panel
+scale and the page's zoom. A point that falls outside the visible viewport is
+refused with `not-found` and a message to scroll the control into view first.
+A pixel scroll is sent at the centre of the shown page.
+
+`colorScheme` sets the page's `prefers-color-scheme` to `light` or `dark` with
+`Emulation.setEmulatedMedia`, separately from the size. It may be given alone
+or with a size, and `system` removes the override so the page follows the
+device. The **Viewport** menu does not change the colour scheme.
+
+The tablet and mobile presets set the emulation's `mobile` flag, so the page
+applies its `<meta name="viewport">` tag as a phone or tablet browser would.
+Inertia does not emulate touch and does not change the user agent: input stays
+mouse and keyboard in every preset.
+
+The setting lasts for the chat's Browser, shown or hidden, until the agent or
+the user changes it; it is not reset when a turn ends. A Browser that is
+closed, for example evicted or closed with the window, starts again at Fit
+with the system colour scheme.
+
+Every successful result's tab state carries
+`viewport: {"width","height","fit","mobile","colorScheme"}`, and a snapshot's
+`viewport` adds `fit`, `mobile` and `colorScheme` to the page's own values. In
+Fit, `width` and `height` are the panel's current size, or 1280 by 800 before
+a panel has shown the page.
+
+A change to the viewport, or any change to the panel's size, changes the
+geometry under an action. A click or type that has already located its target
+then stops with `not-found` and "The Browser page layout changed during this
+action. Take a new inertia_browser_snapshot for current refs." This applies
+equally when the user changes the **Viewport** menu while an agent action
+runs. A successful `inertia_browser_resize` result says that earlier refs may
+be stale and asks for a new snapshot. Its Evidence label is fixed, such as
+"Agent set the viewport to 1280×800", "Agent fitted the viewport to the
+panel" or "Agent set the dark colour scheme".
+
+## Screenshots
+
+`inertia_browser_screenshot` captures the visible part of the active page,
+whether or not the panel is showing, with the Chrome DevTools Protocol command
+`Page.captureScreenshot` clipped to the visual viewport. The PNG is at CSS-pixel
+resolution with its long edge at most 1,568 pixels. A PNG larger than 4 MiB is
+reduced, at most five times, and the call fails with `too-large` if it still
+does not fit. The local Evidence thumbnail, at most 512 by 320 pixels and 256
+KiB, is made from the same image.
+
+The result text is `{"captured":true,"tabId","url","width","height","providerImage"}`
+with the tab state, where `url` is only the page's origin. The PNG is attached
+to the result for the model only when the turn runs on Claude or Codex with
+the provider's own backend, not a custom backend, and the selected model, or
+the provider's default model, accepts image input. This is the same rule the
+chat context tool uses for attached images. Otherwise `providerImage` is
+`false`, a note says the image stayed on the user's device and to read the
+page with `inertia_browser_snapshot`, and the capture exists only in the local
+Evidence timeline. Cursor, Kimi Code and OpenCode therefore never receive
+screenshot pixels. A sent image becomes part of the provider's conversation
+and is kept as that provider keeps its session history.
+
+In a Supervised chat, a screenshot that will be sent asks for one ordinary
+approval per call, "Send a screenshot of the Browser page to the agent".
+Auto-edit and Full Access send it without asking. A screenshot that stays
+local never asks.
+
+Pixels can carry what text redaction cannot see. CSS boxes, shadows, canvas,
+SVG, video, and other rendering primitives can draw arbitrary pixels without a
+corresponding secret string or enumerable source property, and OCR, visual
+heuristics, or a CSS-property blacklist cannot prove a bitmap safe. Inertia
+does not redact pixels. It withholds the whole capture, for the model and for
+Evidence alike, under the rules in
+[Screenshots and local capture](#screenshots-and-local-capture), and a
+Supervised chat shows each image's send as an approval.
 
 ## Privacy guard
 
@@ -352,7 +479,11 @@ value or could not be scanned completely.
 Screenshots and local capture are withheld while the document holds any
 remembered sensitive value, and for every reason that withholds a snapshot.
 The refusal message names the reason and that navigating to the page again
-starts a new document.
+starts a new document. A screenshot is also withheld when, immediately before
+or immediately after the capture, the visible text looks like a credential, a
+control named for a credential shows a value, or the page is too large to
+check. A withheld screenshot returns `sensitive` and no image, and nothing is
+added to Evidence.
 
 ### Accepted limits
 
@@ -403,8 +534,10 @@ merely contain frames or shadow roots elsewhere are unaffected.
 ## Local evidence
 
 The Evidence view is an inspectable main-process ledger for the exact live
-Browser session. It is not provider context and is never written to SQLite, the
-project, attachments, diagnostics, or renderer storage. Closing a chat's
+Browser session. It is not added to provider context on its own: an agent
+receives its text rows, never its images, only by calling
+`inertia_browser_logs`. It is never written to SQLite, the project,
+attachments, diagnostics, or renderer storage. Closing a chat's
 Browser clears its entries, retained thumbnails, request correlation, browser
 storage, and session listeners; hiding it keeps them.
 
@@ -432,22 +565,36 @@ confirmation with **Cancel** as the default, rechecks the fingerprint, and then
 renders the image in a main-owned sandboxed window with no preload or IPC
 bridge. The React renderer receives only shown/unavailable status. A denial,
 stale chat, split owner, replaced or evicted image, or closed Browser receives
-no view. Full Access never bypasses this local inspection confirmation, and
-timeline or tool screenshots never cross back to a provider.
+no view. Full Access never bypasses this local inspection confirmation.
+Inspecting an Evidence image never sends it to a provider; the only way
+screenshot pixels reach a model is the `inertia_browser_screenshot` result
+described in [Screenshots](#screenshots).
 
 ## Permission behavior
 
-Snapshots, local screenshot capture, and page listing are read-only. Inspecting
-one retained capture has its separate native post-capture confirmation. In a Supervised chat,
-navigation, interaction, and page mutations create one ordinary Inertia
-approval tied to the exact provider tool call. Denial prevents the browser
-action. Auto-edit and Full Access use their existing provider access contract
-without adding a second interaction approval, but do not release local image
-bytes.
+Snapshots, waits, page listing, `inertia_browser_logs`, and a screenshot that
+stays local are read-only and never ask. Inspecting one retained capture has
+its separate native post-capture confirmation. In a Supervised chat every
+other call creates one ordinary Inertia approval tied to the exact provider
+tool call:
 
-Tools that change the page or its tabs (navigate, click, type, press, open
-tab, close tab) carry the MCP `destructiveHint`; snapshot, screenshot, tabs
-and wait carry `readOnlyHint` and `idempotentHint`; every Browser tool carries
+| Call | Supervised approval |
+| --- | --- |
+| snapshot, wait, tabs, logs | none |
+| screenshot | only when the image will be sent to the model |
+| navigate, history, click, type, press, scroll, hover, select | one per call |
+| resize, including a colour scheme alone | one per call |
+| open, select or close a tab | one per call |
+
+Denial prevents the browser action. Auto-edit and Full Access use their
+existing provider access contract without adding a second interaction
+approval, and send a screenshot to a model that accepts images without asking.
+They never release Evidence images through the local inspection path.
+
+Tools that change the page, its viewport or its tabs (navigate, click, type,
+press, resize, hover, select, open tab, close tab) carry the MCP
+`destructiveHint`; snapshot, screenshot, logs, tabs and wait carry
+`readOnlyHint` and `idempotentHint`; every Browser tool carries
 `openWorldHint: false` because only loopback pages are reachable. Claude and
 OpenCode receive the destructive hint because Inertia already allows its own
 tools in their native permission layers, so the hint cannot add a prompt
@@ -497,7 +644,8 @@ therefore turns background throttling off for a page while an agent command
 is using it and restores it two seconds after the last command. Menus,
 dialogs, and approval prompts hide the native page without resizing it, so an
 agent action that is waiting for approval is not invalidated by its own
-prompt; only a change to the page's size invalidates in-flight refs.
+prompt; only a change to the panel's size or to the viewport stops an action
+in flight (see [Viewport](#viewport)).
 
 The user can take over the page at any time. When the user clicks or types
 in the Browser pane while an agent command is running, the command stops and
@@ -525,8 +673,9 @@ The main process denies permission checks and requests, downloads, new windows,
 remote navigation, and URLs containing credentials. Browser storage is cleared
 when the chat's Browser session closes.
 
-The renderer can request navigation, page selection, bounds, and native
-inspection for an exact opaque evidence image through a strict preload API, but it never receives image bytes, a
+The renderer can request navigation, page selection, bounds, a viewport
+preset, and native inspection for an exact opaque evidence image through a
+strict preload API, but it never receives image bytes, a
 `WebContents`, browser storage, raw page DOM, or arbitrary capture capability.
 The supervised utility process cannot create Electron views directly. Its path
 is:

@@ -1,0 +1,162 @@
+{
+  "rebaseline": "INERTIA_UPDATE_AGENT_SURFACE_BUDGET=1 npm test -- tests/server/agent-surface-budget.test.ts",
+  "unit": "UTF-8 bytes",
+  "tools": {
+    "inertia_browser_navigate": {
+      "claude": 999,
+      "codex": 856,
+      "cursorKimi": 962,
+      "opencode": 961
+    },
+    "inertia_browser_snapshot": {
+      "claude": 962,
+      "codex": 820,
+      "cursorKimi": 924,
+      "opencode": 924
+    },
+    "inertia_browser_click": {
+      "claude": 805,
+      "codex": 662,
+      "cursorKimi": 768,
+      "opencode": 767
+    },
+    "inertia_browser_type": {
+      "claude": 1035,
+      "codex": 892,
+      "cursorKimi": 998,
+      "opencode": 997
+    },
+    "inertia_browser_press": {
+      "claude": 847,
+      "codex": 704,
+      "cursorKimi": 810,
+      "opencode": 809
+    },
+    "inertia_browser_scroll": {
+      "claude": 781,
+      "codex": 637,
+      "cursorKimi": 743,
+      "opencode": 743
+    },
+    "inertia_browser_wait_for": {
+      "claude": 949,
+      "codex": 807,
+      "cursorKimi": 911,
+      "opencode": 911
+    },
+    "inertia_browser_screenshot": {
+      "claude": 469,
+      "codex": 327,
+      "cursorKimi": 431,
+      "opencode": 431
+    },
+    "inertia_browser_tabs": {
+      "claude": 397,
+      "codex": 255,
+      "cursorKimi": 359,
+      "opencode": 359
+    },
+    "inertia_browser_open_tab": {
+      "claude": 592,
+      "codex": 449,
+      "cursorKimi": 555,
+      "opencode": 554
+    },
+    "inertia_browser_select_tab": {
+      "claude": 568,
+      "codex": 424,
+      "cursorKimi": 530,
+      "opencode": 530
+    },
+    "inertia_browser_close_tab": {
+      "claude": 556,
+      "codex": 413,
+      "cursorKimi": 519,
+      "opencode": 518
+    },
+    "inertia_list_conversations": {
+      "claude": 567,
+      "codex": 425,
+      "cursorKimi": 529,
+      "opencode": 529
+    },
+    "inertia_inspect_conversation": {
+      "claude": 547,
+      "codex": 405,
+      "cursorKimi": 509,
+      "opencode": 509
+    },
+    "inertia_request_context": {
+      "claude": 1516,
+      "codex": 1372,
+      "cursorKimi": 1478,
+      "opencode": 1478
+    },
+    "inertia_create_conversation": {
+      "claude": 1446,
+      "codex": 1302,
+      "cursorKimi": 1408,
+      "opencode": 1408
+    },
+    "inertia_send_message": {
+      "claude": 668,
+      "codex": 524,
+      "cursorKimi": 630,
+      "opencode": 630
+    },
+    "inertia_get_conversation_status": {
+      "claude": 504,
+      "codex": 362,
+      "cursorKimi": 466,
+      "opencode": 466
+    },
+    "inertia_get_latest_result": {
+      "claude": 743,
+      "codex": 601,
+      "cursorKimi": 705,
+      "opencode": 705
+    },
+    "inertia_stop_conversation": {
+      "claude": 526,
+      "codex": 382,
+      "cursorKimi": 488,
+      "opencode": 488
+    },
+    "inertia_archive_conversation": {
+      "claude": 527,
+      "codex": 383,
+      "cursorKimi": 489,
+      "opencode": 489
+    },
+    "inertia_render_html": {
+      "claude": 2716,
+      "codex": 2573,
+      "cursorKimi": 2678,
+      "opencode": 2678
+    }
+  },
+  "instructions": {
+    "inertia-frontend-workbench": 1415,
+    "inertia-orchestration": 463,
+    "mcp-initialize:claude": 113,
+    "mcp-initialize:http": 134
+  },
+  "totals": {
+    "claude": {
+      "withBrowser": 20711,
+      "withoutBrowser": 10336
+    },
+    "codex": {
+      "withBrowser": 17453,
+      "withoutBrowser": 8792
+    },
+    "cursorKimi": {
+      "withBrowser": 19902,
+      "withoutBrowser": 9977
+    },
+    "opencode": {
+      "withBrowser": 19896,
+      "withoutBrowser": 9977
+    }
+  }
+}

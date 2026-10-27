@@ -95,7 +95,7 @@ const budgets = {
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
   colorThemesCss: 8 * kibibyte + 120 + 552,
-  detachedChatCss: 8 * kibibyte,
+  detachedChatCss: 1.5 * kibibyte + 55,
   settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.

@@ -77,6 +77,14 @@ test("opens the main window's tools beside the chat, without the Browser", async
   await expect(panel).toBeHidden();
 });
 
+test("keeps the header actions clear of the corner controls at the default width", async () => {
+  await resizePopup(640);
+  const more = await popup.locator(".workspace-header").getByRole("button", { name: "More header actions" }).boundingBox();
+  const corner = await popup.locator(".workspace-corner-controls").boundingBox();
+  expect(more && corner).toBeTruthy();
+  expect(more!.x + more!.width).toBeLessThanOrEqual(corner!.x);
+});
+
 test("offers the chat's own menu, rename and thread ID copy in the header", async () => {
   const titleButton = popup.locator(".workspace-header").getByRole("button", {
     name: title,
@@ -115,8 +123,7 @@ test("shows this chat's workspace changes in the Changes tab", async () => {
   await panel.getByRole("button", { name: "Add panel surface" }).click();
   await panel.getByRole("menu", { name: "Add panel surface" }).getByRole("menuitem", { name: /^Changes/u }).click();
   await expect(panel.getByRole("tabpanel", { name: "Changes" })).toBeVisible();
-  const changedFiles = panel.getByRole("navigation", { name: "Git repositories and changed files" });
-  await expect(changedFiles.getByText("sample.ts", { exact: true })).toBeVisible();
+  await expect(panel.getByRole("region", { name: "Diff content for sample.ts" })).toBeVisible();
   await expect(popup.getByRole("alert")).toHaveCount(0);
 });
 

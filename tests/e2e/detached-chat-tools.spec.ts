@@ -62,7 +62,7 @@ test("opens the main window's tools beside the chat, without the Browser", async
   await addMenu.getByRole("menuitem", { name: /^Attachments/u }).click();
   await expect(panel.getByRole("tab", { name: "Attachments" })).toHaveAttribute("aria-selected", "true");
 
-  await resizePopup(1280);
+  await resizePopup(960);
   await expect(panel).toHaveClass(/is-inline/u);
   const width = await popup.evaluate(() => document.documentElement.clientWidth);
   const panelBox = await panel.boundingBox();
@@ -104,6 +104,7 @@ test("offers the chat's own menu, rename and thread ID copy in the header", asyn
 test("keeps search, tasks and sidebar shortcuts in the main window", async () => {
   await popup.getByRole("textbox", { name: "Message" }).focus();
   for (const key of ["k", "t", "b"]) await popup.keyboard.press(`${primaryModifier}+${key}`);
+  await popup.waitForTimeout(500);
   await expect(popup.getByRole("dialog")).toHaveCount(0);
   await expect(popup.locator('aside[aria-label="Project navigation"]')).toHaveCount(0);
   await expect(popup.getByRole("textbox", { name: "Message" })).toBeFocused();
@@ -114,6 +115,8 @@ test("shows this chat's workspace changes in the Changes tab", async () => {
   await panel.getByRole("button", { name: "Add panel surface" }).click();
   await panel.getByRole("menu", { name: "Add panel surface" }).getByRole("menuitem", { name: /^Changes/u }).click();
   await expect(panel.getByRole("tabpanel", { name: "Changes" })).toBeVisible();
+  const changedFiles = panel.getByRole("navigation", { name: "Git repositories and changed files" });
+  await expect(changedFiles.getByText("sample.ts", { exact: true })).toBeVisible();
   await expect(popup.getByRole("alert")).toHaveCount(0);
 });
 
@@ -122,6 +125,7 @@ test("runs a terminal for this chat in the Terminal tab", async () => {
   await panel.getByRole("button", { name: "Add panel surface" }).click();
   await panel.getByRole("menu", { name: "Add panel surface" }).getByRole("menuitem", { name: /^Terminal/u }).click();
   await expect(panel.locator(".xterm")).toBeVisible();
+  await expect(panel.locator(".xterm-rows")).toContainText(/\S/u);
   await expect(popup.getByRole("alert")).toHaveCount(0);
 });
 

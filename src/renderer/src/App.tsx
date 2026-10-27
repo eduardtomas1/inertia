@@ -1078,7 +1078,7 @@ export default function App(): React.JSX.Element {
     dismissActivity,
   });
   const mainWindowTargetActions = useStableActions({
-    createConversation, openSettings, connectProvider, openBackendSetup, reportUnavailable: setActionError,
+    selectConversation, createConversation, openSettings, connectProvider, openBackendSetup, reportUnavailable: setActionError,
   });
   const multiSpawnActions = useStableActions({
     openDialog: multiSpawn.openDialog,

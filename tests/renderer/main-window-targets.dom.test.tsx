@@ -66,6 +66,7 @@ const openUsageLimits = vi.fn();
 function actions() {
   return {
     activateConversation: vi.fn(),
+    selectConversation: vi.fn(),
     createConversation: vi.fn(),
     openSettings: vi.fn(),
     connectProvider: vi.fn(),
@@ -78,10 +79,16 @@ function renderTargets(
   value: AppSnapshot | null,
   targetActions = actions(),
   limits: UsageLimitsContextValue | null = { open: openUsageLimits } as unknown as UsageLimitsContextValue,
+  detached: ReadonlySet<string> = new Set(),
 ) {
   const view = (next: AppSnapshot | null) => (
     <UsageLimitsContext.Provider value={limits}>
-      <MainWindowTargets snapshot={next} actions={targetActions} />
+      <MainWindowTargets
+        snapshot={next}
+        detachedConversationIds={detached}
+        activateConversation={targetActions.activateConversation}
+        actions={targetActions}
+      />
     </UsageLimitsContext.Provider>
   );
   const rendered = render(view(value));
@@ -120,7 +127,16 @@ describe("main-window targets from detached chats", () => {
     const { actions: performed } = renderTargets(snapshot([conversation(sourceId), other]));
     send({ kind: "conversation", conversationId: otherId });
     expect(performed.activateConversation).toHaveBeenCalledExactlyOnceWith(other);
+    expect(performed.selectConversation).not.toHaveBeenCalled();
     expect(performed.reportUnavailable).not.toHaveBeenCalled();
+  });
+
+  it("selects a chat that has its own window instead of activating the main workspace", () => {
+    const other = conversation(otherId);
+    const { actions: performed } = renderTargets(snapshot([conversation(sourceId), other]), actions(), undefined, new Set([otherId]));
+    send({ kind: "conversation", conversationId: otherId });
+    expect(performed.selectConversation).toHaveBeenCalledExactlyOnceWith(other);
+    expect(performed.activateConversation).not.toHaveBeenCalled();
   });
 
   it("creates new chats only in the detached chat's own project and checkout", () => {
@@ -189,6 +205,7 @@ describe("main-window targets from detached chats", () => {
     ]);
     for (const action of [
       performed.activateConversation,
+      performed.selectConversation,
       performed.createConversation,
       performed.connectProvider,
       performed.openBackendSetup,

@@ -20,6 +20,10 @@ export interface MainWindowTargetActions {
   reportUnavailable: (message: string) => void;
 }
 
+export type MainWindowTargetAppActions = Omit<MainWindowTargetActions, "activateConversation" | "openUsageLimits"> & {
+  selectConversation: (conversation: Conversation) => void;
+};
+
 function newChatLocation(
   source: Conversation,
   checkout: MainWindowNewChatCheckout | undefined,
@@ -117,11 +121,17 @@ export function useMainWindowTargets(
 
 export function MainWindowTargets(props: {
   snapshot: AppSnapshot | null;
-  actions: Omit<MainWindowTargetActions, "openUsageLimits">;
+  detachedConversationIds: ReadonlySet<string>;
+  activateConversation: (conversation: Conversation) => void;
+  actions: MainWindowTargetAppActions;
 }): null {
   const usageLimits = useUsageLimitsContext();
   useMainWindowTargets(props.snapshot, {
     ...props.actions,
+    activateConversation: (conversation) => {
+      if (props.detachedConversationIds.has(conversation.id)) props.actions.selectConversation(conversation);
+      else props.activateConversation(conversation);
+    },
     openUsageLimits: () => {
       if (usageLimits) usageLimits.open();
       else props.actions.reportUnavailable("Provider limits are unavailable.");

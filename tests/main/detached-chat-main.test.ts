@@ -792,9 +792,8 @@ describe("detached chat main-process boundary", () => {
     }
   });
 
-  it("keeps a validated main-window target with an explicit dock", async () => {
+  it("docks with the draft alone and rejects any extra argument", async () => {
     const value = fixture();
-    const target = { kind: "settings", page: "agents" };
     try {
       await value.ipc.invoke(
         DETACHED_CHAT_IPC.open,
@@ -806,39 +805,11 @@ describe("detached chat main-process boundary", () => {
         DETACHED_CHAT_IPC.dock,
         eventFor(popup.webContents),
         "draft",
-        { kind: "settings", page: "secrets" },
-      )).rejects.toThrow("Invalid main-window target");
-      await expect(value.ipc.invoke(
-        DETACHED_CHAT_IPC.dock,
-        eventFor(popup.webContents),
-        "draft",
-        target,
-        "extra",
-      )).rejects.toThrow("Rejected untrusted renderer request");
-      await expect(value.ipc.invoke(
-        DETACHED_CHAT_IPC.dock,
-        eventFor(value.main.webContents),
-        "draft",
-        target,
+        { kind: "settings", page: "agents" },
       )).rejects.toThrow("Rejected untrusted renderer request");
       await afterIpcReply();
       expect(popup.destroyed).toBe(false);
-      const draftHandoffs = () => value.main.webContents.sent
-        .filter(({ channel }) => channel === DETACHED_CHAT_IPC.draftChanged);
-      expect(draftHandoffs()).toEqual([]);
-
-      await value.ipc.invoke(
-        DETACHED_CHAT_IPC.dock,
-        eventFor(popup.webContents),
-        "docked draft",
-        { ...target },
-      );
-      await afterIpcReply();
-      expect(popup.destroyed).toBe(true);
-      expect(value.docked).toHaveBeenCalledExactlyOnceWith(FIRST_ID, target);
-      expect(draftHandoffs().map(({ args }) => args[0])).toEqual([
-        expect.objectContaining({ conversationId: FIRST_ID, draft: "docked draft" }),
-      ]);
+      expect(value.docked).not.toHaveBeenCalled();
     } finally {
       await cleanup(value);
     }

@@ -747,7 +747,7 @@ export interface DesktopBridge {
     request: DetachedChatWindowRequest,
   ) => Promise<DetachedChatWindowSummary>;
   /** Explicitly returns the chat to the main workbench. Native close never docks it. */
-  dockDetachedChat: (draft: string, target?: MainWindowTarget) => Promise<void>;
+  dockDetachedChat: (draft: string) => Promise<void>;
   openInMainWindow: (target: MainWindowTarget) => Promise<void>;
   onMainWindowTarget: (
     listener: (request: MainWindowTargetRequest) => void,

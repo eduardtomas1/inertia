@@ -213,6 +213,32 @@ describe("Browser hover", () => {
       .resolves.toMatchObject({ ok: true, state: { controller: "user" } });
   });
 
+  it("moves the pointer in view coordinates under a fixed viewport and refuses targets outside it", async () => {
+    const { broker, contents } = await loadedHarness();
+    broker.connect({ ownerId: "primary", contextId: conversationId, connectionId });
+    broker.setBounds({
+      ownerId: "primary", contextId: conversationId, connectionId,
+      bounds: { x: 100, y: 50, width: 600, height: 500 },
+    });
+    await broker.perform(runIdentity, { action: "resize", preset: "desktop" });
+    pageTools.locateAgentPageRef.mockResolvedValue({ ...shippingTarget, role: "button", label: "Help", x: 1_230, y: 720 });
+
+    await expect(broker.perform(runIdentity, { action: "hover", ref: "e2" })).resolves.toMatchObject({
+      ok: true,
+      state: { activity: { action: "hover", x: 1_230, y: 720 } },
+    });
+    expect(contents.sentInputs).toEqual([{ type: "mouseMove", x: 576.5625, y: 337.5 }]);
+    expect(pageTools.showAgentPageCursor).toHaveBeenLastCalledWith(contents, 1_230, 720, "Agent hover");
+
+    pageTools.locateAgentPageRef.mockResolvedValue({ ...shippingTarget, x: 1_300, y: 720 });
+    await expect(broker.perform(runIdentity, { action: "hover", ref: "e2" })).resolves.toEqual({
+      ok: false,
+      code: "not-found",
+      message: "That control is outside the visible part of the page. Scroll it into view with inertia_browser_scroll and its ref, then try again.",
+    });
+    expect(contents.sentInputs).toHaveLength(1);
+  });
+
   it("binds a Supervised hover approval to the inspected element", async () => {
     const { broker, contents } = await loadedHarness();
     pageTools.locateAgentPageRef.mockResolvedValue({ ...shippingTarget, role: "button", label: "Help" });

@@ -46,11 +46,14 @@ describe("agent browser text lengths agree between the tool validator and main",
       .toMatchObject({ command: expect.anything() });
     expect(parseRuntimeWorkerEvent(await postedEvent("inertia_browser_wait_for", { text: "x".repeat(200) })))
       .toMatchObject({ command: expect.anything() });
+    expect(parseRuntimeWorkerEvent(await postedEvent("inertia_browser_select", { ref: "e1", value: "x".repeat(200) })))
+      .toMatchObject({ command: expect.anything() });
   });
 
   it.each([
     ["inertia_browser_type", { ref: "e1", text: emoji.repeat(4_000) }],
     ["inertia_browser_wait_for", { text: emoji.repeat(200) }],
+    ["inertia_browser_select", { ref: "e1", value: emoji.repeat(200) }],
     ["inertia_browser_navigate", { url: `http://localhost:3000/${emoji.repeat(2_100)}` }],
   ])("forwards astral %s arguments that main accepts", async (tool, args) => {
     const event = await postedEvent(tool, args);
@@ -61,6 +64,7 @@ describe("agent browser text lengths agree between the tool validator and main",
   it.each([
     ["inertia_browser_type", { ref: "e1", text: emoji.repeat(4_001) }],
     ["inertia_browser_wait_for", { text: emoji.repeat(201) }],
+    ["inertia_browser_select", { ref: "e1", value: emoji.repeat(201) }],
     ["inertia_browser_navigate", { url: `http://localhost:3000/${emoji.repeat(4_096)}` }],
   ])("answers over-long astral %s arguments as invalid without posting", async (tool, args) => {
     const { posted, pending } = invoke(tool, args);

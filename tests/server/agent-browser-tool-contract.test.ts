@@ -75,6 +75,10 @@ describe("agent browser tool contract", () => {
       ["inertia_browser_scroll", [], false],
       ["inertia_browser_wait_for", [], true],
       ["inertia_browser_screenshot", [], true],
+      ["inertia_browser_resize", [], false],
+      ["inertia_browser_hover", ["ref"], false],
+      ["inertia_browser_select", ["ref", "value"], false],
+      ["inertia_browser_logs", [], true],
       ["inertia_browser_tabs", [], true],
       ["inertia_browser_open_tab", [], false],
       ["inertia_browser_select_tab", ["tabId"], false],
@@ -204,6 +208,16 @@ describe("agent browser tool contract", () => {
     ["inertia_browser_wait_for", {}, { action: "wait", state: "present", timeoutMs: 10_000 }],
     ["inertia_browser_wait_for", { text: "  Saved  ", state: "absent", timeoutMs: 250 }, { action: "wait", text: "Saved", state: "absent", timeoutMs: 250 }],
     ["inertia_browser_tabs", {}, { action: "tabs" }],
+    ["inertia_browser_screenshot", {}, { action: "screenshot" }],
+    ["inertia_browser_logs", {}, { action: "logs" }],
+    ["inertia_browser_resize", { preset: "desktop" }, { action: "resize", preset: "desktop" }],
+    ["inertia_browser_resize", { preset: "fit", colorScheme: "system" }, { action: "resize", preset: "fit", colorScheme: "system" }],
+    ["inertia_browser_resize", { width: 320, height: 2_560 }, { action: "resize", width: 320, height: 2_560 }],
+    ["inertia_browser_resize", { width: 2_560, height: 240, colorScheme: "light" }, { action: "resize", width: 2_560, height: 240, colorScheme: "light" }],
+    ["inertia_browser_resize", { colorScheme: "dark" }, { action: "resize", colorScheme: "dark" }],
+    ["inertia_browser_hover", { ref: "e7" }, { action: "hover", ref: "e7" }],
+    ["inertia_browser_select", { ref: "e8", value: "Canada" }, { action: "select", ref: "e8", value: "Canada" }],
+    ["inertia_browser_select", { ref: "e8", value: " " }, { action: "select", ref: "e8", value: " " }],
     ["inertia_browser_open_tab", {}, { action: "tab-open" }],
     ["inertia_browser_open_tab", { url: "http://localhost:3000" }, { action: "tab-open", url: "http://localhost:3000" }],
     ["inertia_browser_select_tab", { tabId }, { action: "tab-activate", tabId }],
@@ -237,6 +251,22 @@ describe("agent browser tool contract", () => {
     ["inertia_browser_interact", { action: "click" }],
     ["inertia_browser_tabs", { action: "activate" }],
     ["inertia_browser_snapshot", { selector: "body" }],
+    ["inertia_browser_logs", { level: "error" }],
+    ["inertia_browser_resize", {}],
+    ["inertia_browser_resize", { width: 800 }],
+    ["inertia_browser_resize", { height: 600, colorScheme: "dark" }],
+    ["inertia_browser_resize", { preset: "desktop", width: 800, height: 600 }],
+    ["inertia_browser_resize", { preset: "laptop" }],
+    ["inertia_browser_resize", { width: 319, height: 600 }],
+    ["inertia_browser_resize", { width: 800, height: 2_561 }],
+    ["inertia_browser_resize", { width: 800.5, height: 600 }],
+    ["inertia_browser_resize", { colorScheme: "sepia" }],
+    ["inertia_browser_hover", {}],
+    ["inertia_browser_hover", { ref: "bad ref" }],
+    ["inertia_browser_select", { ref: "e1" }],
+    ["inertia_browser_select", { ref: "e1", value: "" }],
+    ["inertia_browser_select", { ref: "e1", value: "a\nb" }],
+    ["inertia_browser_select", { ref: "e1", value: "x".repeat(201) }],
   ])("explains rejected arguments for %s %j without reaching the Browser", async (tool, args) => {
     const broker = { perform: vi.fn() };
     const result = await new AgentBrowserHostTools(broker)
@@ -256,14 +286,20 @@ describe("agent browser tool contract", () => {
       inertia_browser_press: JSON.stringify({ pressed: "Enter" }),
       inertia_browser_navigate: JSON.stringify(state),
       inertia_browser_click: JSON.stringify({ clicked: "e1", state }),
-      inertia_browser_screenshot: "captured",
+      inertia_browser_screenshot: JSON.stringify({ captured: true, tabId, width: 4, height: 4 }),
+      inertia_browser_resize: JSON.stringify({ resized: true }),
+      inertia_browser_hover: JSON.stringify({ hovered: "e1" }),
+      inertia_browser_select: JSON.stringify({ selected: "e1" }),
+      inertia_browser_logs: JSON.stringify({ entries: [] }),
     };
     const results: Record<string, unknown> = {};
     for (const [tool, text] of Object.entries(texts)) {
       const broker = { perform: vi.fn(async () => ({ ok: true as const, text, state })) };
       const args = tool === "inertia_browser_press" ? { key: "Enter" }
         : tool === "inertia_browser_navigate" ? { url: "http://localhost:3000" }
-          : tool === "inertia_browser_click" ? { ref: "e1" } : {};
+          : tool === "inertia_browser_click" || tool === "inertia_browser_hover" ? { ref: "e1" }
+            : tool === "inertia_browser_select" ? { ref: "e1", value: "Canada" }
+              : tool === "inertia_browser_resize" ? { preset: "desktop" } : {};
       const result = await new AgentBrowserHostTools(broker)
         .invoke({ id: conversationId, accessMode: "full" } as Conversation, call(tool, args), identity);
       results[tool] = result.text;
@@ -271,7 +307,19 @@ describe("agent browser tool contract", () => {
     expect(JSON.parse(String(results.inertia_browser_press))).toEqual({ pressed: "Enter", state });
     expect(results.inertia_browser_navigate).toBe(texts.inertia_browser_navigate);
     expect(results.inertia_browser_click).toBe(texts.inertia_browser_click);
-    expect(results.inertia_browser_screenshot).toBe("captured");
+    expect(JSON.parse(String(results.inertia_browser_screenshot))).toEqual({
+      captured: true,
+      tabId,
+      width: 4,
+      height: 4,
+      providerImage: false,
+      note: "The image stayed on the user's device. Use inertia_browser_snapshot to read the page.",
+      state,
+    });
+    expect(JSON.parse(String(results.inertia_browser_resize))).toEqual({ resized: true, state });
+    expect(JSON.parse(String(results.inertia_browser_hover))).toEqual({ hovered: "e1", state });
+    expect(JSON.parse(String(results.inertia_browser_select))).toEqual({ selected: "e1", state });
+    expect(JSON.parse(String(results.inertia_browser_logs))).toEqual({ entries: [], state });
 
     const page = { title: "Local app", url: "http://127.0.0.1:3000", viewport: {}, text: "Hi", elements: [], truncated: false };
     const snapshotBroker = { perform: vi.fn(async () => ({ ok: true as const, text: JSON.stringify(page), state })) };
@@ -287,11 +335,15 @@ describe("agent browser tool contract", () => {
     expect(JSON.parse(blankSnapshot.text)).toEqual({ ...blank, state });
   });
 
-  it("asks for approval only for actions that change the page or its tabs", async () => {
+  it.each([false, true])("asks for approval only for actions that change the page or its tabs, or send pixels (images accepted: %s)", async (providerImages) => {
     const approvalsByTool: Record<string, number> = {};
     for (const [tool, args] of [
       ["inertia_browser_snapshot", {}],
       ["inertia_browser_screenshot", {}],
+      ["inertia_browser_logs", {}],
+      ["inertia_browser_resize", { preset: "mobile" }],
+      ["inertia_browser_hover", { ref: "e1" }],
+      ["inertia_browser_select", { ref: "e1", value: "Canada" }],
       ["inertia_browser_tabs", {}],
       ["inertia_browser_wait_for", { text: "Saved" }],
       ["inertia_browser_navigate", { url: "http://localhost:3000" }],
@@ -311,12 +363,16 @@ describe("agent browser tool contract", () => {
       })) };
       const request = call(tool, args);
       await new AgentBrowserHostTools(broker as never)
-        .invoke({ id: conversationId, accessMode: "supervised" } as Conversation, request, identity);
+        .invoke({ id: conversationId, accessMode: "supervised" } as Conversation, request, identity, providerImages);
       approvalsByTool[tool] = (request.requestApproval as ReturnType<typeof vi.fn>).mock.calls.length;
     }
     expect(approvalsByTool).toEqual({
       inertia_browser_snapshot: 0,
-      inertia_browser_screenshot: 0,
+      inertia_browser_screenshot: providerImages ? 1 : 0,
+      inertia_browser_logs: 0,
+      inertia_browser_resize: 1,
+      inertia_browser_hover: 1,
+      inertia_browser_select: 1,
       inertia_browser_tabs: 0,
       inertia_browser_wait_for: 0,
       inertia_browser_navigate: 1,

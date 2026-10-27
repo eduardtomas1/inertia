@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { scrubCommandSecrets } from "../../src/server/provider/command-secrets";
+import type { RuntimeAgentBrowserBroker } from "../../src/server/runtime/agent-browser-broker-client";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
 import {
   ConversationContextRequestCoordinator,
@@ -40,7 +41,13 @@ function image(name: string, bytes: number): ChatAttachment {
   };
 }
 
-async function fixture(options: { providerId?: ProviderId; imageModel?: boolean; watcherPolicy?: boolean; contextTimeoutMs?: number } = {}) {
+async function fixture(options: {
+  providerId?: ProviderId;
+  imageModel?: boolean;
+  watcherPolicy?: boolean;
+  contextTimeoutMs?: number;
+  agentBrowser?: RuntimeAgentBrowserBroker;
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), "inertia-agent-context-tool-"));
   roots.push(root);
   const workspace = join(root, "workspace");
@@ -133,6 +140,7 @@ async function fixture(options: { providerId?: ProviderId; imageModel?: boolean;
   };
   const manager = new AgentThreadManager({
     ...(options.watcherPolicy ? { watcherPolicy } : {}),
+    ...(options.agentBrowser ? { agentBrowser: options.agentBrowser } : {}),
     store,
     providers: {} as never,
     backendProfileController: {} as never,
@@ -973,6 +981,41 @@ describe("inertia_request_context images", () => {
         included: false,
         note: "not included: this result already carries 4 images",
       });
+    } finally {
+      context.store.close();
+    }
+  });
+
+  it.each([
+    ["codex", true],
+    ["claude", true],
+    ["cursor", true],
+    ["kimi", true],
+    ["opencode", true],
+    ["claude", false],
+    ["codex", false],
+  ] as const)("sends a Browser screenshot to %s (image model %s) exactly when it sends chat images", async (providerId, imageModel) => {
+    const tabId = randomUUID();
+    const state = { activeTabId: tabId, tabs: [{ id: tabId, title: "App", url: "http://127.0.0.1:3000", loading: false }], activity: null };
+    const token = randomUUID();
+    const perform = vi.fn(async (_identity: unknown, request: { action: string }) => request.action === "prepare-approval"
+      ? { ok: true as const, text: JSON.stringify({ token, detail: "Browser tab 1" }), state }
+      : {
+          ok: true as const,
+          text: JSON.stringify({ captured: true, tabId, width: 4, height: 4 }),
+          state,
+          image: { mimeType: "image/png" as const, data: Buffer.from("png").toString("base64"), width: 4, height: 4 },
+        });
+    const { context, turn, current } = await imageTurn({ providerId, imageModel, agentBrowser: { perform } });
+    try {
+      const bridge = context.bridgeFor(current);
+      const chat = await bridge.invoke(call({ conversationId: context.target.id, turnId: turn.id }));
+      const screenshot = await bridge.invoke({ ...call({}), tool: "inertia_browser_screenshot" });
+      expect(screenshot.success, screenshot.text).toBe(true);
+      const sent = chat.images !== undefined;
+      expect(sent).toBe((providerId === "codex" || providerId === "claude") && imageModel);
+      expect(screenshot.images !== undefined).toBe(sent);
+      expect(JSON.parse(screenshot.text).providerImage).toBe(sent);
     } finally {
       context.store.close();
     }

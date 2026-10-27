@@ -427,6 +427,32 @@ export class TurnLedgerRepository {
     return origin.started_after_retirement === 0 || origin.completed_turn === 1;
   }
 
+  sessionInstructionBytes(conversationId: string, sessionId: string): number | null {
+    const row = this.context.database.prepare(`
+      SELECT CASE WHEN json_valid(manifest.manifest_json)
+        THEN json_extract(manifest.manifest_json, '$.sessionInstructionBytes')
+      END AS bytes
+      FROM agent_turns AS turn
+      LEFT JOIN turn_execution_manifests AS manifest ON manifest.turn_id = turn.id
+      WHERE turn.conversation_id = ? AND turn.provider_session_after = ?
+        AND turn.provider_session_before IS NULL
+      ORDER BY turn.requested_at ASC, turn.id ASC
+      LIMIT 1
+    `).get(conversationId, sessionId) as { bytes: unknown } | undefined;
+    return typeof row?.bytes === "number" ? row.bytes : null;
+  }
+
+  compactedSince(conversationId: string, since: string): boolean {
+    const row = this.context.database.prepare(`
+      SELECT EXISTS(
+        SELECT 1 FROM messages
+        WHERE conversation_id = ? AND turn_id IS NULL AND role = 'system'
+          AND compaction_json IS NOT NULL AND created_at >= ?
+      ) AS compacted
+    `).get(conversationId, since) as { compacted: 0 | 1 };
+    return row.compacted === 1;
+  }
+
   historyStayedOnEndpoint(
     conversationId: string,
     backendProfileId: string,

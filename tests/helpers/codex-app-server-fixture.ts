@@ -136,6 +136,11 @@ if (message.method === "initialize") {
 if (message.method === "initialized") return;
 if (message.method === "model/list") return send({ id: message.id, result: { data: [{ id: "model-a", model: "model-a", displayName: "Model A", description: "A test model", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Quick" }, { reasoningEffort: "high", description: "Careful" }], defaultReasoningEffort: "low", inputModalities: ["text", "image"], serviceTiers: [{ id: "priority", name: "Fast", description: "Faster responses" }], defaultServiceTier: null, isDefault: true }], nextCursor: null } });
 if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: { limitId: "codex", limitName: null, primary: { usedPercent: 37, windowDurationMins: 10080, resetsAt: 1893456000 }, secondary: null }, rateLimitsByLimitId: null } });
+if (message.method === "config/read") {
+  return send({ id: message.id, result: { config: process.env.INERTIA_APP_SERVER_SCENARIO === "configured-developer-instructions"
+    ? { developer_instructions: "USER_DEVELOPER_RULES" }
+    : {} } });
+}
 if (message.method === "thread/start" || message.method === "thread/resume") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "incompatible-full-access" && message.params.approvalPolicy === "never") {
     return send({ id: message.id, error: { code: -32602, message: "invalid params: unknown variant danger-full-access" } });

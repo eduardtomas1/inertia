@@ -23,6 +23,7 @@ import {
   MAX_CONVERSATION_CONTEXT_TURN_BYTES,
 } from "../../../shared/conversation-context";
 import { byteLength } from "../../persistence/bounded-message-text";
+import { MAX_SYSTEM_INSTRUCTION_BYTES } from "../../provider/watcher-harness-profile";
 import type { ConversationContextDelivery } from "../../persistence/conversation-context-transport";
 import {
   MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
@@ -95,6 +96,7 @@ export interface SanitizedTurnExecutionManifest {
   contextBytes: number;
   internalInstructionCount: number;
   internalInstructionBytes: number;
+  sessionInstructionBytes?: number;
   executionSegmentCount: number;
   assembledPayloadBytes: number;
   references: TurnExecutionManifestReference[];
@@ -142,6 +144,7 @@ export interface AssembleTurnRequestInput {
   conversationContexts?: (capacityBytes: number) => ConversationContextMaterialization;
   carriedConversationContexts?: readonly MaterializedConversationContext[];
   internalInstructions?: readonly HiddenProviderInstruction[];
+  sessionInstructionBytes?: number;
   restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
 }
 
@@ -283,6 +286,15 @@ export function parseSanitizedTurnExecutionManifest(
       "Internal instruction byte size",
       MAX_INTERNAL_INSTRUCTION_BYTES,
     ),
+    ...(manifest.sessionInstructionBytes === undefined
+      ? {}
+      : {
+          sessionInstructionBytes: requiredBoundedInteger(
+            manifest.sessionInstructionBytes,
+            "Session instruction byte size",
+            MAX_SYSTEM_INSTRUCTION_BYTES,
+          ),
+        }),
     executionSegmentCount: requiredBoundedInteger(
       manifest.executionSegmentCount,
       "Execution segment count",
@@ -862,6 +874,9 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
         contextBytes: references.reduce((total, reference) => total + reference.byteSize, 0),
         internalInstructionCount: internalInstructions.length,
         internalInstructionBytes,
+        ...(input.sessionInstructionBytes === undefined
+          ? {}
+          : { sessionInstructionBytes: input.sessionInstructionBytes }),
         executionSegmentCount,
         assembledPayloadBytes,
         references,

@@ -661,7 +661,7 @@ describe("TurnController authoritative lifecycle", () => {
     planRuntime.store.close();
   }, 30_000);
 
-  it("adds the Build instruction once per follow-up when resuming a provider session", async () => {
+  it("adds the Build instruction on the session's first turn and not again on a resumed follow-up", async () => {
     const runtime = await testRuntime();
     const first = runtime.controller.queue({
       conversationId: runtime.conversationId,
@@ -683,14 +683,7 @@ describe("TurnController authoritative lifecycle", () => {
     });
     expect(runtime.controller.start(followUp.turn.id)).toBe(true);
     expect(runtime.provider.input?.sessionId).toBe("task-51-session");
-    expect(runtime.provider.input?.prompt.startsWith(
-      "Now validate the follow-up.\n\n",
-    )).toBe(true);
-    expect(runtime.provider.input?.prompt).not.toContain(
-      "Implement the first change.",
-    );
-    expect(runtime.provider.input?.prompt.split(BUILD_MODE_INSTRUCTION))
-      .toHaveLength(2);
+    expect(runtime.provider.input?.prompt).toBe("Now validate the follow-up.");
     runtime.provider.resolve();
     await flushPromises();
     runtime.store.close();
@@ -1339,7 +1332,7 @@ describe("TurnController authoritative lifecycle", () => {
       uniqueContextBlobCount: 2,
       // Harness and trusted caller controls remain separate from the one
       // centralized Build-mode instruction.
-      internalInstructionCount: 3,
+      internalInstructionCount: 2,
     });
     expect(JSON.stringify(runtime.store.turnExecutionManifest(queued.turn.id)))
       .not.toContain("INTERNAL_SECRET_POLICY");
@@ -1347,7 +1340,8 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.provider.input?.prompt).toContain("Why is this change safe?");
     expect(runtime.provider.input?.prompt).toContain("+const enabled = true;");
     expect(runtime.provider.input?.prompt).toContain("1 test passed");
-    expect(runtime.provider.input?.prompt).toContain("HARNESS_POLICY");
+    expect(runtime.provider.input?.prompt).not.toContain("HARNESS_POLICY");
+    expect(runtime.provider.input?.sessionInstruction).toContain("HARNESS_POLICY");
     expect(runtime.provider.input?.prompt).toContain("INTERNAL_SECRET_POLICY");
     runtime.provider.resolve();
     await flushPromises();

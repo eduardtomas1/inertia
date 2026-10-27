@@ -819,6 +819,37 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       .toMatchObject({ messageID: expect.stringMatching(/^msg_[a-f0-9]{32}$/u) });
   });
 
+  it("sends the session instruction ahead of any role instruction as the prompt's system text", async () => {
+    const root = portableFixtureRoot("OpenCode session instruction");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "idle-before-prompt-receipt"));
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.run({
+      ...nativeProviderRunInput({
+        providerId: "opencode",
+        conversationId: "opencode-session-instruction",
+        cwd: root,
+        prompt: "Continue",
+        interactionMode: "build",
+        access: "supervised",
+        sessionId: "opencode-lifecycle-session",
+      }),
+      sessionInstruction: "[inertia-chat]\nThis chat's id is chat-1.",
+      systemInstruction: "[inertia-watcher]\nWATCHER_ROLE",
+    }, {})).resolves.toMatchObject({ status: "completed" });
+    const capture = readStableCapture<{
+      captured: Array<{ path: string; body?: Record<string, unknown> }>;
+    }>(capturePath);
+    expect(capture.captured.find(({ path }) => path.endsWith("/prompt_async"))?.body)
+      .toMatchObject({ system: "[inertia-chat]\nThis chat's id is chat-1.\n\n[inertia-watcher]\nWATCHER_ROLE" });
+  });
+
   it("does not treat admission alone as proof that a queued prompt has run", async () => {
     const root = portableFixtureRoot("OpenCode idle after admission");
     roots.push(root);

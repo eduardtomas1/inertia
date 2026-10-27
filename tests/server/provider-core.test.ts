@@ -32,6 +32,17 @@ describe("provider adapter seams", () => {
     expect(() => validateProviderRunInput(input("claude", { imagePaths }))).toThrow("Too many images were attached.");
   });
 
+  it("accepts a bounded session instruction only on harnesses with a system channel", () => {
+    expect(validateProviderRunInput(input("claude", { sessionInstruction: "[inertia-chat]\nThis chat's id is chat-1." }))).toBe("conversation-1");
+    expect(validateProviderRunInput(input("codex", { sessionInstruction: "[inertia-chat]\nThis chat's id is chat-1." }))).toBe("conversation-1");
+    expect(() => validateProviderRunInput(input("cursor", { sessionInstruction: "[inertia-chat]\nThis chat's id is chat-1." })))
+      .toThrow("The session instruction is invalid.");
+    expect(() => validateProviderRunInput(input("claude", { sessionInstruction: " " }))).toThrow("The session instruction is invalid.");
+    expect(() => validateProviderRunInput(input("claude", { sessionInstruction: "bad\0text" }))).toThrow("The session instruction is invalid.");
+    expect(() => validateProviderRunInput(input("claude", { sessionInstruction: "x".repeat(16 * 1_024 + 1) })))
+      .toThrow("The session instruction is invalid.");
+  });
+
   it("owns a provider control operation with an explicit correlation identity", () => {
     expect(validateProviderRunInput(input("claude", {
       runId: "compact-operation-1",

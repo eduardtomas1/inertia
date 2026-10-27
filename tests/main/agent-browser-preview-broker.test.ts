@@ -23,6 +23,7 @@ import {
   conversationId,
   createPreviewBrokerHarness,
   runIdentity,
+  SCREENSHOT_PNG_BASE64,
   type PreviewBrokerHarnessContents,
 } from "./support/preview-broker-harness";
 
@@ -430,16 +431,12 @@ describe("agent-owned native Browser", () => {
     const screenshot = await broker.perform(conversationId, { action: "screenshot" });
     expect(screenshot).toMatchObject({
       ok: true,
+      image: { mimeType: "image/png", data: SCREENSHOT_PNG_BASE64, width: 4, height: 3 },
     });
-    expect(screenshot).not.toHaveProperty("image");
+    expect(parseAgentBrowserResult(screenshot)).toEqual(screenshot);
     if (screenshot.ok) {
-      expect(JSON.parse(screenshot.text)).toMatchObject({
-        bitmap: "local-only",
-        providerImage: false,
-      });
-      expect(screenshot.text).not.toContain(
-        Buffer.from("bounded-png").toString("base64"),
-      );
+      expect(Object.keys(JSON.parse(screenshot.text) as object).sort()).toEqual(["captured", "height", "tabId", "url", "width"]);
+      expect(screenshot.text).not.toContain(SCREENSHOT_PNG_BASE64);
     }
     expect(pageTools.agentPageEvidencePrivacy).toHaveBeenCalled();
     await expect(broker.perform(conversationId, { action: "click", ref: "e1" }))
@@ -463,7 +460,7 @@ describe("agent-owned native Browser", () => {
     expect(children[0]!.webContents.insertedText).toEqual(["hello"]);
   });
 
-  it("never returns CSS-painted screenshot bytes to the provider result", async () => {
+  it("returns the page's own viewport capture, never the composited native view", async () => {
     const contentsOffset = electronState.contents.length;
     const { broker } = harness();
     await broker.navigate({
@@ -471,18 +468,18 @@ describe("agent-owned native Browser", () => {
       contextId: conversationId,
       url: "http://127.0.0.1:3000/pixel-art",
     });
-    const paintedBytes = Buffer.from("credential-painted-only-with-css-pixels");
-    electronState.contents[contentsOffset]!.capturePage.mockImplementationOnce(async () => ({
+    const contents = electronState.contents[contentsOffset]!;
+    const paintedBytes = Buffer.from("composited-view-bytes");
+    contents.capturePage.mockImplementationOnce(async () => ({
       getSize: () => ({ width: 640, height: 360 }),
       resize() { return this; },
       toPNG: () => paintedBytes,
     }));
 
     const screenshot = await broker.perform(conversationId, { action: "screenshot" });
-    expect(screenshot).toMatchObject({ ok: true });
-    expect(screenshot).not.toHaveProperty("image");
+    expect(screenshot).toMatchObject({ ok: true, image: { data: SCREENSHOT_PNG_BASE64 } });
+    expect(contents.capturePage).not.toHaveBeenCalled();
     expect(JSON.stringify(screenshot)).not.toContain(paintedBytes.toString("base64"));
-    expect(JSON.stringify(screenshot)).not.toContain(paintedBytes.toString("utf8"));
   });
 
   it("keeps page-authored element names out of click and type activity labels", async () => {
@@ -1103,7 +1100,8 @@ describe("agent-owned native Browser", () => {
         code: "sensitive",
         message: "Screenshots are unavailable because the visible page shows a secret, or is too large for Inertia to check for one.",
       });
-    expect(contents.capturePage).toHaveBeenCalledOnce();
+    expect(contents.debugger.sendCommand.mock.calls.filter(([method]) => method === "Page.captureScreenshot"))
+      .toHaveLength(1);
     expect(contents.debugger.sendCommand).toHaveBeenCalledWith(
       "Page.setWebLifecycleState",
       { state: "frozen" },
@@ -1171,15 +1169,17 @@ describe("agent-owned native Browser", () => {
     });
 
     const contents = electronState.contents[contentsOffset]!;
-    const originalCapture = contents.capturePage.getMockImplementation() as () => Promise<unknown>;
+    const originalCommand = contents.debugger.sendCommand.getMockImplementation();
     let captureStarted = (): void => undefined;
     let releaseCapture = (): void => undefined;
     const started = new Promise<void>((resolve) => { captureStarted = resolve; });
     const blocked = new Promise<void>((resolve) => { releaseCapture = resolve; });
-    contents.capturePage.mockImplementationOnce(async () => {
-      captureStarted();
-      await blocked;
-      return await originalCapture();
+    contents.debugger.sendCommand.mockImplementation(async (method, params) => {
+      if (method === "Page.captureScreenshot") {
+        captureStarted();
+        await blocked;
+      }
+      return await originalCommand?.(method, params);
     });
 
     const screenshotPromise = broker.perform(conversationId, { action: "screenshot" });
@@ -1670,19 +1670,20 @@ describe("agent-owned native Browser", () => {
       contextId: conversationId,
       url: "http://127.0.0.1:3000/",
     });
-    electronState.contents[contentsOffset]!.capturePage
-      .mockImplementationOnce(async () => ({
-        getSize: () => ({ width: 0, height: 0 }),
-        resize() { return this; },
-        toPNG: () => Buffer.alloc(0),
-      }));
-
-    await expect(broker.perform(conversationId, { action: "screenshot" }))
-      .resolves.toMatchObject({
-        ok: false,
-        code: "unavailable",
-        message: "The active Browser page had no drawable screenshot.",
-      });
+    for (const data of [undefined, "", Buffer.from("not a png").toString("base64")]) {
+      electronState.screenshotData = data;
+      try {
+        await expect(broker.perform(conversationId, { action: "screenshot" }))
+          .resolves.toEqual({
+            ok: false,
+            code: "unavailable",
+            message: "The active Browser page had no drawable screenshot.",
+          });
+      } finally {
+        electronState.screenshotData = SCREENSHOT_PNG_BASE64;
+      }
+    }
+    expect(electronState.contents[contentsOffset]!.capturePage).not.toHaveBeenCalled();
   });
 
   it("attributes tab-close activity to the exact closed page", async () => {
@@ -1830,7 +1831,7 @@ describe("Browser evidence phase timeouts", () => {
     { phase: "privacy-check", description: "the page privacy check", action: "screenshot",
       stall: () => { pageTools.agentPageHasSensitiveScreenshotEvidence.mockImplementationOnce(never); } },
     { phase: "screenshot-capture", description: "screenshot capture", action: "screenshot",
-      stall: (contents) => { contents.capturePage.mockImplementationOnce(never); } },
+      stall: () => { electronState.stalledCommands.push((method) => method === "Page.captureScreenshot"); } },
     { phase: "page-resume", description: "page resume after evidence capture", action: "screenshot",
       stall: () => {
         electronState.stalledCommands.push((method, params) => (

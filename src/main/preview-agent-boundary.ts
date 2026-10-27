@@ -1,5 +1,7 @@
 import type { WebContents } from "electron";
 
+import { restoreAgentPageEmulation } from "./preview-agent-viewport.js";
+
 const MAX_AGENT_PAGE_FOCUS_DEPTH = 4_000;
 const AGENT_PAGE_BOUNDARY_OBJECT_GROUP = "inertia-agent-page-boundary";
 const AGENT_PAGE_WORLD_NAME = "Electron Isolated Context";
@@ -78,6 +80,7 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
     await contents.debugger.sendCommand("Page.setInterceptFileChooserDialog", {
       enabled: false,
     });
+    await restoreAgentPageEmulation(contents);
   } catch (error) {
     releaseAgentPageDebugger(contents);
     throw error;

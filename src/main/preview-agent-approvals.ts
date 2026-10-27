@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentBrowserRequest } from "../shared/agent-browser-approval.js";
-import type { AgentBrowserCommand, AgentBrowserRunIdentity } from "../shared/agent-browser.js";
+import { AGENT_BROWSER_VIEWPORT_SIZES, type AgentBrowserCommand, type AgentBrowserRunIdentity } from "../shared/agent-browser.js";
 import { sanitizeBrowserEvidenceText } from "../shared/browser-evidence.js";
 import type { PreviewAgentTarget } from "./preview-agent-page.js";
 import type { PreviewTab } from "./preview-tab.js";
@@ -46,6 +46,15 @@ function historyTarget(tab: PreviewTab, direction: "back" | "forward" | "reload"
   return sanitizeBrowserEvidenceText(url, "[private address hidden]", 600).text;
 }
 
+function viewportDetail(command: Extract<AgentBrowserCommand, { action: "resize" }>): string {
+  const size = command.preset === "fit" ? "Fit the Browser viewport to the panel"
+    : command.preset ? `Set the Browser viewport to ${AGENT_BROWSER_VIEWPORT_SIZES[command.preset].width}×${AGENT_BROWSER_VIEWPORT_SIZES[command.preset].height} ${command.preset}`
+      : command.width !== undefined && command.height !== undefined ? `Set the Browser viewport to ${command.width}×${command.height} desktop`
+        : null;
+  const scheme = command.colorScheme ? `Use the ${command.colorScheme} colour scheme` : null;
+  return [size, scheme].filter((line) => line !== null).join("\n");
+}
+
 function inspectedTarget(
   command: AgentBrowserCommand,
   tab: PreviewTab,
@@ -78,6 +87,8 @@ function actionDetail(command: AgentBrowserCommand, tab: PreviewTab, target: Pre
     case "scroll": return "ref" in command
       ? `${page}\nScroll ${control} into view`
       : `${page}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels`;
+    case "resize": return viewportDetail(command);
+    case "screenshot": return `${page}\nSend a screenshot of the Browser page to the agent`;
     case "tab-open": return `Open a browser tab${command.url ? `: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}` : ""}`;
     case "tab-close": return `${page}\nClose this tab`;
     case "tab-activate": return `${page}\nSwitch to this tab`;

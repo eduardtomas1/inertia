@@ -43,6 +43,11 @@ import {
   type JsonObject,
 } from "./protocol";
 import { codexWatcherThreadConfig } from "./read-only-thread-config";
+import {
+  codexDeveloperInstructions,
+  configuredDeveloperInstructions,
+  readConfiguredDeveloperInstructions,
+} from "./developer-instructions";
 import { codexModelProviderThreadConfig } from "./model-provider-config";
 import type {
   CodexAppServerOptions,
@@ -958,9 +963,17 @@ export async function openCodexTurn({
   const providerConfig = modelProvider
     ? codexModelProviderThreadConfig(modelProvider, effectiveConfig)
     : null;
-  const developerInstructions = [options.sessionDeveloperInstructions ?? "", options.developerInstructions ?? ""]
-    .filter((section) => section.length > 0)
-    .join("\n\n");
+  const developerInstructions = codexDeveloperInstructions([
+    options.sessionDeveloperInstructions === undefined
+      ? undefined
+      : effectiveConfig
+        ? configuredDeveloperInstructions(effectiveConfig)
+        : await readConfiguredDeveloperInstructions(
+          () => request("config/read", { includeLayers: false, cwd: options.cwd }, undefined, false),
+        ),
+    options.sessionDeveloperInstructions,
+    options.developerInstructions,
+  ]);
   const threadConfig = {
     cwd: options.cwd,
     approvalPolicy: accessPolicy.approvalPolicy,

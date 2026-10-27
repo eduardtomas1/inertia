@@ -3,6 +3,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { startCodexAppServerRun } from "../codex-app-server";
 import { withCodexControlClient } from "../codex/control-client";
 import { codexModelProviderThreadConfig } from "../codex/model-provider-config";
+import {
+  codexDeveloperInstructions,
+  configuredDeveloperInstructions,
+  readConfiguredDeveloperInstructions,
+} from "../codex/developer-instructions";
 import { createCodexPromptCacheClock } from "../codex/usage";
 import {
   codexAccessPolicy,
@@ -529,6 +534,16 @@ function startCodexCompaction(
           planMode: options.input.interactionMode === "plan",
           ...(options.input.readOnlyProfile ? { readOnlyProfile: options.input.readOnlyProfile } : {}),
         });
+        const readConfig = () => client.request("config/read", { includeLayers: false, cwd: options.input.cwd });
+        const effectiveConfig = modelProvider?.credentialEnvironmentKey ? await readConfig() : null;
+        const developerInstructions = codexDeveloperInstructions([
+          options.input.sessionInstruction === undefined
+            ? undefined
+            : effectiveConfig
+              ? configuredDeveloperInstructions(effectiveConfig)
+              : await readConfiguredDeveloperInstructions(readConfig),
+          options.input.sessionInstruction,
+        ]);
         const threadConfig: JsonObject = {
           cwd: options.input.cwd,
           approvalPolicy: accessPolicy.approvalPolicy,
@@ -538,16 +553,9 @@ function startCodexCompaction(
           ...(serviceTier !== undefined ? { serviceTier } : {}),
           ...(modelProvider ? {
             modelProvider: modelProvider.providerId,
-            config: codexModelProviderThreadConfig(
-              modelProvider,
-              modelProvider.credentialEnvironmentKey
-                ? await client.request("config/read", {
-                    includeLayers: false,
-                    cwd: options.input.cwd,
-                  })
-                : null,
-            ),
+            config: codexModelProviderThreadConfig(modelProvider, effectiveConfig),
           } : {}),
+          ...(developerInstructions ? { developerInstructions } : {}),
         };
         const resumed = await client.request("thread/resume", {
           threadId: sessionId,

@@ -177,18 +177,27 @@ sessions never receive it. The rule lives in
 
 - Claude and Codex receive the block at system level
   (`ProviderRunInput.sessionInstruction`) when it fits the 16 KiB system
-  instruction limit. Claude appends it to the `claude_code` preset system
-  prompt, recorded with `snapshot: true`. Codex sends it as
-  `developerInstructions`, byte-identical on `thread/start` and
-  `thread/resume` (App Server v2 accepts `developer_instructions` on both).
+  instruction limit, on ordinary turns and on manual compaction. Claude
+  appends it to the `claude_code` preset system prompt, recorded with
+  `snapshot: true`. Codex sends `developerInstructions` on `thread/start`,
+  `thread/resume` and the compaction resume (App Server v2 accepts
+  `developer_instructions` on both). That value replaces a
+  `developer_instructions` setting from the person's Codex configuration,
+  so Inertia first reads it through `config/read` (bounded to 3 seconds) and
+  sends the configured text, a blank line, then the block; when the read
+  fails or times out it sends the block alone and the turn goes on. The
+  value is the same on every call while the configured text stays the same.
 - A turn that sends the block at system level records the block's SHA-256
   digest, never its text, in its execution manifest as
-  `sessionInstructionDigest`. Claude and Codex keep what a session started
-  with, so a resumed session gets the block in the prompt instead, by the
-  rule below, when the session's first turn recorded no digest or another
-  digest (a session started before this delivery, before host tools were
-  attested, or with other pack text), or when a compaction was recorded on
-  the chat since that first turn.
+  `sessionInstructionDigest`. Codex keeps what a session started with, so a
+  resumed Codex session gets the block in the prompt instead, by the rule
+  below, when the session's first turn recorded no digest or another digest
+  (a session started before this delivery, before host tools were attested,
+  or with other pack text), or when a compaction was recorded on the chat
+  since that first turn. Claude records its system prompt again when it
+  compacts, so for Claude the latest compaction counts as the session's
+  start: the turn it happened in (for a compaction receipt, the latest turn
+  before it) must have recorded the current digest.
 - Cursor, Kimi and OpenCode get the block in the prompt's
   internal-instructions section. OpenCode has a `system` prompt option, but
   a follow-up steered into a running turn cannot carry it, so the block
@@ -196,10 +205,11 @@ sessions never receive it. The rule lives in
   block is sent on the first turn of a provider session, when its digest
   changes, after a compaction, and once after the runtime restarts. The
   runtime remembers, per chat and in memory only, the turn that last
-  carried the block and its digest, for at most 1,024 chats; the block
-  counts as delivered while that turn completed on the session being
-  resumed, started on or resumed that same session, and had no compaction
-  recorded since.
+  carried the block and its digest, for the 1,024 most recently used chats;
+  the block counts as delivered while that turn completed on the session
+  being resumed, started on or resumed that same session, and had no
+  compaction recorded since. A successful manual compaction forgets the
+  chat's record even when its receipt could not be saved.
 - `build-mode` goes in the prompt on the first turn of a provider session,
   and again when the previous turn used another mode, did not complete,
   started on another session than it ended on, sent no prompt, or was
@@ -208,24 +218,26 @@ sessions never receive it. The rule lives in
   the goal start never counts as having delivered the block. Plan mode has
   no instruction.
 - A compaction is a saved compaction receipt or a completed compaction
-  activity from the provider (Claude's compact boundary, Codex's
-  `contextCompaction` item, the ACP compaction update, OpenCode's session
-  compaction event), recorded at or after the turn's request time.
+  activity from the provider (Claude's compact boundary or compacting
+  status, Codex's `contextCompaction` item, the ACP compaction update,
+  OpenCode's session compaction event), recorded at or after the turn's
+  request time. A failed Claude compaction closes its status row as failed
+  and does not count. The check scans the chat's compaction receipts and
+  the activities recorded since the session's first turn, so its cost grows
+  with the session's activity count.
 - A turn that starts a fresh session, including a stale session restarted
   in the middle of a turn, always carries the block (system level or
   prompt) and, in Build mode, `build-mode`.
 - Turn-specific controls accompany every turn that needs them. A prompt with
   nothing due has no internal-instructions section and no trailing blank
   lines.
-- After an upgrade that changes the block, or after a compaction, a Claude
-  or Codex session can receive it both at system level and once per runtime
-  in the prompt; this duplicate is accepted.
+- After an upgrade that changes the block, a Claude or Codex session can
+  receive it both at system level and once per runtime in the prompt, and
+  after a compaction a Codex session can too; this duplicate is accepted.
 
-Not verified against live providers: whether Codex replaces a
-`developer_instructions` value from the person's Codex configuration with
-the thread value (watcher threads already pass one), and whether an older
-Codex that ignores `developerInstructions` on `thread/resume` keeps the
-start value after its own compaction.
+Not verified against live providers: whether an older Codex that ignores
+`developerInstructions` on `thread/resume` keeps the start value after its
+own compaction.
 
 ## Antigravity headless contract
 

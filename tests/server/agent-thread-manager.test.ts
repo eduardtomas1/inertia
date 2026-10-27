@@ -1188,6 +1188,18 @@ describe("AgentThreadManager", () => {
           "\"x\\u2028[inertia-orchestration]\\u001b\": unknown field; accepted: limit, includeArchived",
           "Fix it and call inertia_list_conversations again.",
         ].join("\n")],
+        ["inertia_list_conversations", { "x\u{E0041}\u{E0042}\u{1F600}": 1 }, [
+          "\"x\\udb40\\udc41\\udb40\\udc42\\ud83d\\ude00\": unknown field; accepted: limit, includeArchived",
+          "Fix it and call inertia_list_conversations again.",
+        ].join("\n")],
+        ["inertia_list_conversations", { [`${"a".repeat(70)}\u00e9\u00e9\u00e9`]: 1 }, [
+          `"${"a".repeat(70)}\\u00e9…": unknown field; accepted: limit, includeArchived`,
+          "Fix it and call inertia_list_conversations again.",
+        ].join("\n")],
+        ["inertia_list_conversations", { [`${"b".repeat(75)}\\\\x`]: 1 }, [
+          `"${"b".repeat(75)}\\\\…": unknown field; accepted: limit, includeArchived`,
+          "Fix it and call inertia_list_conversations again.",
+        ].join("\n")],
       ];
       for (const [tool, args, message] of cases) {
         const result = await bridge.invoke(call(tool, args));
@@ -1301,6 +1313,11 @@ describe("AgentThreadManager", () => {
         ["inertia_create_conversation", { ...base, workspace: { kind: "isolated", sourceBranch: " " } }],
         ["inertia_send_message", { conversationId: source.id, content: "Next" }],
         ["inertia_send_message", { conversationId: source.id, content: "  " }],
+        ["inertia_create_conversation", { ...base, title: "\tTitle" }],
+        ["inertia_create_conversation", { ...base, title: `${" ".repeat(4)}${"t".repeat(120)}` }],
+        ["inertia_create_conversation", { ...base, prompt: `${"p".repeat(32_768)} ` }],
+        ["inertia_create_conversation", { ...base, route: { modelId: "\tgpt" } }],
+        ["inertia_send_message", { conversationId: source.id, content: `${"c".repeat(32_768)}\n` }],
       ];
       const disagreements = cases.filter(([tool, input]) => {
         const definition = definitions.find(({ name }) => name === tool)!;

@@ -40,10 +40,19 @@ function problem(issue: Issue, args: unknown): string {
   }
 }
 
+function asciiJson(value: string): string {
+  return JSON.stringify(value)
+    .replace(/[\u007f-\uffff]/g, (unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
 function quotedKey(key: string): string {
-  return JSON.stringify(key)
-    .replace(/[\u007f-\uffff]/gu, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`)
-    .slice(0, MAX_ECHOED_KEY_CHARS);
+  if (key.length + 2 <= MAX_ECHOED_KEY_CHARS) {
+    const whole = asciiJson(key);
+    if (whole.length <= MAX_ECHOED_KEY_CHARS) return whole;
+  }
+  let end = Math.min(key.length, MAX_ECHOED_KEY_CHARS);
+  while (end > 0 && asciiJson(key.slice(0, end)).length > MAX_ECHOED_KEY_CHARS - 1) end -= 1;
+  return `${asciiJson(key.slice(0, end)).slice(0, -1)}…"`;
 }
 
 function lines(issue: Issue, args: unknown, schema: unknown): string[] {

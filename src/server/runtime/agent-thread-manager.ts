@@ -81,15 +81,15 @@ const MULTILINE_PATTERN = "^\\s*[^\\s\\x00][^\\x00]*$";
 const tokenPattern = (maximum: number) => `^[^\\s\\x00-\\x1f\\x7f]{1,${maximum}}$`;
 const idSchema = z.string().uuid();
 const safeSingleLineSchema = (maximum: number) => z.string()
-  .trim()
-  .min(1)
   .max(maximum)
-  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), "must be one line without control characters");
+  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), "must be one line without control characters")
+  .trim()
+  .min(1);
 const safeMultilineSchema = (maximum: number) => z.string()
-  .trim()
-  .min(1)
   .max(maximum)
-  .refine((value) => !value.includes("\0"), "must not contain NUL characters");
+  .refine((value) => !value.includes("\0"), "must not contain NUL characters")
+  .trim()
+  .min(1);
 const tokenSchema = (maximum: number) => z.string()
   .max(maximum)
   .regex(new RegExp(tokenPattern(maximum), "u"), "must be one word without spaces or control characters");

@@ -95,7 +95,7 @@ describe("agent browser host tools", () => {
         tabs: [{ id: tabId, title: "App", url: "http://127.0.0.1:3000", loading: false }],
         activity: null,
       },
-      image: { mimeType: "image/png" as const, data: image },
+      image: { mimeType: "image/png" as const, data: image, width: 4, height: 4 },
     })) };
     const tools = new AgentBrowserHostTools(broker);
     const request = call("inertia_browser_screenshot", {});

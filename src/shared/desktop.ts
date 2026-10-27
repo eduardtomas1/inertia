@@ -1,4 +1,5 @@
 import type { ChatAttachmentMimeType } from "./attachments";
+import type { AgentBrowserViewport, AgentBrowserViewportRequest } from "./agent-browser";
 import { MAX_CHAT_MESSAGE_CHARS } from "./diff-review";
 import {
   PRIVATE_CONNECT_GRANT_LIMITS,
@@ -219,6 +220,7 @@ export interface PreviewState {
   agentActivity: PreviewAgentActivity | null;
   evidence: BrowserEvidenceSnapshot;
   pageFocused?: boolean;
+  viewport?: AgentBrowserViewport;
 }
 export interface PreviewStateUpdate extends Omit<PreviewState, "evidence"> {
   ownerId: "primary" | "secondary";
@@ -719,7 +721,8 @@ export interface DesktopBridge {
   previewCommand: (request: {
     ownerId: string;
     contextId: string;
-    action: "back" | "forward" | "reload";
+    action: "back" | "forward" | "reload" | "viewport";
+    viewport?: AgentBrowserViewportRequest;
   }) => Promise<PreviewState>;
   previewTab: (request: {
     ownerId: string;

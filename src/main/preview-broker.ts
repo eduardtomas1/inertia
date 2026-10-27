@@ -317,6 +317,11 @@ export class PreviewBroker {
                 return await this.#operations.scroll(session, command, operation, validate);
               case "tabs":
                 return this.#success(session, boundedAgentStateText(this.#agentState(session)));
+              case "resize":
+              case "hover":
+              case "select":
+              case "logs":
+                return failure("unavailable", "That Inertia Browser action is not available yet.");
               case "tab-open":
                 return await this.#operations.openTab(session, command.url, operation, MAX_BROWSER_TABS);
               case "tab-activate":

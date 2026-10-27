@@ -385,7 +385,7 @@ function startClaudeRun(
           // here would let a repository's .claude/settings.json install hooks
           // or allow rules that execute before canUseTool can ask the user.
           settingSources: [],
-          ...claudeIdentityOptions(identity, options.input.systemInstruction),
+          ...claudeIdentityOptions(identity, options.input.systemInstruction, options.input.sessionInstruction),
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
           ...(Object.keys(launchSettings).length > 0 ? { settings: launchSettings } : {}),
           permissionMode: options.input.readOnlyProfile === "watcher"

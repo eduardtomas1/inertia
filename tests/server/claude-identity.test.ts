@@ -9,6 +9,7 @@ import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-ag
 import { loadClaudeInstructions } from "../../src/server/provider/claude-memory";
 import { CLAUDE_ISOLATED_SKILL_PLUGIN_NAME } from "../../src/server/provider/claude-skill-plugin";
 import {
+  CLAUDE_PROTOCOL_SESSION_ID,
   claudeSuccessResult,
   claudeSystem,
   fixtureClaudeQuery,
@@ -280,6 +281,57 @@ describe("Claude turn identity in the harness", () => {
     await expect(run.result).resolves.toMatchObject({
       status: "failed",
       error: expect.stringContaining("selected isolated skills"),
+    });
+  });
+
+  it("records the session instruction with the system prompt on new and resumed sessions", async () => {
+    const home = fixtureRoot("Claude harness session instruction home");
+    const project = fixtureRoot("Claude harness session instruction project");
+    const captured: ClaudeOptions[] = [];
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        captured.push(options!);
+        return fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSystem("init", { plugins: [], skills: [] });
+          yield claudeSuccessResult("Done", "completed");
+        })());
+      },
+    });
+    const sessionInstruction = "[inertia-orchestration]\nPACK_TEXT\n\n[inertia-chat]\nThis chat's id is chat-1.";
+    const run = async (input: { sessionId?: string; systemInstruction?: string }) => {
+      const started = harness.start({
+        input: {
+          ...nativeProviderRunInput({
+            providerId: "claude",
+            conversationId: "claude-identity-session-instruction",
+            cwd: project,
+            prompt: "Hello",
+            interactionMode: "build",
+            access: "supervised",
+          }),
+          skills: [],
+          sessionInstruction,
+          ...input,
+        },
+        executable: process.execPath,
+        environment: { HOME: home },
+        providerNativeToolsAvailable: true,
+      });
+      await expect(started.result).resolves.toMatchObject({ status: "completed" });
+    };
+
+    await run({});
+    await run({ sessionId: CLAUDE_PROTOCOL_SESSION_ID });
+    await run({ systemInstruction: "[inertia-watcher]\nWATCHER_ROLE" });
+
+    expect(captured[0]!.systemPrompt).toEqual({
+      type: "preset", preset: "claude_code", snapshot: true, append: sessionInstruction,
+    });
+    expect(captured[1]!.resume).toBe(CLAUDE_PROTOCOL_SESSION_ID);
+    expect(captured[1]!.systemPrompt).toEqual(captured[0]!.systemPrompt);
+    expect(captured[2]!.systemPrompt).toEqual({
+      type: "preset", preset: "claude_code", snapshot: false,
+      append: `${sessionInstruction}\n\n[inertia-watcher]\nWATCHER_ROLE`,
     });
   });
 });

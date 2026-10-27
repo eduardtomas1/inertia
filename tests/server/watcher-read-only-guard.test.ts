@@ -300,7 +300,7 @@ describe("read-only watcher turns", () => {
       runtime.controller.start(ordinary.turn.id);
       await flushTurnControllerTestPromises();
       expect(runtime.checkpoints).toEqual([ordinary.turn.id]);
-      expect(runtime.provider.input?.prompt).toContain("Capability pack.");
+      expect(runtime.provider.input?.sessionInstruction).toContain("Capability pack.");
     } finally {
       runtime.store.close();
     }

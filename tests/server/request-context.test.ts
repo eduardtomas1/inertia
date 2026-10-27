@@ -487,6 +487,27 @@ describe("bounded structured turn request context", () => {
     ]);
   });
 
+  it("adds no instruction header when no instruction is due and records only the session instruction size", async () => {
+    const cwd = await workspace();
+    const bare = assembleTurnRequest({ cwd, visibleContent: "hello", sessionInstructionBytes: 1_234 });
+
+    expect(bare.executionPrompt).toBe("hello");
+    expect(bare.persistence.manifest).toMatchObject({
+      internalInstructionCount: 0,
+      internalInstructionBytes: 0,
+      sessionInstructionBytes: 1_234,
+      executionSegmentCount: 1,
+      assembledPayloadBytes: 5,
+    });
+    expect(parseSanitizedTurnExecutionManifest(bare.persistence.manifest)).toEqual(bare.persistence.manifest);
+    expect(assembleTurnRequest({ cwd, visibleContent: "hello" }).persistence.manifest)
+      .not.toHaveProperty("sessionInstructionBytes");
+    expect(() => parseSanitizedTurnExecutionManifest({
+      ...bare.persistence.manifest,
+      sessionInstructionBytes: 16 * 1_024 + 1,
+    })).toThrow("Session instruction byte size is invalid.");
+  });
+
   it("rejects inconsistent manifest totals during privileged debug decoding", () => {
     expect(() => parseSanitizedTurnExecutionManifest({
       version: 1,

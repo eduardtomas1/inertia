@@ -994,6 +994,13 @@ export async function openCodexTurn({
   } else {
     opened = await request("thread/start", {
       ...threadConfig,
+      ...(options.sessionDeveloperInstructions
+        ? {
+            developerInstructions: [options.sessionDeveloperInstructions, options.developerInstructions ?? ""]
+              .filter((section) => section.length > 0)
+              .join("\n\n"),
+          }
+        : {}),
       ...(options.hostTools
         ? {
             dynamicTools: options.hostTools.definitions.map((definition) => ({

@@ -159,6 +159,58 @@ Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
 
+## Hidden instruction delivery
+
+A turn can carry four kinds of hidden instructions: the capability-pack
+instructions, an `inertia-chat` line that tells the agent its chat's id, the
+`build-mode` instruction, and turn-specific controls such as watcher notes,
+runtime-interruption notes and caller controls. The packs and the chat line
+form one block of `[label]` sections joined by blank lines, byte-identical on
+every turn of a session. The block is sent only when the turn has attested
+Inertia host tools; watchers, custom backends and resumed imported Codex
+sessions never receive it. The rule lives in
+`src/server/runtime/turns/turn-instruction-delivery.ts`.
+
+- Claude, Codex and OpenCode receive the block on their system channel
+  (`ProviderRunInput.sessionInstruction`) when it fits the 16 KiB system
+  instruction limit. Claude appends it to the `claude_code` preset system
+  prompt, recorded with `snapshot: true`; a watcher role on the same turn
+  still turns recording off. Codex sends it as `developerInstructions` on
+  `thread/start` only, never on `thread/resume`. OpenCode sends it as the
+  prompt's `system` text on every prompt.
+- Every turn's execution manifest records the block's byte size, never its
+  text, as `sessionInstructionBytes`. Claude and Codex keep what a session
+  started with, so a resumed session whose first turn did not record a block
+  of the current size (one started before this delivery, before host tools
+  were attested, or with other pack text) gets the block in the prompt
+  instead, by the rule below.
+- Cursor and Kimi have no system channel. The block goes in the prompt's
+  internal-instructions section on the first turn of a provider session,
+  when its SHA-256 digest changes, after a compaction receipt is saved for
+  the chat, and once after the runtime restarts. The runtime remembers, per
+  chat and in memory only, the turn that last carried the block and its
+  digest; the block counts as delivered while that turn completed on the
+  session being resumed.
+- `build-mode` goes in the prompt on the first turn of a provider session,
+  and again when the previous turn used another mode, did not complete,
+  ended on another session, or was followed by a compaction receipt. A
+  native Codex goal start sends no prompt, so a Codex session that ran a
+  native goal gets `build-mode` on every turn, and a goal start never counts
+  as having delivered the block. Plan mode has no instruction.
+- A turn that starts a fresh session, including a stale session restarted
+  in the middle of a turn, always carries the block (system channel or
+  prompt) and, in Build mode, `build-mode`.
+- Turn-specific controls accompany every turn that needs them. A prompt with
+  nothing due has no internal-instructions section and no trailing blank
+  lines.
+
+Not verified against live providers: whether Codex replaces a
+`developer_instructions` value from the person's Codex configuration with
+the `thread/start` value (watcher threads already pass one); whether OpenCode
+keeps a prompt's `system` text for a follow-up steered into the same run,
+which carries no `system` field; and provider-internal automatic compaction,
+which saves no receipt, so it does not trigger a re-send on Cursor or Kimi.
+
 ## Antigravity headless contract
 
 Antigravity is Inertia's only Google provider; the former Gemini CLI provider

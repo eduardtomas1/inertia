@@ -51,6 +51,7 @@ export interface CodexAppServerOptions {
   access: "supervised" | "auto-edit" | "full";
   readOnlyProfile?: "watcher";
   developerInstructions?: string;
+  sessionDeveloperInstructions?: string;
   /** Exact-run Inertia tools; advertised only on new provider threads. */
   hostTools?: ProviderHostToolBridge;
   /** Test seam that may shorten, but never extend, host-tool approval expiry. */

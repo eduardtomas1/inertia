@@ -13,6 +13,8 @@ export interface DetachedChatRuntimePolicyResources {
   snapshot(): AppSnapshot;
   subagentConversationId(traceId: string): string | null;
   checkpointConversationId(checkpointId: string): string | null;
+  turnConversationId(turnId: string): string | null;
+  duoLaunchConversationIds(launchId: string): readonly string[] | null;
   pendingApproval(
     conversationId: string,
     requestId: string,
@@ -51,6 +53,20 @@ export function detachedChatCommandRejection(
   ) ?? null;
   const ownsExistingConversation = (candidate: string): boolean =>
     Boolean(shell && owns(candidate));
+  const ownsWorkspace = (
+    payload: { projectId: string; conversationId?: string },
+  ): boolean => Boolean(
+    shell
+    && payload.projectId === shell.projectId
+    && payload.conversationId !== undefined
+    && owns(payload.conversationId),
+  );
+  const ownsTurn = (turnId: string): boolean =>
+    resources.turnConversationId(turnId) === authority.conversationId;
+  const ownsRun = (runId: string): boolean => snapshot.runs.some(
+    ({ id, conversationId }) =>
+      id === runId && conversationId === authority.conversationId,
+  );
 
   switch (command.type) {
     case "conversation.detail.subscription":
@@ -77,6 +93,17 @@ export function detachedChatCommandRejection(
     case "message.queue.remove":
     case "message.queue.send":
     case "message.queue.stop-and-send":
+    case "conversation.background-tasks.get":
+    case "conversation.settle":
+    case "conversation.unsettle":
+    case "conversation.mark-unread":
+    case "conversation.regenerate-title":
+    case "review.state.set":
+    case "review.note.create":
+    case "review.note.update":
+    case "review.note.delete":
+    case "review.selection.cancel":
+    case "review.summary.cancel":
       return ownsExistingConversation(command.payload.conversationId)
         ? null
         : REJECTION;
@@ -122,6 +149,9 @@ export function detachedChatCommandRejection(
           "modelSelection",
           "interactionMode",
           "accessMode",
+          "title",
+          "pinned",
+          "snoozedUntil",
         ])
         && Object.keys(command.payload).length > 1
         ? null
@@ -162,17 +192,74 @@ export function detachedChatCommandRejection(
         ? null
         : REJECTION;
     case "activity.mark-seen":
-      return snapshot.runs.some(
-        ({ id, conversationId }) =>
-          id === command.payload.runId
-          && conversationId === authority.conversationId,
-      ) ? null : REJECTION;
+    case "activity.acknowledge":
+    case "activity.stop":
+    case "activity.dismiss":
+      return ownsRun(command.payload.runId) ? null : REJECTION;
+    case "git.refresh":
+    case "git.diff":
+    case "git.workspace.refresh":
+    case "git.workspace.diff":
+    case "git.selection.inspect":
+    case "git.selection.revert":
+    case "git.selection.undo":
+    case "git.branches":
+    case "git.branch.create":
+    case "git.branch.switch":
+    case "git.fetch":
+    case "git.pull":
+    case "git.commit":
+    case "git.push":
+    case "git.pr.open":
+    case "git.pr.confidence":
+    case "git.pr.create":
+    case "review.selection.ask":
+    case "review.selection.revise":
+    case "review.summary.generate":
     case "workspace.entries":
+    case "workspace.file.read":
+    case "workspace.file.write":
+    case "project.actions":
+    case "project.action.run":
+    case "terminal.create":
+    case "terminal.attach":
+    case "terminal.provider.resume":
+      return ownsWorkspace(command.payload) ? null : REJECTION;
+    case "git.turn.diff":
+      return ownsWorkspace(command.payload)
+        && ownsTurn(command.payload.turnId)
+        ? null
+        : REJECTION;
+    case "git.turn.compare":
+      return ownsWorkspace(command.payload)
+        && ownsTurn(command.payload.earlierTurnId)
+        && ownsTurn(command.payload.laterTurnId)
+        ? null
+        : REJECTION;
+    case "terminal.input":
+    case "terminal.resize":
+    case "terminal.detach":
+    case "terminal.close":
+    case "usage.limits.get":
+    case "prompt-preset.create":
+    case "prompt-preset.update":
+    case "prompt-preset.duplicate":
+    case "prompt-preset.delete":
+    case "prompt-preset.reorder":
+      return null;
+    case "duo.pending":
       return shell
-        && command.payload.conversationId === authority.conversationId
-        && command.payload.projectId === shell.projectId
-        && command.payload.query
-        && command.payload.directory === undefined
+        && command.payload.projectIds.every(
+          (projectId) => projectId === shell.projectId,
+        )
+        ? null
+        : REJECTION;
+    case "duo.status":
+    case "duo.comparison.retry":
+    case "duo.comparison.cancel":
+      return shell
+        && resources.duoLaunchConversationIds(command.payload.launchId)
+          ?.includes(authority.conversationId)
         ? null
         : REJECTION;
     case "provider.refresh":

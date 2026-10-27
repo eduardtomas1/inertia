@@ -1,85 +1,128 @@
 <p align="center">
-  <img src="resources/icon.png" width="72" alt="Inertia logo" />
+  <img src="resources/icon.png" width="80" alt="Inertia logo" />
 </p>
 
 <h1 align="center">Inertia</h1>
+
 <p align="center">
-  Unstoppable execution.<br />
-  A calm desktop workspace for building with coding agents.
+  <strong>Every coding agent, one calm desktop.</strong><br />
+  Run Codex, Claude, Cursor, Kimi Code, OpenCode and Antigravity side by side,<br />
+  next to your projects, Git review and terminals, in a workspace that stays on your computer.
 </p>
 
-[Download the latest release](https://github.com/eduardtomas1/inertia/releases/latest) · [User guide](docs/user/README.md) · [Installation guide](docs/INSTALLING.md) · [Changelog](CHANGELOG.md)
+<p align="center">
+  <a href="https://github.com/eduardtomas1/inertia/releases/latest"><strong>Download the latest release</strong></a>
+  &nbsp;·&nbsp; <a href="docs/INSTALLING.md">Installation guide</a>
+  &nbsp;·&nbsp; <a href="docs/user/README.md">User guide</a>
+  &nbsp;·&nbsp; <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-![Inertia — project sidebar, conversation, and composer in dark mode](docs/screenshots/inertia-dark.png)
+<p align="center">macOS · Windows · Linux &nbsp;·&nbsp; Intel and ARM64 &nbsp;·&nbsp; Apache 2.0</p>
 
-Inertia brings agent conversations, project files, Git review, and terminals into one local workspace. Use the coding accounts you already have with **Codex, Claude, Cursor, Antigravity, Kimi Code, or OpenCode**.
+<img src="docs/screenshots/inertia-dark.png" alt="Inertia in dark mode: the project sidebar, a finished agent turn with its changed files, and the composer" />
 
-## Start working
+Inertia is a desktop app for working with coding agents. Each chat belongs to a project, runs on an account you already have, and sits beside the files, diffs and terminals it is changing. Open several chats at once, hand them tasks, and review every change before it leaves your machine.
 
-1. Install the build for your platform: macOS, Windows, or Linux, on Intel/AMD or ARM64.
-2. Add a local folder or clone a repository from its HTTPS or SSH Git URL.
-3. Open **Settings → Agents**, connect a provider, and start a chat. To use API credits instead of a subscription, add an Anthropic or OpenAI API key in **Accounts and API keys** and choose its route in the model chooser; see [Accounts and API keys](docs/user/getting-started.md#accounts-and-api-keys).
+## Start in a minute
 
-Use **Ctrl/Cmd+K** to find commands, settings, projects, chats, and saved messages. Type at least two characters to search your messages and final agent answers across unarchived chats, then open a snippet to jump to its turn, including in a detached chat window. Message search matches literal phrases, ignores case, and shows up to 20 newest matches. Very large histories may return partial results, which the palette labels explicitly.
+1. **Install** the build for your platform from the [latest release](https://github.com/eduardtomas1/inertia/releases/latest).
+2. **Add a project.** Open a local folder or clone a repository from an HTTPS or SSH Git URL.
+3. **Connect an agent** in **Settings → Agents**, then choose **New chat** and describe the task. To spend API credits instead of a subscription, add an Anthropic or OpenAI key under [Accounts and API keys](docs/user/getting-started.md#accounts-and-api-keys) and pick that route in the model chooser.
 
-![Search saved messages and agent answers across projects](docs/screenshots/inertia-message-search.png)
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/inertia-add-project.png" alt="The Add project dialog with Local folder and Clone repository" /></td>
+    <td width="50%"><img src="docs/screenshots/inertia-project-picker.png" alt="Finding a project by name or folder path from the sidebar" /></td>
+  </tr>
+</table>
 
-Choose **All projects** to search by name or folder path, filter the sidebar, or open project actions. Pin favourite projects and give each one a colour to keep them easy to find.
+## Built for the coding loop
 
-Choose **No project** in a new chat’s project selector, or **Start without a project** in the command palette, to work without opening a folder. Each chat gets a separate folder under Inertia’s runtime data directory (`scratch/<date>-<title>-<chat-id>`) when its workspace is first created. These are plain folders, with no automatic Git initialization. Deleting a chat keeps its files. Project-free chats have a separate **No project** sidebar section that appears only when it has chats; they stay out of the project list and filters.
+- **Give the agent context.** Attach images, PDFs, text, Markdown, CSV, JSON and spreadsheets. Type `@` to reference a project file or another chat, and `$` to insert a provider skill.
+- **Decide how it works.** Choose the model, reasoning level, response speed, work mode and access from the composer. `/plan` and `/build` switch modes; in Plan mode the agent proposes steps before touching anything.
+- **Keep follow-ups moving.** While an agent works, Enter sends a follow-up and Tab queues it for the next turn.
+- **Switch providers without losing the chat.** Pick another provider and the next message continues with the earlier messages as context. The timeline marks the switch with a **Context handoff** divider.
+- **Get visual answers.** An agent can reply with a chart, table, diagram or mockup rendered in the chat, themed like the app and sandboxed from the network and your files. See [Visual replies](docs/user/chats-and-agents.md#visual-replies).
+- **Pay less for long API chats.** Return to a chat of 200K tokens or more on an Anthropic or OpenAI key after its prompt cache has expired and the send button reads **Compact and send**. See [Compact on return](docs/user/chats-and-agents.md#compact-on-return).
+- **Choose the access you are comfortable with.** **Supervised** keeps provider approvals, **Auto-accept edits** allows supported file edits, and **Full access** lets the agent act without asking.
 
-When a stopped chat has a reported subscription reset time, the composer offers **Resume at reset** and **Snooze until reset**. Resuming is an explicit, cancellable action that survives restarts and rechecks the account, chat route and available quota before continuing once; if the provider has not reported new quota within an hour of the reset, nothing is sent and **Resume now** waits for you. Inertia must be running to resume; snoozing alone never sends a message. Supported native accounts include Codex, Claude and OpenCode Go. Cursor and Kimi Code don't report usage, and other OpenCode backends, custom routes and the current Antigravity CLI do not expose compatible reset data; Limits explains availability for each provider. Accounts without enough identity information still support snoozing but cannot schedule automatic resume.
+## Find anything
 
-![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
+Press **Ctrl/Cmd+K** to find commands, settings, projects, chats and saved messages. Type at least two characters to search your own messages and the agents' final answers across every unarchived chat, then open a match to jump to its turn.
 
-## One workspace for the coding loop
+<img src="docs/screenshots/inertia-message-search.png" alt="The command palette searching messages and agent answers across projects" />
 
-- **Chat with context.** Attach images, documents, spreadsheets, and plain-text source or configuration files; mention files or reference up to three chats, including this chat's own earlier messages with `@this-chat`; invoke skills with `$`; choose a model, reasoning level, and access mode. Send follow-ups immediately or queue them for the next turn.
-- **Switch providers mid-chat.** Pick another provider in the model chooser, for example when one account reaches its usage limit, and keep going in the same chat. The next turn starts a fresh session on the new provider with the chat's earlier visible messages and a list of the files its turns changed; tool output, file contents, and hidden provider state stay behind. The timeline marks the switch with a **Context handoff** divider.
-- **Capture a window.** On Linux, use **Take reviewed screenshot** in the composer to select, crop, mask, and approve an image. Enable protected [Snapshots](docs/SNAPSHOTS_AND_COMPACTION.md) in **Settings → Devices & integrations → Snapshots** for foreground capture with inspectable accessibility context. Successful `/compact` operations retain a timeline receipt with provider-reported context counts. On an Anthropic or OpenAI API key, a chat of 200K tokens or more whose prompt cache has expired offers **Compact and send**; see [Compact on return](docs/user/chats-and-agents.md#compact-on-return).
-- **Bring CLI conversations into Inertia.** In **Settings → Projects → CLI conversations**, choose **Import conversations…** to preview and import Codex or Claude Code text history for the selected project folder. The chat resumes its original native session; close that session in your terminal before continuing here. Archived Codex sessions continue in a new session with the imported messages as context. Already imported sessions are marked, including after restarting Inertia.
-- **See visual replies.** Agents can answer with a chart, table, diagram, or mockup that appears in the chat above their reply, themed like the app and sandboxed so it cannot fetch from the network or reach your files. Open it full size from the page. See [Visual replies](docs/user/chats-and-agents.md#visual-replies).
-- **Work side by side.** Drag chats into a split workspace with up to four panes, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
-- **Watch a running chat.** A [watcher](docs/user/watcher.md) on any agent, read-only by default or with chat access you choose, follows a chat as a Reviewer, Scope guard, or Explainer and keeps its findings in a side dock until you send them, or sends them on its own once you turn on automatic sending.
-- **Open the tools you need.** Choose Terminal in **Open a surface** for multiple terminal tabs and splits, or use the bottom dock. Find sent files in the dedicated **Attachments** surface. New chats start with the panel closed; each chat remembers its own surfaces and visibility.
-- **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
-- **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
-- **Follow active work.** The Work tab shows activity and elapsed time for running threads, with a brief cue when a thread needs input or finishes. Choose a Working indicator in Settings for the Work tab and working cue; Automatic can also match individual tool and agent activity.
-- **Optional desktop mascot.** Enable it in **Settings → Notifications → Desktop mascot** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Pick up the character to move it between screens; it returns to its current activity when released and remembers its position. Click the bubble to open the relevant chat; right-click to pause or hide. The bubble shows the chat that needs you most and lists up to five other active or unread chats; click one to open it. Hiding lasts until you choose **Unhide** in Settings, **Show mascot** in the Window menu or the macOS Dock menu, or restart Inertia. Export a sprite template and preview your own artwork before applying it. Reduced motion uses still artwork. Wayland manages placement through the window manager.
+## Work side by side
 
-![Two project conversations with independent context and composers](docs/screenshots/inertia-split-workspace.png)
+Drag a chat onto the workspace to split it. Up to four chats show at once, each with its own project, tools and draft, and up to eight chats can have their own windows. Send one brief to two agents with a [Duo](docs/user/duo.md) and let a third model judge the results, or attach a [watcher](docs/user/watcher.md) that reviews, guards scope or explains a chat as it runs.
 
-Review changed files on the current branch, mark completed hunks, and commit only the paths you choose.
+<img src="docs/screenshots/inertia-split-workspace.png" alt="Two chats in different projects side by side, each with its own composer and branch" />
 
-![Branch context, changed files, and hunk review in the Changes panel](docs/screenshots/inertia-git-workflow.png)
+## Review before it ships
 
-Keep an objective in view alongside the latest conversation plan. Goals distinguish provider-native controls from local tracking, so progress and available actions stay explicit.
+The **Changes** surface shows every file an agent touched. Mark hunks as reviewed, select lines to ask about them, request a revision or revert them, then commit exactly the paths you choose. The branch menu creates and switches branches and starts chats in an isolated worktree. Pull only fast-forwards, and Inertia never force-pushes. If a turn went wrong, **Revert** restores the project to before it and saves your current edits in a recovery checkpoint first.
 
-![A tracked objective and conversation plan in the Goal panel](docs/screenshots/inertia-goals.png)
+<img src="docs/screenshots/inertia-git-workflow.png" alt="The Changes panel with a branch, two changed files, and a hunk under review" />
 
-The Plan tab shows the agent's plan as a formatted document and marks each step as the provider reports progress.
+## Keep the goal in view
 
-![A plan document with live step progress in the Plan tab](docs/screenshots/inertia-plan.png)
+The **Goal** surface shows the provider's own objective next to notes that stay in Inertia, so what is shared with the agent and what is local is always explicit. The **Plan** surface renders the agent's plan as a document and marks each step as the provider reports progress.
 
-Keep a to-do list on the **Tasks** page with due dates and priorities. Open a task to hand it to an agent: choose a model and a project or folder, and **Start** opens a chat with the task as its first message.
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/inertia-goals.png" alt="The Goal panel with a Codex native goal, local tracking, and the latest plan summary" /></td>
+    <td width="50%"><img src="docs/screenshots/inertia-plan.png" alt="The Plan panel with context, steps and checks, two of three steps complete" /></td>
+  </tr>
+</table>
 
-![The Tasks page with an urgent task open, ready to hand to an agent](docs/screenshots/inertia-tasks.png)
+## Hand tasks to an agent
 
-Open image attachments without leaving the chat, zoom into details, and pan across larger images. Browse sent files in **Open a surface → Attachments**, with previews and a scrollable gallery.
+**Tasks** is a short list with due dates and priorities. Type a task and press Enter to keep it, or Tab to hand it to an agent straight away. **Start** opens a chat with the task as its first message, and the row says what the agent is doing until it is ready for you.
 
-See [supported attachment formats and provider limits](docs/ATTACHMENTS.md) for text/log encodings, source/configuration files, documents, and spreadsheets.
+<img src="docs/screenshots/inertia-tasks.png" alt="The Tasks page with an urgent task open and a model, reasoning level and project chosen for hand-off" />
 
-![Zooming into an attached interface screenshot](docs/screenshots/inertia-image-preview.png)
+## Everything the chat touched, one panel away
+
+The right panel opens **Changes**, **Files**, **Browser**, **Terminal**, **Attachments**, **Background tasks**, **Usage**, **Goal** or **Plan**, and each chat remembers its own. Browse and edit project files in place, run terminals with tabs and splits, open local development pages for the agent to use, and preview any attachment: zoom with + and −, pan with the arrow keys, reset with 0.
+
+<img src="docs/screenshots/inertia-image-preview.png" alt="An attached screenshot opened in the preview, zoomed to 150 percent" />
 
 ## Local by default
 
-History and preferences stay on your computer. Providers retain their own authentication; custom backend credentials use the operating system credential vault. Provider capabilities remain explicit, including approvals, cancellation, context, and usage.
+History and preferences stay on your computer. Each provider keeps its own sign-in, and API keys and custom backend credentials live in your operating system's credential vault, never in Inertia's database. Desktop notifications leave out prompt and response text. Diagnostics are a local history you can search, export or clear, and **Report an issue** shows you the exact text before anything reaches GitHub.
 
-**Supervised** keeps provider approvals active. **Auto-edit** allows supported file edits. **Full Access** is an explicit choice for a workspace and task you trust.
+Optional [Private Connect](docs/PRIVATE_CONNECT.md) pairs a browser on another device over your Tailscale network while this computer stays online, with Monitor or Collaborate access per device. Its boundaries are in the [security model](docs/PRIVATE_CONNECT_SECURITY.md).
 
-Optional [Private Connect](docs/PRIVATE_CONNECT.md) provides scoped access from another device over Tailscale while the desktop stays online. Read the [security model](docs/PRIVATE_CONNECT_SECURITY.md) for its boundaries.
+## Make it yours
 
-![The same workspace in Inertia’s light theme](docs/screenshots/inertia-light.png)
+Choose System, Light or Dark and a colour theme from the theme library, or pick one custom colour per appearance and let Inertia derive readable shades. Set the interface scale from Compact to Large, choose how running work is shown, and turn on a sound, desktop notifications or the desktop mascot when a task ends.
+
+<img src="docs/screenshots/inertia-light.png" alt="The same workspace in the light theme" />
+
+<details>
+<summary><strong>More</strong></summary>
+
+- **Resume at reset.** When a chat stops at a subscription limit, the composer offers **Resume at reset** and **Snooze until reset**; Inertia must be running to resume.
+- **Usage and limits.** **Usage** shows locally recorded usage across chats and providers, and each provider's remaining quota per window with a countdown to its reset. **Daily work** summarises tokens, runtime and conversations for a day.
+- **Import CLI conversations.** Bring a project's Codex or Claude Code history into Inertia from **Settings → Projects**; the chat continues the original session.
+- **Chats without a project.** Choose **No project** in the composer to work in a chat folder of its own.
+- **Start from a terminal.** Run Inertia with `--new-chat` to open a chat for the current folder, or `--new-chat <path>` for another.
+- **Background tasks.** A surface lists the chat's delegated agents and the commands Inertia started, with what each is doing.
+- **Prompt presets.** Save reusable prompts and keep per-chat drafts in Scratch prompts; presets never send automatically.
+- **Snapshots and reviewed screenshots.** Attach the foreground window with its accessibility context, or on Linux capture, crop, mask and approve a screenshot before it is sent.
+- **Discord.** Prepare release notes and a commit preview for a Discord webhook from **Settings → Devices & integrations**.
+
+</details>
+
+## Install
+
+| Platform | Architectures | Package |
+| --- | --- | --- |
+| macOS | Apple silicon, Intel | DMG or ZIP |
+| Windows | x64, ARM64 | Installer |
+| Linux | x64, ARM64 | AppImage, with verified in-app updates |
+
+Every release ships `SHA256SUMS.txt`; compare the checksum before opening a package. macOS and Windows builds update manually while code signing is unavailable. Worktree chats need Git 2.36 or newer. The [installation guide](docs/INSTALLING.md) covers Gatekeeper and SmartScreen prompts, the AppImage executable bit and the Canary channel.
 
 ## Run from source
 
@@ -90,14 +133,10 @@ npm ci
 npm run dev
 ```
 
-Run `npm run check` for architecture, lint, type checking, unit/integration tests, and the production build. Desktop interaction tests run with `npm run test:e2e`.
-
-See [AGENTS.md](AGENTS.md) for repository conventions and [RELEASING.md](docs/RELEASING.md) for packaging, Stable/Canary channels, signing, and updates.
+`npm run check` runs quality checks, the test suite and the production build. Desktop interaction tests run with `npm run test:e2e`. See [AGENTS.md](AGENTS.md) for repository conventions and [RELEASING.md](docs/RELEASING.md) for packaging, Stable and Canary channels, signing and updates.
 
 ## Help
 
-If an older Windows update leaves startup blocked by unconfirmed process cleanup, follow the [profile recovery steps](docs/WINDOWS_STARTUP_RECOVERY.md).
-
-See [Troubleshooting](docs/user/troubleshooting.md) for fixes grouped by symptom. Refresh a provider in **Settings → Agents** if it stops responding. For app problems, use **Settings → Help → Diagnostics → Copy support summary**, review it, and attach it to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). Avoid sharing raw logs, databases, or credentials.
+Start with [Troubleshooting](docs/user/troubleshooting.md), grouped by symptom. If an agent stops responding, refresh it in **Settings → Agents**. For app problems, use **Settings → Help → Diagnostics → Copy support summary**, review it and attach it to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml); avoid sharing raw logs, databases or credentials. If an older Windows update leaves startup blocked by unconfirmed process cleanup, follow the [profile recovery steps](docs/WINDOWS_STARTUP_RECOVERY.md).
 
 [Apache 2.0](LICENSE). Packaged builds include third-party notices and dependency licenses.

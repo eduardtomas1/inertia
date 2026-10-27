@@ -190,8 +190,11 @@ export function setAgentPageEmulation(
   return queueAgentPageEmulation(contents);
 }
 
-export function restoreAgentPageEmulation(contents: WebContents): Promise<void> {
+export function resetAgentPageEmulation(contents: WebContents): void {
   appliedEmulations.delete(contents);
+}
+
+export function restoreAgentPageEmulation(contents: WebContents): Promise<void> {
   return queueAgentPageEmulation(contents);
 }
 

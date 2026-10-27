@@ -36,8 +36,8 @@ function boundedAgentScreenshot(source: Buffer): AgentPageCapture {
     if (edge === 1 && fits) return { image, data, width, height };
     const factor = fits ? edge : edge * OVERSIZED_REDUCTION;
     image = image.resize({
-      width: Math.max(1, Math.floor(width * factor)),
-      height: Math.max(1, Math.floor(height * factor)),
+      width: Math.max(1, Math.round(width * factor)),
+      height: Math.max(1, Math.round(height * factor)),
       quality: "good",
     });
     data = image.toPNG().toString("base64");

@@ -1,6 +1,6 @@
 import type { WebContents } from "electron";
 
-import { restoreAgentPageEmulation } from "./preview-agent-viewport.js";
+import { resetAgentPageEmulation, restoreAgentPageEmulation } from "./preview-agent-viewport.js";
 
 const MAX_AGENT_PAGE_FOCUS_DEPTH = 4_000;
 const AGENT_PAGE_BOUNDARY_OBJECT_GROUP = "inertia-agent-page-boundary";
@@ -43,6 +43,7 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
     agentPageDebuggerBootstraps.set(contents, contents.navigationHistory.getActiveIndex());
   }
   contents.debugger.attach("1.3");
+  resetAgentPageEmulation(contents);
   const state: AgentPageBoundaryState = {
     mainFrameId: null,
     documentGeneration: 0,

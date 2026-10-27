@@ -949,9 +949,7 @@ export async function openCodexTurn({
   notify("initialized");
 
   const accessPolicy = codexAccessPolicy(options);
-  const startsWithSessionInstructions = options.sessionDeveloperInstructions !== undefined && !options.sessionId;
   const effectiveConfig = options.readOnlyProfile === "watcher" || modelProvider?.credentialEnvironmentKey
-    || startsWithSessionInstructions
     ? await request("config/read", { includeLayers: false, cwd: options.cwd })
     : null;
   const watcherConfig = options.readOnlyProfile === "watcher" && effectiveConfig
@@ -994,16 +992,13 @@ export async function openCodexTurn({
       throw error;
     }
   } else {
-    const configuredDeveloperInstructions = objectValue(effectiveConfig?.config)?.developer_instructions;
     opened = await request("thread/start", {
       ...threadConfig,
-      ...(startsWithSessionInstructions
+      ...(options.sessionDeveloperInstructions
         ? {
-            developerInstructions: [
-              typeof configuredDeveloperInstructions === "string" ? configuredDeveloperInstructions.trim() : "",
-              options.sessionDeveloperInstructions ?? "",
-              options.developerInstructions ?? "",
-            ].filter((section) => section.length > 0).join("\n\n"),
+            developerInstructions: [options.sessionDeveloperInstructions, options.developerInstructions ?? ""]
+              .filter((section) => section.length > 0)
+              .join("\n\n"),
           }
         : {}),
       ...(options.hostTools

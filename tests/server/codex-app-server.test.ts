@@ -630,10 +630,9 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
   });
 
-  it.each([undefined, "configured-developer-instructions"])("sends the session instruction as developer instructions only when a thread starts (scenario %s)", async (scenario) => {
+  it("sends the session instruction as developer instructions only when a thread starts", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    if (scenario) process.env.INERTIA_APP_SERVER_SCENARIO = scenario;
     const manager = trackedManager(fake.command);
     const sessionInstruction = "[inertia-chat]\nThis chat's id is chat-1.";
     const run = (sessionId?: string) => manager.run({
@@ -655,10 +654,9 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     await expect(run()).resolves.toMatchObject({ status: "completed" });
     await expect(run("thread-existing")).resolves.toMatchObject({ status: "completed" });
     const messages = captured(fake.capturePath);
-    expect(messages.filter(({ method }) => method === "config/read").map(({ params }) => params))
-      .toEqual([{ includeLayers: false, cwd: fake.root }]);
+    expect(messages.some(({ method }) => method === "config/read")).toBe(false);
     expect((messages.find(({ method }) => method === "thread/start")?.params as Record<string, unknown>).developerInstructions)
-      .toBe(scenario ? `USER_DEVELOPER_RULES\n\n${sessionInstruction}` : sessionInstruction);
+      .toBe(sessionInstruction);
     expect(messages.find(({ method }) => method === "thread/resume")?.params).not.toHaveProperty("developerInstructions");
   });
 

@@ -49,7 +49,13 @@ function CornerControls({
   const rootRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const node = rootRef.current;
-    if (node) onWidthChange(Math.ceil(node.getBoundingClientRect().width));
+    if (!node) return;
+    const report = (): void => onWidthChange(Math.ceil(node.getBoundingClientRect().width));
+    report();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(report);
+    observer.observe(node);
+    return () => observer.disconnect();
   }, [onWidthChange]);
   return (
     <div ref={rootRef} className="workspace-corner-controls no-drag" data-panel-layout-controls>

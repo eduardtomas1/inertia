@@ -181,8 +181,10 @@ sessions never receive it. The rule lives in
   session being resumed.
 - `build-mode` goes in the prompt on the first turn of a provider session,
   and again when the previous turn used another mode, did not complete,
-  ended on another session, or was followed by a compaction receipt. Plan
-  mode has no instruction.
+  ended on another session, or was followed by a compaction receipt. A
+  native Codex goal start sends no prompt, so a Codex session that ran a
+  native goal gets `build-mode` on every turn, and a goal start never counts
+  as having delivered the block. Plan mode has no instruction.
 - A turn that starts a fresh session, including a stale session restarted
   in the middle of a turn, always carries the block (system channel or
   prompt) and, in Build mode, `build-mode`.

@@ -36,6 +36,18 @@ describe("agent page input ownership", () => {
     expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", key: "Tab" } as never)).toBe(true);
   });
 
+  it("sends scaled view coordinates and expects the agent's own click there", () => {
+    const page = contents();
+    const map = { scale: 0.5, offsetX: 0, offsetY: 0, width: 640, height: 400 };
+    sendAgentPageInput(page as never, { type: "mouseDown", x: 1_200, y: 700, button: "left", clickCount: 1 }, map);
+    expect(page.emitted).toEqual([{ type: "mouseDown", x: 600, y: 350, button: "left", clickCount: 1 }]);
+    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 1_200, y: 700 } as never)).toBe(true);
+    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 600, y: 350 } as never)).toBe(false);
+    expect(() => sendAgentPageInput(page as never, { type: "mouseDown", x: 1_300, y: 700, button: "left", clickCount: 1 }, map))
+      .toThrow("outside the visible page");
+    expect(page.emitted).toHaveLength(1);
+  });
+
   it("ignores pointer movement, wheels and characters, which are not the user taking over", () => {
     const page = contents();
     for (const type of ["mouseMove", "mouseUp", "mouseWheel", "char", "keyUp", "mouseEnter"]) {

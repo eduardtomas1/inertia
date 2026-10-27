@@ -646,6 +646,14 @@ export async function installAgentPagePrivacyGuard(contents: WebContents): Promi
   await execute(contents, `(${installPreviewAgentPrivacyGuard.toString()})(${PRIVACY_RUNTIME})`);
 }
 
+export async function agentPageDevicePixelRatio(contents: WebContents): Promise<number> {
+  const value = await execute(contents, "devicePixelRatio");
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 16) {
+    throw new Error("Inertia could not read the Browser page pixel ratio. Reload the page, then try again.");
+  }
+  return value;
+}
+
 export async function agentPageHasSensitiveEvidence(contents: WebContents): Promise<boolean> {
   return (await agentPageEvidencePrivacy(contents)).withheld !== null;
 }

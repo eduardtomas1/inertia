@@ -2,8 +2,22 @@ import { vi } from "vitest";
 
 import type { PreviewAgentTarget } from "../../../src/main/preview-agent-page";
 
+export const SCREENSHOT_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGNQaLgARww4OQBIVhFB6kJugAAAAABJRU5ErkJggg==";
+
+function pngSize(data: Buffer): { width: number; height: number } {
+  const signature = "89504e470d0a1a0a";
+  return data.byteLength >= 24 && data.subarray(0, 8).toString("hex") === signature
+    ? { width: data.readUInt32BE(16), height: data.readUInt32BE(20) }
+    : { width: 0, height: 0 };
+}
+
 export function createPreviewBrokerElectronState() {
   return {
+    visualViewport: {
+      pageX: 0, pageY: 0, offsetX: 0, offsetY: 0, clientWidth: 1_280, clientHeight: 800, scale: 1, zoom: 1,
+    } as Record<string, number>,
+    screenshotData: SCREENSHOT_PNG_BASE64 as string | undefined,
+    emulation: [] as Array<{ contentsId: number; method: string; params?: Record<string, unknown> }>,
     loadOverrides: [] as Array<(url: string) => Promise<void>>,
     focusedShadowRoots: undefined as Array<{ shadowRootType: string }> | undefined,
     stalledCommands: [] as Array<(method: string, params?: Record<string, unknown>) => boolean>,
@@ -109,7 +123,15 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
       return new FakeImage(options.width, options.height ?? Math.max(1, Math.floor(this.height * ratio)));
     }
     toPNG() { return Buffer.from("bounded-png"); }
+    isEmpty() { return this.width <= 0 || this.height <= 0; }
   }
+
+  const nativeImage = {
+    createFromBuffer: vi.fn((data: Buffer) => {
+      const size = pngSize(data);
+      return new FakeImage(size.width, size.height);
+    }),
+  };
 
   class FakeWebContents {
     readonly id = nextWebContentsId++;
@@ -180,6 +202,14 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
             },
           });
           return undefined;
+        }
+        if (method.startsWith("Emulation.")) {
+          electronState.emulation.push({ contentsId: this.id, method, ...(params ? { params } : {}) });
+          return {};
+        }
+        if (method === "Page.getLayoutMetrics") return { cssVisualViewport: { ...electronState.visualViewport } };
+        if (method === "Page.captureScreenshot") {
+          return electronState.screenshotData === undefined ? {} : { data: electronState.screenshotData };
         }
         if (method === "Page.createIsolatedWorld") return { executionContextId: 9 };
         if (method === "Runtime.evaluate" && params?.contextId === 7) {
@@ -301,7 +331,7 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
     setBackgroundColor(): void {}
   }
 
-  return { WebContentsView: FakeWebContentsView };
+  return { WebContentsView: FakeWebContentsView, nativeImage };
 }
 
 export function createPreviewBrokerPageTools() {
@@ -310,6 +340,7 @@ export function createPreviewBrokerPageTools() {
     PRIVACY_RUNTIME: "({ redact: (_state, value) => value })",
     agentPageActivationBlocked: vi.fn<() => Promise<"disabled" | "file" | null>>(async () => null),
     agentPageActivationTargetStillFocused: vi.fn<() => Promise<boolean>>(async () => true),
+    agentPageDevicePixelRatio: vi.fn<() => Promise<number>>(async () => 2),
     agentPageEvidencePrivacy: vi.fn<() => Promise<{
       withheld: "password" | "hidden-input" | "credential-signal" | "document-too-large" | null;
     }>>(async () => ({ withheld: null })),

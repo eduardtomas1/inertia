@@ -142,7 +142,7 @@ describe("main window while the active chat is in its own window", () => {
     expect(screen.queryByRole("complementary", { name: "Workspace tools" })).not.toBeInTheDocument();
     expect(container.querySelector(".terminal-dock")).toBeNull();
     const toggles = screen.getAllByRole("button", {
-      name: "Workspace tools are hidden while this chat is in its own window.",
+      name: "Unavailable while this chat is detached.",
     });
     expect(toggles).toHaveLength(2);
     for (const toggle of toggles) expect(toggle).toBeDisabled();

@@ -86,7 +86,7 @@ import { useWatcherSurfaceController } from "./hooks/useWatcherSurface";
 import { WatcherContext } from "./components/watcher/watcherContext";
 import { WatcherAttachHost } from "./components/watcher/WatcherAttachHost";
 const focusPrimaryPreview = (): void => focusWorkspacePreviewAddress("primary");
-const DETACHED_CHAT_TOOLS_REASON = "Workspace tools are hidden while this chat is in its own window.";
+const DETACHED_CHAT_TOOLS_REASON = "Unavailable while this chat is detached.";
 
 export function commandMayChangeWorkspaceAuthority(
   command: CommandWithoutId,

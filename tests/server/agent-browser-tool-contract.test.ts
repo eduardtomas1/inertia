@@ -178,12 +178,13 @@ describe("agent browser tool contract", () => {
     })).resolves.toMatchObject({ success: false });
   });
 
-  it("tells every provider to navigate first and to follow failure messages", () => {
+  it("tells every provider to follow failure messages, leaving navigate-first to the tool description", () => {
     const [instruction] = registry().instructions()
       .filter(({ label }) => label === "inertia-frontend-workbench");
-    expect(instruction?.text).toContain("inertia_browser_navigate before anything else");
-    expect(instruction?.text).toContain("whether or not its panel is showing");
-    expect(instruction?.text).toContain("its message says what to do next");
+    const navigate = AGENT_BROWSER_TOOL_DEFINITIONS.find(({ name }) => name === "inertia_browser_navigate")!;
+    expect(navigate.description).toContain("Call this first");
+    expect(navigate.description).toContain("even when its panel is not showing");
+    expect(instruction?.text).toContain("When a Browser tool fails, follow its message before giving up on the Browser.");
     expect(instruction?.text).not.toContain("inertia_browser_interact");
   });
 

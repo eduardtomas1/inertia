@@ -67,6 +67,7 @@ describe("Claude in-process Inertia chat tools", () => {
     const client = new Client({ name: "inertia-image-test", version: "1.0.0" });
     await tools.config.instance.connect(serverTransport);
     await client.connect(clientTransport);
+    expect(client.getInstructions()).toBeUndefined();
     expect(await client.callTool({
       name: "inertia_create_conversation",
       arguments: { title: "Visual proof" },

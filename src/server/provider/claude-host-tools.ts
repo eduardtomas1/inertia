@@ -43,7 +43,6 @@ export function createClaudeHostTools(
   const config = createSdkMcpServer({
     name: INERTIA_HOST_MCP_NAME,
     version: "1.0.0",
-    instructions: "Manage bounded top-level Inertia chats in the current project. Inertia itself asks for approval before mutations.",
   });
   const providerToolNames = new Set<string>();
   for (const definition of runtime.definitions()) {

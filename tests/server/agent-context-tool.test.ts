@@ -230,6 +230,7 @@ describe("inertia_request_context", () => {
       const result = parsed(await bridgeFor(turn).invoke(call({ conversationId: source.id })));
 
       expect(pendingInputs.size).toBe(0);
+      expect(result).not.toHaveProperty("about");
       expect(result.chat).toMatchObject({ conversationId: source.id, access: "referenced" });
       expect(result.turns).toEqual([
         expect.objectContaining({ turnId: second.id, request: "Chart the export duration.", status: "failed" }),
@@ -676,7 +677,10 @@ describe("inertia_request_context", () => {
       const list = parsed(await bridge.invoke(call({ conversationId: target.id })));
       expect(list.turns.map(({ turnId }: { turnId: string }) => turnId)).toEqual([current.id, earlierOnB.id]);
       expect(list.withheldTurns).toBe(1);
+      expect(list.about).toBe("withheldTurns ran on another model endpoint and cannot be read here.");
       expect(JSON.stringify(list)).not.toContain("endpoint A");
+      const turnPage = parsed(await bridge.invoke(call({ conversationId: target.id, turnId: current.id })));
+      expect(turnPage).not.toHaveProperty("about");
 
       const read = await bridge.invoke(call({ conversationId: target.id, turnId: onA.id }));
       expect(read.success).toBe(false);
@@ -709,6 +713,23 @@ describe("inertia_request_context", () => {
     }
   });
 
+  it("names the field and the next step when arguments do not combine", async () => {
+    const context = await fixture();
+    const { begin, bridgeFor, store, target } = context;
+    try {
+      const bridge = bridgeFor(begin(target, "Hi"));
+      const cases: Array<[unknown, string]> = [
+        [{ turnId: "t1" }, "conversationId: required with turnId, cursor or limit; this chat's id is in the Inertia instructions."],
+        [{ conversationId: target.id, turnId: "t1", limit: 5 }, "limit: applies only to the turn list; drop it when passing turnId."],
+      ];
+      for (const [args, message] of cases) {
+        expect(JSON.parse((await bridge.invoke(call(args))).text)).toEqual({ error: { code: "invalid_arguments", message } });
+      }
+    } finally {
+      store.close();
+    }
+  });
+
   it("describes what it reads and that other chats need approval", async () => {
     const context = await fixture();
     const { begin, bridgeFor, store, target } = context;
@@ -717,7 +738,9 @@ describe("inertia_request_context", () => {
         .find(({ name }) => name === "inertia_request_context")!;
       expect(definition.description).not.toMatch(/oldest messages/u);
       expect(definition.description).toMatch(/referenced/u);
-      expect(definition.description).toMatch(/approval/u);
+      expect(definition.description).toMatch(/asks the user/u);
+      expect(definition.description).toContain("This chat's id is in the Inertia instructions.");
+      expect(Buffer.byteLength(definition.description, "utf8")).toBeLessThanOrEqual(520);
       expect(Object.keys(definition.inputSchema.properties as object).sort())
         .toEqual(["conversationId", "cursor", "limit", "turnId"]);
     } finally {

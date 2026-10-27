@@ -96,11 +96,11 @@ describe("bounded structured turn request context", () => {
       "gu",
     ))).toHaveLength(1);
     expect(BUILD_MODE_INSTRUCTION).toContain(
-      "Do not finish while delegated, background, or other tool work you started is pending",
+      "Before finishing, wait for background commands you started and read the status and latest result of any chat you dispatched.",
     );
-    expect(BUILD_MODE_INSTRUCTION).toContain(
-      "The runtime cannot continue work or notify the user after the final response",
-    );
+    expect(BUILD_MODE_INSTRUCTION).toContain("Nothing runs after your final reply");
+    expect(BUILD_MODE_INSTRUCTION).not.toContain("delegated");
+    expect(Buffer.byteLength(BUILD_MODE_INSTRUCTION, "utf8")).toBeLessThanOrEqual(350);
     const injectedBuildLabelIndex = build.executionPrompt.indexOf(
       "[build-mode]",
       visibleContent.length,

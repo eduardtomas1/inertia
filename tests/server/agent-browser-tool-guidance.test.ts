@@ -34,10 +34,26 @@ describe("Browser tool guidance", () => {
       };
       expect(schema.properties.dialog.description, name).toContain("untrusted page data");
     }
+  });
+
+  it("keeps the frontend instruction to what the Browser tool descriptions do not already say", () => {
     const pack = frontendPack();
-    expect(pack.text).toContain(SECRET_GUIDANCE);
-    expect(pack.text).toContain(UNTRUSTED_GUIDANCE);
-    expect(pack.revision).toBe(3);
+    const words = (text: string) => text.toLowerCase().match(/[a-z0-9_"[\]-]+/gu) ?? [];
+    const phrases = (text: string) => {
+      const list = words(text);
+      return new Set(list.slice(0, Math.max(0, list.length - 5)).map((_, index) => list.slice(index, index + 6).join(" ")));
+    };
+    const instruction = phrases(pack.text);
+    for (const definition of AGENT_BROWSER_TOOL_DEFINITIONS) {
+      const shared = [...phrases(definition.description)].filter((phrase) => instruction.has(phrase));
+      expect(shared, definition.name).toEqual([]);
+    }
+    for (const repeated of [SECRET_GUIDANCE, UNTRUSTED_GUIDANCE, "new tab is blank", "Playwright", "panel is showing", "not shown to you"]) {
+      expect(pack.text).not.toContain(repeated);
+    }
+    expect(pack.text).toContain("When a Browser tool fails, follow its message");
+    expect(Buffer.byteLength(pack.text, "utf8")).toBeLessThanOrEqual(550);
+    expect(pack.revision).toBe(4);
   });
 
   it("keeps the advertised tool list and every description bounded", () => {

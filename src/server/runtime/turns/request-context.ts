@@ -47,10 +47,10 @@ const CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES = 512;
 const EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES = 256;
 
 export const BUILD_MODE_INSTRUCTION = [
-  "In Build mode, inspect enough to act safely, then implement and validate promptly.",
-  "Keep visible planning brief and operational; use a formal numbered plan only when the user requests one, the task is ambiguous, or safe staged coordination requires it.",
-  "Do not finish while delegated, background, or other tool work you started is pending; wait for it and incorporate its result before the final response.",
-  "The runtime cannot continue work or notify the user after the final response. If blocked, state the blocker and do not imply that work is still running.",
+  "Build mode: inspect enough to act safely, then implement and validate.",
+  "Keep planning brief; number a plan only when asked, for an ambiguous task, or for staged work.",
+  "Before finishing, wait for background commands you started and read the status and latest result of any chat you dispatched.",
+  "Nothing runs after your final reply; if blocked, say so.",
 ].join(" ");
 
 export type TurnExecutionContextKind =

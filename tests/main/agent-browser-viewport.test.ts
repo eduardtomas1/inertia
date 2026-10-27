@@ -329,6 +329,42 @@ describe("agent Browser viewport in the broker", () => {
     }]);
   });
 
+  it("re-attaches a tab that lost its debugger when the user navigates it under a fixed viewport", async () => {
+    const { broker, contents, emulation } = await shownBrowser();
+    await broker.perform(runIdentity, { action: "resize", preset: "desktop" });
+    const applied = emulation().length;
+    contents.debugger.attached = false;
+
+    contents.setURL("http://127.0.0.1:3000/#section");
+    contents.emit("did-navigate-in-page", {}, "http://127.0.0.1:3000/#section", true);
+    contents.setURL("https://example.com/");
+    contents.emit("did-navigate", {}, "https://example.com/");
+    contents.setURL("about:blank");
+    contents.emit("did-navigate", {}, "about:blank");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(contents.debugger.attached).toBe(false);
+    expect(emulation()).toHaveLength(applied);
+
+    contents.setURL("http://127.0.0.1:3000/next");
+    contents.emit("did-navigate", {}, "http://127.0.0.1:3000/next");
+    await vi.waitFor(() => expect(emulation().slice(applied)).toEqual([{
+      contentsId: contents.id,
+      method: "Emulation.setDeviceMetricsOverride",
+      params: agentDeviceMetricsOverride(desktop, 0.46875),
+    }]));
+    expect(contents.debugger.attached).toBe(true);
+  });
+
+  it("leaves a fit-mode tab's debugger alone when the user navigates it", async () => {
+    const { contents, emulation } = await shownBrowser();
+    contents.debugger.attached = false;
+    contents.setURL("http://127.0.0.1:3000/next");
+    contents.emit("did-navigate", {}, "http://127.0.0.1:3000/next");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(contents.debugger.attached).toBe(false);
+    expect(emulation()).toEqual([]);
+  });
+
   it("clears the override and media when the viewport returns to fit and the system scheme", async () => {
     const { broker, contents, view, emulation } = await shownBrowser();
     await broker.perform(runIdentity, { action: "resize", preset: "desktop", colorScheme: "light" });

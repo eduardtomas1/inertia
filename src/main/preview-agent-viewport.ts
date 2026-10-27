@@ -6,6 +6,7 @@ import {
   type AgentBrowserViewport,
   type AgentBrowserViewportPreset,
 } from "../shared/agent-browser.js";
+import { previewNavigationTarget } from "../shared/preview-url.js";
 
 export const PARKED_PREVIEW_BOUNDS: Rectangle = { x: 0, y: 0, width: 1_280, height: 800 };
 
@@ -188,6 +189,25 @@ export function setAgentPageEmulation(
 ): Promise<void> {
   desiredEmulations.set(contents, { viewport: setting.viewport, colorScheme: setting.colorScheme, scale });
   return queueAgentPageEmulation(contents);
+}
+
+function localAgentPage(url: string): boolean {
+  try {
+    return previewNavigationTarget(url).kind === "embed";
+  } catch {
+    return false;
+  }
+}
+
+export async function emulateAgentPreviewPage(
+  contents: WebContents,
+  setting: AgentViewportSetting,
+  scale: number,
+  attach: (contents: WebContents) => Promise<void>,
+): Promise<void> {
+  await setAgentPageEmulation(contents, setting, scale);
+  const emulated = setting.viewport !== null || setting.colorScheme !== "system";
+  if (emulated && !contents.debugger.isAttached() && localAgentPage(contents.getURL())) await attach(contents);
 }
 
 export function resetAgentPageEmulation(contents: WebContents): void {

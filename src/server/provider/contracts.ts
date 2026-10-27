@@ -437,7 +437,7 @@ export interface ProviderHostToolDefinition {
   name: string;
   description: string;
   inputSchema: Readonly<Record<string, unknown>>;
-  /** Process-local validator used by in-process provider tool transports. */
+  /** Process-local validator that must accept exactly what inputSchema advertises. */
   inputValidator?: ZodType<Record<string, unknown>>;
   readOnly: boolean;
   destructive?: boolean;

@@ -135,7 +135,7 @@ describe("agent browser tool contract", () => {
         arguments: { ref: "e1" },
       })).resolves.toMatchObject({ content: [{ type: "text", text: "inertia_browser_click" }] });
       await expect(client.callTool({ name: "inertia_browser_click", arguments: {} }))
-        .resolves.toMatchObject({ isError: true });
+        .resolves.toMatchObject({ content: [{ type: "text", text: "inertia_browser_click" }] });
     } finally {
       await tools.close();
       await client.close().catch(() => undefined);

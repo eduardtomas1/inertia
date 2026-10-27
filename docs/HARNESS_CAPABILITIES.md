@@ -55,13 +55,18 @@ the user leaves unanswered for five minutes resolves as a denial on the card
 and returns `approval_timed_out` to the agent, which may ask the user to try
 again. Chat and context tool arguments that fail Inertia's validation return
 `invalid_arguments` with one `<field>: <problem>` line per problem and a final
-line naming the tool to call again; an unknown field name is echoed as a JSON
-string with non-ASCII characters escaped and cut at 80 characters; Claude's in-process MCP server still
-answers schema failures itself before Inertia sees them. On Codex and the HTTP
-MCP bridge, a call to a tool the chat does not have names the closest tool and
-lists the tools it does have; it repeats the requested name only when it is
-plain ASCII (letters, digits, `_`, `.`, `:`, `-`), and a name with control
-characters or Unicode line separators is rejected as malformed.
+line naming the tool to call again, on every provider: Claude's in-process MCP
+server accepts any argument object and leaves validation to Inertia, while its
+advertised schema stays Inertia's. An unknown field name is echoed as a JSON
+string with every character outside printable ASCII escaped as `\uXXXX`, and a
+name longer than 80 characters is cut to a complete string ending in `…`. On
+Codex and the HTTP MCP bridge, a call to a tool the chat does not have lists
+the tools it does have and suggests one when the name is within three edits of
+it or ends in `__<tool>`; the requested name is repeated only with such a
+suggestion and only when it is plain ASCII (letters, digits, `_`, `.`, `:`,
+`-`). A name with control characters or Unicode line separators is rejected as
+malformed, and a name that is only padded with whitespace or a byte-order mark
+gets the suggestion on both transports.
 
 `inertia.frontend-workbench` composes the Browser tools described in
 `docs/AGENT_BROWSER.md`. Its guidance holds only what the tool descriptions do

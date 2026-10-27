@@ -3,10 +3,13 @@ import {
   type McpSdkServerConfigWithInstance,
 } from "@anthropic-ai/claude-agent-sdk";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
 import { providerMcpTools } from "./host-tool-mcp-protocol";
+
+const UNCHECKED_ARGUMENTS = z.looseObject({});
 
 interface McpRequestExtra {
   requestId?: unknown;
@@ -54,7 +57,7 @@ export function createClaudeHostTools(
       definition.name,
       {
         description: definition.description,
-        inputSchema: definition.inputValidator,
+        inputSchema: UNCHECKED_ARGUMENTS,
         annotations: {
           readOnlyHint: definition.readOnly,
           destructiveHint: definition.destructive === true,

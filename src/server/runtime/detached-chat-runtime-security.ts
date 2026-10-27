@@ -4,6 +4,7 @@ import type {
   AgentInputRequest,
   AppSnapshot,
   ClientCommand,
+  DuoLaunchStatus,
 } from "../../shared/contracts";
 import {
   detachedChatCommandRejection,
@@ -15,6 +16,8 @@ import type { RuntimeClientAuthority } from "./runtime-client-authority";
 interface DetachedChatRuntimeSecurityStore {
   subagentTrace(traceId: string): { conversationId: string };
   checkpoint(checkpointId: string): { conversationId: string };
+  agentTurn(turnId: string): { conversationId: string };
+  findPairedLaunch(launchId: string): Pick<DuoLaunchStatus, "sides" | "comparison"> | null;
 }
 
 interface DetachedChatRuntimeSecurityOptions {
@@ -72,6 +75,21 @@ export function createDetachedChatRuntimeSecurity(
       } catch {
         return null;
       }
+    },
+    turnConversationId: (turnId) => {
+      try {
+        return options.store.agentTurn(turnId).conversationId;
+      } catch {
+        return null;
+      }
+    },
+    duoLaunchConversationIds: (launchId) => {
+      const launch = options.store.findPairedLaunch(launchId);
+      if (!launch) return null;
+      return [
+        ...launch.sides.map(({ conversationId }) => conversationId),
+        launch.comparison?.conversationId ?? null,
+      ].filter((conversationId) => conversationId !== null);
     },
     pendingApproval: (conversationId, requestId) =>
       pendingInteractionForConversation(

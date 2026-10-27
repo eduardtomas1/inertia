@@ -13,26 +13,10 @@ import type { RuntimeClientAuthority } from "./runtime-client-authority";
 function projectedSettings(settings: AppSettings): AppSettings {
   return {
     ...defaultSettings,
-    theme: settings.theme,
-    colorTheme: settings.colorTheme,
-    lightColorTheme: settings.lightColorTheme,
-    darkColorTheme: settings.darkColorTheme,
-    lightCustomColor: settings.lightCustomColor,
-    darkCustomColor: settings.darkCustomColor,
-    mutedCustomColors: settings.mutedCustomColors,
-    showTimestamps: settings.showTimestamps,
-    showThinking: settings.showThinking,
-    usageDisplayMode: settings.usageDisplayMode,
-    interfaceScale: settings.interfaceScale,
-    responseDensity: settings.responseDensity,
-    defaultCodeWrap: settings.defaultCodeWrap,
-    autoCollapseWorkLog: settings.autoCollapseWorkLog,
-    showChangedFileSummaries: settings.showChangedFileSummaries,
-    autoScrollToFinalAnswer: settings.autoScrollToFinalAnswer,
-    confirmDestructiveActions: settings.confirmDestructiveActions,
-    providerIdentityLabels: { ...settings.providerIdentityLabels },
-    keybindings: { ...defaultSettings.keybindings },
-    workingIndicator: { ...settings.workingIndicator },
+    ...settings,
+    codexBinaryPath: defaultSettings.codexBinaryPath,
+    discordReleaseRepositoryUrl: defaultSettings.discordReleaseRepositoryUrl,
+    completionSound: defaultSettings.completionSound,
   };
 }
 
@@ -107,7 +91,7 @@ export function projectDetachedChatSnapshot(
     backendProfiles: snapshot.backendProfiles ?? [],
     backendDefaults: [],
     settings: projectedSettings(snapshot.settings),
-    promptPresets: [],
+    promptPresets: snapshot.promptPresets ?? [],
     todos: [],
     ...(snapshot.watchers ? {
       watchers: snapshot.watchers.filter((link) => watcherLinkTouches(link, conversationId)),
@@ -187,8 +171,11 @@ export function projectRuntimeFrameForAuthority(
         ? frame
         : runtimeCursorFrame(frame);
     }
-    case "todos.updated":
     case "workspace.git.invalidated":
+      return frame.event.conversationId === authority.conversationId
+        ? frame
+        : runtimeCursorFrame(frame);
+    case "todos.updated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":
       return runtimeCursorFrame(frame);

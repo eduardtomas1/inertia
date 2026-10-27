@@ -60,6 +60,7 @@ import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
 import { useLaunchIntro } from "../hooks/useLaunchIntro";
 import { useSidebarCollapseMotion } from "../hooks/useSidebarCollapseMotion";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
+import type { MainWindowTargetActions } from "../hooks/useMainWindowTargets";
 import type { AppView } from "../appView";
 import type { UsageViewProps } from "./UsageView";
 import {
@@ -80,6 +81,9 @@ const MultiSpawnDialog = lazy(async () => ({
 const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
 const ThreadNotifications = lazy(async () => ({
   default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
+}));
+const MainWindowTargets = lazy(async () => ({
+  default: (await import("../hooks/useMainWindowTargets")).MainWindowTargets,
 }));
 const CompletionSounds = lazy(async () => ({
   default: (await import("../hooks/useCompletionSounds")).CompletionSounds,
@@ -182,6 +186,7 @@ interface AppLayoutProps {
   splitConversationIds: ReadonlySet<string>;
   splitViewFull: boolean;
   detachedConversationIds: ReadonlySet<string>;
+  mainWindowTargetActions: Omit<MainWindowTargetActions, "activateConversation" | "openUsageLimits">;
   detachedChatLimitReached: boolean;
   conversationSuppressedInMain: boolean;
   scenePanel: WorkspacePanelActions;
@@ -308,6 +313,7 @@ export const AppLayout = memo(function AppLayout({
   splitConversationIds,
   splitViewFull,
   detachedConversationIds,
+  mainWindowTargetActions,
   detachedChatLimitReached,
   conversationSuppressedInMain,
   scenePanel,
@@ -513,18 +519,23 @@ export const AppLayout = memo(function AppLayout({
       setView("tasks");
     },
   });
+  const activateConversation = (thread: Conversation): void => {
+    setDailyWorkOpen(false);
+    activateNotificationConversation(thread, {
+      selectConversation: actions.selectConversation,
+      showWorkspace: () => setView("workspace"),
+      closeSidebar: () => setSidebarOpen(false),
+      closePalette: () => setPaletteOpen(false),
+      closeCommitDialog: () => setCommitDialogOpen(false),
+      closePullRequestDialog: () => setPullRequestDialogOpen(false),
+      closeProviderAuth: providerAuth.onClose,
+    });
+  };
   const notificationActions = useStableActions({
-    activate: (thread: Conversation) => {
-      setDailyWorkOpen(false);
-      activateNotificationConversation(thread, {
-        selectConversation: actions.selectConversation,
-        showWorkspace: () => setView("workspace"),
-        closeSidebar: () => setSidebarOpen(false),
-        closePalette: () => setPaletteOpen(false),
-        closeCommitDialog: () => setCommitDialogOpen(false),
-        closePullRequestDialog: () => setPullRequestDialogOpen(false),
-        closeProviderAuth: providerAuth.onClose,
-      });
+    activate: activateConversation,
+    activateTarget: (thread: Conversation) => {
+      if (detachedConversationIds.has(thread.id)) actions.selectConversation(thread);
+      else activateConversation(thread);
     },
   });
   useEffect(() => {
@@ -649,6 +660,10 @@ export const AppLayout = memo(function AppLayout({
           enabled={settings.desktopNotifications}
           onlyInBackground={settings.notifyOnlyInBackground}
           onActivate={notificationActions.activate}
+        />
+        <MainWindowTargets
+          snapshot={connection.snapshot}
+          actions={{ ...mainWindowTargetActions, activateConversation: notificationActions.activateTarget }}
         />
         {settings.completionSound.enabled && <CompletionSounds snapshot={connection.snapshot} settings={settings.completionSound} />}
       </Suspense>

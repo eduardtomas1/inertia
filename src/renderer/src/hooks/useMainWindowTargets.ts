@@ -11,8 +11,7 @@ import type { NewConversationLocation } from "../lib/newConversation";
 import type { SettingsProfilePanel, SettingsTarget } from "../lib/settingsTarget";
 
 export interface MainWindowTargetActions {
-  selectConversation: (conversation: Conversation) => void;
-  showWorkspace: () => void;
+  activateConversation: (conversation: Conversation) => void;
   createConversation: (project: Project, location: NewConversationLocation) => void;
   openSettings: (target: SettingsTarget) => void;
   connectProvider: (providerId: ProviderId, method: ProviderAuthMethod) => void;
@@ -42,8 +41,7 @@ export function performMainWindowTarget(
     case "conversation": {
       const conversation = snapshot.conversations.find(({ id }) => id === target.conversationId);
       if (!conversation) return actions.reportUnavailable("That chat is no longer available.");
-      actions.showWorkspace();
-      return actions.selectConversation(conversation);
+      return actions.activateConversation(conversation);
     }
     case "new-chat": {
       const source = snapshot.conversations.find(({ id }) => id === sourceConversationId);

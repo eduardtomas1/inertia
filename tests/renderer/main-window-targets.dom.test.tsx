@@ -65,8 +65,7 @@ const openUsageLimits = vi.fn();
 
 function actions() {
   return {
-    selectConversation: vi.fn(),
-    showWorkspace: vi.fn(),
+    activateConversation: vi.fn(),
     createConversation: vi.fn(),
     openSettings: vi.fn(),
     connectProvider: vi.fn(),
@@ -116,12 +115,11 @@ afterEach(() => {
 });
 
 describe("main-window targets from detached chats", () => {
-  it("shows the workspace and selects another chat through normal navigation", () => {
+  it("activates another chat through the main window's normal activation", () => {
     const other = conversation(otherId);
     const { actions: performed } = renderTargets(snapshot([conversation(sourceId), other]));
     send({ kind: "conversation", conversationId: otherId });
-    expect(performed.showWorkspace).toHaveBeenCalledOnce();
-    expect(performed.selectConversation).toHaveBeenCalledExactlyOnceWith(other);
+    expect(performed.activateConversation).toHaveBeenCalledExactlyOnceWith(other);
     expect(performed.reportUnavailable).not.toHaveBeenCalled();
   });
 
@@ -190,8 +188,7 @@ describe("main-window targets from detached chats", () => {
       ["That model backend is no longer available."],
     ]);
     for (const action of [
-      performed.selectConversation,
-      performed.showWorkspace,
+      performed.activateConversation,
       performed.createConversation,
       performed.connectProvider,
       performed.openBackendSetup,
@@ -210,13 +207,13 @@ describe("main-window targets from detached chats", () => {
     const { actions: performed, rerender, unmount } = renderTargets(null);
     send({ kind: "settings", page: "agents" });
     send({ kind: "conversation", conversationId: otherId });
-    expect(performed.selectConversation).not.toHaveBeenCalled();
+    expect(performed.activateConversation).not.toHaveBeenCalled();
     expect(performed.openSettings).not.toHaveBeenCalled();
     rerender(snapshot([conversation(sourceId), other]));
-    expect(performed.selectConversation).toHaveBeenCalledExactlyOnceWith(other);
+    expect(performed.activateConversation).toHaveBeenCalledExactlyOnceWith(other);
     expect(performed.openSettings).not.toHaveBeenCalled();
     rerender(snapshot([conversation(sourceId), other]));
-    expect(performed.selectConversation).toHaveBeenCalledOnce();
+    expect(performed.activateConversation).toHaveBeenCalledOnce();
     unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
   });

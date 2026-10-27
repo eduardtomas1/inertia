@@ -1184,7 +1184,7 @@ describe("AgentThreadManager", () => {
       for (const [tool, args, message] of cases) {
         const result = await bridge.invoke(call(tool, args));
         expect(result.success, tool).toBe(false);
-        expect(JSON.parse(result.text), tool).toEqual({ error: { code: "host_tool_failed", message } });
+        expect(JSON.parse(result.text), tool).toEqual({ error: { code: "invalid_arguments", message } });
       }
     } finally {
       store.close();

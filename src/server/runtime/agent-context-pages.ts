@@ -30,6 +30,7 @@ const MIN_TEXT_SLICE_BYTES = 1024;
 const MAX_HEADER_LIST_BYTES = 4 * 1024;
 const CURSOR_PATTERN = /^(\d{1,6}):(\d{1,9})$/u;
 
+const CURSOR_NOT_FROM_TURN = "cursor: not from this turn; omit it to read the turn from the start, or pass nextCursor from this turn's previous result.";
 const WITHHELD_ABOUT = "withheldTurns ran on another model endpoint and cannot be read here.";
 
 type JsonEntry = Record<string, unknown>;
@@ -143,7 +144,7 @@ function parseCursor(cursor: string | undefined, entryCount: number): { index: n
   const match = CURSOR_PATTERN.exec(cursor);
   const index = Number(match?.[1]);
   const offset = Number(match?.[2]);
-  if (!match || index >= entryCount) throw new Error("That cursor does not belong to this turn.");
+  if (!match || index >= entryCount) throw new Error(CURSOR_NOT_FROM_TURN);
   return { index, offset };
 }
 
@@ -298,7 +299,7 @@ export function agentContextTurnPage(
     }
     const message = reads.messageText(row.id, AGENT_CONTEXT_MESSAGE_BYTES);
     const text = cleanText(message.content);
-    if (offset > text.length) throw new Error("That cursor does not belong to this turn.");
+    if (offset > text.length) throw new Error(CURSOR_NOT_FROM_TURN);
     const rest = text.slice(offset);
     const kind = row.role === "assistant"
       ? "answer"

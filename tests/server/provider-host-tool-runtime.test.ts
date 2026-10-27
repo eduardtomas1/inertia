@@ -157,15 +157,17 @@ describe("provider host-tool call admission", () => {
     return { runtime, resolved };
   }
 
-  it("names the available tools when a provider calls an unknown one", async () => {
+  it("names the available tools and the closest one when a provider calls an unknown tool", async () => {
     const { runtime } = owner(async () => ({ success: true, text: "ok" }));
-    const result = await runtime.invoke({ callId: "typo", tool: "inertia_create_conversaton", arguments: {} });
-    expect(JSON.parse(result.text)).toEqual({
-      error: {
-        code: "host_tool_rejected",
-        message: "inertia_create_conversaton is not an Inertia tool in this chat. Use one of: inertia_list_conversations, inertia_create_conversation.",
-      },
-    });
+    const cases: Array<[string, string]> = [
+      ["inertia_create_conversaton", "Unknown Inertia tool inertia_create_conversaton. Did you mean inertia_create_conversation? Available: inertia_list_conversations, inertia_create_conversation."],
+      ["mcp__inertia-chat-manager__inertia_list_conversations", "Unknown Inertia tool mcp__inertia-chat-manager__inertia_list_conversations. Did you mean inertia_list_conversations? Available: inertia_list_conversations, inertia_create_conversation."],
+      ["inertia_delete_everything", "Unknown Inertia tool inertia_delete_everything. Available: inertia_list_conversations, inertia_create_conversation."],
+    ];
+    for (const [tool, message] of cases) {
+      const result = await runtime.invoke({ callId: tool, tool, arguments: {} });
+      expect(JSON.parse(result.text)).toEqual({ error: { code: "host_tool_rejected", message } });
+    }
   });
 
   it("keeps a malformed call identity distinct from an unknown tool", async () => {

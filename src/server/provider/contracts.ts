@@ -493,6 +493,41 @@ export function providerHostToolAccepted(
     || bridge.retiredToolNames?.has(tool) === true;
 }
 
+const MAX_LISTED_HOST_TOOL_NAMES = 32;
+const MAX_SUGGESTION_DISTANCE = 3;
+
+function editDistance(left: string, right: string): number {
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    const current = [row];
+    for (let column = 1; column <= right.length; column += 1) {
+      current[column] = Math.min(
+        previous[column]! + 1,
+        current[column - 1]! + 1,
+        previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1),
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length]!;
+}
+
+export function unknownProviderHostToolMessage(
+  bridge: ProviderHostToolBridge,
+  tool: string,
+): string {
+  const names = bridge.definitions.map(({ name }) => name);
+  if (names.length === 0) return `Unknown Inertia tool ${tool}; this chat has no Inertia tools.`;
+  const suffix = names.find((name) => tool.endsWith(`__${name}`));
+  const nearest = names
+    .map((name) => ({ name, distance: editDistance(tool, name) }))
+    .sort((left, right) => left.distance - right.distance)[0]!;
+  const suggestion = suffix ?? (nearest.distance <= MAX_SUGGESTION_DISTANCE ? nearest.name : undefined);
+  const listed = names.slice(0, MAX_LISTED_HOST_TOOL_NAMES).join(", ");
+  const more = names.length > MAX_LISTED_HOST_TOOL_NAMES ? ", …" : "";
+  return `Unknown Inertia tool ${tool}.${suggestion ? ` Did you mean ${suggestion}?` : ""} Available: ${listed}${more}.`;
+}
+
 export type ProviderTerminalOutcome =
   | { outcome: "completed"; reason: "provider-completed" }
   | { outcome: "cancelled"; reason: "provider-cancelled" }

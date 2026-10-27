@@ -76,8 +76,9 @@ const TERMINAL_TURN_STATUSES = new Set([
   "interrupted",
 ]);
 
-const SINGLE_LINE_PATTERN = "^[^\\u0000-\\u001f\\u007f]*[^\\s\\u0000-\\u001f\\u007f][^\\u0000-\\u001f\\u007f]*$";
-const MULTILINE_PATTERN = "^[^\\u0000]*[^\\s\\u0000][^\\u0000]*$";
+const SINGLE_LINE_PATTERN = "^[^\\x00-\\x1f\\x7f]*[^\\s\\x00-\\x1f\\x7f][^\\x00-\\x1f\\x7f]*$";
+const MULTILINE_PATTERN = "^[^\\x00]*[^\\s\\x00][^\\x00]*$";
+const tokenPattern = (maximum: number) => `^[^\\s\\x00-\\x1f\\x7f]{1,${maximum}}$`;
 const idSchema = z.string().uuid();
 const safeSingleLineSchema = (maximum: number) => z.string()
   .trim()
@@ -89,16 +90,19 @@ const safeMultilineSchema = (maximum: number) => z.string()
   .min(1)
   .max(maximum)
   .refine((value) => !value.includes("\0"), "must not contain NUL characters");
+const tokenSchema = (maximum: number) => z.string()
+  .max(maximum)
+  .regex(new RegExp(tokenPattern(maximum), "u"), "must be one word without spaces or control characters");
 const routeSchema = z.object({
   providerId: z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity"])
     .optional(),
-  backendProfileId: safeSingleLineSchema(200).optional(),
+  backendProfileId: tokenSchema(200).optional(),
   modelId: safeSingleLineSchema(300).optional(),
-  reasoningEffort: safeSingleLineSchema(100).nullable().optional(),
+  reasoningEffort: tokenSchema(100).nullable().optional(),
 }).strict();
 const workspaceSchema = z.object({
   kind: z.enum(["project", "reuse-current", "isolated"]),
-  sourceBranch: safeSingleLineSchema(255).optional(),
+  sourceBranch: tokenSchema(255).optional(),
 }).strict();
 const listSchema = z.object({
   limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional(),
@@ -152,23 +156,13 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
   AGENT_CONTEXT_TOOL_DEFINITION,
   {
     name: "inertia_create_conversation",
-    description: `Create a top-level chat in this project and start it with \`prompt\`. Inertia asks the user before running this call. \`route\`, \`interactionMode\` and \`accessMode\` default to this chat's, and \`accessMode\` cannot exceed it. \`workspace.kind\` (default project): project = the project folder, reuse-current = this chat's worktree, isolated = a new worktree. At most ${MAX_ACTIVE_CHILDREN} chats you created run at once.`,
+    description: `Start a top-level chat with \`prompt\`; Inertia asks the user first. \`workspace.kind\`: project (default), reuse-current (this chat's worktree), isolated (new one).`,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        title: {
-          type: "string",
-          minLength: 1,
-          maxLength: 120,
-          pattern: SINGLE_LINE_PATTERN,
-        },
-        prompt: {
-          type: "string",
-          minLength: 1,
-          maxLength: MAX_PROMPT_CHARS,
-          pattern: MULTILINE_PATTERN,
-        },
+        title: { type: "string", maxLength: 120, pattern: SINGLE_LINE_PATTERN },
+        prompt: { type: "string", maxLength: MAX_PROMPT_CHARS, pattern: MULTILINE_PATTERN },
         route: {
           type: "object",
           additionalProperties: false,
@@ -176,9 +170,9 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
             providerId: {
               enum: ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"],
             },
-            backendProfileId: { type: "string", minLength: 1, maxLength: 200, pattern: SINGLE_LINE_PATTERN },
-            modelId: { type: "string", minLength: 1, maxLength: 300, pattern: SINGLE_LINE_PATTERN },
-            reasoningEffort: { type: ["string", "null"], minLength: 1, maxLength: 100, pattern: SINGLE_LINE_PATTERN },
+            backendProfileId: { type: "string", pattern: tokenPattern(200) },
+            modelId: { type: "string", maxLength: 300, pattern: SINGLE_LINE_PATTERN },
+            reasoningEffort: { type: ["string", "null"], pattern: tokenPattern(100) },
           },
         },
         interactionMode: { enum: ["build", "plan"] },
@@ -188,7 +182,7 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
           additionalProperties: false,
           properties: {
             kind: { enum: ["project", "reuse-current", "isolated"] },
-            sourceBranch: { type: "string", minLength: 1, maxLength: 255, pattern: SINGLE_LINE_PATTERN },
+            sourceBranch: { type: "string", pattern: tokenPattern(255) },
           },
           required: ["kind"],
         },
@@ -206,12 +200,7 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
       additionalProperties: false,
       properties: {
         conversationId: { type: "string", format: "uuid" },
-    content: {
-      type: "string",
-      minLength: 1,
-      maxLength: MAX_PROMPT_CHARS,
-      pattern: MULTILINE_PATTERN,
-    },
+        content: { type: "string", maxLength: MAX_PROMPT_CHARS, pattern: MULTILINE_PATTERN },
       },
       required: ["conversationId", "content"],
     },
@@ -469,7 +458,7 @@ export class AgentThreadManager {
     } catch (error) {
       if (error instanceof z.ZodError) {
         const definition = TOOL_DEFINITIONS.find(({ name }) => name === call.tool);
-        return failure("host_tool_failed", invalidHostToolArguments(call.tool, definition?.inputSchema, call.arguments, error));
+        return failure("invalid_arguments", invalidHostToolArguments(call.tool, definition?.inputSchema, call.arguments, error));
       }
       return failure(
         "host_tool_failed",
@@ -509,7 +498,7 @@ export class AgentThreadManager {
   private managedTarget(source: Conversation, conversationId: string): Conversation {
     const target = this.sameProject(source, conversationId);
     if (!this.dependencies.store.agentThreadManagement.managedBy(source.id, target.id)) {
-      throw new Error("This parent chat does not own management authority for that chat.");
+      throw new Error("conversationId: not a chat this chat created; only chats created with inertia_create_conversation can be managed here.");
     }
     return target;
   }
@@ -782,7 +771,7 @@ export class AgentThreadManager {
       toolName === "inertia_archive_conversation"
       && this.dependencies.turns.isActive(target.id)
     ) {
-      throw new Error("Stop the managed chat before changing its archive state.");
+      throw new Error("Stop the chat with inertia_stop_conversation before archiving or unarchiving it.");
     }
   }
 
@@ -1103,7 +1092,7 @@ export class AgentThreadManager {
       this.dependencies.turns.isActive(target.id)
       || this.dependencies.providerTerminalResumes.isActive(target.id)
     ) {
-      throw new Error("Stop the managed chat before changing its archive state.");
+      throw new Error("Stop the chat with inertia_stop_conversation before archiving or unarchiving it.");
     }
     this.dependencies.store.archiveConversation(target.id, input.archived);
     this.dependencies.broadcastConversationShell(target.id);

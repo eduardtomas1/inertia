@@ -12,6 +12,7 @@ import {
   type ProviderHostToolBridge,
   type ProviderHostToolImage,
   type ProviderHostToolResult,
+  unknownProviderHostToolMessage,
 } from "./contracts";
 import type {
   AgentApprovalDecision,
@@ -22,7 +23,6 @@ const HOST_TOOL_APPROVAL_ID_PREFIX = "inertia-host-tool:";
 const HOST_TOOL_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 const MAX_HOST_TOOL_CALLS = 128;
 const MAX_PENDING_HOST_TOOL_CALLS = 8;
-const MAX_LISTED_TOOL_NAMES = 32;
 
 interface PendingApproval {
   callId: string;
@@ -138,7 +138,7 @@ export class ProviderHostToolRuntime {
       return Promise.resolve(failure("The provider sent a malformed Inertia tool call."));
     }
     if (!providerHostToolAccepted(this.options.bridge, input.tool)) {
-      return Promise.resolve(failure(this.unknownToolMessage(input.tool)));
+      return Promise.resolve(failure(unknownProviderHostToolMessage(this.options.bridge, input.tool)));
     }
     if (this.seenCallIds.has(input.callId)) {
       // MCP/JSON-RPC only promises correlation, not run-global uniqueness.
@@ -257,14 +257,6 @@ export class ProviderHostToolRuntime {
 
   isSettled(): boolean {
     return this.settled;
-  }
-
-  private unknownToolMessage(tool: string): string {
-    const names = this.options.bridge.definitions.map(({ name }) => name);
-    if (names.length === 0) return `${tool} is not available: this chat has no Inertia tools.`;
-    const listed = names.slice(0, MAX_LISTED_TOOL_NAMES).join(", ");
-    const more = names.length > MAX_LISTED_TOOL_NAMES ? ", …" : "";
-    return `${tool} is not an Inertia tool in this chat. Use one of: ${listed}${more}.`;
   }
 
   private requestApproval(

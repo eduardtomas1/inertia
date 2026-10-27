@@ -35,9 +35,7 @@ export interface MisuseCase {
   pending?: string | Partial<Record<ToolTransport, string>>;
 }
 
-const RAW_ZOD = "returns the raw zod issue JSON as a host_tool_failed message instead of naming the field and the fix";
 const CLAUDE_SDK_ZOD = "Claude's MCP SDK validates first and answers 'MCP error -32602: Input validation error' with raw zod issue JSON";
-const ORCHESTRATION_ARGUMENT_GAP = { codex: RAW_ZOD, mcp: RAW_ZOD, claude: CLAUDE_SDK_ZOD };
 const CLAUDE_ONLY_ARGUMENT_GAP = { claude: CLAUDE_SDK_ZOD };
 const NO_CLAUDE_CODE = { claude: { code: null } };
 const NAVIGATE = { tool: "inertia_browser_navigate", arguments: { url: "http://localhost:3000/" } };
@@ -52,7 +50,7 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     call: { tool: "inertia_get_conversation_status", arguments: { conversation_id: "$child" } },
     expect: { success: false, code: "invalid_arguments", includes: ["conversationId", "conversation_id"] },
     transportExpect: NO_CLAUDE_CODE,
-    pending: ORCHESTRATION_ARGUMENT_GAP,
+    pending: CLAUDE_ONLY_ARGUMENT_GAP,
   },
   {
     id: "conversation-id-not-uuid",
@@ -65,7 +63,7 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
       includes: ["conversationId", "inertia_list_conversations"],
     },
     transportExpect: NO_CLAUDE_CODE,
-    pending: ORCHESTRATION_ARGUMENT_GAP,
+    pending: CLAUDE_ONLY_ARGUMENT_GAP,
   },
   {
     id: "list-limit-over-maximum",
@@ -74,7 +72,7 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     call: { tool: "inertia_list_conversations", arguments: { limit: 100 } },
     expect: { success: false, code: "invalid_arguments", includes: ["limit", "25"] },
     transportExpect: NO_CLAUDE_CODE,
-    pending: ORCHESTRATION_ARGUMENT_GAP,
+    pending: CLAUDE_ONLY_ARGUMENT_GAP,
   },
   {
     id: "create-whitespace-title",
@@ -83,7 +81,7 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     call: { tool: "inertia_create_conversation", arguments: { title: "   ", prompt: "Review the parser." } },
     expect: { success: false, code: "invalid_arguments", includes: ["title"] },
     transportExpect: NO_CLAUDE_CODE,
-    pending: ORCHESTRATION_ARGUMENT_GAP,
+    pending: CLAUDE_ONLY_ARGUMENT_GAP,
   },
   {
     id: "create-empty-reasoning-effort",
@@ -95,7 +93,7 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     },
     expect: { success: false, code: "invalid_arguments", includes: ["reasoningEffort"] },
     transportExpect: NO_CLAUDE_CODE,
-    pending: ORCHESTRATION_ARGUMENT_GAP,
+    pending: CLAUDE_ONLY_ARGUMENT_GAP,
   },
   {
     id: "create-unknown-provider",
@@ -107,7 +105,7 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     },
     expect: { success: false, code: "invalid_arguments", includes: ["providerId", "codex", "claude"] },
     transportExpect: NO_CLAUDE_CODE,
-    pending: ORCHESTRATION_ARGUMENT_GAP,
+    pending: CLAUDE_ONLY_ARGUMENT_GAP,
   },
   {
     id: "create-missing-prompt",
@@ -116,7 +114,7 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     call: { tool: "inertia_create_conversation", arguments: { title: "Verifier" } },
     expect: { success: false, code: "invalid_arguments", includes: ["prompt"] },
     transportExpect: NO_CLAUDE_CODE,
-    pending: ORCHESTRATION_ARGUMENT_GAP,
+    pending: CLAUDE_ONLY_ARGUMENT_GAP,
   },
   {
     id: "create-valid",
@@ -140,7 +138,6 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     approval: "timeout",
     call: { tool: "inertia_create_conversation", arguments: { title: "Verifier", prompt: "Review the parser." } },
     expect: { success: false, matches: [/timed out|did not answer|no answer|expired/iu] },
-    pending: "a timed-out approval returns the same user_denied text as an explicit denial, so the agent cannot tell the user never answered",
   },
   {
     id: "send-to-chat-not-created-here",
@@ -149,7 +146,6 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     setup: ["foreign-chat"],
     call: { tool: "inertia_send_message", arguments: { conversationId: "$foreign", content: "Please rebase." } },
     expect: { success: false, includes: ["inertia_create_conversation"] },
-    pending: "says the parent lacks 'management authority' without saying that only chats it created with inertia_create_conversation can receive messages",
   },
   {
     id: "latest-result-while-running",
@@ -158,7 +154,6 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     setup: ["managed-child"],
     call: { tool: "inertia_get_latest_result", arguments: { conversationId: "$child" } },
     expect: { success: true, matches: [/running|active|in progress|not finished/iu] },
-    pending: "returns result null without saying the chat is still running or when to check again",
   },
   {
     id: "stop-idle-chat",
@@ -175,7 +170,6 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     setup: ["managed-child"],
     call: { tool: "inertia_archive_conversation", arguments: { conversationId: "$child" } },
     expect: { success: false, includes: ["inertia_stop_conversation"] },
-    pending: "says 'Stop the managed chat' without naming inertia_stop_conversation",
   },
   {
     id: "archive-idle-chat",
@@ -229,7 +223,6 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
       arguments: { conversationId: "$self", turnId: "$selfTurn", cursor: "$selfTurn" },
     },
     expect: { success: false, includes: ["cursor", "nextCursor"] },
-    pending: "says the cursor does not belong to this turn without saying to omit cursor or pass this turn's own nextCursor",
   },
   {
     id: "html-over-byte-limit",
@@ -268,10 +261,6 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
       success: false,
       matches: [/inertia_delete_conversation/u, /not available|not found|unknown|does not exist/iu],
     },
-    pending: {
-      codex: "Codex gets 'invalid or unauthorised Inertia tool call' without the tool name",
-      mcp: "the runtime answers 'invalid or unauthorised Inertia tool call' without the tool name",
-    },
   },
   {
     id: "misspelled-browser-tool",
@@ -280,7 +269,7 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     browser: true,
     call: { tool: "inertia_browser_snapshots", arguments: {} },
     expect: { success: false, matches: [/inertia_browser_snapshot(?!s)/u] },
-    pending: "the rejection does not suggest the closest tool, inertia_browser_snapshot",
+    pending: { claude: "Claude's SDK answers 'Tool inertia_browser_snapshots not found' without suggesting inertia_browser_snapshot" },
   },
   {
     id: "retired-interact-click",

@@ -53,10 +53,11 @@ completed. A latest-result read on a chat that is still running returns
 the user leaves unanswered for five minutes resolves as a denial on the card
 and returns `approval_timed_out` to the agent, which may ask the user to try
 again. Chat and context tool arguments that fail Inertia's validation return
-`host_tool_failed` with one `<field>: <problem>` line per problem and a final
+`invalid_arguments` with one `<field>: <problem>` line per problem and a final
 line naming the tool to call again; Claude's in-process MCP server still
-answers schema failures itself before Inertia sees them. On the HTTP MCP
-bridge, a call to a tool the chat does not have lists the tools it does have.
+answers schema failures itself before Inertia sees them. On Codex and the HTTP
+MCP bridge, a call to a tool the chat does not have names the closest tool and
+lists the tools it does have.
 
 `inertia.frontend-workbench` composes the Browser tools described in
 `docs/AGENT_BROWSER.md`. Its guidance holds only what the tool descriptions do

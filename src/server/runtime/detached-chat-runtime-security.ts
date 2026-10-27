@@ -49,6 +49,10 @@ export interface DetachedChatRuntimeSecurity {
   consumeCapability(
     requestUrl: string | undefined,
   ): DetachedChatCapabilityAdmission | null;
+  visibleDuoLaunchIds(
+    authority: RuntimeClientAuthority,
+    launchIds: readonly string[],
+  ): string[];
 }
 
 /**
@@ -136,5 +140,11 @@ export function createDetachedChatRuntimeSecurity(
           }
         : null;
     },
+    visibleDuoLaunchIds: (authority, launchIds) =>
+      authority.kind === "main"
+        ? [...launchIds]
+        : launchIds.filter((launchId) =>
+            resources.duoLaunchConversationIds(launchId)
+              ?.includes(authority.conversationId)),
   };
 }

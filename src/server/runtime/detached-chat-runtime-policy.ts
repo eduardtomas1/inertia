@@ -47,23 +47,29 @@ export function detachedChatCommandRejection(
 
   const owns = (candidate: string): boolean =>
     exactConversation(candidate, authority);
-  const snapshot = resources.snapshot();
-  const shell = snapshot.conversations.find(
-    ({ id }) => id === authority.conversationId,
-  ) ?? null;
+  let cachedSnapshot: AppSnapshot | null = null;
+  const snapshot = (): AppSnapshot =>
+    cachedSnapshot ??= resources.snapshot();
+  const shell = (): AppSnapshot["conversations"][number] | null =>
+    snapshot().conversations.find(
+      ({ id }) => id === authority.conversationId,
+    ) ?? null;
   const ownsExistingConversation = (candidate: string): boolean =>
-    Boolean(shell && owns(candidate));
+    Boolean(shell() && owns(candidate));
   const ownsWorkspace = (
     payload: { projectId: string; conversationId?: string },
-  ): boolean => Boolean(
-    shell
-    && payload.projectId === shell.projectId
-    && payload.conversationId !== undefined
-    && owns(payload.conversationId),
-  );
+  ): boolean => {
+    const conversation = shell();
+    return Boolean(
+      conversation
+      && payload.projectId === conversation.projectId
+      && payload.conversationId !== undefined
+      && owns(payload.conversationId),
+    );
+  };
   const ownsTurn = (turnId: string): boolean =>
     resources.turnConversationId(turnId) === authority.conversationId;
-  const ownsRun = (runId: string): boolean => snapshot.runs.some(
+  const ownsRun = (runId: string): boolean => snapshot().runs.some(
     ({ id, conversationId }) =>
       id === runId && conversationId === authority.conversationId,
   );
@@ -247,33 +253,40 @@ export function detachedChatCommandRejection(
     case "prompt-preset.delete":
     case "prompt-preset.reorder":
       return null;
-    case "duo.pending":
-      return shell
+    case "duo.pending": {
+      const conversation = shell();
+      return conversation
         && command.payload.projectIds.every(
-          (projectId) => projectId === shell.projectId,
+          (projectId) => projectId === conversation.projectId,
         )
         ? null
         : REJECTION;
+    }
     case "duo.status":
     case "duo.comparison.retry":
     case "duo.comparison.cancel":
-      return shell
+      return shell()
         && resources.duoLaunchConversationIds(command.payload.launchId)
           ?.includes(authority.conversationId)
         ? null
         : REJECTION;
-    case "provider.refresh":
-      return shell && command.payload.providerId === shell.providerId
+    case "provider.refresh": {
+      const conversation = shell();
+      return conversation
+        && command.payload.providerId === conversation.providerId
         ? null
         : REJECTION;
-    case "backend.profile.probe":
-      return shell
+    }
+    case "backend.profile.probe": {
+      const conversation = shell();
+      return conversation
         && command.payload.profileId
-          === shell.modelSelection.backendProfileId
+          === conversation.modelSelection.backendProfileId
         && command.payload.modelIds?.length === 1
-        && command.payload.modelIds[0] === shell.modelSelection.modelId
+        && command.payload.modelIds[0] === conversation.modelSelection.modelId
         ? null
         : REJECTION;
+    }
     case "settings.update":
       return Object.keys(command.payload).length === 1
         && command.payload.usageDisplayMode !== undefined

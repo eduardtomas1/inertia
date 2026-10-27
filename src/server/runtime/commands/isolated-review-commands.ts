@@ -312,6 +312,7 @@ export function createIsolatedReviewCommandHandler(
               text: "Treat the selected lines as the requested focus, not a perfect technical write fence. Avoid unrelated files and hunks, and report any necessary spillover. A recovery checkpoint was created before this turn.",
             }],
             checkpointId: checkpoint.id,
+            activateConversation: false,
             onSettled: async (status, turnId) => {
               let audit =
                 "The refreshed diff could not be audited automatically. Use the recovery checkpoint if the result is not acceptable.";

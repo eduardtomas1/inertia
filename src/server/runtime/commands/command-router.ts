@@ -1,5 +1,9 @@
 import type WebSocket from "ws";
 import { RuntimeRequestError } from "../../runtime-errors";
+import {
+  MAIN_RUNTIME_CLIENT_AUTHORITY,
+  type RuntimeClientAuthority,
+} from "../runtime-client-authority";
 
 import {
   clientCommandSchema,
@@ -16,6 +20,7 @@ export interface RuntimeCommandHandler {
   (
     socket: WebSocket,
     command: ClientCommand,
+    authority?: RuntimeClientAuthority,
   ): Promise<RuntimeCommandDisposition>;
   readonly commandTypes?: readonly ClientCommand["type"][];
 }
@@ -90,15 +95,19 @@ function indexCommandOwners(
  */
 export function createRuntimeCommandExecutor(
   options: RuntimeCommandRouterOptions,
-): (socket: WebSocket, command: ClientCommand) => Promise<void> {
+): (
+  socket: WebSocket,
+  command: ClientCommand,
+  authority?: RuntimeClientAuthority,
+) => Promise<void> {
   const owners = indexCommandOwners(options.handlers);
-  return async (socket, command) => {
+  return async (socket, command, authority = MAIN_RUNTIME_CLIENT_AUTHORITY) => {
     try {
       const handler = owners.get(command.type);
       if (!handler) {
         throw new Error(`No runtime command handler owns ${command.type}.`);
       }
-      const disposition = await handler(socket, command);
+      const disposition = await handler(socket, command, authority);
       if (disposition === "not-handled") {
         throw new Error(
           `Runtime command handler rejected its owned command ${command.type}.`,

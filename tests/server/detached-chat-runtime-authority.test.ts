@@ -1007,6 +1007,28 @@ describe("detached chat workspace tool authority", () => {
     ];
     expect(commands.map(rejection)).toEqual(commands.map(() => null));
   });
+
+  it("builds the app snapshot only for commands that consult it", () => {
+    let snapshots = 0;
+    const counting = (): DetachedChatRuntimePolicyResources => {
+      const base = resources();
+      return {
+        ...base,
+        snapshot: () => {
+          snapshots += 1;
+          return base.snapshot();
+        },
+      };
+    };
+    const check = (command: ClientCommand): number => {
+      snapshots = 0;
+      expect(detachedChatCommandRejection(authority, command, counting())).toBeNull();
+      return snapshots;
+    };
+    expect(check({ type: "terminal.input", requestId: REQUEST, payload: { terminalId: TERMINAL, data: "ls\r" } })).toBe(0);
+    expect(check({ type: "prompt-preset.create", requestId: REQUEST, payload: { name: "Review", body: "Review this.", route: null } })).toBe(0);
+    expect(check({ type: "git.refresh", requestId: REQUEST, payload: OWNED_SCOPE })).toBe(1);
+  });
 });
 
 describe("detached chat title menu authority", () => {

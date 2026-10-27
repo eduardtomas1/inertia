@@ -281,6 +281,9 @@ export class PreviewBroker {
           if (request.action === "prepare-approval") {
             const refusal = blankTabRefusal(this.#active(session).view.webContents, request.command);
             if (refusal) return refusal;
+            if (request.command.action === "navigate") {
+              await this.#operations.ensureSecurityDebugger(this.#active(session).view.webContents, operation);
+            }
           }
           try {
             const resolved = await this.#approvals.resolve(

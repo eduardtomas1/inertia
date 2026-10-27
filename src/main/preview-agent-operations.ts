@@ -968,4 +968,8 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       endAgentPageInputRefusalCapture(contents);
     }
   }
+
+  async ensureSecurityDebugger(contents: PreviewContents, scope: AgentOperationScope): Promise<void> {
+    await this.#ensureSecurityDebugger(contents, scope);
+  }
 }

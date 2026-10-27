@@ -1,6 +1,8 @@
 // @inertia-e2e-resource isolated
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import WebSocket from "ws";
 
+import type { ServerEvent } from "../../src/shared/contracts";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 const codexAppServerSource = `
@@ -60,6 +62,28 @@ async function capture(testInfo: TestInfo, name: string): Promise<void> {
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
+async function waitForCodexModels(): Promise<void> {
+  const { websocketUrl } = await app.runtimeSnapshot();
+  if (!websocketUrl) throw new Error("Fixture runtime is unavailable.");
+  const socket = new WebSocket(websocketUrl, {
+    origin: "inertia://bundle", maxPayload: 2 * 1024 * 1024,
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.on("error", reject);
+      socket.on("message", (data) => {
+        const frame = JSON.parse(data.toString()) as ServerEvent;
+        const event = frame.type === "runtime.event" ? frame.event : frame;
+        if (event.type !== "server.welcome" && event.type !== "snapshot.updated") return;
+        const codex = event.snapshot.providers.find(({ id }) => id === "codex");
+        if (codex?.canRun && codex.models.length === 2) resolve();
+      });
+    });
+  } finally {
+    socket.terminate();
+  }
+}
+
 test.beforeAll(async () => {
   app = await createAppFixture({
     name: "provider-settings-visual",
@@ -73,6 +97,7 @@ if (process.argv[2] === "status") {
 `,
   });
   page = app.page;
+  await waitForCodexModels();
 });
 
 test.afterAll(async () => {

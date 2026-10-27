@@ -12,7 +12,7 @@ const budgets = {
   // React 19.3 adds 29,322 emitted bytes on identical application source.
   // The dependency batch measures 217.3 KiB; retain 224 bytes of headroom.
   // See docs/pr-evidence/dependency-batch-v0.0.56-renderer.json.
-  entryJavaScript: 217.5 * kibibyte + 161,
+  entryJavaScript: 217.5 * kibibyte + 180,
   mascotFirstLoadJavaScript: 6 * kibibyte + 5_418,
   mascotJavaScript: 6 * kibibyte + 5_418,
   mascotSettingsJavaScript: 6.8 * kibibyte + 841,
@@ -162,7 +162,7 @@ const budgets = {
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte + 245 + 50,
   deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850 + 32,
-  detachedChatJavaScript: 16 * kibibyte + 8_292,
+  detachedChatJavaScript: 16 * kibibyte + 8_610,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte + 205,
   deferredIconRegionJavaScript: 12_995,

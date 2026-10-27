@@ -9,7 +9,7 @@ import {
   type Project,
   type ServerEvent,
 } from "../../src/shared/contracts";
-import type { DetachedChatMainTarget } from "../../src/shared/desktop";
+import type { MainWindowTarget } from "../../src/shared/desktop";
 import {
   buildDraftConversation,
   buildNewConversationPayload,
@@ -149,7 +149,7 @@ export function recordingConnection(
 }
 
 export interface DetachedBridge {
-  openedInMain: DetachedChatMainTarget[];
+  openedInMain: MainWindowTarget[];
   docked: unknown[][];
   copied: string[];
   install(): void;
@@ -167,7 +167,7 @@ export function detachedBridge(): DetachedBridge {
           get: (_target, key) => {
             if (key === "getPlatform") return () => "darwin";
             if (key === "openInMainWindow") {
-              return (target: DetachedChatMainTarget) => {
+              return (target: MainWindowTarget) => {
                 bridge.openedInMain.push(target);
                 return Promise.resolve();
               };

@@ -200,7 +200,7 @@ describe("detached chat keyboard", () => {
     expect(press(",", { code: "Comma" }).defaultPrevented).toBe(true);
     await waitFor(() => expect(bridge.openedInMain).toEqual([
       { kind: "new-chat", projectId },
-      { kind: "settings", page: "general" },
+      { kind: "settings", page: "appearance" },
     ]));
     for (const key of ["k", "t", "b"]) press(key);
     await act(async () => { await Promise.resolve(); });

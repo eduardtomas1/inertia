@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, type Dispatch, type SetStateAction } from "react";
-import type { DetachedChatMainTarget } from "@shared/desktop";
 
 import { prepareComposerDetachment } from "../../utils/composerOwnership";
-import { dockInMainWith, openInMain } from "../../utils/detachedHandoff";
+import { dockInMainWith, openInMain, type MainWindowTarget } from "../../utils/detachedHandoff";
+import { UUID_PATTERN } from "@shared/request-identifiers";
 import {
   DIAGNOSTIC_NAVIGATION_EVENT,
   parseDiagnosticNavigation,
@@ -10,7 +10,7 @@ import {
 
 export interface DetachedHandoff {
   dockInMain: () => void;
-  openInMain: (target: DetachedChatMainTarget) => void;
+  openInMain: (target: MainWindowTarget) => void;
 }
 
 function publicError(error: unknown, fallback: string): string {
@@ -35,7 +35,7 @@ export function useDetachedHandoff(
       ));
     });
   }, [conversationId, setActionError]);
-  const openTarget = useCallback((target: DetachedChatMainTarget) => {
+  const openTarget = useCallback((target: MainWindowTarget) => {
     setActionError(null);
     void openInMain(target).catch((error: unknown) => {
       setActionError(publicError(error, "The main window could not be opened."));
@@ -45,9 +45,10 @@ export function useDetachedHandoff(
     const navigate = (event: Event): void => {
       const target = parseDiagnosticNavigation((event as CustomEvent<unknown>).detail);
       if (!target) return;
+      const turnId = "conversationId" in target ? undefined : target.selection?.turnId;
       openTarget("conversationId" in target
         ? { kind: "conversation", conversationId: target.conversationId }
-        : { kind: "diagnostics" });
+        : turnId && UUID_PATTERN.test(turnId) ? { kind: "diagnostics", turnId } : { kind: "diagnostics" });
     };
     window.addEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigate);
     return () => window.removeEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigate);

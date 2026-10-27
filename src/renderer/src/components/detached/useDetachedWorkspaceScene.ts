@@ -253,11 +253,10 @@ export function useDetachedWorkspaceScene({
     },
     connectProvider: (providerId: ProviderId) =>
       handoff.openInMain({ kind: "provider-setup", providerId }),
-    openProviderSetup: (providerId: ProviderId) =>
-      handoff.openInMain({ kind: "provider-setup", providerId }),
+    openProviderSetup: () => handoff.openInMain({ kind: "settings", page: "agents" }),
     openBackendSetup: (profileId: string) =>
       handoff.openInMain({ kind: "backend-setup", profileId }),
-    openSettings: () => handoff.openInMain({ kind: "settings", page: "general" }),
+    openSettings: () => handoff.openInMain({ kind: "settings", page: "appearance" }),
     openProjectPath: runtimeActions.openProjectPath,
     followUpSubagent: (trace: SubagentTrace) => {
       requestSubagentFollowUp(conversationId, trace, projection.turns);

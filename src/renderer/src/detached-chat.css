@@ -27,11 +27,6 @@
   -webkit-app-region: no-drag;
 }
 
-.detached-chat-shell .workspace-corner-controls .icon-button[aria-pressed="true"] {
-  color: var(--text);
-  background: var(--fill-strong);
-}
-
 .detached-chat-loading {
   display: grid;
   width: 100%;

@@ -196,7 +196,7 @@ export default function DetachedChatApp({
     createConversation: () => {
       if (projectId) openInMain(newChatTarget(projectId));
     },
-    openSettings: () => openInMain({ kind: "settings", page: "general" }),
+    openSettings: () => openInMain({ kind: "settings", page: "appearance" }),
     closeWindow,
   });
   const setTerminalToggle = useCallback((toggle: (() => void) | null) => {

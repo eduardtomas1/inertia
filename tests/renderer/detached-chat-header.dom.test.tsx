@@ -250,7 +250,15 @@ describe("detached chat hand-offs", () => {
     const { navigateDiagnosticContext } = await import("../../src/renderer/src/utils/diagnosticNavigation");
     act(() => {
       navigateDiagnosticContext({ section: "help", anchor: "diagnostics-incidents" });
+      navigateDiagnosticContext({
+        section: "help",
+        anchor: "diagnostics-incidents",
+        selection: { turnId: "66666666-6666-4666-8666-666666666666" },
+      });
     });
-    expect(bridge.openedInMain).toEqual([{ kind: "diagnostics" }]);
+    expect(bridge.openedInMain).toEqual([
+      { kind: "diagnostics" },
+      { kind: "diagnostics", turnId: "66666666-6666-4666-8666-666666666666" },
+    ]);
   });
 });

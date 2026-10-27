@@ -16,6 +16,8 @@ import type { DiagnosticPage, DiagnosticQuery, RendererDiagnostic } from "./appl
 import type { CompletionSoundImport } from "./completion-sound";
 import type { ContextMenuAction, ContextMenuRequest } from "./context-menu";
 import { isProjectRelativePath, UUID_PATTERN } from "./request-identifiers";
+import type { ProviderAuthMethod, ProviderId } from "./provider";
+import type { SettingsSection } from "./settings-sections";
 import type { RuntimeStartupBlockerCode } from
   "./runtime-startup-diagnostics";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
@@ -292,26 +294,24 @@ export type DesktopWindowContext =
   | { role: "main" }
   | ({ role: "detached-chat"; draft: string } & DetachedChatWindowSummary);
 
-export type DetachedChatSettingsPage = "general" | "agents" | "help";
-
-export type DetachedChatMainTarget =
-  | { kind: "conversation"; conversationId: string }
-  | {
-    kind: "new-chat";
-    projectId: string;
-    branch?: string;
-    worktree?: "current" | "isolated";
-  }
-  | { kind: "settings"; page: DetachedChatSettingsPage }
-  | { kind: "provider-setup"; providerId: string }
-  | { kind: "backend-setup"; profileId?: string }
-  | { kind: "diagnostics" }
-  | { kind: "usage-limits" };
-
 export interface DetachedChatWindowOpenResult
   extends DetachedChatWindowSummary {
   disposition: "opened" | "focused";
 }
+
+export type MainWindowNewChatCheckout =
+  | { kind: "branch"; branch: string }
+  | { kind: "this-worktree"; branch?: string }
+  | { kind: "isolated-worktree" };
+
+export type MainWindowTarget =
+  | { kind: "conversation"; conversationId: string }
+  | { kind: "new-chat"; projectId: string; checkout?: MainWindowNewChatCheckout }
+  | { kind: "settings"; page: SettingsSection }
+  | { kind: "provider-setup"; providerId: ProviderId; method?: ProviderAuthMethod }
+  | { kind: "backend-setup"; profileId?: string; panel?: "key" | "models" }
+  | { kind: "diagnostics"; turnId?: string }
+  | { kind: "usage-limits" };
 
 export interface AppProcessHealth {
   pid: number;

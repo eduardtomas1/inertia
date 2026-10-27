@@ -305,6 +305,17 @@ describe("Browser select", () => {
     expect(page.events).toEqual([]);
   });
 
+  it("keeps the listed options within the failure message limit", async () => {
+    const { broker, contents } = await loadedHarness();
+    selectPage(contents, Array.from({ length: 20 }, (_, index) => ({
+      value: `quoted-${index}`, label: "\"".repeat(40),
+    })));
+    const result = await broker.perform(runIdentity, { action: "select", ref: "e4", value: "Gold" });
+    expect(result).toMatchObject({ ok: false, code: "not-found", message: expect.stringContaining("(20 options in total)") });
+    expect((result as { message: string }).message.length).toBeLessThanOrEqual(1_000);
+    expect(parseAgentBrowserResult(result)).toEqual(result);
+  });
+
   it.each([
     ["not a select", { tagName: "INPUT" }, "That page element is not a <select> list. Click custom menus open and choose an option with inertia_browser_click."],
     ["disabled", { disabled: true }, "That page element is disabled."],

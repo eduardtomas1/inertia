@@ -14,6 +14,8 @@ import type { AgentOperationScope } from "./preview-agent-scope.js";
 import { selectAgentPageOption, type AgentPageSelection } from "./preview-agent-select.js";
 
 const MAX_LOG_ENTRIES = 100;
+const MAX_FAILURE_MESSAGE_CHARS = 1_000;
+const LISTED_OPTIONS_SUFFIX_RESERVE = 40;
 const STALE_MESSAGE = "That page element is stale. Take a new inertia_browser_snapshot for current refs.";
 const BLOCKED_MESSAGE = "That page element cannot be controlled by the Browser agent.";
 const DISABLED_MESSAGE = "That page element is disabled.";
@@ -128,12 +130,18 @@ export async function hoverAgentPageElement<Session extends AgentOperationSessio
 function selectionFailure(selection: Exclude<AgentPageSelection, { outcome: "selected" }>): AgentBrowserResult {
   switch (selection.outcome) {
     case "not-found": {
-      const listed = selection.options.map((option) => JSON.stringify(option)).join(", ");
-      const more = selection.total > selection.options.length
-        ? ` (${selection.total} options in total)`
-        : "";
-      return failure("not-found", selection.options.length > 0
-        ? `No option in that list matches. Its options include ${listed}${more}.`
+      const prefix = "No option in that list matches. Its options include ";
+      let listed = "";
+      let count = 0;
+      for (const option of selection.options) {
+        const next = `${count > 0 ? ", " : ""}${JSON.stringify(option)}`;
+        if (prefix.length + listed.length + next.length + LISTED_OPTIONS_SUFFIX_RESERVE > MAX_FAILURE_MESSAGE_CHARS) break;
+        listed += next;
+        count += 1;
+      }
+      const more = selection.total > count ? ` (${selection.total} options in total)` : "";
+      return failure("not-found", count > 0
+        ? `${prefix}${listed}${more}.`
         : selection.total > 0
           ? "No option in that list matches, and Inertia cannot list its options on this page."
           : "That list has no options to choose.");

@@ -62,7 +62,7 @@ test("opens the main window's tools beside the chat, without the Browser", async
   await addMenu.getByRole("menuitem", { name: /^Attachments/u }).click();
   await expect(panel.getByRole("tab", { name: "Attachments" })).toHaveAttribute("aria-selected", "true");
 
-  await resizePopup(1280);
+  await resizePopup(960);
   await expect(panel).toHaveClass(/is-inline/u);
   const width = await popup.evaluate(() => document.documentElement.clientWidth);
   const panelBox = await panel.boundingBox();
@@ -77,6 +77,14 @@ test("opens the main window's tools beside the chat, without the Browser", async
   await expect(panel).toBeHidden();
 });
 
+test("keeps the header actions clear of the corner controls at the default width", async () => {
+  await resizePopup(640);
+  const more = await popup.locator(".workspace-header").getByRole("button", { name: "More header actions" }).boundingBox();
+  const corner = await popup.locator(".workspace-corner-controls").boundingBox();
+  expect(more && corner).toBeTruthy();
+  expect(more!.x + more!.width).toBeLessThanOrEqual(corner!.x);
+});
+
 test("offers the chat's own menu, rename and thread ID copy in the header", async () => {
   const titleButton = popup.locator(".workspace-header").getByRole("button", {
     name: title,
@@ -85,8 +93,7 @@ test("offers the chat's own menu, rename and thread ID copy in the header", asyn
   await titleButton.click();
   const menu = popup.getByRole("menu", { name: `Thread actions for ${title}` });
   await expect(menu.getByRole("menuitem", { name: "Rename thread" })).toBeVisible();
-  await expect(menu.getByRole("menuitem", { name: /split view|new window/iu })).toHaveCount(0);
-  await expect(menu.getByRole("menuitem", { name: "Archive thread" })).toHaveAttribute("aria-disabled", "true");
+  await expect(menu.getByRole("menuitem", { name: /split view|new window|archive|delete/iu })).toHaveCount(0);
   await menu.getByRole("menuitem", { name: "Copy" }).click();
   await popup.getByRole("menuitem", { name: "Thread ID" }).click();
   await expect(menu).toBeHidden();
@@ -105,6 +112,7 @@ test("offers the chat's own menu, rename and thread ID copy in the header", asyn
 test("keeps search, tasks and sidebar shortcuts in the main window", async () => {
   await popup.getByRole("textbox", { name: "Message" }).focus();
   for (const key of ["k", "t", "b"]) await popup.keyboard.press(`${primaryModifier}+${key}`);
+  await popup.waitForTimeout(500);
   await expect(popup.getByRole("dialog")).toHaveCount(0);
   await expect(popup.locator('aside[aria-label="Project navigation"]')).toHaveCount(0);
   await expect(popup.getByRole("textbox", { name: "Message" })).toBeFocused();
@@ -115,6 +123,7 @@ test("shows this chat's workspace changes in the Changes tab", async () => {
   await panel.getByRole("button", { name: "Add panel surface" }).click();
   await panel.getByRole("menu", { name: "Add panel surface" }).getByRole("menuitem", { name: /^Changes/u }).click();
   await expect(panel.getByRole("tabpanel", { name: "Changes" })).toBeVisible();
+  await expect(panel.getByRole("region", { name: "Diff content for sample.ts" })).toBeVisible();
   await expect(popup.getByRole("alert")).toHaveCount(0);
 });
 
@@ -123,6 +132,7 @@ test("runs a terminal for this chat in the Terminal tab", async () => {
   await panel.getByRole("button", { name: "Add panel surface" }).click();
   await panel.getByRole("menu", { name: "Add panel surface" }).getByRole("menuitem", { name: /^Terminal/u }).click();
   await expect(panel.locator(".xterm")).toBeVisible();
+  await expect(panel.locator(".xterm-rows")).toContainText(/\S/u);
   await expect(popup.getByRole("alert")).toHaveCount(0);
 });
 

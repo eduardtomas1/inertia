@@ -98,9 +98,9 @@ interface ConversationActionsMenuProps {
   splitViewFull?: boolean;
   thread: SidebarThreadView;
   onAcknowledgeRun: (run: WorkspaceRun) => void;
-  onArchiveConversation: (conversation: Conversation) => void;
+  onArchiveConversation?: (conversation: Conversation) => void;
   onCloseConversationSplit: (conversation: Conversation) => void;
-  onDeleteConversation: (conversation: Conversation) => void;
+  onDeleteConversation?: (conversation: Conversation) => void;
   onDismiss: (reason: DismissReason) => void;
   onDismissRun: (run: WorkspaceRun) => void;
   onOpenConversationInSplit?: (conversation: Conversation) => void;
@@ -338,28 +338,32 @@ export function ConversationActionsMenu({
           <X size={14} />Dismiss from Work
         </ConversationMenuItem>
       )}
-      <div role="separator" />
-      <ConversationMenuItem
-        {...itemProps}
-        disabled={!canSettle || isDetached}
-        hint={isDetached
-          ? "Return this chat to the main window before archiving it."
-          : undefined}
-        onActivate={() => onArchiveConversation(conversation)}
-      >
-        <Archive size={14} />Archive thread
-      </ConversationMenuItem>
-      <ConversationMenuItem
-        {...itemProps}
-        className="is-danger"
-        disabled={!canSettle || isDetached}
-        hint={isDetached
-          ? "Return this chat to the main window before deleting it."
-          : undefined}
-        onActivate={() => onDeleteConversation(conversation)}
-      >
-        <Trash2 size={14} />Delete
-      </ConversationMenuItem>
+      {(onArchiveConversation || onDeleteConversation) && <div role="separator" />}
+      {onArchiveConversation && (
+        <ConversationMenuItem
+          {...itemProps}
+          disabled={!canSettle || isDetached}
+          hint={isDetached
+            ? "Return this chat to the main window before archiving it."
+            : undefined}
+          onActivate={() => onArchiveConversation(conversation)}
+        >
+          <Archive size={14} />Archive thread
+        </ConversationMenuItem>
+      )}
+      {onDeleteConversation && (
+        <ConversationMenuItem
+          {...itemProps}
+          className="is-danger"
+          disabled={!canSettle || isDetached}
+          hint={isDetached
+            ? "Return this chat to the main window before deleting it."
+            : undefined}
+          onActivate={() => onDeleteConversation(conversation)}
+        >
+          <Trash2 size={14} />Delete
+        </ConversationMenuItem>
+      )}
     </div>, document.body,
   );
 }

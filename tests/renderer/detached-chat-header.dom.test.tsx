@@ -81,7 +81,7 @@ describe("detached chat header", () => {
     }
   });
 
-  it("offers the chat's own actions and leaves window placement and removal to the main window", async () => {
+  it("offers the chat's own actions and hides window placement and removal", async () => {
     await renderWindow();
     const menu = await openTitleMenu();
     const items = within(menu).getAllByRole("menuitem").map((item) => item.textContent);
@@ -93,13 +93,10 @@ describe("detached chat header", () => {
       "Regenerate title",
       "Mark unread",
       "Copy",
-      "Archive thread",
-      "Delete",
     ]));
-    expect(items.some((item) => /split view|new window|chat window/iu.test(item ?? ""))).toBe(false);
-    expect(within(menu).getByRole("menuitem", { name: "Archive thread" })).toHaveAttribute("aria-disabled", "true");
-    expect(within(menu).getByRole("menuitem", { name: "Delete" })).toHaveAttribute("aria-disabled", "true");
+    expect(items.some((item) => /split view|new window|chat window|archive|delete/iu.test(item ?? ""))).toBe(false);
     expect(menu.querySelectorAll('[role="separator"] + [role="separator"]')).toHaveLength(0);
+    expect(menu.lastElementChild).not.toHaveAttribute("role", "separator");
   });
 
   it("sends the main window's commands for pin, settle, unread and title regeneration", async () => {

@@ -27,6 +27,12 @@
   -webkit-app-region: no-drag;
 }
 
+@media (max-width: 760px) {
+  .detached-chat-shell .workspace-header {
+    padding-right: calc(14px + var(--workspace-corner-controls-width, 0px));
+  }
+}
+
 .detached-chat-loading {
   display: grid;
   width: 100%;

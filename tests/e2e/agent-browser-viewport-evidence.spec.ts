@@ -186,8 +186,8 @@ test("captures the Browser panel at each agent viewport", async () => {
   await capturePanel(panel, "after-fit-narrow-panel.png");
 
   const sizes = [
-    { command: { preset: "desktop" }, width: 1_280, height: 800, value: "desktop", label: "Desktop 1280×800", file: "after-desktop-1280x800.png" },
-    { command: { preset: "mobile" }, width: 375, height: 812, value: "mobile", label: "Mobile 375×812", file: "after-mobile-375x812.png" },
+    { command: { preset: "desktop" }, width: 1_280, height: 800, value: "desktop", label: "Desktop", file: "after-desktop-1280x800.png" },
+    { command: { preset: "mobile" }, width: 375, height: 812, value: "mobile", label: "Mobile", file: "after-mobile-375x812.png" },
     { command: { width: 1_440, height: 900 }, width: 1_440, height: 900, value: "custom", label: "1440×900", file: "after-custom-1440x900.png" },
   ];
   for (const size of sizes) {

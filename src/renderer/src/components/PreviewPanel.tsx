@@ -374,7 +374,7 @@ export function PreviewPanel({
             <option value="fit">Fit</option>
             {VIEWPORT_PRESET_OPTIONS.map(({ value, label }) => (
               <option key={value} value={value}>
-                {`${label} ${AGENT_BROWSER_VIEWPORT_SIZES[value].width}×${AGENT_BROWSER_VIEWPORT_SIZES[value].height}`}
+                {label}
               </option>
             ))}
             {selectedViewport === "custom" && viewport && (

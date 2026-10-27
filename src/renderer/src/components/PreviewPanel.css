@@ -9,7 +9,7 @@
 .preview-safe-stage { background: var(--surface); }
 
 @container (max-width: 480px) {
-  .preview-viewport-select { max-width: 76px; }
+  .preview-viewport-select { max-width: 96px; }
 }
 
 @media (forced-colors: active) {

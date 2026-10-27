@@ -36,7 +36,7 @@ describe("browser viewport control", () => {
     const { container } = render(panel());
     const row = container.querySelector(".preview-chrome") as HTMLElement;
     expect(within(row).getByRole("combobox", { name: "Viewport" })).toBe(viewportSelect());
-    expect(optionLabels()).toEqual(["Fit", "Desktop 1280×800", "Tablet 768×1024", "Mobile 375×812"]);
+    expect(optionLabels()).toEqual(["Fit", "Desktop", "Tablet", "Mobile"]);
     expect(viewportSelect().value).toBe("fit");
   });
 
@@ -54,7 +54,7 @@ describe("browser viewport control", () => {
 
   it("shows a size the agent chose as its own selected option", () => {
     const view = render(panel({ viewport: fixed(1440, 900) }));
-    expect(optionLabels()).toEqual(["Fit", "Desktop 1280×800", "Tablet 768×1024", "Mobile 375×812", "1440×900"]);
+    expect(optionLabels()).toEqual(["Fit", "Desktop", "Tablet", "Mobile", "1440×900"]);
     expect(viewportSelect().selectedOptions[0]).toHaveTextContent("1440×900");
 
     view.rerender(panel({ viewport: fixed(768, 1024) }));

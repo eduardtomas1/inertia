@@ -24,6 +24,7 @@ if (process.argv[2] === "--help") { process.stdout.write("Usage: codex app-serve
 require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "cli-import-fixture" } });
+  if (message.method === "config/read") return send({ id: message.id, result: { config: {} } });
   if (message.method === "model/list") return send({ id: message.id, result: { data: [], nextCursor: null } });
   if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: null } });
   if (message.method === "thread/goal/get") return send({ id: message.id, result: { goal: null } });

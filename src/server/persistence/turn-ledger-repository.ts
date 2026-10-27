@@ -434,22 +434,63 @@ export class TurnLedgerRepository {
     sessionId: string,
   ): { requestedAt: string; sessionInstructionDigest: string | null } | null {
     const row = this.context.database.prepare(`
-      SELECT turn.requested_at,
+      SELECT turn.requested_at, turn.provider_session_before,
         CASE WHEN json_valid(manifest.manifest_json)
           THEN json_extract(manifest.manifest_json, '$.sessionInstructionDigest')
         END AS digest
       FROM agent_turns AS turn
       LEFT JOIN turn_execution_manifests AS manifest ON manifest.turn_id = turn.id
       WHERE turn.conversation_id = ? AND turn.provider_session_after = ?
-        AND turn.provider_session_before IS NULL
       ORDER BY turn.requested_at ASC, turn.id ASC
       LIMIT 1
-    `).get(conversationId, sessionId) as { requested_at: string; digest: unknown } | undefined;
+    `).get(conversationId, sessionId) as {
+      requested_at: string;
+      provider_session_before: string | null;
+      digest: unknown;
+    } | undefined;
     if (!row) return null;
     return {
       requestedAt: row.requested_at,
-      sessionInstructionDigest: isSessionInstructionDigest(row.digest) ? row.digest : null,
+      sessionInstructionDigest: row.provider_session_before === null && isSessionInstructionDigest(row.digest)
+        ? row.digest
+        : null,
     };
+  }
+
+  latestCompaction(
+    conversationId: string,
+    since: string,
+  ): { sessionInstructionDigest: string | null } | null {
+    const titles = CONTEXT_COMPACTION_ACTIVITY_TITLES;
+    const row = this.context.database.prepare(`
+      SELECT compaction.turn_id, compaction.created_at FROM (
+        SELECT NULL AS turn_id, created_at FROM messages
+        WHERE conversation_id = ? AND turn_id IS NULL AND role = 'system'
+          AND compaction_json IS NOT NULL AND created_at >= ?
+        UNION ALL
+        SELECT turn_id, created_at FROM activities
+        WHERE conversation_id = ? AND kind = 'status' AND status = 'completed'
+          AND title IN (${titles.map(() => "?").join(", ")}) AND created_at >= ?
+      ) AS compaction
+      ORDER BY compaction.created_at DESC
+      LIMIT 1
+    `).get(conversationId, since, conversationId, ...titles, since) as {
+      turn_id: string | null;
+      created_at: string;
+    } | undefined;
+    if (!row) return null;
+    const digest = this.context.database.prepare(`
+      SELECT CASE WHEN json_valid(manifest.manifest_json)
+        THEN json_extract(manifest.manifest_json, '$.sessionInstructionDigest')
+      END AS digest
+      FROM agent_turns AS turn
+      LEFT JOIN turn_execution_manifests AS manifest ON manifest.turn_id = turn.id
+      WHERE turn.conversation_id = ?
+        AND (turn.id = ? OR (? IS NULL AND turn.requested_at <= ?))
+      ORDER BY turn.requested_at DESC, turn.id DESC
+      LIMIT 1
+    `).get(conversationId, row.turn_id, row.turn_id, row.created_at) as { digest: unknown } | undefined;
+    return { sessionInstructionDigest: isSessionInstructionDigest(digest?.digest) ? digest!.digest : null };
   }
 
   promptWithheld(turnId: string): boolean {

@@ -756,8 +756,7 @@ three layers that the account route does not need:
   the projector, the transcript or the failure path sees it. It masks the
   exact key and these forms of it: URL and JSON escaping, base64 and base64url
   of the key alone and followed by `
-` or `
-
+` or `
 ` (what `echo $KEY | base64`
   prints), and lower- and upper-case hex. Spaces, tabs and line breaks
   between characters are ignored, so wrapped base64 (`base64` wraps at 76

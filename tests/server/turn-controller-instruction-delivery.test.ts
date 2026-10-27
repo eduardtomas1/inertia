@@ -7,7 +7,14 @@ import {
 } from "../../src/shared/model-routing";
 import type { ProviderRunInput } from "../../src/server/provider/contracts";
 import { createInertiaHarnessCapabilities } from "../../src/server/runtime/inertia-harness-capabilities";
-import type { HiddenProviderInstruction } from "../../src/server/runtime/turns/request-context";
+import {
+  BUILD_MODE_INSTRUCTION,
+  type HiddenProviderInstruction,
+} from "../../src/server/runtime/turns/request-context";
+import {
+  MAX_TRACKED_PROMPT_DELIVERIES,
+  PromptInstructionDeliveries,
+} from "../../src/server/runtime/turns/turn-instruction-delivery";
 import {
   TurnController,
   type TurnControllerHooks,
@@ -70,11 +77,26 @@ async function runTurn(
   content: string,
   sessionId = "session-1",
   controller = runtime.controller,
+  options: { goalStart?: { objective: string }; compactionActivity?: string } = {},
 ): Promise<ProviderRunInput> {
-  const queued = controller.queue({ conversationId: runtime.conversationId, content });
+  const queued = controller.queue({
+    conversationId: runtime.conversationId,
+    content,
+    ...(options.goalStart ? { goalStart: options.goalStart } : {}),
+  });
   expect(controller.start(queued.turn.id)).toBe(true);
   const input = runtime.provider.input!;
   runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId });
+  if (options.compactionActivity) {
+    runtime.provider.emit({
+      ...turnControllerTestIdentity(runtime),
+      type: "activity",
+      kind: "system",
+      phase: "completed",
+      label: options.compactionActivity,
+      activityId: "compaction-1",
+    });
+  }
   runtime.provider.resolve({ status: "completed", sessionId });
   await flushTurnControllerTestPromises();
   expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed");
@@ -207,6 +229,116 @@ describe("hidden instruction delivery", () => {
     expect(second.sessionInstruction).toBe(first.sessionInstruction);
     expect(second.prompt).toBe("two");
     runtime.store.close();
+  });
+
+  it("sends Build mode after a Codex native goal start, which sends no prompt", async () => {
+    const { runtime } = await chatRuntime("codex");
+
+    const goal = await runTurn(runtime, "/goal ship it", "session-1", runtime.controller, { goalStart: { objective: "ship it" } });
+    const next = await runTurn(runtime, "now do this");
+    const after = await runTurn(runtime, "and this");
+
+    expect(goal.goalStart).toBeDefined();
+    expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([]);
+    expect(next.sessionId).toBe("session-1");
+    expect(next.prompt).toContain("[build-mode]");
+    expect(after.prompt).toBe("and this");
+    runtime.store.close();
+  });
+
+  it("re-sends a Codex chat's pack when its text changes at the same size", async () => {
+    let pack: readonly HiddenProviderInstruction[] = PACK;
+    const { runtime } = await chatRuntime("codex", () => pack);
+
+    const first = await runTurn(runtime, "one");
+    pack = [PACK[0]!, { label: "inertia-frontend-workbench", text: "FRONTEND_PACK_TEXZ" }];
+    expect(Buffer.byteLength(pack[1]!.text)).toBe(Buffer.byteLength(PACK[1]!.text));
+    expect(pack[1]!.text).not.toBe(PACK[1]!.text);
+    const second = await runTurn(runtime, "two");
+    const third = await runTurn(runtime, "three");
+
+    expect(first.prompt).toBe(`one\n\n${INSTRUCTIONS_HEADER}\n[build-mode]\n${BUILD_MODE_INSTRUCTION}`);
+    expect(second.sessionInstruction).toBe(sessionText(runtime.conversationId, pack));
+    expect(second.prompt).toContain(`[inertia-frontend-workbench]\n${pack[1]!.text}`);
+    expect(third.prompt).toBe("three");
+    runtime.store.close();
+  });
+
+  it("re-sends a Codex chat's pack and Build mode after a compaction receipt", async () => {
+    const { runtime, clock } = await chatRuntime("codex");
+
+    await runTurn(runtime, "one");
+    compact(runtime, "codex", clock);
+    const after = await runTurn(runtime, "two");
+    const settled = await runTurn(runtime, "three");
+
+    expect(after.sessionId).toBe("session-1");
+    expect(after.prompt).toContain("[build-mode]");
+    expect(after.prompt).toContain("ORCHESTRATION_PACK_TEXT");
+    expect(settled.prompt).toBe("three");
+    runtime.store.close();
+  });
+
+  it.each([
+    ["codex", "Context compaction"],
+    ["cursor", "Cursor compacted session context"],
+    ["kimi", "Kimi Code compacted session context"],
+    ["claude", "Claude compacted context"],
+  ] as const)("re-sends after a %s compaction recorded only as an activity", async (providerId, label) => {
+    const { runtime } = await chatRuntime(providerId);
+
+    await runTurn(runtime, "one", "session-1", runtime.controller, { compactionActivity: label });
+    const after = await runTurn(runtime, "two");
+    const settled = await runTurn(runtime, "three");
+
+    expect(after.prompt).toContain("[build-mode]");
+    expect(after.prompt).toContain("ORCHESTRATION_PACK_TEXT");
+    expect(settled.prompt).toBe("three");
+    runtime.store.close();
+  });
+
+  it("sends Build mode on the next turn after a Claude session is replaced mid-turn", async () => {
+    const { runtime } = await chatRuntime("claude");
+
+    await runTurn(runtime, "one");
+    const reset = await runTurn(runtime, "/clear", "session-2");
+    const next = await runTurn(runtime, "now build", "session-2");
+
+    expect(reset.sessionId).toBe("session-1");
+    expect(runtime.store.agentTurnsForConversation(runtime.conversationId).at(-2))
+      .toMatchObject({ providerSessionBefore: "session-1", providerSessionAfter: "session-2" });
+    expect(next.sessionId).toBe("session-2");
+    expect(next.prompt).toContain("[build-mode]");
+    runtime.store.close();
+  });
+
+  it("sends an OpenCode chat's pack in the prompt once, never as system text", async () => {
+    const { runtime } = await chatRuntime("opencode");
+
+    const first = await runTurn(runtime, "one");
+    const second = await runTurn(runtime, "two");
+
+    expect(first.sessionInstruction).toBeUndefined();
+    expect(first.systemInstruction).toBeUndefined();
+    expect(first.prompt).toContain(`[inertia-chat]\nThis chat's id is ${runtime.conversationId}.`);
+    expect(second.sessionInstruction).toBeUndefined();
+    expect(second.prompt).toBe("two");
+    runtime.store.close();
+  });
+
+  it("forgets the oldest chats once it tracks too many prompt deliveries", () => {
+    const deliveries = new PromptInstructionDeliveries();
+    for (let index = 0; index <= MAX_TRACKED_PROMPT_DELIVERIES; index += 1) {
+      deliveries.record(`chat-${index}`, `turn-${index}`, "digest");
+    }
+    deliveries.record("chat-1", "turn-1b", "digest");
+    deliveries.record("chat-new", "turn-new", "digest");
+
+    expect(deliveries.sentTurnId("chat-0", "digest")).toBeNull();
+    expect(deliveries.sentTurnId("chat-1", "digest")).toBe("turn-1b");
+    expect(deliveries.sentTurnId("chat-2", "digest")).toBeNull();
+    expect(deliveries.sentTurnId(`chat-${MAX_TRACKED_PROMPT_DELIVERIES}`, "digest")).toBe(`turn-${MAX_TRACKED_PROMPT_DELIVERIES}`);
+    expect(deliveries.sentTurnId("chat-new", "digest")).toBe("turn-new");
   });
 
   it("adds no instruction header when nothing is due", async () => {

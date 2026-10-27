@@ -43,6 +43,7 @@ export {
   MAX_CLAUDE_STREAM_CORRELATION_BLOCKS,
   MAX_CLAUDE_STREAM_CORRELATION_CHARS,
 } from "./claude-message-projector-support";
+import { CLAUDE_COMPACTED_CONTEXT_TITLE } from "./context-compaction-activity";
 
 type ClaudeSystemMessage = Extract<SDKMessage, { type: "system" }>;
 
@@ -628,7 +629,7 @@ export class ClaudeMessageProjector {
         this.options.emitter.activity(
           "system",
           "completed",
-          "Claude compacted context",
+          CLAUDE_COMPACTED_CONTEXT_TITLE,
           {
             activityId: boundedIdentifier(message.uuid),
             detail: detailLines([
@@ -1068,7 +1069,7 @@ export class ClaudeMessageProjector {
       "system",
       "completed",
       status === "compacting"
-        ? "Claude compacted context"
+        ? CLAUDE_COMPACTED_CONTEXT_TITLE
         : "Claude received a response",
       { activityId: `claude:status:${status}` },
     );

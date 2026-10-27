@@ -339,9 +339,10 @@ export function resolveTurnRequest(
     documentContexts: request.documentContexts,
     context: request.context,
     internalInstructions: [...instructionDelivery.promptPack, ...turnInstructions],
-    ...(instructionDelivery.sessionInstructionBytes === undefined
+    ...(instructionDelivery.sessionInstructionDigest === undefined
       ? {}
-      : { sessionInstructionBytes: instructionDelivery.sessionInstructionBytes }),
+      : { sessionInstructionDigest: instructionDelivery.sessionInstructionDigest }),
+    ...(request.goalStart === undefined ? {} : { promptWithheld: true as const }),
   } satisfies AssembleTurnRequestInput;
   const ownChatPacketId = dependencies.store.contextPackets
     .ownConversationPacketId(conversation.id, contextPacketIds);

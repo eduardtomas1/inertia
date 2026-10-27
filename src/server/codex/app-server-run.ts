@@ -958,6 +958,9 @@ export async function openCodexTurn({
   const providerConfig = modelProvider
     ? codexModelProviderThreadConfig(modelProvider, effectiveConfig)
     : null;
+  const developerInstructions = [options.sessionDeveloperInstructions ?? "", options.developerInstructions ?? ""]
+    .filter((section) => section.length > 0)
+    .join("\n\n");
   const threadConfig = {
     cwd: options.cwd,
     approvalPolicy: accessPolicy.approvalPolicy,
@@ -969,7 +972,7 @@ export async function openCodexTurn({
       : {}),
     ...(modelProvider ? { modelProvider: modelProvider.providerId } : {}),
     ...(providerConfig || watcherConfig ? { config: { ...watcherConfig, ...providerConfig } } : {}),
-    ...(options.developerInstructions ? { developerInstructions: options.developerInstructions } : {}),
+    ...(developerInstructions ? { developerInstructions } : {}),
   };
   let opened: JsonObject;
   if (options.sessionId) {
@@ -994,13 +997,6 @@ export async function openCodexTurn({
   } else {
     opened = await request("thread/start", {
       ...threadConfig,
-      ...(options.sessionDeveloperInstructions
-        ? {
-            developerInstructions: [options.sessionDeveloperInstructions, options.developerInstructions ?? ""]
-              .filter((section) => section.length > 0)
-              .join("\n\n"),
-          }
-        : {}),
       ...(options.hostTools
         ? {
             dynamicTools: options.hostTools.definitions.map((definition) => ({

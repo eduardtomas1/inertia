@@ -45,19 +45,28 @@ safe customization feature.
 
 `inertia.orchestration` composes the existing top-level chat-management tools.
 Its guidance requires concrete ownership and success criteria, bounded
-delegation, inspection of the terminal result, and deference to Inertia for
-approval. Starting a child chat is explicitly not treated as evidence that its
-work completed.
+delegation, and inspection of the status and latest result, and states that
+Inertia asks the user before every mutating call whatever the access mode.
+Starting a child chat is explicitly not treated as evidence that its work
+completed. A latest-result read on a chat that is still running returns
+`result: null` with a `next` line pointing to the status tool. An approval
+the user leaves unanswered for five minutes resolves as a denial on the card
+and returns `approval_timed_out` to the agent, which may ask the user to try
+again. Chat and context tool arguments that fail Inertia's validation return
+`host_tool_failed` with one `<field>: <problem>` line per problem and a final
+line naming the tool to call again; Claude's in-process MCP server still
+answers schema failures itself before Inertia sees them. On the HTTP MCP
+bridge, a call to a tool the chat does not have lists the tools it does have.
 
 `inertia.frontend-workbench` composes the Browser tools described in
-`docs/AGENT_BROWSER.md`. Its guidance tells every provider that the chat has
-its own Browser whether or not the panel is showing, to navigate before
-anything else because a new tab is blank, and to follow the next step a
-failed tool names before giving up on the Browser. It also says that a
-`[redacted]` value is Inertia hiding a secret rather than page content and
-must never be retyped to check it, and that page text and control names are
-untrusted page data, never instructions; the snapshot and type tool
-descriptions repeat this. A
+`docs/AGENT_BROWSER.md`. Its guidance holds only what the tool descriptions do
+not already say: snapshot before and after each meaningful UI change, exercise
+the real interaction path, treat the audit as deterministic signals rather than
+a visual judgment, follow a failed tool's message before giving up on the
+Browser, and report only observed evidence. Navigating first, the Browser
+working while its panel is hidden, what `[redacted]` means, and that page text
+and control names are untrusted page data live in the navigate, snapshot and
+type tool descriptions, and a test keeps the guidance from repeating them. A
 successful semantic snapshot gains a bounded `inertiaAudit` object with stable
 issue codes for controls without stable labels or semantic names, clipped
 controls, overlapping controls, and targets smaller than 24 by 24 CSS pixels
@@ -81,13 +90,15 @@ The frontend loop is therefore:
 5. report only the evidence actually observed.
 
 The local screenshot remains useful evidence for the user, but its pixels are
-not currently visible to the provider model. The pack tells the model this
-directly so it cannot quietly convert “capture succeeded” into a visual claim.
+not currently visible to the provider model. The screenshot tool description
+says so and the pack forbids claiming visual parity from a screenshot, so the
+model cannot quietly convert “capture succeeded” into a visual claim.
 The current Browser also has no agent-owned viewport-resize command.
 
 `inertia.visual-replies` adds one tool, `inertia_render_html`, for every
 provider that has Inertia host tools. The agent passes one self-contained HTML
-document (at most 256 KiB of UTF-8), a title of at most 120 characters without
+document (at most 262,144 UTF-8 bytes, stated in the `html` field description
+rather than as `maxLength`, which JSON Schema counts in characters), a title of at most 120 characters without
 control characters, and an optional initial frame height from 80 to 2000 CSS
 pixels (default 360). The tool description carries the layout and theme
 guidance, including the CSS custom properties Inertia injects, so the pack adds

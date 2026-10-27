@@ -2,23 +2,30 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Unreleased
+## 0.0.79 — 2026-10-27
+
+API key chats that work end to end, a readable selection highlight in dark
+mode, and a composer with room at the bottom.
 
 ### Accounts and API keys
 
 - Chats on an Anthropic or OpenAI API key now work. Since API keys arrived in
   0.0.77, a message on a key failed at once with "The exact provider
   installation does not attest 'reasoning'", because Inertia only allowed
-  what its short model test had checked. A key on the official address now gets everything the
-  agent itself supports there: reasoning levels, plan mode, images, file
-  tools, skills, goals, **Compact and send**, and follow-ups that continue the
-  same session, also after the agent updates. Account-only features such as
-  quota windows and fast mode stay with your subscription.
+  what its short model test had checked. A key on the official address now
+  gets everything the agent itself supports there: reasoning levels, plan
+  mode, images, file tools, skills, goals, **Compact and send**, and
+  follow-ups that continue the same session, also after the agent updates.
+  Account-only features such as quota windows and fast mode stay with your
+  subscription.
 - Third-party compatible backends keep the stricter rule: only what their
   model test confirmed.
 
-### Chats
+### Look and feel
 
+- Selected text is clearly visible in dark mode. The highlight follows your
+  colour theme, in the app and in the file editor, and terminal selections
+  are brighter in every dark theme.
 - The composer's bottom row has the same breathing room as its top, so the
   branch label no longer sits against the rounded corners.
 

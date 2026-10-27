@@ -369,8 +369,8 @@ describe("detached chat window", () => {
     expect(dismiss).toContain("font-weight: 500;");
     const header = readSourceText("src/renderer/src/components/detached/DetachedChatHeader.tsx");
     expect(header).toContain("<WorkspaceHeader");
-    expect(header).toContain("<Pin size={16} />");
-    expect(readSourceText("src/renderer/src/DetachedChatApp.tsx")).toContain("Review this request in the main window.");
+    expect(readSourceText("src/renderer/src/components/detached/DetachedWindowChrome.tsx")).toContain("<Pin size={16} />");
+    expect(readSourceText("src/renderer/src/components/detached/detachedContextRequests.tsx")).toContain("Review this request in the main window.");
     expect(readSourceText("src/renderer/src/components/DetachedConversationPlaceholder.tsx")).toContain("{windowOpen ? <PictureInPicture2 size={14} /> : <PanelTopOpen size={14} />}");
   });
 });

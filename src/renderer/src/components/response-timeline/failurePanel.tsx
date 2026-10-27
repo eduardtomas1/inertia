@@ -16,9 +16,14 @@ import {
   type FailureDiagnosticFact,
 } from "../../utils/failureDiagnostics";
 import { useCopiedState } from "../../hooks/useCopiedState";
-import { diagnosticNavigationAvailable, navigateDiagnosticContext } from "../../utils/diagnosticNavigation";
+import { navigateDiagnosticContext } from "../../utils/diagnosticNavigation";
 import { TooltipButton } from "../TooltipButton";
 import "./failureDiagnostics.css";
+
+function diagnosticNavigationAvailable(): boolean {
+  const bridge = window.inertia as { queryDiagnostics?: unknown; openInMainWindow?: unknown } | undefined;
+  return typeof bridge?.queryDiagnostics === "function" || typeof bridge?.openInMainWindow === "function";
+}
 
 function DiagnosticFacts({ facts }: { facts: FailureDiagnosticFact[] }): React.JSX.Element {
   return (

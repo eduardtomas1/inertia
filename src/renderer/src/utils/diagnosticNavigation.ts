@@ -16,11 +16,6 @@ export function navigateDiagnosticContext(target: DiagnosticNavigation | Setting
   if (safe) window.dispatchEvent(new CustomEvent(DIAGNOSTIC_NAVIGATION_EVENT, { detail: safe }));
 }
 
-export function diagnosticNavigationAvailable(): boolean {
-  const bridge = window.inertia as { queryDiagnostics?: unknown; openInMainWindow?: unknown } | undefined;
-  return typeof bridge?.queryDiagnostics === "function" || typeof bridge?.openInMainWindow === "function";
-}
-
 export function diagnosticErrorReference(message: string): { message: string; incidentId?: string } {
   const match = / \[incident:([0-9a-f-]{36})\]$/iu.exec(message);
   return match && uuid.test(match[1]!) ? { message: message.slice(0, match.index), incidentId: match[1] } : { message };

@@ -1,5 +1,4 @@
-import { lazy, Suspense, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { PanelTopOpen, Pin, PinOff, X } from "lucide-react";
+import { lazy, Suspense, useState } from "react";
 import type {
   AppSettings,
   Conversation,
@@ -14,10 +13,10 @@ import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import { rootGitMutationScope } from "../../utils/workspaceGit";
 import { loadCommitDialog } from "../lazySurfaceLoaders";
-import { IconButton } from "../ui";
 import { WorkspaceHeader, type HeaderConversationMenu } from "../WorkspaceHeader";
 import type { WorkspaceToolScene } from "../WorkspaceScene";
 import { PanelLayoutControls } from "../workspace-header/PanelLayoutControls";
+import { DetachedWindowActions, type DetachedWindowActionsProps } from "./DetachedWindowChrome";
 import { newChatTarget } from "./detachedTargets";
 import type { DetachedHandoff } from "./useDetachedHandoff";
 
@@ -34,66 +33,10 @@ type ActivityActions = ReturnType<typeof useActivityActions>;
 type WorkspaceLayout = ReturnType<typeof useWorkspaceLayout>;
 type WorkspaceTools = ReturnType<typeof useWorkspaceTools>;
 
-interface WindowActionsProps {
-  alwaysOnTop: boolean;
-  pinning: boolean;
-  onToggleAlwaysOnTop: () => void;
-  onDock: () => void;
-  onClose: () => void;
-}
-
-function DetachedWindowActions({
-  alwaysOnTop,
-  pinning,
-  onToggleAlwaysOnTop,
-  onDock,
-  onClose,
-}: WindowActionsProps): React.JSX.Element {
-  return (
-    <>
-      <IconButton
-        className="corner-toggle"
-        label={alwaysOnTop ? "Unpin chat window" : "Keep chat window on top"}
-        aria-pressed={alwaysOnTop}
-        disabled={pinning}
-        onClick={onToggleAlwaysOnTop}
-      >
-        {alwaysOnTop ? <PinOff size={16} /> : <Pin size={16} />}
-      </IconButton>
-      <IconButton className="corner-toggle" label="Return chat to main window" onClick={onDock}>
-        <PanelTopOpen size={16} />
-      </IconButton>
-      <IconButton className="corner-toggle" label="Close chat window" onClick={onClose}>
-        <X size={16} />
-      </IconButton>
-    </>
-  );
-}
-
-function FallbackCornerControls({
-  children,
-  onWidthChange,
-}: {
-  children: ReactNode;
-  onWidthChange: (width: number) => void;
-}): React.JSX.Element {
-  const rootRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const node = rootRef.current;
-    if (node) onWidthChange(Math.ceil(node.getBoundingClientRect().width));
-  }, [onWidthChange]);
-  return (
-    <div ref={rootRef} className="workspace-corner-controls no-drag" data-panel-layout-controls>
-      {children}
-    </div>
-  );
-}
-
-export interface DetachedChatHeaderProps extends WindowActionsProps {
+export interface DetachedChatHeaderProps extends DetachedWindowActionsProps {
   platform: string;
-  title: string;
-  project: Project | null;
-  conversation: Conversation | null;
+  project: Project;
+  conversation: Conversation;
   settings: AppSettings;
   runs: readonly WorkspaceRun[] | undefined;
   busyAction: string | null;
@@ -110,7 +53,6 @@ export interface DetachedChatHeaderProps extends WindowActionsProps {
 
 export function DetachedChatHeader({
   platform,
-  title,
   project,
   conversation,
   settings,
@@ -130,24 +72,6 @@ export function DetachedChatHeader({
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
   const controls = <DetachedWindowActions {...windowActions} />;
-  if (!project || !conversation) {
-    return (
-      <>
-        <header className="workspace-header drag-region">
-          <div className="header-leading">
-            <nav className="header-breadcrumb" aria-label="Chat breadcrumb">
-              <div className="header-title-wrap">
-                <h1><span className="header-title-text">{title}</span></h1>
-              </div>
-            </nav>
-          </div>
-        </header>
-        <FallbackCornerControls onWidthChange={onCornerControlsWidthChange}>
-          {controls}
-        </FallbackCornerControls>
-      </>
-    );
-  }
   const gitStatus = tools.gitStatus;
   const rootRepository = rootGitMutationScope(gitStatus);
   const updateConversation = (

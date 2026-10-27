@@ -165,6 +165,10 @@ function selectionFailure(selection: Exclude<AgentPageSelection, { outcome: "sel
       return failure("invalid", "That option is disabled.");
     case "too-large":
       return failure("too-large", "That list has too many options for Inertia to search.");
+    case "reverted":
+      return failure("invalid", selection.label
+        ? `The page did not keep that option. The list shows ${JSON.stringify(selection.label)}.`
+        : "The page did not keep that option.");
   }
 }
 

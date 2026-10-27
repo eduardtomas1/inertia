@@ -189,12 +189,21 @@ test("an agent hovers a control, chooses an option and reads the page's logs", a
   expect(hovered).toMatchObject({ hovered: refFor(snapshot, "Help"), element: { label: "Help" } });
   await expect.poll(() => pageValue<boolean>(path, "window.__hovered === true")).toBe(true);
 
-  const list = snapshot.elements?.find((element) => (element as { role?: string }).role === "select")?.ref;
-  expect(list, JSON.stringify(snapshot.elements)).toBeTruthy();
+  const lists = snapshot.elements?.filter((element) => (element as { role?: string }).role === "select")
+    .map((element) => element.ref) ?? [];
+  expect(lists, JSON.stringify(snapshot.elements)).toHaveLength(3);
+  const [list, plan, region] = lists;
   expect(parsed(await browser({ action: "select", ref: list, value: "Express" })))
     .toMatchObject({ option: { value: "express", label: "Express" } });
   expect(await pageValue<string>(path, "document.querySelector('#status').textContent")).toBe("express");
   expect(await pageValue<number>(path, "window.__inputs")).toBe(1);
+  expect(parsed(await browser({ action: "select", ref: plan, value: "Pro" })))
+    .toMatchObject({ option: { value: "pro", label: "Pro" } });
+  expect(await pageValue<string>(path, "document.querySelector('#plan').value")).toBe("pro");
+  expect(await browser({ action: "select", ref: region, value: "US" })).toEqual({
+    ok: false, code: "invalid", message: "The page did not keep that option. The list shows \"EU\".",
+  });
+  expect(await pageValue<string>(path, "document.querySelector('#region').value")).toBe("eu");
   expect(await browser({ action: "select", ref: list, value: "Gold" })).toMatchObject({
     ok: false, code: "not-found", message: expect.stringContaining("\"Standard\", \"Express\""),
   });

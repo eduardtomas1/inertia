@@ -311,6 +311,51 @@ describe("Browser select", () => {
     expect(page.select.selectedIndex).toBe(2);
   });
 
+  it("reports the option a controlled list kept when its change handler accepts or rejects the choice", async () => {
+    const { broker, contents } = await loadedHarness();
+    const page = selectPage(contents, shipping);
+    let kept = 0;
+    let accept = true;
+    page.select.dispatchEvent = (event: Event) => {
+      page.events.push({ type: event.type, bubbles: event.bubbles });
+      if (event.type === "change") {
+        if (accept) kept = page.select.selectedIndex as number;
+        page.select.selectedIndex = kept;
+      }
+      return true;
+    };
+
+    await expect(broker.perform(runIdentity, { action: "select", ref: "e4", value: "express" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(page.select.selectedIndex).toBe(1);
+
+    accept = false;
+    const rejected = await broker.perform(runIdentity, { action: "select", ref: "e4", value: "Overnight" });
+    expect(rejected).toEqual({
+      ok: false,
+      code: "invalid",
+      message: "The page did not keep that option. The list shows \"Express\".",
+    });
+    expect(parseAgentBrowserResult(rejected)).toEqual(rejected);
+    expect(page.select.selectedIndex).toBe(1);
+    await expect(broker.perform(runIdentity, { action: "tabs" }))
+      .resolves.toMatchObject({ state: { activity: { action: "select" } } });
+  });
+
+  it("redacts the kept option of a list Inertia withholds", async () => {
+    const { broker, contents } = await loadedHarness();
+    const page = selectPage(contents, shipping, {}, ["Standard"]);
+    page.select.dispatchEvent = (event: Event) => {
+      if (event.type === "change") page.select.selectedIndex = 0;
+      return true;
+    };
+    await expect(broker.perform(runIdentity, { action: "select", ref: "e4", value: "express" })).resolves.toEqual({
+      ok: false,
+      code: "invalid",
+      message: "The page did not keep that option. The list shows \"[redacted]\".",
+    });
+  });
+
   it("lists up to twenty redacted option labels when nothing matches and changes nothing", async () => {
     const { broker, contents } = await loadedHarness();
     const options = Array.from({ length: 25 }, (_, index) => ({

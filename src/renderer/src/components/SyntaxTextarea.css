@@ -4,7 +4,7 @@
 .syntax-textarea-mirror::-webkit-scrollbar { visibility: hidden; }
 .syntax-textarea-mirror code, .syntax-textarea-mirror span { font: inherit;}
 .file-editor-dialog .syntax-textarea.is-highlighted textarea { color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--text); background: transparent; }
-.file-editor-dialog .syntax-textarea.is-highlighted textarea::selection { background: var(--accent-soft); -webkit-text-fill-color: var(--text); }
+.file-editor-dialog .syntax-textarea.is-highlighted textarea::selection { background: var(--selection); -webkit-text-fill-color: var(--text); }
 .syntax-textarea-mode { position: absolute; bottom: 12px; right: 20px; padding: 2px 6px; border-radius: var(--radius-xs); background: var(--surface); color: var(--text-faint); font-size: var(--text-xs); }
 @media (forced-colors: active) {
   .syntax-textarea-mirror { display: none; }

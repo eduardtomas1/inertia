@@ -28,7 +28,7 @@ const FRONTEND_INSTRUCTION: HiddenProviderInstruction = {
     "For frontend work, snapshot before and after each meaningful UI change and exercise the real interaction path.",
     "The snapshot audit flags missing control names and clipped, overlapping or small controls in the current viewport: deterministic signals, not a full visual judgment; re-check after the viewport changes.",
     "When a Browser tool fails, follow its message before giving up on the Browser.",
-    "Report only evidence you observed; never claim visual parity from a screenshot.",
+    "Report only evidence you observed.",
   ].join(" "),
 };
 

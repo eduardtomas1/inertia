@@ -48,7 +48,7 @@ describe("Browser tool guidance", () => {
       const shared = [...phrases(definition.description)].filter((phrase) => instruction.has(phrase));
       expect(shared, definition.name).toEqual([]);
     }
-    for (const repeated of [SECRET_GUIDANCE, UNTRUSTED_GUIDANCE, "new tab is blank", "Playwright", "panel is showing", "not shown to you"]) {
+    for (const repeated of [SECRET_GUIDANCE, UNTRUSTED_GUIDANCE, "new tab is blank", "Playwright", "panel is showing", "not shown to you", "screenshot", "pixels"]) {
       expect(pack.text).not.toContain(repeated);
     }
     expect(pack.text).toContain("When a Browser tool fails, follow its message");

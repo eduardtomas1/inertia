@@ -91,8 +91,8 @@ The frontend loop is therefore:
 
 The local screenshot remains useful evidence for the user, but its pixels are
 not currently visible to the provider model. The screenshot tool description
-says so and the pack forbids claiming visual parity from a screenshot, so the
-model cannot quietly convert “capture succeeded” into a visual claim.
+says so, and the pack tells the model to report only evidence it observed, so
+it cannot quietly convert “capture succeeded” into a visual claim.
 The current Browser also has no agent-owned viewport-resize command.
 
 `inertia.visual-replies` adds one tool, `inertia_render_html`, for every

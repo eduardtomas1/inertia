@@ -106,21 +106,9 @@ export function defaultHtmlRenderTheme(scheme: HtmlRenderScheme): HtmlRenderThem
 }
 
 /** Variables the page can rely on, in agent-facing words for tool guidance. */
-export const HTML_RENDER_THEME_GUIDE = [
-  "Inertia injects its active theme as CSS custom properties on :root, and they follow the user's light/dark mode and color theme live:",
-  "--background (the page background, identical to the chat around the frame), --foreground, --muted, --muted-foreground,",
-  "--card, --card-foreground, --border, --accent, --accent-foreground (text on the accent), --accent-strong (accent used as text),",
-  "--destructive, --warning, --success, --info, --code-background, --radius, --font-sans, --font-mono.",
-  "A base stylesheet sets html background/color/font from these and body margin to 0; your own CSS overrides it.",
-].join(" ");
+export const HTML_RENDER_THEME_GUIDE = `Theme variables on :root follow the user's theme live: ${HTML_RENDER_THEME_VARIABLES.map(([alias]) => alias).join(", ")}.`;
 
-export const HTML_RENDER_LAYOUT_GUIDE = [
-  "The frame is borderless on the chat's own background, as wide as the reply column, and its left edge lines up with your reply text.",
-  "Leave html, body, and the outermost element without a background color unless a box must stand apart; then give it 16px of padding and var(--radius) corners.",
-  "Use a fluid width with no outer card, border, or banner title: the page is part of your reply.",
-  "Let content set the page's height and avoid viewport-based heights such as 100vh; the frame grows to fit the page up to 2000px, then scrolls inside.",
-  "Give charts fixed pixel heights. Write everything inline: the page cannot load remote scripts, styles, fonts, or images, so use inline SVG, <canvas>, or data: URIs.",
-].join(" ");
+export const HTML_RENDER_LAYOUT_GUIDE = "Layout: fluid width; no outer card, border, page background or banner title; no 100vh; fixed pixel heights for charts.";
 
 // ---------------------------------------------------------------------------
 // Frame ↔ renderer messages

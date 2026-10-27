@@ -50,10 +50,9 @@ export const htmlRenderInputSchema = z.object({
 }).strict();
 
 const DESCRIPTION = [
-  "Show a finished HTML page (chart, table, diagram, collage, mockup) inline in this chat, above your final text reply; call it before writing that reply.",
-  "The reader sees the page above the reply, but some clients and later turns see only text: in the reply, say in one sentence what the page shows, then add only what the page doesn't say, without restating its details or saying where it is.",
-  "Pass one complete, self-contained HTML document of at most 256 KiB and a short title. Scripts run in a sandbox that cannot fetch or load anything remote.",
-  `A turn can show at most ${HTML_RENDER_MAX_PER_TURN} pages.`,
+  "Show one finished, self-contained HTML page (chart, table, diagram, mockup) inline above your reply; call it before writing the reply.",
+  `Limits: ${HTML_RENDER_MAX_PER_TURN} pages per turn; the frame grows to ${HTML_RENDER_MAX_HEIGHT}px, then scrolls.`,
+  "Sandboxed with no network: inline all CSS, scripts, fonts and images (SVG, <canvas>, data: URIs).",
   HTML_RENDER_LAYOUT_GUIDE,
   HTML_RENDER_THEME_GUIDE,
 ].join(" ");
@@ -68,7 +67,6 @@ export const HTML_RENDER_TOOL_DEFINITION: ProviderHostToolDefinition = {
       html: {
         type: "string",
         minLength: 1,
-        maxLength: HTML_RENDER_MAX_HTML_BYTES,
         description: `A complete HTML document with inline CSS and scripts. At most ${HTML_RENDER_MAX_HTML_BYTES} UTF-8 bytes.`,
       },
       title: {
@@ -144,7 +142,7 @@ export class HtmlRenderHostTool {
     if (oversized(call.arguments)) {
       return failure(
         "html_too_large",
-        `The page is larger than ${HTML_RENDER_MAX_HTML_BYTES} UTF-8 bytes. Inline less data or simplify the markup, then try again.`,
+        `html: larger than ${HTML_RENDER_MAX_HTML_BYTES} UTF-8 bytes. Inline less data or simplify the markup, then call ${HTML_RENDER_TOOL_NAME} again.`,
       );
     }
     const parsed = htmlRenderInputSchema.safeParse(call.arguments);

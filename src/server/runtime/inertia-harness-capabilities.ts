@@ -92,7 +92,7 @@ export function createInertiaHarnessCapabilities(
   });
   packs.push({
     id: "inertia.visual-replies",
-    revision: 1,
+    revision: 2,
     title: "Inertia visual replies",
     summary: "One sandboxed, self-contained HTML page per call, shown inline above the turn's written reply.",
     instructions: [],

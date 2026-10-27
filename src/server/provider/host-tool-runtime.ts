@@ -7,6 +7,7 @@ import {
 } from "../../shared/provider-host-tools";
 import {
   providerHostToolAccepted,
+  type ProviderHostToolApprovalDecision,
   type ProviderHostToolApprovalRequest,
   type ProviderHostToolBridge,
   type ProviderHostToolImage,
@@ -21,10 +22,11 @@ const HOST_TOOL_APPROVAL_ID_PREFIX = "inertia-host-tool:";
 const HOST_TOOL_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 const MAX_HOST_TOOL_CALLS = 128;
 const MAX_PENDING_HOST_TOOL_CALLS = 8;
+const MAX_LISTED_TOOL_NAMES = 32;
 
 interface PendingApproval {
   callId: string;
-  resolve(decision: AgentApprovalDecision): void;
+  resolve(decision: ProviderHostToolApprovalDecision): void;
   timeout: NodeJS.Timeout;
 }
 
@@ -132,12 +134,11 @@ export class ProviderHostToolRuntime {
     if (this.settled) {
       return Promise.resolve(failure("This Inertia turn no longer owns chat-tool authority."));
     }
-    if (
-      !validIdentity(input.callId, 512)
-      || !validIdentity(input.tool, 128)
-      || !providerHostToolAccepted(this.options.bridge, input.tool)
-    ) {
-      return Promise.resolve(failure("The provider sent an invalid or unauthorised Inertia tool call."));
+    if (!validIdentity(input.callId, 512) || !validIdentity(input.tool, 128)) {
+      return Promise.resolve(failure("The provider sent a malformed Inertia tool call."));
+    }
+    if (!providerHostToolAccepted(this.options.bridge, input.tool)) {
+      return Promise.resolve(failure(this.unknownToolMessage(input.tool)));
     }
     if (this.seenCallIds.has(input.callId)) {
       // MCP/JSON-RPC only promises correlation, not run-global uniqueness.
@@ -258,10 +259,18 @@ export class ProviderHostToolRuntime {
     return this.settled;
   }
 
+  private unknownToolMessage(tool: string): string {
+    const names = this.options.bridge.definitions.map(({ name }) => name);
+    if (names.length === 0) return `${tool} is not available: this chat has no Inertia tools.`;
+    const listed = names.slice(0, MAX_LISTED_TOOL_NAMES).join(", ");
+    const more = names.length > MAX_LISTED_TOOL_NAMES ? ", …" : "";
+    return `${tool} is not an Inertia tool in this chat. Use one of: ${listed}${more}.`;
+  }
+
   private requestApproval(
     callId: string,
     request: ProviderHostToolApprovalRequest,
-  ): Promise<AgentApprovalDecision> {
+  ): Promise<ProviderHostToolApprovalDecision> {
     const call = this.pendingCalls.get(callId);
     if (
       this.settled
@@ -280,12 +289,12 @@ export class ProviderHostToolRuntime {
       permissionRoots: request.permissionRoots.slice(0, 8),
       availableDecisions: ["approve", "deny", "cancel"],
     };
-    return new Promise<AgentApprovalDecision>((resolve) => {
+    return new Promise<ProviderHostToolApprovalDecision>((resolve) => {
       const timeout = setTimeout(() => {
         const pending = this.pendingApprovals.get(requestId);
         if (!pending) return;
         this.pendingApprovals.delete(requestId);
-        pending.resolve("deny");
+        pending.resolve("timeout");
         this.options.onApprovalResolved(requestId, "deny");
       }, Math.max(1, Math.min(
         HOST_TOOL_APPROVAL_TIMEOUT_MS,

@@ -40,6 +40,7 @@ import {
   type AgentContextWatcherPolicy,
 } from "./agent-context-tool";
 import { hostToolDigest as digest } from "./host-tool-digest";
+import { invalidHostToolArguments } from "./host-tool-argument-errors";
 import type { TurnController } from "./turns/turn-controller";
 import {
   AGENT_BROWSER_TOOL_NAMES,
@@ -67,6 +68,7 @@ const MAX_LIST_LIMIT = 25;
 const MAX_PROMPT_CHARS = 32_768;
 const MAX_LATEST_RESULT_BYTES = 8_000;
 const MAX_ACTIVE_CHILDREN = 3;
+const LATEST_RESULT_RUNNING_NEXT = "Still running; read inertia_get_conversation_status, then call inertia_get_latest_result again once it has finished.";
 const TERMINAL_TURN_STATUSES = new Set([
   "completed",
   "failed",
@@ -74,17 +76,19 @@ const TERMINAL_TURN_STATUSES = new Set([
   "interrupted",
 ]);
 
+const SINGLE_LINE_PATTERN = "^[^\\u0000-\\u001f\\u007f]*[^\\s\\u0000-\\u001f\\u007f][^\\u0000-\\u001f\\u007f]*$";
+const MULTILINE_PATTERN = "^[^\\u0000]*[^\\s\\u0000][^\\u0000]*$";
 const idSchema = z.string().uuid();
 const safeSingleLineSchema = (maximum: number) => z.string()
   .trim()
   .min(1)
   .max(maximum)
-  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value));
+  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), "must be one line without control characters");
 const safeMultilineSchema = (maximum: number) => z.string()
   .trim()
   .min(1)
   .max(maximum)
-  .refine((value) => !value.includes("\0"));
+  .refine((value) => !value.includes("\0"), "must not contain NUL characters");
 const routeSchema = z.object({
   providerId: z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity"])
     .optional(),
@@ -157,13 +161,13 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
           type: "string",
           minLength: 1,
           maxLength: 120,
-          pattern: "^[^\\u0000-\\u001f\\u007f]+$",
+          pattern: SINGLE_LINE_PATTERN,
         },
         prompt: {
           type: "string",
           minLength: 1,
           maxLength: MAX_PROMPT_CHARS,
-          pattern: "^[^\\u0000]*$",
+          pattern: MULTILINE_PATTERN,
         },
         route: {
           type: "object",
@@ -172,9 +176,9 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
             providerId: {
               enum: ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"],
             },
-            backendProfileId: { type: "string", minLength: 1, maxLength: 200 },
-            modelId: { type: "string", minLength: 1, maxLength: 300 },
-            reasoningEffort: { type: ["string", "null"], maxLength: 100 },
+            backendProfileId: { type: "string", minLength: 1, maxLength: 200, pattern: SINGLE_LINE_PATTERN },
+            modelId: { type: "string", minLength: 1, maxLength: 300, pattern: SINGLE_LINE_PATTERN },
+            reasoningEffort: { type: ["string", "null"], minLength: 1, maxLength: 100, pattern: SINGLE_LINE_PATTERN },
           },
         },
         interactionMode: { enum: ["build", "plan"] },
@@ -184,7 +188,7 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
           additionalProperties: false,
           properties: {
             kind: { enum: ["project", "reuse-current", "isolated"] },
-            sourceBranch: { type: "string", minLength: 1, maxLength: 255 },
+            sourceBranch: { type: "string", minLength: 1, maxLength: 255, pattern: SINGLE_LINE_PATTERN },
           },
           required: ["kind"],
         },
@@ -206,7 +210,7 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
       type: "string",
       minLength: 1,
       maxLength: MAX_PROMPT_CHARS,
-      pattern: "^[^\\u0000]*$",
+      pattern: MULTILINE_PATTERN,
     },
       },
       required: ["conversationId", "content"],
@@ -463,6 +467,10 @@ export class AgentThreadManager {
           return failure("unknown_tool", "That Inertia host tool is not available.");
       }
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        const definition = TOOL_DEFINITIONS.find(({ name }) => name === call.tool);
+        return failure("host_tool_failed", invalidHostToolArguments(call.tool, definition?.inputSchema, call.arguments, error));
+      }
       return failure(
         "host_tool_failed",
         error instanceof Error ? error.message.slice(0, 1_000) : "The Inertia host tool failed.",
@@ -550,7 +558,14 @@ export class AgentThreadManager {
     const target = this.managedTarget(source, input.conversationId);
     const latest = this.dependencies.store.latestAgentTurnForConversation(target.id);
     if (!latest?.terminalAssistantMessageId) {
-      return json({ conversationId: target.id, result: null, persisted: true });
+      const running = this.dependencies.turns.isActive(target.id)
+        || (latest !== null && !TERMINAL_TURN_STATUSES.has(latest.status));
+      return json({
+        conversationId: target.id,
+        result: null,
+        persisted: true,
+        ...(running ? { next: LATEST_RESULT_RUNNING_NEXT } : {}),
+      });
     }
     const message = this.dependencies.store.message(
       latest.terminalAssistantMessageId,
@@ -634,10 +649,16 @@ export class AgentThreadManager {
         reserved.operation.id,
         ["approval-pending"],
         "denied",
-        { failureMessage: decision === "cancel" ? "Cancelled by the user." : "Denied by the user." },
+        {
+          failureMessage: decision === "cancel"
+            ? "Cancelled by the user."
+            : decision === "timeout" ? "The approval timed out." : "Denied by the user.",
+        },
         this.now(),
       );
-      return failure("user_denied", "The user did not approve this chat action.");
+      return decision === "timeout"
+        ? failure("approval_timed_out", `The user did not answer the approval in time. Ask the user to try again, then call ${toolName} again.`)
+        : failure("user_denied", "The user did not approve this chat action.");
     }
     this.dependencies.store.agentThreadManagement.transition(
       reserved.operation.id,

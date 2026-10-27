@@ -443,6 +443,8 @@ export interface ProviderHostToolDefinition {
   idempotent?: boolean;
 }
 
+export type ProviderHostToolApprovalDecision = AgentApprovalDecision | "timeout";
+
 export interface ProviderHostToolApprovalRequest {
   title: string;
   detail: string;
@@ -459,7 +461,7 @@ export interface ProviderHostToolCall {
   signal: AbortSignal;
   requestApproval(
     request: ProviderHostToolApprovalRequest,
-  ): Promise<AgentApprovalDecision>;
+  ): Promise<ProviderHostToolApprovalDecision>;
 }
 
 export interface ProviderHostToolImage {

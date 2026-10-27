@@ -115,7 +115,7 @@ function failure(code: string, message: string): ProviderHostToolResult {
   return { success: false, text: JSON.stringify({ error: { code, message } }) };
 }
 
-function imagesAccepted(turn: AgentTurn, providers: readonly ProviderInfo[]): boolean {
+export function imagesAccepted(turn: AgentTurn, providers: readonly ProviderInfo[]): boolean {
   if (turn.providerId !== "claude" && turn.providerId !== "codex") return false;
   if (turn.modelSelection.backendProfileId !== providerNativeBackendProfile(turn.providerId).id) {
     return false;

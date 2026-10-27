@@ -33,7 +33,7 @@ const FRONTEND_INSTRUCTION: HiddenProviderInstruction = {
     "For frontend work, take a snapshot before and after meaningful UI changes.",
     "The snapshot includes an Inertia audit for stable control names, clipped controls, overlapping controls, and small targets in the current viewport; treat these as deterministic signals, not a complete visual judgment.",
     "Exercise the real interaction path when useful, repeat checks after the user or layout changes the viewport, and report which evidence was actually observed.",
-    "The local screenshot tool records pixels for the user but does not show those pixels to you, so never claim visual parity from that capture alone.",
+    "inertia_browser_screenshot returns the image to you when this model accepts images; otherwise the pixels stay on the user's device, so never claim visual parity from a capture you could not see.",
   ].join(" "),
 };
 

@@ -33,7 +33,7 @@ import { AgentBrowserTimeout, agentOperationDelay, type AgentOperationScope } fr
 import type { PreviewTab } from "./preview-tab.js";
 import {
   agentPagePointMap, agentPageViewPoint, agentViewportActivityLabel, agentViewportLayout, agentViewportState, nextAgentViewport,
-  type AgentPagePointMap, type AgentViewportSetting, type AgentViewportSize,
+  restoreAgentPageEmulation, type AgentPagePointMap, type AgentViewportSetting, type AgentViewportSize,
 } from "./preview-agent-viewport.js";
 
 const PREVIEW_RENDERER_OPERATION_TIMEOUT_MS = 15_000;
@@ -940,6 +940,11 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       throw new AgentBrowserRefusal(failure("unavailable", CRASHED_PAGE_MESSAGE));
     }
     await this.#ensureSecurityDebugger(contents, scope);
+    await this.rendererOperation(
+      contents,
+      () => restoreAgentPageEmulation(contents),
+      { scope, phase: "page-viewport", cancel: () => resetAgentFileChooserBlock(contents) },
+    );
     await this.rendererOperation(
       contents,
       () => installAgentPagePrivacyGuard(contents),

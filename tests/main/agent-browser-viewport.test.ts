@@ -24,6 +24,9 @@ import {
   agentViewportLayout,
   agentViewportState,
   nextAgentViewport,
+  resetAgentPageEmulation,
+  restoreAgentPageEmulation,
+  setAgentPageEmulation,
 } from "../../src/main/preview-agent-viewport";
 import {
   MAX_AGENT_BROWSER_IMAGE_EDGE,
@@ -390,6 +393,62 @@ describe("agent Browser viewport in the broker", () => {
     expect(emulation()).toEqual([
       { contentsId: contents.id, method: "Emulation.setEmulatedMedia", params: agentEmulatedMedia("dark") },
     ]);
+  });
+
+  it("re-sends an override that failed before the next agent action", async () => {
+    const { broker, contents, emulation } = await shownBrowser();
+    await broker.perform(runIdentity, { action: "resize", preset: "desktop", colorScheme: "dark" });
+    const applied = emulation().length;
+    const send = contents.debugger.sendCommand.getMockImplementation()!;
+    contents.debugger.sendCommand.mockImplementationOnce(async (method, params) => {
+      if (method === "Emulation.setDeviceMetricsOverride") throw new Error("The page was busy.");
+      return await send(method, params);
+    });
+    broker.setBounds({ ...owner, bounds: { x: 100, y: 50, width: 300, height: 500 } });
+    await vi.waitFor(() => expect(contents.debugger.sendCommand).toHaveBeenLastCalledWith(
+      "Emulation.setDeviceMetricsOverride",
+      agentDeviceMetricsOverride(desktop, 300 / 1_280),
+    ));
+    expect(emulation()).toHaveLength(applied);
+
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e1" })).resolves.toMatchObject({ ok: true });
+    expect(emulation().slice(applied)).toEqual([
+      {
+        contentsId: contents.id,
+        method: "Emulation.setDeviceMetricsOverride",
+        params: agentDeviceMetricsOverride(desktop, 300 / 1_280),
+      },
+      { contentsId: contents.id, method: "Emulation.setEmulatedMedia", params: agentEmulatedMedia("dark") },
+    ]);
+    await broker.perform(runIdentity, { action: "click", ref: "e1" });
+    expect(emulation()).toHaveLength(applied + 2);
+  });
+
+  it("never records an override that a re-attached debugger did not receive", async () => {
+    const { contents, emulation } = await shownBrowser();
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const send = contents.debugger.sendCommand.getMockImplementation()!;
+    contents.debugger.sendCommand.mockImplementationOnce(async (method, params) => {
+      const result = await send(method, params);
+      await gate;
+      return result;
+    });
+    const first = setAgentPageEmulation(contents as never, { viewport: desktop, colorScheme: "dark" }, 0.5);
+    await vi.waitFor(() => expect(emulation()).toHaveLength(1));
+
+    resetAgentPageEmulation(contents as never);
+    const restored = restoreAgentPageEmulation(contents as never);
+    release();
+    await Promise.all([first, restored]);
+
+    expect(emulation()).toEqual([
+      { contentsId: contents.id, method: "Emulation.setDeviceMetricsOverride", params: agentDeviceMetricsOverride(desktop, 0.5) },
+      { contentsId: contents.id, method: "Emulation.setDeviceMetricsOverride", params: agentDeviceMetricsOverride(desktop, 0.5) },
+      { contentsId: contents.id, method: "Emulation.setEmulatedMedia", params: agentEmulatedMedia("dark") },
+    ]);
+    await restoreAgentPageEmulation(contents as never);
+    expect(emulation()).toHaveLength(3);
   });
 
   it("does not wait for an inactive tab whose page never answers the emulation", async () => {

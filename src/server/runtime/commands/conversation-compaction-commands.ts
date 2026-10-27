@@ -66,6 +66,7 @@ export interface ConversationCompactionCommandDependencies {
   enableProviders: boolean;
   lifetimeSignal?: AbortSignal;
   compactions?: ConversationCompactionStates;
+  instructions?: Pick<TurnController, "compactionSessionInstruction" | "forgetPromptDelivery">;
   interaction?: TurnInteractionCommandDependencies;
   settings?(): Pick<AppSettings, "compactOnReturn">;
   refreshProviderAccount?(providerId: ProviderInfo["id"]): Promise<void>;
@@ -351,6 +352,7 @@ async function compactUnderLock<T>(
     let usageObserved = false;
     let usageProjectionFailed = false;
     let result: Awaited<ReturnType<ProviderManager["compact"]>>;
+    const sessionInstruction = dependencies.instructions?.compactionSessionInstruction(currentConversation, route);
     dependencies.lifetimeSignal?.throwIfAborted();
     if (request.deadline?.aborted) throw new RuntimeRequestError(COMPACTION_TIMED_OUT);
     try {
@@ -376,6 +378,7 @@ async function compactUnderLock<T>(
         access: currentConversation.accessMode,
         sessionId: currentConversation.providerSessionId!,
         ...(supportedFastMode ? { supportedFastMode } : {}),
+        ...(sessionInstruction === undefined ? {} : { sessionInstruction }),
       }, request.instruction, {
         onUsage: (event) => {
           afterTokens = event.usage.usedTokens;
@@ -410,6 +413,7 @@ async function compactUnderLock<T>(
       throw new RuntimeRequestError(request.deadline?.aborted ? COMPACTION_TIMED_OUT : result.message);
     }
     progress.compacted = true;
+    dependencies.instructions?.forgetPromptDelivery(conversation.id);
     if (!usageObserved) {
       try { invalidateStaleContextUsage(dependencies, conversation.id); }
       catch { usageProjectionFailed = true; }

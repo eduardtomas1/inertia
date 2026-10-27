@@ -148,6 +148,21 @@ test("shares one directly openable Browser across user, agent, and restart lifec
   });
 
   await closeWorkspaceTools(page);
+  await expect.poll(() => app.nativePreviewIsVisible(agentUrl)).toBe(false);
+  const hiddenScreenshot = await app.electronApp.evaluate(
+    async (_electron, id) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          conversationId: string,
+          command: { action: "screenshot" },
+        ) => Promise<Record<string, unknown>>;
+      };
+      return await runtime.agentBrowser(id, { action: "screenshot" });
+    },
+    conversationId,
+  );
+  expect(hiddenScreenshot).toMatchObject({ ok: true, image: { mimeType: "image/png" } });
+
   ({ page } = await app.restart());
   await expect.poll(() => app.electronApp.evaluate(
     ({ webContents }, url) => webContents.getAllWebContents().some(

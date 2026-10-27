@@ -68,20 +68,24 @@ async function waitForCodexModels(): Promise<void> {
   const socket = new WebSocket(websocketUrl, {
     origin: "inertia://bundle", maxPayload: 2 * 1024 * 1024,
   });
-  try {
-    await new Promise<void>((resolve, reject) => {
-      socket.on("error", reject);
-      socket.on("message", (data) => {
-        const frame = JSON.parse(data.toString()) as ServerEvent;
-        const event = frame.type === "runtime.event" ? frame.event : frame;
-        if (event.type !== "server.welcome" && event.type !== "snapshot.updated") return;
-        const codex = event.snapshot.providers.find(({ id }) => id === "codex");
-        if (codex?.canRun && codex.models.length === 2) resolve();
-      });
+  await new Promise<void>((resolve, reject) => {
+    const finish = (error?: Error): void => {
+      clearTimeout(timer);
+      socket.terminate();
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => finish(new Error("Codex discovery did not publish two models.")), 30_000);
+    socket.on("error", (error) => finish(error));
+    socket.on("close", () => finish(new Error("Runtime socket closed before Codex discovery finished.")));
+    socket.on("message", (data) => {
+      const frame = JSON.parse(data.toString()) as ServerEvent;
+      const event = frame.type === "runtime.event" ? frame.event : frame;
+      if (event.type !== "server.welcome" && event.type !== "snapshot.updated") return;
+      const codex = event.snapshot.providers.find(({ id }) => id === "codex");
+      if (codex?.canRun && codex.models.length === 2) finish();
     });
-  } finally {
-    socket.terminate();
-  }
+  });
 }
 
 test.beforeAll(async () => {

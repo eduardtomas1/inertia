@@ -292,6 +292,22 @@ export type DesktopWindowContext =
   | { role: "main" }
   | ({ role: "detached-chat"; draft: string } & DetachedChatWindowSummary);
 
+export type DetachedChatSettingsPage = "general" | "agents" | "help";
+
+export type DetachedChatMainTarget =
+  | { kind: "conversation"; conversationId: string }
+  | {
+    kind: "new-chat";
+    projectId: string;
+    branch?: string;
+    worktree?: "current" | "isolated";
+  }
+  | { kind: "settings"; page: DetachedChatSettingsPage }
+  | { kind: "provider-setup"; providerId: string }
+  | { kind: "backend-setup"; profileId?: string }
+  | { kind: "diagnostics" }
+  | { kind: "usage-limits" };
+
 export interface DetachedChatWindowOpenResult
   extends DetachedChatWindowSummary {
   disposition: "opened" | "focused";

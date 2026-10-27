@@ -212,6 +212,7 @@ function startCodexRun(
       onReasoning: (text) => emitter.codex({ type: "reasoning-summary", text }),
       onUsage: (usage) => emitter.codex({ type: "usage", usage: promptCacheClock.attach(usage) }),
       onRateLimits: (rateLimits, complete) => {
+        if (options.input.backendProfile.source === "custom") return;
         emitter.capability("rate-limits", true);
         emitter.codex({ type: "metadata", metadata: { rateLimits }, source: "provider", complete });
       },

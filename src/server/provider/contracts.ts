@@ -520,13 +520,13 @@ export function unknownProviderHostToolMessage(
   tool: string,
 ): string {
   const names = bridge.definitions.map(({ name }) => name);
-  const unknown = ECHOABLE_HOST_TOOL_NAME.test(tool) ? `Unknown Inertia tool ${tool}` : "Unknown Inertia tool";
-  if (names.length === 0) return `${unknown}; this chat has no Inertia tools.`;
+  if (names.length === 0) return "Unknown Inertia tool; this chat has no Inertia tools.";
   const suffix = names.find((name) => tool.endsWith(`__${name}`));
   const nearest = names
     .map((name) => ({ name, distance: editDistance(tool, name) }))
     .sort((left, right) => left.distance - right.distance)[0]!;
   const suggestion = suffix ?? (nearest.distance <= MAX_SUGGESTION_DISTANCE ? nearest.name : undefined);
+  const unknown = suggestion && ECHOABLE_HOST_TOOL_NAME.test(tool) ? `Unknown Inertia tool ${tool}` : "Unknown Inertia tool";
   const listed = names.slice(0, MAX_LISTED_HOST_TOOL_NAMES).join(", ");
   const more = names.length > MAX_LISTED_HOST_TOOL_NAMES ? ", …" : "";
   return `${unknown}.${suggestion ? ` Did you mean ${suggestion}?` : ""} Available: ${listed}${more}.`;

@@ -245,6 +245,28 @@ describe("Codex App Server host tools", () => {
     }
   });
 
+  it("answers a tool name with surrounding whitespace like the HTTP bridge and keeps control characters malformed", async () => {
+    const harness = eventHarness();
+    try {
+      const cases: Array<[string, string]> = [
+        [" inertia_list_conversations", "Unknown Inertia tool. Did you mean inertia_list_conversations?"],
+        ["inertia_list_conversations\uFEFF", "Unknown Inertia tool. Did you mean inertia_list_conversations?"],
+        ["\tinertia_list_conversations", "Codex sent an invalid or unauthorised Inertia tool call."],
+      ];
+      for (const [index, [tool, message]] of cases.entries()) {
+        harness.events.handleServerRequest(`rpc-${index}`, "item/tool/call", toolRequest({ callId: `call-${index}`, tool }));
+      }
+      await flush();
+      expect(harness.calls).toEqual([]);
+      expect(harness.writes).toEqual(cases.map(([, message], index) => ({
+        id: `rpc-${index}`,
+        error: { code: -32602, message: expect.stringContaining(message) },
+      })));
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
   it("returns host-owned images through Codex dynamic tool content", async () => {
     const image = Buffer.from("png-evidence").toString("base64");
     const photo = Buffer.from("webp-evidence!").toString("base64");

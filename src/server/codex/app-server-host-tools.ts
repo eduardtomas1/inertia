@@ -84,7 +84,12 @@ export class CodexHostToolRuntime {
     );
     const providerTurnId = strictCodexProviderIdentifier(params.turnId, 512);
     const toolCallId = strictCodexProviderIdentifier(params.callId, 512);
-    const tool = strictCodexProviderIdentifier(params.tool, 128);
+    const tool = strictCodexProviderIdentifier(params.tool, 128)
+      ?? (typeof params.tool === "string"
+        && params.tool.length <= 128
+        && strictCodexProviderIdentifier(params.tool.trim(), 128) !== null
+        ? params.tool
+        : null);
     if (!bridge) {
       this.writeOrCancel({
         id,

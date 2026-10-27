@@ -2,6 +2,26 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Accounts and API keys
+
+- Chats on an Anthropic or OpenAI API key now work. Since API keys arrived in
+  0.0.77, a message on a key failed at once with "The exact provider
+  installation does not attest 'reasoning'", because Inertia only allowed
+  what its short model test had checked. A key on the official address now gets everything the
+  agent itself supports there: reasoning levels, plan mode, images, file
+  tools, skills, goals, **Compact and send**, and follow-ups that continue the
+  same session, also after the agent updates. Account-only features such as
+  quota windows and fast mode stay with your subscription.
+- Third-party compatible backends keep the stricter rule: only what their
+  model test confirmed.
+
+### Chats
+
+- The composer's bottom row has the same breathing room as its top, so the
+  branch label no longer sits against the rounded corners.
+
 ## 0.0.78 — 2026-10-27
 
 A calmer, more polished look across the app, a sidebar strip that says what

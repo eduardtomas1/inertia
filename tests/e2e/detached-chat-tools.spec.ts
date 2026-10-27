@@ -85,8 +85,7 @@ test("offers the chat's own menu, rename and thread ID copy in the header", asyn
   await titleButton.click();
   const menu = popup.getByRole("menu", { name: `Thread actions for ${title}` });
   await expect(menu.getByRole("menuitem", { name: "Rename thread" })).toBeVisible();
-  await expect(menu.getByRole("menuitem", { name: /split view|new window/iu })).toHaveCount(0);
-  await expect(menu.getByRole("menuitem", { name: "Archive thread" })).toHaveAttribute("aria-disabled", "true");
+  await expect(menu.getByRole("menuitem", { name: /split view|new window|archive|delete/iu })).toHaveCount(0);
   await menu.getByRole("menuitem", { name: "Copy" }).click();
   await popup.getByRole("menuitem", { name: "Thread ID" }).click();
   await expect(menu).toBeHidden();

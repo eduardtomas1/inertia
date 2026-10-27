@@ -11,6 +11,13 @@ import {
   versionedContinuationIdentityForSelection,
   providerNativeModelSelection,
 } from "../src/shared/model-routing";
+import { backendEndpointIdentity } from "../src/shared/backend-endpoint-identity";
+import { OFFICIAL_API_KEY_ENDPOINTS } from "../src/shared/official-api-key-endpoints";
+import {
+  API_KEY_BACKEND_PRESET_IDS,
+  BACKEND_PRESETS,
+  normalizeBackendBaseUrl,
+} from "../src/shared/backend-presets";
 
 const codex = providerNativeModelSelection({
   providerId: "codex",
@@ -509,5 +516,56 @@ describe("provider continuation policy", () => {
       hasTurns: true,
       allowsModelSwitchWithinSession: true,
     })).toMatchObject({ action: "resume-session", changeKind: "none" });
+  });
+
+  it.each([
+    ["claude-agent-sdk", "https://api.anthropic.com"],
+    ["codex-app-server", "https://api.openai.com/v1"],
+  ] as const)("keeps an official %s API key session across an installation change", (harnessId, baseUrl) => {
+    const keyIdentity = {
+      ...codexIdentity,
+      harnessId,
+      backendProfileId: "custom:api-key",
+      endpointIdentity: backendEndpointIdentity(baseUrl),
+    };
+    expect(resumesAcrossProviderInstallation(keyIdentity)).toBe(true);
+    expect(resolveContinuationDecision({
+      previousIdentity: keyIdentity,
+      nextIdentity: { ...keyIdentity, providerCompatibilityToken: "b".repeat(64) },
+      previousModelId: codex.modelId,
+      nextModelId: codex.modelId,
+      hasProviderSession: true,
+      hasTurns: true,
+      allowsModelSwitchWithinSession: true,
+    })).toMatchObject({ action: "resume-session" });
+  });
+
+  it("does not treat a gateway or the wrong harness as an official API key route", () => {
+    expect(resumesAcrossProviderInstallation({
+      ...codexIdentity,
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "custom:gateway",
+      endpointIdentity: backendEndpointIdentity("https://gateway.example.test"),
+    })).toBe(false);
+    expect(resumesAcrossProviderInstallation({
+      ...codexIdentity,
+      harnessId: "codex-app-server",
+      backendProfileId: "custom:mismatch",
+      endpointIdentity: backendEndpointIdentity("https://api.anthropic.com"),
+    })).toBe(false);
+  });
+});
+
+describe("official API key endpoints", () => {
+  it("match the API key presets' normalized addresses and harnesses", () => {
+    expect(OFFICIAL_API_KEY_ENDPOINTS.map(({ harnessId, baseUrl }) => ({ harnessId, baseUrl }))).toEqual(
+      API_KEY_BACKEND_PRESET_IDS.map((presetId) => {
+        const preset = BACKEND_PRESETS[presetId];
+        return {
+          harnessId: preset.harnessId,
+          baseUrl: normalizeBackendBaseUrl(preset.protocol, preset.baseUrl),
+        };
+      }),
+    );
   });
 });

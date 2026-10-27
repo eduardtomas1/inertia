@@ -11,6 +11,8 @@ import {
 } from "../../src/server/providers";
 import { providerRunTerminal } from "../../src/server/provider/contracts";
 import { ProviderInstallationLeaseCoordinator } from "../../src/server/provider/installation-lease";
+import { providerCapabilityManifest } from "../../src/server/provider/capability-manifest";
+import { officialEndpointObservedCapabilities } from "../../src/server/provider/runtime-capability-attestation";
 import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
 import { backendCompatibilityProbeResultSchema } from "../../src/shared/backend-probe";
 import {
@@ -259,5 +261,156 @@ describe("custom key routes through the real capability authority", () => {
       cleanupConfirmed: true,
     });
     await expect(running).resolves.toMatchObject({ terminalReason: { outcome: "completed" } });
+  });
+});
+
+const OFFICIAL_CASES = CASES.filter(({ expectedState }) => expectedState === "verified");
+const GATEWAY_CASE = CASES.find(({ expectedState }) => expectedState === "partially-compatible")!;
+
+function selectionFor(route: RouteCase, reasoningEffort: string | null) {
+  return modelSelectionSchema.parse({
+    harnessId: route.harnessId,
+    backendProfileId: route.profile.id,
+    backendProfileDisplayName: route.profile.displayName,
+    modelId: route.modelId,
+    alias: null,
+    reasoningEffort,
+    contextWindowOverride: null,
+    providerOptions: {},
+    capabilities: [],
+    backendConfigurationRevision: route.profile.configurationRevision,
+  });
+}
+
+function runInputFor(
+  manager: ReturnType<typeof managerFor>["manager"],
+  route: RouteCase,
+  overrides: Partial<ProviderRunInput> = {},
+): ProviderRunInput {
+  const modelSelection = selectionFor(route, "low");
+  const resolved = manager.resolveModelRoute(modelSelection);
+  return {
+    ...nativeProviderRunInput({
+      providerId: route.providerId,
+      harnessId: route.harnessId,
+      conversationId: `conversation-${route.profile.id}`,
+      cwd: "/workspace",
+      prompt: "ola",
+      interactionMode: "build",
+      access: "supervised",
+    }),
+    backendProfile: resolved.backendProfile,
+    backendCompatibility: resolved.compatibility,
+    modelSelection,
+    continuationIdentity: resolved.continuationIdentity,
+    model: route.modelId,
+    reasoningEffort: "low",
+    ...overrides,
+  };
+}
+
+async function detectedManager(route: RouteCase, fingerprint?: string) {
+  const fixture = managerFor(route);
+  await fixture.manager.detect(route.providerId);
+  fixture.manager.recordBackendProbeResult(probeFor(
+    route,
+    fingerprint ?? fixture.manager.providerInstallationFingerprint(route.providerId),
+  ));
+  return fixture;
+}
+
+describe("official API key routes keep the provider's own capabilities", () => {
+  it.each(OFFICIAL_CASES)("starts a turn with a chosen reasoning level on $label", async (route) => {
+    const { manager, starts, finish } = await detectedManager(route);
+    const input = runInputFor(manager, route);
+    expect(manager.providerCapabilityAdmissible(input, "reasoning")).toBe(true);
+
+    const running = manager.run(input);
+    await vi.waitFor(() => expect(starts).toHaveLength(1));
+    finish({
+      ...providerRunTerminal(input, "completed"),
+      text: "Hola",
+      textTruncated: false,
+      exitCode: 0,
+      signal: null,
+      cleanupConfirmed: true,
+    });
+    await expect(running).resolves.toMatchObject({ terminalReason: { outcome: "completed" } });
+  });
+
+  it.each(OFFICIAL_CASES)("admits plans, images, resume, compaction and native tools on $label", async (route) => {
+    const { manager } = await detectedManager(route);
+    const input = runInputFor(manager, route);
+    for (const capability of [
+      "plans",
+      "images",
+      "session-resume",
+      "compaction",
+      "provider-native-tools",
+      "tool-activity",
+      "approvals",
+      "usage-tokens",
+    ] as const) {
+      expect(manager.providerCapabilityAdmissible(input, capability), capability).toBe(true);
+    }
+    for (const capability of [
+      "rate-limits",
+      "performance-modes",
+      "model-discovery",
+      "host-tool-bridge",
+    ] as const) {
+      expect(manager.providerCapabilityAvailable(input, capability, [capability]), capability).toBe(false);
+    }
+    expect(input.continuationIdentity?.providerCompatibilityToken).toEqual(expect.any(String));
+  });
+
+  it.each(OFFICIAL_CASES)("falls back to the probed baseline when the probe came from another installation on $label", async (route) => {
+    const { manager } = await detectedManager(route, "f".repeat(64));
+    const input = runInputFor(manager, route);
+    expect(manager.providerCapabilityAdmissible(input, "reasoning")).toBe(false);
+    expect(manager.providerCapabilityAdmissible(input, "session-resume")).toBe(false);
+  });
+
+  it("keeps a third-party gateway limited to what its probe verified", async () => {
+    const { manager } = await detectedManager(GATEWAY_CASE);
+    const input = runInputFor(manager, GATEWAY_CASE);
+    expect(manager.providerCapabilityAdmissible(input, "text-streaming")).toBe(true);
+    for (const capability of ["reasoning", "plans", "images", "session-resume"] as const) {
+      expect(manager.providerCapabilityAdmissible(input, capability), capability).toBe(false);
+    }
+    expect(input.continuationIdentity?.providerCompatibilityToken ?? null).toBeNull();
+  });
+});
+
+describe("official endpoint capability ceiling", () => {
+  const streaming = [{
+    id: "streaming" as const,
+    state: "verified" as const,
+    provenance: "probe" as const,
+    detail: null,
+    checkedAt: CHECKED_AT,
+  }];
+
+  it.each(["claude-agent-sdk", "codex-app-server"] as const)("grants %s its native capabilities except account features", (harnessId) => {
+    const manifest = providerCapabilityManifest(harnessId)!;
+    const observed = officialEndpointObservedCapabilities(manifest, streaming)!;
+    expect(observed).toEqual(expect.arrayContaining(["reasoning", "plans", "images", "session-resume", "compaction"]));
+    for (const excluded of [
+      "rate-limits",
+      "performance-modes",
+      "model-discovery",
+      "auth-state-discovery",
+      "maintenance-update",
+      "provider-owned-server",
+      "host-tool-bridge",
+    ] as const) {
+      expect(observed).not.toContain(excluded);
+    }
+  });
+
+  it("grants nothing extra until the probe verified streaming", () => {
+    const manifest = providerCapabilityManifest("claude-agent-sdk")!;
+    expect(officialEndpointObservedCapabilities(manifest, [])).toBeNull();
+    expect(officialEndpointObservedCapabilities(manifest, [{ ...streaming[0]!, state: "unknown", provenance: "unknown" }])).toBeNull();
   });
 });

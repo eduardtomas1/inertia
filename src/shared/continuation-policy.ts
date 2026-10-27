@@ -1,4 +1,5 @@
 import { providerIdForHarness, providerNativeBackendProfile } from "./model-routing";
+import { officialApiKeyEndpoint } from "./official-api-key-endpoints";
 import type { ProviderId } from "./provider";
 
 import type {
@@ -110,11 +111,14 @@ export function staleProviderSessionDecision(): ContinuationDecision {
 }
 
 export function resumesAcrossProviderInstallation(
-  identity: Pick<ContinuationIdentity, "harnessId" | "backendProfileId">,
+  identity: Pick<ContinuationIdentity, "harnessId" | "backendProfileId" | "endpointIdentity">,
 ): boolean {
   const providerId = providerIdForHarness(identity.harnessId);
   return providerId !== null
-    && identity.backendProfileId === providerNativeBackendProfile(providerId).id;
+    && (
+      identity.backendProfileId === providerNativeBackendProfile(providerId).id
+      || officialApiKeyEndpoint(identity.harnessId, identity.endpointIdentity)
+    );
 }
 
 function identityChangeKind(

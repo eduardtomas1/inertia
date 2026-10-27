@@ -14,6 +14,7 @@ import {
   providerCapabilityManifest,
   type ProviderCapabilityAttestation,
   type ProviderCapabilityId,
+  type ProviderCapabilityManifest,
 } from "./capability-manifest";
 import type { ProviderId } from "./contracts";
 
@@ -38,6 +39,7 @@ export interface RuntimeProviderCapabilityInput {
   additionalConfigured?: readonly ProviderCapabilityId[];
   additionalNegotiated?: Readonly<Partial<Record<ProviderCapabilityId, boolean>>>;
   customProbeCapabilities?: readonly ModelCapability[];
+  officialEndpoint?: boolean;
 }
 
 const CUSTOM_BACKEND_BASELINE_CAPABILITIES = new Set<ProviderCapabilityId>([
@@ -60,6 +62,31 @@ const CUSTOM_MODEL_CAPABILITY_MAP: Readonly<
   compaction: ["compaction"],
   "session-continuation": ["session-resume"],
 };
+
+const OFFICIAL_ENDPOINT_EXCLUDED_CAPABILITIES = new Set<ProviderCapabilityId>([
+  "rate-limits",
+  "performance-modes",
+  "model-discovery",
+  "auth-state-discovery",
+  "maintenance-update",
+  "provider-owned-server",
+  "host-tool-bridge",
+]);
+
+export function officialEndpointObservedCapabilities(
+  manifest: ProviderCapabilityManifest,
+  capabilities: readonly ModelCapability[],
+): readonly ProviderCapabilityId[] | null {
+  const streamingVerified = capabilities.some((capability) =>
+    capability.id === "streaming"
+    && capability.state === "verified"
+    && capability.provenance === "probe");
+  if (!streamingVerified) return null;
+  return Object.freeze(manifest.capabilities
+    .filter(({ id, support }) =>
+      support !== "unavailable" && !OFFICIAL_ENDPOINT_EXCLUDED_CAPABILITIES.has(id))
+    .map(({ id }) => id));
+}
 
 export function customBackendObservedCapabilities(
   capabilities: readonly ModelCapability[],
@@ -111,7 +138,14 @@ export function runtimeProviderCapabilityAttestation(
   };
   let observed: readonly ProviderCapabilityId[] | undefined;
   if (input.backendProfile.source === "custom") {
-    observed = customBackendObservedCapabilities(
+    observed = (
+      input.officialEndpoint
+        ? officialEndpointObservedCapabilities(
+          manifest,
+          input.customProbeCapabilities ?? [],
+        )
+        : null
+    ) ?? customBackendObservedCapabilities(
       input.customProbeCapabilities ?? [],
     );
     configured.add("custom-backend");

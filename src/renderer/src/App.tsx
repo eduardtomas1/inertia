@@ -86,6 +86,7 @@ import { useWatcherSurfaceController } from "./hooks/useWatcherSurface";
 import { WatcherContext } from "./components/watcher/watcherContext";
 import { WatcherAttachHost } from "./components/watcher/WatcherAttachHost";
 const focusPrimaryPreview = (): void => focusWorkspacePreviewAddress("primary");
+const DETACHED_CHAT_TOOLS_REASON = "Workspace tools are hidden while this chat is in its own window.";
 
 export function commandMayChangeWorkspaceAuthority(
   command: CommandWithoutId,
@@ -971,6 +972,7 @@ export default function App(): React.JSX.Element {
       || detachedChats.conversationIds.has(conversation.id)
     ),
   );
+  const primaryChatDetached = primaryConversationSuppressed && !draftConversation.conversation;
   const visibleWorkspaceScene = useMemo<WorkspaceSceneProps>(() => ({
     ...workspaceScene,
     chat: {
@@ -979,14 +981,14 @@ export default function App(): React.JSX.Element {
         ? sendingConversationIds.has(conversation.id)
         : false,
     },
-    tools: workspaceScene.tools ? {
+    tools: workspaceScene.tools && !primaryChatDetached ? {
       ...workspaceScene.tools,
       runs: {
         ...workspaceScene.tools.runs,
         onOpenRunPreview: openWorkspaceRunPreview,
       },
     } : null,
-    detachedChat: conversation && primaryConversationSuppressed && !draftConversation.conversation ? {
+    detachedChat: conversation && primaryChatDetached ? {
       title: conversation.title,
       windowOpen: detachedChats.conversationIds.has(conversation.id),
       onActivate: () => selectConversation(conversation),
@@ -995,9 +997,8 @@ export default function App(): React.JSX.Element {
   }), [
     conversation,
     detachedChats.conversationIds,
-    draftConversation.conversation,
     openWorkspaceRunPreview,
-    primaryConversationSuppressed,
+    primaryChatDetached,
     selectConversation,
     sendingConversationIds,
     splitPanes.splitScene,
@@ -1158,7 +1159,7 @@ export default function App(): React.JSX.Element {
       detachedChatLimitReached={detachedChats.atLimit}
       conversationSuppressedInMain={primaryConversationSuppressed}
       scenePanel={primarySceneLayout}
-      workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
+      workspaceToolsUnavailableReason={primaryChatDetached ? DETACHED_CHAT_TOOLS_REASON : workspaceToolsUnavailableReason}
       gitStatus={gitStatus}
       branches={branches} branchesLoading={workspaceTools.branchesLoading} branchesError={workspaceTools.branchesError}
       projectActions={projectActions}

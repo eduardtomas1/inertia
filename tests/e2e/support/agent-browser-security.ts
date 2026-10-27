@@ -191,7 +191,7 @@ export async function expectScreenshotPrivacyGuard(
   conversationId: string,
   url: string,
   forbiddenText: string,
-  localOnly = false,
+  captured = false,
 ): Promise<void> {
   const evidence = await app.electronApp.evaluate(async (_electron, request) => {
     type Command =
@@ -228,7 +228,7 @@ export async function expectScreenshotPrivacyGuard(
     });
     return { closed, opened, restored, screenshot };
   }, { conversationId, url });
-  expect(evidence).toMatchObject(localOnly ? {
+  expect(evidence).toMatchObject(captured ? {
     opened: { ok: true },
     screenshot: { ok: true },
     closed: { ok: true },
@@ -243,10 +243,10 @@ export async function expectScreenshotPrivacyGuard(
     closed: { ok: true },
     restored: { ok: true },
   });
-  if (localOnly && evidence.screenshot?.ok) {
-    expect(evidence.screenshot).not.toHaveProperty("image");
-    expect(JSON.parse(evidence.screenshot.text ?? "{}"))
-      .toMatchObject({ bitmap: "local-only", providerImage: false });
+  if (captured && evidence.screenshot?.ok) {
+    expect(evidence.screenshot.image).toMatchObject({ mimeType: "image/png" });
+    expect(JSON.parse(evidence.screenshot.text ?? "{}")).toMatchObject({ captured: true });
+    expect(JSON.parse(evidence.screenshot.text ?? "{}")).not.toHaveProperty("bitmap");
   }
   expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
 }

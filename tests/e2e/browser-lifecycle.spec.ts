@@ -127,16 +127,16 @@ test("shares one directly openable Browser across user, agent, and restart lifec
     },
     conversationId,
   );
-  expect(screenshot).toMatchObject({ ok: true });
-  expect(screenshot).not.toHaveProperty("image");
+  expect(screenshot).toMatchObject({ ok: true, image: { mimeType: "image/png" } });
   const screenshotEvidence = JSON.parse(String(screenshot.text)) as {
-    bitmap: string;
-    providerImage: boolean;
+    captured: boolean;
+    width: number;
+    height: number;
   };
-  expect(screenshotEvidence).toMatchObject({
-    bitmap: "local-only",
-    providerImage: false,
-  });
+  expect(screenshotEvidence).toMatchObject({ captured: true });
+  expect(screenshotEvidence).not.toHaveProperty("bitmap");
+  expect(screenshotEvidence.width).toBeGreaterThan(0);
+  expect(screenshotEvidence.height).toBeGreaterThan(0);
   await expect(sharedTools.getByRole("button", { name: /Evidence [1-9]/u }))
     .toBeVisible();
 

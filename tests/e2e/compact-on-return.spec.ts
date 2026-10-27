@@ -286,12 +286,14 @@ test("offers Compact and send on a stale API-key chat, then shows the compaction
     await capture(testInfo, `compact-and-send-offer-${theme}`);
   }
 
-  await page.getByRole("button", { name: /^Open usage and context\./u }).click();
+  const usageTrigger = page.getByRole("button", { name: /^Open usage and context\./u });
+  await usageTrigger.click();
   const meter = page.getByRole("dialog", { name: "Usage & context" });
   await expect(meter.getByText(/^Prompt cache expired \d+ min ago$/u)).toBeVisible();
   await capture(testInfo, "usage-meter-cache-expired-dark");
   await page.keyboard.press("Escape");
   await expect(meter).toBeHidden();
+  await expect(usageTrigger).toBeFocused();
 
   const fullHistory = page.getByRole("button", { name: "Full history" });
   await fullHistory.focus();

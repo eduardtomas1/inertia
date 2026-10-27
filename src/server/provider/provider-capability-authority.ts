@@ -20,6 +20,7 @@ import type {
   ProviderRunInput,
 } from "./contracts";
 import type { ProviderMetadataCache } from "./metadata";
+import { officialPresetEndpoint } from "../runtime/backends/backend-profile-presets";
 import {
   nativeRuntimeCapabilityInput,
   runtimeProviderCapabilityAttestation,
@@ -305,6 +306,7 @@ export class ProviderCapabilityAuthority {
       customProbeCapabilities: backendProfile.source === "custom" && modelId
         ? this.options.customProbeCapabilities(providerId, backendProfile, modelId)
         : [],
+      officialEndpoint: officialPresetEndpoint(backendProfile),
     });
   }
 }

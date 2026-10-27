@@ -175,45 +175,57 @@ Inertia host tools; watchers, custom backends and resumed imported Codex
 sessions never receive it. The rule lives in
 `src/server/runtime/turns/turn-instruction-delivery.ts`.
 
-- Claude, Codex and OpenCode receive the block on their system channel
+- Claude and Codex receive the block at system level
   (`ProviderRunInput.sessionInstruction`) when it fits the 16 KiB system
   instruction limit. Claude appends it to the `claude_code` preset system
-  prompt, recorded with `snapshot: true`; a watcher role on the same turn
-  still turns recording off. Codex sends it as `developerInstructions` on
-  `thread/start` only, never on `thread/resume`. OpenCode sends it as the
-  prompt's `system` text on every prompt.
-- Every turn's execution manifest records the block's byte size, never its
-  text, as `sessionInstructionBytes`. Claude and Codex keep what a session
-  started with, so a resumed session whose first turn did not record a block
-  of the current size (one started before this delivery, before host tools
-  were attested, or with other pack text) gets the block in the prompt
-  instead, by the rule below.
-- Cursor and Kimi have no system channel. The block goes in the prompt's
-  internal-instructions section on the first turn of a provider session,
-  when its SHA-256 digest changes, after a compaction receipt is saved for
-  the chat, and once after the runtime restarts. The runtime remembers, per
-  chat and in memory only, the turn that last carried the block and its
-  digest; the block counts as delivered while that turn completed on the
-  session being resumed.
+  prompt, recorded with `snapshot: true`. Codex sends it as
+  `developerInstructions`, byte-identical on `thread/start` and
+  `thread/resume` (App Server v2 accepts `developer_instructions` on both).
+- A turn that sends the block at system level records the block's SHA-256
+  digest, never its text, in its execution manifest as
+  `sessionInstructionDigest`. Claude and Codex keep what a session started
+  with, so a resumed session gets the block in the prompt instead, by the
+  rule below, when the session's first turn recorded no digest or another
+  digest (a session started before this delivery, before host tools were
+  attested, or with other pack text), or when a compaction was recorded on
+  the chat since that first turn.
+- Cursor, Kimi and OpenCode get the block in the prompt's
+  internal-instructions section. OpenCode has a `system` prompt option, but
+  a follow-up steered into a running turn cannot carry it, so the block
+  would drop out for the rest of that run; watcher roles still use it. The
+  block is sent on the first turn of a provider session, when its digest
+  changes, after a compaction, and once after the runtime restarts. The
+  runtime remembers, per chat and in memory only, the turn that last
+  carried the block and its digest, for at most 1,024 chats; the block
+  counts as delivered while that turn completed on the session being
+  resumed, started on or resumed that same session, and had no compaction
+  recorded since.
 - `build-mode` goes in the prompt on the first turn of a provider session,
   and again when the previous turn used another mode, did not complete,
-  ended on another session, or was followed by a compaction receipt. A
-  native Codex goal start sends no prompt, so a Codex session that ran a
-  native goal gets `build-mode` on every turn, and a goal start never counts
-  as having delivered the block. Plan mode has no instruction.
+  started on another session than it ended on, sent no prompt, or was
+  followed by a compaction. A native Codex goal start sends no prompt; its
+  manifest records `promptWithheld`, so the next turn sends `build-mode` and
+  the goal start never counts as having delivered the block. Plan mode has
+  no instruction.
+- A compaction is a saved compaction receipt or a completed compaction
+  activity from the provider (Claude's compact boundary, Codex's
+  `contextCompaction` item, the ACP compaction update, OpenCode's session
+  compaction event), recorded at or after the turn's request time.
 - A turn that starts a fresh session, including a stale session restarted
-  in the middle of a turn, always carries the block (system channel or
+  in the middle of a turn, always carries the block (system level or
   prompt) and, in Build mode, `build-mode`.
 - Turn-specific controls accompany every turn that needs them. A prompt with
   nothing due has no internal-instructions section and no trailing blank
   lines.
+- After an upgrade that changes the block, or after a compaction, a Claude
+  or Codex session can receive it both at system level and once per runtime
+  in the prompt; this duplicate is accepted.
 
 Not verified against live providers: whether Codex replaces a
 `developer_instructions` value from the person's Codex configuration with
-the `thread/start` value (watcher threads already pass one); whether OpenCode
-keeps a prompt's `system` text for a follow-up steered into the same run,
-which carries no `system` field; and provider-internal automatic compaction,
-which saves no receipt, so it does not trigger a re-send on Cursor or Kimi.
+the thread value (watcher threads already pass one), and whether an older
+Codex that ignores `developerInstructions` on `thread/resume` keeps the
+start value after its own compaction.
 
 ## Antigravity headless contract
 
@@ -345,9 +357,9 @@ and count towards the five-request cap); Antigravity's tool names beyond the
 `view_file`, `run_command` and `invoke_subagent` its fixtures use (the
 file-writing names `write_to_file`, `write_file`, `create_file`, `edit_file`,
 `replace_file_content`, `multi_replace_file_content`, `delete_file`,
-`move_file` and `rename_file` are assumed); whether Antigravity's plan mode
-refuses writes on its own; and whether Codex applies `developerInstructions`
-on `thread/resume`.
+`move_file` and `rename_file` are assumed); and whether Antigravity's plan
+mode refuses writes on its own. Codex App Server v2 accepts
+`developerInstructions` on `thread/resume` as on `thread/start`.
 
 ### Read-only command allowlist
 

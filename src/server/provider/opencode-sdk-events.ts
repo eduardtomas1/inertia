@@ -47,6 +47,7 @@ import {
   stringValue,
   todoStep,
 } from "./opencode-sdk-support";
+import { OPENCODE_COMPACTED_CONTEXT_TITLE } from "./context-compaction-activity";
 
 const MAX_PENDING_INTERACTIONS = 64;
 const MAX_OBSERVED_INTERACTIONS = 256;
@@ -672,7 +673,7 @@ export function handleOpenCodeEvent(
     if (!ownership.markActivePromptWork()) return;
     usageState.currentContextTokens = null;
     emitOpenCodeUsageSnapshot(usageState, emitter.rich);
-    emitter.activity("system", "info", "OpenCode compacted the session context");
+    emitter.activity("system", "info", OPENCODE_COMPACTED_CONTEXT_TITLE);
   }
 }
 

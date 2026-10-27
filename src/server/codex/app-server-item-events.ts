@@ -15,6 +15,7 @@ import {
 import { stableProviderActivityId } from "../provider/activity-lifecycle";
 import type { CodexAppServerOptions } from "./types";
 import type { CodexCommandOutput } from "./app-server-command-output";
+import { CODEX_CONTEXT_COMPACTION_TITLE } from "../provider/context-compaction-activity";
 
 export type CodexItemActivity = {
   kind: "command" | "tool" | "system";
@@ -248,7 +249,7 @@ export function handleCodexItem(
   } else if (itemType === "imageGeneration") {
     emitItemActivity(host, "tool", phase, "Generate image", activityId);
   } else if (itemType === "contextCompaction") {
-    emitItemActivity(host, "system", phase, "Context compaction", activityId);
+    emitItemActivity(host, "system", phase, CODEX_CONTEXT_COMPACTION_TITLE, activityId);
   } else if (itemType === "enteredReviewMode") {
     host.options.onActivity?.("system", "info", "Entered review mode");
   } else if (itemType === "exitedReviewMode") {

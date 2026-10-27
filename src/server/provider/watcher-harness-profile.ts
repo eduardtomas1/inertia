@@ -1,22 +1,22 @@
 export interface WatcherHarnessProfile {
   systemInstruction: boolean;
-  sessionScopedSystemInstruction: boolean;
+  sessionInstruction: boolean;
   editsGatedBeforeStart: boolean;
 }
 
 const UNKNOWN_HARNESS: WatcherHarnessProfile = Object.freeze({
   systemInstruction: false,
-  sessionScopedSystemInstruction: false,
+  sessionInstruction: false,
   editsGatedBeforeStart: false,
 });
 
 const HARNESS_PROFILES: Readonly<Record<string, WatcherHarnessProfile>> = Object.freeze({
-  "claude-agent-sdk": Object.freeze({ systemInstruction: true, sessionScopedSystemInstruction: true, editsGatedBeforeStart: true }),
-  "codex-app-server": Object.freeze({ systemInstruction: true, sessionScopedSystemInstruction: true, editsGatedBeforeStart: true }),
-  "opencode-sdk": Object.freeze({ systemInstruction: true, sessionScopedSystemInstruction: false, editsGatedBeforeStart: false }),
-  "cursor-acp": Object.freeze({ systemInstruction: false, sessionScopedSystemInstruction: false, editsGatedBeforeStart: true }),
-  "kimi-acp": Object.freeze({ systemInstruction: false, sessionScopedSystemInstruction: false, editsGatedBeforeStart: true }),
-  "antigravity-cli": Object.freeze({ systemInstruction: false, sessionScopedSystemInstruction: false, editsGatedBeforeStart: false }),
+  "claude-agent-sdk": Object.freeze({ systemInstruction: true, sessionInstruction: true, editsGatedBeforeStart: true }),
+  "codex-app-server": Object.freeze({ systemInstruction: true, sessionInstruction: true, editsGatedBeforeStart: true }),
+  "opencode-sdk": Object.freeze({ systemInstruction: true, sessionInstruction: false, editsGatedBeforeStart: false }),
+  "cursor-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, editsGatedBeforeStart: true }),
+  "kimi-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, editsGatedBeforeStart: true }),
+  "antigravity-cli": Object.freeze({ systemInstruction: false, sessionInstruction: false, editsGatedBeforeStart: false }),
 });
 
 export function watcherHarnessProfile(harnessId: string): WatcherHarnessProfile {

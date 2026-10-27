@@ -27,13 +27,13 @@ function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
 }
 
-function validSystemLevelInstruction(value: unknown, harnessId: string): boolean {
+function validSystemLevelInstruction(value: unknown, channelAvailable: boolean): boolean {
   return value === undefined || (
     typeof value === "string"
     && value.trim().length > 0
     && !value.includes("\0")
     && Buffer.byteLength(value, "utf8") <= MAX_SYSTEM_INSTRUCTION_BYTES
-    && watcherHarnessProfile(harnessId).systemInstruction
+    && channelAvailable
   );
 }
 
@@ -169,13 +169,13 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       "The read-only profile is invalid.",
     );
   }
-  if (!validSystemLevelInstruction(input.systemInstruction, input.harnessId)) {
+  if (!validSystemLevelInstruction(input.systemInstruction, watcherHarnessProfile(input.harnessId).systemInstruction)) {
     throw new ProviderRuntimeError(
       "invalid_input",
       "The system instruction is invalid.",
     );
   }
-  if (!validSystemLevelInstruction(input.sessionInstruction, input.harnessId)) {
+  if (!validSystemLevelInstruction(input.sessionInstruction, watcherHarnessProfile(input.harnessId).sessionInstruction)) {
     throw new ProviderRuntimeError(
       "invalid_input",
       "The session instruction is invalid.",

@@ -21,6 +21,7 @@ import {
   type TurnSessionRecovery,
 } from "../../shared/continuation-policy";
 import {
+  isSessionInstructionDigest,
   parseSanitizedTurnExecutionManifest,
   validateExecutionContextReference,
   validatePersistedTurnExecutionContext,
@@ -33,6 +34,7 @@ import {
   type RuntimeInterruption,
 } from "../runtime/turns/turn-runtime-interruption-note";
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
+import { CONTEXT_COMPACTION_ACTIVITY_TITLES } from "../provider/context-compaction-activity";
 import { assertConversationProvider } from "./conversation-provider-policy";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import { completeRestartContinuationPlan } from "./restart-continuation-repository";
@@ -427,29 +429,53 @@ export class TurnLedgerRepository {
     return origin.started_after_retirement === 0 || origin.completed_turn === 1;
   }
 
-  sessionInstructionBytes(conversationId: string, sessionId: string): number | null {
+  sessionOrigin(
+    conversationId: string,
+    sessionId: string,
+  ): { requestedAt: string; sessionInstructionDigest: string | null } | null {
     const row = this.context.database.prepare(`
-      SELECT CASE WHEN json_valid(manifest.manifest_json)
-        THEN json_extract(manifest.manifest_json, '$.sessionInstructionBytes')
-      END AS bytes
+      SELECT turn.requested_at,
+        CASE WHEN json_valid(manifest.manifest_json)
+          THEN json_extract(manifest.manifest_json, '$.sessionInstructionDigest')
+        END AS digest
       FROM agent_turns AS turn
       LEFT JOIN turn_execution_manifests AS manifest ON manifest.turn_id = turn.id
       WHERE turn.conversation_id = ? AND turn.provider_session_after = ?
         AND turn.provider_session_before IS NULL
       ORDER BY turn.requested_at ASC, turn.id ASC
       LIMIT 1
-    `).get(conversationId, sessionId) as { bytes: unknown } | undefined;
-    return typeof row?.bytes === "number" ? row.bytes : null;
+    `).get(conversationId, sessionId) as { requested_at: string; digest: unknown } | undefined;
+    if (!row) return null;
+    return {
+      requestedAt: row.requested_at,
+      sessionInstructionDigest: isSessionInstructionDigest(row.digest) ? row.digest : null,
+    };
+  }
+
+  promptWithheld(turnId: string): boolean {
+    const row = this.context.database.prepare(`
+      SELECT CASE WHEN json_valid(manifest_json)
+        THEN json_extract(manifest_json, '$.promptWithheld')
+      END AS withheld
+      FROM turn_execution_manifests
+      WHERE turn_id = ?
+    `).get(turnId) as { withheld: unknown } | undefined;
+    return row?.withheld === 1;
   }
 
   compactedSince(conversationId: string, since: string): boolean {
+    const titles = CONTEXT_COMPACTION_ACTIVITY_TITLES;
     const row = this.context.database.prepare(`
       SELECT EXISTS(
         SELECT 1 FROM messages
         WHERE conversation_id = ? AND turn_id IS NULL AND role = 'system'
           AND compaction_json IS NOT NULL AND created_at >= ?
+      ) OR EXISTS(
+        SELECT 1 FROM activities
+        WHERE conversation_id = ? AND kind = 'status' AND status = 'completed'
+          AND title IN (${titles.map(() => "?").join(", ")}) AND created_at >= ?
       ) AS compacted
-    `).get(conversationId, since) as { compacted: 0 | 1 };
+    `).get(conversationId, since, conversationId, ...titles, since) as { compacted: 0 | 1 };
     return row.compacted === 1;
   }
 

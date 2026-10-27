@@ -61,6 +61,7 @@ function inspectedTarget(
   inspect: (tab: PreviewTab, ref: string, purpose?: "scroll") => Promise<PreviewAgentTarget>,
 ): Promise<PreviewAgentTarget> | null {
   if (command.action === "click" || command.action === "type") return inspect(tab, command.ref);
+  if (command.action === "hover" || command.action === "select") return inspect(tab, command.ref);
   return command.action === "scroll" && "ref" in command ? inspect(tab, command.ref, "scroll") : null;
 }
 
@@ -92,6 +93,13 @@ function actionDetail(command: AgentBrowserCommand, tab: PreviewTab, target: Pre
     case "tab-open": return `Open a browser tab${command.url ? `: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}` : ""}`;
     case "tab-close": return `${page}\nClose this tab`;
     case "tab-activate": return `${page}\nSwitch to this tab`;
+    case "hover": return `${page}\nHover over ${control}`;
+    case "select": {
+      const option = target?.sensitive
+        ? "[sensitive text hidden]"
+        : sanitizeBrowserEvidenceText(command.value, "[sensitive text hidden]", 200).text;
+      return `${page}\nChoose an option in ${control}\nOption: ${JSON.stringify(option)}`;
+    }
     default: throw new Error("This Browser action does not need an approval.");
   }
 }

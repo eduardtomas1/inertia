@@ -495,4 +495,53 @@ describe("Browser tool surface", () => {
     });
     expect(codes).toEqual(["outside"]);
   });
+
+  it("scrolls an off-screen ref into view before hovering and sends only a pointer move", async () => {
+    const { broker, contents } = await loadedHarness();
+    const codes = isolatedScripts(contents, () => true);
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({ found: false });
+    await expect(broker.perform(runIdentity, { action: "hover", ref: "e9" }))
+      .resolves.toMatchObject({ ok: true, state: { activity: { action: "hover" } } });
+    expect(codes).toEqual(["outside", "scroll"]);
+    expect(contents.sentInputs).toEqual([{ type: "mouseMove", x: 42, y: 28 }]);
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e9" })).resolves.toMatchObject({ ok: true });
+    expect(contents.sentInputs.map((input) => input.type)).toEqual(["mouseMove", "mouseMove", "mouseDown", "mouseUp"]);
+  });
+
+  it("refuses hover and select in a blank tab before inspecting, also when preparing an approval", async () => {
+    const { broker } = createPreviewBrokerHarness(PreviewBroker);
+    pageTools.locateAgentPageRef.mockClear();
+    for (const command of [
+      { action: "hover", ref: "e1" },
+      { action: "select", ref: "e1", value: "Express" },
+    ] as const) {
+      for (const request of [command, { action: "prepare-approval", command } as const]) {
+        await expect(broker.perform(runIdentity, request)).resolves.toMatchObject({
+          ok: false, code: "not-found", message: expect.stringContaining("This tab is blank"),
+        });
+      }
+    }
+    expect(pageTools.locateAgentPageRef).not.toHaveBeenCalled();
+  });
+
+  it("reads logs without an approval and never mints one for them", async () => {
+    const { broker } = await loadedHarness();
+    await expect(broker.perform(runIdentity, { action: "logs" })).resolves.toMatchObject({ ok: true });
+    await expect(broker.perform(runIdentity, { action: "prepare-approval", command: { action: "logs" } }))
+      .resolves.toEqual({ ok: false, code: "unavailable", message: "This Browser action does not need an approval." });
+  });
+
+  it("binds a Supervised navigate in a never-loaded tab to the page its security setup opens", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = createPreviewBrokerHarness(PreviewBroker);
+    const prepared = await broker.perform(runIdentity, {
+      action: "prepare-approval", command: { action: "navigate", url: "http://localhost:3000/" },
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    expect(contents.getURL()).toBe("about:blank");
+    expect(contents.debugger.isAttached()).toBe(true);
+    expect(JSON.parse((prepared as { text: string }).text)).toMatchObject({
+      detail: "Browser tab 1\nNavigate: http://localhost:3000",
+    });
+  });
 });

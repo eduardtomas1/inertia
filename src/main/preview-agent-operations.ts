@@ -98,7 +98,7 @@ export function blankTabRefusal(
   contents: PreviewContents,
   command: AgentBrowserCommand,
 ): AgentBrowserResult | null {
-  return ["click", "type", "press", "scroll", "history"].includes(command.action) && blankTab(contents)
+  return ["click", "type", "press", "scroll", "history", "hover", "select"].includes(command.action) && blankTab(contents)
     ? failure("not-found", BLANK_TAB_NEXT_STEP)
     : null;
 }
@@ -999,5 +999,37 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       }
       endAgentPageInputRefusalCapture(contents);
     }
+  }
+
+  async ensureSecurityDebugger(contents: PreviewContents, scope: AgentOperationScope): Promise<void> {
+    await this.#ensureSecurityDebugger(contents, scope);
+  }
+
+  activeTab(session: Session): PreviewTab {
+    return this.host.active(session);
+  }
+
+  agentState(session: Session): AgentBrowserState {
+    return this.host.agentState(session);
+  }
+
+  recordActivity(session: Session, action: AgentBrowserActivity["action"], label: string, point: { x: number; y: number }): void {
+    this.host.record(session, action, label, point);
+  }
+
+  async prepareInput(contents: PreviewContents, scope: AgentOperationScope): Promise<void> {
+    await this.#prepareAgentPage(contents, scope);
+  }
+
+  async locateInView(contents: PreviewContents, ref: string, scope: AgentOperationScope): Promise<PreviewAgentTarget> {
+    return await this.#locateInView(contents, ref, scope);
+  }
+
+  async deliverInput(
+    contents: PreviewContents,
+    dispatch: () => Promise<void>,
+    scope: AgentOperationScope,
+  ): Promise<Awaited<ReturnType<typeof agentPageInputRefusal>>> {
+    return await this.#sendInputAndWait(contents, dispatch, scope);
   }
 }

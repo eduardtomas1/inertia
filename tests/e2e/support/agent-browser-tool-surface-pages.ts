@@ -25,6 +25,14 @@ const pages: Record<string, string> = {
     + "<script>document.querySelector('#far').addEventListener('click',()=>{window.__clicked='far'})</script>",
   "/agent-browser-post-form": "<title>Post form</title>"
     + "<form method='post' action='/agent-browser-post-count'><button type='submit'>Send post</button></form>",
+  "/agent-browser-hover-select": "<title>Hover and select</title><p id='status'>none</p>"
+    + "<button id='help' type='button'>Help</button>"
+    + "<label>Shipping <select id='shipping'><option value='standard'>Standard</option>"
+    + "<option value='express'>Express</option></select></label>"
+    + "<script>window.__inputs=0;document.querySelector('#help').addEventListener('mouseenter',()=>{window.__hovered=true});"
+    + "const shipping=document.querySelector('#shipping');shipping.addEventListener('input',()=>{window.__inputs+=1});"
+    + "shipping.addEventListener('change',()=>{document.querySelector('#status').textContent=shipping.value});"
+    + "console.error('Fixture failure')</script>",
   "/agent-browser-closed-shadow-alert": "<title>Closed code entry</title><div id='host'></div>"
     + "<script>const root=document.querySelector('#host').attachShadow({mode:'closed'});"
     + "const input=document.createElement('input');root.append(input);"

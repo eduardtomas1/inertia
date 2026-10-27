@@ -116,6 +116,7 @@ import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
 import { runtimeCredentialBroker } from "./runtime-credential-broker.js";
 import { runtimeIssueEvidenceBroker } from "./runtime-issue-evidence-broker.js";
 import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-bootstrap.js";
+import { mainWindowTargetHandlers } from "./main-window-targets.js";
 import * as detachedChatClose from "./detached-chat-close-coordinator.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
@@ -752,10 +753,7 @@ async function createMainWindow(): Promise<void> {
       "detached-draft.recovery",
       { ...diagnostic },
     ),
-    onDock: (conversationId) => activateThreadNotification(conversationId, {
-      channel: IPC.threadNotificationActivated,
-      currentWindow: () => mainWindow, createWindow,
-    }),
+    ...mainWindowTargetHandlers({ currentWindow: () => mainWindow, createWindow }),
   });
   const savedWindow = readWindowState();
   const window = new BrowserWindow({

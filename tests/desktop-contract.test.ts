@@ -7,6 +7,7 @@ import {
   parseDetachedChatDraftHandoff,
   parseDetachedChatWindowOpenRequest,
   parseDetachedChatWindowRequest,
+  parseMainWindowTarget,
   parseOpenProjectPathRequest,
   parsePendingDetachedChatDraft,
   parsePrivateConnectDeviceUpdateRequest,
@@ -110,6 +111,73 @@ describe("desktop detached-chat contract", () => {
     ]) {
       expect(parseDetachedChatDraftAcknowledgement(value)).toBeNull();
     }
+  });
+});
+
+describe("desktop main-window target contract", () => {
+  const turnId = "44444444-4444-4444-8444-444444444444";
+
+  it.each([
+    { kind: "conversation", conversationId },
+    { kind: "new-chat", projectId },
+    { kind: "new-chat", projectId, checkout: { kind: "branch", branch: "feature/detached-chat" } },
+    { kind: "new-chat", projectId, checkout: { kind: "this-worktree" } },
+    { kind: "new-chat", projectId, checkout: { kind: "this-worktree", branch: "cwp/handoff" } },
+    { kind: "new-chat", projectId, checkout: { kind: "isolated-worktree" } },
+    { kind: "settings", page: "appearance" },
+    { kind: "settings", page: "agents" },
+    { kind: "settings", page: "help" },
+    { kind: "provider-setup", providerId: "codex" },
+    { kind: "provider-setup", providerId: "claude", method: "console" },
+    { kind: "provider-setup", providerId: "antigravity", method: "account" },
+    { kind: "backend-setup" },
+    { kind: "backend-setup", profileId: "local-ollama" },
+    { kind: "backend-setup", profileId: "openrouter:main", panel: "models" },
+    { kind: "diagnostics" },
+    { kind: "diagnostics", turnId },
+    { kind: "usage-limits" },
+  ])("accepts the exact target %j", (target) => {
+    const parsed = parseMainWindowTarget(target);
+    expect(parsed).toEqual(target);
+    expect(parsed).not.toBe(target);
+  });
+
+  it.each([
+    ["no object", null],
+    ["an array", [{ kind: "usage-limits" }]],
+    ["an unknown kind", { kind: "browser" }],
+    ["a missing kind", { conversationId }],
+    ["an extra key", { kind: "usage-limits", url: "https://example.com/" }],
+    ["an inherited kind", Object.create({ kind: "usage-limits" })],
+    ["a malformed conversation", { kind: "conversation", conversationId: "../other" }],
+    ["a missing conversation", { kind: "conversation" }],
+    ["a malformed project", { kind: "new-chat", projectId: "project" }],
+    ["an undefined checkout", { kind: "new-chat", projectId, checkout: undefined }],
+    ["an unknown checkout", { kind: "new-chat", projectId, checkout: { kind: "path", path: "/tmp" } }],
+    ["a checkout path", { kind: "new-chat", projectId, checkout: { kind: "this-worktree", path: "/tmp" } }],
+    ["an isolated worktree branch", { kind: "new-chat", projectId, checkout: { kind: "isolated-worktree", branch: "main" } }],
+    ["an empty branch", { kind: "new-chat", projectId, checkout: { kind: "branch", branch: "" } }],
+    ["a padded branch", { kind: "new-chat", projectId, checkout: { kind: "branch", branch: " main" } }],
+    ["a branch with a newline", { kind: "new-chat", projectId, checkout: { kind: "branch", branch: "main\nother" } }],
+    ["a branch with a null byte", { kind: "new-chat", projectId, checkout: { kind: "this-worktree", branch: "main\0" } }],
+    ["an over-long branch", { kind: "new-chat", projectId, checkout: { kind: "branch", branch: "b".repeat(256) } }],
+    ["a missing branch", { kind: "new-chat", projectId, checkout: { kind: "branch" } }],
+    ["an unknown settings page", { kind: "settings", page: "secrets" }],
+    ["a legacy settings page", { kind: "settings", page: "diagnostics" }],
+    ["a settings anchor", { kind: "settings", page: "agents", anchor: "model-backends" }],
+    ["an unknown provider", { kind: "provider-setup", providerId: "gemini" }],
+    ["an inherited provider", { kind: "provider-setup", providerId: "toString" }],
+    ["an unknown sign-in method", { kind: "provider-setup", providerId: "claude", method: "token" }],
+    ["an unsupported sign-in method", { kind: "provider-setup", providerId: "codex", method: "console" }],
+    ["a malformed backend profile", { kind: "backend-setup", profileId: "../profile" }],
+    ["an over-long backend profile", { kind: "backend-setup", profileId: "p".repeat(201) }],
+    ["a backend panel without a profile", { kind: "backend-setup", panel: "key" }],
+    ["an unknown backend panel", { kind: "backend-setup", profileId: "local", panel: "secret" }],
+    ["a malformed diagnostics turn", { kind: "diagnostics", turnId: "turn-1" }],
+    ["a diagnostics incident", { kind: "diagnostics", incidentId: turnId }],
+    ["usage limits with a provider", { kind: "usage-limits", providerId: "codex" }],
+  ])("rejects %s", (_name, target) => {
+    expect(parseMainWindowTarget(target)).toBeNull();
   });
 });
 

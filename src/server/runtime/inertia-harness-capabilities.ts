@@ -18,7 +18,7 @@ const ORCHESTRATION_INSTRUCTION: HiddenProviderInstruction = {
   text: [
     "Chat tools start real top-level chats: delegate only concrete, independent work with an explicit owner and success criteria, never as hidden subagents.",
     "A started chat is not finished work; read its status and latest result before relying on it.",
-    "Inertia asks the user before every mutating call, whatever the access mode.",
+    "Inertia asks the user before every call that changes a chat, whatever the access mode.",
   ].join(" "),
 };
 

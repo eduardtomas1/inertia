@@ -210,10 +210,10 @@
 .composer-shell .composer-checkout-strip {
   z-index: auto;
   grid-area: strip;
-  height: 32px;
+  height: 40px;
   min-height: 0;
   margin: 0;
-  padding: 0 14px 0 18px;
+  padding: 0 14px 8px 18px;
   border: 0;
   border-top: 1px solid var(--line-soft);
   border-radius: 0;
@@ -222,7 +222,7 @@
   font-size: var(--text-sm);
 }
 .composer-shell .composer-checkout-strip.is-branch-only {
-  height: 28px;
+  height: 36px;
   border-top: 0;
   color: var(--text-faint);
   font-size: var(--text-xs);

@@ -179,6 +179,28 @@ test("an agent sees a confirmation dialog and accepts it only when it asks to", 
   expect(parsed(await browser({ action: "snapshot" })).text).toContain("Deleted");
 });
 
+test("an agent hovers a control, chooses an option and reads the page's logs", async () => {
+  const path = "agent-browser-hover-select";
+  await navigate(path);
+  const snapshot = parsed(await browser({ action: "snapshot" }));
+  const hovered = parsed(await browser({ action: "hover", ref: refFor(snapshot, "Help") }));
+  expect(hovered).toMatchObject({ hovered: refFor(snapshot, "Help"), element: { label: "Help" } });
+  await expect.poll(() => pageValue<boolean>(path, "window.__hovered === true")).toBe(true);
+
+  const list = snapshot.elements?.find((element) => (element as { role?: string }).role === "select")?.ref;
+  expect(list, JSON.stringify(snapshot.elements)).toBeTruthy();
+  expect(parsed(await browser({ action: "select", ref: list, value: "Express" })))
+    .toMatchObject({ option: { value: "express", label: "Express" } });
+  expect(await pageValue<string>(path, "document.querySelector('#status').textContent")).toBe("express");
+  expect(await pageValue<number>(path, "window.__inputs")).toBe(1);
+  expect(await browser({ action: "select", ref: list, value: "Gold" })).toMatchObject({
+    ok: false, code: "not-found", message: expect.stringContaining("\"Standard\", \"Express\""),
+  });
+
+  await expect.poll(async () => JSON.stringify(parsed(await browser({ action: "logs" })).entries))
+    .toContain("Fixture failure");
+});
+
 test("the user takes over the page during an agent command", async () => {
   await interruptedWhile("agent-browser-focus-order", { type: "mouseDown", x: 20, y: 20, button: "left", clickCount: 1 });
   expect(await browser({ action: "tabs" })).toMatchObject({ ok: true, state: { controller: "user" } });

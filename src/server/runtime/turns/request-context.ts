@@ -23,7 +23,6 @@ import {
   MAX_CONVERSATION_CONTEXT_TURN_BYTES,
 } from "../../../shared/conversation-context";
 import { byteLength } from "../../persistence/bounded-message-text";
-import { MAX_SYSTEM_INSTRUCTION_BYTES } from "../../provider/watcher-harness-profile";
 import type { ConversationContextDelivery } from "../../persistence/conversation-context-transport";
 import {
   MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
@@ -43,6 +42,7 @@ const MAX_IMAGE_COUNT = MAX_ATTACHMENT_COUNT;
 const MAX_IMAGE_BYTES = MAX_IMAGE_ATTACHMENT_BYTES;
 const MAX_TOTAL_IMAGE_BYTES = MAX_IMAGE_ATTACHMENT_TOTAL_BYTES;
 const SHA256_REFERENCE_PATTERN = /^sha256:([0-9a-f]{64})$/u;
+const SESSION_INSTRUCTION_DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const BUILD_MODE_INSTRUCTION_LABEL = "build-mode";
 const CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES = 512;
 const EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES = 256;
@@ -84,7 +84,7 @@ export interface TurnExecutionManifestReference {
 
 /**
  * Safe to persist or log. It deliberately carries no context body, assembled
- * provider prompt, image path, or hidden provider instruction text/digest.
+ * provider prompt, image path, or hidden provider instruction text.
  */
 export interface SanitizedTurnExecutionManifest {
   version: 1;
@@ -96,7 +96,8 @@ export interface SanitizedTurnExecutionManifest {
   contextBytes: number;
   internalInstructionCount: number;
   internalInstructionBytes: number;
-  sessionInstructionBytes?: number;
+  sessionInstructionDigest?: string;
+  promptWithheld?: true;
   executionSegmentCount: number;
   assembledPayloadBytes: number;
   references: TurnExecutionManifestReference[];
@@ -144,7 +145,8 @@ export interface AssembleTurnRequestInput {
   conversationContexts?: (capacityBytes: number) => ConversationContextMaterialization;
   carriedConversationContexts?: readonly MaterializedConversationContext[];
   internalInstructions?: readonly HiddenProviderInstruction[];
-  sessionInstructionBytes?: number;
+  sessionInstructionDigest?: string;
+  promptWithheld?: true;
   restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
 }
 
@@ -206,6 +208,20 @@ function requiredBoundedInteger(
     throw new Error(`${label} is invalid.`);
   }
   return value as number;
+}
+
+export function isSessionInstructionDigest(value: unknown): value is string {
+  return typeof value === "string" && SESSION_INSTRUCTION_DIGEST_PATTERN.test(value);
+}
+
+function requiredSessionInstructionDigest(value: unknown): string {
+  if (!isSessionInstructionDigest(value)) throw new Error("Session instruction digest is invalid.");
+  return value;
+}
+
+function requiredPromptWithheld(value: unknown): true {
+  if (value !== true) throw new Error("Withheld prompt marker is invalid.");
+  return value;
 }
 
 export function parseSanitizedTurnExecutionManifest(
@@ -286,15 +302,12 @@ export function parseSanitizedTurnExecutionManifest(
       "Internal instruction byte size",
       MAX_INTERNAL_INSTRUCTION_BYTES,
     ),
-    ...(manifest.sessionInstructionBytes === undefined
+    ...(manifest.sessionInstructionDigest === undefined
       ? {}
-      : {
-          sessionInstructionBytes: requiredBoundedInteger(
-            manifest.sessionInstructionBytes,
-            "Session instruction byte size",
-            MAX_SYSTEM_INSTRUCTION_BYTES,
-          ),
-        }),
+      : { sessionInstructionDigest: requiredSessionInstructionDigest(manifest.sessionInstructionDigest) }),
+    ...(manifest.promptWithheld === undefined
+      ? {}
+      : { promptWithheld: requiredPromptWithheld(manifest.promptWithheld) }),
     executionSegmentCount: requiredBoundedInteger(
       manifest.executionSegmentCount,
       "Execution segment count",
@@ -874,9 +887,10 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
         contextBytes: references.reduce((total, reference) => total + reference.byteSize, 0),
         internalInstructionCount: internalInstructions.length,
         internalInstructionBytes,
-        ...(input.sessionInstructionBytes === undefined
+        ...(input.sessionInstructionDigest === undefined
           ? {}
-          : { sessionInstructionBytes: input.sessionInstructionBytes }),
+          : { sessionInstructionDigest: requiredSessionInstructionDigest(input.sessionInstructionDigest) }),
+        ...(input.promptWithheld ? { promptWithheld: true as const } : {}),
         executionSegmentCount,
         assembledPayloadBytes,
         references,

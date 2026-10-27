@@ -487,25 +487,30 @@ describe("bounded structured turn request context", () => {
     ]);
   });
 
-  it("adds no instruction header when no instruction is due and records only the session instruction size", async () => {
+  it("adds no instruction header when no instruction is due and records the session instruction digest", async () => {
     const cwd = await workspace();
-    const bare = assembleTurnRequest({ cwd, visibleContent: "hello", sessionInstructionBytes: 1_234 });
+    const digest = "a".repeat(64);
+    const bare = assembleTurnRequest({ cwd, visibleContent: "hello", sessionInstructionDigest: digest, promptWithheld: true });
 
     expect(bare.executionPrompt).toBe("hello");
     expect(bare.persistence.manifest).toMatchObject({
       internalInstructionCount: 0,
       internalInstructionBytes: 0,
-      sessionInstructionBytes: 1_234,
+      sessionInstructionDigest: digest,
+      promptWithheld: true,
       executionSegmentCount: 1,
       assembledPayloadBytes: 5,
     });
     expect(parseSanitizedTurnExecutionManifest(bare.persistence.manifest)).toEqual(bare.persistence.manifest);
-    expect(assembleTurnRequest({ cwd, visibleContent: "hello" }).persistence.manifest)
-      .not.toHaveProperty("sessionInstructionBytes");
-    expect(() => parseSanitizedTurnExecutionManifest({
-      ...bare.persistence.manifest,
-      sessionInstructionBytes: 16 * 1_024 + 1,
-    })).toThrow("Session instruction byte size is invalid.");
+    const plain = assembleTurnRequest({ cwd, visibleContent: "hello" }).persistence.manifest;
+    expect(plain).not.toHaveProperty("sessionInstructionDigest");
+    expect(plain).not.toHaveProperty("promptWithheld");
+    for (const sessionInstructionDigest of ["A".repeat(64), "a".repeat(63), 1_234]) {
+      expect(() => parseSanitizedTurnExecutionManifest({ ...bare.persistence.manifest, sessionInstructionDigest }))
+        .toThrow("Session instruction digest is invalid.");
+    }
+    expect(() => parseSanitizedTurnExecutionManifest({ ...bare.persistence.manifest, promptWithheld: false }))
+      .toThrow("Withheld prompt marker is invalid.");
   });
 
   it("rejects inconsistent manifest totals during privileged debug decoding", () => {

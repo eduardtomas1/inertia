@@ -15,7 +15,7 @@ describe("Codex session instructions", { concurrent: false }, () => {
     await Promise.all(roots.splice(0).map(removePortableFixture));
   });
 
-  it("sends the session instruction as developer instructions only when a thread starts", async () => {
+  it("sends the same session instruction as developer instructions when a thread starts and resumes", async () => {
     const fake = fakeAppServer(roots);
     const manager = ProviderManager.createForTests({
       commands: { codex: fake.command },
@@ -47,6 +47,7 @@ describe("Codex session instructions", { concurrent: false }, () => {
     expect(messages.some(({ method }) => method === "config/read")).toBe(false);
     expect(messages.find(({ method }) => method === "thread/start")?.params)
       .toMatchObject({ developerInstructions: sessionInstruction });
-    expect(messages.find(({ method }) => method === "thread/resume")?.params).not.toHaveProperty("developerInstructions");
+    expect(messages.find(({ method }) => method === "thread/resume")?.params)
+      .toMatchObject({ developerInstructions: sessionInstruction });
   });
 });

@@ -20,11 +20,15 @@ export function chatInstruction(conversationId: string): HiddenProviderInstructi
   return { label: "inertia-chat", text: `This chat's id is ${conversationId}.` };
 }
 
+export const MAX_TRACKED_PROMPT_DELIVERIES = 1_024;
+
 export class PromptInstructionDeliveries {
   private readonly sent = new Map<string, { turnId: string; digest: string }>();
 
   record(conversationId: string, turnId: string, digest: string): void {
+    this.sent.delete(conversationId);
     this.sent.set(conversationId, { turnId, digest });
+    while (this.sent.size > MAX_TRACKED_PROMPT_DELIVERIES) this.sent.delete(this.sent.keys().next().value!);
   }
 
   sentTurnId(conversationId: string, digest: string): string | null {
@@ -46,7 +50,7 @@ export interface HiddenInstructionDeliveryInput {
 
 export interface HiddenInstructionDelivery {
   sessionInstruction?: string;
-  sessionInstructionBytes?: number;
+  sessionInstructionDigest?: string;
   promptPack: readonly HiddenProviderInstruction[];
   freshSessionPromptPack: readonly HiddenProviderInstruction[];
   buildModeDue: boolean;
@@ -58,22 +62,26 @@ export function resolveHiddenInstructionDelivery(
 ): HiddenInstructionDelivery {
   const { store, conversation, resumedSessionId } = input;
   const ledger = store.turnLedgerRepository;
-  const nativeGoalSession = resumedSessionId !== null && store.agentGoals(conversation.id)
-    .some((goal) => goal.source === "codex-native" && goal.providerSessionId === resumedSessionId);
   const settledOnSession = (turn: AgentTurn | null): boolean => turn !== null
     && turn.status === "completed"
     && turn.providerSessionAfter === resumedSessionId
+    && (turn.providerSessionBefore === null || turn.providerSessionBefore === turn.providerSessionAfter)
+    && !ledger.promptWithheld(turn.id)
     && !ledger.compactedSince(conversation.id, turn.requestedAt);
   const text = systemInstructionText(input.pack);
   const bytes = text === undefined ? 0 : Buffer.byteLength(text, "utf8");
   const profile = watcherHarnessProfile(input.harnessId);
   const systemChannel = text !== undefined
-    && profile.systemInstruction
+    && profile.sessionInstruction
     && bytes <= MAX_SYSTEM_INSTRUCTION_BYTES;
   const digest = text === undefined ? "" : createHash("sha256").update(text, "utf8").digest("hex");
-  const sessionHoldsPack = (sessionId: string): boolean => systemChannel
-    && (!profile.sessionScopedSystemInstruction
-      || ledger.sessionInstructionBytes(conversation.id, sessionId) === bytes);
+  const sessionHoldsPack = (sessionId: string): boolean => {
+    if (!systemChannel) return false;
+    const origin = ledger.sessionOrigin(conversation.id, sessionId);
+    return origin !== null
+      && origin.sessionInstructionDigest === digest
+      && !ledger.compactedSince(conversation.id, origin.requestedAt);
+  };
   const promptPackHeld = (): boolean => {
     const turnId = input.deliveries?.sentTurnId(conversation.id, digest) ?? null;
     if (turnId === null) return false;
@@ -88,11 +96,10 @@ export function resolveHiddenInstructionDelivery(
     : !sessionHoldsPack(resumedSessionId) && !promptPackHeld());
   const promptPack = packDue ? input.pack : [];
   return {
-    ...(systemChannel ? { sessionInstruction: text, sessionInstructionBytes: bytes } : {}),
+    ...(systemChannel ? { sessionInstruction: text, sessionInstructionDigest: digest } : {}),
     promptPack,
     freshSessionPromptPack: text !== undefined && !systemChannel ? input.pack : [],
     buildModeDue: resumedSessionId === null
-      || nativeGoalSession
       || input.latestTurn?.interactionMode !== conversation.interactionMode
       || !settledOnSession(input.latestTurn),
     recordPromptPack: (turnId) => {

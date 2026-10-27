@@ -748,9 +748,6 @@ function startOpenCodeRun(
       if (!subscriptionAcknowledged) {
         emitter.status("starting", undefined, "event subscription unacknowledged");
       }
-      const systemText = [options.input.sessionInstruction, options.input.systemInstruction]
-        .filter((section) => section !== undefined && section.length > 0)
-        .join("\n\n");
       const providerOperation = compacting
         ? (() => {
             manualCompaction.initiatedAt = compactionTimestampNow();
@@ -766,7 +763,7 @@ function startOpenCodeRun(
             ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
             ...(agent ? { agent: agent.name } : {}),
             ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}),
-            ...(systemText ? { system: systemText } : {}),
+            ...(options.input.systemInstruction ? { system: options.input.systemInstruction } : {}),
             parts: [
               { type: "text", text: options.input.prompt },
               ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),

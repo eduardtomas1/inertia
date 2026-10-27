@@ -28,6 +28,7 @@ import {
   type AgentOperationSession,
 } from "./preview-agent-operations.js";
 import type { PreviewAgentOperationFailure } from "./preview-agent-phase.js";
+import { agentPageLogs, hoverAgentPageElement, selectAgentPageElement } from "./preview-agent-interactions.js";
 import { BrowserEvidenceCapture, type BrowserEvidenceAuthority, type BrowserEvidencePage } from "./browser-evidence-capture.js";
 import { BrowserEvidenceInspectorRegistry, type BrowserEvidenceImageApproval, type BrowserEvidenceImageInspection } from "./browser-evidence-image-approval.js";
 import { PreviewContextRegistry } from "./preview-lifecycle.js";
@@ -321,10 +322,13 @@ export class PreviewBroker {
               case "tabs":
                 return this.#success(session, boundedAgentStateText(this.#agentState(session)));
               case "resize":
-              case "hover":
-              case "select":
-              case "logs":
                 return failure("unavailable", "That Inertia Browser action is not available yet.");
+              case "hover":
+                return await hoverAgentPageElement(this.#operations, session, command, operation, validate);
+              case "select":
+                return await selectAgentPageElement(this.#operations, session, command, operation, validate);
+              case "logs":
+                return agentPageLogs(this.#operations, session);
               case "tab-open":
                 return await this.#operations.openTab(session, command.url, operation, MAX_BROWSER_TABS);
               case "tab-activate":

@@ -719,7 +719,7 @@ describe("inertia_request_context", () => {
     try {
       const bridge = bridgeFor(begin(target, "Hi"));
       const cases: Array<[unknown, string]> = [
-        [{ turnId: "t1" }, "conversationId: required with turnId, cursor or limit; this chat's id is in the Inertia instructions."],
+        [{ turnId: "t1" }, "conversationId: required with turnId, cursor or limit; this chat's id is in the [inertia-chat] instruction."],
         [{ conversationId: target.id, turnId: "t1", limit: 5 }, "limit: applies only to the turn list; drop it when passing turnId."],
       ];
       for (const [args, message] of cases) {
@@ -739,7 +739,7 @@ describe("inertia_request_context", () => {
       expect(definition.description).not.toMatch(/oldest messages/u);
       expect(definition.description).toMatch(/referenced/u);
       expect(definition.description).toMatch(/asks the user/u);
-      expect(definition.description).toContain("This chat's id is in the Inertia instructions.");
+      expect(definition.description).toContain("This chat's id is in the `[inertia-chat]` instruction.");
       expect(Buffer.byteLength(definition.description, "utf8")).toBeLessThanOrEqual(520);
       expect(Object.keys(definition.inputSchema.properties as object).sort())
         .toEqual(["conversationId", "cursor", "limit", "turnId"]);

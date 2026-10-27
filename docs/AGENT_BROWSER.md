@@ -633,6 +633,10 @@ tool call:
 | resize, including a colour scheme alone | one per call |
 | open, select or close a tab | one per call |
 
+A resize approval says that it changes the viewport of every page in the
+chat's Browser; every other approval says that it applies only to the
+inspected tab and document.
+
 Denial prevents the browser action. Auto-edit and Full Access use their
 existing provider access contract without adding a second interaction
 approval, and send a screenshot to a model that accepts images without asking.
@@ -721,7 +725,7 @@ remote navigation, and URLs containing credentials. Browser storage is cleared
 when the chat's Browser session closes.
 
 The renderer can request navigation, page selection, bounds, a viewport
-preset, and native inspection for an exact opaque evidence image through a
+preset or a validated width and height, and native inspection for an exact opaque evidence image through a
 strict preload API, but it never receives image bytes, a
 `WebContents`, browser storage, raw page DOM, or arbitrary capture capability.
 The supervised utility process cannot create Electron views directly. Its path

@@ -223,6 +223,18 @@ describe("agent browser host tools", () => {
       : [identity, { action: "discard-approval", token }]);
   });
 
+  it.each([
+    ["inertia_browser_resize", { preset: "desktop" }, "This changes the viewport of every page in this chat's Browser."],
+    ["inertia_browser_interact", { action: "click", ref: "e1" }, "This approval applies only to the inspected tab and document."],
+  ] as const)("gives %s an approval reason that matches its reach", async (tool, args, reason) => {
+    const broker = { perform: vi.fn(async () => ({
+      ok: true as const, text: JSON.stringify({ token: crypto.randomUUID(), detail: "Browser action" }), state: pageState,
+    })) };
+    const request = call(tool, args, "deny");
+    await new AgentBrowserHostTools(broker).invoke(conversation("supervised"), request, identity);
+    expect(request.requestApproval).toHaveBeenCalledWith(expect.objectContaining({ reason }));
+  });
+
   it("does not ask for approval or execute when the control cannot be inspected", async () => {
     const broker = { perform: vi.fn(async () => ({ ok: false as const, code: "not-found" as const, message: "stale control" })) };
     const request = call("inertia_browser_interact", { action: "click", ref: "e1" });

@@ -29,6 +29,7 @@ import {
   setAgentPageEmulation,
 } from "../../src/main/preview-agent-viewport";
 import {
+  MAX_AGENT_BROWSER_IMAGE_BYTES,
   MAX_AGENT_BROWSER_IMAGE_EDGE,
   parseAgentBrowserResult,
   type AgentBrowserCommand,
@@ -57,6 +58,7 @@ afterEach(() => {
     pageX: 0, pageY: 0, offsetX: 0, offsetY: 0, clientWidth: 1_280, clientHeight: 800, scale: 1, zoom: 1,
   };
   electronState.screenshotData = SCREENSHOT_PNG_BASE64;
+  electronState.encodedPngBytes = undefined;
 });
 
 async function shownBrowser(bounds = { x: 100, y: 50, width: 600, height: 500 }) {
@@ -598,6 +600,20 @@ describe("agent Browser screenshots", () => {
       },
     });
     expect(parseAgentBrowserResult(screenshot)).toEqual(screenshot);
+  });
+
+  it("gives up after five reductions without encoding a sixth", async () => {
+    const { broker } = await shownBrowser();
+    const oversized = Buffer.from(SCREENSHOT_PNG_BASE64, "base64");
+    oversized.writeUInt32BE(3_000, 16);
+    oversized.writeUInt32BE(2_000, 20);
+    electronState.screenshotData = oversized.toString("base64");
+    electronState.encodedPngBytes = MAX_AGENT_BROWSER_IMAGE_BYTES + 1;
+    electronState.imageResizes = 0;
+
+    await expect(broker.perform(runIdentity, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: false, code: "too-large" });
+    expect(electronState.imageResizes).toBe(5);
   });
 
   it("still withholds the image when the page shows a secret", async () => {

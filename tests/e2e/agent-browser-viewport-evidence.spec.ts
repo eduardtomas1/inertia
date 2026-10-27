@@ -229,7 +229,7 @@ test("captures the Browser panel at each agent viewport", async () => {
       kind: "permissions",
       title: "Control Inertia Browser",
       detail: approval.detail,
-      reason: "This approval applies only to the inspected tab and document.",
+      reason: "This changes the viewport of every page in this chat's Browser.",
       cwd: app.workspaceDirectory,
       command: null,
       networkScope: null,

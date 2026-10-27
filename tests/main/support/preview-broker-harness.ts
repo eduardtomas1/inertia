@@ -17,6 +17,8 @@ export function createPreviewBrokerElectronState() {
       pageX: 0, pageY: 0, offsetX: 0, offsetY: 0, clientWidth: 1_280, clientHeight: 800, scale: 1, zoom: 1,
     } as Record<string, number>,
     screenshotData: SCREENSHOT_PNG_BASE64 as string | undefined,
+    encodedPngBytes: undefined as number | undefined,
+    imageResizes: 0,
     emulation: [] as Array<{ contentsId: number; method: string; params?: Record<string, unknown> }>,
     loadOverrides: [] as Array<(url: string) => Promise<void>>,
     focusedShadowRoots: undefined as Array<{ shadowRootType: string }> | undefined,
@@ -119,10 +121,15 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
     constructor(private readonly width = 1_920, private readonly height = 1_080) {}
     getSize() { return { width: this.width, height: this.height }; }
     resize(options: { width: number; height?: number }) {
+      electronState.imageResizes += 1;
       const ratio = options.width / this.width;
       return new FakeImage(options.width, options.height ?? Math.max(1, Math.floor(this.height * ratio)));
     }
-    toPNG() { return Buffer.from("bounded-png"); }
+    toPNG() {
+      return electronState.encodedPngBytes === undefined
+        ? Buffer.from("bounded-png")
+        : Buffer.alloc(electronState.encodedPngBytes);
+    }
     isEmpty() { return this.width <= 0 || this.height <= 0; }
   }
 

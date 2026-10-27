@@ -35,12 +35,13 @@ function withinImageBytes(data: string): boolean {
 function boundedAgentScreenshot(source: Buffer): AgentPageCapture {
   let image = nativeImage.createFromBuffer(source);
   let data = source.toString("base64");
-  for (let attempt = 0; attempt <= MAX_SCREENSHOT_REDUCTIONS; attempt += 1) {
+  for (let attempt = 0; ; attempt += 1) {
     const { width, height } = image.getSize();
     if (width <= 0 || height <= 0) return "empty";
     const edge = Math.min(1, MAX_AGENT_BROWSER_IMAGE_EDGE / Math.max(width, height));
     const fits = withinImageBytes(data);
     if (edge === 1 && fits) return { image, data, width, height };
+    if (attempt === MAX_SCREENSHOT_REDUCTIONS) return "too-large";
     const factor = fits ? edge : edge * OVERSIZED_REDUCTION;
     image = image.resize({
       width: Math.max(1, Math.round(width * factor)),
@@ -49,7 +50,6 @@ function boundedAgentScreenshot(source: Buffer): AgentPageCapture {
     });
     data = image.toPNG().toString("base64");
   }
-  return "too-large";
 }
 
 export async function agentPageScreenshotPrivacy(

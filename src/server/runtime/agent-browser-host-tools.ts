@@ -580,7 +580,9 @@ export class AgentBrowserHostTools {
         approved = await call.requestApproval({
           title: "Control Inertia Browser",
           detail: approval.detail,
-          reason: "This approval applies only to the inspected tab and document.",
+          reason: command.action === "resize"
+            ? "This changes the viewport of every page in this chat's Browser."
+            : "This approval applies only to the inspected tab and document.",
           permissionRoots: [],
         }) === "approve" && !call.signal.aborted;
       } finally {

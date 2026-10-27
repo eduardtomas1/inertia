@@ -253,7 +253,7 @@ describe("Codex App Server host tools", () => {
         ["inertia_list_conversations\uFEFF", "Unknown Inertia tool. Did you mean inertia_list_conversations?"],
         ["\tinertia_list_conversations", "Codex sent an invalid or unauthorised Inertia tool call."],
       ];
-      for (const [index, [tool, message]] of cases.entries()) {
+      for (const [index, [tool]] of cases.entries()) {
         harness.events.handleServerRequest(`rpc-${index}`, "item/tool/call", toolRequest({ callId: `call-${index}`, tool }));
       }
       await flush();

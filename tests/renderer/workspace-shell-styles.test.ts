@@ -360,16 +360,17 @@ describe("split view", () => {
 describe("detached chat window", () => {
   const detached = readSourceText("src/renderer/src/detached-chat.css");
 
-  it("puts project and title on one breadcrumb line and keeps the error bar plain", () => {
-    expect(block(".detached-chat-title", detached)).not.toContain("flex-direction: column;");
-    expect(block(".detached-chat-title > .detached-chat-project::after", detached)).toContain('content: "/";');
+  it("reuses the workbench breadcrumb header, keeps it draggable and keeps the error bar plain", () => {
+    expect(block(".detached-chat-shell .workspace-header > .header-leading", detached)).toContain("-webkit-app-region: drag;");
+    expect(block(".detached-chat-shell .header-breadcrumb :is(button, input)", detached)).toContain("-webkit-app-region: no-drag;");
     expect(block(".detached-chat-error", detached)).not.toContain("background");
     const dismiss = block(".detached-chat-error > button", detached);
     expect(dismiss).toContain("border: 1px solid var(--line);");
     expect(dismiss).toContain("font-weight: 500;");
-    const app = readSourceText("src/renderer/src/DetachedChatApp.tsx");
-    expect(app).toContain("<Pin size={16} />");
-    expect(app).toContain("Review this request in the main window.");
+    const header = readSourceText("src/renderer/src/components/detached/DetachedChatHeader.tsx");
+    expect(header).toContain("<WorkspaceHeader");
+    expect(header).toContain("<Pin size={16} />");
+    expect(readSourceText("src/renderer/src/DetachedChatApp.tsx")).toContain("Review this request in the main window.");
     expect(readSourceText("src/renderer/src/components/DetachedConversationPlaceholder.tsx")).toContain("{windowOpen ? <PictureInPicture2 size={14} /> : <PanelTopOpen size={14} />}");
   });
 });

@@ -17,11 +17,12 @@ describe("Windows title bar overlay clearance", () => {
     expect(detachedCss).toMatch(/\.detached-chat-shell\.platform-win32 \{\n  --titlebar-overlay-inset: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u);
   });
 
-  it("pads the header, panel tabs, corner controls and detached header by the overlay inset", () => {
+  it("pads the header, panel tabs and corner controls of both windows by the overlay inset", () => {
     expect(css).toMatch(/\.platform-win32 \.workspace-frame:not\(\.has-right-panel\) > \.workspace-header \{\n  padding-right: calc\(14px \+ var\(--workspace-corner-controls-width, 0px\) \+ var\(--titlebar-overlay-inset\)\);/u);
     expect(css).toMatch(/\.platform-win32 \.workspace-panel:not\(\.is-stacked\) > \.workspace-panel-tabs \{\n  padding-right: calc\(var\(--workspace-corner-controls-width, 0px\) \+ 16px \+ var\(--titlebar-overlay-inset\)\);/u);
     expect(css).toMatch(/\.platform-win32 \.workspace-corner-controls \{\n  right: calc\(12px \+ var\(--titlebar-overlay-inset\)\);/u);
-    expect(detachedCss).toMatch(/\.detached-chat-shell\.platform-win32 \.detached-chat-header \{\n  padding-right: calc\(8px \+ var\(--titlebar-overlay-inset\)\);/u);
+    expect(detachedCss).not.toContain(".detached-chat-header");
+    expect(detachedCss).not.toMatch(/\.platform-win32 [^{]*\.workspace-header \{/u);
   });
 
   it("keeps the right panel at 300px on Windows and clears the caption buttons only in its tab strip", () => {

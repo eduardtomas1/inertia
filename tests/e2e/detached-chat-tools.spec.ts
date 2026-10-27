@@ -111,7 +111,6 @@ test("keeps search, tasks and sidebar shortcuts in the main window", async () =>
 });
 
 test("shows this chat's workspace changes in the Changes tab", async () => {
-  test.fixme(true, "Needs the W1 detached policy rows for git.refresh, git.workspace.refresh and git.diff.");
   const panel = await openPanel();
   await panel.getByRole("button", { name: "Add panel surface" }).click();
   await panel.getByRole("menu", { name: "Add panel surface" }).getByRole("menuitem", { name: /^Changes/u }).click();
@@ -120,7 +119,6 @@ test("shows this chat's workspace changes in the Changes tab", async () => {
 });
 
 test("runs a terminal for this chat in the Terminal tab", async () => {
-  test.fixme(true, "Needs the W1 detached policy rows for terminal.create, terminal.attach and terminal.input.");
   const panel = await openPanel();
   await panel.getByRole("button", { name: "Add panel surface" }).click();
   await panel.getByRole("menu", { name: "Add panel surface" }).getByRole("menuitem", { name: /^Terminal/u }).click();
@@ -129,7 +127,6 @@ test("runs a terminal for this chat in the Terminal tab", async () => {
 });
 
 test("opens settings in the main window and keeps the chat window open", async () => {
-  test.fixme(true, "Needs the W2 openInMainWindow preload method and the main-window target dispatcher.");
   await popup.getByRole("textbox", { name: "Message" }).focus();
   await popup.keyboard.press(`${primaryModifier}+Comma`);
   await expect(app.page.getByRole("heading", { name: "Settings" })).toBeVisible();

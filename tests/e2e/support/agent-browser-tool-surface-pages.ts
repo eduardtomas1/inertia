@@ -23,6 +23,23 @@ const pages: Record<string, string> = {
     + "#far{position:absolute;left:1150px;top:700px;width:100px;height:40px}</style>"
     + "<p>Viewport page</p><button id='far' type='button'>Far corner</button>"
     + "<script>document.querySelector('#far').addEventListener('click',()=>{window.__clicked='far'})</script>",
+  "/agent-browser-responsive": "<title>Responsive layout</title><meta name='viewport' content='width=device-width,initial-scale=1'><style>:root{color-scheme:light}"
+    + "body{margin:0;font:16px/1.5 -apple-system,system-ui,sans-serif;color:#1f2328;background:#fff}"
+    + "header{padding:16px 24px;border-bottom:1px solid #d0d7de;background:#f6f8fa}h1{margin:0;font-size:24px}"
+    + "#size{margin:4px 0 0;font-size:18px;color:#424a53}main{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:24px}"
+    + "section{border:1px solid #d0d7de;border-radius:6px;padding:16px}h2{margin:0 0 6px;font-size:18px}p{margin:0}"
+    + "@media (max-width:999px){main{grid-template-columns:repeat(2,1fr)}}@media (max-width:599px){main{grid-template-columns:1fr}}</style>"
+    + "<header><h1>Responsive layout</h1><p id='size'></p></header><main>"
+    + "<section><h2>Orders</h2><p>Twelve orders are waiting to ship today.</p></section>"
+    + "<section><h2>Shipping</h2><p>Delivery takes three working days.</p></section>"
+    + "<section><h2>Returns</h2><p>Two returns arrived this morning.</p></section>"
+    + "<section><h2>Payments</h2><p>All payments for this week have cleared.</p></section>"
+    + "<section><h2>Support</h2><p>Four questions need an answer.</p></section>"
+    + "<section><h2>Reports</h2><p>The monthly report is ready to review.</p></section></main>"
+    + "<script>const size=document.querySelector('#size');const main=document.querySelector('main');"
+    + "const show=()=>{const columns=getComputedStyle(main).gridTemplateColumns.split(' ').length;"
+    + "size.textContent=innerWidth+'\\u00d7'+innerHeight+' CSS pixels, '+columns+(columns===1?' column':' columns')};"
+    + "show();addEventListener('resize',show)</script>",
   "/agent-browser-post-form": "<title>Post form</title>"
     + "<form method='post' action='/agent-browser-post-count'><button type='submit'>Send post</button></form>",
   "/agent-browser-hover-select": "<title>Hover and select</title><p id='status'>none</p>"

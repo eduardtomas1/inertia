@@ -923,6 +923,68 @@ describe("detached chat main-process boundary", () => {
     }
   });
 
+  it("refuses main-window targets from a chat window that is already closing", async () => {
+    const value = fixture();
+    const target = { kind: "settings", page: "agents" };
+    try {
+      for (const [conversationId, title] of [[FIRST_ID, "First"], [SECOND_ID, "Second"]] as const) {
+        await value.ipc.invoke(
+          DETACHED_CHAT_IPC.open,
+          eventFor(value.main.webContents),
+          { conversationId, title, draft: "" },
+        );
+      }
+      const [first, second] = value.popups;
+      await value.ipc.invoke(DETACHED_CHAT_IPC.close, eventFor(first!.webContents), "closing draft");
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(first!.webContents),
+        target,
+      )).rejects.toThrow("This chat window is closing.");
+      await value.ipc.invoke(DETACHED_CHAT_IPC.dock, eventFor(second!.webContents), "docking draft");
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(second!.webContents),
+        { kind: "conversation", conversationId: FIRST_ID },
+      )).rejects.toThrow("This chat window is closing.");
+      expect(value.openedInMain).not.toHaveBeenCalled();
+      await afterIpcReply();
+      expect(first!.destroyed).toBe(true);
+      expect(second!.destroyed).toBe(true);
+      expect(value.openedInMain).not.toHaveBeenCalled();
+      expect(value.docked).toHaveBeenCalledExactlyOnceWith(SECOND_ID);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("refuses main-window targets once detached chats are shutting down", async () => {
+    const value = fixture();
+    try {
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.open,
+        eventFor(value.main.webContents),
+        { conversationId: FIRST_ID, title: "First", draft: "" },
+      );
+      const popup = value.popups[0]!;
+      popup.close = () => {
+        popup.closeCalls += 1;
+      };
+      const stopping = value.coordinator.shutdown();
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.openInMain,
+        eventFor(popup.webContents),
+        { kind: "usage-limits" },
+      )).rejects.toThrow("Detached chats are shutting down.");
+      expect(popup.closeCalls).toBe(1);
+      popup.destroy();
+      await stopping;
+      expect(value.openedInMain).not.toHaveBeenCalled();
+    } finally {
+      await cleanup(value);
+    }
+  });
+
   it("removes only its invoke handlers during shutdown", async () => {
     const value = fixture();
     try {

@@ -301,6 +301,12 @@ export class DetachedChatMain {
       DETACHED_CHAT_IPC.openInMain,
       async (event, ...args) => {
         const context = this.#assertDetachedIpc(event, args.length, 1);
+        if (this.#shuttingDown) {
+          throw new Error("Detached chats are shutting down.");
+        }
+        if (this.#scheduledClosures.has(event.sender)) {
+          throw new Error("This chat window is closing.");
+        }
         const target = mainWindowTarget(args[0]);
         if (
           target.kind === "conversation"

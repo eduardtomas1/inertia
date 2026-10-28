@@ -314,6 +314,36 @@ describe("useDetachedChatWindows", () => {
     }
   });
 
+  it("keeps a terminal handoff that arrives before the first runtime snapshot", async () => {
+    const projectId = "33333333-3333-4333-8333-333333333333";
+    const terminalId = "44444444-4444-4444-8444-444444444444";
+    const storageKey = `inertia:terminal-sessions:v1:${projectId}:${CONVERSATION_ID}`;
+    let publish: ((handoff: DetachedChatTerminalHandoff) => void) | undefined;
+    installDetachedChatBridge({
+      onTerminalHandoff: vi.fn((listener) => {
+        publish = listener;
+        return vi.fn();
+      }),
+    });
+    const snapshot = {
+      conversations: [{ id: CONVERSATION_ID, projectId }],
+    } as unknown as AppSnapshot;
+    const hook = renderHook(
+      ({ current }: { current: AppSnapshot | null }) => useDetachedChatWindows(current),
+      { initialProps: { current: null as AppSnapshot | null } },
+    );
+    await waitFor(() => expect(hook.result.current.ready).toBe(true));
+
+    act(() => publish?.({ conversationId: CONVERSATION_ID, terminalIds: [terminalId], dock: true }));
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    expect(hook.result.current.dockedTerminalConversationId).toBeNull();
+
+    hook.rerender({ current: snapshot });
+    await waitFor(() => expect(hook.result.current.dockedTerminalConversationId).toBe(CONVERSATION_ID));
+    expect(window.sessionStorage.getItem(storageKey)).toBe(JSON.stringify([terminalId]));
+    window.sessionStorage.clear();
+  });
+
   it("seeds the returned terminal ids and asks to open the terminal only on dock", async () => {
     const projectId = "33333333-3333-4333-8333-333333333333";
     const terminalId = "44444444-4444-4444-8444-444444444444";

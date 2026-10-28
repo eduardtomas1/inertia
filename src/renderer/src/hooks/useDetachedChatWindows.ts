@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSnapshot } from "@shared/contracts";
 import type {
+  DetachedChatTerminalHandoff,
   DetachedChatWindowOpenResult,
   DetachedChatWindowOpenRequest,
   DetachedChatWindowSummary,
@@ -40,9 +41,13 @@ export function useDetachedChatWindows(
     useState<string | null>(null);
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
+  const pendingTerminalHandoffs = useRef(new Map<string, DetachedChatTerminalHandoff>());
 
-  useEffect(() => window.inertia.onDetachedChatTerminalHandoff((handoff) => {
-    const projectId = snapshotRef.current?.conversations.find(
+  const applyTerminalHandoff = useCallback((
+    current: AppSnapshot,
+    handoff: DetachedChatTerminalHandoff,
+  ) => {
+    const projectId = current.conversations.find(
       ({ id }) => id === handoff.conversationId,
     )?.projectId;
     if (!projectId) return;
@@ -53,7 +58,20 @@ export function useDetachedChatWindows(
     if (handoff.dock && handoff.terminalIds.length > 0) {
       setDockedTerminalConversationId(handoff.conversationId);
     }
-  }), []);
+  }, []);
+
+  useEffect(() => window.inertia.onDetachedChatTerminalHandoff((handoff) => {
+    const current = snapshotRef.current;
+    if (current) applyTerminalHandoff(current, handoff);
+    else pendingTerminalHandoffs.current.set(handoff.conversationId, handoff);
+  }), [applyTerminalHandoff]);
+
+  useEffect(() => {
+    if (!snapshot || pendingTerminalHandoffs.current.size === 0) return;
+    const pending = [...pendingTerminalHandoffs.current.values()];
+    pendingTerminalHandoffs.current.clear();
+    for (const handoff of pending) applyTerminalHandoff(snapshot, handoff);
+  }, [applyTerminalHandoff, snapshot]);
   const consumeDockedTerminal = useCallback(
     () => setDockedTerminalConversationId(null),
     [],

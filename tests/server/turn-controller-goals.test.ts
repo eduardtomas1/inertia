@@ -361,6 +361,26 @@ describe("TurnController native goal lifecycle", () => {
     expect(runtime.provider.input).not.toHaveProperty("goalStart");
   });
 
+  it("starts a goal without moving the main window's selected chat", async () => {
+    const runtime = await goalRuntime();
+    const projectId = runtime.store.conversation(runtime.conversationId).projectId;
+    const selected = runtime.store.createConversation(projectId, "Selected conversation", {
+      providerId: "codex",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+    });
+    runtime.store.selectConversation(selected.id);
+    void runtime.controller.setNativeGoal({
+      conversationId: runtime.conversationId,
+      objective: "Stay in the background",
+      status: "active",
+    }).catch(() => undefined);
+    await vi.waitFor(() => expect(runtime.provider.runCount).toBe(1));
+    expect(runtime.store.shellSnapshot().activeConversationId).toBe(selected.id);
+  });
+
   it("resumes execution when a goal remains active after its run ends", async () => {
     const runtime = await goalRuntime();
     const first = runtime.controller.setNativeGoal({

@@ -27,6 +27,14 @@ const OTHER_PROJECT = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const RUN = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const CHECKPOINT = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const REQUEST = "11111111-1111-4111-8111-111111111111";
+const OTHER_RUN = "22222222-2222-4222-8222-222222222222";
+const TURN = "33333333-3333-4333-8333-333333333333";
+const OTHER_TURN = "44444444-4444-4444-8444-444444444444";
+const LAUNCH = "55555555-5555-4555-8555-555555555555";
+const JUDGED_LAUNCH = "66666666-6666-4666-8666-666666666666";
+const OTHER_LAUNCH = "77777777-7777-4777-8777-777777777777";
+const TERMINAL = "88888888-8888-4888-8888-888888888888";
+const FINGERPRINT = "a".repeat(64);
 
 const authority: RuntimeClientAuthority = {
   kind: "detached-chat",
@@ -112,7 +120,7 @@ function snapshot(): AppSnapshot {
         glow: true,
       },
     },
-    promptPresets: [{ id: "secret-preset" }] as unknown as NonNullable<AppSnapshot["promptPresets"]>,
+    promptPresets: [{ id: "review-preset" }] as unknown as NonNullable<AppSnapshot["promptPresets"]>,
     todos: [{ id: "secret-task" }] as unknown as NonNullable<AppSnapshot["todos"]>,
     activeProjectId: OTHER_PROJECT,
     activeConversationId: OTHER_CONVERSATION,
@@ -128,6 +136,15 @@ function resources(): DetachedChatRuntimePolicyResources {
       : null,
     checkpointConversationId: (checkpointId) =>
       checkpointId === CHECKPOINT ? CONVERSATION : OTHER_CONVERSATION,
+    turnConversationId: (turnId) => ({
+      [TURN]: CONVERSATION,
+      [OTHER_TURN]: OTHER_CONVERSATION,
+    })[turnId] ?? null,
+    duoLaunchConversationIds: (launchId) => ({
+      [LAUNCH]: [CONVERSATION, OTHER_CONVERSATION],
+      [JUDGED_LAUNCH]: [OTHER_CONVERSATION, "99999999-9999-4999-8999-999999999999", CONVERSATION],
+      [OTHER_LAUNCH]: [OTHER_CONVERSATION, "99999999-9999-4999-8999-999999999999"],
+    })[launchId] ?? null,
     pendingApproval: (conversationId, requestId) =>
       conversationId === CONVERSATION && requestId === REQUEST
       ? ({ conversationId: CONVERSATION } as AgentApprovalRequest)
@@ -247,7 +264,7 @@ describe("detached chat runtime authority", () => {
     expect(projected.providers[0]).not.toHaveProperty("maintenance");
     expect(projected.maintenanceOperations).toEqual([]);
     expect(projected.backendDefaults).toEqual([]);
-    expect(projected.promptPresets).toEqual([]);
+    expect(projected.promptPresets).toEqual([{ id: "review-preset" }]);
     expect(projected.todos).toEqual([]);
     expect(projected).not.toHaveProperty("databaseBackup");
     expect(projected.settings).toMatchObject({
@@ -569,6 +586,8 @@ describe("detached chat runtime authority", () => {
       store: {
         subagentTrace: () => { throw new Error("Not found."); },
         checkpoint: () => { throw new Error("Not found."); },
+        agentTurn: () => { throw new Error("Not found."); },
+        findPairedLaunch: () => null,
       },
       snapshot,
       pendingApprovals: new Map(),
@@ -716,11 +735,6 @@ describe("detached chat runtime authority", () => {
       requestId: REQUEST,
       payload: { providerId: "codex" },
     })).not.toBeNull();
-    expect(rejection({
-      type: "prompt-preset.delete",
-      requestId: REQUEST,
-      payload: { presetId: REQUEST, expectedRevision: 1 },
-    })).not.toBeNull();
     const clearDone: ClientCommand = { type: "todo.clearDone", requestId: REQUEST, payload: { ids: [] } };
     expect(rejection(clearDone)).not.toBeNull();
     expect(mainRejection(clearDone)).toBeNull();
@@ -737,7 +751,7 @@ describe("detached chat runtime authority", () => {
     }
   });
 
-  it("allows only search mentions in the owning workspace", () => {
+  it("allows workspace entries only in the owning workspace", () => {
     expect(rejection({
       type: "workspace.entries",
       requestId: REQUEST,
@@ -756,37 +770,420 @@ describe("detached chat runtime authority", () => {
         query: "src",
       },
     })).not.toBeNull();
-    expect(rejection({
-      type: "workspace.entries",
-      requestId: REQUEST,
-      payload: {
-        projectId: PROJECT,
-        conversationId: CONVERSATION,
-        directory: "src",
-      },
-    })).not.toBeNull();
-  });
-
-  it("keeps terminal reattachment outside detached-chat authority", () => {
-    const attach: ClientCommand = {
-      type: "terminal.attach",
-      requestId: REQUEST,
-      payload: {
-        projectId: PROJECT,
-        conversationId: CONVERSATION,
-        terminalId: "22222222-2222-4222-8222-222222222222",
-        cols: 80,
-        rows: 24,
-      },
-    };
-
-    expect(rejection(attach)).toBe(
-      "That request is unavailable in a detached chat.",
-    );
-    expect(mainRejection(attach)).toBeNull();
   });
 });
 
+
+const REJECTED = "That request is unavailable in a detached chat.";
+
+interface WorkspaceScope {
+  projectId: string;
+  conversationId?: string;
+}
+
+const OWNED_SCOPE: WorkspaceScope = { projectId: PROJECT, conversationId: CONVERSATION };
+const FOREIGN_SCOPES: WorkspaceScope[] = [
+  { projectId: PROJECT, conversationId: OTHER_CONVERSATION },
+  { projectId: OTHER_PROJECT, conversationId: OTHER_CONVERSATION },
+  { projectId: OTHER_PROJECT, conversationId: CONVERSATION },
+  { projectId: PROJECT },
+];
+
+function gitCommands(scope: WorkspaceScope): ClientCommand[] {
+  const nested = { ...scope, repositoryPath: "packages/app", authorityRef: REQUEST };
+  const selection = {
+    ...scope,
+    fingerprint: FINGERPRINT,
+    filePath: "src/app.ts",
+    hunkId: "hunk-1",
+    lineIds: ["line-1"],
+  };
+  return [
+    { type: "git.refresh", requestId: REQUEST, payload: scope },
+    { type: "git.workspace.refresh", requestId: REQUEST, payload: scope },
+    { type: "git.diff", requestId: REQUEST, payload: { ...scope, authorityRef: REQUEST } },
+    { type: "git.workspace.diff", requestId: REQUEST, payload: { ...nested, path: "src/app.ts" } },
+    { type: "git.selection.inspect", requestId: REQUEST, payload: selection },
+    {
+      type: "git.selection.revert",
+      requestId: REQUEST,
+      payload: {
+        ...selection,
+        authorityRef: REQUEST,
+        expected: {
+          diffFingerprint: FINGERPRINT,
+          fileFingerprint: FINGERPRINT,
+          hunkFingerprint: FINGERPRINT,
+          selectionFingerprint: FINGERPRINT,
+          gitStateFingerprint: FINGERPRINT,
+        },
+      },
+    },
+    { type: "git.selection.undo", requestId: REQUEST, payload: { ...scope, operationId: REQUEST, authorityRef: REQUEST } },
+    { type: "git.branches", requestId: REQUEST, payload: { ...scope, authorityRef: REQUEST } },
+    { type: "git.branch.create", requestId: REQUEST, payload: { ...nested, name: "feature" } },
+    { type: "git.branch.switch", requestId: REQUEST, payload: { ...scope, name: "main", remote: true } },
+    { type: "git.fetch", requestId: REQUEST, payload: nested },
+    { type: "git.pull", requestId: REQUEST, payload: scope },
+    { type: "git.push", requestId: REQUEST, payload: nested },
+    {
+      type: "git.commit",
+      requestId: REQUEST,
+      payload: {
+        ...scope,
+        message: "Commit",
+        paths: ["src/app.ts"],
+        reviewReceipt: { authorityRef: REQUEST, fingerprint: FINGERPRINT },
+      },
+    },
+    { type: "git.pr.open", requestId: REQUEST, payload: scope },
+    { type: "git.pr.confidence", requestId: REQUEST, payload: nested },
+    { type: "git.pr.create", requestId: REQUEST, payload: { ...scope, title: "Change", body: "", draft: true } },
+    { type: "review.selection.ask", requestId: REQUEST, payload: { ...selection, conversationId: scope.conversationId ?? "" } },
+    { type: "review.selection.revise", requestId: REQUEST, payload: { ...selection, conversationId: scope.conversationId ?? "", comment: "Smaller" } },
+    {
+      type: "review.summary.generate",
+      requestId: REQUEST,
+      payload: { projectId: scope.projectId, conversationId: scope.conversationId ?? "", fingerprint: FINGERPRINT },
+    },
+  ];
+}
+
+function workspaceCommands(scope: WorkspaceScope): ClientCommand[] {
+  return [
+    { type: "workspace.entries", requestId: REQUEST, payload: scope },
+    { type: "workspace.entries", requestId: REQUEST, payload: { ...scope, directory: "src" } },
+    { type: "workspace.entries", requestId: REQUEST, payload: { ...scope, query: "app" } },
+    { type: "workspace.file.read", requestId: REQUEST, payload: { ...scope, path: "src/app.ts", fallbackPath: "src/index.ts" } },
+    {
+      type: "workspace.file.write",
+      requestId: REQUEST,
+      payload: { ...scope, path: "src/app.ts", authorityRef: REQUEST, expectedDigest: FINGERPRINT, content: "export {};" },
+    },
+  ];
+}
+
+function terminalCommands(scope: WorkspaceScope): ClientCommand[] {
+  return [
+    { type: "terminal.create", requestId: REQUEST, payload: { ...scope, cols: 80, rows: 24 } },
+    { type: "terminal.attach", requestId: REQUEST, payload: { ...scope, terminalId: TERMINAL, cols: 80, rows: 24 } },
+    {
+      type: "terminal.provider.resume",
+      requestId: REQUEST,
+      payload: { projectId: scope.projectId, conversationId: scope.conversationId ?? "", terminalId: TERMINAL, cols: 80, rows: 24 },
+    },
+    { type: "project.actions", requestId: REQUEST, payload: scope },
+    {
+      type: "project.action.run",
+      requestId: REQUEST,
+      payload: { ...scope, actionId: "dev", terminalId: TERMINAL, cols: 80, rows: 24 },
+    },
+  ];
+}
+
+function expectOnlyOwnedScope(commands: (scope: WorkspaceScope) => ClientCommand[]): void {
+  expect(commands(OWNED_SCOPE).map(rejection)).toEqual(commands(OWNED_SCOPE).map(() => null));
+  for (const scope of FOREIGN_SCOPES) {
+    expect(commands(scope).map(rejection)).toEqual(commands(scope).map(() => REJECTED));
+    expect(commands(scope).map(mainRejection)).toEqual(commands(scope).map(() => null));
+  }
+  expect(commands(OWNED_SCOPE).map((command) => detachedChatCommandRejection(authority, command, {
+    ...resources(),
+    snapshot: () => ({ ...snapshot(), conversations: [conversation(OTHER_CONVERSATION, OTHER_PROJECT)] }),
+  }))).toEqual(commands(OWNED_SCOPE).map(() => REJECTED));
+}
+
+describe("detached chat workspace tool authority", () => {
+  it("scopes Git status, diffs, branches, remotes, commits, pull requests and review questions to the owned checkout", () => {
+    expectOnlyOwnedScope(gitCommands);
+  });
+
+  it("opens turn diffs and comparisons only for turns the owned conversation recorded", () => {
+    const diff = (turnId: string, conversationId = CONVERSATION): ClientCommand => ({
+      type: "git.turn.diff",
+      requestId: REQUEST,
+      payload: { projectId: PROJECT, conversationId, turnId, path: "src/app.ts" },
+    });
+    const compare = (earlierTurnId: string, laterTurnId: string): ClientCommand => ({
+      type: "git.turn.compare",
+      requestId: REQUEST,
+      payload: { projectId: PROJECT, conversationId: CONVERSATION, earlierTurnId, laterTurnId },
+    });
+    expect(rejection(diff(TURN))).toBeNull();
+    expect(rejection(compare(TURN, TURN))).toBeNull();
+    expect(rejection(diff(OTHER_TURN))).toBe(REJECTED);
+    expect(rejection(diff("unknown-turn"))).toBe(REJECTED);
+    expect(rejection(diff(OTHER_TURN, OTHER_CONVERSATION))).toBe(REJECTED);
+    expect(rejection(compare(TURN, OTHER_TURN))).toBe(REJECTED);
+    expect(rejection(compare(OTHER_TURN, TURN))).toBe(REJECTED);
+    expect(rejection({
+      type: "git.turn.diff",
+      requestId: REQUEST,
+      payload: { projectId: OTHER_PROJECT, conversationId: CONVERSATION, turnId: TURN },
+    })).toBe(REJECTED);
+    expect(mainRejection(diff(OTHER_TURN, OTHER_CONVERSATION))).toBeNull();
+  });
+
+  it("keeps review notes, review state and review cancellation on the owned conversation", () => {
+    const commands = (conversationId: string): ClientCommand[] => [
+      {
+        type: "review.state.set",
+        requestId: REQUEST,
+        payload: { conversationId, scope: "hunk", path: "src/app.ts", hunkId: "hunk-1", targetFingerprint: FINGERPRINT, reviewed: true },
+      },
+      {
+        type: "review.note.create",
+        requestId: REQUEST,
+        payload: { conversationId, path: "src/app.ts", hunkId: null, lineIds: [], targetFingerprint: FINGERPRINT, body: "Check this" },
+      },
+      { type: "review.note.update", requestId: REQUEST, payload: { conversationId, noteId: REQUEST, body: "Checked" } },
+      { type: "review.note.delete", requestId: REQUEST, payload: { conversationId, noteId: REQUEST } },
+      { type: "review.selection.cancel", requestId: REQUEST, payload: { conversationId } },
+      { type: "review.summary.cancel", requestId: REQUEST, payload: { conversationId } },
+    ];
+    expect(commands(CONVERSATION).map(rejection)).toEqual(commands(CONVERSATION).map(() => null));
+    expect(commands(OTHER_CONVERSATION).map(rejection)).toEqual(commands(OTHER_CONVERSATION).map(() => REJECTED));
+    expect(commands(OTHER_CONVERSATION).map(mainRejection)).toEqual(commands(OTHER_CONVERSATION).map(() => null));
+  });
+
+  it("lets the Files panel list folders, read and save files only in the owned checkout", () => {
+    expectOnlyOwnedScope(workspaceCommands);
+  });
+
+  it("opens terminals, provider resume and project actions only in the owned checkout", () => {
+    expectOnlyOwnedScope(terminalCommands);
+  });
+
+  it("leaves terminal input, resizing, detaching and closing to the socket that owns the terminal", () => {
+    const commands: ClientCommand[] = [
+      { type: "terminal.input", requestId: REQUEST, payload: { terminalId: TERMINAL, data: "ls\r" } },
+      { type: "terminal.resize", requestId: REQUEST, payload: { terminalId: TERMINAL, cols: 100, rows: 30 } },
+      { type: "terminal.detach", requestId: REQUEST, payload: { terminalId: TERMINAL } },
+      { type: "terminal.close", requestId: REQUEST, payload: { terminalId: TERMINAL } },
+    ];
+    expect(commands.map(rejection)).toEqual(commands.map(() => null));
+  });
+
+  it("controls background work only for runs of the owned conversation", () => {
+    const activity = (runId: string): ClientCommand[] => [
+      { type: "activity.stop", requestId: REQUEST, payload: { runId } },
+      { type: "activity.dismiss", requestId: REQUEST, payload: { runId } },
+      { type: "activity.acknowledge", requestId: REQUEST, payload: { runId } },
+    ];
+    expect(activity(RUN).map(rejection)).toEqual([null, null, null]);
+    expect(activity(OTHER_RUN).map(rejection)).toEqual([REJECTED, REJECTED, REJECTED]);
+    expect(activity("unknown-run").map(rejection)).toEqual([REJECTED, REJECTED, REJECTED]);
+    expect(activity(OTHER_RUN).map(mainRejection)).toEqual([null, null, null]);
+    const tasks = (conversationId: string): ClientCommand => ({
+      type: "conversation.background-tasks.get",
+      requestId: REQUEST,
+      payload: { conversationId, before: null },
+    });
+    expect(rejection(tasks(CONVERSATION))).toBeNull();
+    expect(rejection(tasks(OTHER_CONVERSATION))).toBe(REJECTED);
+  });
+
+  it("reads provider limits without editing limit sources or resets", () => {
+    expect(rejection({ type: "usage.limits.get", requestId: REQUEST, payload: { refresh: true, force: false, background: true } })).toBeNull();
+    expect(rejection({ type: "usage.limits.get", requestId: REQUEST, payload: { refresh: false } })).toBeNull();
+    for (const command of [
+      { type: "usage.source.remove", requestId: REQUEST, payload: { id: REQUEST } },
+      { type: "usage.reset.prepare", requestId: REQUEST, payload: { accountId: "account" } },
+      { type: "usage.reset.confirm", requestId: REQUEST, payload: { confirmationId: REQUEST, confirmed: true } },
+      { type: "usage.dashboard.get", requestId: REQUEST, payload: { days: 7, fromInclusive: "2026-01-01T00:00:00.000Z", toExclusive: "2026-01-08T00:00:00.000Z", endDate: "2026-01-07", timeZone: "UTC" } },
+    ] satisfies ClientCommand[]) {
+      expect(rejection(command)).toBe(REJECTED);
+      expect(mainRejection(command)).toBeNull();
+    }
+  });
+
+  it("manages the user's own prompt presets", () => {
+    const commands: ClientCommand[] = [
+      { type: "prompt-preset.create", requestId: REQUEST, payload: { name: "Review", body: "Review this.", route: null } },
+      { type: "prompt-preset.update", requestId: REQUEST, payload: { presetId: REQUEST, expectedRevision: 1, name: "Check" } },
+      { type: "prompt-preset.duplicate", requestId: REQUEST, payload: { presetId: REQUEST, expectedRevision: 1 } },
+      { type: "prompt-preset.delete", requestId: REQUEST, payload: { presetId: REQUEST, expectedRevision: 1 } },
+      { type: "prompt-preset.reorder", requestId: REQUEST, payload: { expectedPresetIds: [REQUEST, RUN], presetIds: [RUN, REQUEST] } },
+    ];
+    expect(commands.map(rejection)).toEqual(commands.map(() => null));
+  });
+
+  it("builds the app snapshot only for commands that consult it", () => {
+    let snapshots = 0;
+    const counting = (): DetachedChatRuntimePolicyResources => {
+      const base = resources();
+      return {
+        ...base,
+        snapshot: () => {
+          snapshots += 1;
+          return base.snapshot();
+        },
+      };
+    };
+    const check = (command: ClientCommand): number => {
+      snapshots = 0;
+      expect(detachedChatCommandRejection(authority, command, counting())).toBeNull();
+      return snapshots;
+    };
+    expect(check({ type: "terminal.input", requestId: REQUEST, payload: { terminalId: TERMINAL, data: "ls\r" } })).toBe(0);
+    expect(check({ type: "prompt-preset.create", requestId: REQUEST, payload: { name: "Review", body: "Review this.", route: null } })).toBe(0);
+    expect(check({ type: "git.refresh", requestId: REQUEST, payload: OWNED_SCOPE })).toBe(1);
+  });
+});
+
+describe("detached chat title menu authority", () => {
+  it("renames, pins and snoozes only the owned conversation", () => {
+    const update = (payload: Record<string, unknown>): ClientCommand => ({
+      type: "conversation.update",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, ...payload },
+    } as ClientCommand);
+    for (const payload of [
+      { title: "Renamed" },
+      { pinned: true },
+      { pinned: false },
+      { snoozedUntil: "2030-01-01T09:00:00.000Z" },
+      { snoozedUntil: null },
+    ]) {
+      expect(rejection(update(payload))).toBeNull();
+      expect(rejection(update({ ...payload, conversationId: OTHER_CONVERSATION }))).toBe(REJECTED);
+    }
+    expect(rejection(update({ model: "gpt-5" }))).toBe(REJECTED);
+    expect(rejection(update({ reasoningEffort: "high" }))).toBe(REJECTED);
+    expect(rejection(update({}))).toBe(REJECTED);
+  });
+
+  it("settles, reopens, marks unread and regenerates the title only for the owned conversation", () => {
+    const commands = (conversationId: string): ClientCommand[] => ([
+      "conversation.settle",
+      "conversation.unsettle",
+      "conversation.mark-unread",
+      "conversation.regenerate-title",
+    ] as const).map((type) => ({ type, requestId: REQUEST, payload: { conversationId } }));
+    expect(commands(CONVERSATION).map(rejection)).toEqual([null, null, null, null]);
+    expect(commands(OTHER_CONVERSATION).map(rejection)).toEqual([REJECTED, REJECTED, REJECTED, REJECTED]);
+    expect(commands(OTHER_CONVERSATION).map(mainRejection)).toEqual([null, null, null, null]);
+    for (const type of ["conversation.archive", "conversation.unarchive", "conversation.delete"] as const) {
+      expect(rejection({ type, requestId: REQUEST, payload: { conversationId: CONVERSATION } })).toBe(REJECTED);
+    }
+  });
+});
+
+describe("detached chat Duo authority", () => {
+  it("sweeps pending Duo launches only in the owned project", () => {
+    const pending = (projectIds: string[]): ClientCommand => ({
+      type: "duo.pending",
+      requestId: REQUEST,
+      payload: { projectIds, page: 1 },
+    });
+    expect(rejection(pending([PROJECT]))).toBeNull();
+    expect(rejection(pending([OTHER_PROJECT]))).toBe(REJECTED);
+    expect(rejection(pending([PROJECT, OTHER_PROJECT]))).toBe(REJECTED);
+    expect(mainRejection(pending([PROJECT, OTHER_PROJECT]))).toBeNull();
+  });
+
+  it("reads, retries and cancels Duo comparisons only for launches that include the owned conversation", () => {
+    const commands = (launchId: string): ClientCommand[] => ([
+      "duo.status",
+      "duo.comparison.retry",
+      "duo.comparison.cancel",
+    ] as const).map((type) => ({ type, requestId: REQUEST, payload: { launchId } }));
+    expect(commands(LAUNCH).map(rejection)).toEqual([null, null, null]);
+    expect(commands(JUDGED_LAUNCH).map(rejection)).toEqual([null, null, null]);
+    expect(commands(OTHER_LAUNCH).map(rejection)).toEqual([REJECTED, REJECTED, REJECTED]);
+    expect(commands(REQUEST).map(rejection)).toEqual([REJECTED, REJECTED, REJECTED]);
+    expect(commands(OTHER_LAUNCH).map(mainRejection)).toEqual([null, null, null]);
+    for (const type of ["duo.dispatch", "duo.cancel", "duo.acknowledge"] as const) {
+      expect(rejection({ type, requestId: REQUEST, payload: { launchId: LAUNCH } })).toBe(REJECTED);
+    }
+  });
+});
+
+describe("detached chat projection for chat surfaces", () => {
+  const chatSettings = (): AppSnapshot["settings"] => ({
+    ...defaultSettings,
+    terminalFontSize: 17,
+    wrapDiffs: true,
+    ignoreWhitespace: true,
+    autoOpenPlan: false,
+    compactOnReturn: "never",
+    desktopNotifications: false,
+    quotaWarnings: { enabled: false, firstThreshold: 15 },
+    keybindings: { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t" },
+    newThreadMode: "worktree",
+    defaultAccessMode: "full",
+    codexBinaryPath: "/Users/someone/bin/codex",
+    discordReleaseRepositoryUrl: "https://github.com/someone/release-notes",
+    completionSound: {
+      enabled: true,
+      sound: "0123456789abcdef.mp3",
+      library: [{ file: "0123456789abcdef.mp3", name: "Private recording" }],
+      longRunsOnly: true,
+      longRunSeconds: 120,
+    },
+  });
+  const projectedSettings = () => projectDetachedChatSnapshot(
+    { ...snapshot(), settings: chatSettings() },
+    CONVERSATION,
+  ).settings;
+
+  it("projects every chat setting the window reads, including the ones it used to reset", () => {
+    expect(projectedSettings()).toMatchObject({
+      terminalFontSize: 17,
+      wrapDiffs: true,
+      ignoreWhitespace: true,
+      autoOpenPlan: false,
+      compactOnReturn: "never",
+      desktopNotifications: false,
+      quotaWarnings: { enabled: false, firstThreshold: 15 },
+      keybindings: { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t" },
+      newThreadMode: "worktree",
+      defaultAccessMode: "full",
+    });
+    const { codexBinaryPath: _codex, discordReleaseRepositoryUrl: _discord, completionSound: _sound, ...shared } = chatSettings();
+    expect(projectedSettings()).toMatchObject(shared);
+  });
+
+  it.each([
+    ["codexBinaryPath", "names a local executable that only provider setup in the main window uses"],
+    ["discordReleaseRepositoryUrl", "configures release announcements, which only the main window sends"],
+    ["completionSound", "is played by the main window and lists the user's imported sound files"],
+  ] as const)("keeps %s at its default because it %s", (key, _reason) => {
+    expect(projectedSettings()[key]).toEqual(defaultSettings[key]);
+    expect(JSON.stringify(projectedSettings())).not.toMatch(/someone|Private recording/u);
+  });
+
+  it("keeps the owned project's actions and preferences in the projected project", () => {
+    const state = snapshot();
+    const preferences = { actions: [{ id: "dev", name: "Dev", executable: "npm", args: ["run", "dev"] }] };
+    state.projects = state.projects.map((project) => project.id === PROJECT
+      ? { ...project, preferences } as AppSnapshot["projects"][number]
+      : project);
+    expect(projectDetachedChatSnapshot(state, CONVERSATION).projects).toEqual([
+      expect.objectContaining({ id: PROJECT, preferences }),
+    ]);
+  });
+
+  it("forwards Git invalidation only for the owned conversation's checkout", () => {
+    const sync = { runtimeGeneration: "33333333-3333-4333-8333-333333333333", latestSequence: 3 };
+    const invalidated = (projectId: string, conversationId: string | null): RuntimeSequencedFrame & { type: "runtime.event" } => ({
+      type: "runtime.event",
+      sync,
+      scope: { kind: "shell" },
+      event: { type: "workspace.git.invalidated", requestId: REQUEST, projectId, conversationId },
+    });
+    const project = (frame: RuntimeSequencedFrame & { type: "runtime.event" }) =>
+      projectRuntimeFrameForAuthority(frame, { conversationIds: [CONVERSATION] }, authority);
+    expect(project(invalidated(PROJECT, CONVERSATION))).toEqual(invalidated(PROJECT, CONVERSATION));
+    expect(project(invalidated(PROJECT, OTHER_CONVERSATION))).toEqual({ type: "runtime.cursor", sync });
+    expect(project(invalidated(PROJECT, null))).toEqual({ type: "runtime.cursor", sync });
+    expect(projectRuntimeFrameForAuthority(
+      invalidated(OTHER_PROJECT, OTHER_CONVERSATION),
+      { conversationIds: [] },
+      { kind: "main" },
+    )).toEqual(invalidated(OTHER_PROJECT, OTHER_CONVERSATION));
+  });
+});
 
 describe("global message search authority", () => {
   it("denies global search and cross-window focus commands to detached renderers", () => {

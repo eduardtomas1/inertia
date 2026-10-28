@@ -7,7 +7,7 @@ export interface ThreadNotificationWindow {
   show(): void;
   focus(): void;
   webContents: {
-    send(channel: string, conversationId: string): void;
+    send(channel: string, payload: unknown): void;
   };
 }
 
@@ -41,8 +41,8 @@ export function waitForThreadNotificationWindowLoad(
   });
 }
 
-export async function activateThreadNotification(
-  conversationId: string,
+export async function activateMainWindow(
+  payload: unknown,
   dependencies: ThreadNotificationActivationDependencies,
 ): Promise<void> {
   await dependencies.createWindow();
@@ -53,5 +53,12 @@ export async function activateThreadNotification(
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
-  window.webContents.send(dependencies.channel, conversationId);
+  window.webContents.send(dependencies.channel, payload);
+}
+
+export function activateThreadNotification(
+  conversationId: string,
+  dependencies: ThreadNotificationActivationDependencies,
+): Promise<void> {
+  return activateMainWindow(conversationId, dependencies);
 }

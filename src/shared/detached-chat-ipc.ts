@@ -16,6 +16,8 @@ export const DETACHED_CHAT_IPC = {
   retarget: "inertia:detached-chat-retarget",
   dock: "inertia:detached-chat-dock",
   close: "inertia:detached-chat-close",
+  openInMain: "inertia:detached-chat-open-in-main",
+  mainWindowTarget: "inertia:detached-chat-main-window-target",
 } as const;
 
 export type DetachedChatBridge = Pick<
@@ -24,6 +26,7 @@ export type DetachedChatBridge = Pick<
   | "setDetachedChatAlwaysOnTop"
   | "retargetDetachedChat"
   | "dockDetachedChat"
+  | "openInMainWindow"
   | "closeDetachedChat"
   | "persistDetachedChatDraft"
   | "mirrorDetachedChatDraft"

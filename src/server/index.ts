@@ -750,7 +750,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       queuedMessages.handler,
       ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
-      createDuoCommandHandler({ coordinator: duoLaunchCoordinator, broadcastSnapshot: flushSnapshot, send }),
+      createDuoCommandHandler({ coordinator: duoLaunchCoordinator, visibleLaunchIds: detachedChatRuntimeSecurity.visibleDuoLaunchIds, broadcastSnapshot: flushSnapshot, send }),
       watchers.handler,
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
       createAgentWorkflowCommandHandler({
@@ -905,7 +905,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           });
           return;
         }
-        await executeCommand(socket, command);
+        await executeCommand(socket, command, authority);
       });
     } finally {
       activeRuntimeCommands -= 1;

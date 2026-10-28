@@ -174,20 +174,22 @@ test("moves one live chat between a remembered native window and the main app", 
     .toHaveCount(0);
   await expect(popup.getByRole("button", { name: /new chat/iu }))
     .toHaveCount(0);
-  await expect(popup.getByRole("button", { name: /prompt presets/iu }))
-    .toHaveCount(0);
+  await popup.getByRole("button", { name: "More tools" }).click();
+  await expect(popup.getByRole("button", { name: /^Prompt presets/u }))
+    .toBeVisible();
   await expect(popup.getByRole("button", { name: /scratch prompts/iu }))
     .toHaveCount(0);
   await expect(popup.getByRole("button", {
     name: "Add context from another chat",
   })).toHaveCount(0);
+  await popup.getByRole("button", { name: "More tools" }).click();
   await expect(popup.getByRole("dialog", {
     name: /chat context/iu,
   })).toHaveCount(0);
   await expect(popup.getByRole("searchbox", { name: "Search chats" }))
     .toHaveCount(0);
   await expect(popup.getByRole("group", { name: "Chat checkout context" }))
-    .toHaveCount(0);
+    .toBeVisible();
   await expect(popup.getByText("Context from Reviewed context")).toBeVisible();
   await popup.getByRole("button", { name: "Copy final answer" }).click();
   const copiedAnswer = popup.getByRole("button", { name: "Answer copied" });

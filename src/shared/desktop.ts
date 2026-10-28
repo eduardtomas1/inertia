@@ -17,6 +17,13 @@ import type { DiagnosticPage, DiagnosticQuery, RendererDiagnostic } from "./appl
 import type { CompletionSoundImport } from "./completion-sound";
 import type { ContextMenuAction, ContextMenuRequest } from "./context-menu";
 import { isProjectRelativePath, UUID_PATTERN } from "./request-identifiers";
+import {
+  PROVIDER_AUTH_METHODS,
+  providerSupportsAuthMethod,
+  type ProviderAuthMethod,
+  type ProviderId,
+} from "./provider";
+import { SETTINGS_SECTION_IDS, type SettingsSection } from "./settings-sections";
 import type { RuntimeStartupBlockerCode } from
   "./runtime-startup-diagnostics";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
@@ -299,6 +306,25 @@ export interface DetachedChatWindowOpenResult
   disposition: "opened" | "focused";
 }
 
+export type MainWindowNewChatCheckout =
+  | { kind: "branch"; branch: string }
+  | { kind: "this-worktree"; branch?: string }
+  | { kind: "isolated-worktree" };
+
+export type MainWindowTarget =
+  | { kind: "conversation"; conversationId: string }
+  | { kind: "new-chat"; projectId: string; checkout?: MainWindowNewChatCheckout }
+  | { kind: "settings"; page: SettingsSection }
+  | { kind: "provider-setup"; providerId: ProviderId; method?: ProviderAuthMethod }
+  | { kind: "backend-setup"; profileId?: string; panel?: "key" | "models" }
+  | { kind: "diagnostics"; incidentId?: string; turnId?: string }
+  | { kind: "usage-limits" };
+
+export interface MainWindowTargetRequest {
+  sourceConversationId: string;
+  target: MainWindowTarget;
+}
+
 export interface AppProcessHealth {
   pid: number;
   cpuPercent: number;
@@ -375,6 +401,123 @@ export function parseDetachedChatWindowRequest(
     || /[\0\r\n]/u.test(title)
   ) return null;
   return { conversationId: value.conversationId, title };
+}
+
+const MAIN_WINDOW_PROVIDER_IDS: Readonly<Record<ProviderId, true>> = {
+  codex: true,
+  claude: true,
+  cursor: true,
+  kimi: true,
+  opencode: true,
+  antigravity: true,
+};
+const BACKEND_PROFILE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
+const MAX_TARGET_BRANCH_LENGTH = 255;
+
+function exactTargetKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  return required.every((key) => Object.hasOwn(value, key))
+    && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
+}
+
+function uuidValue(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+function targetBranch(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= MAX_TARGET_BRANCH_LENGTH
+    && value.trim() === value
+    && !/\p{Cc}/u.test(value);
+}
+
+function targetSettingsPage(value: unknown): value is SettingsSection {
+  return typeof value === "string" && (SETTINGS_SECTION_IDS as readonly string[]).includes(value);
+}
+
+function targetProviderId(value: unknown): value is ProviderId {
+  return typeof value === "string" && Object.hasOwn(MAIN_WINDOW_PROVIDER_IDS, value);
+}
+
+function targetAuthMethod(value: unknown): value is ProviderAuthMethod {
+  return typeof value === "string" && (PROVIDER_AUTH_METHODS as readonly string[]).includes(value);
+}
+
+function parseNewChatCheckout(value: unknown): MainWindowNewChatCheckout | null {
+  if (!plainObject(value)) return null;
+  switch (value.kind) {
+    case "branch":
+      return exactTargetKeys(value, ["kind", "branch"]) && targetBranch(value.branch)
+        ? { kind: "branch", branch: value.branch }
+        : null;
+    case "this-worktree":
+      if (!exactTargetKeys(value, ["kind"], ["branch"])) return null;
+      if (!Object.hasOwn(value, "branch")) return { kind: "this-worktree" };
+      return targetBranch(value.branch) ? { kind: "this-worktree", branch: value.branch } : null;
+    case "isolated-worktree":
+      return exactTargetKeys(value, ["kind"]) ? { kind: "isolated-worktree" } : null;
+    default:
+      return null;
+  }
+}
+
+export function parseMainWindowTarget(value: unknown): MainWindowTarget | null {
+  if (!plainObject(value) || !Object.hasOwn(value, "kind")) return null;
+  switch (value.kind) {
+    case "conversation":
+      return exactTargetKeys(value, ["kind", "conversationId"]) && uuidValue(value.conversationId)
+        ? { kind: "conversation", conversationId: value.conversationId }
+        : null;
+    case "new-chat": {
+      if (!exactTargetKeys(value, ["kind", "projectId"], ["checkout"]) || !uuidValue(value.projectId)) return null;
+      if (!Object.hasOwn(value, "checkout")) return { kind: "new-chat", projectId: value.projectId };
+      const checkout = parseNewChatCheckout(value.checkout);
+      return checkout ? { kind: "new-chat", projectId: value.projectId, checkout } : null;
+    }
+    case "settings":
+      return exactTargetKeys(value, ["kind", "page"]) && targetSettingsPage(value.page)
+        ? { kind: "settings", page: value.page }
+        : null;
+    case "provider-setup":
+      if (!exactTargetKeys(value, ["kind", "providerId"], ["method"]) || !targetProviderId(value.providerId)) return null;
+      if (!Object.hasOwn(value, "method")) return { kind: "provider-setup", providerId: value.providerId };
+      return targetAuthMethod(value.method) && providerSupportsAuthMethod(value.providerId, value.method)
+        ? { kind: "provider-setup", providerId: value.providerId, method: value.method }
+        : null;
+    case "backend-setup": {
+      if (!exactTargetKeys(value, ["kind"], ["profileId", "panel"])) return null;
+      const { profileId, panel } = value;
+      const hasProfile = Object.hasOwn(value, "profileId");
+      const hasPanel = Object.hasOwn(value, "panel");
+      if (hasProfile && !(typeof profileId === "string" && BACKEND_PROFILE_ID_PATTERN.test(profileId))) return null;
+      if (hasPanel && (!hasProfile || (panel !== "key" && panel !== "models"))) return null;
+      return {
+        kind: "backend-setup",
+        ...(hasProfile ? { profileId: profileId as string } : {}),
+        ...(hasPanel ? { panel: panel as "key" | "models" } : {}),
+      };
+    }
+    case "diagnostics": {
+      if (!exactTargetKeys(value, ["kind"], ["incidentId", "turnId"])) return null;
+      const { incidentId, turnId } = value;
+      const hasIncident = Object.hasOwn(value, "incidentId");
+      const hasTurn = Object.hasOwn(value, "turnId");
+      if ((hasIncident && !uuidValue(incidentId)) || (hasTurn && !uuidValue(turnId))) return null;
+      return {
+        kind: "diagnostics",
+        ...(hasIncident ? { incidentId: incidentId as string } : {}),
+        ...(hasTurn ? { turnId: turnId as string } : {}),
+      };
+    }
+    case "usage-limits":
+      return exactTargetKeys(value, ["kind"]) ? { kind: "usage-limits" } : null;
+    default:
+      return null;
+  }
 }
 
 export function parseDetachedChatWindowOpenRequest(
@@ -615,6 +758,10 @@ export interface DesktopBridge {
   ) => Promise<DetachedChatWindowSummary>;
   /** Explicitly returns the chat to the main workbench. Native close never docks it. */
   dockDetachedChat: (draft: string) => Promise<void>;
+  openInMainWindow: (target: MainWindowTarget) => Promise<void>;
+  onMainWindowTarget: (
+    listener: (request: MainWindowTargetRequest) => void,
+  ) => () => void;
   closeDetachedChat: (draft: string) => Promise<void>;
   /** Synchronously preserves the owned draft during native window teardown. */
   persistDetachedChatDraft: (draft: string) => boolean;

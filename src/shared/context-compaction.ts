@@ -10,6 +10,7 @@ export interface ContextCompaction {
   afterTokens: number | null;
   instructionForwarded: boolean;
   trigger?: ContextCompactionTrigger;
+  sessionInstructionDigest?: string | null;
 }
 
 export function isContextCompaction(value: unknown): value is ContextCompaction {
@@ -18,8 +19,11 @@ export function isContextCompaction(value: unknown): value is ContextCompaction 
   const count = (input: unknown): boolean => input === null
     || (typeof input === "number" && Number.isSafeInteger(input) && input >= 0);
   const triggered = "trigger" in row;
-  return Object.keys(row).length === (triggered ? 5 : 4)
+  const digested = "sessionInstructionDigest" in row;
+  return Object.keys(row).length === 4 + (triggered ? 1 : 0) + (digested ? 1 : 0)
     && (!triggered || CONTEXT_COMPACTION_TRIGGERS.includes(row.trigger as ContextCompactionTrigger))
+    && (!digested || row.sessionInstructionDigest === null
+      || (typeof row.sessionInstructionDigest === "string" && /^[0-9a-f]{64}$/u.test(row.sessionInstructionDigest)))
     && PROVIDER_IDS.includes(row.providerId as ProviderId)
     && count(row.beforeTokens) && count(row.afterTokens)
     && typeof row.instructionForwarded === "boolean";

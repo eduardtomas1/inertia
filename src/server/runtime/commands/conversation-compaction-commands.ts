@@ -33,6 +33,7 @@ import type { BackendProfileController } from "../backends/backend-profile-contr
 import type { ConversationCompactionStates } from "../conversation-compaction-states";
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
 import type { TurnController } from "../turns/turn-controller";
+import { sessionInstructionDigest } from "../turns/turn-instruction-delivery";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
 import {
   defineRuntimeCommandHandler,
@@ -427,6 +428,7 @@ async function compactUnderLock<T>(
       afterTokens,
       instructionForwarded: result.instructionForwarded,
       trigger: request.trigger,
+      sessionInstructionDigest: sessionInstruction === undefined ? null : sessionInstructionDigest(sessionInstruction),
     };
     try {
       const message = dependencies.store.createMessage(

@@ -29,4 +29,16 @@ describe("confirmed context compaction receipts", () => {
     expect(isContextCompaction(widest)).toBe(true);
     expect(JSON.stringify(widest).length).toBeLessThan(256);
   });
+  it("records which session instruction a compaction sent, or that it sent none", () => {
+    const digest = "a".repeat(64);
+    expect(isContextCompaction({ ...compaction, sessionInstructionDigest: digest })).toBe(true);
+    expect(isContextCompaction({ ...compaction, sessionInstructionDigest: null })).toBe(true);
+    expect(isContextCompaction({ ...compaction, trigger: "manual", sessionInstructionDigest: digest })).toBe(true);
+    for (const sessionInstructionDigest of ["A".repeat(64), "a".repeat(63), "", 1, undefined]) {
+      expect(isContextCompaction({ ...compaction, sessionInstructionDigest })).toBe(false);
+    }
+    const widest = { providerId: "antigravity", beforeTokens: Number.MAX_SAFE_INTEGER, afterTokens: Number.MAX_SAFE_INTEGER, instructionForwarded: false, trigger: "on-return", sessionInstructionDigest: digest };
+    expect(isContextCompaction(widest)).toBe(true);
+    expect(JSON.stringify(widest).length).toBeLessThan(256);
+  });
 });

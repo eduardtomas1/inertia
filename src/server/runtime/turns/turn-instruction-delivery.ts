@@ -16,6 +16,10 @@ export function systemInstructionText(
     : instructions.map(({ label, text }) => `[${label}]\n${text}`).join("\n\n");
 }
 
+export function sessionInstructionDigest(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
 export function chatInstruction(conversationId: string): HiddenProviderInstruction {
   return { label: "inertia-chat", text: `This chat's id is ${conversationId}.` };
 }
@@ -99,7 +103,7 @@ export function resolveHiddenInstructionDelivery(
     && !ledger.compactedSince(conversation.id, turn.requestedAt);
   const text = systemInstructionText(input.pack);
   const systemChannel = sessionInstructionText(input.harnessId, input.pack) !== undefined;
-  const digest = text === undefined ? "" : createHash("sha256").update(text, "utf8").digest("hex");
+  const digest = text === undefined ? "" : sessionInstructionDigest(text);
   const sessionHoldsPack = (sessionId: string): boolean => {
     if (!systemChannel) return false;
     const origin = ledger.sessionOrigin(conversation.id, sessionId);

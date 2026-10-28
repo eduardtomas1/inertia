@@ -90,9 +90,6 @@
 .welcome-guide-logo {
   width: 46px;
   height: 46px;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
-  box-shadow: none;
   animation: welcome-pop var(--dur-slow) var(--ease-fade) both;
 }
 

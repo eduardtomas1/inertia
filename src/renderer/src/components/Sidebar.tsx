@@ -1040,7 +1040,7 @@ function SidebarView({
         <div className="sidebar-brand drag-region">
           {preview.preview}
           <button type="button" className="brand-lockup no-drag" aria-label="Start a new chat" onClick={onOpenHome}>
-            <img src="./inertia-logo.png" alt="" className="brand-logo" />
+            <span className="brand-logo" aria-hidden="true" />
             <span className="brand-name">Inertia</span>
           </button>
           <IconButton label="Close navigation" className="mobile-close no-drag" onClick={onClose}><X size={16} /></IconButton>

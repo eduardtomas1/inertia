@@ -128,6 +128,7 @@ for (const marker of EXPECTED_SOURCE_MARKERS) {
   if (!source.includes(marker)) throw new Error(`The icon source is not the expected Inertia mark (${marker}).`);
 }
 
+await writeFile(join(ROOT, "src", "renderer", "public", "inertia-logo.svg"), source, { mode: 0o644 });
 await mkdir(ICON_DIRECTORY, { recursive: true });
 for (const size of SIZES) {
   const outputPath = join(ICON_DIRECTORY, `${size}x${size}.png`);

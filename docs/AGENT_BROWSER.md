@@ -517,7 +517,9 @@ The screenshot is withheld when any of that text looks like a credential, a
 control named for a credential shows a value, a value is remembered, or a
 check stops early because the content is too large: more than 4,000 elements
 in the top-level document, or more than 4,000 nodes, 12,000 characters of
-text or 200 controls inside shadow roots and frames. A withheld screenshot
+text or 200 controls inside shadow roots and frames, or a nested control whose
+name is longer than 300 characters or whose value is longer than 500. A
+withheld screenshot
 returns `sensitive` and no image, and nothing is added to Evidence.
 
 Some regions cannot be read at all: a closed shadow root, and a frame,

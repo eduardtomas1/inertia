@@ -3,6 +3,8 @@ export type AgentPageNestedEvidence = "clear" | "sensitive" | "unreadable";
 export const MAX_NESTED_EVIDENCE_NODES = 4_000;
 export const MAX_NESTED_EVIDENCE_TEXT_CHARS = 12_000;
 export const MAX_NESTED_EVIDENCE_FIELDS = 200;
+export const MAX_NESTED_EVIDENCE_FIELD_NAME_CHARS = 300;
+export const MAX_NESTED_EVIDENCE_FIELD_VALUE_CHARS = 500;
 
 export function agentPageNestedEvidenceScript(privacyRuntime: string): string {
   return `(() => {
@@ -53,12 +55,15 @@ export function agentPageNestedEvidenceScript(privacyRuntime: string): string {
         truncated = true;
         return;
       }
-      fields.push({
-        name: fieldName(element).replace(/\\s+/gu, " ").trim().slice(0, 300),
-        value: typeof element.value === "string" && !state.passwordNodes.has(element)
-          ? element.value.slice(0, 500)
-          : "",
-      });
+      const name = fieldName(element).replace(/\\s+/gu, " ").trim();
+      const value = typeof element.value === "string" && !state.passwordNodes.has(element)
+        ? element.value
+        : "";
+      if (name.length > ${MAX_NESTED_EVIDENCE_FIELD_NAME_CHARS} || value.length > ${MAX_NESTED_EVIDENCE_FIELD_VALUE_CHARS}) {
+        truncated = true;
+        return;
+      }
+      fields.push({ name, value });
     };
     const top = document.documentElement;
     const topIterator = top && typeof document.createNodeIterator === "function"

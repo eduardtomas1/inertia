@@ -96,4 +96,14 @@ describe("Browser screenshot privacy beyond the top-level document", () => {
     window.document.querySelector("#host")!.attachShadow({ mode: "open" }).innerHTML = "<i>x</i>".repeat(2_100);
     await expect(privacy()).resolves.toBe("sensitive");
   });
+
+  it("fails closed when a nested field value or name is longer than Inertia reads", async () => {
+    const { window, privacy } = await page("<div id='host'></div>");
+    const root = window.document.querySelector("#host")!.attachShadow({ mode: "open" });
+    root.innerHTML = "<label>Notes <input id='notes'></label>";
+    (root.querySelector("#notes") as unknown as { value: string }).value = `${"benign ".repeat(80)}${secret}`;
+    await expect(privacy()).resolves.toBe("sensitive");
+    root.innerHTML = `<input aria-label='${"note ".repeat(70)}${secret}' value='ok'>`;
+    await expect(privacy()).resolves.toBe("sensitive");
+  });
 });

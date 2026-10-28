@@ -18,6 +18,10 @@ import type { CompletionSoundImport } from "./completion-sound";
 import type { ContextMenuAction, ContextMenuRequest } from "./context-menu";
 import { isProjectRelativePath, UUID_PATTERN } from "./request-identifiers";
 import {
+  parseTerminalHandoffIds,
+  type DetachedChatTerminalHandoff,
+} from "./terminal-handoff";
+import {
   PROVIDER_AUTH_METHODS,
   providerSupportsAuthMethod,
   type ProviderAuthMethod,
@@ -27,6 +31,12 @@ import { SETTINGS_SECTION_IDS, type SettingsSection } from "./settings-sections"
 import type { RuntimeStartupBlockerCode } from
   "./runtime-startup-diagnostics";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
+export {
+  MAX_PERSISTED_TERMINAL_TABS,
+  parseDetachedChatTerminalHandoff,
+  parseTerminalHandoffIds,
+  type DetachedChatTerminalHandoff,
+} from "./terminal-handoff";
 
 export interface RuntimeConnection {
   websocketUrl: string;
@@ -281,6 +291,7 @@ export interface DetachedChatWindowRequest {
 export interface DetachedChatWindowOpenRequest
   extends DetachedChatWindowRequest {
   draft: string;
+  terminalIds: readonly string[];
 }
 
 export interface DetachedChatDraftHandoff {
@@ -304,7 +315,11 @@ export interface DetachedChatWindowSummary {
 
 export type DesktopWindowContext =
   | { role: "main" }
-  | ({ role: "detached-chat"; draft: string } & DetachedChatWindowSummary);
+  | ({
+    role: "detached-chat";
+    draft: string;
+    terminalIds: readonly string[];
+  } & DetachedChatWindowSummary);
 
 export interface DetachedChatWindowOpenResult
   extends DetachedChatWindowSummary {
@@ -528,17 +543,19 @@ export function parseMainWindowTarget(value: unknown): MainWindowTarget | null {
 export function parseDetachedChatWindowOpenRequest(
   value: unknown,
 ): DetachedChatWindowOpenRequest | null {
-  if (!plainObject(value) || Object.keys(value).length !== 3) return null;
+  if (!plainObject(value) || Object.keys(value).length !== 4) return null;
   const request = parseDetachedChatWindowRequest({
     conversationId: value.conversationId,
     title: value.title,
   });
+  const terminalIds = parseTerminalHandoffIds(value.terminalIds);
   if (
     !request
+    || !terminalIds
     || typeof value.draft !== "string"
     || value.draft.length > MAX_CHAT_MESSAGE_CHARS
   ) return null;
-  return { ...request, draft: value.draft };
+  return { ...request, draft: value.draft, terminalIds };
 }
 
 export function parseDetachedChatDraftHandoff(
@@ -748,6 +765,9 @@ export interface DesktopBridge {
   onDetachedChatDraftMirrored: (
     listener: (handoff: DetachedChatDraftHandoff) => void,
   ) => () => void;
+  onDetachedChatTerminalHandoff: (
+    listener: (handoff: DetachedChatTerminalHandoff) => void,
+  ) => () => void;
   /** Hydrates draft handoffs missed while the workbench renderer was unavailable. */
   getPendingDetachedChatDrafts: () => Promise<PendingDetachedChatDraft[]>;
   /** Removes only the exact pending handoff already written by the workbench. */
@@ -762,12 +782,18 @@ export interface DesktopBridge {
     request: DetachedChatWindowRequest,
   ) => Promise<DetachedChatWindowSummary>;
   /** Explicitly returns the chat to the main workbench. Native close never docks it. */
-  dockDetachedChat: (draft: string) => Promise<void>;
+  dockDetachedChat: (
+    draft: string,
+    terminalIds: readonly string[],
+  ) => Promise<void>;
   openInMainWindow: (target: MainWindowTarget) => Promise<void>;
   onMainWindowTarget: (
     listener: (request: MainWindowTargetRequest) => void,
   ) => () => void;
-  closeDetachedChat: (draft: string) => Promise<void>;
+  closeDetachedChat: (
+    draft: string,
+    terminalIds: readonly string[],
+  ) => Promise<void>;
   /** Synchronously preserves the owned draft during native window teardown. */
   persistDetachedChatDraft: (draft: string) => boolean;
   /** Mirrors coalesced popup edits without performing a durable handoff. */

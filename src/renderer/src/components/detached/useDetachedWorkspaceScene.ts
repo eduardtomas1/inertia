@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useLayoutEffect,
   useMemo,
   useState,
   type Dispatch,
@@ -36,6 +37,7 @@ import { withRequestId, type CommandWithoutId } from "../../lib/runtimeCommands"
 import { workspaceRunPreviewUrl } from "../../utils/environmentSummary";
 import { requestSubagentFollowUp } from "../../utils/subagentFollowUp";
 import type { WorkspaceSceneProps } from "../WorkspaceScene";
+import { adoptTerminalHandoff, terminalStorageKey } from "../terminalTabStorage";
 import {
   DETACHED_APP_UPDATE,
   DETACHED_HIDDEN_SURFACES,
@@ -48,6 +50,7 @@ type Connection = ReturnType<typeof useInertiaConnection>;
 
 interface DetachedWorkspaceSceneOptions {
   conversationId: string;
+  terminalHandoffIds: readonly string[];
   connection: Connection;
   settings: AppSettings;
   handoff: DetachedHandoff;
@@ -58,6 +61,7 @@ interface DetachedWorkspaceSceneOptions {
 
 export function useDetachedWorkspaceScene({
   conversationId,
+  terminalHandoffIds,
   connection,
   settings,
   handoff,
@@ -81,6 +85,17 @@ export function useDetachedWorkspaceScene({
     workspaceId: project ? `${project.id}:${conversationId}` : null,
   });
   const setActiveTool = layout.setActiveTool;
+  const handoffProjectId = project?.id ?? null;
+  const openTerminal = layout.openTerminal;
+  useLayoutEffect(() => {
+    if (
+      handoffProjectId
+      && adoptTerminalHandoff(
+        terminalStorageKey(handoffProjectId, conversationId),
+        terminalHandoffIds,
+      )
+    ) openTerminal();
+  }, [conversationId, handoffProjectId, openTerminal, terminalHandoffIds]);
   const sendCommand = connection.sendCommand;
   const request = useCallback(
     (command: CommandWithoutId) => sendCommand(withRequestId(command)),

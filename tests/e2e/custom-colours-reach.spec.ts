@@ -102,7 +102,8 @@ test("mutes custom colours from Settings and recolours the terminal and the deta
     await expect.poll(() => rootToken(page, "accent")).toBe(token("#f97316", "light", false, "accent"));
     await expectTerminalFollows(page);
     const popup = await openDetachedChat(app, "custom-colours-live");
-    await popup.getByRole("button", { name: "Toggle terminal" }).click();
+    await expect(popup.getByRole("button", { name: "Toggle terminal" })).toHaveAttribute("aria-pressed", "true");
+    await expect(popup.locator(".terminal-dock")).toBeVisible();
     await expect(popup.locator(".terminal-dock .terminal-panel[data-terminal-state=ready]")).toHaveCount(1);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Appearance", exact: true }).click();

@@ -15,6 +15,7 @@ import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
 import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
 import { DETACHED_CHAT_IPC } from "../shared/detached-chat-ipc.js";
+import { parseDetachedChatTerminalHandoff } from "../shared/terminal-handoff.js";
 import { COMPLETION_SOUND_IPC } from "../shared/completion-sound.js";
 import { ThreadNotificationActivationBuffer } from "./thread-notification-activation.js";
 
@@ -169,6 +170,19 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.on(DETACHED_CHAT_IPC.draftChanged, handler);
     return () => ipcRenderer.removeListener(
       DETACHED_CHAT_IPC.draftChanged,
+      handler,
+    );
+  },
+  onDetachedChatTerminalHandoff: (
+    listener: Parameters<DesktopBridge["onDetachedChatTerminalHandoff"]>[0],
+  ) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      const handoff = parseDetachedChatTerminalHandoff(value);
+      if (handoff) listener(handoff);
+    };
+    ipcRenderer.on(DETACHED_CHAT_IPC.terminalHandoff, handler);
+    return () => ipcRenderer.removeListener(
+      DETACHED_CHAT_IPC.terminalHandoff,
       handler,
     );
   },

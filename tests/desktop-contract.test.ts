@@ -5,6 +5,7 @@ import {
   parseAttachmentPickerMode,
   parseDetachedChatDraftAcknowledgement,
   parseDetachedChatDraftHandoff,
+  parseDetachedChatTerminalHandoff,
   parseDetachedChatWindowOpenRequest,
   parseDetachedChatWindowRequest,
   parseMainWindowTarget,
@@ -12,6 +13,7 @@ import {
   parsePendingDetachedChatDraft,
   parsePrivateConnectDeviceUpdateRequest,
   parsePrivateConnectPairingApprovalRequest,
+  parseTerminalHandoffIds,
 } from "../src/shared/desktop";
 import {
   BACKEND_CREDENTIAL_MASK,
@@ -22,6 +24,12 @@ import {
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
 const handoffId = "33333333-3333-4333-8333-333333333333";
+const terminalIds = [
+  "44444444-4444-4444-8444-444444444441",
+  "44444444-4444-4444-8444-444444444442",
+  "44444444-4444-4444-8444-444444444443",
+  "44444444-4444-4444-8444-444444444444",
+];
 
 describe("desktop detached-chat contract", () => {
   it.each([
@@ -35,8 +43,8 @@ describe("desktop detached-chat contract", () => {
     expect(title).toBe(expected);
     const request = { conversationId, title };
     expect(parseDetachedChatWindowRequest(request)).toEqual(request);
-    expect(parseDetachedChatWindowOpenRequest({ ...request, draft: "Pending\nmessage" }))
-      .toEqual({ ...request, draft: "Pending\nmessage" });
+    expect(parseDetachedChatWindowOpenRequest({ ...request, draft: "Pending\nmessage", terminalIds: [] }))
+      .toEqual({ ...request, draft: "Pending\nmessage", terminalIds: [] });
   });
 
   it("accepts one exact conversation identity and a bounded display title", () => {
@@ -63,6 +71,7 @@ describe("desktop detached-chat contract", () => {
       conversationId,
       title: "Keep the runtime running",
       draft: "Exact pending text",
+      terminalIds: [],
     };
     expect(parseDetachedChatWindowOpenRequest(open)).toEqual(open);
     expect(parseDetachedChatDraftHandoff({
@@ -81,6 +90,46 @@ describe("desktop detached-chat contract", () => {
       conversationId: "not-a-uuid",
       draft: open.draft,
     })).toBeNull();
+  });
+
+  it("hands over at most four distinct terminal identities with a window", () => {
+    expect(parseTerminalHandoffIds([])).toEqual([]);
+    expect(parseTerminalHandoffIds(terminalIds)).toEqual(terminalIds);
+    const open = { conversationId, title: "Chat", draft: "", terminalIds };
+    expect(parseDetachedChatWindowOpenRequest(open)).toEqual(open);
+    expect(parseDetachedChatWindowOpenRequest({ ...open, terminalIds: [] }))
+      .toEqual({ ...open, terminalIds: [] });
+
+    const invalidIds: unknown[] = [
+      [...terminalIds, "44444444-4444-4444-8444-444444444445"],
+      [terminalIds[0], terminalIds[0]],
+      ["not-a-uuid"],
+      [42],
+      [null],
+      "44444444-4444-4444-8444-444444444441",
+      { 0: terminalIds[0], length: 1 },
+      undefined,
+    ];
+    for (const value of invalidIds) {
+      expect(parseTerminalHandoffIds(value)).toBeNull();
+      expect(parseDetachedChatWindowOpenRequest({ ...open, terminalIds: value })).toBeNull();
+    }
+    const { terminalIds: _omitted, ...missing } = open;
+    expect(parseDetachedChatWindowOpenRequest(missing)).toBeNull();
+    expect(parseDetachedChatWindowOpenRequest({ ...missing, extra: [] })).toBeNull();
+    expect(parseDetachedChatWindowOpenRequest({ ...open, extra: true })).toBeNull();
+
+    const handoff = { conversationId, terminalIds, dock: true };
+    expect(parseDetachedChatTerminalHandoff(handoff)).toEqual(handoff);
+    for (const value of [
+      { conversationId, terminalIds },
+      { ...handoff, extra: true },
+      { ...handoff, dock: 1 },
+      { ...handoff, conversationId: "not-a-uuid" },
+      { ...handoff, terminalIds: [terminalIds[0], terminalIds[0]] },
+    ]) {
+      expect(parseDetachedChatTerminalHandoff(value)).toBeNull();
+    }
   });
 
   it("accepts only exact pending handoffs and acknowledgements", () => {

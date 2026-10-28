@@ -41,7 +41,7 @@ import { useAsyncOperationQueue, useAuthoritativeConversationCreateQueue, useWor
 import { agentWorkflowRouteIdentity, agentWorkflowTargetConversation, useAgentWorkflows } from "./hooks/useAgentWorkflows";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
-import { useDetachedChatWindows } from "./hooks/useDetachedChatWindows";
+import { useDetachedChatWindows, useDockedTerminalOpen } from "./hooks/useDetachedChatWindows";
 import { useDraftConversation } from "./hooks/useDraftConversation";
 import { useActivityActions, type PreviewWorkspaceRun } from "./hooks/useActivityActions";
 import { useStableActions, useStableController } from "./hooks/useStableController";
@@ -82,6 +82,7 @@ import { useConversationWorkspaceOptions } from "./hooks/useConversationWorkspac
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
 import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
+import { liveTerminalIdsForHandoff } from "./components/terminalTabStorage";
 import type { AppView } from "./appView";
 import { useWatcherSurfaceController } from "./hooks/useWatcherSurface";
 import { WatcherContext } from "./components/watcher/watcherContext";
@@ -109,7 +110,7 @@ export function commandMayChangeWorkspaceAuthority(
 const AddProjectDialog = lazy(async () => ({ default: (await import("./components/AddProjectDialog")).AddProjectDialog }));
 export default function App(): React.JSX.Element {
   const connection = useStableController(useInertiaConnection());
-  const detachedChats = useDetachedChatWindows();
+  const detachedChats = useDetachedChatWindows(connection.snapshot);
   const sendCommand = connection.sendCommand;
   const appUpdate = useStableController(useAppUpdate());
   const providerQuotaNotices = useStableController(
@@ -522,6 +523,10 @@ export default function App(): React.JSX.Element {
     );
     const splitOwner = splitOwnerOf(nextConversation.id);
     const pinnedOwner = splitOwner === "primary" ? null : splitOwner;
+    const terminalIds = liveTerminalIdsForHandoff(
+      nextConversation.projectId,
+      nextConversation.id,
+    );
     setSuppressedMainConversationIds((current) => {
       if (current.has(nextConversation.id)) return current;
       const next = new Set(current);
@@ -535,6 +540,7 @@ export default function App(): React.JSX.Element {
       conversationId: nextConversation.id,
       title: detachedChatWindowTitle(nextConversation.title),
       draft: preparation.draft,
+      terminalIds,
     })).catch((error: unknown) => {
       if (!wasSuppressed) {
         setSuppressedMainConversationIds((current) => {
@@ -973,6 +979,11 @@ export default function App(): React.JSX.Element {
     ),
   );
   const primaryChatDetached = primaryConversationSuppressed && !draftConversation.conversation;
+  useDockedTerminalOpen(
+    detachedChats,
+    view === "workspace" && !primaryChatDetached ? conversation?.id ?? null : null,
+    primarySceneLayout.openTerminal,
+  );
   const visibleWorkspaceScene = useMemo<WorkspaceSceneProps>(() => ({
     ...workspaceScene,
     chat: {

@@ -17,6 +17,7 @@ import {
   parseDetachedChatWindowOpenRequest,
   parseDetachedChatWindowRequest,
   parseMainWindowTarget,
+  parseTerminalHandoffIds,
   type DesktopWindowContext,
   type MainWindowTarget,
   type PendingDetachedChatDraft,
@@ -90,6 +91,13 @@ export interface DetachedChatMainOptions {
 }
 
 type TrustedWindowRole = DesktopWindowContext["role"];
+type DetachedWindowContext = Extract<DesktopWindowContext, { role: "detached-chat" }>;
+
+interface ScheduledClosure {
+  dock: boolean;
+  conversationId: string;
+  terminalIds: readonly string[];
+}
 
 function fixedRendererUrl(value: string, applicationScheme: string): string {
   let parsed: URL;
@@ -145,7 +153,8 @@ export class DetachedChatMain {
   #ipcRegistered = false;
   #shuttingDown = false;
   readonly #drafts = new Map<string, string>();
-  readonly #scheduledClosures = new Map<WebContents, string | null>();
+  readonly #terminalHandoffs = new Map<string, readonly string[]>();
+  readonly #scheduledClosures = new Map<WebContents, ScheduledClosure>();
   readonly #persistDraftListener = (
     event: IpcMainEvent,
     ...args: unknown[]
@@ -216,15 +225,17 @@ export class DetachedChatMain {
         }
         const request = parseDetachedChatWindowOpenRequest(args[0]);
         if (!request) throw new Error("Invalid detached-chat window request");
-        const { draft, ...windowRequest } = request;
+        const { draft, terminalIds, ...windowRequest } = request;
         if (!this.#manager.windowForConversation(request.conversationId)) {
           this.#drafts.set(request.conversationId, draft);
+          this.#terminalHandoffs.set(request.conversationId, terminalIds);
         }
         try {
           return await this.#manager.open(windowRequest);
         } catch (error) {
           if (!this.#manager.windowForConversation(request.conversationId)) {
             this.#drafts.delete(request.conversationId);
+            this.#terminalHandoffs.delete(request.conversationId);
           }
           throw error;
         }
@@ -284,11 +295,8 @@ export class DetachedChatMain {
     this.#options.ipcMain.handle(
       DETACHED_CHAT_IPC.dock,
       (event, ...args) => {
-        const context = this.#persistDraftForEvent(event, args);
-        this.#scheduleCloseAfterIpcReply(
-          event.sender,
-          context.conversationId,
-        );
+        const context = this.#handOffForEvent(event, args);
+        this.#scheduleCloseAfterIpcReply(event.sender, context, true);
       },
     );
     this.#options.ipcMain.handle(
@@ -312,8 +320,8 @@ export class DetachedChatMain {
     this.#options.ipcMain.handle(
       DETACHED_CHAT_IPC.close,
       (event, ...args) => {
-        this.#persistDraftForEvent(event, args);
-        this.#scheduleCloseAfterIpcReply(event.sender);
+        const context = this.#handOffForEvent(event, args);
+        this.#scheduleCloseAfterIpcReply(event.sender, context, false);
       },
     );
     this.#options.ipcMain.on(
@@ -337,6 +345,7 @@ export class DetachedChatMain {
         && channel !== DETACHED_CHAT_IPC.mainWindowTarget
         && channel !== DETACHED_CHAT_IPC.draftChanged
         && channel !== DETACHED_CHAT_IPC.draftMirrored
+        && channel !== DETACHED_CHAT_IPC.terminalHandoff
         && channel !== DETACHED_CHAT_IPC.persistDraft
         && channel !== DETACHED_CHAT_IPC.mirrorDraft
       ) {
@@ -374,6 +383,7 @@ export class DetachedChatMain {
     return {
       ...context,
       draft: this.#drafts.get(context.conversationId) ?? "",
+      terminalIds: this.#terminalHandoffs.get(context.conversationId) ?? [],
     };
   }
 
@@ -467,7 +477,7 @@ export class DetachedChatMain {
     event: IpcMainInvokeEvent,
     argumentCount: number,
     expectedArguments = 0,
-  ): Extract<DesktopWindowContext, { role: "detached-chat" }> {
+  ): DetachedWindowContext {
     const context = this.assertTrustedChatIpc(
       event,
       argumentCount,
@@ -553,18 +563,25 @@ export class DetachedChatMain {
 
   #scheduleCloseAfterIpcReply(
     sender: WebContents,
-    dockConversationId?: string,
+    context: DetachedWindowContext,
+    dock: boolean,
   ): void {
     const window = this.#manager.windowForSender(sender);
     if (!liveWindow(window)) throw new Error(UNTRUSTED_RENDERER_ERROR);
     if (this.#scheduledClosures.has(sender)) return;
-    this.#scheduledClosures.set(sender, dockConversationId ?? null);
+    this.#scheduledClosures.set(sender, {
+      dock,
+      conversationId: context.conversationId,
+      terminalIds: context.terminalIds,
+    });
     window.once("closed", () => {
-      const scheduledDock = this.#scheduledClosures.get(sender) ?? null;
+      const scheduled = this.#scheduledClosures.get(sender);
       this.#scheduledClosures.delete(sender);
-      if (scheduledDock) {
+      if (!scheduled) return;
+      this.#sendTerminalHandoff(scheduled);
+      if (scheduled.dock) {
         void Promise.resolve()
-          .then(() => this.#options.onDock(scheduledDock))
+          .then(() => this.#options.onDock(scheduled.conversationId))
           .catch(() => undefined);
       }
     });
@@ -585,11 +602,12 @@ export class DetachedChatMain {
   #persistDraftForEvent(
     event: IpcMainEvent | IpcMainInvokeEvent,
     args: unknown[],
-  ): Extract<DesktopWindowContext, { role: "detached-chat" }> {
+    expectedArguments = 1,
+  ): DetachedWindowContext {
     const context = this.#assertDetachedIpc(
       event as IpcMainInvokeEvent,
       args.length,
-      1,
+      expectedArguments,
     );
     const handoff = parseDetachedChatDraftHandoff({
       conversationId: context.conversationId,
@@ -598,6 +616,31 @@ export class DetachedChatMain {
     if (!handoff) throw new Error("Invalid detached-chat draft handoff");
     this.#persistDraftHandoff(handoff);
     return { ...context, draft: handoff.draft };
+  }
+
+  #handOffForEvent(
+    event: IpcMainInvokeEvent,
+    args: unknown[],
+  ): DetachedWindowContext {
+    this.#assertDetachedIpc(event, args.length, 2);
+    const terminalIds = parseTerminalHandoffIds(args[1]);
+    if (!terminalIds) throw new Error("Invalid detached-chat terminal handoff");
+    return { ...this.#persistDraftForEvent(event, args, 2), terminalIds };
+  }
+
+  #sendTerminalHandoff({
+    conversationId,
+    terminalIds,
+    dock,
+  }: ScheduledClosure): void {
+    const main = this.#options.mainWindow();
+    if (liveWindow(main) && !main.webContents.isDestroyed()) {
+      main.webContents.send(DETACHED_CHAT_IPC.terminalHandoff, {
+        conversationId,
+        terminalIds,
+        dock,
+      });
+    }
   }
 
   #mirrorDraftForEvent(
@@ -662,6 +705,9 @@ export class DetachedChatMain {
     const liveConversationIds = new Set(windows.map(({ conversationId: id }) => id));
     for (const id of this.#drafts.keys()) {
       if (!liveConversationIds.has(id)) this.#drafts.delete(id);
+    }
+    for (const id of this.#terminalHandoffs.keys()) {
+      if (!liveConversationIds.has(id)) this.#terminalHandoffs.delete(id);
     }
     const main = this.#options.mainWindow();
     if (

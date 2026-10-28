@@ -25,6 +25,7 @@ type Connection = ReturnType<typeof useInertiaConnection>;
 
 export interface DetachedWorkspaceProps {
   conversationId: string;
+  terminalHandoffIds: readonly string[];
   connection: Connection;
   settings: AppSettings;
   handoff: DetachedHandoff;
@@ -39,6 +40,7 @@ export interface DetachedWorkspaceProps {
 
 export function DetachedWorkspace({
   conversationId,
+  terminalHandoffIds,
   connection,
   settings,
   handoff,
@@ -53,6 +55,7 @@ export function DetachedWorkspace({
   const [cornerControlsWidth, setCornerControlsWidth] = useState(0);
   const workspace = useDetachedWorkspaceScene({
     conversationId,
+    terminalHandoffIds,
     connection,
     settings,
     handoff,

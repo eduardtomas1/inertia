@@ -238,7 +238,7 @@ describe("detached chat hand-offs", () => {
   it("returns the chat with its draft through the existing dock request", async () => {
     await renderWindow();
     fireEvent.click(screen.getByRole("button", { name: "Return chat to main window" }));
-    await waitFor(() => expect(bridge.docked).toEqual([[""]]));
+    await waitFor(() => expect(bridge.docked).toEqual([["", []]]));
     expect(bridge.openedInMain).toEqual([]);
   });
 

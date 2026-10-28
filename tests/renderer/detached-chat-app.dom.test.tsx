@@ -160,6 +160,7 @@ const context = {
   conversationId,
   alwaysOnTop: false,
   draft: "",
+  terminalIds: [] as readonly string[],
 };
 
 type ConnectionListener = Parameters<InertiaConnection["subscribe"]>[0];

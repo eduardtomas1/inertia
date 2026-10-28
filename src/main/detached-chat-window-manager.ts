@@ -182,7 +182,7 @@ export class DetachedChatWindowManager {
 
   contextForSender(
     sender: WebContents,
-  ): Omit<Extract<DesktopWindowContext, { role: "detached-chat" }>, "draft"> {
+  ): Omit<Extract<DesktopWindowContext, { role: "detached-chat" }>, "draft" | "terminalIds"> {
     const record = this.#requireSender(sender);
     return { role: "detached-chat", ...this.#recordSummary(record) };
   }

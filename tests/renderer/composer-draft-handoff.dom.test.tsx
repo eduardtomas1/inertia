@@ -61,6 +61,7 @@ function installDetachedChatBridge(): {
         listeners.mirror = listener;
         return vi.fn();
       }),
+      onDetachedChatTerminalHandoff: vi.fn(() => vi.fn()),
       openDetachedChat: vi.fn(),
       focusDetachedChat: vi.fn(),
     },

@@ -84,6 +84,7 @@ export const windowContext = {
   conversationId,
   alwaysOnTop: false,
   draft: "",
+  terminalIds: [] as readonly string[],
 };
 
 type Listener = Parameters<InertiaConnection["subscribe"]>[0];

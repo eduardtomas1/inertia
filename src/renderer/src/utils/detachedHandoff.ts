@@ -6,6 +6,9 @@ export function openInMain(target: MainWindowTarget): Promise<void> {
   return window.inertia.openInMainWindow(target);
 }
 
-export function dockInMainWith(draft: string): Promise<void> {
-  return window.inertia.dockDetachedChat(draft);
+export function dockInMainWith(
+  draft: string,
+  terminalIds: readonly string[],
+): Promise<void> {
+  return window.inertia.dockDetachedChat(draft, terminalIds);
 }

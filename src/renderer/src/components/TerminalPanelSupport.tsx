@@ -7,6 +7,12 @@ import type {
   ServerEvent,
   ThemePreference,
 } from "@shared/contracts";
+import { MAX_PERSISTED_TERMINAL_TABS } from "@shared/terminal-handoff";
+import {
+  newTerminalTab,
+  persistTerminalTabs,
+  type TerminalTab,
+} from "./terminalTabStorage";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 
@@ -53,7 +59,16 @@ export function providerTerminalExitPresentation(
       };
 }
 
-export const MAX_PERSISTED_TERMINAL_TABS = 4;
+export { MAX_PERSISTED_TERMINAL_TABS };
+export {
+  liveTerminalIdsForHandoff,
+  markTerminalPanelMounted,
+  newTerminalTab,
+  persistTerminalTabs,
+  readPersistedTerminalTabs,
+  terminalStorageKey,
+  type TerminalTab,
+} from "./terminalTabStorage";
 export const TERMINAL_CREATE_RETRY_DELAYS_MS = [400, 900] as const;
 export const TERMINAL_SETTLING_RETRY_DELAYS_MS = [400, 900, 900] as const;
 export const TERMINAL_CLOSE_FAILURE_MESSAGE = "Terminal did not stop";
@@ -96,19 +111,7 @@ export const ignoreCommandFailure = (result: Promise<ServerEvent>): void => {
   void result.catch(() => undefined);
 };
 
-const MAX_TERMINAL_STORAGE_LENGTH = 4_096;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const terminalPanelOwners = new Map<string, string>();
-
-export type TerminalTab = {
-  id: string;
-  label: string;
-  terminalId: string | null;
-};
-
-export function terminalStorageKey(projectId: string, conversationId?: string): string {
-  return `inertia:terminal-sessions:v1:${projectId}:${conversationId ?? "project"}`;
-}
 
 export function claimTerminalPanelOwner(
   storageKey: string,
@@ -133,17 +136,6 @@ export function isCurrentTerminalPanelOwner(
     // Fall through to the same-renderer authority token.
   }
   return terminalPanelOwners.get(storageKey) === owner;
-}
-
-export function newTerminalTab(
-  index = 0,
-  terminalId: string | null = null,
-): TerminalTab {
-  return {
-    id: crypto.randomUUID(),
-    label: `Terminal ${index + 1}`,
-    terminalId,
-  };
 }
 
 export function nextTerminalTabIndex(tabs: readonly TerminalTab[]): number {
@@ -197,28 +189,6 @@ export function replaceTerminalTabWithoutHiding(
     : next;
 }
 
-export function readPersistedTerminalTabs(storageKey: string): TerminalTab[] {
-  try {
-    const raw = window.sessionStorage.getItem(storageKey);
-    if (!raw || raw.length > MAX_TERMINAL_STORAGE_LENGTH) return [newTerminalTab()];
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      !Array.isArray(parsed)
-      || parsed.length < 1
-      || parsed.length > MAX_PERSISTED_TERMINAL_TABS
-      || new Set(parsed.filter((terminalId) => terminalId !== null)).size
-        !== parsed.filter((terminalId) => terminalId !== null).length
-      || parsed.some((terminalId) => (
-        terminalId !== null
-        && (typeof terminalId !== "string" || !UUID_PATTERN.test(terminalId))
-      ))
-    ) return [newTerminalTab()];
-    return parsed.map((terminalId, index) => newTerminalTab(index, terminalId));
-  } catch {
-    return [newTerminalTab()];
-  }
-}
-
 export function useTerminalTabsLifecycle(
   storageKey: string,
   tabs: readonly TerminalTab[],
@@ -236,21 +206,6 @@ export function useTerminalTabsLifecycle(
     }
   }, [sendCommand, storageKey]);
   return tabsRef;
-}
-
-export function persistTerminalTabs(
-  storageKey: string,
-  tabs: readonly TerminalTab[],
-): void {
-  try {
-    if (tabs.length === 0) window.sessionStorage.removeItem(storageKey);
-    else window.sessionStorage.setItem(
-      storageKey,
-      JSON.stringify(tabs.map(({ terminalId }) => terminalId)),
-    );
-  } catch {
-    // Session restoration is a convenience; terminal ownership stays server-side.
-  }
 }
 
 export function waitForTerminalRetry(delayMs: number): Promise<void> {

@@ -11,10 +11,15 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DetachedConversationPlaceholder } from "../../src/renderer/src/components/DetachedConversationPlaceholder";
-import { useDetachedChatWindows } from "../../src/renderer/src/hooks/useDetachedChatWindows";
+import {
+  useDetachedChatWindows,
+  useDockedTerminalOpen,
+} from "../../src/renderer/src/hooks/useDetachedChatWindows";
+import type { AppSnapshot } from "../../src/shared/contracts";
 import type {
   DetachedChatWindowSummary,
   DetachedChatDraftHandoff,
+  DetachedChatTerminalHandoff,
   PendingDetachedChatDraft,
 } from "../../src/shared/desktop";
 
@@ -50,6 +55,7 @@ function installDetachedChatBridge({
   onWindowsChanged = vi.fn(() => vi.fn()),
   onDraftChanged = vi.fn(() => vi.fn()),
   onDraftMirrored = vi.fn(() => vi.fn()),
+  onTerminalHandoff = vi.fn(() => vi.fn()),
 }: {
   getWindows?: () => Promise<DetachedChatWindowSummary[]>;
   getPendingDrafts?: () => Promise<PendingDetachedChatDraft[]>;
@@ -66,6 +72,9 @@ function installDetachedChatBridge({
   onDraftMirrored?: (
     listener: (handoff: DetachedChatDraftHandoff) => void,
   ) => () => void;
+  onTerminalHandoff?: (
+    listener: (handoff: DetachedChatTerminalHandoff) => void,
+  ) => () => void;
 } = {}): void {
   Object.defineProperty(window, "inertia", {
     configurable: true,
@@ -76,6 +85,7 @@ function installDetachedChatBridge({
       onDetachedChatWindowsChanged: onWindowsChanged,
       onDetachedChatDraftChanged: onDraftChanged,
       onDetachedChatDraftMirrored: onDraftMirrored,
+      onDetachedChatTerminalHandoff: onTerminalHandoff,
       openDetachedChat: vi.fn(),
       focusDetachedChat: vi.fn(),
     },
@@ -302,6 +312,85 @@ describe("useDetachedChatWindows", () => {
     } finally {
       storageWrite.mockRestore();
     }
+  });
+
+  it("seeds the returned terminal ids and asks to open the terminal only on dock", async () => {
+    const projectId = "33333333-3333-4333-8333-333333333333";
+    const terminalId = "44444444-4444-4444-8444-444444444444";
+    const storageKey = `inertia:terminal-sessions:v1:${projectId}:${CONVERSATION_ID}`;
+    let publish: ((handoff: DetachedChatTerminalHandoff) => void) | undefined;
+    installDetachedChatBridge({
+      onTerminalHandoff: vi.fn((listener) => {
+        publish = listener;
+        return vi.fn();
+      }),
+    });
+    window.sessionStorage.setItem(
+      storageKey,
+      JSON.stringify(["55555555-5555-4555-8555-555555555555"]),
+    );
+    const snapshot = {
+      conversations: [{ id: CONVERSATION_ID, projectId }],
+    } as unknown as AppSnapshot;
+    const hook = renderHook(() => useDetachedChatWindows(snapshot));
+    await waitFor(() => expect(hook.result.current.ready).toBe(true));
+
+    act(() => publish?.({
+      conversationId: OTHER_CONVERSATION_ID,
+      terminalIds: [terminalId],
+      dock: true,
+    }));
+    expect(hook.result.current.dockedTerminalConversationId).toBeNull();
+
+    act(() => publish?.({
+      conversationId: CONVERSATION_ID,
+      terminalIds: [terminalId],
+      dock: false,
+    }));
+    expect(window.sessionStorage.getItem(storageKey)).toBe(JSON.stringify([terminalId]));
+    expect(hook.result.current.dockedTerminalConversationId).toBeNull();
+
+    act(() => publish?.({
+      conversationId: CONVERSATION_ID,
+      terminalIds: [],
+      dock: true,
+    }));
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    expect(hook.result.current.dockedTerminalConversationId).toBeNull();
+
+    act(() => publish?.({
+      conversationId: CONVERSATION_ID,
+      terminalIds: [terminalId],
+      dock: true,
+    }));
+    expect(window.sessionStorage.getItem(storageKey)).toBe(JSON.stringify([terminalId]));
+    expect(hook.result.current.dockedTerminalConversationId).toBe(CONVERSATION_ID);
+    act(() => hook.result.current.consumeDockedTerminal());
+    expect(hook.result.current.dockedTerminalConversationId).toBeNull();
+    window.sessionStorage.clear();
+  });
+});
+
+describe("useDockedTerminalOpen", () => {
+  it("opens the main terminal once the docked chat is the one shown", () => {
+    const openTerminal = vi.fn();
+    const consumeDockedTerminal = vi.fn();
+    const hook = renderHook(
+      ({ requested, shown }: { requested: string | null; shown: string | null }) =>
+        useDockedTerminalOpen(
+          { dockedTerminalConversationId: requested, consumeDockedTerminal },
+          shown,
+          openTerminal,
+        ),
+      { initialProps: { requested: null as string | null, shown: CONVERSATION_ID as string | null } },
+    );
+    expect(openTerminal).not.toHaveBeenCalled();
+    hook.rerender({ requested: CONVERSATION_ID, shown: OTHER_CONVERSATION_ID });
+    hook.rerender({ requested: CONVERSATION_ID, shown: null });
+    expect(openTerminal).not.toHaveBeenCalled();
+    hook.rerender({ requested: CONVERSATION_ID, shown: CONVERSATION_ID });
+    expect(consumeDockedTerminal).toHaveBeenCalledOnce();
+    expect(openTerminal).toHaveBeenCalledOnce();
   });
 });
 

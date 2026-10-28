@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
+import { RuntimeConnectionUnavailableError } from "../../src/main/runtime-supervisor-connection";
 import type { RuntimeWorkerCommand } from
   "../../src/node/runtime-process-protocol";
 
@@ -126,4 +127,17 @@ it.each([
     restartScheduled: false,
     startupBlockerCode: blockerCode,
   });
+  expect(supervisor.canRestartFromUser()).toBe(false);
+  expect(supervisor.restartFromUser()).toBe(false);
+  expect(children).toHaveLength(1);
+  let unavailable: unknown;
+  try {
+    supervisor.connection(false);
+  } catch (error) {
+    unavailable = error;
+  }
+  expect(unavailable).toBeInstanceOf(RuntimeConnectionUnavailableError);
+  const { connection } = unavailable as RuntimeConnectionUnavailableError;
+  expect(connection).toMatchObject({ unavailable: true, code: blockerCode });
+  expect(connection).not.toHaveProperty("restartable");
 });

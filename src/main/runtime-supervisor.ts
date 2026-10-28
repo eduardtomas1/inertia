@@ -224,7 +224,7 @@ export class RuntimeSupervisor {
   }
   canRestartFromUser(): boolean {
     return this.lifecycle === "started" && this.phase === "stopped"
-      && !this.current && !this.desiredRunning
+      && !this.current && !this.desiredRunning && this.startupBlockerCode === null
       && (!this.liveModernDarwinRecoveryEligible || this.requestExplicitRecovery !== undefined);
   }
   restartFromUser(): boolean {

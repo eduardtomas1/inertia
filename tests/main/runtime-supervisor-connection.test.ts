@@ -94,9 +94,11 @@ describe("runtime supervisor connection", () => {
       restartable: true,
       message: "The local service stopped. Restart it to continue.",
     });
-    expect(unavailableRuntimeConnection({
+    const blocked = unavailableRuntimeConnection({
       phase: "stopped", startupBlockerCode: "prior-runtime-cleanup-unconfirmed", restartable: true,
-    }, "linux")).toMatchObject({ code: "prior-runtime-cleanup-unconfirmed", restartable: true });
+    }, "linux");
+    expect(blocked).toMatchObject({ code: "prior-runtime-cleanup-unconfirmed" });
+    expect(blocked).not.toHaveProperty("restartable");
   });
 
   it("gives stranded Windows profiles a supported recovery step without retrying or deleting state", () => {

@@ -42,7 +42,7 @@ export function unavailableRuntimeConnection(
   platform: NodeJS.Platform = process.platform,
 ): RuntimeConnectionUnavailable {
   const connection = unavailableRuntimeConnectionReason(state, platform);
-  return state.restartable ? { ...connection, restartable: true } : connection;
+  return state.restartable && !state.startupBlockerCode ? { ...connection, restartable: true } : connection;
 }
 
 function unavailableRuntimeConnectionReason(

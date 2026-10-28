@@ -17,6 +17,7 @@ import { assertConversationProvider } from "./conversation-provider-policy";
 import { conversationFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import type { NewConversationOptions } from "./types";
+import { releaseProviderRecoveryRecords } from "./provider-run-ownership-repository";
 import { WorkspacePathAuthority } from "../workspace-path-authority";
 import { QUICK_TITLE_SCANNED_CHARS, quickConversationTitle } from "../runtime/conversation-title";
 
@@ -345,9 +346,13 @@ export class ConversationRepository {
     }
   }
 
-  delete(conversationId: string): void {
+  delete(
+    conversationId: string,
+    recoveryRecords: readonly { turnId: string; runId: string }[] = [],
+  ): void {
     const conversation = this.context.requireConversation(conversationId);
     this.context.database.transaction(() => {
+      releaseProviderRecoveryRecords(this.context.database, recoveryRecords);
       this.context.database.prepare("DELETE FROM html_renders WHERE conversation_id = ?").run(conversationId);
       this.context.database.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
     })();

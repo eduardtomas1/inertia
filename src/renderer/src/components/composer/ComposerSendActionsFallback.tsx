@@ -36,7 +36,7 @@ export function ComposerSendActionsFallback({
         data-composer-action-state={primaryAction}
         aria-busy={stopping || submitting}
         onClick={() => void (stop ? onStop() : onSubmit())}
-        disabled={stopping || submitting || primaryAction === "send-disabled"}
+        disabled={submitting || primaryAction === "send-disabled"}
       >
         <span aria-hidden="true">{stop || stopAndSend ? "■" : submitting ? "…" : "↑"}</span>
     </button>

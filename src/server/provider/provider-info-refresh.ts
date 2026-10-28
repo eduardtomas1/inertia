@@ -11,6 +11,8 @@ import { MAX_PROBE_DEADLINE_MS, slowMachineProbeDeadline } from "./probe-deadlin
 const DETECTION_TIMEOUT_MS = 4_000;
 const DETECTION_RETRY_TIMEOUTS_MS = [8_000, 12_000];
 const DETECTION_RETRY_DELAYS_MS = [1_000, 3_000, 9_000];
+const REDISCOVERY_DELAY_MS = 2_000;
+const RESUME_REDISCOVERY_AGE_MS = 10 * 60_000;
 
 export interface ProviderInfoRefreshDependencies {
   reportIncident?: (observation: IncidentObservation) => unknown;
@@ -26,6 +28,7 @@ export interface ProviderInfoRefreshDependencies {
   beforeRefresh?(signal: AbortSignal): Promise<void>;
   onActivityChange(delta: 1 | -1): void;
   detectionRetryDelaysMs?: readonly number[];
+  now?: () => number;
 }
 
 export type RefreshProviderInfo = (
@@ -34,6 +37,10 @@ export type RefreshProviderInfo = (
   forceMetadata?: boolean,
   verificationAuthority?: ProviderInstallationVerificationAuthority,
 ) => Promise<void>;
+
+export type ProviderInfoRefresh = RefreshProviderInfo & {
+  rediscoverAfterSystemResume(): void;
+};
 
 async function pause(delayMs: number, signal: AbortSignal): Promise<boolean> {
   return await new Promise<boolean>((resolve) => {
@@ -64,8 +71,10 @@ function retainMaintenance(
 
 export function createProviderInfoRefresh(
   dependencies: ProviderInfoRefreshDependencies,
-): RefreshProviderInfo {
+): ProviderInfoRefresh {
   const incidents = dependencies.reportIncident ? new ProviderReadinessIncidents(dependencies.reportIncident) : null;
+  const now = dependencies.now ?? Date.now;
+  const refreshedAt = new Map<ProviderInfo["id"], number>();
   const owners = new Map<ProviderInfo["id"], symbol>();
   const pendingRetries = new Map<ProviderInfo["id"], AbortController>();
   const retryAttempts = new Map<ProviderInfo["id"], Promise<void>>();
@@ -93,6 +102,7 @@ export function createProviderInfoRefresh(
       const candidate = byId.get(current.id);
       if (!candidate || owners.get(current.id) !== owner) return current;
       replaced = true;
+      refreshedAt.set(current.id, now());
       return retainMaintenance(current, candidate);
     });
     if (replaced) {
@@ -321,7 +331,7 @@ export function createProviderInfoRefresh(
     }
   };
 
-  return async (...args) => {
+  const refresh: RefreshProviderInfo = async (...args) => {
     // Claim synchronously at invocation so an older broad refresh can still
     // publish untouched providers without overwriting a newer targeted result.
     const { owner, providerIds } = claim(args[0]);
@@ -337,6 +347,51 @@ export function createProviderInfoRefresh(
       }
     });
   };
+
+  const scheduled = new Map<ProviderInfo["id"], NodeJS.Timeout>();
+  const rediscover = (providerId: ProviderInfo["id"]): void => {
+    if (
+      !dependencies.enabled
+      || dependencies.isClosed()
+      || dependencies.lifetimeSignal.aborted
+      || scheduled.has(providerId)
+    ) return;
+    const timer = setTimeout(() => {
+      scheduled.delete(providerId);
+      if (dependencies.isClosed() || dependencies.lifetimeSignal.aborted) return;
+      void refresh(providerId, true).catch(() => undefined);
+    }, REDISCOVERY_DELAY_MS);
+    timer.unref();
+    scheduled.set(providerId, timer);
+  };
+  const stopObserving = dependencies.providers.observeInstallationEvents((event) => {
+    if (event.kind !== "probe-cleanup-unconfirmed") {
+      rediscover(event.providerId);
+      return;
+    }
+    dependencies.reportIncident?.({
+      code: "provider.discovery-cleanup-unconfirmed",
+      outcome: "unknown",
+      context: { providerId: event.providerId },
+    });
+  });
+  dependencies.lifetimeSignal.addEventListener("abort", () => {
+    stopObserving();
+    for (const timer of scheduled.values()) clearTimeout(timer);
+    scheduled.clear();
+  }, { once: true });
+  return Object.assign(refresh, {
+    rediscoverAfterSystemResume: (): void => {
+      for (const { id } of dependencies.providerInfo()) {
+        const lastRefreshedAt = refreshedAt.get(id);
+        if (lastRefreshedAt === undefined) continue;
+        if (
+          dependencies.providers.providerInstallationState(id) !== "current"
+          || now() - lastRefreshedAt >= RESUME_REDISCOVERY_AGE_MS
+        ) rediscover(id);
+      }
+    },
+  });
 }
 
 export function providerInstallationVerifier(

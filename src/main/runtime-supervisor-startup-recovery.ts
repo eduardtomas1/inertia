@@ -1,6 +1,9 @@
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
-import { recoverPriorRuntimeGenerations } from "./runtime-owned-process-recovery.js";
+import {
+  recoverPriorRuntimeGenerations,
+  type RuntimeOwnedOrphan,
+} from "./runtime-owned-process-recovery.js";
 import type { WindowsRuntimeJobAssembly } from "./windows-runtime-job.js";
 import { runtimeSupervisorRecoveryWaitMs } from
   "../node/runtime-shutdown-deadline.js";
@@ -16,6 +19,7 @@ export class RuntimeSupervisorStartupRecovery {
     receipts: RuntimeCleanupReceiptJournal;
     darwinGuardianPath?: string;
     windowsRuntimeJobAssembly?: WindowsRuntimeJobAssembly;
+    onUnsignalledOrphans?: (orphans: readonly RuntimeOwnedOrphan[]) => void;
   }) {}
 
   begin(onFinished: (recovered: boolean) => void): Promise<boolean> | null {

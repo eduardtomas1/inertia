@@ -9,6 +9,7 @@ import {
   createOwnedProcessTreeTermination,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
+import { providerUnconfirmedCleanup } from "./provider-unconfirmed-cleanup";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -356,6 +357,7 @@ function startAntigravityRun(
       signal: exit?.signal ?? child.signalCode,
       ...(runFailure ? { error: runFailure.message, failure: runFailure } : {}),
       cleanupConfirmed,
+      ...(cleanupConfirmed ? {} : providerUnconfirmedCleanup(child)),
     });
   };
   const exitedWithoutResult = (): ProviderRunFailure => {
@@ -368,19 +370,17 @@ function startAntigravityRun(
       `Antigravity exited without a result (${signal ? `signal ${signal}` : `code ${code ?? "unknown"}`}).`,
     );
   };
-  const finalize = (cleanupConfirmed: boolean): void => {
-    if (settled || finalizing) return;
-    finalizing = true;
-    if (!cleanupConfirmed) {
-      settle("failed", false, cleanupUnconfirmed());
-    } else if (cancelRequested) {
-      settle("cancelled", true);
+  const settleOutcome = (cleanupConfirmed: boolean): void => {
+    if (cancelRequested) {
+      settle("cancelled", cleanupConfirmed);
     } else if (failure) {
-      settle("failed", true, failure);
+      settle("failed", cleanupConfirmed, failure);
     } else if (result) {
       const resultFailure = antigravityResultFailure(result, input.cwd);
-      if (resultFailure) settle("failed", true, resultFailure);
-      else settle("completed", true);
+      if (resultFailure) settle("failed", cleanupConfirmed, resultFailure);
+      else settle("completed", cleanupConfirmed);
+    } else if (!cleanupConfirmed) {
+      settle("failed", false, cleanupUnconfirmed());
     } else if (spawnError && child.pid === undefined) {
       settle("failed", true, antigravityFailure(
         "exit",
@@ -392,10 +392,15 @@ function startAntigravityRun(
       settle("failed", true, exitedWithoutResult());
     }
   };
+  const finalize = (cleanupConfirmed: boolean): void => {
+    if (settled || finalizing) return;
+    finalizing = true;
+    settleOutcome(cleanupConfirmed);
+  };
   const armSettleDeadline = (): void => {
     if (settleDeadline || settled) return;
     settleDeadline = setTimeout(() => {
-      if (!settled) settle("failed", false, cleanupUnconfirmed());
+      if (!settled) settleOutcome(false);
     }, terminationConfirmMs);
     settleDeadline.unref?.();
   };

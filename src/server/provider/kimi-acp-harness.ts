@@ -26,6 +26,7 @@ import {
   createOwnedProcessTreeTermination,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
+import { providerUnconfirmedCleanup } from "./provider-unconfirmed-cleanup";
 import { providerActivityDetailSections } from "./activity-detail";
 import {
   createAgentHarnessEmitter,
@@ -79,6 +80,11 @@ import {
 import { selectKimiAcpAuthMethod } from "./acp-terminal-auth";
 import { AcpCompactionProjection } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
+import {
+  endProviderInput,
+  providerNaturalCloseFirst,
+  waitForProviderNaturalClose,
+} from "./provider-natural-close";
 import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED, acpFileMutation, acpReadOnlyWatcher } from "./acp-watcher";
 import { KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON } from "../../shared/provider";
 import {
@@ -239,6 +245,7 @@ function startKimiRun(
   let wireError: Error | undefined;
   let child: ChildProcessWithoutNullStreams;
   let requestProcessTermination = (_force: boolean): void => {};
+  let naturalCloseRequested = false;
 
   const settleApproval = (
     requestId: string,
@@ -587,7 +594,8 @@ function startKimiRun(
               const failure = kimiStopFailure(response.stopReason);
               return finish("failed", failure.message, failure);
             })();
-      requestProcessTermination(true);
+      naturalCloseRequested = outcome.status !== "cancelled" && providerNaturalCloseFirst();
+      if (!naturalCloseRequested) requestProcessTermination(true);
       return outcome;
     },
   ).catch(async (error: unknown) => {
@@ -638,25 +646,15 @@ function startKimiRun(
     } catch {
       hostToolsCleanupFailed = true;
     }
+    let processCleanupConfirmed = true;
+    if (naturalCloseRequested) {
+      endProviderInput(child);
+      await waitForProviderNaturalClose(child);
+    }
     try {
       await terminateOwnedProcessTree(true);
     } catch {
-      const error = "Kimi ACP process tree could not be confirmed stopped.";
-      emitter.status("failed", error);
-      return {
-        ...outcome,
-        status: "failed",
-        exitCode: child.exitCode,
-        signal: child.signalCode,
-        error,
-        failure: {
-          reason: "process-exit",
-          message: error,
-          phase: "cleanup",
-          terminalEvent: "process/cleanup",
-        },
-        cleanupConfirmed: false,
-      };
+      processCleanupConfirmed = false;
     }
     if (hostToolsCleanupFailed) {
       const error = "Kimi Inertia chat tools could not be cleaned up.";
@@ -681,6 +679,10 @@ function startKimiRun(
       ...outcome,
       exitCode: child.exitCode,
       signal: child.signalCode,
+      ...(processCleanupConfirmed ? {} : {
+        cleanupConfirmed: false,
+        ...providerUnconfirmedCleanup(child),
+      }),
     };
   }).then((outcome) => ({
     ...outcome,

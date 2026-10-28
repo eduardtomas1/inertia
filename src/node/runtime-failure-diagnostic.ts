@@ -5,6 +5,8 @@ import {
 } from "../shared/runtime-startup-diagnostics.js";
 import {
   parseRuntimeOwnedProcessDiagnostic,
+  RUNTIME_RESTART_REASONS,
+  type RuntimeRestartReason,
   type RuntimeRestartRequestedEvent,
 } from "./runtime-owned-process-diagnostic.js";
 import type { RuntimeShutdownUnconfirmedReason } from "./runtime-shutdown-protocol.js";
@@ -19,7 +21,8 @@ const unknownShutdown = "The runtime could not confirm complete process cleanup.
 const restartMessages = {
   "owned-process-tainted": "The runtime restarted because owned process containment could not be confirmed.",
   "owned-process-cleanup-unconfirmed": "The runtime restarted because owned process cleanup could not be confirmed.",
-} as const;
+  "uncaught-exception": "The runtime restarted after an unexpected internal error.",
+} as const satisfies Record<RuntimeRestartReason, string>;
 
 export function runtimeShutdownFailureMessage(reason?: RuntimeShutdownUnconfirmedReason): string {
   return reason ? shutdownMessages[reason] : unknownShutdown;
@@ -45,7 +48,7 @@ function initiatingFailureCode(message: string): string | null {
     }
   }
   if (isRuntimeStartupFailureMessage(message)) return "startup-failed";
-  for (const reason of ["owned-process-tainted", "owned-process-cleanup-unconfirmed"] as const) {
+  for (const reason of RUNTIME_RESTART_REASONS) {
     if (message === restartMessages[reason]) return reason;
   }
   if (!message.startsWith(restartMessages["owned-process-tainted"])) return null;

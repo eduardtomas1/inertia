@@ -463,6 +463,37 @@ describe("runtime process protocol", () => {
         priorRuntimeCleanupUnconfirmed: false,
       },
     })).toBeNull();
+    const exitedGenerationId = "99999999-9999-4999-8999-999999999999:6";
+    const exitedUnconfirmed = {
+      type: "runtime.start",
+      options: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+        runtimeGenerationId,
+        systemBootId,
+        exitedUnconfirmedRuntimeGenerationIds: [exitedGenerationId],
+      },
+    } as const;
+    expect(parseRuntimeWorkerCommand(exitedUnconfirmed)).toEqual(exitedUnconfirmed);
+    for (const exitedUnconfirmedRuntimeGenerationIds of [
+      [],
+      [exitedGenerationId, exitedGenerationId],
+      [runtimeGenerationId],
+      ["not-a-generation"],
+    ]) {
+      expect(parseRuntimeWorkerCommand({
+        ...exitedUnconfirmed,
+        options: { ...exitedUnconfirmed.options, exitedUnconfirmedRuntimeGenerationIds },
+      })).toBeNull();
+    }
+    expect(parseRuntimeWorkerCommand({
+      ...exitedUnconfirmed,
+      options: {
+        ...exitedUnconfirmed.options,
+        confirmedTerminatedRuntimeGenerationIds: [exitedGenerationId],
+      },
+    })).toBeNull();
     expect(parseRuntimeWorkerCommand({ type: "runtime.start", options: { dataDirectory: "relative", defaultWorkspacePath: workspaceDirectory, enableProviders: false } })).toBeNull();
     expect(parseRuntimeWorkerCommand({
       type: "runtime.start",

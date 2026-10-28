@@ -106,4 +106,44 @@ describe("runtime supervisor startup recovery", () => {
       { state: "pending" },
     ]);
   });
+
+  it("retries prior-generation recovery from the app before spawning", async () => {
+    const dataDirectory = mkdtempSync(join(tmpdir(), "inertia-startup-recovery-"));
+    directories.push(dataDirectory);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory)
+      .publish(priorGeneration, bootId)).toBe(true);
+    const journal = new RuntimeOwnedProcessJournal(dataDirectory);
+    expect(journal.startSession(priorGeneration, bootId)).toBe(true);
+    journal.begin(
+      priorGeneration,
+      bootId,
+      journal.sessionCapability(priorGeneration, bootId)!,
+    );
+    const spawn = vi.fn(() => new EventEmitter() as never);
+    const supervisor = new RuntimeSupervisor({
+      systemBootId: bootId,
+      workerOptions: {
+        dataDirectory,
+        defaultWorkspacePath: dataDirectory,
+        enableProviders: false,
+      },
+      spawn,
+    });
+    supervisor.start();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(supervisor.canRestartFromUser()).toBe(true);
+
+    expect(supervisor.restartFromUser()).toBe(true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(spawn).not.toHaveBeenCalled();
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      lastError: expect.stringContaining("unconfirmed process cleanup"),
+    });
+
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).consume(priorGeneration)).toBe(true);
+    expect(supervisor.restartFromUser()).toBe(true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(spawn).toHaveBeenCalledOnce();
+  });
 });

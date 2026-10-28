@@ -1,9 +1,14 @@
 import * as childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { signalLinuxGuardianExactAsync } from "../../src/node/runtime-owned-process-linux";
+import {
+  LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
+  readLinuxGuardianReadyAsync,
+  signalLinuxGuardianExactAsync,
+} from "../../src/node/runtime-owned-process-linux";
 import {
   runtimeOwnedProcessInvocation,
   runtimeOwnedProcessOwnershipIsTainted,
@@ -33,7 +38,7 @@ linuxIt("does not taint a real guardian when ready-helper completions are schedu
     if (Array.isArray(args[1]) && args[1][0] === "ready") {
       helper.once("close", (code, signal) => readyExits.push({ code, signal }));
       queueMicrotask(() => {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_700);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS + 200);
       });
     }
     return helper;
@@ -109,7 +114,7 @@ async function runTransportHelper(
 }
 
 function stallEventLoop(): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_700);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS + 200);
 }
 
 linuxIt("preserves a successful helper exit queued behind an event-loop stall", async () => {
@@ -133,11 +138,12 @@ linuxIt("still rejects excess output when successful completion was already queu
   expect(result.confirmed).toBe(false);
 });
 
-linuxIt("kills a genuinely unfinished helper at the unchanged deadline", async () => {
+linuxIt("kills a genuinely unfinished helper at its deadline", async () => {
   const result = await runTransportHelper("exec /bin/sleep 10");
   expect(result.exits).toEqual([{ code: null, signal: "SIGKILL" }]);
   expect(result.confirmed).toBe(false);
-  expect(result.elapsedMs).toBeLessThan(4_000);
+  expect(result.elapsedMs).toBeGreaterThanOrEqual(LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS - 100);
+  expect(result.elapsedMs).toBeLessThan(LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS + 2_500);
 });
 
 linuxIt.each([
@@ -176,4 +182,29 @@ linuxIt("stops waiting for exec confirmation once the guardian has exited", asyn
     await exited;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+it("never signals a Linux guardian helper that failed to start before it has a process id", async () => {
+  const helper = Object.assign(new EventEmitter(), {
+    pid: undefined,
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    kill: vi.fn(() => true),
+    exitCode: null,
+    signalCode: null,
+  });
+  vi.mocked(childProcess.spawn).mockReturnValueOnce(helper as unknown as childProcess.ChildProcess);
+  const controller = new AbortController();
+  controller.abort();
+  const ready = readLinuxGuardianReadyAsync(
+    4_242,
+    "/missing/runtime-process-guardian",
+    process.pid,
+    controller.signal,
+  );
+  expect(helper.kill).not.toHaveBeenCalled();
+  helper.emit("error", new Error("spawn ENOENT"));
+  helper.emit("close", null, null);
+  await expect(ready).resolves.toBeNull();
+  expect(helper.kill).not.toHaveBeenCalled();
 });

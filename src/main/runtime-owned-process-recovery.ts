@@ -25,6 +25,12 @@ import {
 } from "../node/runtime-owned-process-linux.js";
 import { linuxGuardianProcessTreeGone } from
   "../node/runtime-owned-process-linux-cgroup.js";
+import { reapLinuxGuardianOrphans } from "../node/runtime-owned-process-linux-orphans.js";
+import {
+  type DarwinGuardianEscapeeCensus,
+  type DarwinGuardianIdentity,
+  readDarwinGuardianEscapeesAsync,
+} from "../node/runtime-owned-process-darwin-orphans.js";
 export { readDarwinProcessIdentity } from "../node/runtime-owned-processes.js";
 
 type Kill = (pid: number, signal?: NodeJS.Signals | number) => true;
@@ -49,6 +55,16 @@ export interface RuntimeOwnedProcessRecoveryOptions {
   readonly linuxTerminalAuthority?: typeof linuxGuardianTerminalAuthority;
   readonly recoverLinuxGuardian?: typeof recoverLinuxGuardianTerminalExact;
   readonly linuxGuardianTreeGone?: typeof linuxGuardianProcessTreeGone;
+  readonly reapLinuxGuardianOrphans?: typeof reapLinuxGuardianOrphans;
+  readonly readDarwinEscapees?: (
+    guardian: DarwinGuardianIdentity,
+    timeoutMs: number,
+  ) => Promise<DarwinGuardianEscapeeCensus>;
+  readonly onUnsignalledOrphans?: (orphans: readonly RuntimeOwnedOrphan[]) => void;
+}
+
+export interface RuntimeOwnedOrphan {
+  readonly pid: number;
 }
 
 function exactPidAbsent(pid: number, kill: Kill): boolean {
@@ -433,6 +449,40 @@ export function recoverRuntimeOwnedProcesses(
         waitForProcessGroupDrain,
       )) return false;
     }
+    const reapOrphans = options.reapLinuxGuardianOrphans ?? reapLinuxGuardianOrphans;
+    const missingLinuxGuardianTreeGone = async (
+      guardian: { readonly pid: number; readonly startTimeTicks: string },
+      observedStartTimeTicks: string | null,
+    ): Promise<boolean> => {
+      if (linuxGuardianTreeGone(guardian, observedStartTimeTicks)) return true;
+      const reaped = await reapOrphans(guardian, {
+        deadlineAt: processProofDeadlineAt,
+        reusedHolderStartTimeTicks: observedStartTimeTicks,
+        wait: waitForProcessGroupDrain,
+        kill: (pid, signal) => { kill(pid, signal); },
+      }).catch(() => ({ recovered: false, unsignalled: [] }));
+      if (reaped.unsignalled.length > 0) {
+        try { options.onUnsignalledOrphans?.(reaped.unsignalled); } catch {
+          return false;
+        }
+      }
+      return reaped.recovered;
+    };
+    const readDarwinEscapees = options.readDarwinEscapees
+      ?? ((guardian: DarwinGuardianIdentity, timeoutMs: number) => (options.darwinGuardianPath
+        ? readDarwinGuardianEscapeesAsync(guardian, options.darwinGuardianPath, { reap: true, timeoutMs })
+        : Promise.resolve({ absent: null, remaining: [] })));
+    const darwinEscapeesGone = async (record: RuntimeOwnedProcessClaim): Promise<boolean> => {
+      if (!("startTimeSeconds" in record.process)) return false;
+      const census = await readDarwinEscapees(record.process, processProofDeadlineAt - Date.now())
+        .catch(() => ({ absent: null, remaining: [] }));
+      if (census.absent === false) {
+        try { options.onUnsignalledOrphans?.(census.remaining); } catch {
+          return false;
+        }
+      }
+      return census.absent === true;
+    };
     const forceKill = options.forceKill ?? forceKillRuntimeProcessTree;
     const readIdentity = options.readIdentity
       ?? ((pid: number) => readProcessIdentity(
@@ -486,7 +536,7 @@ export function recoverRuntimeOwnedProcesses(
         if (platform === "linux" && options.darwinGuardianPath) {
           if (
             !("startTimeTicks" in record.process)
-            || !linuxGuardianTreeGone(record.process, null)
+            || !await missingLinuxGuardianTreeGone(record.process, null)
             || !await releaseRuntimeOwnedProcessClaimAfterProof(
               journal,
               runtimeGenerationId,
@@ -498,21 +548,24 @@ export function recoverRuntimeOwnedProcesses(
           continue;
         }
         if (platform === "darwin") {
-          // A missing guardian and an empty birth session do not prove that a
-          // fork-tainted descendant is gone: it may have double-forked,
-          // called setsid(), and reparented before the guardian's bounded
-          // census. Drain the exact session to reduce live work, but retain
-          // the durable claim for the existing explicit modern-Darwin
-          // recovery authority. Silent recovery here would allow an escaped
-          // process to run beside a replacement runtime.
-          await waitForDarwinSessionDrain(
-            record,
-            readIdentity,
-            readDarwinSessionEmpty,
-            options.deadlineAt,
-            waitForProcessGroupDrain,
-          );
-          return false;
+          if (
+            !await waitForDarwinSessionDrain(
+              record,
+              readIdentity,
+              readDarwinSessionEmpty,
+              processProofDeadlineAt,
+              waitForProcessGroupDrain,
+            )
+            || !await darwinEscapeesGone(record)
+            || !await releaseRuntimeOwnedProcessClaimAfterProof(
+              journal,
+              runtimeGenerationId,
+              record.ownershipId,
+              options.deadlineAt,
+              waitForProcessGroupDrain,
+            )
+          ) return false;
+          continue;
         }
         if (
           !await waitForMissingRootCleanup(
@@ -539,7 +592,7 @@ export function recoverRuntimeOwnedProcesses(
           || !("startTimeTicks" in identity)
           || !("startTimeTicks" in record.process)
           || identity.startTimeTicks === record.process.startTimeTicks
-          || !linuxGuardianTreeGone(record.process, identity.startTimeTicks)
+          || !await missingLinuxGuardianTreeGone(record.process, identity.startTimeTicks)
           || !await releaseRuntimeOwnedProcessClaimAfterProof(
             journal,
             runtimeGenerationId,
@@ -646,18 +699,24 @@ export function recoverRuntimeOwnedProcesses(
             && error.code === "ESRCH"
           )) return false;
         }
-        // A cancellation result cannot distinguish a fully drained guardian
-        // from its fork-tainted uncertain-containment exit. Drain the exact
-        // birth session, retain the claim, and require the explicit modern
-        // recovery snapshot before a replacement runtime can start.
-        await waitForDarwinSessionDrain(
-          record,
-          readIdentity,
-          readDarwinSessionEmpty,
-          options.deadlineAt,
-          waitForProcessGroupDrain,
-        );
-        return false;
+        if (
+          !await waitForDarwinSessionDrain(
+            record,
+            readIdentity,
+            readDarwinSessionEmpty,
+            processProofDeadlineAt,
+            waitForProcessGroupDrain,
+          )
+          || !await darwinEscapeesGone(record)
+          || !await releaseRuntimeOwnedProcessClaimAfterProof(
+            journal,
+            runtimeGenerationId,
+            record.ownershipId,
+            options.deadlineAt,
+            waitForProcessGroupDrain,
+          )
+        ) return false;
+        continue;
       }
       if (
         identity.processGroupId !== identity.pid
@@ -695,6 +754,7 @@ export function recoverPriorRuntimeGenerations(options: {
   platform?: NodeJS.Platform;
   darwinGuardianPath?: string;
   windowsRuntimeJobAssembly?: WindowsRuntimeJobAssembly;
+  onUnsignalledOrphans?: (orphans: readonly RuntimeOwnedOrphan[]) => void;
 }): Promise<boolean> | null {
   const platform = options.platform ?? process.platform;
   if (!supportedRuntimeOwnedProcessPlatform(platform)) return null;
@@ -742,6 +802,9 @@ export function recoverPriorRuntimeGenerations(options: {
             : {}),
           ...(options.windowsRuntimeJobAssembly
             ? { windowsRuntimeJobAssembly: options.windowsRuntimeJobAssembly }
+            : {}),
+          ...(options.onUnsignalledOrphans
+            ? { onUnsignalledOrphans: options.onUnsignalledOrphans }
             : {}),
         },
       );

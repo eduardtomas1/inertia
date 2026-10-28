@@ -102,6 +102,7 @@ import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspect
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
 import { RuntimeConnectionUnavailableError } from
   "./runtime-supervisor-connection.js";
+import { applyRuntimeConnectionRequest } from "./runtime-connection-request.js";
 import { RuntimeSystemSuspendDelivery } from "./runtime-system-suspend-delivery.js";
 import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
@@ -403,7 +404,8 @@ function registerIpcHandlers(): void {
   });
   ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
-    const context = assertTrustedChatIpc(event, args.length);
+    const context = assertTrustedChatIpc(event, args.length, Math.min(args.length, 1));
+    applyRuntimeConnectionRequest(args, context.role, runtimeSupervisor);
 
     if (!runtimeSupervisor) {
       return {
@@ -869,8 +871,10 @@ function focusMainWindow(): void {
 }
 function finishQuitAfterCleanup(): void { finishPrivilegedExit({
     takeWindow: () => { const window = mainWindow; mainWindow = null; return window; },
+    flushDiagnostics: () => runtimeDiagnostics?.flushIncidents(),
     recordExit: () => recordPackageSmokeStage("app-exit"), exit: () => process.exit(0),
   }); }
+function recordUnconfirmedQuit(): void { runtimeDiagnostics?.record("runtime.failure", { phase: "stopping", message: runtimeSupervisor?.snapshot().lastError ?? "Inertia closed before process cleanup was confirmed." }); }
 let snapshotService: SnapshotService | null = null;
 function runPrivilegedCleanup(): Promise<boolean> {
   mainWindowCreation.beginShutdown();
@@ -952,7 +956,7 @@ async function bootstrap(safetyAssets: ReturnType<typeof resolveDesktopRuntimePr
     handoffContext: () => appUpdateInstallRuntimeContext(
       runtimeSupervisor?.updateHandoffIdentity(), runtimeDataDirectory,
       app.getPath("userData")),
-    finishNormalShutdown: finishQuitAfterCleanup,
+    finishNormalShutdown: finishQuitAfterCleanup, recordUnconfirmedExit: recordUnconfirmedQuit,
     onUnconfirmedShutdown: lifecycleNotices.reportUnconfirmedShutdown,
     reportError: (error) => reportMainFailure("app-update-preparation-failed", "Failed to prepare the application update", error),
   });
@@ -1022,6 +1026,7 @@ async function bootstrap(safetyAssets: ReturnType<typeof resolveDesktopRuntimePr
   const liveDarwinRecovery = new RuntimeLiveDarwinRecoveryCoordinator({ dataDirectory, systemBootId: bootstrapSafety.systemBootId, guardianPath: runtimeProcessGuardianPath, getWindow: () => mainWindow });
   runtimeSupervisor = new RuntimeSupervisor({
     platform: process.platform,
+    requestExplicitRecovery: () => runtimeSupervisor !== null && liveDarwinRecovery.request(runtimeSupervisor),
     ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),
     agentBrowserBroker: previewBroker,
     issueEvidenceBroker: runtimeIssueEvidenceBroker({ channel: releaseChannel.channel }),
@@ -1216,7 +1221,8 @@ void (detachedRelaunch ? relaunchDetached(detachedRelaunch, process.env, process
   recordBeforeQuit: () => recordPackageSmokeStage("before-quit"),
   cleanupBeforeQuit: runPrivilegedCleanup,
   finishNormalShutdown: finishQuitAfterCleanup,
-  onUnconfirmedShutdown: lifecycleNotices.reportUnconfirmedShutdown,
+  onUnconfirmedShutdown: recordUnconfirmedQuit,
+  reportShutdownInProgress: lifecycleNotices.reportShutdownInProgress,
   reportSingletonContention: lifecycleNotices.reportSingletonContention,
   reportCleanupFailure: (error) => reportMainFailure("privileged-shutdown-failed", "Failed to finish privileged shutdown", error),
   validateCandidateBootstrap: async (operationId, expectedActiveRuntimeOwner) => await validateDesktopAppUpdateCandidate({ operationId, dataDirectory: configuredRuntimeDataDirectory(), expectedActiveRuntimeOwner }),

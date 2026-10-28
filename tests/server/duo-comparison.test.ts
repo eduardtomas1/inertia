@@ -511,7 +511,7 @@ describe("Duo third-model comparison", () => {
     }
   });
 
-  it("persists and broadcasts active-turn quarantine when provider cleanup is unconfirmed", async () => {
+  it("finalizes the quarantined active turn but keeps its ownership row when provider cleanup is unconfirmed", async () => {
     const broadcastSnapshot = vi.fn();
     const runtime = await createRuntime({ broadcastSnapshot });
     const launches = comparisonCoordinator(runtime);
@@ -528,14 +528,13 @@ describe("Duo third-model comparison", () => {
     )).resolves.toBe(false);
 
     expect(runtime.store.agentTurn(side.turnId)).toMatchObject({
-      status: "running",
-      runState: {
-        state: "cancelling",
-        providerState: "duo-quarantine",
-      },
+      status: "cancelled",
+      runState: { state: "cancelled" },
     });
+    expect(runtime.store.providerRunOwnership.all()).toContainEqual(
+      expect.objectContaining({ turnId: side.turnId }),
+    );
     expect(broadcastSnapshot).toHaveBeenCalled();
-    expect(runtime.provider.isRunning(side.conversationId)).toBe(true);
     runtime.store.close();
   });
 

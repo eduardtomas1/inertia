@@ -159,7 +159,17 @@ export class AuthoritativeRunStateEngine {
     outcome: AgentRunTerminalState,
     providerState?: string | null,
   ): boolean {
-    return this.requestCancellation(outcome, providerState);
+    if (outcome === "cancelled") {
+      return this.requestCancellation(outcome, providerState);
+    }
+    if (this.terminal !== null) return false;
+    const before = this.current;
+    this.requestedTerminal ??= outcome;
+    this.quarantined = true;
+    this.approvals = 0;
+    this.inputs = 0;
+    this.preferredInteraction = null;
+    return this.refresh(providerState) || before.state !== this.current.state;
   }
 
   quarantine(providerState?: string | null): boolean {
@@ -219,7 +229,10 @@ export class AuthoritativeRunStateEngine {
 
   private derivedState(): AgentRunState {
     if (this.terminal) return this.terminal;
-    if (this.cancellationObserved || this.requestedTerminal) return "cancelling";
+    if (
+      this.cancellationObserved
+      || this.requestedTerminal === "cancelled"
+    ) return "cancelling";
     if (this.preferredInteraction === "approval" && this.approvals > 0) {
       return "waiting-for-approval";
     }

@@ -657,7 +657,7 @@ describe("agent harness architecture", () => {
     expect(manager.cancel("conversation-claude")).toBe(false);
   });
 
-  it("retains an unconfirmed exact run and makes its late events inert", async () => {
+  it("detaches an exact run that ignores a forced stop and keeps its late events inert", async () => {
     const emitters = new Map<string, NonNullable<Parameters<AgentHarness["start"]>[0]["callbacks"]>["onEvent"]>();
     const resolvers = new Map<string, (result: ProviderRunResult) => void>();
     const cancelCalls = new Map<string, boolean[]>();
@@ -686,7 +686,10 @@ describe("agent harness architecture", () => {
         };
       },
     };
-    const manager = ProviderManager.createForTests({ cancelGraceMs: 10_000 }, new AgentHarnessRegistry([harness]));
+    const manager = ProviderManager.createForTests(
+      { cancelGraceMs: 10_000, forceStopBudgetMs: 10 },
+      new AgentHarnessRegistry([harness]),
+    );
     const ordinaryInput = input("claude", {
       harnessId: "claude-cli",
       conversationId: "ordinary-conversation",
@@ -722,7 +725,7 @@ describe("agent harness architecture", () => {
       1,
     )).resolves.toBe("force-detached");
     expect(cancelCalls.get("isolated-conversation")).toEqual([false, true]);
-    expect(manager.isRunning("isolated-conversation")).toBe(true);
+    expect(manager.isRunning("isolated-conversation")).toBe(false);
     expect(manager.isRunning("ordinary-conversation")).toBe(true);
 
     emitters.get("isolated-conversation")?.({
@@ -756,7 +759,7 @@ describe("agent harness architecture", () => {
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
-  it("bounds global shutdown but retains every unconfirmed malformed run", async () => {
+  it("bounds global shutdown and detaches every unconfirmed malformed run", async () => {
     const cancelCalls = new Map<string, boolean[]>();
     const harness: AgentHarness = {
       id: "claude-cli",
@@ -778,7 +781,7 @@ describe("agent harness architecture", () => {
       },
     };
     const manager = ProviderManager.createForTests(
-      { cancelGraceMs: 100 },
+      { cancelGraceMs: 100, forceStopBudgetMs: 250 },
       new AgentHarnessRegistry([harness]),
     );
     for (let index = 0; index < 3; index += 1) {
@@ -798,7 +801,7 @@ describe("agent harness architecture", () => {
     const elapsedMs = performance.now() - startedAt;
 
     expect(elapsedMs).toBeLessThan(700);
-    expect(manager.activeConversationIds()).toHaveLength(3);
+    expect(manager.activeConversationIds()).toHaveLength(0);
     for (const calls of cancelCalls.values()) {
       expect(calls[0]).toBe(false);
       expect(calls).toContain(true);

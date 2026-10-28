@@ -184,6 +184,7 @@ function latestTurn(value: unknown): boolean {
     && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
     && modelRouteIdentityCoherent(value)
     && optionalBooleanField(value, "usageLimited")
+    && optionalStringField(value, "providerActivityAt")
     && optionalTurnFailureKind(value);
 }
 

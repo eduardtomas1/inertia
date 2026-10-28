@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { useComposerStopAction } from "../../src/renderer/src/components/composer/useComposerStopAction";
-import { COMPOSER_ACTION_STALE_FALLBACK_MS } from "../../src/renderer/src/utils/composerPrimaryAction";
+import { COMPOSER_ACTION_STALE_FALLBACK_MS, STOP_REPEAT_LATCH_MS } from "../../src/renderer/src/utils/composerPrimaryAction";
 import { composerProps, conversation, deferred } from "./composer-fixtures";
 
 afterEach(() => {
@@ -65,6 +65,36 @@ describe("composer cancellation ownership", () => {
     expect(screen.getByRole("button", { name: "Stop agent" })).toHaveFocus();
   });
 
+  it("asks the runtime again when Stop is pressed while the turn is stopping, but not on a double click", async () => {
+    const current = conversation("conversation-force-stop");
+    const onStop = vi.fn(async () => undefined);
+    const cancellingTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "turn-force-stop",
+      status: "running" as const,
+      harnessId: "codex-app-server" as const,
+      runState: { state: "cancelling" as const, providerState: "cancel/requested", revision: 2 },
+    };
+    render(<Composer {...composerProps(current, { running: true, latestTurn: cancellingTurn, onStop })} />);
+    const stopping = await screen.findByRole("button", { name: "Stopping agent" });
+    expect(stopping).toBeEnabled();
+    vi.useFakeTimers();
+
+    await act(async () => {
+      fireEvent.click(stopping);
+      fireEvent.click(stopping);
+    });
+    expect(onStop).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(STOP_REPEAT_LATCH_MS);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Stopping agent" }));
+    });
+    expect(onStop).toHaveBeenCalledTimes(2);
+  });
+
   it.each(["detail", "summary"] as const)(
     "keeps follow-ups blocked until %s confirms cancellation has finished",
     async (projection) => {
@@ -91,7 +121,7 @@ describe("composer cancellation ownership", () => {
       fireEvent.keyDown(editor, { key: "Enter" });
       expect(onStop).toHaveBeenCalledOnce();
       expect(onSend).not.toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: "Stopping agent" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Stopping agent" })).toHaveAttribute("aria-busy", "true");
 
       const cancellingTurn = {
         ...runningTurn,
@@ -113,7 +143,7 @@ describe("composer cancellation ownership", () => {
       });
       fireEvent.keyDown(editor, { key: "Enter" });
       expect(onSend).not.toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: "Stopping agent" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Stopping agent" })).toBeEnabled();
       expect(editor).toHaveValue("Keep this draft until stopped");
 
       view.rerender(<Composer {...composerProps(conversation("other-chat"))} />);
@@ -121,7 +151,7 @@ describe("composer cancellation ownership", () => {
       const restoredEditor = screen.getByRole("textbox", { name: "Message" });
       fireEvent.keyDown(restoredEditor, { key: "Enter" });
       expect(onSend).not.toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: "Stopping agent" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Stopping agent" })).toBeEnabled();
       expect(restoredEditor).toHaveValue("Keep this draft until stopped");
 
       view.rerender(<Composer {...props} running={false} latestTurn={{

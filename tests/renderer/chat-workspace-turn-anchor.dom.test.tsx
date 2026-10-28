@@ -401,7 +401,7 @@ describe("draft turn anchoring", () => {
     expect(screen.queryByText("codex update available")).not.toBeInTheDocument();
   });
 
-  it("projects owned prompts and arms exact-turn restoration from both Stop surfaces", async () => {
+  it("projects owned prompts, arms exact-turn restoration once and forwards a repeated Stop from the other surface", async () => {
     const activeConversation = {
       ...conversation("conversation-stop-restore"),
       status: "running" as const,
@@ -461,7 +461,7 @@ describe("draft turn anchoring", () => {
     fireEvent.click(await screen.findByRole("button", {
       name: "Stop from timeline mock",
     }));
-    await waitFor(() => expect(onStop).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onStop).toHaveBeenCalledTimes(2));
     expect(restoreEvents).toHaveLength(1);
     expect(restoreEvents.map(({ phase, conversationId, turnId, messageId, text }) => ({
       phase, conversationId, turnId, messageId, text,

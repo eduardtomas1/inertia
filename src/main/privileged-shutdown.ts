@@ -5,11 +5,17 @@ interface DestroyableWindow {
 
 export function finishPrivilegedExit(options: {
   takeWindow(): DestroyableWindow | null;
+  flushDiagnostics?(): void;
   recordExit(): void;
   exit(): never;
 }): never {
   const window = options.takeWindow();
   if (window && !window.isDestroyed()) window.destroy();
+  try {
+    options.flushDiagnostics?.();
+  } catch (error) {
+    console.error("Failed to write pending diagnostics before exit", error);
+  }
   options.recordExit();
   // Every privileged owner has settled. Electron's native exit can still
   // remain resident, so normal shutdown ends the already-clean process.
@@ -27,6 +33,33 @@ export function finishNormalShutdownAfterCleanup(options: {
   }
   options.finish();
   return true;
+}
+
+export async function finishNormalShutdownWithinDeadline(options: {
+  cleanup(): Promise<boolean>;
+  deadlineMs: number;
+  finish(): void;
+  recordUnconfirmedExit(): void;
+  reportCleanupFailure(error: unknown): void;
+}): Promise<void> {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const cleanupConfirmed = await Promise.race([
+    Promise.resolve().then(() => options.cleanup()),
+    new Promise<boolean>((resolve) => {
+      deadline = setTimeout(() => resolve(false), options.deadlineMs);
+    }),
+  ]).catch((error: unknown) => {
+    options.reportCleanupFailure(error);
+    return false;
+  }).finally(() => clearTimeout(deadline));
+  finishNormalShutdownAfterCleanup({
+    cleanupConfirmed,
+    finish: options.finish,
+    onUnconfirmed: () => {
+      options.recordUnconfirmedExit();
+      options.finish();
+    },
+  });
 }
 
 export interface RetryablePrivilegedCleanupOptions {

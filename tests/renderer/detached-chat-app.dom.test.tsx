@@ -121,6 +121,8 @@ function connectionFor(nextSnapshot: AppSnapshot | null): InertiaConnection {
     runtimeGeneration: "detached-generation",
     status: "online",
     error: null,
+    runtimeStopped: null,
+    restartRuntime: async () => undefined,
     databaseRecoveryNotice: null,
     dismissDatabaseRecoveryNotice: clearError,
     clearError,

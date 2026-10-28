@@ -57,6 +57,33 @@ describe("RuntimeLiveDarwinRecoveryCoordinator", () => {
     expect(resumeWithModernDarwinRecovery).toHaveBeenCalledWith(descriptor);
   });
 
+  it("offers the recovery decision again when the user asks to restart", async () => {
+    let decide!: (authority: typeof descriptor | null) => void;
+    const prompt = vi.fn(async () => await new Promise<typeof descriptor | null>((resolve) => { decide = resolve; }));
+    const resumeWithModernDarwinRecovery = vi.fn(() => true);
+    const supervisor = {
+      canResumeWithModernDarwinRecovery: () => true,
+      resumeWithModernDarwinRecovery,
+    } as unknown as RuntimeSupervisor;
+    const coordinator = new RuntimeLiveDarwinRecoveryCoordinator({
+      dataDirectory: "/tmp/inertia-test-data",
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
+      guardianPath: "/tmp/runtime-process-guardian",
+      getWindow: () => window,
+      platform: "darwin",
+      prompt,
+    });
+
+    coordinator.observe(stoppedSnapshot, supervisor);
+    expect(coordinator.request(supervisor)).toBe(false);
+    decide(null);
+    await vi.waitFor(() => expect(coordinator.request(supervisor)).toBe(true));
+    expect(coordinator.request(supervisor)).toBe(false);
+    decide(descriptor);
+    await vi.waitFor(() => expect(resumeWithModernDarwinRecovery).toHaveBeenCalledWith(descriptor));
+    expect(prompt).toHaveBeenCalledTimes(2);
+  });
+
   it("does not offer recovery outside an eligible macOS safety lock", () => {
     const prompt = vi.fn(async () => descriptor);
     const supervisor = {

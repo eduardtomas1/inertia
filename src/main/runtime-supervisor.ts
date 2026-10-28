@@ -10,25 +10,27 @@ import {
   type RuntimePrivateConnectPromptPreparation, type RuntimeSystemSuspendInterval,
   type RuntimeUpdatePreparationResult, type RuntimeWorkerCommand,
 } from "../node/runtime-process-protocol.js";
-import { RuntimeAttachmentBrokerCoordinator } from "./runtime-attachment-broker.js";
-import { RuntimePrivateConnectPromptCoordinator } from "./runtime-private-connect-prompt-coordinator.js";
-import { RuntimePrivateConnectRequestCoordinator } from "./runtime-private-connect-request-coordinator.js";
+import type { RuntimeAttachmentBrokerCoordinator } from "./runtime-attachment-broker.js";
+import type { RuntimePrivateConnectPromptCoordinator } from "./runtime-private-connect-prompt-coordinator.js";
+import type { RuntimePrivateConnectRequestCoordinator } from "./runtime-private-connect-request-coordinator.js";
+import { createRuntimeSupervisorCoordinators } from "./runtime-supervisor-coordinators.js";
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { persistRuntimeGenerationCleanup } from "./runtime-generation-cleanup.js";
 import { readSystemBootId } from "./system-boot-id.js";
 import { boundedDuration, publicProcessError, runtimeRestartDelayMs, postRuntimeWorkerCommand, clearSupervisorTimer,
   runtimeSupervisorDefaults, unconfirmedRuntimeCleanupMessage, isRuntimeMascotStatusMessage } from "./runtime-supervisor-values.js";
-import { detachedRuntimeConnection, runtimeConnection,
+import { connectDetachedRuntime, runtimeConnection,
   runtimeConnectionUnavailableError } from "./runtime-supervisor-connection.js";
 import { createRuntimeSupervisorSnapshot } from "./runtime-supervisor-snapshot.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
-import { reconcileStoppedRuntimeQuarantine, runtimeStopAttemptState, trackRuntimeStopAttempt } from "./runtime-supervisor-stop-recovery.js";
-import { isRuntimeSecureFileBrokerEvent, RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
-import { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.js";
+import { RuntimeQuarantineReconciliation, runtimePriorCleanupEvidence, runtimeStopAttemptState,
+  trackRuntimeStopAttempt } from "./runtime-supervisor-stop-recovery.js";
+import { isRuntimeSecureFileBrokerEvent, type RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
+import type { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
-import { RuntimeUpdatePreparationCoordinator, type RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
-import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
-import { RuntimeHtmlRenderCoordinator } from "./runtime-html-render-coordinator.js";
+import type { RuntimeUpdatePreparationCoordinator, RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
+import type { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
+import type { RuntimeHtmlRenderCoordinator } from "./runtime-html-render-coordinator.js";
 import type { RuntimeHtmlRenderDocument } from "../node/runtime-html-render-protocol.js";
 import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
@@ -73,6 +75,7 @@ export class RuntimeSupervisor {
   private readonly attachmentRequests:
     RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
   private readonly onRestartRequested?: RuntimeSupervisorOptions["onRestartRequested"];
+  private readonly requestExplicitRecovery?: RuntimeSupervisorOptions["requestExplicitRecovery"];
   private readonly incidents: RuntimeIncidentObserver;
   private readonly onMascotStatus?: RuntimeSupervisorOptions["onMascotStatus"]; private readonly onSystemSuspendResult?: RuntimeSupervisorOptions["onSystemSuspendResult"]; private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
@@ -89,6 +92,7 @@ export class RuntimeSupervisor {
   private restartBlocked = false;
   private liveModernDarwinRecoveryEligible = false;
   private unconfirmedRestarts = 0;
+  private priorGenerationsUnrecovered = false;
   private readonly ownerNonce = randomUUID();
   private readonly cleanupReceipts: RuntimeCleanupReceiptJournal;
   private readonly runtimeGenerationLeases: RuntimeGenerationLeaseJournal;
@@ -109,6 +113,7 @@ export class RuntimeSupervisor {
   private readonly credentials: RuntimeCredentialCoordinator;
   private readonly secureFiles: RuntimeSecureFileCoordinator;
   private readonly stopAttempt;
+  private readonly quarantineReconciliation: RuntimeQuarantineReconciliation;
   private resolveStop: ((confirmed: boolean) => void) | null = null;
   private readonly testRecycle = new RuntimeSupervisorRecycle();
   constructor(options: RuntimeSupervisorOptions) {
@@ -161,7 +166,7 @@ export class RuntimeSupervisor {
       workerOptions: this.workerOptions,
       isCurrent: (record) => this.current === record,
       isRunningDesired: () => this.desiredRunning,
-      hasQuarantinedProcesses: () => this.quarantined.size > 0,
+      priorCleanupEvidence: () => runtimePriorCleanupEvidence(this.quarantined),
       persist: (record, containment) => this.runtimeOwnedProcesses.armContainment(
         record.runtimeGenerationId, this.systemBootId, containment,
       ),
@@ -175,85 +180,37 @@ export class RuntimeSupervisor {
       },
     });
     this.startupRecovery = processSafety.startupRecovery;
-    this.privateConnectPrompts = new RuntimePrivateConnectPromptCoordinator({
-      timeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
+    this.quarantineReconciliation = new RuntimeQuarantineReconciliation({ records: this.quarantined,
+      drain: async (record) => await this.secureFiles.drain(record, true),
+      recoverOwnedProcesses: this.recoverOwnedProcesses, systemBootId: this.systemBootId,
+      recoveryWaitMs: this.recoveryWaitMs, cleanupReceipts: this.cleanupReceipts,
+      runtimeGenerationLeases: this.runtimeGenerationLeases, runtimeOwnedProcesses: this.runtimeOwnedProcesses,
+      onPersistenceFailure: () => { this.lastError = "The confirmed runtime cleanup receipt could not be persisted."; },
+      clear: (record) => this.attachmentRequests.clear(record) });
+    const coordinators = createRuntimeSupervisorCoordinators(options, {
       setTimer: this.setTimer,
       clearTimer: this.clearTimer,
       post: (record, command) => this.post(record.child, command),
-    });
-    this.credentials = new RuntimeCredentialCoordinator({
-      broker: options.credentialBroker,
-      timeoutMs: boundedDuration(options.credentialRequestTimeoutMs,
-        runtimeSupervisorDefaults.credentialRequestTimeoutMs),
-      setTimer: this.setTimer,
-      clearTimer: this.clearTimer,
       accepts: (record) => this.acceptsBrokerRequests(record),
-      post: (record, command) => this.post(record.child, command),
-    });
-    this.secureFiles = new RuntimeSecureFileCoordinator({
-      retryUnconfirmedShutdown: true, broker: options.secureFileBroker,
-      conversationAttachmentStoreRunner:
-        options.conversationAttachmentStoreRunner,
-      documentPreparationRunner: options.documentPreparationRunner,
-      conversationAttachmentSourceRoot: options.conversationAttachmentSourceRoot,
-      conversationAttachmentStoreAuthority:
-        options.conversationAttachmentStoreAuthority,
-      agentBrowserBroker: options.agentBrowserBroker,
-      issueEvidenceBroker: options.issueEvidenceBroker,
-      accepts: (record) => this.acceptsBrokerRequests(record),
-      post: (record, command) => this.post(record.child, command),
-    });
-    this.attachmentRequests = new RuntimeAttachmentBrokerCoordinator({
-      broker: options.attachmentBroker,
-      timeoutMs: boundedDuration(
-        options.attachmentRequestTimeoutMs,
-        runtimeSupervisorDefaults.requestTimeoutMs,
-      ),
-      setTimer: this.setTimer,
-      clearTimer: this.clearTimer,
-      accepts: (record) => this.acceptsBrokerRequests(record),
-      post: (record, result) => this.post(record.child, result),
-    });
-    this.databaseRecoveryRequests = new RuntimeDatabaseRecoveryCoordinator({
-      requestTimeoutMs: boundedDuration(
-        options.databaseRecoveryRequestTimeoutMs,
-        runtimeSupervisorDefaults.databaseRecoveryTimeoutMs,
-      ),
-      cancelTimeoutMs: boundedDuration(
-        options.databaseRecoveryCancelTimeoutMs,
-        runtimeSupervisorDefaults.databaseRecoveryCancelTimeoutMs,
-      ),
-      setTimer: this.setTimer,
-      clearTimer: this.clearTimer,
-      post: (record, command) => this.post(record.child, command),
-      cancellationUnconfirmed: (record) => {
+      readyRecord: () => this.readyRuntimeRecord(),
+      readyCurrent: () => this.phase === "ready" ? this.current : null,
+      forceTerminate: (record) => this.forceTerminate(record.child),
+      databaseRecoveryCancellationUnconfirmed: (record) => {
         this.lastError = "The runtime did not confirm database recovery cancellation.";
         this.forceTerminate(record.child);
         this.emitState();
       },
     });
-    this.privateConnectRequests = new RuntimePrivateConnectRequestCoordinator({
-      requestTimeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
-      setTimer: this.setTimer,
-      clearTimer: this.clearTimer,
-      post: (record, command) => this.post(record.child, command),
-    });
-    this.htmlRenders = new RuntimeHtmlRenderCoordinator({
-      requestTimeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
-      setTimer: this.setTimer,
-      clearTimer: this.clearTimer,
-      readyRecord: () => this.readyRuntimeRecord(),
-      post: (record, command) => this.post(record.child, command),
-    });
-    this.updatePreparation = new RuntimeUpdatePreparationCoordinator({
-      timeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
-      setTimer: this.setTimer,
-      clearTimer: this.clearTimer,
-      current: () => this.phase === "ready" ? this.current : null,
-      post: (record, command) => this.post(record.child, command),
-      forceTerminate: (record) => this.forceTerminate(record.child),
-    });
+    this.privateConnectPrompts = coordinators.privateConnectPrompts;
+    this.credentials = coordinators.credentials;
+    this.secureFiles = coordinators.secureFiles;
+    this.attachmentRequests = coordinators.attachmentRequests;
+    this.databaseRecoveryRequests = coordinators.databaseRecoveryRequests;
+    this.privateConnectRequests = coordinators.privateConnectRequests;
+    this.htmlRenders = coordinators.htmlRenders;
+    this.updatePreparation = coordinators.updatePreparation;
     this.onRestartRequested = options.onRestartRequested;
+    this.requestExplicitRecovery = options.requestExplicitRecovery;
     this.onMascotStatus = options.onMascotStatus; this.onSystemSuspendResult = options.onSystemSuspendResult; this.onStateChange = options.onStateChange;
     this.incidents = new RuntimeIncidentObserver(options.onIncident);
   }
@@ -263,7 +220,26 @@ export class RuntimeSupervisor {
       this.spawnNext();
       return;
     }
+    this.recoverPriorGenerationsThenSpawn();
+  }
+  canRestartFromUser(): boolean {
+    return this.lifecycle === "started" && this.phase === "stopped"
+      && !this.current && !this.desiredRunning
+      && (!this.liveModernDarwinRecoveryEligible || this.requestExplicitRecovery !== undefined);
+  }
+  restartFromUser(): boolean {
+    if (!this.canRestartFromUser()) return false;
+    if (this.liveModernDarwinRecoveryEligible) return this.requestExplicitRecovery?.() ?? false;
+    this.resetForRestart();
+    this.phase = "starting";
+    this.emitState();
+    if (this.priorGenerationsUnrecovered) this.recoverPriorGenerationsThenSpawn();
+    else this.spawnAfterReconciliation();
+    return true;
+  }
+  private recoverPriorGenerationsThenSpawn(): void {
     const priorRecovery = this.startupRecovery.begin((recovered) => { if (!this.desiredRunning) return;
+      this.priorGenerationsUnrecovered = !recovered;
       if (!recovered) { this.desiredRunning = false; this.restartBlocked = true; this.phase = "stopped";
         this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
           "A prior runtime generation still has unconfirmed process cleanup.",
@@ -272,8 +248,19 @@ export class RuntimeSupervisor {
       }
       this.spawnNext();
     });
-    if (!priorRecovery) { this.spawnNext(); return; }
+    if (!priorRecovery) { this.priorGenerationsUnrecovered = false; this.spawnNext(); return; }
     this.phase = "starting"; this.emitState();
+  }
+  private resetForRestart(): void {
+    this.lifecycle = "started";
+    this.restartBlocked = false;
+    this.liveModernDarwinRecoveryEligible = false;
+    this.unconfirmedRestarts = 0;
+    this.restartAttempt = 0;
+    this.lastError = null;
+    this.startupBlockerCode = null;
+    this.desiredRunning = true;
+    this.clearShutdownTimers();
   }
   canResumeWithModernDarwinRecovery(): boolean {
     return this.lifecycle !== "closed"
@@ -295,15 +282,7 @@ export class RuntimeSupervisor {
     // admission may the supervisor forget its in-memory quarantine and let the
     // replacement worker retire the durable records transactionally.
     this.quarantined.clear();
-    this.lifecycle = "started";
-    this.restartBlocked = false;
-    this.liveModernDarwinRecoveryEligible = false;
-    this.unconfirmedRestarts = 0;
-    this.restartAttempt = 0;
-    this.lastError = null;
-    this.startupBlockerCode = null;
-    this.desiredRunning = true;
-    this.clearShutdownTimers();
+    this.resetForRestart();
     this.spawnNext();
     return this.current !== null;
   }
@@ -315,6 +294,7 @@ export class RuntimeSupervisor {
       databaseRecoveryReport: this.databaseRecoveryReport,
       databaseRecoveryNoticePending: consumeRecoveryNotice && this.databaseRecoveryNoticePending,
       startupBlockerCode: this.startupBlockerCode,
+      restartable: this.canRestartFromUser(),
     });
     if (consumeRecoveryNotice && result.consumedRecoveryNotice) {
       this.databaseRecoveryNoticePending = false;
@@ -322,7 +302,7 @@ export class RuntimeSupervisor {
     return result.connection;
   }
   detachedConnection(conversationId: string, clientId: string): RuntimeConnection {
-    return detachedRuntimeConnection(this.connection(false), conversationId, clientId);
+    return connectDetachedRuntime(() => this.connection(false), conversationId, clientId);
   }
   recordSystemSuspendInterval(interval: RuntimeSystemSuspendInterval): boolean {
     const record = this.phase === "ready" ? this.current : null;
@@ -483,7 +463,6 @@ export class RuntimeSupervisor {
   stop(): Promise<boolean> {
     this.lifecycle = "closed"; this.testRecycle.cancelForStop();
     if (this.stopAttempt.promise) return this.stopAttempt.promise;
-    const retrying = this.stopAttempt.retryEligible;
     this.desiredRunning = false;
     this.clearTimerValue("restartTimer");
     this.clearTimerValue("startupTimer");
@@ -511,15 +490,8 @@ export class RuntimeSupervisor {
         Promise.all([secureFilesStopped, startupRecovery])
         .then(async ([confirmed, recovered]) => {
           this.phase = "stopped";
-          const reconciled = confirmed && recovered && retrying
-            ? await reconcileStoppedRuntimeQuarantine({ records: this.quarantined, drain: async (record) => await this.secureFiles.drain(record, true),
-              recoverOwnedProcesses: this.recoverOwnedProcesses, systemBootId: this.systemBootId,
-              recoveryWaitMs: this.recoveryWaitMs, cleanupReceipts: this.cleanupReceipts,
-              runtimeGenerationLeases: this.runtimeGenerationLeases, runtimeOwnedProcesses: this.runtimeOwnedProcesses,
-              onPersistenceFailure: () => { this.lastError =
-                "The confirmed runtime cleanup receipt could not be persisted."; },
-              clear: (record) => this.attachmentRequests.clear(record) })
-            : this.quarantined.size === 0;
+          const reconciled = confirmed && recovered
+            && await this.quarantineReconciliation.reconcile();
           this.restartBlocked = this.quarantined.size > 0;
           if (!this.restartBlocked) { this.lastError = null; this.startupBlockerCode = null; }
           this.emitState();
@@ -532,8 +504,8 @@ export class RuntimeSupervisor {
     this.emitState();
     const runtimeStopped = new Promise<boolean>((resolve) => { this.resolveStop = resolve; });
     const attempt = Promise.all([runtimeStopped, secureFilesStopped])
-      .then(([runtimeConfirmed, secureFilesConfirmed]) => runtimeConfirmed
-        && secureFilesConfirmed && this.quarantined.size === 0);
+      .then(async ([runtimeConfirmed, secureFilesConfirmed]) => runtimeConfirmed
+        && secureFilesConfirmed && await this.quarantineReconciliation.reconcile());
     const tracked = trackRuntimeStopAttempt(this.stopAttempt, attempt);
     this.beginRuntimeShutdown(this.current, () => {
       this.resolveStop?.(false);
@@ -846,6 +818,7 @@ export class RuntimeSupervisor {
     this.emitState();
   }
   private handleExit(record: RuntimeProcessRecord, code: number): void {
+    record.exited = true;
     if (this.current !== record) return;
     this.incidents.exited(record.runtimeGenerationId, record.ready, this.desiredRunning && !record.cleanupConfirmed, code);
     const exitedBeforeCleanRecycleReadiness = this.testRecycle.owns(record)
@@ -888,6 +861,7 @@ export class RuntimeSupervisor {
     if (this.current !== record) return;
     if (!secureFileCleanupConfirmed) {
       record.cleanupConfirmed = false;
+      record.utilityCleanupUnconfirmed = true;
       this.current = null;
       this.clearShutdownTimers();
       this.quarantined.add(record);
@@ -1021,30 +995,41 @@ export class RuntimeSupervisor {
         });
         return;
       }
-      if (!this.desiredRunning) {
-        this.settleStopped(record);
+      if (!record.cleanupConfirmed) {
+        this.phase = this.desiredRunning ? "restarting" : "stopping";
+        this.emitState();
+        recoverUnconfirmedRuntimeCleanup({
+          record, recoverOwnedProcesses: this.recoverOwnedProcesses, systemBootId: this.systemBootId,
+          deadlineAt: record.shutdownDeadlineAt ?? Date.now() + this.recoveryWaitMs,
+          isCurrent: () => this.current === record,
+          onSettled: (outcome) => {
+            if (outcome === "recovered") { continueAfterTermination(true); return; }
+            if (!this.desiredRunning) { this.settleStopped(record); return; }
+            this.current = null;
+            this.quarantined.add(record);
+            this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
+              "The runtime process tree was stopped, but prior detached work could not be confirmed cleaned up.");
+            if (
+              this.requiresExplicitModernDarwinRecovery()
+              || this.unconfirmedRestarts
+                >= runtimeSupervisorDefaults.maxUnconfirmedRestarts
+            ) {
+              this.restartBlocked = true;
+              this.liveModernDarwinRecoveryEligible =
+                this.requiresExplicitModernDarwinRecovery();
+              this.desiredRunning = false;
+              this.phase = "stopped";
+              this.emitState();
+              return;
+            }
+            this.unconfirmedRestarts += 1;
+            this.scheduleRestart();
+          },
+        });
         return;
       }
-      if (!record.cleanupConfirmed) {
-        this.current = null;
-        this.quarantined.add(record);
-        this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
-          "The runtime process tree was stopped, but prior detached work could not be confirmed cleaned up.");
-        if (
-          this.requiresExplicitModernDarwinRecovery()
-          || this.unconfirmedRestarts
-            >= runtimeSupervisorDefaults.maxUnconfirmedRestarts
-        ) {
-          this.restartBlocked = true;
-          this.liveModernDarwinRecoveryEligible =
-            this.requiresExplicitModernDarwinRecovery();
-          this.desiredRunning = false;
-          this.phase = "stopped";
-          this.emitState();
-          return;
-        }
-        this.unconfirmedRestarts += 1;
-        this.scheduleRestart();
+      if (!this.desiredRunning) {
+        this.settleStopped(record);
         return;
       }
       this.current = null;
@@ -1090,9 +1075,13 @@ export class RuntimeSupervisor {
     this.phase = "restarting";
     this.restartTimer = this.setTimer(() => {
       this.restartTimer = null;
-      this.spawnNext();
+      this.spawnAfterReconciliation();
     }, delay);
     this.emitState();
+  }
+  private spawnAfterReconciliation(): void {
+    if (this.quarantined.size === 0) { this.spawnNext(); return; }
+    void this.quarantineReconciliation.reconcile().then(() => this.spawnNext());
   }
   private post(child: UtilityProcess, message: RuntimeWorkerCommand): boolean {
     const failure = postRuntimeWorkerCommand(child, message);
@@ -1234,8 +1223,7 @@ export class RuntimeSupervisor {
     this.emitState();
     this.resolveStop?.(
       record.cleanupConfirmed
-        && record.processTreeTerminationConfirmed
-        && this.quarantined.size === 0,
+        && record.processTreeTerminationConfirmed,
     );
     this.resolveStop = null;
   }

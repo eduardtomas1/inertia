@@ -59,6 +59,7 @@ import {
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
 import { useLaunchIntro } from "../hooks/useLaunchIntro";
 import { useSidebarCollapseMotion } from "../hooks/useSidebarCollapseMotion";
+import { RuntimeConnectionBanner } from "./RuntimeConnectionBanner";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
 import type { MainWindowTargetAppActions } from "../hooks/useMainWindowTargets";
 import type { AppView } from "../appView";
@@ -832,6 +833,7 @@ export const AppLayout = memo(function AppLayout({
             onPush={() => { void actions.mutateRemote("git.push").catch(() => undefined); }}
             {...(actions.refreshGitStatus ? { onRefreshGitStatus: actions.refreshGitStatus } : {})}
           />
+          <RuntimeConnectionBanner connection={connection} />
           {cornerControlsVisible && (
             <PanelLayoutControls
               usage={headerTools?.usage.usage ?? null}

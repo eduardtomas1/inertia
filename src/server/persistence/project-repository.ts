@@ -6,6 +6,7 @@ import { defaultProjectPreferences, projectPreferencesSchema } from "../../share
 import { WorkspacePathAuthority } from "../workspace-path-authority";
 import { projectFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
+import { releaseProviderRecoveryRecords } from "./provider-run-ownership-repository";
 
 const PROJECT_COLORS = ["#6f76d9", "#5b8ca8", "#8a73ba", "#a76c79", "#9a814f", "#687f91"] as const;
 
@@ -140,10 +141,16 @@ export class ProjectRepository {
     return next;
   }
 
-  remove(projectId: string): void {
+  remove(
+    projectId: string,
+    recoveryRecords: readonly { turnId: string; runId: string }[] = [],
+  ): void {
     this.context.requireProject(projectId);
     const state = this.context.database.prepare("SELECT active_project_id FROM app_state WHERE id = 1").get() as { active_project_id: string | null } | undefined;
-    this.context.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+    this.context.database.transaction(() => {
+      releaseProviderRecoveryRecords(this.context.database, recoveryRecords);
+      this.context.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+    })();
     const activeProjectId = state?.active_project_id ?? null;
     if (activeProjectId !== null && activeProjectId !== projectId) return;
     this.selectRegularProject();

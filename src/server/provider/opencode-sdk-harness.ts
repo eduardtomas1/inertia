@@ -13,6 +13,10 @@ import {
   type OwnedProcessTreeTermination,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
+import {
+  providerUnconfirmedCleanup,
+  type ProviderUnconfirmedCleanup,
+} from "./provider-unconfirmed-cleanup";
 import { watcherCommandEnvironment } from "../runtime/watcher/read-only-commands";
 import {
   createAgentHarnessEmitter,
@@ -45,7 +49,6 @@ import {
   openCodeQuestionId,
 } from "./opencode-boundary";
 import {
-  openCodeCleanupFailureMessage,
   OpenCodeServerCleanupUnconfirmedError,
   startOwnedOpenCodeServer,
   waitForOpenCodeHealth,
@@ -866,36 +869,15 @@ function startOpenCodeRun(
     }
     eventAbort.abort();
     rejectPending();
+    let unconfirmedCleanup: ProviderUnconfirmedCleanup | undefined;
     if (child) {
       try {
         await terminateOwnedRun?.(true);
-      } catch (error) {
+      } catch {
+        if (cleanupConfirmed) {
+          unconfirmedCleanup = providerUnconfirmedCleanup(child);
+        }
         cleanupConfirmed = false;
-        const cleanupError = sanitizeProviderFailureSummary(
-          openCodeCleanupFailureMessage(outcome.error, error),
-          "OpenCode could not confirm process cleanup.",
-          { workspaceRoot: options.input.cwd },
-        );
-        const priorFailure = outcome.failure;
-        const cleanupDetail = sanitizeProviderActivityDetail(
-          [
-            priorFailure?.technicalDetail,
-            safeError(error, "OpenCode process-tree cleanup was not confirmed."),
-          ].filter((value): value is string => Boolean(value)).join("\n"),
-          { workspaceRoot: options.input.cwd, maxChars: 16 * 1024 },
-        );
-        outcome = {
-          ...outcome,
-          status: "failed",
-          error: cleanupError,
-          failure: {
-            reason: "provider-error",
-            message: cleanupError,
-            phase: "cleanup",
-            terminalEvent: "process-tree/cleanup",
-            ...(cleanupDetail ? { technicalDetail: cleanupDetail } : {}),
-          },
-        };
       }
     }
     return finish(
@@ -903,6 +885,7 @@ function startOpenCodeRun(
       outcome.error,
       outcome.failure,
       cleanupConfirmed,
+      unconfirmedCleanup,
     );
   })();
 
@@ -911,6 +894,7 @@ function startOpenCodeRun(
     error?: string,
     failure?: ProviderRunFailure,
     cleanupConfirmed = true,
+    unconfirmedCleanup?: ProviderUnconfirmedCleanup,
   ): ProviderRunResult {
     subagents?.finish(status === "completed");
     const canonical = openCodeCanonicalResult(emittedParts, eventState);
@@ -938,6 +922,7 @@ function startOpenCodeRun(
       ...(error ? { error } : {}),
       ...(failure ? { failure } : {}),
       cleanupConfirmed,
+      ...unconfirmedCleanup,
     };
   }
 

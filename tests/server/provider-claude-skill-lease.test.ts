@@ -24,7 +24,7 @@ it.each([
     quarantined: false,
   },
   {
-    label: "unconfirmed process-tree cleanup quarantines",
+    label: "unconfirmed process-tree cleanup quarantines until the next clean detection lifts",
     failure: () => new ProcessTreeTerminationError("Claude skill discovery process tree"),
     quarantined: true,
   },
@@ -46,9 +46,9 @@ it.each([
     await expect(manager.claudeSkills(root, false)).rejects.toThrow();
 
     expect(leases.hasProviderAuthority("claude")).toBe(quarantined);
-    const retry = manager.claudeSkills(root, false);
-    if (quarantined) await expect(retry).rejects.toThrow();
-    else await expect(retry).resolves.toEqual([]);
+    await expect(manager.claudeSkills(root, false)).resolves.toEqual([]);
+    expect(leases.hasProviderAuthority("claude")).toBe(false);
+    expect(readClaudeAgentSdkSkills).toHaveBeenCalledTimes(2);
   } finally {
     await manager.disposeAll().catch(() => undefined);
   }

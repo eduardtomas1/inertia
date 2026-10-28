@@ -43,7 +43,12 @@ export interface RuntimeConnectionUnavailable {
     | "runtime-stopped"
     | "runtime-unavailable";
   retryable: boolean;
+  restartable?: true;
   message: string;
+}
+
+export interface RuntimeConnectionRequest {
+  readonly restart: true;
 }
 
 export type RuntimeConnectionResult =
@@ -767,7 +772,9 @@ export interface DesktopBridge {
   persistDetachedChatDraft: (draft: string) => boolean;
   /** Mirrors coalesced popup edits without performing a durable handoff. */
   mirrorDetachedChatDraft: (draft: string) => boolean;
-  getRuntimeConnection: () => Promise<RuntimeConnectionResult>;
+  getRuntimeConnection: (
+    request?: RuntimeConnectionRequest,
+  ) => Promise<RuntimeConnectionResult>;
   /** Wakes a reconnect attempt without exposing the runtime URL capability. */
   onRuntimeReady: (listener: () => void) => () => void;
   selectDirectory: () => Promise<string | null>;

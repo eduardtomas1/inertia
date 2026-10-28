@@ -19,6 +19,7 @@ import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProc
   "../helpers/prepared-runtime-owned-process-registry";
 import { runtimeOwnedPtyInvocation } from "../../src/node/runtime-owned-pty-invocation";
 import {
+  LINUX_GUARDIAN_UNPROVED_TERMINAL_MS,
   linuxGuardianTerminalAuthority,
   monitorLinuxGuardianTerminal,
   readLinuxGuardianReadyAsync,
@@ -594,12 +595,12 @@ describe("Linux runtime process guardian", () => {
       stop.wake();
       vi.advanceTimersByTime(0);
       expect(terminalAuthority).toHaveBeenCalledOnce();
-      vi.advanceTimersByTime(900);
+      vi.advanceTimersByTime(LINUX_GUARDIAN_UNPROVED_TERMINAL_MS - 50);
       expect(onFailure).not.toHaveBeenCalled();
-      expect(terminalAuthority).toHaveBeenCalledTimes(19);
+      expect(terminalAuthority).toHaveBeenCalledTimes(LINUX_GUARDIAN_UNPROVED_TERMINAL_MS / 50);
       vi.advanceTimersByTime(50);
-      expect(terminalAuthority).toHaveBeenCalledTimes(20);
-      expect(onFailure).toHaveBeenCalledOnce();
+      expect(terminalAuthority).toHaveBeenCalledTimes(LINUX_GUARDIAN_UNPROVED_TERMINAL_MS / 50 + 1);
+      expect(onFailure).toHaveBeenCalledExactlyOnceWith("unproved-terminal");
     } finally {
       stop();
       vi.useRealTimers();
@@ -1310,6 +1311,7 @@ describe("Linux runtime process guardian", () => {
       await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
       await waitForChild(child);
 
+      expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(false);
       expect(child.exitCode).toBe(143);
       expect(child.signalCode).toBeNull();
       expect(existsSync(marker)).toBe(false);
@@ -1400,8 +1402,9 @@ describe("Linux runtime process guardian", () => {
     const guardian = compileGuardian(root);
     const generation = "90000000-0000-4000-8000-000000000009:1";
     const boot = "test:a0000000-0000-4000-8000-00000000000a";
+    const onProcessFault = vi.fn();
     const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
-      platform: "linux", darwinGuardianPath: guardian,
+      platform: "linux", darwinGuardianPath: guardian, onProcessFault,
     });
     const executable = statSync(guardian, { bigint: true });
     const wrongOwner = spawn("/bin/sleep", ["60"], { stdio: "ignore" });
@@ -1419,8 +1422,14 @@ describe("Linux runtime process guardian", () => {
       }).records(generation)?.[0]?.state === "pending");
       if (!child) throw new Error("The wrong-parent guardian did not spawn.");
       await waitForChild(child);
-      expect(() => spawnRuntimeOwnedProcess(() => spawn("/bin/true")))
-        .toThrow("tainted until restart");
+      await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+      expect(onProcessFault).toHaveBeenCalledExactlyOnceWith({
+        kind: "admission-rejected", diagnostic: { stage: "linux-claim" },
+      });
+      expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(false);
+      expect(new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: guardian,
+      }).records(generation)).toEqual([]);
       expect(() => statSync(join(root, "ran"))).toThrow();
     } finally {
       if (child) await stopChild(child);

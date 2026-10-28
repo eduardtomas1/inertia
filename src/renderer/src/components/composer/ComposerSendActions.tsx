@@ -41,7 +41,7 @@ function primaryPresentation(
     return {
       action: "stop" as const,
       busy: state === "stop-pending",
-      disabled: state === "stop-pending",
+      disabled: false,
       icon: squareMorphIcon,
       iconState: "stop",
       label: state === "stop-pending" ? "Stopping agent" : "Stop agent",

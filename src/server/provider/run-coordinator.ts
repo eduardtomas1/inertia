@@ -1,3 +1,4 @@
+import type { PosixCleanupFailureReason } from "../posix-cleanup-diagnostics";
 import type { AgentApprovalDecision } from "./interactions";
 import type { AgentHarnessRun } from "./agent-harness";
 import type { AgentHarnessRegistry } from "./agent-harness-registry";
@@ -39,6 +40,13 @@ import {
 import { startHarnessWithFreshSessionFallback } from "./fresh-session-fallback";
 import type { ProviderMetadataCache } from "./metadata";
 import { ProviderInstallationAdmissionError } from "./installation-lease";
+import {
+  PROVIDER_SHUTDOWN_RESERVE_MS,
+  PROVIDER_SHUTDOWN_STOP_GRACE_MS,
+  ProviderRunCleanupLedger,
+  boundedCleanupConfirmation,
+} from "./run-cleanup-settlement";
+import { forceTerminationBudgetMs } from "../process-lifecycle";
 import { providerChildEnvironment } from "../environment";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../shared/provider-maintenance";
@@ -47,6 +55,7 @@ import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../../shared/runtime-c
 interface ProviderRunInstallationUse {
   release(): boolean;
   quarantine(reason: string): void;
+  liftQuarantine?(): void;
 }
 
 interface ActiveRun {
@@ -63,12 +72,19 @@ interface ActiveRun {
   negotiatedCapabilities: Set<ProviderCapabilityId>;
   capabilityAvailable(capabilityId: ProviderCapabilityId): boolean;
   installationUse: ProviderRunInstallationUse;
+  installationQuarantined: boolean;
   processCleanupConfirmed: boolean;
   cancelRequested: boolean;
   settled: boolean;
+  cleanupDetached: boolean;
+  cleanupReason?: PosixCleanupFailureReason;
   detach: () => boolean;
+  detachUnconfirmed: () => void;
   quarantine: (reason: string) => void;
+  stopLadder: Promise<OwnedProviderStopResult> | null;
+  escalateStop: (() => void) | null;
   hardKillTimer?: NodeJS.Timeout;
+  shutdownTimers: NodeJS.Timeout[];
 }
 
 export type OwnedProviderStopResult =
@@ -107,11 +123,16 @@ export interface ProviderRunCoordinatorOptions {
     input: ProviderRunInput,
     executable: string,
   ): ProviderRunInstallationUse;
+  onCleanupUnconfirmed?(
+    identity: ProviderRunIdentity,
+    cleanupReason?: PosixCleanupFailureReason,
+  ): void;
+  onCleanupConfirmedLate?(identity: ProviderRunIdentity): void;
+  onQuarantinedRunSettled?(providerId: ProviderId): void;
+  forceStopBudgetMs?: number;
 }
 
 const MAX_OWNED_STOP_GRACE_MS = 30_000;
-const FORCE_DETACH_GRACE_MS = 250;
-const MAX_CLEANUP_RECEIPTS = 256;
 const MAX_REFUSED_OWNERS_PER_CONVERSATION = 64;
 const MAX_REFUSED_OWNERS = 1_024;
 
@@ -181,11 +202,17 @@ export class ProviderRunCoordinator {
    * confirms cleanup and removes its active entry immediately before the
    * lifecycle owner asks stopOwned() for the same barrier.
    */
-  private readonly cleanupReceipts = new Map<string, ProviderRunIdentity>();
+  private readonly cleanupReceipts: ProviderRunCleanupLedger;
   private readonly refusalReceipts = new Map<string, Set<string>>();
   private refusalReceiptCount = 0;
+  private shutdownDeadlineAt: number | null = null;
 
-  constructor(private readonly options: ProviderRunCoordinatorOptions) {}
+  constructor(private readonly options: ProviderRunCoordinatorOptions) {
+    this.cleanupReceipts = new ProviderRunCleanupLedger(
+      (identity, cleanupReason) => options.onCleanupUnconfirmed?.(identity, cleanupReason),
+      (identity) => options.onCleanupConfirmedLate?.(identity),
+    );
+  }
 
   isRunning(conversationId: string): boolean {
     return this.activeRuns.has(conversationId);
@@ -302,7 +329,7 @@ export class ProviderRunCoordinator {
         expectedIdentity,
         "invalid_input",
         this.options.evidenceUncertain?.(providerId)
-          ? `${PROVIDER_INFO[providerId].name} is paused because Inertia could not confirm that an earlier ${PROVIDER_INFO[providerId].name} process was cleaned up. Restart Inertia to continue.`
+          ? `${PROVIDER_INFO[providerId].name} is paused because Inertia could not confirm that an earlier ${PROVIDER_INFO[providerId].name} process was cleaned up. Open Settings > Agents and choose Refresh all providers to recover.`
           : providerAdmissionRefusal(
             PROVIDER_INFO[providerId].name,
             this.options.installationState?.(providerId) ?? "current",
@@ -455,30 +482,67 @@ export class ProviderRunCoordinator {
     if (!this.options.resolvedCommandFor(providerId)) {
       this.options.rememberResolvedCommand(providerId, executable);
     }
-    const settle = (): boolean => {
-      if (active.settled) return true;
-      if (
-        !active.processCleanupConfirmed
-        || !active.installationUse.release()
-      ) {
-        active.cancelRequested = true;
-        compatibilityEmitter.close();
-        active.installationUse.quarantine(
-          "provider-run-installation-release-mismatch",
-        );
-        return false;
-      }
+    const releaseInstallation = (): boolean => {
+      if (!active.installationQuarantined) return active.installationUse.release();
+      active.installationUse.liftQuarantine?.();
+      this.options.onQuarantinedRunSettled?.(providerId);
+      return true;
+    };
+    const finishActive = (): void => {
       active.settled = true;
       active.launchAbort.abort();
       compatibilityEmitter.close();
       disposeLaunch();
       if (active.hardKillTimer) clearTimeout(active.hardKillTimer);
+      for (const timer of active.shutdownTimers) clearTimeout(timer);
       if (this.activeRuns.get(conversationId) === active) {
         this.activeRuns.delete(conversationId);
       }
-      this.rememberCleanupReceipt(expectedIdentity);
+    };
+    const settle = (): boolean => {
+      if (active.settled) return true;
+      if (
+        !active.processCleanupConfirmed
+        || !releaseInstallation()
+      ) {
+        active.cancelRequested = true;
+        compatibilityEmitter.close();
+        active.installationQuarantined = true;
+        active.installationUse.quarantine(
+          "provider-run-installation-release-mismatch",
+        );
+        return false;
+      }
+      finishActive();
+      this.cleanupReceipts.confirmed(expectedIdentity);
       active.resolveLifecycleSettlement();
       return true;
+    };
+    const detachUnconfirmed = (): void => {
+      if (active.settled) return;
+      active.quarantine("provider-run-force-detached");
+      finishActive();
+      active.cleanupDetached = true;
+      active.installationUse.liftQuarantine?.();
+      this.cleanupReceipts.detached(expectedIdentity, active.cleanupReason);
+      active.resolveLifecycleSettlement();
+    };
+    const settleLateCleanup = (
+      confirmation: Promise<boolean> | undefined,
+    ): void => {
+      void boundedCleanupConfirmation(confirmation).then((confirmed) => {
+        if (active.settled) {
+          if (confirmed && active.cleanupDetached) {
+            this.cleanupReceipts.lateConfirmed(expectedIdentity);
+          }
+          return;
+        }
+        if (confirmed) {
+          active.processCleanupConfirmed = true;
+          if (settle()) return;
+        }
+        detachUnconfirmed();
+      });
     };
     const cancelledBeforeStart = (): ProviderRunResult => {
       compatibilityEmitter.status("cancelled");
@@ -633,18 +697,26 @@ export class ProviderRunCoordinator {
         capabilityId, [...active.negotiatedCapabilities],
       ),
       installationUse,
+      installationQuarantined: false,
       processCleanupConfirmed: false,
       cancelRequested: false,
       settled: false,
+      cleanupDetached: false,
       detach: settle,
+      detachUnconfirmed,
       quarantine: (reason) => {
+        if (active.settled) return;
         active.cancelRequested = true;
         compatibilityEmitter.close();
+        active.installationQuarantined = true;
         active.installationUse.quarantine(reason);
       },
+      stopLadder: null,
+      escalateStop: null,
+      shutdownTimers: [],
     };
     this.activeRuns.set(conversationId, active);
-    this.cleanupReceipts.delete(conversationId);
+    this.cleanupReceipts.forget(conversationId);
     this.consumeRefusal(conversationId, active);
 
     let launched: Promise<ProviderRunResult>;
@@ -674,6 +746,16 @@ export class ProviderRunCoordinator {
     }
     const result = launched.then(
       (value) => {
+        if (active.cleanupDetached) {
+          this.cleanupReceipts.observeLateCleanup(
+            expectedIdentity,
+            value.cleanupConfirmed
+              && hasExactProviderRunIdentity(value, expectedIdentity)
+              ? Promise.resolve(true)
+              : value.cleanupConfirmation,
+          );
+          return value;
+        }
         if (
           !hasExactProviderRunIdentity(value, expectedIdentity)
           || !hasConsistentProviderTerminalOutcome(value)
@@ -705,8 +787,10 @@ export class ProviderRunCoordinator {
           }
         }
         if (!value.cleanupConfirmed) {
+          active.cleanupReason = value.cleanupReason;
           active.quarantine("provider-run-cleanup-unconfirmed");
           if (active.hardKillTimer) clearTimeout(active.hardKillTimer);
+          settleLateCleanup(value.cleanupConfirmation);
         } else {
           active.processCleanupConfirmed = true;
           if (!settle()) {
@@ -720,6 +804,7 @@ export class ProviderRunCoordinator {
         return value;
       },
       (error: unknown) => {
+        if (active.cleanupDetached) throw error;
         if (!active.harnessStartInvoked) {
           active.processCleanupConfirmed = true;
           settle();
@@ -915,13 +1000,8 @@ export class ProviderRunCoordinator {
   ): Promise<OwnedProviderStopResult> {
     const active = this.activeRuns.get(conversationId);
     if (!active || active.settled) {
-      const receipt = this.cleanupReceipts.get(conversationId);
-      return (receipt
-        && receipt.runId === identity.runId
-        && receipt.turnId === identity.turnId)
-        || this.consumeRefusal(conversationId, identity)
-        ? "settled"
-        : "missing";
+      return this.cleanupReceipts.receipt(conversationId, identity)
+        ?? (this.consumeRefusal(conversationId, identity) ? "settled" : "missing");
     }
     if (active.runId !== identity.runId || active.turnId !== identity.turnId) {
       if (this.consumeRefusal(conversationId, identity)) return "settled";
@@ -930,13 +1010,30 @@ export class ProviderRunCoordinator {
       return "identity-mismatch";
     }
     if (active.processCleanupConfirmed) {
-      active.detach();
-      return active.settled ? "settled" : "force-detached";
+      if (!active.detach()) active.detachUnconfirmed();
+      return this.settledStopResult(conversationId, active);
     }
+    this.boundStopByShutdown(active);
+    const stopGraceMs = this.shutdownDeadlineAt === null
+      ? graceMs
+      : Math.min(graceMs, PROVIDER_SHUTDOWN_STOP_GRACE_MS);
+    if (stopGraceMs <= 0) active.escalateStop?.();
+    active.stopLadder ??= this.stopLadder(conversationId, active, stopGraceMs);
+    return await active.stopLadder;
+  }
 
+  private async stopLadder(
+    conversationId: string,
+    active: ActiveRun,
+    graceMs: number,
+  ): Promise<OwnedProviderStopResult> {
+    const escalated = new Promise<void>((resolve) => {
+      active.escalateStop = resolve;
+    });
     this.cancel(conversationId);
-    if (await this.waitForSettlement(active, graceMs)) return "settled";
-
+    if (await this.waitForSettlement(active, graceMs, escalated)) {
+      return this.settledStopResult(conversationId, active);
+    }
     if (active.hardKillTimer) {
       clearTimeout(active.hardKillTimer);
       active.hardKillTimer = undefined;
@@ -946,22 +1043,21 @@ export class ProviderRunCoordinator {
     } catch {
       // A malformed harness can throw while its owned process is already gone.
     }
-    if (await this.waitForSettlement(active, FORCE_DETACH_GRACE_MS)) return "settled";
-
-    // Retain this exact run as a process-local exclusion until authoritative
-    // complete-tree cleanup is observed by its lifecycle owner.
-    active.quarantine("provider-run-force-detached");
+    const forceBudgetMs = this.options.forceStopBudgetMs
+      ?? forceTerminationBudgetMs(process.platform);
+    if (await this.waitForSettlement(active, forceBudgetMs)) {
+      return this.settledStopResult(conversationId, active);
+    }
+    active.detachUnconfirmed();
     return "force-detached";
   }
 
-  private rememberCleanupReceipt(identity: ProviderRunIdentity): void {
-    this.cleanupReceipts.delete(identity.conversationId);
-    this.cleanupReceipts.set(identity.conversationId, identity);
-    while (this.cleanupReceipts.size > MAX_CLEANUP_RECEIPTS) {
-      const oldest = this.cleanupReceipts.keys().next().value;
-      if (oldest === undefined) break;
-      this.cleanupReceipts.delete(oldest);
-    }
+  private settledStopResult(
+    conversationId: string,
+    active: ActiveRun,
+  ): OwnedProviderStopResult {
+    return this.cleanupReceipts.receipt(conversationId, active)
+      ?? (active.cleanupDetached ? "force-detached" : "settled");
   }
 
   private refuse(
@@ -1006,6 +1102,32 @@ export class ProviderRunCoordinator {
     return true;
   }
 
+  beginShutdown(deadlineAt: number): void {
+    if (this.shutdownDeadlineAt !== null) return;
+    this.shutdownDeadlineAt = deadlineAt;
+    for (const active of this.activeRuns.values()) this.boundStopByShutdown(active);
+  }
+
+  private boundStopByShutdown(active: ActiveRun): void {
+    if (this.shutdownDeadlineAt === null || active.shutdownTimers.length > 0) return;
+    const detachInMs = Math.max(
+      0,
+      this.shutdownDeadlineAt - PROVIDER_SHUTDOWN_RESERVE_MS - Date.now(),
+    );
+    const escalate = setTimeout(
+      () => active.escalateStop?.(),
+      Math.min(PROVIDER_SHUTDOWN_STOP_GRACE_MS, detachInMs),
+    );
+    const detach = setTimeout(() => {
+      if (active.settled) return;
+      forceCancelHarness(active);
+      active.detachUnconfirmed();
+    }, detachInMs);
+    escalate.unref();
+    detach.unref();
+    active.shutdownTimers = [escalate, detach];
+  }
+
   async disposeAll(): Promise<boolean> {
     const active = [...this.activeRuns.entries()];
     const results = await Promise.allSettled(active.map(([conversationId, run]) =>
@@ -1017,7 +1139,7 @@ export class ProviderRunCoordinator {
     return !results.some((result) => (
       result.status === "rejected"
       || result.value !== "settled"
-    )) && this.activeRuns.size === 0;
+    )) && this.activeRuns.size === 0 && this.cleanupReceipts.allConfirmed();
   }
 
   respondToApproval(
@@ -1072,6 +1194,7 @@ export class ProviderRunCoordinator {
   private async waitForSettlement(
     active: ActiveRun,
     graceMs: number,
+    escalated?: Promise<void>,
   ): Promise<boolean> {
     if (active.settled) return true;
     const boundedGraceMs = Math.max(0, Math.min(graceMs, MAX_OWNED_STOP_GRACE_MS));
@@ -1083,9 +1206,18 @@ export class ProviderRunCoordinator {
         timer = setTimeout(() => resolve(false), boundedGraceMs);
         timer.unref();
       }),
+      ...(escalated ? [escalated.then(() => active.settled)] : []),
     ]);
     if (timer) clearTimeout(timer);
     return settled;
+  }
+}
+
+function forceCancelHarness(active: ActiveRun): void {
+  try {
+    active.harnessRun?.cancel(true);
+  } catch {
+    return;
   }
 }
 

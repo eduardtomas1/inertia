@@ -2,6 +2,7 @@ import type { AgentTurn } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import type { TurnController } from "./turns/turn-controller";
 import { sameTurnOwner, type TurnOwnerIdentity } from "./turns/turn-ownership";
+import { liveProviderRunOwnership } from "./turns/turn-checkout-activity";
 
 export function recordManagedTurn(store: RuntimeStore, operationId: string, turn: { id: string; runId: string }, now: string): void {
   store.agentThreadManagement.transition(operationId, ["dispatching"], "dispatching",
@@ -21,7 +22,7 @@ export async function stopOwnedManagedTurn(store: RuntimeStore, turns: TurnContr
     throw new Error("The approved turn is no longer active. A newer turn was not stopped.");
   }
   await turns.waitForProviderCleanup([conversationId]);
-  const ownsProvider = store.providerRunOwnership.forConversation(conversationId)
+  const ownsProvider = liveProviderRunOwnership(store, store.providerRunOwnership.forConversation(conversationId))
     .some((run) => sameTurnOwner(run, owner));
   if (ownsProvider || sameTurnOwner(turns.activeIdentity(conversationId), owner)) {
     throw new Error("Stop was requested, but exact provider cleanup was not confirmed.");

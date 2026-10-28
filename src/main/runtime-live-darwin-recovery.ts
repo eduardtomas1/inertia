@@ -17,6 +17,7 @@ export class RuntimeLiveDarwinRecoveryCoordinator {
   readonly #prompt: typeof promptForLiveModernDarwinRuntimeRecovery;
   readonly #reportError: (error: unknown) => void;
   readonly #offeredGenerations = new Set<number>();
+  #prompting = false;
 
   constructor(options: {
     readonly dataDirectory: string;
@@ -49,24 +50,53 @@ export class RuntimeLiveDarwinRecoveryCoordinator {
     supervisor: RuntimeSupervisor | null,
   ): void {
     if (
-      this.#platform !== "darwin"
-      || snapshot.phase !== "stopped"
-      || !this.#guardianPath
-      || !supervisor?.canResumeWithModernDarwinRecovery()
+      snapshot.phase !== "stopped"
+      || !supervisor
       || this.#offeredGenerations.has(snapshot.generation)
     ) return;
-    const window = this.#getWindow();
-    if (!window || window.isDestroyed()) return;
+    const target = this.#eligibleTarget(supervisor);
+    if (!target) return;
     this.#offeredGenerations.add(snapshot.generation);
+    this.#offer(target, supervisor);
+  }
+
+  request(supervisor: RuntimeSupervisor): boolean {
+    const target = this.#eligibleTarget(supervisor);
+    if (!target) return false;
+    this.#offer(target, supervisor);
+    return true;
+  }
+
+  #eligibleTarget(
+    supervisor: RuntimeSupervisor,
+  ): { readonly window: BrowserWindow; readonly guardianPath: string } | null {
+    const guardianPath = this.#guardianPath;
+    if (
+      this.#platform !== "darwin"
+      || !guardianPath
+      || this.#prompting
+      || !supervisor.canResumeWithModernDarwinRecovery()
+    ) return null;
+    const window = this.#getWindow();
+    return window && !window.isDestroyed() ? { window, guardianPath } : null;
+  }
+
+  #offer(
+    { window, guardianPath }: { readonly window: BrowserWindow; readonly guardianPath: string },
+    supervisor: RuntimeSupervisor,
+  ): void {
+    this.#prompting = true;
     void this.#prompt(
       this.#dataDirectory,
       this.#systemBootId,
-      this.#guardianPath,
+      guardianPath,
       window,
     ).then((authority) => {
       if (authority && !window.isDestroyed()) {
         supervisor.resumeWithModernDarwinRecovery(authority);
       }
-    }).catch(this.#reportError);
+    }).catch(this.#reportError).finally(() => {
+      this.#prompting = false;
+    });
   }
 }

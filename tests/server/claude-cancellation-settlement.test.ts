@@ -98,7 +98,7 @@ describe("Claude cancellation settlement", () => {
         new Promise<"stalled">((resolve) => { timer = setTimeout(() => resolve("stalled"), 500); }),
       ]);
       expect(outcome).toMatchObject({
-        status: confirmed ? "cancelled" : "failed",
+        status: "cancelled",
         cleanupConfirmed: confirmed,
         text: "The answer is already visible.",
       });

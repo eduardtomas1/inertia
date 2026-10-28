@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {
@@ -71,30 +71,18 @@ describe("OpenCode owned-server loss", { concurrent: false }, () => {
       windowsCleanupFailures: windowsCleanupFailures(),
     });
 
-    expect(result, evidence).toMatchObject(windows
-      ? {
-          status: "failed",
-          failure: { phase: "cleanup", terminalEvent: "process-tree/cleanup" },
-          cleanupConfirmed: false,
-        }
-      : {
-          status: "failed",
-          failure: { phase: "runtime" },
-          cleanupConfirmed: true,
-        });
-    expect(result.error, evidence).toMatch(
-      /^(?:The OpenCode server exited|OpenCode closed its event stream) before the session completed\./u,
-    );
+    expect(result, evidence).toMatchObject({
+      status: "failed",
+      failure: { phase: "runtime" },
+      cleanupConfirmed: !windows,
+    });
+    expect([
+      ["The OpenCode server exited before the session completed.", "process-exit"],
+      ["OpenCode closed its event stream before the session completed.", "transport-closed"],
+    ]).toContainEqual([result.error, result.failure?.reason]);
     if (windows) {
-      expect(result.error, evidence).toContain(
-        "Cleanup also failed: OpenCode server process tree could not be confirmed stopped.",
-      );
       expect(manager.activeConversationIds()).toEqual([input.conversationId]);
     } else {
-      expect([
-        ["The OpenCode server exited before the session completed.", "process-exit"],
-        ["OpenCode closed its event stream before the session completed.", "transport-closed"],
-      ]).toContainEqual([result.error, result.failure?.reason]);
       expect(manager.activeConversationIds()).toEqual([]);
     }
   });
@@ -111,15 +99,18 @@ describe("OpenCode owned-server loss", { concurrent: false }, () => {
     );
     roots.push(root);
 
-    await expect(manager.run(input)).resolves.toMatchObject({
+    const result = await manager.run(input);
+    expect(result).toMatchObject({
       status: "failed",
       error: expect.stringMatching(
-        /(?:exited|closed its event stream) before the session completed\..*Cleanup also failed: OpenCode server process tree could not be confirmed stopped\./u,
+        /^(?:The OpenCode server exited|OpenCode closed its event stream) before the session completed\.$/u,
       ),
-      failure: { phase: "cleanup", terminalEvent: "process-tree/cleanup" },
+      failure: { phase: "runtime" },
       cleanupConfirmed: false,
     });
-    expect(manager.activeConversationIds()).toEqual([input.conversationId]);
+    await vi.waitFor(() => {
+      expect(manager.activeConversationIds()).toEqual([]);
+    });
   });
 
   it("fails instead of reconnecting when the event stream drops", async () => {

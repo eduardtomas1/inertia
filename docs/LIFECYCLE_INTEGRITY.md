@@ -22,8 +22,21 @@ provider-run, root-turn, provider-maintenance, and application-update seams; the
 inventory below also records where an older subsystem distributes evidence
 across several records rather than one common receipt. A timeout, rejected
 promise, missing map entry, closed stream, absent PID, or caught exception is
-never cleanup proof. Replacement stays closed until cleanup is confirmed; a
-quarantine preserves evidence but does not itself authorize replacement.
+never cleanup proof. A quarantine preserves evidence but does not itself
+authorize replacement.
+
+Cleanup uncertainty is a diagnostic and a recovery task, not a lock on the
+user's work. Turn settlement and the user's chat are released on a bounded
+clock, separately from cleanup proof: the durable record, an incident, and
+startup recovery carry the uncertainty instead of a frozen chat. A provider's
+own completed, cancelled, or failed outcome stays the turn outcome when only
+its cleanup is unconfirmed. Stop is an escalation ladder that always ends
+settled: protocol interrupt, then forced tree termination within the
+platform's budget, then detach. Quarantines are lifted by evidence, such as a
+late cleanup confirmation for the exact run, or by the user through Refresh.
+The runtime can be restarted from inside the app on every platform after
+reconciling what can be reconciled, and quit always exits within a bounded
+time, recording unconfirmed cleanup for the next start.
 
 The canonical identity chain is:
 
@@ -61,10 +74,10 @@ lease; it does not mean an in-memory absence proves cleanup.
 
 | Resource | Admission owner and immutable identity | Active / durable state | Terminal authority | Cleanup proof, quarantine, recovery, and replacement gate |
 | --- | --- | --- | --- | --- |
-| Runtime generation | Electron `RuntimeSupervisor`; `runtimeGenerationId` + `systemBootId` | `RuntimeProcessRecord` / runtime lease, owned-process journal, cleanup receipts | Supervisor accepting the exact worker event for its current record | Windows Job Object or exact POSIX guardian/process evidence plus generation receipt. Unconfirmed cleanup blocks bootstrap and all replacement generations. |
-| Runtime worker | Supervisor; generation identity + native process creation identity | `RuntimeProcessRecord.child` / containment and owned-process records | Supervisor after exact `runtime.stopped`, child close, and generation cleanup | Supervisor joins one bounded shutdown/force path. Late worker messages are ignored. Startup recovery reconciles the prior record before spawn. |
+| Runtime generation | Electron `RuntimeSupervisor`; `runtimeGenerationId` + `systemBootId` | `RuntimeProcessRecord` / runtime lease, owned-process journal, cleanup receipts | Supervisor accepting the exact worker event for its current record | Windows Job Object or exact POSIX guardian/process evidence plus generation receipt. Unconfirmed cleanup blocks bootstrap and all replacement generations while the generation's worker may still be alive; an observed worker exit is handled as described for the runtime worker. |
+| Runtime worker | Supervisor; generation identity + native process creation identity | `RuntimeProcessRecord.child` / containment and owned-process records | Supervisor after exact `runtime.stopped`, child close, and generation cleanup | Supervisor joins one bounded shutdown/force path. Late worker messages are ignored. Startup recovery reconciles the prior record before spawn; the supervisor also reconciles exact owned cleanup before quarantining a generation and again before each respawn. A quarantined generation whose worker exit was observed does not block the next start: its provider run ownership rows are cleared so interrupted-turn recovery runs, and `runtime.cleanup-unconfirmed` is recorded. Only a generation whose worker may still be alive keeps the startup safety lock. A stopped runtime can be restarted from the app on every platform. Quit waits for the privileged shutdown envelope plus a 5 s margin, records unconfirmed cleanup in the runtime diagnostics, and exits. Inside the worker, runtime shutdown stops provider runs with at most 1 s of grace and detaches any run still alive 2.5 s before the shutdown deadline. |
 | Runtime HTTP/WebSocket server | Worker runtime; runtime generation + loopback server instance | Runtime server/socket registries / covered by runtime lease | Runtime shutdown coordinator | Listener close and all socket/operation drains must finish before the worker can report stopped. The supervisor remains the outer cleanup authority. |
-| Provider run | Turn controller and `ProviderManager`; exact provider, conversation, run, turn, harness, and backend tuple | controller/manager active maps / `provider_run_ownership` row | Server run-state engine selects the root outcome | The manager first validates the exact terminal-result tuple and `cleanupConfirmed: true`; the turn owner clears durable ownership and releases attachments only after exact `stopOwned(...) === "settled"` proof. Missing, mismatched, detached, thrown, or false cleanup evidence retains ownership, quarantines admission, and leaves startup recovery to reconcile the durable row. |
+| Provider run | Turn controller and `ProviderManager`; exact provider, conversation, run, turn, harness, and backend tuple | controller/manager active maps / `provider_run_ownership` row | Server run-state engine selects the root outcome | The manager validates the exact terminal-result tuple. A result with `cleanupConfirmed: false` keeps the provider's own status and text and carries a bounded late `cleanupConfirmation`. `stopOwned` is a ladder: protocol cancel with a 2 s grace, forced tree termination within the platform force budget (Linux 10 s, macOS 5 s, Windows 2 s), then detach. A detached run leaves the active set, its run-scoped installation quarantine is lifted, and `provider.cleanup-unconfirmed` is recorded; the turn is finalized with its requested status, plus a note when the user stopped it. The turn owner clears durable ownership after exact `stopOwned(...) === "settled"` proof, or later when a late confirmation proves cleanup of that exact run. Until then the row keeps chat deletion, project removal, resumed provider terminals, and checkout operations closed, and startup recovery reconciles it. Attachments are released when the stop settles either way. |
 | Provider session/thread | Exact provider adapter; native ID bound to continuation identity | adapter session / conversation and turn session snapshots | Server decides whether the native ID is eligible for reuse | Adapter closes protocol resources. A native provider keeps its saved session across an installation change and the provider decides whether it can still be resumed; a custom backend requires an exact compatibility token. A rejected or ineligible session starts a fresh one in the same chat with the earlier visible messages restored. |
 | Provider-owned server | OpenCode SDK harness; provider run tuple + server process identity | harness-owned server/client / owned-process evidence under the runtime generation | Harness only after protocol terminal and server cleanup | SSE/client settlement alone is insufficient. Process-tree/server shutdown failure poisons cleanup and keeps replacement admission closed. |
 | Provider metadata/model/auth probe | Provider manager metadata scope; provider + installation/configuration + exact model identity + probe operation | discovery/metadata operations / a bounded versioned per-model evidence envelope | Probe owner | Exact child-tree cleanup and bounded parser completion. An immediate database transaction rejects older same-model completions and configuration drift while preserving independent models. Maintenance and shutdown wait for probes; installation/capability changes invalidate cached evidence. |
@@ -82,7 +95,7 @@ lease; it does not mean an in-memory absence proves cleanup.
 | Updater installation | `AppUpdateInstallCoordinator`; update operation + old/new versions + old runtime generation + profile/data and candidate identities | install coordinator / integrity-checked handoff journal | Monotonic handoff state, not an updater callback | Runtime, provider, terminal, maintenance, Private Connect, and descendant cleanup must be confirmed. Corrupt, stale, expired, or wrong-identity handoff evidence blocks admission and retains rollback authority. |
 | Linux AppImage candidate | Old app update owner; handoff operation + exact candidate dev/inode/content/version identity | staged candidate / AppImage transaction and handoff journals | Exact candidate bootstrap acknowledgement followed by ownership-transfer commit | Spawn is not readiness. Candidate bootstrap mode cannot admit providers or mutations. Failure keeps backup/journals; a validated candidate that cannot acquire ownership cannot start a second runtime. |
 | Private Connect process | Main Private Connect service; runtime/profile + owned child/request identity | service/preparation gate / runtime-owned process evidence | Main service coordinator | Update/quit closes admission, drains requests, and proves child-tree cleanup. Unconfirmed cleanup blocks privileged app handoff. |
-| Guardian/helper process | Runtime/process owner; generation + boot + record ID + PID creation/start/session evidence | native/helper registry / owned-process journal, guardian handoff, integrity manifest | Platform containment/recovery implementation | Windows Job Object is primary; Linux uses `/proc` start time, group/session, and guardian evidence; Darwin remains conservative and quarantines fork-tainted uncertainty. Helper integrity is pinned. |
+| Guardian/helper process | Runtime/process owner; generation + boot + record ID + PID creation/start/session evidence | native/helper registry / owned-process journal, guardian handoff, integrity manifest | Platform containment/recovery implementation | Windows Job Object is primary; Linux uses `/proc` start time, group/session, and guardian evidence. On macOS a guardian that closes by signal (fork-tainted or otherwise unproven cleanup) quarantines only that process: no registry taint and no runtime restart follow, and its claim is retired once the guardian's birth session is empty and no same-user process carrying its `INERTIA_RUNTIME_OWNED_GUARDIAN` marker (guardian PID and birth time; user terminal sessions are unmarked) remains, after marked escapees are sent TERM and then KILL. When that proof fails the record is kept and `runtime.process-quarantined` is recorded. A settled Claude, Codex, Kimi or Cursor turn on macOS first ends through EOF (2 s) before its guardian is stopped; a user Stop keeps the strict stop. Startup recovery applies the same proof to a vanished or still-running prior macOS guardian and publishes the generation's cleanup receipt when every claim is retired, so the explicit recovery sheet appears only when that evidence is unavailable. Helper integrity is pinned. On Linux a guardian admission failure rejects only that spawn (`runtime.process-start-rejected`) and a monitor failure quarantines only that process, keeping its record for next-start cleanup (`runtime.process-quarantined`, or `runtime.root-process-running` when a child runs as root); only a failed durable claim or authorization write taints the registry. Each guarded payload carries an `INERTIA_RUNTIME_OWNED_GUARDIAN` marker, so recovery of a vanished guardian without cgroup proof scans `/proc` within its deadline, terminates the marked processes, and proves them gone; marked processes it cannot signal leave the generation unrecovered and record one incident, `runtime.root-process-running` when one is root-owned and `runtime.process-quarantined` otherwise. |
 
 ## Runtime and process ownership definition
 
@@ -90,8 +103,10 @@ Windows containment is admitted before `runtime.start`. The native process
 creation identity and named Job Object remain authoritative; `taskkill` is a
 fallback and never proof that descendants were captured. Linux recovery uses
 `/proc` start-time, boot, process-group/session, generation, journal, and
-guardian evidence. Darwin deliberately does not claim Linux-equivalent
-descendant proof and may require manual recovery. Direct-child,
+guardian evidence. Darwin proves a closed guardian's cleanup by its empty birth
+session and a census of same-user processes carrying its marker; a descendant
+that escaped with a scrubbed environment or as another user is outside that
+proof, and unreadable evidence still requires manual recovery. Direct-child,
 descendant/containment, guardian/helper, and durable-clear evidence is retained
 by the owning process records and platform coordinator; the compact durable
 runtime cleanup receipt records the exact generation and final confirmation,
@@ -443,11 +458,9 @@ tools, and the classifier itself select broad evidence.
 - Pushes to main, merge-queue groups, schedules, and full-certification changes
   retain the six OS/architecture matrix, destructive recovery, package and
   installer/container evidence, dependency audit, and conditional benchmarks.
-  Scheduled runs attempt selected lifecycle invariants up to three times per
-  target, stopping early only when cleanup is unconfirmed, retain every attempted
-  run, fail on mixed results, and update a bounded tracked issue
-  on certification failure, closing it only after two consecutive green
-  nightlies. Stable Windows x64 installs a checksummed published
+  A failed scheduled run opens or updates a bounded tracked issue, which closes
+  only after two consecutive green nightlies. Stable Windows x64 installs a
+  checksummed published
   N-1 artifact, smokes it, installs N over the same directory, reopens the same
   profile/database state, verifies N against the unpacked candidate, and
   uninstalls it.

@@ -21,11 +21,13 @@ const ENVIRONMENT_KEYS = [
   "ALL_PROXY",
   "ANTHROPIC_API_KEY",
   "APPDATA",
+  "ASDF_DATA_DIR",
   "AWS_SECRET_ACCESS_KEY",
   "CLAUDE_CODE_USE_BEDROCK",
   "CODEX_HOME",
   "CURSOR_API_KEY",
   "DATABASE_URL",
+  "FNM_DIR",
   "GITHUB_TOKEN",
   "GOOGLE_APPLICATION_CREDENTIALS",
   "GOOGLE_CLOUD_PROJECT",
@@ -36,6 +38,7 @@ const ENVIRONMENT_KEYS = [
   "KIMI_API_KEY",
   "LOCALAPPDATA",
   "NVM_BIN",
+  "NVM_DIR",
   "NODE_ENV",
   "NODE_EXTRA_CA_CERTS",
   "NO_PROXY",
@@ -198,6 +201,43 @@ describe("provider environment discovery", { concurrent: false }, () => {
       } finally {
         for (const key of ["PNPM_HOME", "BUN_INSTALL", "VOLTA_HOME", "FNM_DIR"]) delete process.env[key];
       }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "searches asdf, fnm and nvm directories from their data-directory overrides on POSIX",
+    async () => {
+      const home = temporaryRoot();
+      setEnvironment({ HOME: home, PATH: "/usr/bin:/bin" });
+      const defaults = await providerEnvironment(true);
+      expect(defaults.pathEntries).toEqual(expect.arrayContaining([
+        join(home, ".asdf", "shims"),
+        join(home, ".local", "share", "fnm", "aliases", "default", "bin"),
+        join(home, ".fnm", "aliases", "default", "bin"),
+      ]));
+      if (process.platform === "darwin") {
+        expect(defaults.pathEntries).toContain(
+          join(home, "Library", "Application Support", "fnm", "aliases", "default", "bin"),
+        );
+      }
+
+      const nvmDir = join(home, "nvm-data");
+      const nvmBin = join(nvmDir, "versions", "node", "v22.1.0", "bin");
+      mkdirSync(nvmBin, { recursive: true });
+      setEnvironment({
+        HOME: home,
+        PATH: "/usr/bin:/bin",
+        ASDF_DATA_DIR: join(home, "asdf-data"),
+        FNM_DIR: join(home, "fnm-data"),
+        NVM_DIR: nvmDir,
+      });
+      const overridden = await providerEnvironment(true);
+      expect(overridden.pathEntries).toEqual(expect.arrayContaining([
+        join(home, "asdf-data", "shims"),
+        join(home, "fnm-data", "aliases", "default", "bin"),
+        nvmBin,
+      ]));
+      expect(overridden.pathEntries).not.toContain(join(home, ".asdf", "shims"));
     },
   );
 

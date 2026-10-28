@@ -1896,7 +1896,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     });
   });
 
-  it("maps unconfirmed App Server cleanup to a failed process result", async () => {
+  it("keeps a completed App Server result when only process-tree cleanup is unconfirmed", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "terminal-then-exit";
@@ -1908,20 +1908,19 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       executable: fake.command,
       environment: process.env,
       cwd: fake.root,
-      prompt: "Fail cleanup authoritatively",
+      prompt: "Complete without cleanup proof",
       planMode: false,
       access: "full",
       terminateProcessTree,
     });
 
-    await expect(run.result).resolves.toMatchObject({
-      status: "failed",
-      failure: {
-        reason: "process-exit",
-        message:
-          "Codex App Server process tree could not be confirmed stopped.",
-      },
+    const result = await run.result;
+    expect(result).toMatchObject({
+      status: "completed",
+      cleanupConfirmed: false,
+      cleanupConfirmation: expect.any(Promise),
     });
+    expect(result.failure).toBeUndefined();
     expect(terminateProcessTree).toHaveBeenCalledOnce();
     expect(terminateProcessTree.mock.calls[0]?.[1]).toBe(true);
   });

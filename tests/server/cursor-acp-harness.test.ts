@@ -49,6 +49,21 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   return command;
 }
 
+function refusingCursorAgent(root: string, sessionId: string): string {
+  const command = portableNodeExecutable(root, "cursor-agent");
+  writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: ${JSON.stringify(sessionId)}, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "refusal" } });
+});
+`);
+  return command;
+}
+
 function stalledCursorControlAgent(
   root: string,
   name: string,
@@ -1581,7 +1596,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(statuses.at(-1)).toBe("completed");
   });
 
-  it("maps unconfirmed ACP cleanup to one failed terminal result", async () => {
+  it("keeps a completed ACP result when only process-tree cleanup is unconfirmed", async () => {
     const root = portableFixtureRoot("cursor ACP cleanup failure");
     roots.push(root);
     const command = completingCursorAgent(root, "cursor-cleanup-failure-agent");
@@ -1597,7 +1612,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     );
     const statuses: string[] = [];
 
-    await expect(manager.run(nativeProviderRunInput({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-cleanup-failure",
       cwd: root,
@@ -1606,28 +1621,26 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       access: "supervised",
     }), {
       onStatus: ({ status }) => statuses.push(status),
-    })).resolves.toMatchObject({
-      status: "failed",
-      error: "Cursor ACP process tree could not be confirmed stopped.",
-      cleanupConfirmed: false,
-      failure: {
-        reason: "provider-error",
-        message: "Cursor ACP process tree could not be confirmed stopped.",
-        phase: "cleanup",
-        terminalEvent: "process-tree/cleanup",
-      },
     });
-    expect(statuses).not.toContain("completed");
-    expect(statuses.at(-1)).toBe("failed");
+    expect(result).toMatchObject({
+      status: "completed",
+      text: "Done",
+      cleanupConfirmed: false,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.failure).toBeUndefined();
+    await expect(result.cleanupConfirmation).resolves.toBe(false);
+    expect(statuses).not.toContain("failed");
+    expect(statuses.at(-1)).toBe("completed");
     expect(terminateProcessTree.mock.calls.map(([, force]) => force)).toEqual([
       true,
     ]);
   });
 
-  it.skipIf(process.platform === "win32")("names the POSIX cleanup row of an unconfirmed ACP cleanup", async () => {
+  it.skipIf(process.platform === "win32")("adds the POSIX cleanup row of an unconfirmed ACP cleanup to a prior failure", async () => {
     const root = portableFixtureRoot("cursor ACP cleanup classification");
     roots.push(root);
-    const command = completingCursorAgent(root, "cursor-cleanup-classification-agent");
+    const command = refusingCursorAgent(root, "cursor-cleanup-classification");
     const terminateProcessTree = vi.fn(async (child, force: boolean) =>
       await terminateProcessTreeAndWait(child, force, {
         spawnProcessSync: vi.fn(() => ({ status: 0, stdout: `${child.pid} 1 Ss\n` })) as never,
@@ -1649,32 +1662,20 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       access: "supervised",
     }))).resolves.toMatchObject({
       status: "failed",
-      error: "Cursor ACP process tree could not be confirmed stopped.",
       cleanupConfirmed: false,
       failure: {
-        phase: "cleanup",
-        terminalEvent: "process-tree/cleanup",
+        reason: "provider-error",
         technicalDetail: expect.stringMatching(
-          /^\[POSIX cleanup stop-never-observed: reason=exit-unconfirmed rootStop=sent rootState=running .* reads=9 timedOutReads=0 elapsedMs=\d+\]$/u,
+          /\n\[POSIX cleanup stop-never-observed: reason=exit-unconfirmed rootStop=sent rootState=running .* reads=9 timedOutReads=0 elapsedMs=\d+\]$/u,
         ),
       },
     });
   });
 
-  it("makes cleanup failure authoritative while retaining a prior provider failure", async () => {
+  it("keeps a prior provider failure when process-tree cleanup is unconfirmed", async () => {
     const root = portableFixtureRoot("cursor ACP failure after failure");
     roots.push(root);
-    const command = portableNodeExecutable(root, "cursor-agent");
-    writeNodeSubcommand(root, "acp", `
-const readline = require("node:readline");
-const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
-readline.createInterface({ input: process.stdin }).on("line", (line) => {
-  const message = JSON.parse(line);
-  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
-  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-double-failure", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
-  if (message.method === "session/prompt") return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "refusal" } });
-});
-`);
+    const command = refusingCursorAgent(root, "cursor-double-failure");
     const terminateProcessTree = vi.fn(async (child, _force: boolean) => {
       await terminateProcessTreeAndWait(child, true);
       return false;
@@ -1695,16 +1696,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       access: "supervised",
     }))).resolves.toMatchObject({
       status: "failed",
-      error: "Cursor ACP process tree could not be confirmed stopped.",
+      error: expect.not.stringContaining("could not be confirmed stopped"),
       cleanupConfirmed: false,
       failure: {
         reason: "provider-error",
-        message: "Cursor ACP process tree could not be confirmed stopped.",
-        phase: "cleanup",
-        terminalEvent: "process-tree/cleanup",
-        technicalDetail: expect.stringMatching(
-          /Prior failure reason: provider-error[\s\S]*refusal/,
-        ),
+        message: expect.not.stringContaining("could not be confirmed stopped"),
+        terminalEvent: "session/prompt:refusal",
+        technicalDetail: expect.stringMatching(/^Stop reason: refusal/u),
       },
     });
   });
@@ -1734,7 +1732,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `);
     const manager = ProviderManager.createForTests(
-      { commands: { cursor: command }, cancelGraceMs: 500 },
+      { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
     let markRunning!: () => void;

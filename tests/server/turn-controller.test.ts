@@ -1008,17 +1008,13 @@ describe("TurnController authoritative lifecycle", () => {
 
     releaseSettlement();
     expect(await observed).toBe(cleanupError);
-    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: "running", runState: { state: "cancelling" }, terminalReason: null });
-
-    runtime.provider.resolve({ status: "cancelled" });
-    await flushPromises();
-    await flushPromises();
     expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: "interrupted", runState: { state: "interrupted" }, terminalReason: "runtime-shutdown" });
+    expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId)).toHaveLength(1);
     runtime.store.close();
   });
 
   it.each(["cancel", "timeout"] as const)(
-    "keeps %s visibly stopping until exact provider cleanup is confirmed",
+    "holds %s until the provider stop returns, then releases the chat and its checkout while keeping the recovery record",
     async (scenario) => {
       const runtime = await testRuntime();
       runtime.provider.deferOwnedStop();
@@ -1044,7 +1040,9 @@ describe("TurnController authoritative lifecycle", () => {
         runtime.scheduler.runAll();
       }
 
-      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "running", runState: { state: "cancelling" }, terminalReason: null });
+      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ terminalReason: null });
+      expect(runtime.store.agentTurn(first.turn.id).runState?.state === "cancelling")
+        .toBe(scenario === "cancel");
       expect(runtime.store.conversation(runtime.conversationId).status).toBe("running");
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
       expect(runtime.controller.hasActiveCheckout(runtime.workspace)).toBe(true);
@@ -1073,19 +1071,16 @@ describe("TurnController authoritative lifecycle", () => {
         }));
 
       runtime.provider.resolveOwnedStop();
-      await new Promise<void>((resolve) => setImmediate(resolve));
-
-      expect(runtime.attachmentReleases).toEqual([]);
-      expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
-      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "running", runState: { state: "cancelling" } });
-
-      runtime.provider.resolve({ status: "cancelled", text: "" });
       await flushPromises();
+
       expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
         status: scenario === "cancel" ? "cancelled" : "failed", runState: { state: scenario === "cancel" ? "cancelled" : "failed" },
         terminalReason: scenario === "cancel" ? "user-cancelled" : "turn-timeout",
       });
       expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+
+      runtime.provider.resolve({ status: "cancelled", text: "" });
+      await flushPromises();
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
       const retry = runtime.controller.queue({ conversationId: runtime.conversationId,
         content: `Retry after confirmed ${scenario} cleanup.` });
@@ -1094,6 +1089,8 @@ describe("TurnController authoritative lifecycle", () => {
       runtime.provider.resolve({ status: "completed", text: "Retry completed." });
       await flushPromises();
       expect(runtime.store.agentTurn(retry.turn.id).status).toBe("completed");
+      expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId))
+        .toEqual([expect.objectContaining({ turnId: first.turn.id })]);
       expect(runtime.controller.hasActiveCheckout(runtime.workspace)).toBe(false);
       runtime.store.close();
     },
@@ -1179,7 +1176,7 @@ describe("TurnController authoritative lifecycle", () => {
     reopened.close();
   });
 
-  it("retains attachments and gates retries when a synchronous provider event settles during start", async () => {
+  it("gates retries until the provider stop returns when a synchronous provider event settles during start", async () => {
     const runtime = await testRuntime();
     runtime.provider.deferOwnedStop();
     const attachment = await testAttachment(
@@ -1212,7 +1209,8 @@ describe("TurnController authoritative lifecycle", () => {
     });
 
     expect(runtime.controller.start(first.turn.id)).toBe(true);
-    expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "running", runState: { state: "cancelling" }, terminalReason: null });
+    expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ terminalReason: null });
+    expect(runtime.store.agentTurn(first.turn.id).runState?.state).not.toBe("cancelling");
     expect(runtime.provider.stopOwnedCalls).toEqual([{
       conversationId: runtime.conversationId,
       identity: {
@@ -1228,13 +1226,13 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.provider.runCount).toBe(1);
 
     runtime.provider.resolveOwnedStop();
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await flushPromises();
 
-    expect(runtime.attachmentReleases).toEqual([]);
+    expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "failed", runState: { state: "failed" }, terminalReason: expect.stringContaining("stream-persistence-failed") });
+    expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
     expect(runtime.provider.runCount).toBe(1);
     runtime.provider.resolve({ status: "cancelled", text: "" });
     await flushPromises();
-    expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "failed", runState: { state: "failed" }, terminalReason: expect.stringContaining("stream-persistence-failed") });
     expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
     const retry = runtime.controller.queue({ conversationId: runtime.conversationId,
       content: "Retry after exact-run cleanup." });
@@ -2124,7 +2122,7 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
-  it("lets only one terminal race win and ignores stale and late callbacks", async () => {
+  it("lets only one terminal race win, escalates a repeated cancel and ignores stale and late callbacks", async () => {
     const runtime = await testRuntime();
     const queued = runtime.controller.queue({
       conversationId: runtime.conversationId,
@@ -2141,7 +2139,7 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
     const cancelling = runtime.store.agentTurn(queued.turn.id);
     expect(cancelling).toMatchObject({ status: "running", runState: { state: "cancelling" }, terminalReason: null });
-    expect(runtime.controller.cancel(runtime.conversationId)).toBe(false);
+    expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
     runtime.provider.emit({ ...base, type: "text", text: "late" });
     runtime.provider.resolve({ status: "completed", text: "late completion" });
     await flushPromises();

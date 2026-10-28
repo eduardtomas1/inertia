@@ -113,8 +113,10 @@ vi.mock("../../src/server/provider/opencode-owned-server", async (importOriginal
   };
 });
 
-import { probeOpenCodePureIsolation } from
-  "../../src/server/provider/opencode-pure-isolation";
+import {
+  clearOpenCodePureIsolationCleanupFailures,
+  probeOpenCodePureIsolation,
+} from "../../src/server/provider/opencode-pure-isolation";
 
 describe("selected OpenCode semantic isolation", () => {
   const roots: string[] = [];
@@ -297,6 +299,37 @@ describe("selected OpenCode semantic isolation", () => {
     expect(proofFixture.starts).toHaveLength(startsAfterCleanupFailure);
     expect(proofFixture.terminateCalls).toBe(terminationsAfterCleanupFailure);
   });
+
+  it.each(["the retry window passes", "Refresh clears it"] as const)(
+    "proves the executable again after a cleanup failure once %s",
+    async (recovery) => {
+      const executable = selectedExecutable();
+      const prove = async () => await probeOpenCodePureIsolation(
+        executable,
+        "1.18.26",
+        { env: process.env, pathEntries: [] },
+        vi.fn(),
+        { pluginObservationMs: 1 },
+      );
+      proofFixture.cleanupFails = true;
+      await expect(prove()).resolves.toEqual({ cleanupConfirmed: false, outcome: "operational-error" });
+      proofFixture.cleanupFails = false;
+      await expect(prove()).resolves.toEqual({ cleanupConfirmed: false, outcome: "operational-error" });
+      const startsBeforeRecovery = proofFixture.starts.length;
+
+      const monotonicNow = performance.now.bind(performance);
+      const clock = recovery === "the retry window passes"
+        ? vi.spyOn(performance, "now").mockImplementation(() => monotonicNow() + 60_001)
+        : null;
+      if (!clock) clearOpenCodePureIsolationCleanupFailures();
+      try {
+        await expect(prove()).resolves.toEqual({ cleanupConfirmed: true, outcome: "verified" });
+      } finally {
+        clock?.mockRestore();
+      }
+      expect(proofFixture.starts.length).toBeGreaterThan(startsBeforeRecovery);
+    },
+  );
 
   it("bounds a version health request that never resolves and still cleans up", async () => {
     const executable = selectedExecutable();

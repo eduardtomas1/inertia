@@ -1,5 +1,8 @@
+import { isAgentTurnTerminalStatus } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
-import type { TurnProviderRuntime } from "./turn-controller-types";
+import type { OwnedProviderRun } from "../../persistence/provider-run-ownership-repository";
+import type { ProviderRunIdentity } from "../../provider/contracts";
+import type { ActiveTurn, TurnProviderRuntime } from "./turn-controller-types";
 
 export function providerConversationIds(
   store: RuntimeStore,
@@ -25,4 +28,59 @@ export function hasActiveTurnCheckout(
       conversationId,
       checkoutPath,
     ));
+}
+
+export function liveProviderRunOwnership(
+  store: RuntimeStore,
+  owned: readonly OwnedProviderRun[],
+): OwnedProviderRun[] {
+  return owned.filter(({ turnId }) =>
+    !isAgentTurnTerminalStatus(store.agentTurn(turnId).status));
+}
+
+export function providerRecoveryRecords(
+  store: RuntimeStore,
+  owned: readonly OwnedProviderRun[],
+): ProviderRunIdentity[] {
+  return owned.flatMap(({ turnId, conversationId, runId }) => {
+    const turn = store.agentTurn(turnId);
+    return isAgentTurnTerminalStatus(turn.status)
+      ? [{ providerId: turn.providerId, conversationId, runId, turnId }]
+      : [];
+  });
+}
+
+export function hasLiveProviderRun(store: RuntimeStore, conversationId: string): boolean {
+  return liveProviderRunOwnership(
+    store,
+    store.providerRunOwnership.forConversation(conversationId),
+  ).length > 0;
+}
+
+export function liveProviderRunConversationIds(store: RuntimeStore): string[] {
+  return liveProviderRunOwnership(store, store.providerRunOwnership.all())
+    .map(({ conversationId }) => conversationId);
+}
+
+export function turnOwnedProviderRuns(
+  store: RuntimeStore,
+  conversationId: string,
+  turnId: string,
+): OwnedProviderRun[] {
+  const conversationRuns = store.providerRunOwnership.forConversation(conversationId);
+  return [
+    ...conversationRuns.filter((run) => run.turnId === turnId),
+    ...liveProviderRunOwnership(store, conversationRuns.filter((run) => run.turnId !== turnId)),
+  ];
+}
+
+export function exitedProviderTurns(
+  actives: Iterable<ActiveTurn>,
+  providers: TurnProviderRuntime,
+): ActiveTurn[] {
+  return [...actives].filter((active) =>
+    active.providerRunStarted
+    && active.deferredSettlement === null
+    && !active.runState.isTerminal()
+    && !providers.ownsRun(active.conversation.id, { runId: active.turn.runId, turnId: active.turn.id }));
 }

@@ -1,6 +1,7 @@
 // @inertia-test-suite portable
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ownedProviderStopBudgetMs } from "../../src/server/provider/run-cleanup-settlement";
 import {
   cleanupTurnControllerTestDirectories,
   createTurnControllerTestRuntime,
@@ -45,7 +46,7 @@ describe("TurnController cancellation persistence and cleanup", () => {
           conversationId: runtime.conversationId,
           identity: { runId: queued.turn.runId, turnId: queued.turn.id },
         }]);
-        expect(runtime.scheduler.callbacks.size).toBe(0);
+        expect([...runtime.scheduler.delays.values()]).toEqual([ownedProviderStopBudgetMs() + 5_000]);
         let drained = false;
         const drain = runtime.controller.drainSettlementTasks().then(() => { drained = true; });
         await flushTurnControllerTestPromises();
@@ -60,6 +61,7 @@ describe("TurnController cancellation persistence and cleanup", () => {
         runtime.provider.resolveOwnedStop();
         await drain;
         expect(runtime.provider.stopOwnedCalls).toHaveLength(1);
+        expect(runtime.scheduler.callbacks.size).toBe(0);
         expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
           status: "failed", terminalReason: "stream-persistence-failed",
         });
@@ -78,7 +80,7 @@ describe("TurnController cancellation persistence and cleanup", () => {
   );
 
   it.each(["force-detached"] as const)(
-    "keeps durable ownership and attachments after failed writes and %s cleanup",
+    "finalizes the turn and releases attachments but keeps durable ownership after failed writes and %s cleanup",
     async (cleanupResult) => {
       const runtime = await createTurnControllerTestRuntime();
       try {
@@ -98,13 +100,16 @@ describe("TurnController cancellation persistence and cleanup", () => {
         expect(stop).toHaveBeenCalledExactlyOnceWith(runtime.conversationId, {
           runId: queued.turn.runId, turnId: queued.turn.id,
         });
-        expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
-        expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: initialStatus, terminalReason: null });
+        expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+        expect(runtime.store.agentTurn(queued.turn.id).status).not.toBe(initialStatus);
+        expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+          status: "failed", terminalReason: expect.stringContaining("stream-persistence-failed"),
+        });
         expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId)).toHaveLength(1);
-        expect(runtime.attachmentReleases).toEqual([]);
-        expect(runtime.events.filter(({ type }) => type === "agent.failed" || type === "agent.completed")).toEqual([]);
+        expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+        expect(runtime.events.filter(({ type }) => type === "agent.failed" || type === "agent.completed")).toHaveLength(1);
         expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
-          content: "No new writer without an exact receipt." })).toThrow("already has an active turn");
+          content: "The chat is released." })).not.toThrow();
       } finally {
         vi.restoreAllMocks();
         runtime.store.close();

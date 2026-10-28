@@ -51,6 +51,7 @@ import {
 import { LinuxAppUpdateCandidateClaimJournal } from
   "../../src/main/linux-app-update-candidate-claim";
 import * as appUpdateBootstrap from "../../src/main/app-update-bootstrap";
+import { AppUpdateInstallCoordinator } from "../../src/main/app-update-install";
 
 const roots: string[] = [];
 const operationId = "11111111-1111-4111-8111-111111111111";
@@ -503,6 +504,143 @@ describe("app update startup coordinator", () => {
 
     expect(focusMainWindow).toHaveBeenCalledOnce();
     expect(retryUnconfirmedNormalShutdown).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["unconfirmed", async (): Promise<boolean> => false],
+    ["failed", async (): Promise<boolean> => { throw new Error("cleanup failed"); }],
+  ] as const)("exits after %s quit cleanup instead of staying resident", async (_label, cleanupBeforeQuit) => {
+    const application = applicationFixture(true, []);
+    const finishNormalShutdown = vi.fn();
+    const onUnconfirmedShutdown = vi.fn();
+    const reportCleanupFailure = vi.fn();
+    registerApplicationLifecycle(startupOptions(await windowsFixture(), application.application, {
+      platform: "linux", cleanupBeforeQuit, finishNormalShutdown, onUnconfirmedShutdown, reportCleanupFailure,
+    }));
+    const beforeQuit = application.listeners.get("before-quit")?.[0] as
+      ((event: { preventDefault(): void }) => void);
+    beforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
+    expect(onUnconfirmedShutdown).toHaveBeenCalledOnce();
+    expect(onUnconfirmedShutdown.mock.invocationCallOrder[0])
+      .toBeLessThan(finishNormalShutdown.mock.invocationCallOrder[0]!);
+  });
+
+  it.each([
+    ["linux", false, 1],
+    ["darwin", false, 0],
+    ["linux", true, 0],
+  ] as const)("on %s with an update handoff of %s marks a normal quit for relaunches %i times", async (platform, handoff, marks) => {
+    const application = applicationFixture(true, []);
+    const markShutdownInProgress = vi.fn();
+    registerApplicationLifecycle(startupOptions(await windowsFixture(), application.application, {
+      platform, markShutdownInProgress,
+      updateInstallCoordinator: () => ({ allowBeforeQuit: () => handoff }),
+    }));
+    const beforeQuit = application.listeners.get("before-quit")?.[0] as
+      ((event: { preventDefault(): void }) => void);
+    beforeQuit({ preventDefault: vi.fn() });
+    expect(markShutdownInProgress).toHaveBeenCalledTimes(marks);
+  });
+
+  it("exits at the quit deadline when cleanup never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const application = applicationFixture(true, []);
+      const finishNormalShutdown = vi.fn();
+      const onUnconfirmedShutdown = vi.fn();
+      let settleCleanup!: (confirmed: boolean) => void;
+      registerApplicationLifecycle(startupOptions(await windowsFixture(), application.application, {
+        platform: "linux", finishNormalShutdown, onUnconfirmedShutdown, normalShutdownDeadlineMs: 20_000,
+        cleanupBeforeQuit: () => new Promise<boolean>((resolve) => { settleCleanup = resolve; }),
+      }));
+      const beforeQuit = application.listeners.get("before-quit")?.[0] as
+        ((event: { preventDefault(): void }) => void);
+      beforeQuit({ preventDefault: vi.fn() });
+      await vi.advanceTimersByTimeAsync(19_999);
+      expect(finishNormalShutdown).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(onUnconfirmedShutdown).toHaveBeenCalledOnce();
+      expect(finishNormalShutdown).toHaveBeenCalledOnce();
+      settleCleanup(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(finishNormalShutdown).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows the shutdown notice instead of a silent focus when relaunched during quit", async () => {
+    const application = applicationFixture(true, []);
+    const focusMainWindow = vi.fn();
+    const reportShutdownInProgress = vi.fn();
+    registerApplicationLifecycle(startupOptions(await windowsFixture(), application.application, {
+      platform: "linux", focusMainWindow, reportShutdownInProgress,
+      cleanupBeforeQuit: () => new Promise<boolean>(() => undefined),
+    }));
+    const secondInstance = application.listeners.get("second-instance")?.[0] as
+      ((event: unknown, argv?: unknown, workingDirectory?: unknown) => void);
+    secondInstance({}, ["/opt/Inertia"], "/work");
+    expect(focusMainWindow).toHaveBeenCalledOnce();
+    const beforeQuit = application.listeners.get("before-quit")?.[0] as
+      ((event: { preventDefault(): void }) => void);
+    beforeQuit({ preventDefault: vi.fn() });
+    secondInstance({}, ["/opt/Inertia"], "/work");
+    expect(focusMainWindow).toHaveBeenCalledOnce();
+    expect(reportShutdownInProgress).toHaveBeenCalledOnce();
+  });
+
+  it("bounds a quit owned by the update install coordinator and exits with evidence", async () => {
+    vi.useFakeTimers();
+    try {
+      const application = applicationFixture(true, []);
+      const focusMainWindow = vi.fn();
+      const reportShutdownInProgress = vi.fn();
+      const finishNormalShutdown = vi.fn();
+      const recordUnconfirmedExit = vi.fn();
+      const onUnconfirmedShutdown = vi.fn();
+      const unavailable = (): never => { throw new Error("No update is installing."); };
+      const coordinator = new AppUpdateInstallCoordinator({
+        platform: "linux",
+        service: {
+          current: unavailable, beginInstall: unavailable, blockInstall: unavailable,
+          failInstall: unavailable, quitAndInstall: unavailable,
+        },
+        runtime: () => null,
+        privateConnect: () => null,
+        cleanup: () => new Promise<boolean>(() => undefined),
+        normalShutdownDeadlineMs: 20_000,
+        finishNormalShutdown,
+        recordUnconfirmedExit,
+        onUnconfirmedShutdown,
+        reportError: vi.fn(),
+      });
+      registerApplicationLifecycle(startupOptions(await windowsFixture(), application.application, {
+        platform: "linux", focusMainWindow, reportShutdownInProgress, finishNormalShutdown,
+        updateInstallCoordinator: () => coordinator,
+      }));
+      const beforeQuit = application.listeners.get("before-quit")?.[0] as
+        ((event: { preventDefault(): void }) => void);
+      const secondInstance = application.listeners.get("second-instance")?.[0] as
+        ((event: unknown, argv?: unknown, workingDirectory?: unknown) => void);
+      const preventDefault = vi.fn();
+      beforeQuit({ preventDefault });
+      expect(preventDefault).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(0);
+      secondInstance({}, ["/opt/Inertia"], "/work");
+      expect(reportShutdownInProgress).toHaveBeenCalledOnce();
+      expect(focusMainWindow).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(19_999);
+      expect(finishNormalShutdown).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(recordUnconfirmedExit).toHaveBeenCalledOnce();
+      expect(finishNormalShutdown).toHaveBeenCalledOnce();
+      expect(recordUnconfirmedExit.mock.invocationCallOrder[0])
+        .toBeLessThan(finishNormalShutdown.mock.invocationCallOrder[0]!);
+      expect(onUnconfirmedShutdown).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("hands a second instance's arguments and working directory to the launch handler before focusing", async () => {

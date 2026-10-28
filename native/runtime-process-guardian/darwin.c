@@ -21,6 +21,14 @@
 #define TRANSIENT_PROBE_POLLS 5
 #define POLL_NANOSECONDS 20000000L
 #define ACTIVE_CENSUS_INTERVAL_POLLS 12
+#define OWNER_MARKER_NAME "INERTIA_RUNTIME_OWNED_GUARDIAN"
+#define OWNER_MARKER_CAPACITY 64
+#define OWNER_ENTRY_CAPACITY 128
+#define ESCAPEE_REAP_ROUNDS 3
+#define ESCAPEE_TERM_GRACE_POLLS 25
+#define ESCAPEE_KILL_POLLS 25
+#define ESCAPEE_REPORT_LIMIT 64
+#define MAX_PROCESS_ARGUMENT_BYTES (4 * 1024 * 1024)
 
 struct session_member {
   struct proc_bsdinfo identity;
@@ -267,6 +275,38 @@ static int parse_pid(const char *value, pid_t *pid) {
   }
   *pid = (pid_t)parsed;
   return 1;
+}
+
+static int parse_unsigned(
+  const char *value,
+  unsigned long long maximum,
+  unsigned long long *parsed
+) {
+  if (value[0] < '0' || value[0] > '9') return 0;
+  char *end = NULL;
+  errno = 0;
+  const unsigned long long result = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' || result > maximum) return 0;
+  *parsed = result;
+  return 1;
+}
+
+static int format_owner_marker(
+  char *buffer,
+  size_t capacity,
+  pid_t pid,
+  unsigned long long seconds,
+  unsigned long long microseconds
+) {
+  const int written = snprintf(
+    buffer,
+    capacity,
+    "%d:%llu.%06llu",
+    (int)pid,
+    seconds,
+    microseconds
+  );
+  return written > 0 && (size_t)written < capacity;
 }
 
 static int list_session_members(
@@ -1002,6 +1042,300 @@ static int session_empty_mode(const char *raw_session_id) {
   return count == 0 ? 0 : 4;
 }
 
+static int read_census_identity(
+  pid_t pid,
+  struct proc_bsdinfo *info,
+  uid_t *uid,
+  int *status
+) {
+  int query[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+  struct kinfo_proc process;
+  memset(&process, 0, sizeof(process));
+  size_t size = sizeof(process);
+  if (sysctl(query, 4, &process, &size, NULL, 0) != 0) {
+    return errno == ESRCH ? 0 : -1;
+  }
+  if (size == 0) return 0;
+  if (size != sizeof(process)
+    || process.kp_proc.p_pid != pid
+    || process.kp_proc.p_starttime.tv_sec <= 0
+    || process.kp_proc.p_starttime.tv_usec < 0
+    || process.kp_proc.p_starttime.tv_usec >= 1000000) return -1;
+  memset(info, 0, sizeof(*info));
+  info->pbi_pid = (uint32_t)process.kp_proc.p_pid;
+  info->pbi_ppid = (uint32_t)process.kp_eproc.e_ppid;
+  info->pbi_pgid = (uint32_t)process.kp_eproc.e_pgid;
+  info->pbi_start_tvsec = (uint64_t)process.kp_proc.p_starttime.tv_sec;
+  info->pbi_start_tvusec = (uint64_t)process.kp_proc.p_starttime.tv_usec;
+  *uid = process.kp_eproc.e_ucred.cr_uid;
+  *status = process.kp_proc.p_stat;
+  return 1;
+}
+
+static size_t process_arguments_capacity(void) {
+  int maximum = 0;
+  size_t size = sizeof(maximum);
+  if (sysctlbyname("kern.argmax", &maximum, &size, NULL, 0) != 0
+    || size != sizeof(maximum)
+    || maximum < (int)sizeof(int)
+    || maximum > MAX_PROCESS_ARGUMENT_BYTES) return 0;
+  return (size_t)maximum;
+}
+
+static int process_carries_entry(
+  pid_t pid,
+  char *arguments,
+  size_t capacity,
+  const char *entry,
+  size_t entry_length
+) {
+  int query[] = { CTL_KERN, KERN_PROCARGS2, pid };
+  size_t size = capacity;
+  if (sysctl(query, 3, arguments, &size, NULL, 0) != 0
+    || size < sizeof(int)
+    || size > capacity) return -1;
+  const char *cursor = arguments + sizeof(int);
+  const char *end = arguments + size;
+  while (cursor < end) {
+    const char *terminator = memchr(cursor, '\0', (size_t)(end - cursor));
+    const size_t length = terminator == NULL
+      ? (size_t)(end - cursor)
+      : (size_t)(terminator - cursor);
+    if (length == entry_length && memcmp(cursor, entry, entry_length) == 0) {
+      return 1;
+    }
+    if (terminator == NULL) return 0;
+    cursor = terminator + 1;
+  }
+  return 0;
+}
+
+static int started_before_owner(
+  const struct proc_bsdinfo *identity,
+  unsigned long long owner_seconds,
+  unsigned long long owner_microseconds
+) {
+  return identity->pbi_start_tvsec < owner_seconds
+    || (identity->pbi_start_tvsec == owner_seconds
+      && identity->pbi_start_tvusec < owner_microseconds);
+}
+
+static int list_marked_processes(
+  const char *entry,
+  unsigned long long owner_seconds,
+  unsigned long long owner_microseconds,
+  struct session_member *members,
+  int capacity,
+  char *arguments,
+  size_t arguments_capacity
+) {
+  pid_t *pids = calloc((size_t)capacity, sizeof(*pids));
+  if (pids == NULL) return -1;
+  const int buffer_bytes = capacity * (int)sizeof(*pids);
+  const int bytes = proc_listpids(PROC_ALL_PIDS, 0, pids, buffer_bytes);
+  if (bytes < 0
+    || bytes % (int)sizeof(*pids) != 0
+    || bytes >= buffer_bytes) {
+    free(pids);
+    return -1;
+  }
+  const size_t entry_length = strlen(entry);
+  const uid_t uid = geteuid();
+  const pid_t self = getpid();
+  const int pid_count = bytes / (int)sizeof(*pids);
+  int member_count = 0;
+  for (int index = 0; index < pid_count; index += 1) {
+    const pid_t pid = pids[index];
+    if (pid <= 1 || pid == self) continue;
+    struct proc_bsdinfo identity;
+    uid_t owner = 0;
+    int status = 0;
+    const int read = read_census_identity(pid, &identity, &owner, &status);
+    if (read == 0) continue;
+    if (read < 0) {
+      free(pids);
+      return -1;
+    }
+    if (owner != uid
+      || status == SZOMB
+      || started_before_owner(&identity, owner_seconds, owner_microseconds)) {
+      continue;
+    }
+    if (status == SIDL) {
+      free(pids);
+      return -1;
+    }
+    const int carries = process_carries_entry(
+      pid,
+      arguments,
+      arguments_capacity,
+      entry,
+      entry_length
+    );
+    if (carries == 0) continue;
+    if (carries < 0) {
+      struct proc_bsdinfo current;
+      const int again = read_census_identity(pid, &current, &owner, &status);
+      if (again == 0
+        || (again > 0
+          && (status == SZOMB || !same_identity(&identity, &current)))) {
+        continue;
+      }
+      free(pids);
+      return -1;
+    }
+    if (member_count >= capacity) {
+      free(pids);
+      return -1;
+    }
+    members[member_count].identity = identity;
+    member_count += 1;
+  }
+  free(pids);
+  return member_count;
+}
+
+static int list_marked_processes_bounded(
+  const char *entry,
+  unsigned long long owner_seconds,
+  unsigned long long owner_microseconds,
+  struct session_member *members,
+  int capacity,
+  char *arguments,
+  size_t arguments_capacity
+) {
+  const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
+  for (int poll = 0; poll < TRANSIENT_PROBE_POLLS; poll += 1) {
+    const int count = list_marked_processes(
+      entry,
+      owner_seconds,
+      owner_microseconds,
+      members,
+      capacity,
+      arguments,
+      arguments_capacity
+    );
+    if (count >= 0) return count;
+    if (poll + 1 < TRANSIENT_PROBE_POLLS) (void)nanosleep(&pause, NULL);
+  }
+  return -1;
+}
+
+static int exact_escapee_present(const struct session_member *member) {
+  const pid_t pid = (pid_t)member->identity.pbi_pid;
+  const enum exact_identity_state state = exact_identity(pid, &member->identity);
+  if (state == EXACT_IDENTITY_GONE_OR_CHANGED) return 0;
+  if (state == EXACT_IDENTITY_MATCHED) return 1;
+  return process_status(pid) != SZOMB;
+}
+
+static void signal_exact_escapees(
+  const struct session_member *members,
+  int count,
+  int signal_number
+) {
+  for (int index = 0; index < count; index += 1) {
+    const pid_t pid = (pid_t)members[index].identity.pbi_pid;
+    if (exact_identity(pid, &members[index].identity) == EXACT_IDENTITY_MATCHED) {
+      (void)kill(pid, signal_number);
+    }
+  }
+}
+
+static int escapees_gone(
+  const struct session_member *members,
+  int count,
+  int polls
+) {
+  const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
+  for (int poll = 0; poll < polls; poll += 1) {
+    int remaining = 0;
+    for (int index = 0; index < count && !remaining; index += 1) {
+      remaining = exact_escapee_present(&members[index]);
+    }
+    if (!remaining) return 1;
+    (void)nanosleep(&pause, NULL);
+  }
+  return 0;
+}
+
+static int report_escapees(const struct session_member *members, int count) {
+  for (int index = 0; index < count && index < ESCAPEE_REPORT_LIMIT; index += 1) {
+    if (printf(
+      "%u|%llu|%llu\n",
+      members[index].identity.pbi_pid,
+      members[index].identity.pbi_start_tvsec,
+      members[index].identity.pbi_start_tvusec
+    ) < 0) return 2;
+  }
+  return fflush(stdout) == 0 ? 4 : 2;
+}
+
+static int escapees_mode(
+  const char *raw_pid,
+  const char *raw_seconds,
+  const char *raw_microseconds,
+  int reap
+) {
+  pid_t owner_pid = 0;
+  unsigned long long owner_seconds = 0;
+  unsigned long long owner_microseconds = 0;
+  if (!parse_pid(raw_pid, &owner_pid)
+    || !parse_unsigned(raw_seconds, INT64_MAX, &owner_seconds)
+    || owner_seconds == 0
+    || !parse_unsigned(raw_microseconds, 999999, &owner_microseconds)) return 64;
+  char marker[OWNER_MARKER_CAPACITY];
+  char entry[OWNER_ENTRY_CAPACITY];
+  if (!format_owner_marker(
+    marker,
+    sizeof(marker),
+    owner_pid,
+    owner_seconds,
+    owner_microseconds
+  )) return 64;
+  const int entry_bytes = snprintf(entry, sizeof(entry), "%s=%s", OWNER_MARKER_NAME, marker);
+  if (entry_bytes <= 0 || (size_t)entry_bytes >= sizeof(entry)) return 64;
+  const int capacity = process_scan_capacity();
+  const size_t arguments_capacity = process_arguments_capacity();
+  if (capacity < 1 || arguments_capacity == 0) return 2;
+  struct session_member *members = calloc((size_t)capacity, sizeof(*members));
+  char *arguments = malloc(arguments_capacity);
+  if (members == NULL || arguments == NULL) {
+    free(members);
+    free(arguments);
+    return 2;
+  }
+  int result = 2;
+  for (int round = 0; ; round += 1) {
+    const int count = list_marked_processes_bounded(
+      entry,
+      owner_seconds,
+      owner_microseconds,
+      members,
+      capacity,
+      arguments,
+      arguments_capacity
+    );
+    if (count < 0) break;
+    if (count == 0) {
+      result = 0;
+      break;
+    }
+    if (!reap || round == ESCAPEE_REAP_ROUNDS) {
+      result = report_escapees(members, count);
+      break;
+    }
+    signal_exact_escapees(members, count, SIGTERM);
+    if (!escapees_gone(members, count, ESCAPEE_TERM_GRACE_POLLS)) {
+      signal_exact_escapees(members, count, SIGKILL);
+      (void)escapees_gone(members, count, ESCAPEE_KILL_POLLS);
+    }
+  }
+  free(members);
+  free(arguments);
+  return result;
+}
+
 static int watch_mode(
   int argc,
   char *argv[],
@@ -1058,6 +1392,18 @@ static int watch_mode(
     if (getpgrp() == self || setsid() != self) return 70;
   }
   if (getsid(0) != self || getpgrp() != self) return 70;
+  char owner_marker[OWNER_MARKER_CAPACITY] = { 0 };
+  if (!allow_terminal_session_escape) {
+    struct proc_bsdinfo owner_identity;
+    if (!read_identity(self, &owner_identity)
+      || !format_owner_marker(
+        owner_marker,
+        sizeof(owner_marker),
+        self,
+        owner_identity.pbi_start_tvsec,
+        owner_identity.pbi_start_tvusec
+      )) return 70;
+  }
 
   struct owned_tree_tracker tracker;
   if (!initialize_owned_tree_tracker(&tracker)) {
@@ -1150,6 +1496,8 @@ static int watch_mode(
     }
     if (!graceful_signal_pending) _exit(124);
 #endif
+    if (owner_marker[0] != '\0'
+      && setenv(OWNER_MARKER_NAME, owner_marker, 1) != 0) _exit(126);
     // The fork inherits every guardian handler while their signals remain
     // blocked. Restore payload dispositions before unblocking so a graceful
     // SIGHUP queued in the gate-to-exec window terminates the payload instead
@@ -1332,6 +1680,14 @@ int main(int argc, char *argv[]) {
   }
   if (argc == 3 && strcmp(argv[1], "ready") == 0) {
     return ready_mode(argv[2]);
+  }
+  if (argc == 5 && strcmp(argv[1], "escapees") == 0) {
+    return escapees_mode(argv[2], argv[3], argv[4], 0);
+  }
+  if (argc == 6
+    && strcmp(argv[1], "escapees") == 0
+    && strcmp(argv[5], "--reap") == 0) {
+    return escapees_mode(argv[2], argv[3], argv[4], 1);
   }
   if (argc >= 5 && strcmp(argv[1], "watch") == 0) {
     return watch_mode(argc, argv, 0);

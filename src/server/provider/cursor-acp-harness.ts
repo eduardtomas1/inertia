@@ -25,6 +25,8 @@ import {
   posixCleanupDiagnosticOf,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
+import { providerUnconfirmedCleanup } from "./provider-unconfirmed-cleanup";
+import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -53,7 +55,8 @@ import {
 } from "./host-tool-mcp-http";
 import { acpHostMcpServers } from "./host-tool-mcp-config";
 import {
-  cursorCleanupResult,
+  cursorHostToolsCleanupResult,
+  cursorProcessCleanupResult,
   cursorRuntimeFailure,
 } from "./cursor-acp-failures";
 import {
@@ -88,6 +91,11 @@ import { emitCursorMetadata } from "./cursor-acp-metadata";
 import { CursorInbandErrors } from "./cursor-acp-inband-errors";
 import { imageMediaType, readBoundedProviderImage } from "./provider-image-read";
 import { configureCursorSession } from "./cursor-acp-session";
+import {
+  endProviderInput,
+  providerNaturalCloseFirst,
+  waitForProviderNaturalClose,
+} from "./provider-natural-close";
 import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED, acpFileMutation, acpReadOnlyWatcher } from "./acp-watcher";
 export { findCursorAdvertisedConfigValue } from "./cursor-acp-session";
 
@@ -249,6 +257,7 @@ function startCursorRun(
   let activeTerminalEvent = "initialize";
   let providerEventError: Error | undefined;
   let requestProcessTermination = (_force: boolean): void => undefined;
+  let naturalCloseRequested = false;
 
   const handleCursorProviderEvent = <T>(
     action: () => T,
@@ -662,9 +671,10 @@ function startCursorRun(
         : turnFailure
           ? finish("failed", turnFailure.message, turnFailure)
           : finish("completed");
+    naturalCloseRequested = outcome.status !== "cancelled" && providerNaturalCloseFirst();
     // Arm owned termination before returning control to connectWith, which may
     // close/reap the ACP transport before the public-result continuation runs.
-    requestProcessTermination(true);
+    if (!naturalCloseRequested) requestProcessTermination(true);
     return outcome;
   }).catch((error: unknown) => {
     secretRedactor.discardStreams();
@@ -695,21 +705,34 @@ function startCursorRun(
     } catch {
       hostToolsCleanupFailed = true;
     }
+    let processCleanupConfirmed = true;
+    let processCleanupDiagnostic: PosixCleanupDiagnostic | null = null;
+    if (naturalCloseRequested) {
+      endProviderInput(child);
+      await waitForProviderNaturalClose(child);
+    }
     try {
       // ACP has already produced its terminal response, so no graceful wait
       // window remains useful. Reuse any earlier cancellation request.
       await terminateOwnedProcessTree(true);
     } catch (error) {
-      const failed = cursorCleanupResult(
-        outcome, child, options.input.cwd, "process-tree", posixCleanupDiagnosticOf(error),
-      );
+      processCleanupConfirmed = false;
+      processCleanupDiagnostic = posixCleanupDiagnosticOf(error);
+    }
+    if (hostToolsCleanupFailed) {
+      const failed = cursorHostToolsCleanupResult(outcome, child, options.input.cwd);
       emitter.status("failed", failed.error);
       return failed;
     }
-    if (hostToolsCleanupFailed) {
-      const failed = cursorCleanupResult(outcome, child, options.input.cwd, "host-tools");
-      emitter.status("failed", failed.error);
-      return failed;
+    if (!processCleanupConfirmed) {
+      const unconfirmed = cursorProcessCleanupResult(
+        outcome, child, options.input.cwd, processCleanupDiagnostic,
+      );
+      emitter.status(unconfirmed.status, unconfirmed.error);
+      return {
+        ...unconfirmed,
+        ...providerUnconfirmedCleanup(child),
+      };
     }
     emitter.status(outcome.status, outcome.error);
     return {

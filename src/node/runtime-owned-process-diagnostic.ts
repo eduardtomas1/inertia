@@ -24,6 +24,13 @@ export interface RuntimeOwnedProcessDiagnostic {
   readonly probe?: RuntimeOwnedProcessProbe;
 }
 
+export type RuntimeOwnedProcessFaultKind = "admission-rejected" | "quarantined" | "root-descendant";
+
+export interface RuntimeOwnedProcessFault {
+  readonly kind: RuntimeOwnedProcessFaultKind;
+  readonly diagnostic: RuntimeOwnedProcessDiagnostic;
+}
+
 export function parseRuntimeOwnedProcessDiagnostic(value: unknown): RuntimeOwnedProcessDiagnostic | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -56,7 +63,10 @@ export function guardianCloseDiagnostic(
   };
 }
 
-export type RuntimeRestartReason = "owned-process-tainted" | "owned-process-cleanup-unconfirmed";
+export const RUNTIME_RESTART_REASONS = [
+  "owned-process-tainted", "owned-process-cleanup-unconfirmed", "uncaught-exception",
+] as const;
+export type RuntimeRestartReason = (typeof RUNTIME_RESTART_REASONS)[number];
 
 export interface RuntimeRestartRequestedEvent {
   readonly type: "runtime.restart-requested";
@@ -67,11 +77,12 @@ export interface RuntimeRestartRequestedEvent {
 export function parseRuntimeRestartRequestedEvent(value: Record<string, unknown>): RuntimeRestartRequestedEvent | null {
   if (value.type !== "runtime.restart-requested"
     || Object.keys(value).some((key) => !["type", "reason", "diagnostic"].includes(key))
-    || (value.reason !== "owned-process-tainted" && value.reason !== "owned-process-cleanup-unconfirmed")) return null;
-  if (!Object.hasOwn(value, "diagnostic")) return { type: "runtime.restart-requested", reason: value.reason };
+    || !RUNTIME_RESTART_REASONS.includes(value.reason as RuntimeRestartReason)) return null;
+  const reason = value.reason as RuntimeRestartReason;
+  if (!Object.hasOwn(value, "diagnostic")) return { type: "runtime.restart-requested", reason };
   const diagnostic = parseRuntimeOwnedProcessDiagnostic(value.diagnostic);
-  return diagnostic && value.reason === "owned-process-tainted"
-    ? { type: "runtime.restart-requested", reason: value.reason, diagnostic } : null;
+  return diagnostic && reason === "owned-process-tainted"
+    ? { type: "runtime.restart-requested", reason, diagnostic } : null;
 }
 
 export function guardianSignalName(signal: unknown): unknown {

@@ -8,8 +8,21 @@ import {
 function recovery(canReload = () => true) {
   let now = 1_000;
   const reload = vi.fn();
-  const recover = createRendererCrashRecovery({ reload, canReload, now: () => now });
-  return { recover, reload, advance: (milliseconds: number) => { now += milliseconds; } };
+  const timers: Array<{ at: number; callback: () => void }> = [];
+  const recover = createRendererCrashRecovery({
+    reload, canReload, now: () => now,
+    setTimer: (callback, milliseconds) => { timers.push({ at: now + milliseconds, callback }); },
+  });
+  return {
+    recover, reload, timers,
+    advance: (milliseconds: number) => {
+      now += milliseconds;
+      for (const timer of timers.filter(({ at }) => at <= now)) {
+        timers.splice(timers.indexOf(timer), 1);
+        timer.callback();
+      }
+    },
+  };
 }
 
 describe("main window renderer crash recovery", () => {
@@ -34,12 +47,33 @@ describe("main window renderer crash recovery", () => {
     expect(reload).not.toHaveBeenCalled();
   });
 
-  it("stops after one reload when the reloaded renderer crashes again soon", () => {
-    const { recover, reload, advance } = recovery();
+  it("defers the next reload to the end of the interval when the reloaded renderer crashes again soon", () => {
+    const { recover, reload, advance, timers } = recovery();
 
     recover({ reason: "crashed" });
-    advance(RENDERER_RECOVERY_INTERVAL_MS - 1);
-    expect(recover({ reason: "crashed" })).toBe(false);
+    advance(RENDERER_RECOVERY_INTERVAL_MS - 10);
+    expect(recover({ reason: "crashed" })).toBe(true);
+    expect(recover({ reason: "crashed" })).toBe(true);
+    expect(timers).toHaveLength(1);
+    expect(reload).toHaveBeenCalledOnce();
+    advance(9);
+    expect(reload).toHaveBeenCalledOnce();
+    advance(1);
+    expect(reload).toHaveBeenCalledTimes(2);
+
+    expect(recover({ reason: "crashed" })).toBe(true);
+    advance(RENDERER_RECOVERY_INTERVAL_MS);
+    expect(reload).toHaveBeenCalledTimes(3);
+  });
+
+  it("drops a deferred reload once the window can no longer reload", () => {
+    let canReload = true;
+    const { recover, reload, advance } = recovery(() => canReload);
+
+    recover({ reason: "crashed" });
+    expect(recover({ reason: "crashed" })).toBe(true);
+    canReload = false;
+    advance(RENDERER_RECOVERY_INTERVAL_MS);
     expect(reload).toHaveBeenCalledOnce();
   });
 

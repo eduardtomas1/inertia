@@ -43,11 +43,12 @@ linuxIt.each(["exec", "stop"] as const)(
       return false;
     });
     vi.spyOn(linuxGuardian, "readLinuxGuardianOwnedAsync").mockResolvedValue(null);
+    const onProcessFault = vi.fn();
     const deactivate = activatePreparedRuntimeOwnedProcessRegistry(
       root,
       "41000000-0000-4000-8000-000000000041:1",
       "test:42000000-0000-4000-8000-000000000042",
-      { platform: "linux", darwinGuardianPath: guardian },
+      { platform: "linux", darwinGuardianPath: guardian, onProcessFault },
     );
     let child: ChildProcess | undefined;
     try {
@@ -61,7 +62,10 @@ linuxIt.each(["exec", "stop"] as const)(
         resolve();
       }));
       await expect(owned.waitForGuardianStop()).resolves.toBe(action === "exec");
-      expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(action !== "exec");
+      expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(false);
+      expect(onProcessFault.mock.calls).toEqual(action === "exec"
+        ? []
+        : [[{ kind: "admission-rejected", diagnostic: { stage: "linux-authorization" } }]]);
       expect(owned.confirmStopped()).toBe(false);
       resumeMonitor();
       await closed;

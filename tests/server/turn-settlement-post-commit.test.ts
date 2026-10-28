@@ -252,14 +252,14 @@ describe("terminal commitment survives downstream faults", () => {
     await complete(runtime, second.id);
   });
 
-  it("preserves cancellation as the winner despite completion, duplicate cancellation and rejected hooks", async () => {
+  it("preserves cancellation as the winner despite completion, an escalated repeat cancellation and rejected hooks", async () => {
     const onTurnSettled = vi.fn(async () => { throw new Error("post-cancel follow-up unavailable"); });
     const settlement = vi.spyOn(TurnSettlementCoordinator.prototype, "settle");
     const runtime = await createTurnControllerTestRuntime({ onTurnSettled });
     runtimes.push(runtime);
     const turn = start(runtime).turn;
     expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
-    expect(runtime.controller.cancel(runtime.conversationId)).toBe(false);
+    expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
     runtime.provider.resolve({ status: "completed", text: "Too late." });
     await expect.poll(() => runtime.store.agentTurn(turn.id).status).toBe("cancelled");
     await runtime.controller.drainSettlementTasks();
@@ -309,7 +309,8 @@ describe("terminal commitment survives downstream faults", () => {
     runtime.provider.deferOwnedStop("settled");
     runtime.provider.resolve({ text: "Saved answer." });
     await expect.poll(() => runtime.provider.stopOwnedCalls.length).toBe(1);
-    expect(runtime.store.agentTurn(turn.id).runState?.state).toBe("cancelling");
+    expect(runtime.store.agentTurn(turn.id).runState?.state).not.toBe("cancelling");
+    expect(runtime.store.agentTurn(turn.id).terminalReason).toBeNull();
     expect(runtime.store.providerRunOwnership.all()).toHaveLength(1);
     expect(runtime.attachmentReleases).toEqual([]);
     runtime.provider.resolveOwnedStop();
@@ -351,7 +352,7 @@ describe("terminal commitment survives downstream faults", () => {
     runtime.provider.resolve({ text: "Cannot commit terminal outcome." });
     await expect.poll(() => diagnostics(runtime, turn.id).length).toBe(1);
     await runtime.controller.drainSettlementTasks();
-    expect(runtime.store.agentTurn(turn.id).status).toBe("running");
+    expect(runtime.store.agentTurn(turn.id).status).toBe("starting");
     expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
     expect(() => start(runtime)).toThrow();
     expect(runtime.events.filter(({ type }) => type === "agent.completed" || type === "agent.failed"))

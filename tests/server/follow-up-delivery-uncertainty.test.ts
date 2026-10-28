@@ -123,7 +123,7 @@ describe("follow-up delivery uncertainty", () => {
     runtime.store.close();
   });
 
-  it("keeps unknown delivery ambiguous when Stop arrives while the acknowledgement is pending", async () => {
+  it("keeps unknown delivery ambiguous when Stop arrives while the acknowledgement is pending and releases its image once Stop finishes", async () => {
     const { runtime, retained, conversationAttachments, send, persistedFollowUps } = await activeFollowUpRuntime();
     runtime.provider.deferOwnedStop();
     let lose!: () => void;
@@ -143,10 +143,10 @@ describe("follow-up delivery uncertainty", () => {
 
     runtime.provider.resolveOwnedStop();
     await flushTurnControllerTestPromises();
-    expect(conversationAttachments.release).not.toHaveBeenCalled();
+    expect(conversationAttachments.release).toHaveBeenCalledWith([retained.id]);
     runtime.provider.resolve({ status: "cancelled" });
     await flushTurnControllerTestPromises();
-    expect(conversationAttachments.release).toHaveBeenCalledWith([retained.id]);
+    expect(conversationAttachments.release).toHaveBeenCalledOnce();
     expect(steer).toHaveBeenCalledTimes(1);
     runtime.store.close();
   });

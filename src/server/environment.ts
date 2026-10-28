@@ -252,13 +252,13 @@ export async function loginShellEnvironment(): Promise<NodeJS.ProcessEnv> {
   return {};
 }
 
-async function boundedNvmDefaultVersion(home: string): Promise<readonly bigint[] | null> {
+async function boundedNvmDefaultVersion(nvmRoot: string): Promise<readonly bigint[] | null> {
   let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
     const flags = fsConstants.O_RDONLY | (process.platform === "win32"
       ? 0
       : fsConstants.O_NONBLOCK | FILE_OPEN_NO_FOLLOW);
-    handle = await open(join(home, ".nvm", "alias", "default"), flags);
+    handle = await open(join(nvmRoot, "alias", "default"), flags);
     const info = await handle.stat();
     if (!info.isFile()) return null;
     const buffer = Buffer.alloc(129);
@@ -280,12 +280,12 @@ function nvmVersionComponents(name: string): readonly [bigint, bigint, bigint] {
 }
 
 async function boundedNvmExecutableDirectories(
-  home: string,
+  nvmRoot: string,
   activeBin: string | undefined,
 ): Promise<string[]> {
   try {
-    const versionsRoot = join(home, ".nvm", "versions", "node");
-    const defaultVersion = await boundedNvmDefaultVersion(home);
+    const versionsRoot = join(nvmRoot, "versions", "node");
+    const defaultVersion = await boundedNvmDefaultVersion(nvmRoot);
     const active = activeBin ? resolve(activeBin) : null;
     const versions = await readdir(versionsRoot, {
       withFileTypes: true,
@@ -357,6 +357,17 @@ async function commonExecutableDirectories(
   const bun = environmentValue(environment, "BUN_INSTALL");
   const volta = environmentValue(environment, "VOLTA_HOME");
   const fnm = environmentValue(environment, "FNM_DIR");
+  const asdf = environmentValue(environment, "ASDF_DATA_DIR");
+  const nvm = environmentValue(environment, "NVM_DIR");
+  const fnmRoots = fnm
+    ? [expandHomePath(fnm)]
+    : [
+        join(home, ".local", "share", "fnm"),
+        join(home, ".fnm"),
+        ...(process.platform === "darwin"
+          ? [join(home, "Library", "Application Support", "fnm")]
+          : []),
+      ];
   return unique([
     join(home, ".local", "bin"),
     join(home, "bin"),
@@ -365,12 +376,12 @@ async function commonExecutableDirectories(
     bun ? join(expandHomePath(bun), "bin") : join(home, ".bun", "bin"),
     pnpm ? expandHomePath(pnpm) : "",
     join(home, ".yarn", "bin"),
-    join(home, ".asdf", "shims"),
+    join(asdf ? expandHomePath(asdf) : join(home, ".asdf"), "shims"),
     join(home, ".local", "share", "mise", "shims"),
     join(home, ".opencode", "bin"),
-    join(fnm ? expandHomePath(fnm) : join(home, ".local", "share", "fnm"), "aliases", "default", "bin"),
+    ...fnmRoots.map((root) => join(root, "aliases", "default", "bin")),
     ...await boundedNvmExecutableDirectories(
-      home,
+      nvm ? expandHomePath(nvm) : join(home, ".nvm"),
       environmentValue(environment, "NVM_BIN"),
     ),
     process.platform === "darwin"

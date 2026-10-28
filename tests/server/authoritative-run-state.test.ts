@@ -92,6 +92,75 @@ describe("AuthoritativeRunStateEngine", () => {
     expect(state.snapshot().state).toBe("cancelled");
   });
 
+  it.each(["completed", "failed", "interrupted"] as const)(
+    "keeps the visible state while a %s outcome waits for cleanup",
+    (outcome) => {
+      const state = engine("claude");
+      state.setTransport("running", "native/running");
+      state.observeDescendant("child-1", true, "delegate/running");
+      expect(state.requestTerminal(outcome, "native/terminal")).toBe(true);
+      expect(state.snapshot()).toMatchObject({
+        state: "delegated",
+        providerState: "native/terminal",
+      });
+      expect(state.acceptsProviderEvents()).toBe(false);
+      expect(state.observeDescendant("child-1", false, "late/completed")).toBe(false);
+      expect(state.settle("cancelled")).toBe(outcome);
+      expect(state.snapshot().state).toBe(outcome);
+    },
+  );
+
+  it("shows stopping only while a requested user stop waits for cleanup", () => {
+    const state = engine("codex");
+    state.setTransport("running");
+    expect(state.requestTerminal("cancelled")).toBe(true);
+    expect(state.snapshot().state).toBe("cancelling");
+  });
+
+  it("keeps an interrupted outcome out of stopping while it waits for cleanup", () => {
+    const state = engine("codex");
+    state.setTransport("running");
+    state.requestTerminal("interrupted");
+    expect(state.snapshot().state).toBe("running");
+    expect(state.acceptsProviderEvents()).toBe(false);
+    expect(state.settle("cancelled")).toBe("interrupted");
+  });
+
+  it.each([
+    ["completed", "approval"],
+    ["failed", "approval"],
+    ["interrupted", "approval"],
+    ["completed", "input"],
+    ["failed", "input"],
+    ["interrupted", "input"],
+  ] as const)(
+    "drops the cancelled interactions when a %s outcome is requested during a pending %s",
+    (outcome, interaction) => {
+      const state = engine("claude");
+      state.setTransport("running");
+      state.synchronizeInteractions(
+        interaction === "approval" ? 1 : 0,
+        interaction === "input" ? 1 : 0,
+        null,
+        interaction,
+      );
+      expect(state.snapshot().state).toBe(`waiting-for-${interaction}`);
+      expect(state.requestTerminal(outcome)).toBe(true);
+      expect(state.snapshot().state).toBe("running");
+      expect(state.settle("cancelled")).toBe(outcome);
+    },
+  );
+
+  it("shows stopping when a user stop arrives after a completed outcome was requested", () => {
+    const state = engine("codex");
+    state.setTransport("running");
+    state.requestTerminal("completed");
+    expect(state.snapshot().state).toBe("running");
+    expect(state.requestCancellation(null)).toBe(true);
+    expect(state.snapshot().state).toBe("cancelling");
+    expect(state.settle("cancelled")).toBe("completed");
+  });
+
   it("bounds malformed provider-native state without inventing equivalence", () => {
     const state = engine("kimi");
     state.setTransport("retrying", `\0provider\n${"x".repeat(400)}`);

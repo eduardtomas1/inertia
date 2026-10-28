@@ -1270,7 +1270,7 @@ describe("production provider lifecycle conformance", () => {
   );
 
   it.each(PRODUCTION_HARNESSES.slice(0, 1))(
-    "$harnessId keeps admission quarantined when terminal cleanup is unconfirmed",
+    "$harnessId detaches a run whose terminal cleanup stays unconfirmed and reports it as force-detached",
     async (route) => {
       const controlled = controlledManager(route);
       const input = inputFor(route);
@@ -1288,8 +1288,9 @@ describe("production provider lifecycle conformance", () => {
         status: "failed",
         cleanupConfirmed: false,
       });
-      expect(controlled.manager.isRunning(input.conversationId)).toBe(true);
-      expect(() => controlled.manager.run(input)).toThrow(/already has an active/u);
+      await expect(controlled.manager.stopOwned(input.conversationId, input))
+        .resolves.toBe("force-detached");
+      expect(controlled.manager.isRunning(input.conversationId)).toBe(false);
     },
   );
 

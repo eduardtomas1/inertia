@@ -143,6 +143,7 @@ function projectDependencies(
     store: {
       hasRecordedActiveWorkspaceRunForProject: vi.fn(() => false),
       project: vi.fn(() => ({ id: projectId, path: "/workspace" }) as never),
+      providerRunOwnership: { forConversation: vi.fn(() => []) },
       conversationWork,
       attachments: vi.fn(() => []),
       referencedAttachmentIds: vi.fn(() => new Set<string>()),
@@ -272,7 +273,7 @@ describe("Duo deletion command preflights", () => {
     expect(conversationLookup.mock.invocationCallOrder[1]).toBeLessThan(
       vi.mocked(store.attachments!).mock.invocationCallOrder[0]!,
     );
-    expect(deleteConversation).toHaveBeenCalledWith(conversationId);
+    expect(deleteConversation).toHaveBeenCalledWith(conversationId, []);
     expect(deleteConversation).toHaveBeenCalledBefore(
       vi.mocked(store.referencedAttachmentIds!),
     );
@@ -500,7 +501,7 @@ describe("Duo deletion command preflights", () => {
       .resolves.toBe("mutation");
 
     expect(assertProjectDeletionAllowed).toHaveBeenCalledBefore(removeProject);
-    expect(removeProject).toHaveBeenCalledWith(projectId);
+    expect(removeProject).toHaveBeenCalledWith(projectId, []);
     expect(removeProject).toHaveBeenCalledBefore(
       vi.mocked(store.referencedAttachmentIds!),
     );
@@ -568,7 +569,7 @@ describe("Duo deletion command preflights", () => {
       ["project-delete:0", "project-delete:1"],
       storedWorkspaces,
     );
-    expect(removeProject).toHaveBeenCalledWith(projectId);
+    expect(removeProject).toHaveBeenCalledWith(projectId, []);
   });
 
   it("keeps stale project history when its stored checkout is reserved", async () => {

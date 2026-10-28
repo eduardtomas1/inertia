@@ -84,6 +84,7 @@ export interface ProviderManagerInstallationOptions {
   operationId(): string;
   configuredBoundary(providerId: ProviderId): string;
   invalidateEvidence(providerId: ProviderId): void;
+  onCleanupUnconfirmed?(providerId: ProviderId): void;
 }
 
 export class ProviderManagerInstallationAuthority {
@@ -243,6 +244,16 @@ export class ProviderManagerInstallationAuthority {
     }
   }
 
+  quarantineUnconfirmedCleanup(
+    admission: ProviderInstallationUseAdmission | null,
+    reason: string,
+    observedIdentity?: ProviderInstallationIdentity,
+  ): void {
+    if (!admission) return;
+    this.quarantine(admission, reason, observedIdentity);
+    this.options.onCleanupUnconfirmed?.(admission.identity.providerId);
+  }
+
   transfer(
     admission: ProviderInstallationUseAdmission | null,
   ): ProviderInstallationUseTransfer {
@@ -278,9 +289,9 @@ export class ProviderManagerInstallationAuthority {
     detection: ProviderDetection,
     backendProfile: ModelBackendProfile,
     verificationAuthority?: ProviderInstallationVerificationAuthority,
-    allowUnboundInitialResolution = false,
-  ): void {
-    if (!admission) return;
+    replacementAdmissible = false,
+  ): boolean {
+    if (!admission) return false;
     const observedIdentity = detection.executable
       ? this.identity(
           detection.provider.id,
@@ -290,12 +301,12 @@ export class ProviderManagerInstallationAuthority {
         )
       : undefined;
     if (!detection.cleanupConfirmed) {
-      this.quarantine(
+      this.quarantineUnconfirmedCleanup(
         admission,
         "provider-discovery-cleanup-unconfirmed",
         observedIdentity,
       );
-      return;
+      return false;
     }
     if (
       !observedIdentity
@@ -310,9 +321,9 @@ export class ProviderManagerInstallationAuthority {
       // A confirmed, identity-matching detection proves this installation
       // is healthy again, so it lifts the provider's earlier doubt.
       this.uncertainProviders.delete(admission.identity.providerId);
-      return;
+      return false;
     }
-    if (!verificationAuthority && !allowUnboundInitialResolution) {
+    if (!verificationAuthority && !replacementAdmissible) {
       this.quarantine(
         admission,
         "provider-discovery-crossed-installation-authority",
@@ -354,5 +365,6 @@ export class ProviderManagerInstallationAuthority {
       );
     }
     this.uncertainProviders.delete(admission.identity.providerId);
+    return true;
   }
 }

@@ -408,9 +408,9 @@ export class RuntimeStore {
     return this.conversationRepository.bindScratchFolder(conversationId, path);
   }
 
-  removeProject(projectId: string): void {
+  removeProject(projectId: string, recoveryRecords: readonly { turnId: string; runId: string }[] = []): void {
     this.conversationWorktrees.assertProjectRemovalAllowed(projectId);
-    this.projectRepository.remove(projectId);
+    this.projectRepository.remove(projectId, recoveryRecords);
   }
 
   selectProject(projectId: string): void {
@@ -848,8 +848,8 @@ export class RuntimeStore {
     this.conversationRepository.archive(conversationId, archived);
   }
 
-  deleteConversation(conversationId: string): void {
-    this.conversationRepository.delete(conversationId);
+  deleteConversation(conversationId: string, recoveryRecords: readonly { turnId: string; runId: string }[] = []): void {
+    this.conversationRepository.delete(conversationId, recoveryRecords);
   }
 
   createMessage(

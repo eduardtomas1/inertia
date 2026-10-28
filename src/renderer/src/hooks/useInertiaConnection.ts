@@ -34,6 +34,11 @@ import { markTestStreamingStage } from "../utils/testStreamingTrace";
 
 export type ConnectionStatus = "connecting" | "online" | "offline";
 
+export interface RuntimeStoppedState {
+  restartable: boolean;
+  message: string;
+}
+
 type EventListener = (event: ServerEvent) => void;
 
 export interface InertiaConnection {
@@ -41,6 +46,8 @@ export interface InertiaConnection {
   runtimeGeneration: string | null;
   status: ConnectionStatus;
   error: string | null;
+  runtimeStopped: RuntimeStoppedState | null;
+  restartRuntime: () => Promise<void>;
   databaseRecoveryNotice: DatabaseRecoveryStartupNotice | null;
   dismissDatabaseRecoveryNotice: () => void;
   clearError: () => void;
@@ -56,10 +63,12 @@ export function useInertiaConnection(
   const listenersRef = useRef(new Set<EventListener>());
   const projectionRef = useRef(new RuntimeProjectionSequence());
   const detailSubscriptionsRef = useRef(new RuntimeDetailSubscriptions());
+  const reconnectRef = useRef<(() => void) | null>(null);
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [runtimeGeneration, setRuntimeGeneration] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
+  const [runtimeStopped, setRuntimeStopped] = useState<RuntimeStoppedState | null>(null);
   const [databaseRecoveryNotice, setDatabaseRecoveryNotice] =
     useState<DatabaseRecoveryStartupNotice | null>(null);
 
@@ -112,6 +121,12 @@ export function useInertiaConnection(
         if ("unavailable" in runtimeConnection) {
           setStatus("offline");
           setError(runtimeConnection.message);
+          setRuntimeStopped(runtimeConnection.retryable
+            ? null
+            : {
+                restartable: runtimeConnection.restartable === true,
+                message: runtimeConnection.message,
+              });
           if (runtimeConnection.retryable) {
             const delay = Math.min(8_000, 600 * 2 ** attempt);
             attempt += 1;
@@ -119,6 +134,7 @@ export function useInertiaConnection(
           }
           return;
         }
+        setRuntimeStopped(null);
         const { websocketUrl, databaseRecoveryNotice: startupNotice } =
           runtimeConnection;
         if (startupNotice) setDatabaseRecoveryNotice(startupNotice);
@@ -348,10 +364,15 @@ export function useInertiaConnection(
       attempt = 0;
       requestImmediateConnect();
     });
+    reconnectRef.current = () => {
+      attempt = 0;
+      requestImmediateConnect();
+    };
     void connect();
 
     return () => {
       disposed = true;
+      reconnectRef.current = null;
       stopRuntimeReady?.();
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       const socket = socketRef.current;
@@ -433,6 +454,17 @@ export function useInertiaConnection(
     });
   }, []);
 
+  const restartRuntime = useCallback(async (): Promise<void> => {
+    setRuntimeStopped(null);
+    setStatus("connecting");
+    try {
+      await window.inertia.getRuntimeConnection({ restart: true });
+    } catch {
+      setError("The local service could not be restarted.");
+    }
+    reconnectRef.current?.();
+  }, []);
+
   const subscribe = useCallback((listener: EventListener) => {
     listenersRef.current.add(listener);
     return () => listenersRef.current.delete(listener);
@@ -443,6 +475,8 @@ export function useInertiaConnection(
     runtimeGeneration,
     status,
     error,
+    runtimeStopped,
+    restartRuntime,
     databaseRecoveryNotice,
     dismissDatabaseRecoveryNotice: useCallback(
       () => setDatabaseRecoveryNotice(null),

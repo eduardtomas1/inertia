@@ -12,6 +12,7 @@ import {
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
 import { watcherCommandEnvironment } from "../runtime/watcher/read-only-commands";
+import { providerUnconfirmedCleanup } from "./provider-unconfirmed-cleanup";
 import {
   launchCredentialValues,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
@@ -21,6 +22,10 @@ import {
   createClaudeOwnedQueryProcess,
   type ClaudeOwnedQueryDependencies,
 } from "./claude-owned-query";
+import {
+  PROVIDER_NATURAL_CLOSE_MS,
+  providerNaturalCloseFirst,
+} from "./provider-natural-close";
 import { emitClaudeModelMetadata } from "./claude-agent-sdk-metadata";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { ClaudeChecklistSessions } from "./claude-checklist-projection";
@@ -327,6 +332,7 @@ function startClaudeRun(
     configuredPromptCacheTtl: promptCacheTtl,
   });
   const providerResult = (async (): Promise<ProviderRunResult> => {
+    let providerThrew = false;
     try {
       const compactInstruction = options.input.operation?.instruction;
       const promptText = options.input.operation?.kind === "compact"
@@ -739,6 +745,7 @@ function startClaudeRun(
           : undefined,
       );
     } catch (error) {
+      providerThrew = true;
       if (cancelRequested || abortController.signal.aborted) return finishResult("cancelled");
       const rawError = redactLaunchText(claudeReadableRuntimeError(
         safeError(ownedProcess.transportError() ?? error, "Claude Agent SDK stopped unexpectedly."),
@@ -760,16 +767,25 @@ function startClaudeRun(
       } catch {
         hostToolsCleanupFailed = true;
       }
+      const naturalClose = !providerThrew
+        && !cancelRequested
+        && !abortController.signal.aborted
+        && !ownedProcess.transportError()
+        && providerNaturalCloseFirst();
       // Start the owned shutdown while the SDK child is still an owned live
       // process. The public result below awaits this same memoized attempt
       // after protocol streams and selected-skill resources are closed.
-      ownedProcess.requestTermination(true);
+      if (!naturalClose) ownedProcess.requestTermination(true);
       // No consumer survives terminal query cleanup. Discard any admitted
       // input so retained base64 media and its reservations are released.
       promptChannel.cancel();
       permissions.cancelPending();
       delegateLifecycle.dispose();
       try { query?.close(); } catch { /* The SDK process may already be closed. */ }
+      if (naturalClose) {
+        await ownedProcess.waitForNaturalClose(PROVIDER_NATURAL_CLOSE_MS);
+        ownedProcess.requestTermination(true);
+      }
       if (messageIterator?.return) {
         let timer: NodeJS.Timeout | undefined;
         try {
@@ -796,20 +812,15 @@ function startClaudeRun(
       // The SDK has delivered its terminal protocol result and the finally
       // block above has closed its streams. No useful graceful window remains.
       await ownedProcess.terminate(true);
-      const wireError = ownedProcess.transportError();
-      if (wireError && outcome.status !== "cancelled") {
-        const wireDetail = redactLaunchText(wireError.message);
-        const error = routeFailure(wireDetail);
-        terminal = { ...outcome, status: "failed", error,
-          failure: claudeRuntimeFailure(wireDetail, error) };
-      }
     } catch {
-      terminal = {
-        ...outcome,
-        status: "failed",
-        error: "Claude Code process tree could not be confirmed stopped.",
-        cleanupConfirmed: false,
-      };
+      terminal = { ...outcome, cleanupConfirmed: false };
+    }
+    const wireError = ownedProcess.transportError();
+    if (wireError && outcome.status !== "cancelled") {
+      const wireDetail = redactLaunchText(wireError.message);
+      const error = routeFailure(wireDetail);
+      terminal = { ...terminal, status: "failed", error,
+        failure: claudeRuntimeFailure(wireDetail, error) };
     }
     try {
       await stagedSkillPlugin?.cleanup();
@@ -836,9 +847,13 @@ function startClaudeRun(
       ...(sessionUnavailable && terminal.failure ? { failure: { ...terminal.failure, sessionUnavailable: true as const } } : {}),
     };
     emitter.status(terminal.status, terminal.error);
+    const unconfirmedCleanup = !terminal.cleanupConfirmed && !hostToolsCleanupFailed && child
+      ? providerUnconfirmedCleanup(child)
+      : undefined;
     return {
       ...terminal,
       ...providerRunTerminal(options.input, terminal.status, terminal.failure),
+      ...unconfirmedCleanup,
     };
   });
 

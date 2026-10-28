@@ -34,6 +34,7 @@ import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import { providerImageRequestLimitError } from "../../provider/provider-image-read";
+import { ownedProviderStopBudgetMs } from "../../provider/run-cleanup-settlement";
 import { pendingInteractionForConversation } from "../pending-interaction-registry";
 import {
   defineRuntimeCommandHandler,
@@ -63,6 +64,8 @@ type MessageSendStage =
   | "retention"
   | "turn-persistence"
   | "turn-publication";
+
+const AGENT_STOP_SETTLEMENT_WAIT_MS = ownedProviderStopBudgetMs() + 2_000;
 
 const MESSAGE_SEND_STAGE_LABELS: Record<MessageSendStage, string> = {
   "conversation-state": "conversation state preparation",
@@ -927,19 +930,18 @@ export function createTurnInteractionCommandHandler(
           conversationId,
         );
         const turnStopped = !isolatedStopped
-          && dependencies.turns.cancel(conversationId);
+          && (dependencies.turns.cancel(conversationId)
+            || dependencies.turns.isReleasing(conversationId));
         if (!isolatedStopped && !turnStopped) {
           throw new RuntimeRequestError(
             "This thread does not have an active run.",
           );
         }
         if (turnStopped) {
-          await dependencies.turns.waitForProviderCleanup([conversationId]);
-          if (dependencies.turns.isActive(conversationId)) {
-            throw new RuntimeRequestError(
-              "Stop was requested, but provider cleanup could not be confirmed. Resume remains unavailable.",
-            );
-          }
+          await dependencies.turns.waitForProviderCleanup(
+            [conversationId],
+            Date.now() + AGENT_STOP_SETTLEMENT_WAIT_MS,
+          );
         }
         return "mutation";
       }

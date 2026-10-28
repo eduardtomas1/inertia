@@ -31,6 +31,14 @@ export class RuntimeShutdownDeadlineError extends Error {
   }
 }
 
+export async function settleAllOrThrow(
+  operations: readonly Promise<unknown>[],
+): Promise<void> {
+  const results = await Promise.allSettled(operations);
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed) throw failed.reason;
+}
+
 async function beforeDeadline(
   operation: Promise<void>,
   deadlineAt: number,

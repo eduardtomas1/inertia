@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { parseRuntimeOwnedProcessDiagnostic } from "../node/runtime-owned-process-diagnostic.js";
+import { parseRuntimeOwnedProcessDiagnostic, RUNTIME_RESTART_REASONS } from "../node/runtime-owned-process-diagnostic.js";
 import { parseRuntimeFailureDiagnosticMessage } from "../node/runtime-failure-diagnostic.js";
 import { isPreviewAgentFailureCategory, isPreviewAgentOperationPhase } from "./preview-agent-phase.js";
 import { diagnosticRecordSchema } from "../shared/application-diagnostics.js";
@@ -170,7 +170,7 @@ function validEventFields(record: Record<string, unknown>, event: RuntimeDiagnos
   switch (event) {
     case "runtime.restart-requested":
       if (boundedInteger(record.generation, 0, Number.MAX_SAFE_INTEGER) === undefined
-        || (record.reason !== "owned-process-tainted" && record.reason !== "owned-process-cleanup-unconfirmed")) return false;
+        || !allowlisted(RUNTIME_RESTART_REASONS, record.reason)) return false;
       if (record.stage === undefined && record.signal === undefined && record.exitCode === undefined && record.probe === undefined) return true;
       return record.reason === "owned-process-tainted" && Boolean(parseRuntimeOwnedProcessDiagnostic({
         stage: record.stage,
@@ -264,7 +264,7 @@ export function buildDiagnosticEntry(
   const restartAttempt = boundedInteger(fields.restartAttempt, 0, 1_000_000);
   switch (event) {
     case "runtime.restart-requested": {
-      if (generation === undefined || (fields.reason !== "owned-process-tainted" && fields.reason !== "owned-process-cleanup-unconfirmed")) return null;
+      if (generation === undefined || !allowlisted(RUNTIME_RESTART_REASONS, fields.reason)) return null;
       entry.generation = generation;
       entry.reason = fields.reason;
       const diagnostic = parseRuntimeOwnedProcessDiagnostic({

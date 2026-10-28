@@ -25,6 +25,7 @@ import type { ProviderAuthMethod } from "@shared/provider";
 import { useConversationNavigation } from "./hooks/useConversationNavigation";
 import "./detached-chat-workbench.css";
 import { AppLayout } from "./components/AppLayout";
+import { connectionToastError } from "./components/RuntimeConnectionBanner";
 import { DialogPresence } from "./components/DialogPresence";
 import { LoadingMark } from "./components/ui";
 import type { WorkspaceSceneProps } from "./components/WorkspaceScene";
@@ -765,7 +766,7 @@ export default function App(): React.JSX.Element {
     openSettings({ section });
   }, [openSettings]);
 
-  const visibleError = actionError ?? connection.error;
+  const visibleError = actionError ?? connectionToastError(connection);
   useDiagnosticNavigation(
     connection.snapshot?.conversations,
     connection.status === "online",

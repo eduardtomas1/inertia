@@ -16,6 +16,7 @@ interface RuntimeConnectionState {
   readonly databaseRecoveryReport: RuntimeDatabaseStartupRecoveryReport | null;
   readonly databaseRecoveryNoticePending: boolean;
   readonly startupBlockerCode: RuntimeStartupBlockerCode | null;
+  readonly restartable?: boolean;
 }
 
 export class RuntimeConnectionUnavailableError extends Error {
@@ -37,8 +38,16 @@ export function runtimeConnectionUnavailableError(
 }
 
 export function unavailableRuntimeConnection(
-  state: Pick<RuntimeConnectionState, "phase" | "startupBlockerCode">,
+  state: Pick<RuntimeConnectionState, "phase" | "startupBlockerCode" | "restartable">,
   platform: NodeJS.Platform = process.platform,
+): RuntimeConnectionUnavailable {
+  const connection = unavailableRuntimeConnectionReason(state, platform);
+  return state.restartable ? { ...connection, restartable: true } : connection;
+}
+
+function unavailableRuntimeConnectionReason(
+  state: Pick<RuntimeConnectionState, "phase" | "startupBlockerCode" | "restartable">,
+  platform: NodeJS.Platform,
 ): RuntimeConnectionUnavailable {
   if (state.startupBlockerCode === "prior-runtime-cleanup-unconfirmed") {
     return {
@@ -86,7 +95,9 @@ export function unavailableRuntimeConnection(
     unavailable: true,
     code: "runtime-stopped",
     retryable: false,
-    message: "The local service stopped. Review Runtime diagnostics in Settings → Help before restarting Inertia.",
+    message: state.restartable
+      ? "The local service stopped. Restart it to continue."
+      : "The local service stopped. Review Runtime diagnostics in Settings → Help before restarting Inertia.",
   };
 }
 
@@ -124,6 +135,28 @@ export function runtimeConnection(state: RuntimeConnectionState): {
     },
     consumedRecoveryNotice: databaseRecoveryNotice !== undefined,
   };
+}
+
+export function connectDetachedRuntime(
+  connect: () => RuntimeConnection,
+  conversationId: string,
+  clientId: string,
+): RuntimeConnection {
+  let connection: RuntimeConnection;
+  try {
+    connection = connect();
+  } catch (error) {
+    if (!(error instanceof RuntimeConnectionUnavailableError) || !error.connection.restartable) {
+      throw error;
+    }
+    throw new RuntimeConnectionUnavailableError({
+      unavailable: true,
+      code: error.connection.code,
+      retryable: error.connection.retryable,
+      message: "The local service stopped. Restart it from the main window.",
+    });
+  }
+  return detachedRuntimeConnection(connection, conversationId, clientId);
 }
 
 export function detachedRuntimeConnection(

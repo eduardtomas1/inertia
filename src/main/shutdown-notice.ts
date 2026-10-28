@@ -66,7 +66,25 @@ export function createLifecycleNotices(
     retryQuit: () => application.quit(), focusWindow, canFocusWindow,
     reportError: (error) => console.error("Failed to show shutdown status", error),
   });
+  let shutdownInProgress: Promise<void> | null = null;
   return {
+    reportShutdownInProgress(): void {
+      if (process.env.NODE_ENV === "test" || shutdownInProgress) return;
+      shutdownInProgress = application.whenReady().then(async () => {
+        await nativeDialog.showMessageBox({
+          type: "info",
+          title: "Inertia is still shutting down",
+          message: `Inertia ${application.getVersion()} is still closing.`,
+          detail: "It is stopping its local processes and will close by itself in a few seconds. "
+            + "Open Inertia again after it closes.",
+          buttons: ["OK"], noLink: true,
+        });
+      }).catch((error: unknown) => {
+        console.error("Failed to show shutdown status", error);
+      }).finally(() => {
+        shutdownInProgress = null;
+      });
+    },
     reportUnconfirmedShutdown(): void {
       console.error("Refusing to exit because privileged shutdown could not be confirmed.");
       void notice.show();

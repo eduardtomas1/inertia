@@ -100,6 +100,7 @@ function createHarness(options: {
   manualModernDarwinRecovery?: ModernDarwinRecoveryAuthorityDescriptor;
   runtimeProcessGuardianPath?: string;
   runtimeRecoveryBlocked?: boolean;
+  requestExplicitRecovery?: () => boolean;
 } = {}) {
   const children: FakeUtilityProcess[] = [];
   const forceKill = vi.fn(() => true);
@@ -132,6 +133,9 @@ function createHarness(options: {
     forceKill,
     recoverOwnedProcesses: options.recoverOwnedProcesses ?? (() => true),
     attachmentBroker: options.attachmentBroker,
+    ...(options.requestExplicitRecovery
+      ? { requestExplicitRecovery: options.requestExplicitRecovery }
+      : {}),
     armProcessContainment: () => process.platform === "win32"
       ? {
           kind: "windows-job-v1",
@@ -317,6 +321,54 @@ describe("RuntimeSupervisor recovery admission", () => {
     expect(supervisor.snapshot().lastError)
       .toBe("The runtime process did not become ready in time.");
   });
+
+  it.runIf(process.platform === "darwin")(
+    "does not offer Restart while a live macOS cleanup failure needs explicit recovery",
+    async () => {
+      const { children, supervisor } = createHarness({
+        systemBootId: "test:00000000-0000-4000-8000-000000000001",
+        recoverOwnedProcesses: vi.fn(() => false),
+        runtimeProcessGuardianPath: "/private/tmp/inertia-test-guardian",
+      });
+
+      supervisor.start();
+      children[0].spawn();
+      children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+      children[0].emit("exit", 17);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(supervisor.canResumeWithModernDarwinRecovery()).toBe(true);
+      expect(supervisor.canRestartFromUser()).toBe(false);
+      expect(supervisor.restartFromUser()).toBe(false);
+      expect(children).toHaveLength(1);
+      expect(supervisor.canResumeWithModernDarwinRecovery()).toBe(true);
+    },
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "routes Restart to the explicit macOS recovery decision instead of spawning",
+    async () => {
+      const requestExplicitRecovery = vi.fn(() => true);
+      const { children, supervisor } = createHarness({
+        systemBootId: "test:00000000-0000-4000-8000-000000000001",
+        recoverOwnedProcesses: vi.fn(() => false),
+        runtimeProcessGuardianPath: "/private/tmp/inertia-test-guardian",
+        requestExplicitRecovery,
+      });
+
+      supervisor.start();
+      children[0].spawn();
+      children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+      children[0].emit("exit", 17);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(supervisor.canRestartFromUser()).toBe(true);
+      expect(supervisor.restartFromUser()).toBe(true);
+      expect(requestExplicitRecovery).toHaveBeenCalledOnce();
+      expect(children).toHaveLength(1);
+      expect(supervisor.canResumeWithModernDarwinRecovery()).toBe(true);
+    },
+  );
 
   it.runIf(process.platform === "darwin")(
     "resumes a live cleanup failure only with exact macOS authority",
@@ -557,7 +609,7 @@ describe("RuntimeSupervisor recovery admission", () => {
       const bootId = "test:00000000-0000-4000-8000-000000000001";
       const recoverOwnedProcesses = vi.fn()
         .mockReturnValueOnce(false)
-        .mockReturnValueOnce(true);
+        .mockReturnValueOnce(false);
       const attachmentBroker: RuntimeAttachmentBroker = {
         resolve: vi.fn(async () => trustedAttachment),
         release: vi.fn(async () => true),
@@ -603,7 +655,7 @@ describe("RuntimeSupervisor recovery admission", () => {
       children[1].emit("exit", 1);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(recoverOwnedProcesses).toHaveBeenCalledTimes(1);
+      expect(recoverOwnedProcesses).toHaveBeenCalledTimes(2);
       expect(supervisor.snapshot()).toMatchObject({
         phase: "stopped",
         restartScheduled: false,

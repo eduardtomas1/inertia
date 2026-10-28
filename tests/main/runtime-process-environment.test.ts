@@ -442,6 +442,19 @@ describe("supervised runtime process environment", () => {
     });
   });
 
+  it("passes Node version manager locations to the runtime on Linux", () => {
+    expect(runtimeProcessEnvironment({
+      ASDF_DATA_DIR: "/home/person/.data/asdf",
+      FNM_DIR: "/home/person/.data/fnm",
+      NVM_DIR: "/home/person/.data/nvm",
+      NVM_AUTH_TOKEN: "sentinel-nvm-token",
+    }, "linux")).toEqual({
+      ASDF_DATA_DIR: "/home/person/.data/asdf",
+      FNM_DIR: "/home/person/.data/fnm",
+      NVM_DIR: "/home/person/.data/nvm",
+    });
+  });
+
   it("passes credential-free proxy routing and rejects credential-bearing values", () => {
     const parent: NodeJS.ProcessEnv = {
       ALL_PROXY: "socks5://socks.example.test:1080",

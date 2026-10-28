@@ -73,6 +73,7 @@ describe("provider info refresh ownership", () => {
       }),
       providerCapabilityContract: vi.fn(() => undefined),
       metadataReadTimedOut: () => false,
+      observeInstallationEvents: () => () => undefined,
     } as unknown as ProviderManager;
     const published: ProviderInfo[][] = [];
     const activity = vi.fn();
@@ -130,6 +131,7 @@ describe("provider info refresh ownership", () => {
       }),
       providerCapabilityContract: vi.fn(() => undefined),
       metadataReadTimedOut: () => false,
+      observeInstallationEvents: () => () => undefined,
     } as unknown as ProviderManager;
     const broadcastSnapshot = vi.fn(() => structuredClone(providerInfo));
     const refresh = createProviderInfoRefresh({
@@ -198,6 +200,7 @@ describe("provider info refresh ownership", () => {
       metadata,
       providerCapabilityContract: () => undefined,
       metadataReadTimedOut: () => false,
+      observeInstallationEvents: () => () => undefined,
     } as unknown as ProviderManager;
     const refresh = createProviderInfoRefresh({
       enabled: true, providers, defaultWorkspacePath: "/workspace",
@@ -246,6 +249,7 @@ describe("provider info refresh ownership", () => {
       )),
       metadataReadTimedOut: (id: ProviderInfo["id"]) => cache.lastReadTimedOut(id),
       providerCapabilityContract: () => undefined,
+      observeInstallationEvents: () => () => undefined,
     } as unknown as ProviderManager;
     const refresh = createProviderInfoRefresh({
       enabled: true, providers, defaultWorkspacePath: "/workspace",
@@ -280,6 +284,7 @@ describe("provider info refresh ownership", () => {
       )),
       metadataReadTimedOut: (id: ProviderInfo["id"]) => cache.lastReadTimedOut(id),
       providerCapabilityContract: () => undefined,
+      observeInstallationEvents: () => () => undefined,
     } as unknown as ProviderManager;
     const track = vi.fn(async (operation: () => Promise<void>) => await operation());
     const refresh = createProviderInfoRefresh({
@@ -309,6 +314,7 @@ describe("provider info refresh ownership", () => {
       metadata: vi.fn(async () => empty),
       providerCapabilityContract: vi.fn(() => undefined),
       metadataReadTimedOut: () => false,
+      observeInstallationEvents: () => () => undefined,
     } as unknown as ProviderManager;
     const refresh = createProviderInfoRefresh({
       enabled: true, providers, defaultWorkspacePath: "/workspace",
@@ -436,6 +442,7 @@ describe("provider info refresh ownership", () => {
         metadata: vi.fn(async () => empty),
         providerCapabilityContract: vi.fn(() => undefined),
         metadataReadTimedOut: () => false,
+        observeInstallationEvents: () => () => undefined,
       } as unknown as ProviderManager;
       const refresh = createProviderInfoRefresh({
         enabled: true, providers, defaultWorkspacePath: "/workspace",

@@ -43,9 +43,8 @@ describe("TurnController terminal result persistence", () => {
         conversationId: runtime.conversationId,
         identity: { runId: queued.turn.runId, turnId: queued.turn.id },
       }]);
-      expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
-        status: "running", runState: { state: "cancelling" }, terminalReason: null,
-      });
+      expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ terminalReason: null });
+      expect(runtime.store.agentTurn(queued.turn.id).runState?.state).not.toBe("cancelling");
       expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId))
         .toHaveLength(1);
       expect(runtime.attachmentReleases).toEqual([]);
@@ -82,7 +81,7 @@ describe("TurnController terminal result persistence", () => {
   });
 
   it.each(["missing"] as const)(
-    "retains the failed result owner when cleanup is %s",
+    "finalizes the failed result but keeps its ownership row when cleanup is %s",
     async (cleanupResult) => {
       const runtime = await createTurnControllerTestRuntime();
       try {
@@ -107,15 +106,15 @@ describe("TurnController terminal result persistence", () => {
           runId: queued.turn.runId, turnId: queued.turn.id,
         });
         expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
-          status: "running", runState: { state: "cancelling" }, terminalReason: null,
+          status: "failed", terminalReason: "stream-persistence-failed",
         });
-        expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
+        expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
         expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId))
           .toHaveLength(1);
         expect(runtime.events.some((event) => event.type === "agent.completed")).toBe(false);
         expect(() => runtime.controller.queue({
-          conversationId: runtime.conversationId, content: "Do not bypass uncertain ownership.",
-        })).toThrow("already has an active turn");
+          conversationId: runtime.conversationId, content: "The chat is released.",
+        })).not.toThrow();
       } finally {
         runtime.store.close();
       }

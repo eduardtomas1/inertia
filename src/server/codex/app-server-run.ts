@@ -66,9 +66,13 @@ import {
   type ProviderSteerInput,
 } from "../provider/contracts";
 import { providerProcessInvocation } from "../provider/process";
+import { providerUnconfirmedCleanup } from "../provider/provider-unconfirmed-cleanup";
 import {
-  createOwnedProcessTreeTermination,
-} from "../process-lifecycle";
+  endProviderInput,
+  providerNaturalCloseFirst,
+  waitForProviderNaturalClose,
+} from "../provider/provider-natural-close";
+import { createOwnedProcessTreeTermination } from "../process-lifecycle";
 
 class CodexRequestRefusedError extends Error {}
 class CodexErrorResponse extends CodexRequestRefusedError {}
@@ -309,6 +313,16 @@ export function startCodexAppServerRun(
       // cancellation cannot rewrite this outcome while owned cleanup drains.
       let finalStatus: CodexAppServerResult["status"] = cancelRequested ? "cancelled" : status;
       let cleanupConfirmed = true;
+      if (
+        finalStatus !== "cancelled"
+        && (!failure || failure.reason === "codex-error")
+        && child.exitCode === null
+        && child.signalCode === null
+        && providerNaturalCloseFirst()
+      ) {
+        endProviderInput(child);
+        await waitForProviderNaturalClose(child);
+      }
       try {
         // A terminal App Server turn has no further process work to preserve.
         // Use the same owned promise as cancellation, but avoid adding a
@@ -327,14 +341,8 @@ export function startCodexAppServerRun(
             cleanupConfirmed = false;
           }
         }
-      } catch (error) {
-        finalStatus = "failed";
+      } catch {
         cleanupConfirmed = false;
-        rememberFailure(
-          "process-exit",
-          "Codex App Server process tree could not be confirmed stopped.",
-          error instanceof Error ? error.message : undefined,
-        );
       }
       const finalFailure = finalStatus === "failed"
         ? settledFailure(
@@ -356,6 +364,7 @@ export function startCodexAppServerRun(
         ...(compatibilityError ? { compatibilityError } : {}),
         ...(continuationError ? { continuationError } : {}),
         cleanupConfirmed,
+        ...(cleanupConfirmed ? {} : providerUnconfirmedCleanup(child)),
       });
     })();
   };

@@ -802,7 +802,7 @@ describe("provider manager installation ownership", () => {
     await expect(manager.disposeAll()).resolves.toBeUndefined();
   });
 
-  it("quarantines the exact run installation when terminal cleanup is unconfirmed", async () => {
+  it("detaches the exact run and lifts its own installation quarantine when terminal cleanup stays unconfirmed", async () => {
     const leases = new ProviderInstallationLeaseCoordinator();
     const input = nativeProviderRunInput({
       providerId: "codex",
@@ -844,10 +844,10 @@ describe("provider manager installation ownership", () => {
     await expect(manager.run(input)).resolves.toMatchObject({
       cleanupConfirmed: false,
     });
-    expect(leases.isQuarantined(identity("codex"))).toBe(true);
-    await expect(leases.acquireMaintenance(identity("codex"), {
-      operationId: "maintenance-after-unconfirmed-run",
-    })).rejects.toThrow(ProviderInstallationAdmissionError);
+    await expect(manager.stopOwned(input.conversationId, input))
+      .resolves.toBe("force-detached");
+    expect(manager.isRunning(input.conversationId)).toBe(false);
+    expect(leases.isQuarantined(identity("codex"))).toBe(false);
     await expect(manager.disposeAll()).rejects.toThrow(
       "Provider process cleanup could not be confirmed",
     );
@@ -977,12 +977,13 @@ describe("provider manager installation ownership", () => {
     },
   );
 
-  it("quarantines an ordinary discovery that retargets a known installation", async () => {
+  it("keeps rejecting a discovery that retargets an explicitly configured executable", async () => {
     const leases = new ProviderInstallationLeaseCoordinator();
     let invocation = 0;
-    const manager = ProviderManager.createForTests({
+    const manager = ProviderManager.createProduction({
       commands: { claude: "/tools/claude-v1" },
       installationLeases: leases,
+      conversationProviderGate: () => undefined,
       detectProvider: async (): Promise<ProviderDetection> => {
         invocation += 1;
         return {

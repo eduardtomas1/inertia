@@ -25,7 +25,9 @@ import {
   inspectUnacknowledgedWorktreeCreation,
   removeOwnedWorktree,
 } from "../../git";
+import type { IncidentObservation } from "../../../node/application-incidents";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
+import { providerCleanupIncident } from "../../provider/run-cleanup-settlement";
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
@@ -33,6 +35,7 @@ import { ConversationCreationService } from "../conversation-creation-service";
 import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
+import { liveProviderRunOwnership, providerRecoveryRecords } from "../turns/turn-checkout-activity";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -125,6 +128,7 @@ export interface ConversationCommandDependencies {
   };
   creation?: ConversationCreationService;
   contextRequests?: ConversationContextRequestCoordinator;
+  reportIncident?(observation: IncidentObservation): unknown;
 }
 
 export function createConversationCommandHandler(
@@ -621,8 +625,9 @@ export function createConversationCommandHandler(
           );
         }
         try {
-          if (dependencies.store.providerRunOwnership.forConversation(
-            conversation.id,
+          if (liveProviderRunOwnership(
+            dependencies.store,
+            dependencies.store.providerRunOwnership.forConversation(conversation.id),
           ).length > 0) {
             throw new RuntimeRequestError(
               "Provider process cleanup is unconfirmed. Keep this thread and its checkout until Inertia confirms the prior runtime process tree stopped.",
@@ -743,9 +748,17 @@ export function createConversationCommandHandler(
             .targetConversationIdsForSource(finalConversation.id);
           dependencies.contextRequests?.cancelForSource(finalConversation.id);
           const publishDeletedWatcherLinks = dependencies.watchers?.beforeConversationDelete?.(finalConversation.id);
+          const recoveryRecords = providerRecoveryRecords(
+            dependencies.store,
+            dependencies.store.providerRunOwnership.forConversation(finalConversation.id),
+          );
           dependencies.store.deleteConversation(
             finalConversation.id,
+            recoveryRecords,
           );
+          for (const identity of recoveryRecords) {
+            dependencies.reportIncident?.(providerCleanupIncident(identity));
+          }
           publishDeletedWatcherLinks?.();
           for (const targetConversationId of contextTargetConversationIds) {
             dependencies.runtimeSync.broadcast({

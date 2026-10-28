@@ -35,6 +35,12 @@ import {
 } from "./runtime-worker-startup-preflight.js";
 import { observeRuntimeStartup } from "./runtime-worker-startup-failure.js";
 import { answerRuntimeHtmlRenderRead } from "./runtime-html-render-reads.js";
+import {
+  installRuntimeWorkerFaultHandlers,
+  runtimeOwnedProcessFaultIncidentCode,
+} from "./runtime-worker-process-faults.js";
+import { createIncidentReporter } from "../node/application-incidents.js";
+import type { DiagnosticCode, DiagnosticOutcome } from "../shared/application-diagnostics.js";
 
 let runtime: RunningRuntime | null = null;
 const databaseRecoveryOperations = new DatabaseRecoveryOperationQueue();
@@ -49,6 +55,7 @@ const activeDatabaseRecoveryOperations = new Map<
 let starting = false;
 let stopping = false;
 let runtimeGeneration: number | null = null;
+let runtimeGenerationId: string | null = null;
 let updatePreparation: {
   operationId: string;
   generation: number;
@@ -157,6 +164,19 @@ function requestRuntimeRestart(reason: RuntimeRestartReason, diagnostic?: Runtim
     void shutdown(1);
   }
 }
+
+function recordWorkerIncident(code: DiagnosticCode, outcome: DiagnosticOutcome): void {
+  if (!runtimeGenerationId) return;
+  createIncidentReporter((incident) => post({ type: "runtime.incident", incident }), runtimeGenerationId)({
+    code, outcome,
+  });
+}
+
+installRuntimeWorkerFaultHandlers(process, {
+  started: () => runtimeGenerationId !== null,
+  recordIncident: (code) => recordWorkerIncident(code, code === "runtime.uncaught-exception" ? "failed" : "unknown"),
+  requestRestart: () => requestRuntimeRestart("uncaught-exception"),
+});
 
 parentPort.on("message", (messageEvent) => {
   const command = parseRuntimeWorkerCommand(messageEvent.data);
@@ -625,6 +645,7 @@ parentPort.on("message", (messageEvent) => {
   }
   starting = true;
   runtimeGeneration = Number(command.options.runtimeGenerationId.split(":")[1]);
+  runtimeGenerationId = command.options.runtimeGenerationId;
   updatePreparation = null;
   lastReleasedUpdatePreparation = null;
   try {
@@ -639,6 +660,10 @@ parentPort.on("message", (messageEvent) => {
           ...(guardianPath ? { darwinGuardianPath: guardianPath } : {}),
           ...(linuxGuardianExecutable ? { linuxGuardianExecutable } : {}),
           onTainted: (diagnostic) => requestRuntimeRestart("owned-process-tainted", diagnostic),
+          onProcessFault: (fault) => recordWorkerIncident(
+            runtimeOwnedProcessFaultIncidentCode(fault.kind),
+            fault.kind === "admission-rejected" ? "not-started" : "unknown",
+          ),
         },
       ),
     );

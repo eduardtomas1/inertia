@@ -584,6 +584,7 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
         name: "Toggle project navigation",
       }).click();
       await expect(navigation).toBeHidden();
+      await expect(page.locator(".app-shell")).not.toHaveAttribute("data-sidebar-collapse", /.+/u);
     }
     const workspacePanel = page.locator(".workspace-panel");
     await closeWorkspaceTools(page);

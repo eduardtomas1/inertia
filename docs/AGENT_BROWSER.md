@@ -361,8 +361,8 @@ runs. A successful `inertia_browser_resize` result says that earlier refs may
 be stale and asks for a new snapshot. Unless the tab is blank, it also reports
 `page: {"width","height"}`, the page's own `innerWidth` and `innerHeight` after
 the change, and when a tablet or mobile viewport's page is wider than the
-viewport it adds "The page has no viewport meta tag, so it laid out wider than
-the viewport." Its Evidence label is fixed, such as
+viewport it adds "The page laid out wider than the viewport, as pages without a
+viewport meta tag do." Its Evidence label is fixed, such as
 "Agent set the viewport to 1280×800", "Agent fitted the viewport to the
 panel" or "Agent set the dark colour scheme".
 

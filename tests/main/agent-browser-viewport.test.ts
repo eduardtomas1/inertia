@@ -186,7 +186,7 @@ describe("agent Browser viewport in the broker", () => {
     const mobile = await broker.perform(runIdentity, { action: "resize", preset: "mobile" });
     expect(mobile.ok && JSON.parse(mobile.text)).toMatchObject({
       page: { width: 980, height: 2_122 },
-      note: "The page layout may have changed, so earlier refs may be stale. Take a new inertia_browser_snapshot before using them. The page has no viewport meta tag, so it laid out wider than the viewport.",
+      note: "The page layout may have changed, so earlier refs may be stale. Take a new inertia_browser_snapshot before using them. The page laid out wider than the viewport, as pages without a viewport meta tag do.",
       state: { viewport: { width: 375, height: 812, mobile: true } },
     });
 

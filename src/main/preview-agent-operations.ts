@@ -48,7 +48,7 @@ export const OUTSIDE_VIEWPORT_MESSAGE = "That control is outside the visible par
 const CRASHED_PAGE_MESSAGE = "This tab's page crashed. Navigate to the page again to reload it.";
 const NAVIGATION_REPLACED_NOTE = "The page replaced this navigation before it finished. Take a snapshot to see which page is showing.";
 const VIEWPORT_CHANGED_NOTE = "The page layout may have changed, so earlier refs may be stale. Take a new inertia_browser_snapshot before using them.";
-const WIDER_LAYOUT_NOTE = "The page has no viewport meta tag, so it laid out wider than the viewport.";
+const WIDER_LAYOUT_NOTE = "The page laid out wider than the viewport, as pages without a viewport meta tag do.";
 
 type PreviewContents = PreviewTab["view"]["webContents"];
 

@@ -6,6 +6,7 @@ import {
   AGENT_BROWSER_INSPECT_BUDGET_MS,
   AGENT_BROWSER_NAVIGATION_BUDGET_MS,
   AGENT_BROWSER_QUEUE_WAIT_MS,
+  parseAgentBrowserViewportRequest,
   type AgentBrowserActivity,
   type AgentBrowserResult,
   type AgentBrowserRunIdentity,
@@ -19,15 +20,25 @@ import {
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import { recordAgentPageUnloadPrompt } from "./preview-agent-dialogs.js";
-import { captureAgentPageInputRefusal } from "./preview-agent-input.js";
+import { captureAgentPageInputRefusal, ensureAgentFileChooserBlock } from "./preview-agent-input.js";
 import { agentOperationBudget, agentOperationFailure, AgentOperationScope } from "./preview-agent-scope.js";
 import {
   blankTabRefusal,
-  PARKED_PREVIEW_BOUNDS,
   PreviewAgentOperations,
   type AgentOperationSession,
 } from "./preview-agent-operations.js";
+import {
+  agentViewportLayout,
+  agentViewportState,
+  emulateAgentPreviewPage,
+  nextAgentViewport,
+  PARKED_PREVIEW_BOUNDS,
+  sameAgentViewport,
+  setAgentPageEmulation,
+  type AgentViewportSetting,
+} from "./preview-agent-viewport.js";
 import type { PreviewAgentOperationFailure } from "./preview-agent-phase.js";
+import { agentPageLogs, hoverAgentPageElement, selectAgentPageElement } from "./preview-agent-interactions.js";
 import { BrowserEvidenceCapture, type BrowserEvidenceAuthority, type BrowserEvidencePage } from "./browser-evidence-capture.js";
 import { BrowserEvidenceInspectorRegistry, type BrowserEvidenceImageApproval, type BrowserEvidenceImageInspection } from "./browser-evidence-image-approval.js";
 import { PreviewContextRegistry } from "./preview-lifecycle.js";
@@ -111,6 +122,7 @@ export class PreviewBroker {
       openTab: (session) => this.#openTab(session),
       activateTab: (session, tabId) => this.#activateTab(session, tabId),
       closeTab: (session, tabId) => this.#closeTab(session, tabId),
+      setViewport: async (session, setting) => await this.#setViewport(session, setting),
       recordScreenshot: (session, tab, url, image) => this.#recordScreenshot(session, tab, url, image),
       recordOperationFailure: (operationFailure) => this.options.recordOperationFailure?.(operationFailure),
     });
@@ -161,11 +173,19 @@ export class PreviewBroker {
       ownerId?: unknown;
       contextId?: unknown;
       action?: unknown;
+      viewport?: unknown;
     };
     const ownerId = previewOwner(request.ownerId);
     const contextId = previewContext(request.contextId);
     const session = this.#ownedSession(ownerId, contextId);
     const action = request.action;
+    if (action === "viewport") {
+      const viewport = parseAgentBrowserViewportRequest(request.viewport);
+      if (session && viewport) {
+        void this.#setViewport(session, nextAgentViewport(session, viewport)).catch(() => undefined);
+      }
+      return this.#state(ownerId, contextId);
+    }
     if (
       !session
       || (action !== "back" && action !== "forward" && action !== "reload")
@@ -281,6 +301,9 @@ export class PreviewBroker {
           if (request.action === "prepare-approval") {
             const refusal = blankTabRefusal(this.#active(session).view.webContents, request.command);
             if (refusal) return refusal;
+            if (request.command.action === "navigate") {
+              await this.#operations.ensureSecurityDebugger(this.#active(session).view.webContents, operation);
+            }
           }
           try {
             const resolved = await this.#approvals.resolve(
@@ -317,6 +340,14 @@ export class PreviewBroker {
                 return await this.#operations.scroll(session, command, operation, validate);
               case "tabs":
                 return this.#success(session, boundedAgentStateText(this.#agentState(session)));
+              case "resize":
+                return await this.#operations.resize(session, command, operation, validate);
+              case "hover":
+                return await hoverAgentPageElement(this.#operations, session, command, operation, validate);
+              case "select":
+                return await selectAgentPageElement(this.#operations, session, command, operation, validate);
+              case "logs":
+                return agentPageLogs(this.#operations, session);
               case "tab-open":
                 return await this.#operations.openTab(session, command.url, operation, MAX_BROWSER_TABS);
               case "tab-activate":
@@ -579,6 +610,7 @@ export class PreviewBroker {
       activeTabId: session?.activeTabId ?? null, agentActivity: session?.activity ?? null,
       pageFocused: contents?.isFocused() ?? false,
       tabs: session ? [...session.tabs.values()].map((tab) => this.#previewTab(tab)) : [],
+      ...(session ? { viewport: agentViewportState(session) } : {}),
     };
   }
   #agentState(session: PreviewSession): AgentBrowserState {
@@ -587,6 +619,7 @@ export class PreviewBroker {
       tabs: [...session.tabs.values()].map((tab) => this.#agentTab(tab)),
       activity: session.activity,
       ...(session.controller === "user" ? { controller: "user" as const } : {}),
+      viewport: agentViewportState(session),
     };
   }
   #publish(session: PreviewSession): void {
@@ -661,15 +694,44 @@ export class PreviewBroker {
   }
 
   #layout(session: PreviewSession): void {
+    const layout = agentViewportLayout(session.bounds, session.viewport);
+    if (layout.scale !== session.viewportScale) {
+      session.viewportScale = layout.scale;
+      session.boundsGeneration += 1;
+      void this.#emulate(session).catch(() => undefined);
+    }
     const tab = session.tabs.get(session.activeTabId);
     if (!tab) return;
     if (!liveContents(tab)) {
       this.#dropDeadTabs(session);
       return;
     }
-    const bounds = session.bounds ?? PARKED_PREVIEW_BOUNDS;
+    const bounds = layout.bounds;
     if (!sameBounds(tab.view.getBounds(), bounds)) tab.view.setBounds(bounds);
     if (tab.view.getVisible() !== session.displayed) tab.view.setVisible(session.displayed);
+  }
+
+  async #setViewport(session: PreviewSession, setting: AgentViewportSetting): Promise<void> {
+    if (!sameAgentViewport(session, setting)) {
+      session.viewport = setting.viewport;
+      session.colorScheme = setting.colorScheme;
+      session.boundsGeneration += 1;
+    }
+    this.#layout(session);
+    this.#publish(session);
+    await this.#emulate(session);
+  }
+
+  async #emulate(session: PreviewSession, tabs = [...session.tabs.values()]): Promise<void> {
+    let active: Promise<void> = Promise.resolve();
+    for (const tab of tabs) {
+      const contents = liveContents(tab);
+      if (!contents) continue;
+      const emulated = emulateAgentPreviewPage(contents, session, session.viewportScale, ensureAgentFileChooserBlock);
+      if (tab.id === session.activeTabId) active = emulated;
+      else void emulated.catch(() => undefined);
+    }
+    await active;
   }
 
   #dropDeadTabs(session: PreviewSession, gone?: PreviewTab): void {
@@ -757,6 +819,9 @@ export class PreviewBroker {
       bounds: null,
       displayed: false,
       boundsGeneration: 0,
+      viewport: null,
+      colorScheme: "system",
+      viewportScale: 1,
       activity: null,
       agentQueue: Promise.resolve(),
       activeIdentity: null,
@@ -820,6 +885,7 @@ export class PreviewBroker {
           sameDocument,
           this.#evidenceAuthority(session, currentTab.id),
         );
+        if (!sameDocument) void this.#emulate(session, [currentTab]).catch(() => undefined);
       },
       allowUnload: (currentTab) => this.#allowUnload(session, currentTab),
       userInput: () => {
@@ -837,6 +903,7 @@ export class PreviewBroker {
     });
     tab.view.webContents.once("destroyed", () => this.#dropDeadTabs(session, tab));
     session.tabs.set(tab.id, tab);
+    void setAgentPageEmulation(tab.view.webContents, session, session.viewportScale).catch(() => undefined);
     return tab;
   }
 

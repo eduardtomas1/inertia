@@ -7,11 +7,14 @@ import {
   AGENT_BROWSER_NAVIGATION_BUDGET_MS,
   AGENT_BROWSER_QUEUE_WAIT_MS,
   AGENT_BROWSER_RUNTIME_BACKSTOP_MS,
+  MAX_AGENT_BROWSER_IMAGE_BYTES,
   MAX_AGENT_BROWSER_TEXT_BYTES,
   MAX_AGENT_BROWSER_WAIT_MS,
   agentBrowserTextLength,
   parseAgentBrowserCommand,
   parseAgentBrowserResult,
+  parseAgentBrowserViewport,
+  parseAgentBrowserViewportRequest,
 } from "../../src/shared/agent-browser";
 
 const tabId = "11111111-1111-4111-8111-111111111111";
@@ -124,14 +127,82 @@ describe("agent browser boundary", () => {
     );
   });
 
-  it("strictly bounds semantic text and tab state while rejecting bitmap bytes", () => {
-    const image = Buffer.from("small-png-fixture").toString("base64");
+  it("accepts only exact bounded viewport and interaction commands", () => {
+    expect(parseAgentBrowserCommand({ action: "resize", preset: "desktop" }))
+      .toEqual({ action: "resize", preset: "desktop" });
+    expect(parseAgentBrowserCommand({ action: "resize", width: 1_440, height: 900 }))
+      .toEqual({ action: "resize", width: 1_440, height: 900 });
+    expect(parseAgentBrowserCommand({ action: "resize", colorScheme: "dark" }))
+      .toEqual({ action: "resize", colorScheme: "dark" });
+    expect(parseAgentBrowserCommand({ action: "resize", preset: "mobile", colorScheme: "light" }))
+      .toEqual({ action: "resize", preset: "mobile", colorScheme: "light" });
+    expect(parseAgentBrowserCommand({ action: "resize" })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "resize", preset: "desktop", width: 1_280, height: 800 })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "resize", width: 1_280 })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "resize", width: 319, height: 800 })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "resize", width: 1_280, height: 2_561 })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "resize", width: 1_280.5, height: 800 })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "resize", preset: "phone" })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "resize", colorScheme: "auto" })).toBeNull();
+    expect(parseAgentBrowserViewportRequest({ preset: "fit" })).toEqual({ preset: "fit" });
+    expect(parseAgentBrowserViewportRequest({ width: 320, height: 240 })).toEqual({ width: 320, height: 240 });
+    expect(parseAgentBrowserViewportRequest({ preset: "fit", width: 320, height: 240 })).toBeNull();
+    expect(parseAgentBrowserViewportRequest({ width: 2_561, height: 240 })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "hover", ref: "e3" })).toEqual({ action: "hover", ref: "e3" });
+    expect(parseAgentBrowserCommand({ action: "hover", ref: "e3", dialog: "accept" })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "select", ref: "e3", value: "eu-west" }))
+      .toEqual({ action: "select", ref: "e3", value: "eu-west" });
+    expect(parseAgentBrowserCommand({ action: "select", ref: "e3", value: "" })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "select", ref: "e3", value: "a\nb" })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "select", ref: "e3", value: "x".repeat(201) })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "logs" })).toEqual({ action: "logs" });
+    expect(parseAgentBrowserCommand({ action: "logs", tabId })).toBeNull();
+  });
+  it("carries a bounded PNG image and viewport across the process boundary", () => {
+    const image = Buffer.from("small-png-fixture!!").toString("base64");
+    const viewport = { width: 1_280, height: 800, fit: false, mobile: false, colorScheme: "system" };
     expect(parseAgentBrowserResult({
       ok: true,
-      text: "snapshot",
+      text: "screenshot",
+      state: { ...state, viewport },
+      image: { mimeType: "image/png", data: image, width: 1_280, height: 800 },
+    })).toEqual({
+      ok: true,
+      text: "screenshot",
+      state: { ...state, viewport },
+      image: { mimeType: "image/png", data: image, width: 1_280, height: 800 },
+    });
+    expect(parseAgentBrowserResult({
+      ok: true,
+      text: "screenshot",
       state,
       image: { mimeType: "image/png", data: image },
     })).toBeNull();
+    expect(parseAgentBrowserResult({
+      ok: true,
+      text: "screenshot",
+      state,
+      image: { mimeType: "image/png", data: image, width: 1_569, height: 800 },
+    })).toBeNull();
+    expect(parseAgentBrowserResult({
+      ok: true,
+      text: "screenshot",
+      state,
+      image: { mimeType: "image/png", data: "not base64!", width: 10, height: 10 },
+    })).toBeNull();
+    expect(parseAgentBrowserResult({
+      ok: true,
+      text: "screenshot",
+      state,
+      image: { mimeType: "image/png", data: "A".repeat(Math.ceil(MAX_AGENT_BROWSER_IMAGE_BYTES / 3) * 4 + 4), width: 10, height: 10 },
+    })).toBeNull();
+    expect(parseAgentBrowserResult({ ok: true, text: "snapshot", state: { ...state, viewport: { ...viewport, fit: "yes" } } }))
+      .toBeNull();
+    expect(parseAgentBrowserViewport(viewport)).toEqual(viewport);
+    expect(parseAgentBrowserViewport({ ...viewport, colorScheme: "auto" })).toBeNull();
+  });
+  it("strictly bounds semantic text and tab state while rejecting bitmap bytes", () => {
+    const image = Buffer.from("small-png-fixture!!").toString("base64");
     expect(parseAgentBrowserResult({ ok: true, text: "snapshot", state: { ...state, tabs: [] } }))
       .toBeNull();
     expect(parseAgentBrowserResult({ ok: true, text: "snapshot", state: { ...state, controller: "user" } }))
@@ -147,7 +218,7 @@ describe("agent browser boundary", () => {
       ok: true,
       text: "snapshot",
       state,
-      image: { mimeType: "image/jpeg", data: image },
+      image: { mimeType: "image/jpeg", data: image, width: 10, height: 10 },
     })).toBeNull();
   });
 });

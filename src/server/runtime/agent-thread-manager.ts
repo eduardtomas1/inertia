@@ -37,6 +37,7 @@ import {
   AGENT_CONTEXT_TOOL_DEFINITION,
   AGENT_CONTEXT_TOOL_NAME,
   AgentContextTool,
+  imagesAccepted,
   type AgentContextWatcherPolicy,
 } from "./agent-context-tool";
 import { hostToolDigest as digest } from "./host-tool-digest";
@@ -425,7 +426,7 @@ export class AgentThreadManager {
           conversationId: current.id,
           runId: source.turn.runId,
           turnId: source.turn.id,
-        });
+        }, imagesAccepted(source.turn, this.dependencies.providerInfo()));
       }
       switch (call.tool) {
         case "inertia_list_conversations":

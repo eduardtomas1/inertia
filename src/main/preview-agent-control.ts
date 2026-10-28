@@ -1,10 +1,12 @@
 import type { WebContents } from "electron";
 
+import { agentPageViewPoint, type AgentPagePointMap } from "./preview-agent-viewport.js";
+
 const MAX_EXPECTED_INPUTS = 64;
 const EXPECTED_INPUT_TTL_MS = 2_000;
 const MOUSE_TOLERANCE_PX = 1;
 
-type AgentPageInput = Parameters<WebContents["sendInputEvent"]>[0];
+export type AgentPageInput = Parameters<WebContents["sendInputEvent"]>[0];
 
 interface ObservedInput {
   type?: unknown;
@@ -39,7 +41,16 @@ function liveExpectations(contents: object, now: number): ExpectedInput[] {
   return live;
 }
 
-export function sendAgentPageInput(contents: WebContents, input: AgentPageInput): void {
+export function mapAgentPageInput(input: AgentPageInput, map?: AgentPagePointMap): AgentPageInput {
+  const located = input as { x?: unknown; y?: unknown };
+  if (!map || typeof located.x !== "number" || typeof located.y !== "number") return input;
+  const point = agentPageViewPoint(map, located.x, located.y);
+  if (!point) throw new Error("The Browser input point is outside the visible page.");
+  return { ...input, x: point.x, y: point.y } as AgentPageInput;
+}
+
+export function sendAgentPageInput(contents: WebContents, page: AgentPageInput, map?: AgentPagePointMap): void {
+  const input = mapAgentPageInput(page, map);
   const kind = inputKind(input.type);
   if (kind) {
     const now = Date.now();

@@ -1,9 +1,16 @@
-import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "./provider-host-tools";
+import { MAX_PROVIDER_HOST_TOOL_IMAGE_BYTES, MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "./provider-host-tools";
 
 export const MAX_AGENT_BROWSER_TEXT_BYTES = MAX_PROVIDER_HOST_TOOL_RESULT_BYTES;
+export const MAX_AGENT_BROWSER_IMAGE_BYTES = MAX_PROVIDER_HOST_TOOL_IMAGE_BYTES;
+export const MAX_AGENT_BROWSER_IMAGE_EDGE = 1_568;
 export const MAX_AGENT_BROWSER_TYPE_CHARS = 4_000;
+export const MAX_AGENT_BROWSER_SELECT_CHARS = 200;
 export const MAX_AGENT_BROWSER_URL_CHARS = 4_096;
 export const MAX_AGENT_BROWSER_WAIT_TEXT_CHARS = 200;
+export const MIN_AGENT_BROWSER_VIEWPORT_WIDTH = 320;
+export const MAX_AGENT_BROWSER_VIEWPORT_WIDTH = 2_560;
+export const MIN_AGENT_BROWSER_VIEWPORT_HEIGHT = 240;
+export const MAX_AGENT_BROWSER_VIEWPORT_HEIGHT = 2_560;
 export const MIN_AGENT_BROWSER_WAIT_MS = 250;
 export const MAX_AGENT_BROWSER_WAIT_MS = 30_000;
 export const DEFAULT_AGENT_BROWSER_WAIT_MS = 10_000;
@@ -30,9 +37,50 @@ export type AgentBrowserActionKind =
   | "scroll"
   | "snapshot"
   | "screenshot"
+  | "resize"
+  | "hover"
+  | "select"
   | "tab-open"
   | "tab-activate"
   | "tab-close";
+
+export const AGENT_BROWSER_ACTION_KINDS = [
+  "navigate", "click", "type", "press", "scroll", "snapshot", "screenshot",
+  "resize", "hover", "select", "tab-open", "tab-activate", "tab-close",
+] as const satisfies readonly AgentBrowserActionKind[];
+
+export type AgentBrowserViewportPreset = "fit" | "desktop" | "tablet" | "mobile";
+export type AgentBrowserColorScheme = "light" | "dark" | "system";
+
+export const AGENT_BROWSER_VIEWPORT_PRESETS = ["fit", "desktop", "tablet", "mobile"] as const satisfies readonly AgentBrowserViewportPreset[];
+export const AGENT_BROWSER_COLOR_SCHEMES = ["light", "dark", "system"] as const satisfies readonly AgentBrowserColorScheme[];
+export const AGENT_BROWSER_VIEWPORT_SIZES: Readonly<Record<
+  Exclude<AgentBrowserViewportPreset, "fit">,
+  { width: number; height: number; mobile: boolean }
+>> = {
+  desktop: { width: 1_280, height: 800, mobile: false },
+  tablet: { width: 768, height: 1_024, mobile: true },
+  mobile: { width: 375, height: 812, mobile: true },
+};
+
+export interface AgentBrowserViewport {
+  width: number;
+  height: number;
+  fit: boolean;
+  mobile: boolean;
+  colorScheme: AgentBrowserColorScheme;
+}
+
+export type AgentBrowserViewportRequest =
+  | { preset: AgentBrowserViewportPreset }
+  | { width: number; height: number };
+
+export interface AgentBrowserImage {
+  mimeType: "image/png";
+  data: string;
+  width: number;
+  height: number;
+}
 
 export interface AgentBrowserTab {
   id: string;
@@ -55,19 +103,24 @@ export interface AgentBrowserState {
   tabs: AgentBrowserTab[];
   activity: AgentBrowserActivity | null;
   controller?: "user";
+  viewport?: AgentBrowserViewport;
 }
 
 export type AgentBrowserCommand =
   | { action: "snapshot" }
   | { action: "screenshot" }
+  | { action: "logs" }
   | { action: "navigate"; url: string }
   | { action: "history"; direction: "back" | "forward" | "reload" }
   | { action: "click"; ref: string; dialog?: "accept" }
+  | { action: "hover"; ref: string }
   | { action: "type"; ref: string; text: string; replace: boolean }
+  | { action: "select"; ref: string; value: string }
   | { action: "press"; key: AgentBrowserKey; dialog?: "accept" }
   | { action: "scroll"; deltaY: number }
   | { action: "scroll"; ref: string }
   | { action: "wait"; text?: string; state: "present" | "absent"; timeoutMs: number }
+  | { action: "resize"; preset?: AgentBrowserViewportPreset; width?: number; height?: number; colorScheme?: AgentBrowserColorScheme }
   | { action: "tabs" }
   | { action: "tab-open"; url?: string }
   | { action: "tab-activate"; tabId: string }
@@ -103,6 +156,7 @@ export type AgentBrowserResult =
       ok: true;
       text: string;
       state: AgentBrowserState;
+      image?: AgentBrowserImage;
     }
   | {
       ok: false;
@@ -186,14 +240,77 @@ function safeTabId(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
+function safeViewportWidth(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value)
+    && value >= MIN_AGENT_BROWSER_VIEWPORT_WIDTH && value <= MAX_AGENT_BROWSER_VIEWPORT_WIDTH;
+}
+
+function safeViewportHeight(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value)
+    && value >= MIN_AGENT_BROWSER_VIEWPORT_HEIGHT && value <= MAX_AGENT_BROWSER_VIEWPORT_HEIGHT;
+}
+
+function safePreset(value: unknown): value is AgentBrowserViewportPreset {
+  return (AGENT_BROWSER_VIEWPORT_PRESETS as readonly string[]).includes(value as string);
+}
+
+function safeColorScheme(value: unknown): value is AgentBrowserColorScheme {
+  return (AGENT_BROWSER_COLOR_SCHEMES as readonly string[]).includes(value as string);
+}
+
+export function parseAgentBrowserViewportRequest(value: unknown): AgentBrowserViewportRequest | null {
+  if (!plainObject(value)) return null;
+  if (exactKeys(value, ["preset"])) return safePreset(value.preset) ? { preset: value.preset } : null;
+  return exactKeys(value, ["width", "height"])
+    && safeViewportWidth(value.width)
+    && safeViewportHeight(value.height)
+    ? { width: value.width, height: value.height }
+    : null;
+}
+
+function parseResizeCommand(value: Record<string, unknown>): AgentBrowserCommand | null {
+  if (!exactKeys(value, ["action"], ["preset", "width", "height", "colorScheme"])) return null;
+  const sized = Object.hasOwn(value, "width") || Object.hasOwn(value, "height");
+  if (Object.hasOwn(value, "preset")) {
+    if (sized || !safePreset(value.preset)) return null;
+  } else if (sized) {
+    if (!safeViewportWidth(value.width) || !safeViewportHeight(value.height)) return null;
+  } else if (!Object.hasOwn(value, "colorScheme")) {
+    return null;
+  }
+  if (Object.hasOwn(value, "colorScheme") && !safeColorScheme(value.colorScheme)) return null;
+  return {
+    action: "resize",
+    ...(safePreset(value.preset) ? { preset: value.preset } : {}),
+    ...(sized ? { width: value.width as number, height: value.height as number } : {}),
+    ...(safeColorScheme(value.colorScheme) ? { colorScheme: value.colorScheme } : {}),
+  };
+}
+
 export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | null {
   if (!plainObject(value) || typeof value.action !== "string") return null;
   switch (value.action) {
     case "snapshot":
     case "screenshot":
+    case "logs":
     case "tabs":
       return exactKeys(value, ["action"])
         ? { action: value.action }
+        : null;
+    case "resize":
+      return parseResizeCommand(value);
+    case "hover":
+      return exactKeys(value, ["action", "ref"])
+        && typeof value.ref === "string"
+        && SAFE_REF_PATTERN.test(value.ref)
+        ? { action: "hover", ref: value.ref }
+        : null;
+    case "select":
+      return exactKeys(value, ["action", "ref", "value"])
+        && typeof value.ref === "string"
+        && SAFE_REF_PATTERN.test(value.ref)
+        && safeCommandText(value.value, MAX_AGENT_BROWSER_SELECT_CHARS)
+        ? { action: "select", ref: value.ref, value: value.value }
         : null;
     case "navigate":
       return exactKeys(value, ["action", "url"]) && safeUrl(value.url)
@@ -310,10 +427,7 @@ function safeActivity(value: unknown): value is AgentBrowserActivity {
     ["action", "label", "tabId", "at"],
     ["x", "y"],
   )) return false;
-  const actions = new Set<AgentBrowserActionKind>([
-    "navigate", "click", "type", "press", "scroll", "snapshot",
-    "screenshot", "tab-open", "tab-activate", "tab-close",
-  ]);
+  const actions = new Set<AgentBrowserActionKind>(AGENT_BROWSER_ACTION_KINDS);
   return typeof value.action === "string"
     && actions.has(value.action as AgentBrowserActionKind)
     && typeof value.label === "string"
@@ -329,10 +443,41 @@ function safeActivity(value: unknown): value is AgentBrowserActivity {
     ));
 }
 
+export function parseAgentBrowserViewport(value: unknown): AgentBrowserViewport | null {
+  return plainObject(value)
+    && exactKeys(value, ["width", "height", "fit", "mobile", "colorScheme"])
+    && typeof value.width === "number" && Number.isSafeInteger(value.width) && value.width > 0
+    && typeof value.height === "number" && Number.isSafeInteger(value.height) && value.height > 0
+    && typeof value.fit === "boolean"
+    && typeof value.mobile === "boolean"
+    && safeColorScheme(value.colorScheme)
+    ? {
+        width: value.width,
+        height: value.height,
+        fit: value.fit,
+        mobile: value.mobile,
+        colorScheme: value.colorScheme,
+      }
+    : null;
+}
+
+const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/u;
+
+function safeImage(value: unknown): value is AgentBrowserImage {
+  if (!plainObject(value) || !exactKeys(value, ["mimeType", "data", "width", "height"])) return false;
+  if (value.mimeType !== "image/png" || typeof value.data !== "string") return false;
+  if (value.data.length === 0 || value.data.length % 4 !== 0 || !BASE64_PATTERN.test(value.data)) return false;
+  if (Math.floor((value.data.length * 3) / 4) > MAX_AGENT_BROWSER_IMAGE_BYTES) return false;
+  const edge = (entry: unknown): boolean => typeof entry === "number"
+    && Number.isSafeInteger(entry) && entry > 0 && entry <= MAX_AGENT_BROWSER_IMAGE_EDGE;
+  return edge(value.width) && edge(value.height);
+}
+
 function safeState(value: unknown): value is AgentBrowserState {
   return plainObject(value)
-    && exactKeys(value, ["activeTabId", "tabs", "activity"], ["controller"])
+    && exactKeys(value, ["activeTabId", "tabs", "activity"], ["controller", "viewport"])
     && (value.controller === undefined || value.controller === "user")
+    && (value.viewport === undefined || parseAgentBrowserViewport(value.viewport) !== null)
     && safeTabId(value.activeTabId)
     && Array.isArray(value.tabs)
     && value.tabs.length > 0
@@ -363,11 +508,17 @@ export function parseAgentBrowserResult(value: unknown): AgentBrowserResult | nu
       : null;
   }
   if (
-    !exactKeys(value, ["ok", "text", "state"])
+    !exactKeys(value, ["ok", "text", "state"], ["image"])
     || typeof value.text !== "string"
     || utf8Bytes(value.text) > MAX_AGENT_BROWSER_TEXT_BYTES
     || value.text.includes("\0")
     || !safeState(value.state)
+    || (value.image !== undefined && !safeImage(value.image))
   ) return null;
-  return { ok: true, text: value.text, state: value.state };
+  return {
+    ok: true,
+    text: value.text,
+    state: value.state,
+    ...(value.image === undefined ? {} : { image: value.image as AgentBrowserImage }),
+  };
 }

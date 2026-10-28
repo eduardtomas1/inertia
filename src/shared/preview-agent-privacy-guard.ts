@@ -20,6 +20,7 @@ interface AgentBrowserPrivacyState {
   evidenceWithheld?: PreviewAgentWithheldReason;
   framesObserved?: boolean;
   shadowRootsObserved?: boolean;
+  closedShadowRootsObserved?: boolean;
   scanLimitReached?: boolean;
 }
 
@@ -28,6 +29,7 @@ type AgentBrowserPrivacyGlobal = typeof globalThis & {
 };
 
 export const PREVIEW_AGENT_NESTED_BOUNDARY_EVENT = "__inertia_agent_nested_boundary__";
+export const PREVIEW_AGENT_CLOSED_BOUNDARY_EVENT = "__inertia_agent_closed_boundary__";
 export const PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT = "__inertia_agent_credential_signal__";
 export type PreviewAgentWithheldReason = "credential-signal" | "hidden-input" | "document-too-large" | "redaction-limit";
 export const PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL = "inertia:preview-agent-input-refusal";
@@ -39,6 +41,7 @@ export function installPreviewAgentShadowBoundarySignal(
   credentialEventName: string,
   nameSource: string,
   wordSource: string,
+  closedEventName: string,
 ): void {
   const apply = Reflect.apply;
   const dispatch = EventTarget.prototype.dispatchEvent;
@@ -53,6 +56,18 @@ export function installPreviewAgentShadowBoundarySignal(
   const arrayIteratorNext = Object.getOwnPropertyDescriptor(arrayIteratorPrototype, "next")?.value as unknown;
   const signalShadowBoundary = (): void => {
     apply(dispatch, document, [new EventConstructor(eventName)]);
+  };
+  const signalClosedBoundary = (): void => {
+    apply(dispatch, document, [new EventConstructor(closedEventName)]);
+  };
+  const shadowRootMode = typeof ShadowRoot === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(ShadowRoot.prototype, "mode")?.get;
+  const signalShadowRoot = (root: ShadowRoot): void => {
+    signalShadowBoundary();
+    if (typeof shadowRootMode !== "function" || apply(shadowRootMode, root, []) !== "open") {
+      signalClosedBoundary();
+    }
   };
   const signal = (): void => {
     apply(dispatch, document, [new EventConstructor(credentialEventName)]);
@@ -86,7 +101,7 @@ export function installPreviewAgentShadowBoundarySignal(
       ...shadowDescriptor,
       value(this: Element, init: ShadowRootInit): ShadowRoot {
         const root = apply(attachShadow, this, [init]) as ShadowRoot;
-        signalShadowBoundary();
+        signalShadowRoot(root);
         return root;
       },
     });
@@ -101,7 +116,7 @@ export function installPreviewAgentShadowBoundarySignal(
       ...internalsDescriptor,
       value(this: HTMLElement): ElementInternals {
         const internals = apply(attachInternals, this, []) as ElementInternals;
-        if (internals.shadowRoot) signalShadowBoundary();
+        if (internals.shadowRoot) signalShadowRoot(internals.shadowRoot);
         return internals;
       },
     });
@@ -577,6 +592,9 @@ export function installPreviewAgentShadowBoundarySignal(
       ]) !== null) signal();
       else if (apply(querySelector, content, ["template[shadowrootmode]"]) !== null) {
         signalShadowBoundary();
+        if (apply(querySelector, content, [
+          "template[shadowrootmode]:not([shadowrootmode='open' i])",
+        ]) !== null) signalClosedBoundary();
       }
     } catch {
       signal();
@@ -769,6 +787,7 @@ export function installPreviewAgentPrivacyGuard(
 ): void {
   const owner = globalThis as AgentBrowserPrivacyGlobal;
   const nestedBoundaryEvent = "__inertia_agent_nested_boundary__";
+  const closedBoundaryEvent = "__inertia_agent_closed_boundary__";
   const credentialSignalEvent = "__inertia_agent_credential_signal__";
   let state = owner.__inertiaAgentBrowser;
   if (!state) {
@@ -861,6 +880,10 @@ export function installPreviewAgentPrivacyGuard(
   };
   activationTarget.addEventListener(nestedBoundaryEvent, () => {
     state.shadowRootsObserved = true;
+  }, true);
+  activationTarget.addEventListener(closedBoundaryEvent, () => {
+    state.shadowRootsObserved = true;
+    state.closedShadowRootsObserved = true;
   }, true);
   activationTarget.addEventListener(credentialSignalEvent, (event) => {
     const detail = (event as CustomEvent<unknown>).detail;

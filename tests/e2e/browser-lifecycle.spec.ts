@@ -127,16 +127,16 @@ test("shares one directly openable Browser across user, agent, and restart lifec
     },
     conversationId,
   );
-  expect(screenshot).toMatchObject({ ok: true });
-  expect(screenshot).not.toHaveProperty("image");
+  expect(screenshot).toMatchObject({ ok: true, image: { mimeType: "image/png" } });
   const screenshotEvidence = JSON.parse(String(screenshot.text)) as {
-    bitmap: string;
-    providerImage: boolean;
+    captured: boolean;
+    width: number;
+    height: number;
   };
-  expect(screenshotEvidence).toMatchObject({
-    bitmap: "local-only",
-    providerImage: false,
-  });
+  expect(screenshotEvidence).toMatchObject({ captured: true });
+  expect(screenshotEvidence).not.toHaveProperty("bitmap");
+  expect(screenshotEvidence.width).toBeGreaterThan(0);
+  expect(screenshotEvidence.height).toBeGreaterThan(0);
   await expect(sharedTools.getByRole("button", { name: /Evidence [1-9]/u }))
     .toBeVisible();
 
@@ -148,6 +148,21 @@ test("shares one directly openable Browser across user, agent, and restart lifec
   });
 
   await closeWorkspaceTools(page);
+  await expect.poll(() => app.nativePreviewIsVisible(agentUrl)).toBe(false);
+  const hiddenScreenshot = await app.electronApp.evaluate(
+    async (_electron, id) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          conversationId: string,
+          command: { action: "screenshot" },
+        ) => Promise<Record<string, unknown>>;
+      };
+      return await runtime.agentBrowser(id, { action: "screenshot" });
+    },
+    conversationId,
+  );
+  expect(hiddenScreenshot).toMatchObject({ ok: true, image: { mimeType: "image/png" } });
+
   ({ page } = await app.restart());
   await expect.poll(() => app.electronApp.evaluate(
     ({ webContents }, url) => webContents.getAllWebContents().some(

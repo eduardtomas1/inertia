@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatAttachment } from "@shared/contracts";
 import type { PreviewBounds, PreviewState, PreviewStateUpdate } from "@shared/desktop";
 import type { AttachmentPickerMode } from "@shared/desktop";
+import type { AgentBrowserViewportRequest } from "@shared/agent-browser";
 import {
   ATTACHMENT_UPLOAD_CHUNK_BYTES,
   MAX_ATTACHMENT_COUNT,
@@ -316,7 +317,8 @@ export function useDesktopTools({
   }, [previewContextId, previewOwnerId, previewIsCurrent, setActionError]);
 
   const previewCommand = useCallback((
-    action: "back" | "forward" | "reload",
+    action: "back" | "forward" | "reload" | "viewport",
+    viewport?: AgentBrowserViewportRequest,
   ) => {
     const contextId = previewContextId;
     if (!contextId) return;
@@ -324,6 +326,7 @@ export function useDesktopTools({
       ownerId: previewOwnerId,
       contextId,
       action,
+      ...(viewport ? { viewport } : {}),
     })
       .then((state) => {
         if (!previewIsCurrent()) return;

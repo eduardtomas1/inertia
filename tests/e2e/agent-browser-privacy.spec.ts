@@ -142,15 +142,18 @@ test("enforces Agent Browser activation and credential privacy boundaries", asyn
     notInspected: ["frames"],
     present: "Orders dashboard",
     absent: ["frame-only-sentinel", "frame-password-sentinel"],
+    screenshot: "sensitive",
   });
   await expectStructuralCoverage(app, conversationId, `${app.previewUrl}agent-browser-shadow-coverage`, {
     notInspected: ["shadow-roots"],
     present: "Component page",
     absent: ["shadow-only-sentinel", "component-value-sentinel"],
+    screenshot: "local",
   });
   await expectStructuralCoverage(app, conversationId, `${app.previewUrl}agent-browser-declarative-closed-privacy`, {
     notInspected: [],
     absent: ["declarative-closed-shadow-text"],
+    screenshot: "image",
   });
   for (const [path, visible] of [
     ["agent-browser-declarative-detached-privacy", "detached-declarative-visible-text"],
@@ -159,6 +162,7 @@ test("enforces Agent Browser activation and credential privacy boundaries", asyn
     notInspected: ["shadow-roots"],
     present: visible,
     absent: ["private"],
+    screenshot: "local",
   });
 
   const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");

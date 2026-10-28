@@ -4,7 +4,8 @@ import type { PreviewAgentInputRefusal } from "../shared/preview-agent-privacy-g
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import { AGENT_BROWSER_WORLD_ID, agentPageActivationBlocked, agentPageActivationTargetStillFocused, agentPageInputRefusal, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
 import { agentPageFocusIsHidden, installAgentFileChooserBlock, releaseAgentPageDebugger } from "./preview-agent-boundary.js";
-import { sendAgentPageInput } from "./preview-agent-control.js";
+import { mapAgentPageInput, sendAgentPageInput } from "./preview-agent-control.js";
+import type { AgentPagePointMap } from "./preview-agent-viewport.js";
 
 export {
   agentPageBoundaryGaps,
@@ -64,8 +65,10 @@ async function dispatchAgentPageHover(
   x: number,
   y: number,
   signal?: AbortSignal,
+  map?: AgentPagePointMap,
 ): Promise<void> {
   stopForAbort(signal);
+  const move = mapAgentPageInput({ type: "mouseMove", x, y }, map) as { type: "mouseMove"; x: number; y: number };
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     const cleanup = (): void => {
@@ -81,8 +84,8 @@ async function dispatchAgentPageHover(
       if (error) reject(error); else resolve();
     };
     const onInput = (_event: unknown, input: { type?: string; x?: number; y?: number }): void => {
-      if (input.type === "mouseMove" && Math.round(input.x ?? NaN) === Math.round(x)
-          && Math.round(input.y ?? NaN) === Math.round(y)) finish();
+      if (input.type === "mouseMove" && Math.round(input.x ?? NaN) === Math.round(move.x)
+          && Math.round(input.y ?? NaN) === Math.round(move.y)) finish();
     };
     const onDestroyed = (): void => finish(new Error("The active Browser tab closed during hover."));
     const onAbort = (): void => finish(new Error("browser-action-cancelled"));
@@ -96,7 +99,7 @@ async function dispatchAgentPageHover(
     signal?.addEventListener("abort", onAbort, { once: true });
     try {
       if (contents.isDestroyed()) finish(new Error("The active Browser tab closed before hover."));
-      else sendAgentPageInput(contents, { type: "mouseMove", x, y });
+      else sendAgentPageInput(contents, move);
     } catch (error) {
       finish(error instanceof Error ? error : new Error("The Browser hover failed."));
     }
@@ -197,11 +200,12 @@ export async function hoverAgentPageRef(
   x: number,
   y: number,
   signal?: AbortSignal,
+  map?: AgentPagePointMap,
 ): Promise<PreviewAgentTarget> {
   let hoverX = x;
   let hoverY = y;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    await dispatchAgentPageHover(contents, hoverX, hoverY, signal);
+    await dispatchAgentPageHover(contents, hoverX, hoverY, signal, map);
     stopForAbort(signal);
     await waitForAgentPageHover(contents);
     stopForAbort(signal);

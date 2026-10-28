@@ -21,6 +21,11 @@ import {
   type AgentBrowserSnapshotOmission,
 } from "../shared/agent-browser-snapshot.js";
 import { agentPageIsFrozen, evaluateInFrozenAgentPage } from "./preview-agent-boundary.js";
+import {
+  agentPageNestedEvidenceScript,
+  agentPageNestedEvidenceVerdict,
+  type AgentPageNestedEvidence,
+} from "./preview-agent-nested-evidence.js";
 
 // Electron's context-isolated preload world. This is the only world that owns
 // credential identity; the untrusted page cannot read or mutate its state.
@@ -646,6 +651,23 @@ export async function installAgentPagePrivacyGuard(contents: WebContents): Promi
   await execute(contents, `(${installPreviewAgentPrivacyGuard.toString()})(${PRIVACY_RUNTIME})`);
 }
 
+export async function agentPageDevicePixelRatio(contents: WebContents): Promise<number> {
+  const value = await execute(contents, "devicePixelRatio");
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 16) {
+    throw new Error("Inertia could not read the Browser page pixel ratio. Reload the page, then try again.");
+  }
+  return value;
+}
+
+export async function agentPageInnerSize(contents: WebContents): Promise<{ width: number; height: number }> {
+  const value = await execute(contents, "({ width: innerWidth, height: innerHeight })");
+  const { width, height } = plainObject(value) ? value : {};
+  if (typeof width !== "number" || typeof height !== "number" || !Number.isFinite(width) || !Number.isFinite(height)) {
+    throw new Error("Inertia could not read the Browser page size. Reload the page, then try again.");
+  }
+  return { width, height };
+}
+
 export async function agentPageHasSensitiveEvidence(contents: WebContents): Promise<boolean> {
   return (await agentPageEvidencePrivacy(contents)).withheld !== null;
 }
@@ -751,6 +773,15 @@ export async function agentPageHasSensitiveScreenshotEvidence(
 ): Promise<boolean> {
   if (await agentPageHasSensitiveEvidence(contents)) return true;
   return snapshotHasSensitiveVisualEvidence(await readSemanticPage(contents, []));
+}
+
+export async function agentPageNestedScreenshotEvidence(
+  contents: WebContents,
+): Promise<AgentPageNestedEvidence> {
+  return agentPageNestedEvidenceVerdict(
+    await execute(contents, agentPageNestedEvidenceScript(PRIVACY_RUNTIME)),
+    snapshotHasSensitiveVisualEvidence,
+  );
 }
 
 export async function setAgentPageInputGuard(

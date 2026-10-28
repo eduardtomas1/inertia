@@ -6,9 +6,12 @@ const ROOT = resolve(import.meta.dirname, "..");
 const SOURCE_PATH = join(ROOT, "resources", "icon.svg");
 const ICON_DIRECTORY = join(ROOT, "resources", "icons");
 const SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 192, 256, 512, 1024];
+const MARK_SCALE = 1.433904;
+const MARK_OFFSET_X = -230.045101;
+const MARK_OFFSET_Y = -202.800933;
 const EXPECTED_SOURCE_MARKERS = [
   'viewBox="0 0 1024 1024"',
-  'fill="#07070a"',
+  `transform="translate(${MARK_OFFSET_X} ${MARK_OFFSET_Y}) scale(${MARK_SCALE})"`,
   "M384 521",
   "m520 184",
 ];
@@ -73,13 +76,6 @@ function pointInPolygon(x, y, points) {
   return inside;
 }
 
-function inRoundedSquare(x, y) {
-  const radius = 168;
-  const innerX = Math.max(radius, Math.min(1024 - radius, x));
-  const innerY = Math.max(radius, Math.min(1024 - radius, y));
-  return Math.hypot(x - innerX, y - innerY) <= radius;
-}
-
 const shoulder = [[384, 521], [446, 459], [591, 459], [641, 521], [737, 521]];
 const body = [
   [[530, 485], [460, 703], [301, 703]],
@@ -108,28 +104,20 @@ function renderIcon(size) {
   const output = Buffer.alloc(size * size * 4);
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
-      let backgroundCoverage = 0;
       let markCoverage = 0;
       for (let sampleY = 0; sampleY < samples; sampleY += 1) {
         for (let sampleX = 0; sampleX < samples; sampleX += 1) {
-          const sourceX = ((x + (sampleX + 0.5) / samples) / size) * 1024;
-          const sourceY = ((y + (sampleY + 0.5) / samples) / size) * 1024;
-          if (!inRoundedSquare(sourceX, sourceY)) continue;
-          backgroundCoverage += 1;
+          const sourceX = (((x + (sampleX + 0.5) / samples) / size) * 1024 - MARK_OFFSET_X) / MARK_SCALE;
+          const sourceY = (((y + (sampleY + 0.5) / samples) / size) * 1024 - MARK_OFFSET_Y) / MARK_SCALE;
           if (isWhiteMark(sourceX, sourceY)) markCoverage += 1;
         }
       }
       const totalSamples = samples * samples;
       const offset = (y * size + x) * 4;
-      const alpha = Math.round((backgroundCoverage / totalSamples) * 255);
-      const mix = backgroundCoverage === 0 ? 0 : markCoverage / backgroundCoverage;
-      const dark = 8;
-      const light = 255;
-      const value = Math.round(dark + (light - dark) * mix);
-      output[offset] = value;
-      output[offset + 1] = value;
-      output[offset + 2] = Math.round(value + (1 - mix) * 2);
-      output[offset + 3] = alpha;
+      output[offset] = 255;
+      output[offset + 1] = 255;
+      output[offset + 2] = 255;
+      output[offset + 3] = Math.round((markCoverage / totalSamples) * 255);
     }
   }
   return encodePng(size, size, output);

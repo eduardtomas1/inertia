@@ -226,6 +226,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ id: message.id, result: { rateLimits: null, rateLimitsByLimitId: null } });
     return;
   }
+  if (message.method === "config/read") return send({ id: message.id, result: { config: {} } });
   if (message.method === "thread/start" || message.method === "thread/resume") {
     threadId = message.params.threadId || threadId;
     send({ id: message.id, result: { thread: { id: threadId }, model: "fixture" } });

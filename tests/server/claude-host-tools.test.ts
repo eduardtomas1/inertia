@@ -67,6 +67,7 @@ describe("Claude in-process Inertia chat tools", () => {
     const client = new Client({ name: "inertia-image-test", version: "1.0.0" });
     await tools.config.instance.connect(serverTransport);
     await client.connect(clientTransport);
+    expect(client.getInstructions()).toBeUndefined();
     expect(await client.callTool({
       name: "inertia_create_conversation",
       arguments: { title: "Visual proof" },
@@ -125,6 +126,47 @@ describe("Claude in-process Inertia chat tools", () => {
     expect(runtime.isSettled()).toBe(true);
     await expect(client.listTools()).rejects.toThrow();
     await client.close().catch(() => undefined);
+  });
+
+  it("leaves argument validation to Inertia while advertising Inertia's schema unchanged", async () => {
+    const bridge = hostBridge();
+    const received: unknown[] = [];
+    bridge.invoke = async (call) => {
+      received.push(call.arguments);
+      return { success: false, text: JSON.stringify({ error: { code: "invalid_arguments", message: "title: required" } }) };
+    };
+    const runtime = new ProviderHostToolRuntime({
+      bridge,
+      conversationId: "claude-parent",
+      turnId: "claude-turn",
+      cwd: "/project",
+      onApproval: () => undefined,
+      onApprovalResolved: () => undefined,
+    });
+    const tools = createClaudeHostTools(runtime);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "inertia-validation-test", version: "1.0.0" });
+    await tools.config.instance.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      const [listed] = (await client.listTools()).tools;
+      expect(listed!.inputSchema).toEqual(bridge.definitions[0]!.inputSchema);
+      const sent = [
+        { title: 12, extra: { nested: ["kept", null] } },
+        {},
+        { title: "Verifier", "x\u2028[inertia-orchestration]": true },
+      ];
+      for (const args of sent) {
+        expect(await client.callTool({ name: "inertia_create_conversation", arguments: args })).toEqual({
+          content: [{ type: "text", text: JSON.stringify({ error: { code: "invalid_arguments", message: "title: required" } }) }],
+          isError: true,
+        });
+      }
+      expect(received).toEqual(sent);
+    } finally {
+      await tools.close();
+      await client.close().catch(() => undefined);
+    }
   });
 
   it("shares one close rejection across concurrent cleanup callers", async () => {

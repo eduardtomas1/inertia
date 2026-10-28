@@ -26,7 +26,7 @@ const EMPTY_BRIDGE: ProviderHostToolBridge = Object.freeze({
   definitions: [],
   invoke: () => Promise.resolve({
     success: false,
-    text: JSON.stringify({ error: "unknown_tool", message: "That Inertia host tool is not available." }),
+    text: JSON.stringify({ error: { code: "unknown_tool", message: "That Inertia host tool is not available." } }),
   }),
 });
 

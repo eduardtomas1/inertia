@@ -109,7 +109,6 @@ function initializeResult(requested: unknown): Record<string, unknown> {
       title: "Inertia chat manager",
       version: "1.0.0",
     },
-    instructions: "These tools manage bounded top-level Inertia chats in the current project. Mutating actions require an exact user approval in Inertia.",
   };
 }
 

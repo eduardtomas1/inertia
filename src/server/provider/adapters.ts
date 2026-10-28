@@ -27,6 +27,16 @@ function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
 }
 
+function validSystemLevelInstruction(value: unknown, channelAvailable: boolean): boolean {
+  return value === undefined || (
+    typeof value === "string"
+    && value.trim().length > 0
+    && !value.includes("\0")
+    && Buffer.byteLength(value, "utf8") <= MAX_SYSTEM_INSTRUCTION_BYTES
+    && channelAvailable
+  );
+}
+
 export function validateProviderRunInput(input: ProviderRunInput): string {
   if (!isProviderId(input.providerId)) throw new ProviderRuntimeError("invalid_input", "Unknown provider.");
   if (!currentKnownHarnessIdSchema.safeParse(input.harnessId).success) {
@@ -159,19 +169,16 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       "The read-only profile is invalid.",
     );
   }
-  if (
-    input.systemInstruction !== undefined
-    && (
-      typeof input.systemInstruction !== "string"
-      || input.systemInstruction.trim().length === 0
-      || input.systemInstruction.includes("\0")
-      || Buffer.byteLength(input.systemInstruction, "utf8") > MAX_SYSTEM_INSTRUCTION_BYTES
-      || !watcherHarnessProfile(input.harnessId).systemInstruction
-    )
-  ) {
+  if (!validSystemLevelInstruction(input.systemInstruction, watcherHarnessProfile(input.harnessId).systemInstruction)) {
     throw new ProviderRuntimeError(
       "invalid_input",
       "The system instruction is invalid.",
+    );
+  }
+  if (!validSystemLevelInstruction(input.sessionInstruction, watcherHarnessProfile(input.harnessId).sessionInstruction)) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The session instruction is invalid.",
     );
   }
   if (input.goalStart) {

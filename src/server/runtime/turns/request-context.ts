@@ -42,15 +42,16 @@ const MAX_IMAGE_COUNT = MAX_ATTACHMENT_COUNT;
 const MAX_IMAGE_BYTES = MAX_IMAGE_ATTACHMENT_BYTES;
 const MAX_TOTAL_IMAGE_BYTES = MAX_IMAGE_ATTACHMENT_TOTAL_BYTES;
 const SHA256_REFERENCE_PATTERN = /^sha256:([0-9a-f]{64})$/u;
+const SESSION_INSTRUCTION_DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const BUILD_MODE_INSTRUCTION_LABEL = "build-mode";
 const CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES = 512;
 const EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES = 256;
 
 export const BUILD_MODE_INSTRUCTION = [
-  "In Build mode, inspect enough to act safely, then implement and validate promptly.",
-  "Keep visible planning brief and operational; use a formal numbered plan only when the user requests one, the task is ambiguous, or safe staged coordination requires it.",
-  "Do not finish while delegated, background, or other tool work you started is pending; wait for it and incorporate its result before the final response.",
-  "The runtime cannot continue work or notify the user after the final response. If blocked, state the blocker and do not imply that work is still running.",
+  "Build mode: inspect enough to act safely, then implement and validate.",
+  "Keep planning brief; number a plan only when asked, for an ambiguous task, or for staged work.",
+  "Before finishing, wait for background commands you started and read the status and latest result of any chat you dispatched.",
+  "Nothing runs after your final reply; if blocked, say so.",
 ].join(" ");
 
 export type TurnExecutionContextKind =
@@ -83,7 +84,7 @@ export interface TurnExecutionManifestReference {
 
 /**
  * Safe to persist or log. It deliberately carries no context body, assembled
- * provider prompt, image path, or hidden provider instruction text/digest.
+ * provider prompt, image path, or hidden provider instruction text.
  */
 export interface SanitizedTurnExecutionManifest {
   version: 1;
@@ -95,6 +96,8 @@ export interface SanitizedTurnExecutionManifest {
   contextBytes: number;
   internalInstructionCount: number;
   internalInstructionBytes: number;
+  sessionInstructionDigest?: string;
+  promptWithheld?: true;
   executionSegmentCount: number;
   assembledPayloadBytes: number;
   references: TurnExecutionManifestReference[];
@@ -142,6 +145,8 @@ export interface AssembleTurnRequestInput {
   conversationContexts?: (capacityBytes: number) => ConversationContextMaterialization;
   carriedConversationContexts?: readonly MaterializedConversationContext[];
   internalInstructions?: readonly HiddenProviderInstruction[];
+  sessionInstructionDigest?: string;
+  promptWithheld?: true;
   restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
 }
 
@@ -203,6 +208,20 @@ function requiredBoundedInteger(
     throw new Error(`${label} is invalid.`);
   }
   return value as number;
+}
+
+export function isSessionInstructionDigest(value: unknown): value is string {
+  return typeof value === "string" && SESSION_INSTRUCTION_DIGEST_PATTERN.test(value);
+}
+
+function requiredSessionInstructionDigest(value: unknown): string {
+  if (!isSessionInstructionDigest(value)) throw new Error("Session instruction digest is invalid.");
+  return value;
+}
+
+function requiredPromptWithheld(value: unknown): true {
+  if (value !== true) throw new Error("Withheld prompt marker is invalid.");
+  return value;
 }
 
 export function parseSanitizedTurnExecutionManifest(
@@ -283,6 +302,12 @@ export function parseSanitizedTurnExecutionManifest(
       "Internal instruction byte size",
       MAX_INTERNAL_INSTRUCTION_BYTES,
     ),
+    ...(manifest.sessionInstructionDigest === undefined
+      ? {}
+      : { sessionInstructionDigest: requiredSessionInstructionDigest(manifest.sessionInstructionDigest) }),
+    ...(manifest.promptWithheld === undefined
+      ? {}
+      : { promptWithheld: requiredPromptWithheld(manifest.promptWithheld) }),
     executionSegmentCount: requiredBoundedInteger(
       manifest.executionSegmentCount,
       "Execution segment count",
@@ -862,6 +887,10 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
         contextBytes: references.reduce((total, reference) => total + reference.byteSize, 0),
         internalInstructionCount: internalInstructions.length,
         internalInstructionBytes,
+        ...(input.sessionInstructionDigest === undefined
+          ? {}
+          : { sessionInstructionDigest: requiredSessionInstructionDigest(input.sessionInstructionDigest) }),
+        ...(input.promptWithheld ? { promptWithheld: true as const } : {}),
         executionSegmentCount,
         assembledPayloadBytes,
         references,

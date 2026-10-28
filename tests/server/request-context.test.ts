@@ -96,11 +96,11 @@ describe("bounded structured turn request context", () => {
       "gu",
     ))).toHaveLength(1);
     expect(BUILD_MODE_INSTRUCTION).toContain(
-      "Do not finish while delegated, background, or other tool work you started is pending",
+      "Before finishing, wait for background commands you started and read the status and latest result of any chat you dispatched.",
     );
-    expect(BUILD_MODE_INSTRUCTION).toContain(
-      "The runtime cannot continue work or notify the user after the final response",
-    );
+    expect(BUILD_MODE_INSTRUCTION).toContain("Nothing runs after your final reply");
+    expect(BUILD_MODE_INSTRUCTION).not.toContain("delegated");
+    expect(Buffer.byteLength(BUILD_MODE_INSTRUCTION, "utf8")).toBeLessThanOrEqual(350);
     const injectedBuildLabelIndex = build.executionPrompt.indexOf(
       "[build-mode]",
       visibleContent.length,
@@ -485,6 +485,32 @@ describe("bounded structured turn request context", () => {
     expect(crowded.conversationContextDeliveries).toEqual([
       expect.objectContaining({ packetId, budgetBytes: capacities[1] }),
     ]);
+  });
+
+  it("adds no instruction header when no instruction is due and records the session instruction digest", async () => {
+    const cwd = await workspace();
+    const digest = "a".repeat(64);
+    const bare = assembleTurnRequest({ cwd, visibleContent: "hello", sessionInstructionDigest: digest, promptWithheld: true });
+
+    expect(bare.executionPrompt).toBe("hello");
+    expect(bare.persistence.manifest).toMatchObject({
+      internalInstructionCount: 0,
+      internalInstructionBytes: 0,
+      sessionInstructionDigest: digest,
+      promptWithheld: true,
+      executionSegmentCount: 1,
+      assembledPayloadBytes: 5,
+    });
+    expect(parseSanitizedTurnExecutionManifest(bare.persistence.manifest)).toEqual(bare.persistence.manifest);
+    const plain = assembleTurnRequest({ cwd, visibleContent: "hello" }).persistence.manifest;
+    expect(plain).not.toHaveProperty("sessionInstructionDigest");
+    expect(plain).not.toHaveProperty("promptWithheld");
+    for (const sessionInstructionDigest of ["A".repeat(64), "a".repeat(63), 1_234]) {
+      expect(() => parseSanitizedTurnExecutionManifest({ ...bare.persistence.manifest, sessionInstructionDigest }))
+        .toThrow("Session instruction digest is invalid.");
+    }
+    expect(() => parseSanitizedTurnExecutionManifest({ ...bare.persistence.manifest, promptWithheld: false }))
+      .toThrow("Withheld prompt marker is invalid.");
   });
 
   it("rejects inconsistent manifest totals during privileged debug decoding", () => {

@@ -1,6 +1,11 @@
 import { strictCodexProviderIdentifier } from "./app-server-subagents";
 import { type JsonObject, type RpcId } from "./protocol";
-import { providerHostToolAccepted, type ProviderHostToolResult } from "../provider/contracts";
+import {
+  providerHostToolAccepted,
+  type ProviderHostToolResult,
+  UNSAFE_HOST_TOOL_NAME_CHARACTERS,
+  unknownProviderHostToolMessage,
+} from "../provider/contracts";
 import type { AgentApprovalDecision } from "../provider/interactions";
 import { ProviderHostToolRuntime } from "../provider/host-tool-runtime";
 import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "../../shared/provider-host-tools";
@@ -79,7 +84,12 @@ export class CodexHostToolRuntime {
     );
     const providerTurnId = strictCodexProviderIdentifier(params.turnId, 512);
     const toolCallId = strictCodexProviderIdentifier(params.callId, 512);
-    const tool = strictCodexProviderIdentifier(params.tool, 128);
+    const tool = strictCodexProviderIdentifier(params.tool, 128)
+      ?? (typeof params.tool === "string"
+        && params.tool.length <= 128
+        && strictCodexProviderIdentifier(params.tool.trim(), 128) !== null
+        ? params.tool
+        : null);
     if (!bridge) {
       this.writeOrCancel({
         id,
@@ -98,7 +108,7 @@ export class CodexHostToolRuntime {
       || !this.host.isOwnedTurn(providerThreadId, providerTurnId)
       || !toolCallId
       || !tool
-      || !providerHostToolAccepted(bridge, tool)
+      || UNSAFE_HOST_TOOL_NAME_CHARACTERS.test(tool)
     ) {
       this.writeOrCancel({
         id,
@@ -106,6 +116,13 @@ export class CodexHostToolRuntime {
           code: -32602,
           message: "Codex sent an invalid or unauthorised Inertia tool call.",
         },
+      });
+      return;
+    }
+    if (!providerHostToolAccepted(bridge, tool)) {
+      this.writeOrCancel({
+        id,
+        error: { code: -32602, message: unknownProviderHostToolMessage(bridge, tool) },
       });
       return;
     }

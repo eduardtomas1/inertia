@@ -131,6 +131,7 @@ interface ProviderRunRequest {
   maxBudgetUsd?: number;
   readOnlyProfile?: "watcher";
   systemInstruction?: string;
+  sessionInstruction?: string;
   /** Provider-owned control operation that must never become a durable turn. */
   operation?: {
     kind: "compact";
@@ -436,12 +437,14 @@ export interface ProviderHostToolDefinition {
   name: string;
   description: string;
   inputSchema: Readonly<Record<string, unknown>>;
-  /** Process-local validator used by in-process provider tool transports. */
+  /** Process-local validator that must accept exactly what inputSchema advertises. */
   inputValidator?: ZodType<Record<string, unknown>>;
   readOnly: boolean;
   destructive?: boolean;
   idempotent?: boolean;
 }
+
+export type ProviderHostToolApprovalDecision = AgentApprovalDecision | "timeout";
 
 export interface ProviderHostToolApprovalRequest {
   title: string;
@@ -459,7 +462,7 @@ export interface ProviderHostToolCall {
   signal: AbortSignal;
   requestApproval(
     request: ProviderHostToolApprovalRequest,
-  ): Promise<AgentApprovalDecision>;
+  ): Promise<ProviderHostToolApprovalDecision>;
 }
 
 export interface ProviderHostToolImage {
@@ -489,6 +492,44 @@ export function providerHostToolAccepted(
 ): boolean {
   return bridge.definitions.some(({ name }) => name === tool)
     || bridge.retiredToolNames?.has(tool) === true;
+}
+
+const MAX_LISTED_HOST_TOOL_NAMES = 32;
+const MAX_SUGGESTION_DISTANCE = 3;
+const ECHOABLE_HOST_TOOL_NAME = /^[A-Za-z0-9_.:-]{1,128}$/u;
+export const UNSAFE_HOST_TOOL_NAME_CHARACTERS = /[\u0000-\u001f\u007f\u2028\u2029]/u;
+
+function editDistance(left: string, right: string): number {
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    const current = [row];
+    for (let column = 1; column <= right.length; column += 1) {
+      current[column] = Math.min(
+        previous[column]! + 1,
+        current[column - 1]! + 1,
+        previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1),
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length]!;
+}
+
+export function unknownProviderHostToolMessage(
+  bridge: ProviderHostToolBridge,
+  tool: string,
+): string {
+  const names = bridge.definitions.map(({ name }) => name);
+  if (names.length === 0) return "Unknown Inertia tool; this chat has no Inertia tools.";
+  const suffix = names.find((name) => tool.endsWith(`__${name}`));
+  const nearest = names
+    .map((name) => ({ name, distance: editDistance(tool, name) }))
+    .sort((left, right) => left.distance - right.distance)[0]!;
+  const suggestion = suffix ?? (nearest.distance <= MAX_SUGGESTION_DISTANCE ? nearest.name : undefined);
+  const unknown = suggestion && ECHOABLE_HOST_TOOL_NAME.test(tool) ? `Unknown Inertia tool ${tool}` : "Unknown Inertia tool";
+  const listed = names.slice(0, MAX_LISTED_HOST_TOOL_NAMES).join(", ");
+  const more = names.length > MAX_LISTED_HOST_TOOL_NAMES ? ", …" : "";
+  return `${unknown}.${suggestion ? ` Did you mean ${suggestion}?` : ""} Available: ${listed}${more}.`;
 }
 
 export type ProviderTerminalOutcome =

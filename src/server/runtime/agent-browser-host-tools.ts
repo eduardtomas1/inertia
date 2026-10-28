@@ -26,6 +26,7 @@ import {
   type AgentBrowserState,
 } from "../../shared/agent-browser.js";
 import type {
+  ProviderHostToolApprovalDecision,
   ProviderHostToolCall,
   ProviderHostToolDefinition,
   ProviderHostToolResult,
@@ -573,23 +574,29 @@ export class AgentBrowserHostTools {
       const approval = parseAgentBrowserApproval(prepared.text);
       if (!approval) return failure("invalid", "The Browser approval could not be inspected.");
       let approved = false;
+      let decision: ProviderHostToolApprovalDecision | undefined;
       try {
         if (!isSafeApprovalDisplayText(approval.detail, true)) {
           return failure("invalid", "The Browser approval contains unsafe display text.");
         }
-        approved = await call.requestApproval({
+        decision = await call.requestApproval({
           title: "Control Inertia Browser",
           detail: approval.detail,
           reason: command.action === "resize"
             ? "This changes the viewport of every page in this chat's Browser."
             : "This approval applies only to the inspected tab and document.",
           permissionRoots: [],
-        }) === "approve" && !call.signal.aborted;
+        });
+        approved = decision === "approve" && !call.signal.aborted;
       } finally {
         if (!approved) await this.browser.perform(identity, { action: "discard-approval", token: approval.token })
           .catch(() => undefined);
       }
-      if (!approved) return failure("user_denied", "The user did not approve this browser action.");
+      if (!approved) {
+        return decision === "timeout"
+          ? failure("approval_timed_out", "The user did not answer the approval in time. Ask the user to try again, then repeat the browser call.")
+          : failure("user_denied", "The user did not approve this browser action.");
+      }
       execution = { action: "perform-approved", token: approval.token };
     }
     if (call.signal.aborted) {

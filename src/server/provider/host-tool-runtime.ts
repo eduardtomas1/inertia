@@ -7,10 +7,13 @@ import {
 } from "../../shared/provider-host-tools";
 import {
   providerHostToolAccepted,
+  type ProviderHostToolApprovalDecision,
   type ProviderHostToolApprovalRequest,
   type ProviderHostToolBridge,
   type ProviderHostToolImage,
   type ProviderHostToolResult,
+  UNSAFE_HOST_TOOL_NAME_CHARACTERS,
+  unknownProviderHostToolMessage,
 } from "./contracts";
 import type {
   AgentApprovalDecision,
@@ -24,7 +27,7 @@ const MAX_PENDING_HOST_TOOL_CALLS = 8;
 
 interface PendingApproval {
   callId: string;
-  resolve(decision: AgentApprovalDecision): void;
+  resolve(decision: ProviderHostToolApprovalDecision): void;
   timeout: NodeJS.Timeout;
 }
 
@@ -80,7 +83,7 @@ function failure(message: string): ProviderHostToolResult {
 function validIdentity(value: string, maximum: number): boolean {
   return value.length > 0
     && value.length <= maximum
-    && !/[\u0000-\u001f\u007f]/u.test(value);
+    && !UNSAFE_HOST_TOOL_NAME_CHARACTERS.test(value);
 }
 
 const HOST_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
@@ -132,12 +135,11 @@ export class ProviderHostToolRuntime {
     if (this.settled) {
       return Promise.resolve(failure("This Inertia turn no longer owns chat-tool authority."));
     }
-    if (
-      !validIdentity(input.callId, 512)
-      || !validIdentity(input.tool, 128)
-      || !providerHostToolAccepted(this.options.bridge, input.tool)
-    ) {
-      return Promise.resolve(failure("The provider sent an invalid or unauthorised Inertia tool call."));
+    if (!validIdentity(input.callId, 512) || !validIdentity(input.tool, 128)) {
+      return Promise.resolve(failure("The provider sent a malformed Inertia tool call."));
+    }
+    if (!providerHostToolAccepted(this.options.bridge, input.tool)) {
+      return Promise.resolve(failure(unknownProviderHostToolMessage(this.options.bridge, input.tool)));
     }
     if (this.seenCallIds.has(input.callId)) {
       // MCP/JSON-RPC only promises correlation, not run-global uniqueness.
@@ -261,7 +263,7 @@ export class ProviderHostToolRuntime {
   private requestApproval(
     callId: string,
     request: ProviderHostToolApprovalRequest,
-  ): Promise<AgentApprovalDecision> {
+  ): Promise<ProviderHostToolApprovalDecision> {
     const call = this.pendingCalls.get(callId);
     if (
       this.settled
@@ -280,12 +282,12 @@ export class ProviderHostToolRuntime {
       permissionRoots: request.permissionRoots.slice(0, 8),
       availableDecisions: ["approve", "deny", "cancel"],
     };
-    return new Promise<AgentApprovalDecision>((resolve) => {
+    return new Promise<ProviderHostToolApprovalDecision>((resolve) => {
       const timeout = setTimeout(() => {
         const pending = this.pendingApprovals.get(requestId);
         if (!pending) return;
         this.pendingApprovals.delete(requestId);
-        pending.resolve("deny");
+        pending.resolve("timeout");
         this.options.onApprovalResolved(requestId, "deny");
       }, Math.max(1, Math.min(
         HOST_TOOL_APPROVAL_TIMEOUT_MS,

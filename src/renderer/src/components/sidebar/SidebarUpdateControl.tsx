@@ -32,7 +32,6 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null, 
   const [pending, setPending] = useState<UpdateAction | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [openingRelease, setOpeningRelease] = useState(false);
-  const [spinMoving, setSpinMoving] = useState(false);
   const [watermark] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
@@ -67,14 +66,11 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null, 
   const stripActive = stripView?.active === true;
   const everythingLabel = everythingPlan
     ? updateEverythingLabel(everythingPlan.app !== null, everythingPlan.providers.map((provider) => provider.label)) : null;
-  const spinWanted = checking && !stripActive && (spinMoving || !everythingLabel);
-  const holdSpin = spinWanted || spinMoving;
-  const appPresentation = updatePresentation(status, holdSpin);
+  const appPresentation = updatePresentation(status, checking);
   const presentation: ReturnType<typeof updatePresentation> = stripActive
     ? { icon: appPresentation.icon === "checking" ? "idle" : appPresentation.icon, action: "details", label: "Update details", actionLabel: "Update details" }
-    : holdSpin ? appPresentation
-      : everythingLabel && pending === null ? { icon: "available", action: "everything", label: everythingLabel, actionLabel: everythingLabel }
-        : appPresentation;
+    : everythingLabel && pending === null ? { icon: "available", action: "everything", label: everythingLabel, actionLabel: everythingLabel }
+      : appPresentation;
   const percent = updatePercent(status?.progress?.percent);
   const disabled = pending !== null || presentation.action === "none" || (presentation.action === "release" && openingRelease);
   useNativePreviewSuspension(open || confirmation !== null);
@@ -259,8 +255,7 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null, 
           requestAnimationFrame(() => popup.current?.querySelector<HTMLButtonElement>("button")?.focus());
         }
       }}>
-      <UpdateStatusIcon state={presentation.icon} percent={percent} spinning={spinWanted}
-        reducedMotion={reducedMotion} onMovingChange={setSpinMoving} />
+      <UpdateStatusIcon state={presentation.icon} percent={percent} reducedMotion={reducedMotion} />
     </button>
     <span className="update-status-announcement" role="status" aria-live="polite">{stripView?.title ?? status?.message ?? ""}</span>
     {open && <div ref={popup} id={popupId} popover="manual" className="sidebar-update-details" role="dialog"

@@ -1,4 +1,4 @@
-import type { AgentActivity, Conversation } from "../../../shared/contracts";
+import type { AgentActivity, Conversation, ProviderInfo } from "../../../shared/contracts";
 import {
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
@@ -33,6 +33,13 @@ import {
   sharesInterruptionEndpoint,
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
+import {
+  instructionPack,
+  resolveHiddenInstructionDelivery,
+  sessionInstructionText,
+  systemInstructionText,
+  type PromptInstructionDeliveries,
+} from "./turn-instruction-delivery";
 import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
 import type {
   ActiveTurn,
@@ -45,6 +52,8 @@ import type {
 
 const CUSTOM_BACKEND_RESTORED_HISTORY_BYTES = 48 * 1_024;
 
+type InstructionRoute = Parameters<typeof routeUsesTrustedHostBridge>[0];
+
 export type PreparedActiveTurn = Omit<
   ActiveTurn,
   "assistantStream" | "reasoningStream"
@@ -54,6 +63,7 @@ export interface PrepareTurnRequestDependencies {
   store: RuntimeStore;
   providers: TurnProviderRuntime;
   hooks: TurnControllerHooks;
+  instructionDeliveries?: PromptInstructionDeliveries;
   id(): string;
   now(): string;
   clock(): Date;
@@ -145,6 +155,36 @@ function retireUsageLimitSnooze(
   dependencies.store.updateConversation(conversationId, { snoozedUntil: null });
 }
 
+function routeHostBridgeAttested(
+  providerInfo: readonly ProviderInfo[],
+  route: InstructionRoute,
+): boolean {
+  const capabilityContract = providerInfo.find(({ id }) => id === route.providerId)?.capabilityContract;
+  return capabilityContract !== undefined
+    && capabilityContract.installationVerified
+    && capabilityContract.hostToolBridgeAvailable
+    && capabilityContract.harnessId === route.harnessId
+    && routeUsesTrustedHostBridge(route);
+}
+
+export function compactionSessionInstruction(
+  dependencies: Pick<PrepareTurnRequestDependencies, "store" | "hooks">,
+  conversation: Conversation,
+  route: InstructionRoute,
+): string | undefined {
+  const watcher = dependencies.store.watcherLinks.policyForConversation(conversation.id);
+  if (
+    !routeHostBridgeAttested(dependencies.hooks.providerInfo(), route)
+    || (watcher !== null && watcher.status !== "detached")
+    || (route.providerId === "codex"
+      && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
+  ) return undefined;
+  return sessionInstructionText(
+    route.harnessId,
+    instructionPack(conversation.id, dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []),
+  );
+}
+
 export function resolveTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
@@ -185,16 +225,7 @@ export function resolveTurnRequest(
   const watcherTurn = watcherTurnPolicy(dependencies.store, conversation, route.harnessId, request);
   const readOnlyWatcher = watcherTurn?.readOnly;
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
-  const capabilityContract = exactProvider?.capabilityContract;
-  const hostToolBridgeAttested = capabilityContract !== undefined
-    && capabilityContract.installationVerified
-    && capabilityContract.hostToolBridgeAvailable
-    && capabilityContract.harnessId === route.harnessId
-    && routeUsesTrustedHostBridge({
-      providerId: route.providerId,
-      harnessId: route.harnessId,
-      backendProfile: route.backendProfile,
-    });
+  const hostToolBridgeAttested = routeHostBridgeAttested(providerInfo, route);
   const capabilityInstructions = hostToolBridgeAttested && !watcherTurn
     ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
     : [];
@@ -202,8 +233,8 @@ export function resolveTurnRequest(
     ?? (watcherTurn?.wakeId === null
       ? dependencies.hooks.watcherInstructionsForTurn?.({ conversation, hostTools: hostToolBridgeAttested }) ?? []
       : []);
-  const systemInstruction = roleInstructions.length > 0 && watcherHarnessProfile(route.harnessId).systemInstruction
-    ? roleInstructions.map(({ label, text }) => `[${label}]\n${text}`).join("\n\n")
+  const systemInstruction = watcherHarnessProfile(route.harnessId).systemInstruction
+    ? systemInstructionText(roleInstructions)
     : undefined;
   const watcherInstructions = systemInstruction === undefined ? roleInstructions : [];
 
@@ -286,11 +317,34 @@ export function resolveTurnRequest(
     : resolvedContinuation;
   const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
     && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
+  const canResume = continuation.action === "resume-session";
+  const instructionDelivery = resolveHiddenInstructionDelivery({
+    store: dependencies.store,
+    deliveries: dependencies.instructionDeliveries,
+    conversation,
+    harnessId: route.harnessId,
+    pack: resumesImportedCodex ? [] : instructionPack(conversation.id, capabilityInstructions),
+    resumedSessionId: canResume ? conversation.providerSessionId : null,
+    latestTurn,
+    promptWithheld: request.goalStart !== undefined,
+  });
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
   const interruptedTurnId = dependencies.store.turnLedgerRepository
     .runtimeInterruptionSource(conversation.id);
   const requestedAt = dependencies.now();
   let conversationContexts: ConversationContextMaterialization | undefined;
+  const turnInstructions = [
+    ...watcherInstructions,
+    ...(interruptedTurnId === null ? [] : [runtimeInterruptionInstruction(
+      sharesInterruptionEndpoint(
+        dependencies.store.agentTurn(interruptedTurnId).continuationIdentity,
+        route.continuationIdentity,
+      )
+        ? dependencies.store.turnLedgerRepository.runtimeInterruption(interruptedTurnId)
+        : null,
+    )]),
+    ...(request.internalInstructions ?? []),
+  ];
   const assemblyInput = {
     ...(contextPacketIds.length > 0
       ? {
@@ -301,24 +355,16 @@ export function resolveTurnRequest(
       : {}),
     cwd: dependencies.store.conversationPath(conversation.id),
     visibleContent: request.content,
-    interactionMode: conversation.interactionMode,
+    ...(instructionDelivery.buildModeDue ? { interactionMode: conversation.interactionMode } : {}),
     attachments,
     imagePaths: request.imagePaths,
     documentContexts: request.documentContexts,
     context: request.context,
-    internalInstructions: [
-      ...(resumesImportedCodex ? [] : capabilityInstructions),
-      ...watcherInstructions,
-      ...(interruptedTurnId === null ? [] : [runtimeInterruptionInstruction(
-        sharesInterruptionEndpoint(
-          dependencies.store.agentTurn(interruptedTurnId).continuationIdentity,
-          route.continuationIdentity,
-        )
-          ? dependencies.store.turnLedgerRepository.runtimeInterruption(interruptedTurnId)
-          : null,
-      )]),
-      ...(request.internalInstructions ?? []),
-    ],
+    internalInstructions: [...instructionDelivery.promptPack, ...turnInstructions],
+    ...(instructionDelivery.sessionInstructionDigest === undefined
+      ? {}
+      : { sessionInstructionDigest: instructionDelivery.sessionInstructionDigest }),
+    ...(request.goalStart === undefined ? {} : { promptWithheld: true as const }),
   } satisfies AssembleTurnRequestInput;
   const ownChatPacketId = dependencies.store.contextPackets
     .ownConversationPacketId(conversation.id, contextPacketIds);
@@ -376,6 +422,8 @@ export function resolveTurnRequest(
   };
   const assembleOnFreshSession = (excludedMessageId?: string) => assembleTurnRequest({
     ...assemblyInput,
+    interactionMode: conversation.interactionMode,
+    internalInstructions: [...instructionDelivery.freshSessionPromptPack, ...turnInstructions],
     restoredHistory: ownChatPacketId === null
       ? (capacityBytes: number) => dependencies.store.continuationHistory(
           conversation.id,
@@ -386,7 +434,6 @@ export function resolveTurnRequest(
         )
       : referencedHistory,
   });
-  const canResume = continuation.action === "resume-session";
   const importNote = latestTurn?.origin === "cli-import"
     ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
     : null;
@@ -458,6 +505,9 @@ export function resolveTurnRequest(
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
     ...(readOnlyWatcher ? { readOnlyProfile: "watcher" as const } : {}),
     ...(systemInstruction !== undefined ? { systemInstruction } : {}),
+    ...(instructionDelivery.sessionInstruction !== undefined
+      ? { sessionInstruction: instructionDelivery.sessionInstruction }
+      : {}),
   } satisfies ActiveTurn["providerInput"];
   const harnessId = dependencies.providers.harnessIdFor(providerInput);
   if (harnessId !== route.harnessId) {
@@ -520,6 +570,7 @@ export function resolveTurnRequest(
     importNote,
     handoffFromTurnId: providerHandoff ? latestTurn.id : null,
     adopt: (queued) => {
+      instructionDelivery.recordPromptPack(queued.turn.id);
       const runningActivities =
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
       const activeConversation = providerSessionInvalidation

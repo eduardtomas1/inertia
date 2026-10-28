@@ -11,6 +11,7 @@ import {
   type AgentTurn,
   type AgentTurnTerminalStatus,
   type ChatAttachment,
+  type Conversation,
   type SubagentTrace,
 } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
@@ -50,6 +51,7 @@ import {
   updateActiveTurnProviderSession,
 } from "./turn-controller-support";
 import {
+  compactionSessionInstruction,
   prepareTurnRequest,
   type PreparedTurnRequest,
 } from "./turn-request-preparation";
@@ -68,6 +70,7 @@ import { hasActiveTurnCheckout, providerConversationIds } from "./turn-checkout-
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
+import { PromptInstructionDeliveries } from "./turn-instruction-delivery";
 import {
   providerEventMatchesActiveTurn,
   providerFailureCause,
@@ -126,6 +129,7 @@ export class TurnController {
   private readonly followUps: TurnFollowUpCoordinator;
   private readonly timeouts: TurnTimeoutCoordinator;
   private readonly nativeGoalMutations = new TurnNativeGoalMutationGate();
+  private readonly instructionDeliveries = new PromptInstructionDeliveries();
   private closing = false;
 
   constructor(
@@ -577,6 +581,7 @@ export class TurnController {
       store: this.store,
       providers: this.providers,
       hooks: this.hooks,
+      instructionDeliveries: this.instructionDeliveries,
       id: this.id,
       now: () => this.now(),
       clock: this.clock,
@@ -590,6 +595,17 @@ export class TurnController {
     return this.adoptPreparedTurn(prepared);
   }
 
+  compactionSessionInstruction(
+    conversation: Conversation,
+    route: Parameters<typeof compactionSessionInstruction>[2],
+  ): string | undefined {
+    return compactionSessionInstruction({ store: this.store, hooks: this.hooks }, conversation, route);
+  }
+
+  forgetPromptDelivery(conversationId: string): void {
+    this.instructionDeliveries.forget(conversationId);
+  }
+
   queuePair(
     launchId: string,
     requests: readonly [QueueTurnRequest, QueueTurnRequest],
@@ -599,6 +615,7 @@ export class TurnController {
       store: this.store,
       providers: this.providers,
       hooks: this.hooks,
+      instructionDeliveries: this.instructionDeliveries,
       id: this.id,
       now: () => this.now(),
       clock: this.clock,

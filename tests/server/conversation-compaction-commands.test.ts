@@ -383,6 +383,39 @@ describe("conversation compaction command", () => {
     }) }));
   });
 
+  it("compacts with the chat's session instruction and forgets its prompt delivery even when the receipt fails", async () => {
+    const { dependencies, compact } = fixture();
+    const instructions = {
+      compactionSessionInstruction: vi.fn(() => "[inertia-chat]\nThis chat's id is chat-1."),
+      forgetPromptDelivery: vi.fn(),
+    };
+    dependencies.instructions = instructions;
+    vi.mocked(dependencies.store.createMessage).mockImplementation(() => { throw new Error("receipt failed"); });
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId },
+    })).resolves.toBe("handled");
+    expect(compact).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionInstruction: "[inertia-chat]\nThis chat's id is chat-1." }),
+      undefined,
+      expect.anything(),
+    );
+    expect(instructions.compactionSessionInstruction).toHaveBeenCalledWith(
+      expect.objectContaining({ id: conversationId }),
+      expect.objectContaining({ harnessId: "claude-agent-sdk" }),
+    );
+    expect(instructions.forgetPromptDelivery).toHaveBeenCalledExactlyOnceWith(conversationId);
+  });
+
+  it("leaves the prompt delivery record alone when compaction fails", async () => {
+    const { dependencies } = fixture({ compactStatus: "failed" });
+    const instructions = { compactionSessionInstruction: vi.fn(() => undefined), forgetPromptDelivery: vi.fn() };
+    dependencies.instructions = instructions;
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId },
+    })).rejects.toThrow();
+    expect(instructions.forgetPromptDelivery).not.toHaveBeenCalled();
+  });
+
   it("still records the receipt when post-completion usage invalidation fails", async () => {
     const { dependencies, compact, send, upsertUsage } = fixture();
     upsertUsage.mockImplementation(() => { throw new Error("usage storage failed"); });

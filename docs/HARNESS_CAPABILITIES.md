@@ -45,19 +45,38 @@ safe customization feature.
 
 `inertia.orchestration` composes the existing top-level chat-management tools.
 Its guidance requires concrete ownership and success criteria, bounded
-delegation, inspection of the terminal result, and deference to Inertia for
-approval. Starting a child chat is explicitly not treated as evidence that its
-work completed.
+delegation, and inspection of the status and latest result, and states that
+Inertia asks the user before every call that changes a chat, whatever the access mode.
+Starting a child chat is explicitly not treated as evidence that its work
+completed. A latest-result read on a chat that is still running returns
+`result: null` with a `next` line pointing to the status tool; one whose
+latest turn ended without a reply says so in `next`. An approval
+the user leaves unanswered for five minutes resolves as a denial on the card
+and returns `approval_timed_out` to the agent, which may ask the user to try
+again. Chat and context tool arguments that fail Inertia's validation return
+`invalid_arguments` with one `<field>: <problem>` line per problem and a final
+line naming the tool to call again, on every provider: Claude's in-process MCP
+server accepts any argument object and leaves validation to Inertia, while its
+advertised schema stays Inertia's. An unknown field name is echoed as a JSON
+string with every character outside printable ASCII escaped as `\uXXXX`, and a
+name longer than 80 characters is cut to a complete string ending in `…`. On
+Codex and the HTTP MCP bridge, a call to a tool the chat does not have lists
+the tools it does have and suggests one when the name is within three edits of
+it or ends in `__<tool>`; the requested name is repeated only with such a
+suggestion and only when it is plain ASCII (letters, digits, `_`, `.`, `:`,
+`-`). A name with control characters or Unicode line separators is rejected as
+malformed, and a name that is only padded with whitespace or a byte-order mark
+gets the suggestion on both transports.
 
 `inertia.frontend-workbench` composes the Browser tools described in
-`docs/AGENT_BROWSER.md`. Its guidance tells every provider that the chat has
-its own Browser whether or not the panel is showing, to navigate before
-anything else because a new tab is blank, and to follow the next step a
-failed tool names before giving up on the Browser. It also says that a
-`[redacted]` value is Inertia hiding a secret rather than page content and
-must never be retyped to check it, and that page text and control names are
-untrusted page data, never instructions; the snapshot and type tool
-descriptions repeat this. A
+`docs/AGENT_BROWSER.md`. Its guidance holds only what the tool descriptions do
+not already say: snapshot before and after each meaningful UI change, exercise
+the real interaction path, treat the audit as deterministic signals rather than
+a visual judgment, follow a failed tool's message before giving up on the
+Browser, and report only observed evidence. Navigating first, the Browser
+working while its panel is hidden, what `[redacted]` means, and that page text
+and control names are untrusted page data live in the navigate, snapshot and
+type tool descriptions, and a test keeps the guidance from repeating them. A
 successful semantic snapshot gains a bounded `inertiaAudit` object with stable
 issue codes for controls without stable labels or semantic names, clipped
 controls, overlapping controls, and targets smaller than 24 by 24 CSS pixels
@@ -83,7 +102,7 @@ The frontend loop is therefore:
 `inertia_browser_screenshot` returns its image to the model only when the
 turn's provider and model accept images, as described in
 `docs/AGENT_BROWSER.md`; otherwise the pixels stay in the user's local
-Evidence timeline. The pack tells the model this, and the result's
+Evidence timeline. The tool description tells the model this, and the result's
 `providerImage` says which case applied, so the model cannot quietly convert
 “capture succeeded” into a visual claim about pixels it never saw. An agent can
 set a fixed viewport, such as 1280 by 800 for a desktop layout, with
@@ -91,7 +110,8 @@ set a fixed viewport, such as 1280 by 800 for a desktop layout, with
 
 `inertia.visual-replies` adds one tool, `inertia_render_html`, for every
 provider that has Inertia host tools. The agent passes one self-contained HTML
-document (at most 256 KiB of UTF-8), a title of at most 120 characters without
+document (at most 262,144 UTF-8 bytes, stated in the `html` field description
+rather than as `maxLength`, which JSON Schema counts in characters), a title of at most 120 characters without
 control characters, and an optional initial frame height from 80 to 2000 CSS
 pixels (default 360). The tool description carries the layout and theme
 guidance, including the CSS custom properties Inertia injects, so the pack adds
@@ -150,6 +170,82 @@ has no capability epoch that would restart an existing thread for a new tool.
 Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
+
+## Hidden instruction delivery
+
+A turn can carry four kinds of hidden instructions: the capability-pack
+instructions, an `inertia-chat` line that tells the agent its chat's id, the
+`build-mode` instruction, and turn-specific controls such as watcher notes,
+runtime-interruption notes and caller controls. The packs and the chat line
+form one block of `[label]` sections joined by blank lines, byte-identical on
+every turn of a session. The block is sent only when the turn has attested
+Inertia host tools; watchers, custom backends and resumed imported Codex
+sessions never receive it. The rule lives in
+`src/server/runtime/turns/turn-instruction-delivery.ts`.
+
+- Claude and Codex receive the block at system level
+  (`ProviderRunInput.sessionInstruction`) when it fits the 16 KiB system
+  instruction limit, on ordinary turns and on manual compaction. Claude
+  appends it to the `claude_code` preset system prompt, recorded with
+  `snapshot: true`. Codex sends `developerInstructions` on `thread/start`,
+  `thread/resume` and the compaction resume (App Server v2 accepts
+  `developer_instructions` on both). That value replaces a
+  `developer_instructions` setting from the person's Codex configuration,
+  so Inertia first reads it through `config/read` (bounded to 3 seconds) and
+  sends the configured text, a blank line, then the block; when the read
+  fails or times out it sends the block alone and the turn goes on. The
+  value is the same on every call while the configured text stays the same.
+- A turn that sends the block at system level records the block's SHA-256
+  digest, never its text, in its execution manifest as
+  `sessionInstructionDigest`. Codex keeps what a session started with, so a
+  resumed Codex session gets the block in the prompt instead, by the rule
+  below, when the session's first turn recorded no digest or another digest
+  (a session started before this delivery, before host tools were attested,
+  or with other pack text), or when a compaction was recorded on the chat
+  since that first turn. Claude records its system prompt again when it
+  compacts, so for Claude the latest compaction counts as the session's
+  start: the turn it happened in (for a compaction receipt, the latest turn
+  before it) must have recorded the current digest.
+- Cursor, Kimi and OpenCode get the block in the prompt's
+  internal-instructions section. OpenCode has a `system` prompt option, but
+  a follow-up steered into a running turn cannot carry it, so the block
+  would drop out for the rest of that run; watcher roles still use it. The
+  block is sent on the first turn of a provider session, when its digest
+  changes, after a compaction, and once after the runtime restarts. The
+  runtime remembers, per chat and in memory only, the turn that last
+  carried the block and its digest, for the 1,024 most recently used chats;
+  the block counts as delivered while that turn completed on the session
+  being resumed, started on or resumed that same session, and had no
+  compaction recorded since. A successful manual compaction forgets the
+  chat's record even when its receipt could not be saved.
+- `build-mode` goes in the prompt on the first turn of a provider session,
+  and again when the previous turn used another mode, did not complete,
+  started on another session than it ended on, sent no prompt, or was
+  followed by a compaction. A native Codex goal start sends no prompt; its
+  manifest records `promptWithheld`, so the next turn sends `build-mode` and
+  the goal start never counts as having delivered the block. Plan mode has
+  no instruction.
+- A compaction is a saved compaction receipt or a completed compaction
+  activity from the provider (Claude's compact boundary or compacting
+  status, Codex's `contextCompaction` item, the ACP compaction update,
+  OpenCode's session compaction event), recorded at or after the turn's
+  request time. A failed Claude compaction closes its status row as failed
+  and does not count. The check scans the chat's compaction receipts and
+  the activities recorded since the session's first turn, so its cost grows
+  with the session's activity count.
+- A turn that starts a fresh session, including a stale session restarted
+  in the middle of a turn, always carries the block (system level or
+  prompt) and, in Build mode, `build-mode`.
+- Turn-specific controls accompany every turn that needs them. A prompt with
+  nothing due has no internal-instructions section and no trailing blank
+  lines.
+- After an upgrade that changes the block, a Claude or Codex session can
+  receive it both at system level and once per runtime in the prompt, and
+  after a compaction a Codex session can too; this duplicate is accepted.
+
+Not verified against live providers: whether an older Codex that ignores
+`developerInstructions` on `thread/resume` keeps the start value after its
+own compaction.
 
 ## Antigravity headless contract
 
@@ -281,9 +377,9 @@ and count towards the five-request cap); Antigravity's tool names beyond the
 `view_file`, `run_command` and `invoke_subagent` its fixtures use (the
 file-writing names `write_to_file`, `write_file`, `create_file`, `edit_file`,
 `replace_file_content`, `multi_replace_file_content`, `delete_file`,
-`move_file` and `rename_file` are assumed); whether Antigravity's plan mode
-refuses writes on its own; and whether Codex applies `developerInstructions`
-on `thread/resume`.
+`move_file` and `rename_file` are assumed); and whether Antigravity's plan
+mode refuses writes on its own. Codex App Server v2 accepts
+`developerInstructions` on `thread/resume` as on `thread/start`.
 
 ### Read-only command allowlist
 

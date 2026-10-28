@@ -1,0 +1,186 @@
+{
+  "rebaseline": "INERTIA_UPDATE_AGENT_SURFACE_BUDGET=1 npm test -- tests/server/agent-surface-budget.test.ts",
+  "unit": "UTF-8 bytes",
+  "tools": {
+    "inertia_browser_navigate": {
+      "claude": 911,
+      "codex": 768,
+      "cursorKimi": 874,
+      "opencode": 873
+    },
+    "inertia_browser_snapshot": {
+      "claude": 565,
+      "codex": 423,
+      "cursorKimi": 527,
+      "opencode": 527
+    },
+    "inertia_browser_click": {
+      "claude": 805,
+      "codex": 662,
+      "cursorKimi": 768,
+      "opencode": 767
+    },
+    "inertia_browser_type": {
+      "claude": 849,
+      "codex": 706,
+      "cursorKimi": 812,
+      "opencode": 811
+    },
+    "inertia_browser_press": {
+      "claude": 847,
+      "codex": 704,
+      "cursorKimi": 810,
+      "opencode": 809
+    },
+    "inertia_browser_scroll": {
+      "claude": 781,
+      "codex": 637,
+      "cursorKimi": 743,
+      "opencode": 743
+    },
+    "inertia_browser_wait_for": {
+      "claude": 892,
+      "codex": 750,
+      "cursorKimi": 854,
+      "opencode": 854
+    },
+    "inertia_browser_screenshot": {
+      "claude": 533,
+      "codex": 391,
+      "cursorKimi": 495,
+      "opencode": 495
+    },
+    "inertia_browser_resize": {
+      "claude": 1218,
+      "codex": 1075,
+      "cursorKimi": 1181,
+      "opencode": 1180
+    },
+    "inertia_browser_hover": {
+      "claude": 628,
+      "codex": 485,
+      "cursorKimi": 591,
+      "opencode": 590
+    },
+    "inertia_browser_select": {
+      "claude": 831,
+      "codex": 688,
+      "cursorKimi": 794,
+      "opencode": 793
+    },
+    "inertia_browser_logs": {
+      "claude": 458,
+      "codex": 316,
+      "cursorKimi": 420,
+      "opencode": 420
+    },
+    "inertia_browser_tabs": {
+      "claude": 397,
+      "codex": 255,
+      "cursorKimi": 359,
+      "opencode": 359
+    },
+    "inertia_browser_open_tab": {
+      "claude": 592,
+      "codex": 449,
+      "cursorKimi": 555,
+      "opencode": 554
+    },
+    "inertia_browser_select_tab": {
+      "claude": 568,
+      "codex": 424,
+      "cursorKimi": 530,
+      "opencode": 530
+    },
+    "inertia_browser_close_tab": {
+      "claude": 556,
+      "codex": 413,
+      "cursorKimi": 519,
+      "opencode": 518
+    },
+    "inertia_list_conversations": {
+      "claude": 515,
+      "codex": 373,
+      "cursorKimi": 477,
+      "opencode": 477
+    },
+    "inertia_inspect_conversation": {
+      "claude": 448,
+      "codex": 306,
+      "cursorKimi": 410,
+      "opencode": 410
+    },
+    "inertia_request_context": {
+      "claude": 997,
+      "codex": 853,
+      "cursorKimi": 959,
+      "opencode": 959
+    },
+    "inertia_create_conversation": {
+      "claude": 1440,
+      "codex": 1296,
+      "cursorKimi": 1402,
+      "opencode": 1402
+    },
+    "inertia_send_message": {
+      "claude": 584,
+      "codex": 440,
+      "cursorKimi": 546,
+      "opencode": 546
+    },
+    "inertia_get_conversation_status": {
+      "claude": 456,
+      "codex": 314,
+      "cursorKimi": 418,
+      "opencode": 418
+    },
+    "inertia_get_latest_result": {
+      "claude": 520,
+      "codex": 378,
+      "cursorKimi": 482,
+      "opencode": 482
+    },
+    "inertia_stop_conversation": {
+      "claude": 452,
+      "codex": 308,
+      "cursorKimi": 414,
+      "opencode": 414
+    },
+    "inertia_archive_conversation": {
+      "claude": 522,
+      "codex": 378,
+      "cursorKimi": 484,
+      "opencode": 484
+    },
+    "inertia_render_html": {
+      "claude": 1546,
+      "codex": 1403,
+      "cursorKimi": 1508,
+      "opencode": 1508
+    }
+  },
+  "instructions": {
+    "inertia-frontend-workbench": 427,
+    "inertia-orchestration": 331,
+    "mcp-initialize:claude": 0,
+    "mcp-initialize:http": 0
+  },
+  "totals": {
+    "claude": {
+      "withBrowser": 19669,
+      "withoutBrowser": 7811
+    },
+    "codex": {
+      "withBrowser": 15953,
+      "withoutBrowser": 6380
+    },
+    "cursorKimi": {
+      "withBrowser": 18690,
+      "withoutBrowser": 7431
+    },
+    "opencode": {
+      "withBrowser": 18681,
+      "withoutBrowser": 7431
+    }
+  }
+}

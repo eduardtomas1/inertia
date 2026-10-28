@@ -47,6 +47,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (message.method === "initialized") return;
+  if (message.method === "config/read") return send({ id: message.id, result: { config: {} } });
   if (message.method === "model/list") {
     send({ id: message.id, result: { data: [{ id: "vision-fixture", model: "vision-fixture", displayName: "Vision fixture", isDefault: true, inputModalities: ["text", "image"], supportedReasoningEfforts: [] }], nextCursor: null } });
     return;

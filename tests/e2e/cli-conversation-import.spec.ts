@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
+import { loadSeededConversationTurns } from "./support/conversation-history";
 
 const codexId = "01962fd7-1000-7000-8000-123456789abc";
 const claudeId = "01962fd7-2000-7000-8000-123456789abc";
@@ -23,6 +24,7 @@ if (process.argv[2] === "--help") { process.stdout.write("Usage: codex app-serve
 require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "cli-import-fixture" } });
+  if (message.method === "config/read") return send({ id: message.id, result: { config: {} } });
   if (message.method === "model/list") return send({ id: message.id, result: { data: [], nextCursor: null } });
   if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: null } });
   if (message.method === "thread/goal/get") return send({ id: message.id, result: { goal: null } });
@@ -326,15 +328,13 @@ test("imports an archived rollout larger than the old 16 MiB limit with its open
   await expect(app.page.getByText("Step 480 of the packaging pipeline passes.", { exact: true })).toBeVisible();
   const transcript = app.page.getByLabel("Thread transcript");
   const note = app.page.getByRole("article", { name: "Agent system notice" });
-  const earlier = app.page.getByRole("button", { name: "Load earlier messages", exact: true });
-  await expect.poll(async () => {
-    if (await note.count() === 1) return await note.innerText();
-    if (await earlier.isVisible()) await earlier.click({ timeout: 1_000 }).catch(() => undefined);
-    else await transcript.evaluate((element) => { element.scrollTop = element.scrollTop === 0 ? 1 : 0; });
-    return null;
-  }).toContain("Earlier messages were not imported: 762 of 962");
+  await loadSeededConversationTurns(app.page, 100);
+  await expect(async () => {
+    await transcript.press("Home");
+    await expect(note).toBeInViewport({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
+  await expect(note).toContainText("Earlier messages were not imported: 762 of 962");
   await expect(app.page.locator(".response-turn").first()).toContainText(largeTitle);
-  await expect(note).toBeInViewport();
   await captureState(info, "chat-large-note-light-wide");
   expect(app.rendererErrors).toEqual([]);
 });

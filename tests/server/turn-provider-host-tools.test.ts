@@ -81,10 +81,14 @@ describe("turn provider host-tool route authority", () => {
     });
 
     expect(runtime.store.turnExecutionManifest(queued.turn.id))
-      .toMatchObject({ internalInstructionCount: 2 });
+      .toMatchObject({ internalInstructionCount: 1 });
     expect(runtime.controller.start(queued.turn.id)).toBe(true);
     expect(runtime.provider.input?.prompt)
-      .toContain("TRUSTED_KIMI_HOST_TOOLS_ARE_AVAILABLE");
+      .not.toContain("TRUSTED_KIMI_HOST_TOOLS_ARE_AVAILABLE");
+    expect(runtime.provider.input?.sessionInstruction).toBe([
+      "[kimi-host-tools]\nTRUSTED_KIMI_HOST_TOOLS_ARE_AVAILABLE",
+      `[inertia-chat]\nThis chat's id is ${runtime.conversationId}.`,
+    ].join("\n\n"));
     expect(harnessInstructionsForTurn).toHaveBeenCalledTimes(1);
     expect(hostToolsForTurn).toHaveBeenCalledTimes(1);
     expect(runtime.provider.callbacks?.hostTools).toBe(hostTools);

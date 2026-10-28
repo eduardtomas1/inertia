@@ -3,10 +3,13 @@ import {
   type McpSdkServerConfigWithInstance,
 } from "@anthropic-ai/claude-agent-sdk";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
 import { providerMcpTools } from "./host-tool-mcp-protocol";
+
+const UNCHECKED_ARGUMENTS = z.looseObject({});
 
 interface McpRequestExtra {
   requestId?: unknown;
@@ -43,7 +46,6 @@ export function createClaudeHostTools(
   const config = createSdkMcpServer({
     name: INERTIA_HOST_MCP_NAME,
     version: "1.0.0",
-    instructions: "Manage bounded top-level Inertia chats in the current project. Inertia itself asks for approval before mutations.",
   });
   const providerToolNames = new Set<string>();
   for (const definition of runtime.definitions()) {
@@ -55,7 +57,7 @@ export function createClaudeHostTools(
       definition.name,
       {
         description: definition.description,
-        inputSchema: definition.inputValidator,
+        inputSchema: UNCHECKED_ARGUMENTS,
         annotations: {
           readOnlyHint: definition.readOnly,
           destructiveHint: definition.destructive === true,

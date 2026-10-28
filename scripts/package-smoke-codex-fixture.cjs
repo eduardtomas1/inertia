@@ -39,6 +39,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     serviceTiers: [{ id: "priority", name: "Fast" }],
   }], nextCursor: null });
   if (message.method === "account/rateLimits/read") return result({ rateLimits: null });
+  if (message.method === "config/read") return result({ config: {} });
   if (message.method === "thread/start" || message.method === "thread/resume") {
     threadId = message.params.threadId || `package-smoke-${randomUUID()}`;
     requestedServiceTier = tier(message.params);

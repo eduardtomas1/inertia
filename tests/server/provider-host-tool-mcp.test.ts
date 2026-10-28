@@ -254,10 +254,12 @@ describe("provider host-tool MCP transport", () => {
       method: "initialize",
       params: { protocolVersion: "2025-06-18" },
     });
-    expect(await initialized.json()).toMatchObject({
+    const initializedBody = await initialized.json() as { result: Record<string, unknown> };
+    expect(initializedBody).toMatchObject({
       id: 2,
       result: { protocolVersion: "2025-06-18" },
     });
+    expect(initializedBody.result).not.toHaveProperty("instructions");
     const listed = await post({ jsonrpc: "2.0", id: 3, method: "tools/list" });
     expect(await listed.json()).toMatchObject({
       result: {

@@ -29,6 +29,7 @@ import {
   HTML_RENDER_MAX_HTML_BYTES,
   HTML_RENDER_MAX_PER_TURN,
   HTML_RENDER_THEME_GUIDE,
+  HTML_RENDER_THEME_VARIABLES,
   HTML_RENDER_TOOL_NAME,
   htmlRenderPlaceholderText,
   isHtmlRenderTitle,
@@ -120,20 +121,28 @@ describe("inertia_render_html definition", () => {
     expect(HTML_RENDER_TOOL_DEFINITION).toMatchObject({ name: "inertia_render_html", readOnly: true, destructive: false });
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(HTML_RENDER_LAYOUT_GUIDE);
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(HTML_RENDER_THEME_GUIDE);
-    expect(HTML_RENDER_TOOL_DEFINITION.description).toContain("call it before writing that reply");
-    expect(HTML_RENDER_TOOL_DEFINITION.description).toContain("say in one sentence what the page shows");
-    expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(`at most ${HTML_RENDER_MAX_PER_TURN} pages`);
-    expect(HTML_RENDER_TOOL_DEFINITION.description.length).toBeLessThanOrEqual(2_000);
+    for (const [alias] of HTML_RENDER_THEME_VARIABLES) expect(HTML_RENDER_THEME_GUIDE).toMatch(new RegExp(`${alias}[,.]`, "u"));
+    expect(HTML_RENDER_TOOL_DEFINITION.description).toContain("call it before writing the reply");
+    expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(`${HTML_RENDER_MAX_PER_TURN} pages per turn`);
+    expect(HTML_RENDER_TOOL_DEFINITION.description).not.toContain("say in one sentence what the page shows");
+    expect(Buffer.byteLength(HTML_RENDER_TOOL_DEFINITION.description, "utf8")).toBeLessThanOrEqual(850);
     expect(HTML_RENDER_TOOL_DEFINITION.inputSchema).toMatchObject({
       type: "object",
       additionalProperties: false,
       required: ["html", "title"],
       properties: {
-        html: { type: "string", minLength: 1, maxLength: 262_144 },
+        html: { type: "string", minLength: 1 },
         title: { type: "string", minLength: 1, maxLength: 120 },
         height: { type: "integer", minimum: 80, maximum: 2_000, default: 360 },
       },
     });
+  });
+
+  it("advertises the html limit in UTF-8 bytes, the unit the runtime counts", () => {
+    const html = (HTML_RENDER_TOOL_DEFINITION.inputSchema.properties as Record<string, Record<string, unknown>>).html!;
+    expect(html).not.toHaveProperty("maxLength");
+    expect(html.description).toContain(`At most ${HTML_RENDER_MAX_HTML_BYTES} UTF-8 bytes`);
+    expect(HTML_RENDER_TOOL_DEFINITION.description).not.toMatch(/KiB|characters/u);
   });
 
   it("is composed as the always-on inertia.visual-replies pack without private instructions", () => {
@@ -145,7 +154,7 @@ describe("inertia_render_html definition", () => {
       });
       expect(registry.manifest().packs.find(({ id }) => id === "inertia.visual-replies")).toEqual({
         id: "inertia.visual-replies",
-        revision: 1,
+        revision: 2,
         title: "Inertia visual replies",
         summary: expect.any(String),
         toolNames: ["inertia_render_html"],
@@ -159,6 +168,7 @@ describe("inertia_render_html definition", () => {
 });
 
 const KNOWN_MULTIBYTE = "html:é*262144";
+const BYTE_LIMIT_ONLY_IN_DESCRIPTION = ["html:over", KNOWN_MULTIBYTE];
 
 function htmlCandidates(): Array<[string, string]> {
   return [
@@ -240,7 +250,7 @@ function bridgeRuntime(): ProviderHostToolRuntime {
 
 describe("every schema-valid render input is accepted by the runtime and by the handler", () => {
   it("raw definition (also sent verbatim to Codex thread/start dynamicTools)", () => {
-    expect(divergences(HTML_RENDER_TOOL_DEFINITION.inputSchema as Schema)).toEqual([KNOWN_MULTIBYTE]);
+    expect(divergences(HTML_RENDER_TOOL_DEFINITION.inputSchema as Schema)).toEqual(BYTE_LIMIT_ONLY_IN_DESCRIPTION);
   });
 
   it("Claude SDK tools/list override and in-process call", async () => {
@@ -255,7 +265,7 @@ describe("every schema-valid render input is accepted by the runtime and by the 
       expect(listed.annotations).toEqual({
         readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false,
       });
-      expect(divergences(listed.inputSchema as Schema)).toEqual([KNOWN_MULTIBYTE]);
+      expect(divergences(listed.inputSchema as Schema)).toEqual(BYTE_LIMIT_ONLY_IN_DESCRIPTION);
       const result = await client.callTool({ name: HTML_RENDER_TOOL_NAME, arguments: { html: PAGE, title: "Chart" } });
       expect(result.isError).toBeFalsy();
       expect(JSON.parse((result.content as Array<{ text: string }>)[0]!.text)).toMatchObject({ rendered: true, title: "Chart" });
@@ -280,7 +290,7 @@ describe("every schema-valid render input is accepted by the runtime and by the 
       expect(listed.annotations).toEqual({
         readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false,
       });
-      expect(divergences(listed.inputSchema as Schema)).toEqual([KNOWN_MULTIBYTE]);
+      expect(divergences(listed.inputSchema as Schema)).toEqual(BYTE_LIMIT_ONLY_IN_DESCRIPTION);
     } finally {
       await session.close();
     }

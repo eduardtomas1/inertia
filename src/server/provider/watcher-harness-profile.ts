@@ -1,20 +1,24 @@
 export interface WatcherHarnessProfile {
   systemInstruction: boolean;
+  sessionInstruction: boolean;
+  sessionInstructionRecordedAtCompaction: boolean;
   editsGatedBeforeStart: boolean;
 }
 
 const UNKNOWN_HARNESS: WatcherHarnessProfile = Object.freeze({
   systemInstruction: false,
+  sessionInstruction: false,
+  sessionInstructionRecordedAtCompaction: false,
   editsGatedBeforeStart: false,
 });
 
 const HARNESS_PROFILES: Readonly<Record<string, WatcherHarnessProfile>> = Object.freeze({
-  "claude-agent-sdk": Object.freeze({ systemInstruction: true, editsGatedBeforeStart: true }),
-  "codex-app-server": Object.freeze({ systemInstruction: true, editsGatedBeforeStart: true }),
-  "opencode-sdk": Object.freeze({ systemInstruction: true, editsGatedBeforeStart: false }),
-  "cursor-acp": Object.freeze({ systemInstruction: false, editsGatedBeforeStart: true }),
-  "kimi-acp": Object.freeze({ systemInstruction: false, editsGatedBeforeStart: true }),
-  "antigravity-cli": Object.freeze({ systemInstruction: false, editsGatedBeforeStart: false }),
+  "claude-agent-sdk": Object.freeze({ systemInstruction: true, sessionInstruction: true, sessionInstructionRecordedAtCompaction: true, editsGatedBeforeStart: true }),
+  "codex-app-server": Object.freeze({ systemInstruction: true, sessionInstruction: true, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: true }),
+  "opencode-sdk": Object.freeze({ systemInstruction: true, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: false }),
+  "cursor-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: true }),
+  "kimi-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: true }),
+  "antigravity-cli": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: false }),
 });
 
 export function watcherHarnessProfile(harnessId: string): WatcherHarnessProfile {

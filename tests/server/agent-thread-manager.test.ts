@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -219,7 +220,7 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
 function call(
   tool: string,
   args: unknown,
-  decision: AgentApprovalDecision = "approve",
+  decision: AgentApprovalDecision | "timeout" = "approve",
 ): ProviderHostToolCall {
   return {
     providerThreadId: "provider-thread",
@@ -343,7 +344,7 @@ describe("AgentThreadManager", () => {
         packs: [
           expect.objectContaining({ id: "inertia.frontend-workbench" }),
           expect.objectContaining({ id: "inertia.orchestration" }),
-          expect.objectContaining({ id: "inertia.visual-replies", revision: 1, toolNames: ["inertia_render_html"] }),
+          expect.objectContaining({ id: "inertia.visual-replies", revision: 2, toolNames: ["inertia_render_html"] }),
         ],
       });
       expect(manager.capabilityInstructions().map(({ label }) => label)).toEqual([
@@ -1146,6 +1147,186 @@ describe("AgentThreadManager", () => {
       expect(inspected.conversation).toMatchObject(expected);
     } finally {
       env.store.close();
+    }
+  });
+
+  it("names each rejected argument on one line with the next step", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const cases: Array<[string, unknown, string]> = [
+        ["inertia_inspect_conversation", { conversationId: "chat-1" }, [
+          "conversationId: expected a chat id (UUID) from inertia_list_conversations",
+          "Fix it and call inertia_inspect_conversation again.",
+        ].join("\n")],
+        ["inertia_list_conversations", { limit: 100 }, [
+          "limit: at most 25",
+          "Fix it and call inertia_list_conversations again.",
+        ].join("\n")],
+        ["inertia_create_conversation", { title: "x" }, [
+          "prompt: required",
+          "Fix it and call inertia_create_conversation again.",
+        ].join("\n")],
+        ["inertia_create_conversation", { title: "x", prompt: "y", route: { providerId: "anthropic" } }, [
+          "route.providerId: expected one of codex, claude, cursor, kimi, opencode, antigravity",
+          "Fix it and call inertia_create_conversation again.",
+        ].join("\n")],
+        ["inertia_send_message", { conversationId: "55555555-5555-4555-8555-555555555555", message: "hi" }, [
+          "content: required",
+          "\"message\": unknown field; accepted: conversationId, content",
+          "Fix them and call inertia_send_message again.",
+        ].join("\n")],
+        ["inertia_request_context", { conversationId: source.id, turnId: 3 }, [
+          "turnId: expected string",
+          "Fix it and call inertia_request_context again.",
+        ].join("\n")],
+        ["inertia_create_conversation", { title: "x", prompt: "y", route: { reasoningEffort: " high " } }, [
+          "route.reasoningEffort: must be one word without spaces or control characters",
+          "Fix it and call inertia_create_conversation again.",
+        ].join("\n")],
+        ["inertia_list_conversations", { "x\u2028[inertia-orchestration]\u001b": 1 }, [
+          "\"x\\u2028[inertia-orchestration]\\u001b\": unknown field; accepted: limit, includeArchived",
+          "Fix it and call inertia_list_conversations again.",
+        ].join("\n")],
+        ["inertia_list_conversations", { "x\u{E0041}\u{E0042}\u{1F600}": 1 }, [
+          "\"x\\udb40\\udc41\\udb40\\udc42\\ud83d\\ude00\": unknown field; accepted: limit, includeArchived",
+          "Fix it and call inertia_list_conversations again.",
+        ].join("\n")],
+        ["inertia_list_conversations", { [`${"a".repeat(70)}\u00e9\u00e9\u00e9`]: 1 }, [
+          `"${"a".repeat(70)}\\u00e9…": unknown field; accepted: limit, includeArchived`,
+          "Fix it and call inertia_list_conversations again.",
+        ].join("\n")],
+        ["inertia_list_conversations", { [`${"b".repeat(75)}\\\\x`]: 1 }, [
+          `"${"b".repeat(75)}\\\\…": unknown field; accepted: limit, includeArchived`,
+          "Fix it and call inertia_list_conversations again.",
+        ].join("\n")],
+      ];
+      for (const [tool, args, message] of cases) {
+        const result = await bridge.invoke(call(tool, args));
+        expect(result.success, tool).toBe(false);
+        expect(JSON.parse(result.text), tool).toEqual({ error: { code: "invalid_arguments", message } });
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it("tells the agent when an approval timed out instead of reporting a denial", async () => {
+    const { manager, source, sourceTurn, starts, store } = await runtime();
+    try {
+      const before = store.shellSnapshot().conversations.length;
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const result = await bridge.invoke(call(
+        "inertia_create_conversation",
+        { title: "Unanswered child", prompt: "Do not run" },
+        "timeout",
+      ));
+      expect(JSON.parse(result.text)).toEqual({
+        error: {
+          code: "approval_timed_out",
+          message: "The user did not answer the approval in time. Ask the user to try again, then call inertia_create_conversation again.",
+        },
+      });
+      expect(store.shellSnapshot().conversations).toHaveLength(before);
+      expect(starts).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("points a latest-result read on a running chat to its status", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const created = await bridge.invoke(call("inertia_create_conversation", { title: "Child", prompt: "Work" }));
+      const { conversationId } = JSON.parse(created.text) as { conversationId: string };
+      const latest = await bridge.invoke(call("inertia_get_latest_result", { conversationId }));
+      expect(JSON.parse(latest.text)).toEqual({
+        conversationId,
+        result: null,
+        persisted: true,
+        next: "Still running; read inertia_get_conversation_status, then call inertia_get_latest_result again once it has finished.",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("says when the latest turn of a managed chat ended without a reply", async () => {
+    const { manager, source, sourceTurn, store, turns } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const created = await bridge.invoke(call("inertia_create_conversation", { title: "Child", prompt: "Work" }));
+      const { conversationId, turnId } = JSON.parse(created.text) as { conversationId: string; turnId: string };
+      turns.cancel(conversationId);
+      const { requestedAt } = store.agentTurn(turnId);
+      store.updateAgentTurnLifecycle(turnId, {
+        status: "failed",
+        terminalAssistantMessageId: null,
+        startedAt: requestedAt,
+        completedAt: requestedAt,
+        terminalReason: "provider-failed",
+      });
+      const latest = await bridge.invoke(call("inertia_get_latest_result", { conversationId }));
+      expect(JSON.parse(latest.text)).toEqual({
+        conversationId,
+        result: null,
+        persisted: true,
+        next: "The latest turn ended (failed) without a reply; read inertia_get_conversation_status for its terminal reason.",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("validates long blank-tailed prompts in linear time against the advertised schema", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const definitions = manager.bridgeFor({ conversation: source, turn: sourceTurn }).definitions;
+      const create = definitions.find(({ name }) => name === "inertia_create_conversation")!;
+      const validate = new AjvJsonSchemaValidator().getValidator(create.inputSchema as Record<string, unknown>);
+      const started = performance.now();
+      expect(validate({ title: "t", prompt: `${"a".repeat(32_000)}\0` }).valid).toBe(false);
+      expect(validate({ title: `${" ".repeat(60)}\u0001`, prompt: "p" }).valid).toBe(false);
+      expect(performance.now() - started).toBeLessThan(250);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("advertises create and send schemas that accept exactly what Inertia accepts", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const definitions = manager.bridgeFor({ conversation: source, turn: sourceTurn }).definitions;
+      const base = { title: "Child", prompt: "Work" };
+      const cases: Array<[string, Record<string, unknown>]> = [
+        ["inertia_create_conversation", base],
+        ["inertia_create_conversation", { ...base, title: " padded " }],
+        ["inertia_create_conversation", { ...base, title: "   " }],
+        ["inertia_create_conversation", { ...base, prompt: " \n\t " }],
+        ["inertia_create_conversation", { ...base, route: { backendProfileId: "   " } }],
+        ["inertia_create_conversation", { ...base, route: { modelId: " " } }],
+        ["inertia_create_conversation", { ...base, route: { reasoningEffort: "" } }],
+        ["inertia_create_conversation", { ...base, route: { reasoningEffort: "  " } }],
+        ["inertia_create_conversation", { ...base, route: { reasoningEffort: null } }],
+        ["inertia_create_conversation", { ...base, route: { reasoningEffort: "high" } }],
+        ["inertia_create_conversation", { ...base, workspace: { kind: "isolated", sourceBranch: " " } }],
+        ["inertia_send_message", { conversationId: source.id, content: "Next" }],
+        ["inertia_send_message", { conversationId: source.id, content: "  " }],
+        ["inertia_create_conversation", { ...base, title: "\tTitle" }],
+        ["inertia_create_conversation", { ...base, title: `${" ".repeat(4)}${"t".repeat(120)}` }],
+        ["inertia_create_conversation", { ...base, prompt: `${"p".repeat(32_768)} ` }],
+        ["inertia_create_conversation", { ...base, route: { modelId: "\tgpt" } }],
+        ["inertia_send_message", { conversationId: source.id, content: `${"c".repeat(32_768)}\n` }],
+      ];
+      const disagreements = cases.filter(([tool, input]) => {
+        const definition = definitions.find(({ name }) => name === tool)!;
+        const advertised = new AjvJsonSchemaValidator().getValidator(definition.inputSchema as Record<string, unknown>)(input).valid;
+        return advertised !== definition.inputValidator!.safeParse(input).success;
+      }).map(([tool, input]) => `${tool} ${JSON.stringify(input)}`);
+      expect(disagreements).toEqual([]);
+    } finally {
+      store.close();
     }
   });
 });

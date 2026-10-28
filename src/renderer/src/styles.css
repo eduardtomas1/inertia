@@ -965,29 +965,13 @@ textarea {
   background: var(--fill);
 }
 
-.platform-darwin .brand-lockup::before {
+.platform-darwin .brand-logo {
   width: 26px;
   height: 26px;
-  flex: 0 0 auto;
-  content: "";
-  background: currentColor;
-  -webkit-mask-image: url("/inertia-logo.png");
-  mask-image: url("/inertia-logo.png");
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  mask-mode: luminance;
-}
-
-.platform-darwin .brand-logo {
-  display: none;
 }
 
 .platform-darwin .brand-name {
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   font-weight: 600;
 }
 
@@ -1008,17 +992,24 @@ textarea {
 .brand-lockup:hover { background: var(--fill); }
 .brand-lockup:active { transform: scale(0.98); }
 
+.brand-logo,
+.welcome-guide-logo {
+  display: block;
+  flex: 0 0 auto;
+  background: currentColor;
+  -webkit-mask: url("/inertia-logo.svg") center / contain no-repeat;
+  mask: url("/inertia-logo.svg") center / contain no-repeat;
+}
+
 .brand-logo {
   width: 34px;
   height: 34px;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
-  box-shadow: none;
 }
 
 .brand-name {
-  font-size: var(--text-base);
+  font-size: var(--text-lg);
   font-weight: 600;
+  line-height: var(--leading-heading);
 }
 
 .mobile-close {

@@ -120,7 +120,7 @@ export function WelcomeGuide({
       {stepIndex === 0 && (
         <>
           <div className="welcome-guide-hero">
-            <img className="welcome-guide-logo" src="./inertia-logo.png" alt="" />
+            <span className="welcome-guide-logo" aria-hidden="true" />
             <h2 id={headingId}>Welcome to Inertia</h2>
           </div>
           <ul className="welcome-guide-tiles">

@@ -229,7 +229,7 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
       const shell = document.querySelector(".app-shell");
       const lockup = document.querySelector(".brand-lockup");
       const logo = document.querySelector(".brand-logo");
-      const markStyles = lockup ? getComputedStyle(lockup, "::before") : null;
+      const markStyles = logo ? getComputedStyle(logo) : null;
       const lockupStyles = lockup ? getComputedStyle(lockup) : null;
       const logoStyles = logo ? getComputedStyle(logo) : null;
       const lockupBounds = lockup?.getBoundingClientRect();
@@ -248,8 +248,8 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
     expect(geometry?.row.height).toBeLessThanOrEqual(30);
     expect(geometry?.mark.width).toBe("26px");
     expect(geometry?.mark.height).toBe("26px");
-    expect(geometry?.mark.maskImage).toContain("inertia-logo.png");
-    expect(geometry?.logoDisplay).toBe("none");
+    expect(geometry?.mark.maskImage).toContain("inertia-logo.svg");
+    expect(geometry?.logoDisplay).toBe("block");
     expect(geometry?.safeInset).toBe(MAC_BRAND_SAFE_INSET);
     expect(geometry?.markLeft).toBeGreaterThanOrEqual(MAC_BRAND_SAFE_INSET);
     const trafficLightClusterRight = MAC_TRAFFIC_LIGHT_POSITION.x + MAC_TRAFFIC_LIGHT_CLUSTER_WIDTH;

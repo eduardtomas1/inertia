@@ -92,6 +92,7 @@ export function resolveHiddenInstructionDelivery(
   const ledger = store.turnLedgerRepository;
   const settledOnSession = (turn: AgentTurn | null): boolean => turn !== null
     && turn.status === "completed"
+    && turn.origin !== "cli-import"
     && turn.providerSessionAfter === resumedSessionId
     && (turn.providerSessionBefore === null || turn.providerSessionBefore === turn.providerSessionAfter)
     && !ledger.promptWithheld(turn.id)

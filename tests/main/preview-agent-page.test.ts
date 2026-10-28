@@ -300,12 +300,12 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources}, "closed-boundary")`,
       context,
     );
     runInNewContext("new HTMLElement().attachInternals()", context);
 
-    expect(dispatched).toEqual(["nested-boundary"]);
+    expect(dispatched).toEqual(["nested-boundary", "closed-boundary"]);
   });
 
   it("signals an imperative shadow boundary only after native creation succeeds", () => {
@@ -337,14 +337,14 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources}, "closed-boundary")`,
       context,
     );
     expect(() => runInNewContext("new Element().attachShadow({mode:'invalid'})", context))
       .toThrow("Invalid shadow root mode");
     expect(dispatched).toEqual([]);
     runInNewContext("new Element().attachShadow({mode:'closed'})", context);
-    expect(dispatched).toEqual(["nested-boundary"]);
+    expect(dispatched).toEqual(["nested-boundary", "closed-boundary"]);
   });
 
   it("signals a non-empty password value assignment before page code can clear it", () => {
@@ -452,7 +452,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources}, "closed-boundary")`,
       context,
     );
     runInNewContext(`
@@ -608,9 +608,9 @@ describe("agent browser semantic snapshots", () => {
       querySelector(selector: string): object | null {
         if (selector.startsWith("template")) {
           const beforeClose = this.source.split("</template>", 1)[0] ?? "";
-          return beforeClose.startsWith("<template") && beforeClose.includes(" shadowrootmode")
-            ? {}
-            : null;
+          const declarative = beforeClose.startsWith("<template") && beforeClose.includes(" shadowrootmode");
+          const closed = !selector.includes(":not(") || !/ shadowrootmode=['"]?open\b/iu.test(beforeClose);
+          return declarative && closed ? {} : null;
         }
         return /<input\b(?=[^>]*\btype\s*=\s*['"]?password\b)(?=[^>]*\bvalue\s*=\s*(?:['"][^'"]+['"]|[^\s>]+))/iu
           .test(this.source) ? {} : null;
@@ -673,7 +673,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources}, "closed-boundary")`,
       context,
     );
     runInNewContext(`
@@ -683,6 +683,7 @@ describe("agent browser semantic snapshots", () => {
       Document.parseHTMLUnsafe('<template shadowrootmode=closed>private</template>');
       new ShadowRoot().setHTML('<template shadowrootmode=closed>private</template>');
       new ShadowRoot().setHTMLUnsafe('<template shadowrootmode=closed>private</template>');
+      new Element().setHTMLUnsafe('<template shadowrootmode=open>public</template>');
       const passwordMarkup = '<input type="password" value="hunter2">';
       new Element().innerHTML = passwordMarkup;
       new Element().outerHTML = passwordMarkup;
@@ -696,7 +697,8 @@ describe("agent browser semantic snapshots", () => {
     `, context);
 
     expect(dispatched).toEqual([
-      ...Array<string>(6).fill("nested-boundary"),
+      ...Array.from({ length: 6 }, () => ["nested-boundary", "closed-boundary"]).flat(),
+      "nested-boundary",
       ...Array<string>(9).fill("credential-signal"),
     ]);
 
@@ -719,14 +721,14 @@ describe("agent browser semantic snapshots", () => {
       new Document().write('<p>', 'ordinary</p>');
       new Document().writeln('<input type="text" ', 'value="brief note">');
     `, context);
-    expect(dispatched).toHaveLength(15);
+    expect(dispatched).toHaveLength(22);
 
     runInNewContext(`
       new Element().setHTML('x'.repeat(4097));
       new Element().innerHTML = '<div>'.repeat(2000);
       new Document().write('x'.repeat(4000), 'y'.repeat(200));
     `, context);
-    expect(dispatched).toHaveLength(15);
+    expect(dispatched).toHaveLength(22);
 
     const withoutSanitizer: string[] = [];
     class BareEventTarget {
@@ -750,7 +752,7 @@ describe("agent browser semantic snapshots", () => {
       Event: FakeEvent,
     };
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources}, "closed-boundary")`,
       bareContext,
     );
     runInNewContext("new Element().innerHTML = '<p>ordinary</p>'", bareContext);
@@ -1642,9 +1644,10 @@ describe("agent browser semantic snapshots", () => {
     await installAgentPagePrivacyGuard(contents as never);
     expect(document.addEventListener.mock.calls.map(([name]) => name))
       .not.toContain("input");
-    expect(context.addEventListener.mock.calls.slice(0, 4).map(([name]) => name))
+    expect(context.addEventListener.mock.calls.slice(0, 5).map(([name]) => name))
       .toEqual([
         "__inertia_agent_nested_boundary__",
+        "__inertia_agent_closed_boundary__",
         "__inertia_agent_credential_signal__",
         "beforeinput",
         "input",

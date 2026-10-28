@@ -29,6 +29,7 @@ An API key bills every turn for the chat's whole history. While the provider's p
 
 - The **Work** tab lists your chats. Running chats show the agent pixels and elapsed time, and a chat that needs your input or finishes gets a brief cue.
 - The **Plan** and **Goal** panels show the plan and objective that the provider reports. Inertia doesn't invent a goal from the chat text.
+- The **Browser** panel shows the local pages the agent works on. Its **Viewport** menu chooses **Fit**, which follows the panel's size, or a fixed **Desktop**, **Tablet** or **Mobile** size that is scaled down when the panel is smaller; the agent can change the same setting.
 - **Daily work** in the sidebar summarizes processed tokens, agent runtime and conversations.
 - Switching between chats in the same window preserves your reading position. **Jump to latest** resumes following new content. This navigation memory lasts while the window remains open.
 

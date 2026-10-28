@@ -1,5 +1,7 @@
 import type { WebContents } from "electron";
 
+import { resetAgentPageEmulation, restoreAgentPageEmulation } from "./preview-agent-viewport.js";
+
 const MAX_AGENT_PAGE_FOCUS_DEPTH = 4_000;
 const AGENT_PAGE_BOUNDARY_OBJECT_GROUP = "inertia-agent-page-boundary";
 const AGENT_PAGE_WORLD_NAME = "Electron Isolated Context";
@@ -10,6 +12,7 @@ interface AgentPageBoundaryState {
   documentGeneration: number;
   framesObserved: boolean;
   shadowRootsObserved: boolean;
+  closedShadowRootsObserved: boolean;
 }
 
 interface FrozenAgentPage {
@@ -41,11 +44,13 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
     agentPageDebuggerBootstraps.set(contents, contents.navigationHistory.getActiveIndex());
   }
   contents.debugger.attach("1.3");
+  resetAgentPageEmulation(contents);
   const state: AgentPageBoundaryState = {
     mainFrameId: null,
     documentGeneration: 0,
     framesObserved: false,
     shadowRootsObserved: false,
+    closedShadowRootsObserved: false,
   };
   agentPageBoundaryStates.set(contents, state);
   const listener: AgentPageDebuggerListener = (_event, method, params) => {
@@ -58,6 +63,7 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
         state.documentGeneration += 1;
         state.framesObserved = false;
         state.shadowRootsObserved = false;
+        state.closedShadowRootsObserved = false;
       }
       return;
     }
@@ -68,6 +74,7 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
     if (method === "DOM.shadowRootPushed") {
       const root = objectRecord(payload?.root);
       if (root?.shadowRootType !== "user-agent") state.shadowRootsObserved = true;
+      if (root?.shadowRootType === "closed") state.closedShadowRootsObserved = true;
     }
   };
   agentPageDebuggerListeners.set(contents, listener);
@@ -78,6 +85,7 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
     await contents.debugger.sendCommand("Page.setInterceptFileChooserDialog", {
       enabled: false,
     });
+    await restoreAgentPageEmulation(contents);
   } catch (error) {
     releaseAgentPageDebugger(contents);
     throw error;
@@ -92,6 +100,7 @@ export function releaseAgentPageDebugger(contents: WebContents): void {
   agentPageBoundaryStates.delete(contents);
   frozenAgentPages.delete(contents);
   agentPageFreezeGenerations.set(contents, (agentPageFreezeGenerations.get(contents) ?? 0) + 1);
+  resetAgentPageEmulation(contents);
   if (contents.isDestroyed()) return;
   if (listener) contents.debugger.removeListener("message", listener);
   if (collector) contents.debugger.removeListener("message", collector);
@@ -122,6 +131,10 @@ export function agentPageBoundaryGaps(contents: WebContents): AgentPageBoundaryG
     frames: state?.framesObserved === true,
     shadowRoots: state?.shadowRootsObserved === true,
   };
+}
+
+export function agentPageHasClosedShadowRoots(contents: WebContents): boolean {
+  return agentPageBoundaryStates.get(contents)?.closedShadowRootsObserved === true;
 }
 
 export async function agentPageFocusIsHidden(contents: WebContents): Promise<boolean> {

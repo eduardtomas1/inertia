@@ -7,6 +7,7 @@ import { ensureAgentFileChooserBlock, resetAgentFileChooserBlock } from "../../s
 import {
   agentPageHasSensitiveEvidence,
   agentPageHasSensitiveScreenshotEvidence,
+  agentPageNestedScreenshotEvidence,
   semanticPageSnapshot,
 } from "../../src/main/preview-agent-page";
 
@@ -206,6 +207,7 @@ describe("frozen Browser evidence", () => {
     expect(snapshot.elements).toEqual([expect.objectContaining({ ref: "e1" })]);
     expect(JSON.stringify(snapshot.elements)).toContain("Test note");
     await expect(withinFreeze(agentPageHasSensitiveScreenshotEvidence(contents))).resolves.toBe(false);
+    await expect(withinFreeze(agentPageNestedScreenshotEvidence(contents))).resolves.toBe("clear");
     expect(page.contents.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
     const evaluations = page.debuggerApi.sendCommand.mock.calls
       .filter(([method]) => method === "Runtime.evaluate")

@@ -230,7 +230,9 @@ test("an agent can browse without the Browser panel, through a login, and on pag
   ]));
   expect(JSON.stringify(workspace)).not.toContain("login-password-sentinel");
   expect(JSON.stringify(workspace)).not.toContain("frame-only-sentinel");
-  await expect(browser(conversationId, { action: "screenshot" })).resolves.toMatchObject({ ok: true });
+  const framed = await browser(conversationId, { action: "screenshot" });
+  expect(framed).toMatchObject({ ok: false, code: "sensitive" });
+  expect(framed).not.toHaveProperty("image");
 
   const shadowUrl = `${app.previewUrl}agent-browser-shadow-coverage`;
   await expect(browser(conversationId, { action: "navigate", url: shadowUrl }))

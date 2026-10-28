@@ -3,16 +3,16 @@
   "unit": "UTF-8 bytes",
   "tools": {
     "inertia_browser_navigate": {
-      "claude": 999,
-      "codex": 856,
-      "cursorKimi": 962,
-      "opencode": 961
+      "claude": 911,
+      "codex": 768,
+      "cursorKimi": 874,
+      "opencode": 873
     },
     "inertia_browser_snapshot": {
-      "claude": 962,
-      "codex": 820,
-      "cursorKimi": 924,
-      "opencode": 924
+      "claude": 565,
+      "codex": 423,
+      "cursorKimi": 527,
+      "opencode": 527
     },
     "inertia_browser_click": {
       "claude": 805,
@@ -21,10 +21,10 @@
       "opencode": 767
     },
     "inertia_browser_type": {
-      "claude": 1035,
-      "codex": 892,
-      "cursorKimi": 998,
-      "opencode": 997
+      "claude": 849,
+      "codex": 706,
+      "cursorKimi": 812,
+      "opencode": 811
     },
     "inertia_browser_press": {
       "claude": 847,
@@ -39,16 +39,40 @@
       "opencode": 743
     },
     "inertia_browser_wait_for": {
-      "claude": 949,
-      "codex": 807,
-      "cursorKimi": 911,
-      "opencode": 911
+      "claude": 892,
+      "codex": 750,
+      "cursorKimi": 854,
+      "opencode": 854
     },
     "inertia_browser_screenshot": {
-      "claude": 469,
-      "codex": 327,
-      "cursorKimi": 431,
-      "opencode": 431
+      "claude": 533,
+      "codex": 391,
+      "cursorKimi": 495,
+      "opencode": 495
+    },
+    "inertia_browser_resize": {
+      "claude": 1218,
+      "codex": 1075,
+      "cursorKimi": 1181,
+      "opencode": 1180
+    },
+    "inertia_browser_hover": {
+      "claude": 628,
+      "codex": 485,
+      "cursorKimi": 591,
+      "opencode": 590
+    },
+    "inertia_browser_select": {
+      "claude": 831,
+      "codex": 688,
+      "cursorKimi": 794,
+      "opencode": 793
+    },
+    "inertia_browser_logs": {
+      "claude": 458,
+      "codex": 316,
+      "cursorKimi": 420,
+      "opencode": 420
     },
     "inertia_browser_tabs": {
       "claude": 397,
@@ -143,19 +167,19 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 17198,
+      "withBrowser": 19669,
       "withoutBrowser": 7811
     },
     "codex": {
-      "withBrowser": 14053,
+      "withBrowser": 15953,
       "withoutBrowser": 6380
     },
     "cursorKimi": {
-      "withBrowser": 16368,
+      "withBrowser": 18690,
       "withoutBrowser": 7431
     },
     "opencode": {
-      "withBrowser": 16362,
+      "withBrowser": 18681,
       "withoutBrowser": 7431
     }
   }

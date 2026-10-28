@@ -132,6 +132,7 @@ export async function expectStructuralCoverage(
     notInspected: string[];
     present?: string;
     absent: string[];
+    screenshot: "image" | "local" | "sensitive";
   },
 ): Promise<void> {
   const evidence = await app.electronApp.evaluate(
@@ -142,6 +143,7 @@ export async function expectStructuralCoverage(
         | { action: "tab-activate" | "tab-close"; tabId: string };
       type Result = {
         code?: string;
+        image?: unknown;
         message?: string;
         ok: boolean;
         state?: { activeTabId: string };
@@ -171,7 +173,7 @@ export async function expectStructuralCoverage(
   expect(evidence, `page evidence was refused for ${url}`).toMatchObject({
     opened: { ok: true },
     snapshot: { ok: true },
-    screenshot: { ok: true },
+    screenshot: expected.screenshot === "sensitive" ? { ok: false, code: "sensitive" } : { ok: true },
     closed: { ok: true },
     restored: { ok: true },
   });
@@ -180,6 +182,17 @@ export async function expectStructuralCoverage(
     text?: string;
   };
   expect(page.notInspected ?? [], url).toEqual(expected.notInspected);
+  if (expected.screenshot === "image") {
+    expect(evidence.screenshot?.image, url).toMatchObject({ mimeType: "image/png" });
+  } else {
+    expect(evidence.screenshot, url).not.toHaveProperty("image");
+  }
+  if (expected.screenshot === "local") {
+    expect(JSON.parse(evidence.screenshot?.text ?? "{}"), url).toMatchObject({
+      captured: true,
+      withheld: "The page has frames or shadow roots Inertia cannot inspect.",
+    });
+  }
   if (expected.present) expect(page.text, url).toContain(expected.present);
   for (const absent of expected.absent) {
     expect(JSON.stringify(evidence), url).not.toContain(absent);
@@ -191,7 +204,7 @@ export async function expectScreenshotPrivacyGuard(
   conversationId: string,
   url: string,
   forbiddenText: string,
-  localOnly = false,
+  captured = false,
 ): Promise<void> {
   const evidence = await app.electronApp.evaluate(async (_electron, request) => {
     type Command =
@@ -228,7 +241,7 @@ export async function expectScreenshotPrivacyGuard(
     });
     return { closed, opened, restored, screenshot };
   }, { conversationId, url });
-  expect(evidence).toMatchObject(localOnly ? {
+  expect(evidence).toMatchObject(captured ? {
     opened: { ok: true },
     screenshot: { ok: true },
     closed: { ok: true },
@@ -243,10 +256,10 @@ export async function expectScreenshotPrivacyGuard(
     closed: { ok: true },
     restored: { ok: true },
   });
-  if (localOnly && evidence.screenshot?.ok) {
-    expect(evidence.screenshot).not.toHaveProperty("image");
-    expect(JSON.parse(evidence.screenshot.text ?? "{}"))
-      .toMatchObject({ bitmap: "local-only", providerImage: false });
+  if (captured && evidence.screenshot?.ok) {
+    expect(evidence.screenshot.image).toMatchObject({ mimeType: "image/png" });
+    expect(JSON.parse(evidence.screenshot.text ?? "{}")).toMatchObject({ captured: true });
+    expect(JSON.parse(evidence.screenshot.text ?? "{}")).not.toHaveProperty("bitmap");
   }
   expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
 }

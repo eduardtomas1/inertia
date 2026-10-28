@@ -56,6 +56,38 @@ describe("PreviewPanel native bounds", () => {
     ]);
   });
 
+  it("measures again when an ancestor's slide-in animation ends", () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    const rect = (x: number) => ({
+      x, y: 30, width: 640, height: 420, top: 30, left: x, right: x + 640, bottom: 450, toJSON: () => ({}),
+    });
+    const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect(32));
+    const onBoundsChange = vi.fn();
+    const view = render(
+      <div>
+        <div data-testid="sliding">
+          <PreviewPanel
+            owner="primary"
+            url="http://127.0.0.1:4173/slide"
+            onNavigate={vi.fn()}
+            onOpenExternal={vi.fn()}
+            onBoundsChange={onBoundsChange}
+          />
+        </div>
+        <div data-testid="elsewhere" />
+      </div>,
+    );
+    expect(onBoundsChange).toHaveBeenLastCalledWith({ x: 32, y: 30, width: 640, height: 420 });
+    bounds.mockReturnValue(rect(20));
+    onBoundsChange.mockClear();
+
+    view.getByTestId("elsewhere").dispatchEvent(new Event("animationend", { bubbles: true }));
+    expect(onBoundsChange).not.toHaveBeenCalled();
+
+    view.getByTestId("sliding").dispatchEvent(new Event("animationend", { bubbles: true }));
+    expect(onBoundsChange).toHaveBeenLastCalledWith({ x: 20, y: 30, width: 640, height: 420 });
+  });
+
   it("keeps bounds stable across URL-only rerenders", () => {
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
     const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")

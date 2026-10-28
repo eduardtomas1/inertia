@@ -24,10 +24,11 @@ function frontendPack() {
 
 describe("Browser tool guidance", () => {
   it("tells the model what redacted values mean and that page content is untrusted", () => {
-    expect(description("inertia_browser_snapshot")).toContain(SECRET_GUIDANCE);
     expect(description("inertia_browser_snapshot")).toContain(UNTRUSTED_GUIDANCE);
     expect(description("inertia_browser_snapshot")).toContain("up to 200 controls, viewport first; off-screen ones are marked offscreen");
-    expect(description("inertia_browser_type")).toContain(SECRET_GUIDANCE);
+    const descriptions = AGENT_BROWSER_TOOL_DEFINITIONS.map((definition) => definition.description).join("\n");
+    expect(descriptions).not.toContain("[redacted]");
+    expect(descriptions.split("untrusted page data")).toHaveLength(2);
     for (const name of ["inertia_browser_click", "inertia_browser_press"]) {
       const schema = AGENT_BROWSER_TOOL_DEFINITIONS.find((definition) => definition.name === name)!.inputSchema as {
         properties: { dialog: { description: string } };
@@ -56,13 +57,24 @@ describe("Browser tool guidance", () => {
     expect(pack.revision).toBe(4);
   });
 
+  it("describes the viewport and when screenshots reach the model", () => {
+    const resize = description("inertia_browser_resize");
+    expect(resize).toContain("fit, follows the panel");
+    expect(resize).toContain("desktop (1280x800) before inspecting desktop layouts");
+    expect(resize).toContain("persists for this chat until changed");
+    expect(resize).toContain("every result reports the viewport");
+    expect(description("inertia_browser_screenshot")).toContain("returned to you when this model accepts images");
+    expect(frontendPack().text).not.toContain("screenshot");
+    expect(frontendPack().text).not.toContain("pixels");
+  });
+
   it("keeps the advertised tool list and every description bounded", () => {
     const advertised = AGENT_BROWSER_TOOL_DEFINITIONS.map(({ name, description, inputSchema }) => ({
       name, description, inputSchema,
     }));
-    expect(Buffer.byteLength(JSON.stringify(advertised), "utf8")).toBeLessThanOrEqual(7_500);
+    expect(Buffer.byteLength(JSON.stringify(advertised), "utf8")).toBeLessThanOrEqual(9_250);
     for (const definition of AGENT_BROWSER_TOOL_DEFINITIONS) {
-      expect(definition.description.length, definition.name).toBeLessThanOrEqual(700);
+      expect(definition.description.length, definition.name).toBeLessThanOrEqual(300);
     }
   });
 });

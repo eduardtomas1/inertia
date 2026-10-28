@@ -35,9 +35,14 @@ function mainWorld() {
     get textContent(): string | null { return null; }
     set textContent(_value: string | null) {}
   }
+  class FakeShadowRoot {
+    #mode: string;
+    constructor(mode: string) { this.#mode = mode; }
+    get mode(): string { return this.#mode; }
+  }
   class FakeElement extends FakeNode {
     readonly attributeValues = new Map<string, string>();
-    attachShadow(): object { return {}; }
+    attachShadow(init: { mode: string }): object { return new FakeShadowRoot(init.mode); }
     getAttribute(name: string): string | null { return this.attributeValues.get(name) ?? null; }
     applyAttribute(name: string, value: string): void { this.attributeValues.set(name, value); }
     setAttribute(name: string, value: string): void { this.applyAttribute(name, String(value)); }
@@ -81,18 +86,34 @@ function mainWorld() {
     NamedNodeMap: FakeNamedNodeMap,
     Attr: FakeAttr,
     Node: FakeNode,
+    ShadowRoot: FakeShadowRoot,
     EventTarget: FakeEventTarget,
     Event: FakeEvent,
     CustomEvent: FakeCustomEvent,
   };
   runInNewContext(
-    `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${JSON.stringify(PREVIEW_AGENT_SENSITIVE_NAME_SOURCE)}, ${JSON.stringify(PREVIEW_AGENT_NAME_WORD_SOURCE)})`,
+    `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${JSON.stringify(PREVIEW_AGENT_SENSITIVE_NAME_SOURCE)}, ${JSON.stringify(PREVIEW_AGENT_NAME_WORD_SOURCE)}, "closed-boundary")`,
     context,
   );
   return { dispatched, run: (code: string): unknown => runInNewContext(code, context) };
 }
 
 describe("Browser main-world credential signal", () => {
+  it("tells a closed shadow root from an open one with the mode getter captured before page scripts", () => {
+    const { dispatched, run } = mainWorld();
+    run("new Element().attachShadow({ mode: 'open' })");
+    expect(dispatched).toEqual([{ type: "nested-boundary" }]);
+    run(`
+      Object.defineProperty(ShadowRoot.prototype, "mode", { get: () => "open" });
+      new Element().attachShadow({ mode: "closed" });
+    `);
+    expect(dispatched).toEqual([
+      { type: "nested-boundary" },
+      { type: "nested-boundary" },
+      { type: "closed-boundary" },
+    ]);
+  });
+
   it("builds its value signal from built-ins captured before page scripts", () => {
     const { dispatched, run } = mainWorld();
     run(`

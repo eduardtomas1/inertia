@@ -4,6 +4,7 @@ import {
   installPreviewAgentPrivacyGuard,
   PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL,
   installPreviewAgentShadowBoundarySignal,
+  PREVIEW_AGENT_CLOSED_BOUNDARY_EVENT,
   PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT,
   PREVIEW_AGENT_NESTED_BOUNDARY_EVENT,
 } from "../shared/preview-agent-privacy-guard.js";
@@ -34,6 +35,7 @@ contextBridge.executeInMainWorld({
     PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT,
     PREVIEW_AGENT_SENSITIVE_NAME_SOURCE,
     PREVIEW_AGENT_NAME_WORD_SOURCE,
+    PREVIEW_AGENT_CLOSED_BOUNDARY_EVENT,
   ],
 });
 installPreviewAgentDialogRecorder(

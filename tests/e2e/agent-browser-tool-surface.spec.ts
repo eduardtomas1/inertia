@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { agentBrowserToolSurfacePostCount } from "./support/agent-browser-tool-surface-pages";
+import { closeWorkspaceTools, ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 interface Result {
   ok: boolean;
@@ -12,6 +13,7 @@ interface Result {
   message?: string;
   text?: string;
   state?: { controller?: string };
+  image?: { mimeType: string; data: string; width: number; height: number };
 }
 
 interface PageSnapshot {
@@ -179,6 +181,37 @@ test("an agent sees a confirmation dialog and accepts it only when it asks to", 
   expect(parsed(await browser({ action: "snapshot" })).text).toContain("Deleted");
 });
 
+test("an agent hovers a control, chooses an option and reads the page's logs", async () => {
+  const path = "agent-browser-hover-select";
+  await navigate(path);
+  const snapshot = parsed(await browser({ action: "snapshot" }));
+  const hovered = parsed(await browser({ action: "hover", ref: refFor(snapshot, "Help") }));
+  expect(hovered).toMatchObject({ hovered: refFor(snapshot, "Help"), element: { label: "Help" } });
+  await expect.poll(() => pageValue<boolean>(path, "window.__hovered === true")).toBe(true);
+
+  const lists = snapshot.elements?.filter((element) => (element as { role?: string }).role === "select")
+    .map((element) => element.ref) ?? [];
+  expect(lists, JSON.stringify(snapshot.elements)).toHaveLength(3);
+  const [list, plan, region] = lists;
+  expect(parsed(await browser({ action: "select", ref: list, value: "Express" })))
+    .toMatchObject({ option: { value: "express", label: "Express" } });
+  expect(await pageValue<string>(path, "document.querySelector('#status').textContent")).toBe("express");
+  expect(await pageValue<number>(path, "window.__inputs")).toBe(1);
+  expect(parsed(await browser({ action: "select", ref: plan, value: "Pro" })))
+    .toMatchObject({ option: { value: "pro", label: "Pro" } });
+  expect(await pageValue<string>(path, "document.querySelector('#plan').value")).toBe("pro");
+  expect(await browser({ action: "select", ref: region, value: "US" })).toEqual({
+    ok: false, code: "invalid", message: "The page did not keep that option. The list shows \"EU\".",
+  });
+  expect(await pageValue<string>(path, "document.querySelector('#region').value")).toBe("eu");
+  expect(await browser({ action: "select", ref: list, value: "Gold" })).toMatchObject({
+    ok: false, code: "not-found", message: expect.stringContaining("\"Standard\", \"Express\""),
+  });
+
+  await expect.poll(async () => JSON.stringify(parsed(await browser({ action: "logs" })).entries))
+    .toContain("Fixture failure");
+});
+
 test("the user takes over the page during an agent command", async () => {
   await interruptedWhile("agent-browser-focus-order", { type: "mouseDown", x: 20, y: 20, button: "left", clickCount: 1 });
   expect(await browser({ action: "tabs" })).toMatchObject({ ok: true, state: { controller: "user" } });
@@ -189,5 +222,41 @@ test("the user takes over the page during an agent command", async () => {
 
   await interruptedWhile("agent-browser-confirm", { type: "keyDown", keyCode: "a" });
   expect(await browser({ action: "tabs" })).toMatchObject({ ok: true, state: { controller: "user" } });
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("an agent lays the page out at a desktop size inside a narrower panel and still clicks precisely", async () => {
+  const path = "agent-browser-viewport";
+  const panel = await ensureWorkspaceTools(app.page);
+  try {
+    await selectWorkspaceTool(panel, "Browser");
+    await navigate(path);
+    await expect.poll(() => app.nativePreviewIsVisible(`${app.previewUrl}${path}`)).toBe(true);
+    const panelWidth = await pageValue<number>(path, "innerWidth");
+    expect(panelWidth).toBeLessThan(1_280);
+
+    const resized = await browser({ action: "resize", preset: "desktop" });
+    expect(resized).toMatchObject({
+      ok: true,
+      state: { viewport: { width: 1_280, height: 800, fit: false, mobile: false } },
+    });
+    expect(JSON.parse(resized.text ?? "{}")).toMatchObject({ page: { width: 1_280, height: 800 } });
+    await expect.poll(() => pageValue<number>(path, "innerWidth")).toBe(1_280);
+    expect(await pageValue<number>(path, "innerHeight")).toBe(800);
+    const snapshot = parsed(await browser({ action: "snapshot" }));
+    expect(await browser({ action: "click", ref: refFor(snapshot, "Far corner") })).toMatchObject({ ok: true });
+    await expect.poll(() => pageValue<string>(path, "window.__clicked ?? ''")).toBe("far");
+
+    const screenshot = await browser({ action: "screenshot" });
+    expect(screenshot).toMatchObject({ ok: true, image: { mimeType: "image/png" } });
+    expect(screenshot.image).toMatchObject({
+      width: await pageValue<number>(path, "document.documentElement.clientWidth"),
+      height: await pageValue<number>(path, "document.documentElement.clientHeight"),
+    });
+  } finally {
+    expect(await browser({ action: "resize", preset: "fit" })).toMatchObject({ ok: true });
+    await closeWorkspaceTools(app.page);
+  }
+  await expect.poll(() => pageValue<number>(path, "innerWidth")).not.toBe(1_280);
   expect(app.rendererErrors).toEqual([]);
 });

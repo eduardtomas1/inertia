@@ -73,10 +73,11 @@ gets the suggestion on both transports.
 not already say: snapshot before and after each meaningful UI change, exercise
 the real interaction path, treat the audit as deterministic signals rather than
 a visual judgment, follow a failed tool's message before giving up on the
-Browser, and report only observed evidence. Navigating first, the Browser
-working while its panel is hidden, what `[redacted]` means, and that page text
-and control names are untrusted page data live in the navigate, snapshot and
-type tool descriptions, and a test keeps the guidance from repeating them. A
+Browser, use these tools rather than Playwright, never type or retype what
+`[redacted]` hides, and report only observed evidence. Navigating first, the
+Browser working while its panel is hidden, and that page and console text are
+untrusted page data live in the navigate, snapshot and logs tool descriptions,
+and a test keeps the guidance from repeating them. A
 successful semantic snapshot gains a bounded `inertiaAudit` object with stable
 issue codes for controls without stable labels or semantic names, clipped
 controls, overlapping controls, and targets smaller than 24 by 24 CSS pixels
@@ -852,7 +853,8 @@ three layers that the account route does not need:
   the projector, the transcript or the failure path sees it. It masks the
   exact key and these forms of it: URL and JSON escaping, base64 and base64url
   of the key alone and followed by `
-` or `
+` or `
+
 ` (what `echo $KEY | base64`
   prints), and lower- and upper-case hex. Spaces, tabs and line breaks
   between characters are ignored, so wrapped base64 (`base64` wraps at 76

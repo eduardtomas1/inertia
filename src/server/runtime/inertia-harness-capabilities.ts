@@ -28,6 +28,7 @@ const FRONTEND_INSTRUCTION: HiddenProviderInstruction = {
     "For frontend work, snapshot before and after each meaningful UI change and exercise the real interaction path.",
     "The snapshot audit flags missing control names and clipped, overlapping or small controls in the current viewport: deterministic signals, not a full visual judgment; re-check after the viewport changes.",
     "When a Browser tool fails, follow its message before giving up on the Browser.",
+    "Use these tools, not Playwright. \"[redacted]\" hides a secret, not page content; never type it or retype a secret.",
     "Report only evidence you observed.",
   ].join(" "),
 };
@@ -63,7 +64,7 @@ export function createInertiaHarnessCapabilities(
   }];
   if (input.browserEnabled) packs.push({
     id: "inertia.frontend-workbench",
-    revision: 4,
+    revision: 5,
     title: "Inertia frontend workbench",
     summary: "Visible local-page interaction with bounded semantic inspection and deterministic frontend audit evidence.",
     instructions: [FRONTEND_INSTRUCTION],

@@ -1032,12 +1032,14 @@ export class ClaudeMessageProjector {
         || "Claude reported that context compaction failed.";
     }
     if (message.compact_result === "failed") {
+      const closesStatus = this.activeProviderStatus === "compacting";
+      if (closesStatus) this.activeProviderStatus = null;
       this.options.emitter.activity(
         "system",
         "failed",
         "Claude context compaction failed",
         {
-          activityId: boundedIdentifier(message.uuid),
+          activityId: closesStatus ? "claude:status:compacting" : boundedIdentifier(message.uuid),
           detail: detailLines([message.compact_error]),
         },
       );

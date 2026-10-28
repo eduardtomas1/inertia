@@ -11,6 +11,7 @@ import {
   type AgentTurn,
   type AgentTurnTerminalStatus,
   type ChatAttachment,
+  type Conversation,
   type SubagentTrace,
 } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
@@ -50,6 +51,7 @@ import {
   updateActiveTurnProviderSession,
 } from "./turn-controller-support";
 import {
+  compactionSessionInstruction,
   prepareTurnRequest,
   type PreparedTurnRequest,
 } from "./turn-request-preparation";
@@ -591,6 +593,17 @@ export class TurnController {
       this.admissions.consume(admission);
     }
     return this.adoptPreparedTurn(prepared);
+  }
+
+  compactionSessionInstruction(
+    conversation: Conversation,
+    route: Parameters<typeof compactionSessionInstruction>[2],
+  ): string | undefined {
+    return compactionSessionInstruction({ store: this.store, hooks: this.hooks }, conversation, route);
+  }
+
+  forgetPromptDelivery(conversationId: string): void {
+    this.instructionDeliveries.forget(conversationId);
   }
 
   queuePair(

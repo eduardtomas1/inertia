@@ -283,7 +283,6 @@ describe("hidden instruction delivery", () => {
     ["codex", "Context compaction"],
     ["cursor", "Cursor compacted session context"],
     ["kimi", "Kimi Code compacted session context"],
-    ["claude", "Claude compacted context"],
   ] as const)("re-sends after a %s compaction recorded only as an activity", async (providerId, label) => {
     const { runtime } = await chatRuntime(providerId);
 
@@ -295,6 +294,77 @@ describe("hidden instruction delivery", () => {
     expect(after.prompt).toContain("ORCHESTRATION_PACK_TEXT");
     expect(settled.prompt).toBe("three");
     runtime.store.close();
+  });
+
+  it("keeps a Claude session's pack at system level after a compaction, including after a restart", async () => {
+    const { runtime, hooks, clock } = await chatRuntime("claude");
+
+    await runTurn(runtime, "one", "session-1", runtime.controller, { compactionActivity: "Claude compacted context" });
+    const after = await runTurn(runtime, "two");
+    const settled = await runTurn(runtime, "three");
+    compact(runtime, "claude", clock);
+    const afterReceipt = await runTurn(runtime, "four");
+    let restartIds = 0;
+    const restarted = new TurnController(runtime.store, runtime.provider, new Map(), new Map(), new Map(), hooks, {
+      scheduler: new FakeTurnScheduler(),
+      clock,
+      id: () => `restarted-id-${++restartIds}`,
+    });
+    const afterRestart = await runTurn(runtime, "five", "session-1", restarted);
+
+    expect(after.prompt).toBe(`two\n\n${INSTRUCTIONS_HEADER}\n[build-mode]\n${BUILD_MODE_INSTRUCTION}`);
+    expect(after.sessionInstruction).toBe(sessionText(runtime.conversationId));
+    expect(settled.prompt).toBe("three");
+    expect(afterReceipt.prompt).toBe(`four\n\n${INSTRUCTIONS_HEADER}\n[build-mode]\n${BUILD_MODE_INSTRUCTION}`);
+    expect(afterRestart.prompt).toBe("five");
+    runtime.store.close();
+  });
+
+  it("re-sends a Claude session's pack after a compaction that ran with other pack text", async () => {
+    let pack: readonly HiddenProviderInstruction[] = PACK;
+    const { runtime } = await chatRuntime("claude", () => pack);
+
+    await runTurn(runtime, "one");
+    pack = [PACK[0]!, { label: "inertia-frontend-workbench", text: "FRONTEND_PACK_TEXT_V2" }];
+    const changed = await runTurn(runtime, "two");
+    pack = PACK;
+    await runTurn(runtime, "three", "session-1", runtime.controller, { compactionActivity: "Claude compacted context" });
+    pack = [PACK[0]!, { label: "inertia-frontend-workbench", text: "FRONTEND_PACK_TEXT_V2" }];
+    const afterCompaction = await runTurn(runtime, "four");
+
+    expect(changed.prompt).toContain("FRONTEND_PACK_TEXT_V2");
+    expect(afterCompaction.prompt).toContain("FRONTEND_PACK_TEXT_V2");
+    runtime.store.close();
+  });
+
+  it("forgets a chat's prompt delivery when asked, so the next turn re-sends the pack", async () => {
+    const { runtime } = await chatRuntime("cursor");
+
+    await runTurn(runtime, "one");
+    runtime.controller.forgetPromptDelivery(runtime.conversationId);
+    const after = await runTurn(runtime, "two");
+
+    expect(after.prompt).toContain("ORCHESTRATION_PACK_TEXT");
+    runtime.store.close();
+  });
+
+  it("gives compaction the same session instruction as a turn, only where the harness keeps one", async () => {
+    const claude = await chatRuntime("claude");
+    const cursor = await chatRuntime("cursor");
+    const instruction = (runtime: TurnControllerTestRuntime) => {
+      const conversation = runtime.store.conversation(runtime.conversationId);
+      return runtime.controller.compactionSessionInstruction(
+        conversation,
+        runtime.provider.resolveModelRoute(conversation.modelSelection),
+      );
+    };
+
+    const turn = await runTurn(claude.runtime, "one");
+
+    expect(instruction(claude.runtime)).toBe(turn.sessionInstruction);
+    expect(instruction(cursor.runtime)).toBeUndefined();
+    claude.runtime.store.close();
+    cursor.runtime.store.close();
   });
 
   it("sends Build mode on the next turn after a Claude session is replaced mid-turn", async () => {
@@ -324,6 +394,18 @@ describe("hidden instruction delivery", () => {
     expect(second.sessionInstruction).toBeUndefined();
     expect(second.prompt).toBe("two");
     runtime.store.close();
+  });
+
+  it("keeps a chat whose delivery was just read when it must forget one", () => {
+    const deliveries = new PromptInstructionDeliveries();
+    for (let index = 0; index < MAX_TRACKED_PROMPT_DELIVERIES; index += 1) {
+      deliveries.record(`chat-${index}`, `turn-${index}`, "digest");
+    }
+    expect(deliveries.sentTurnId("chat-0", "digest")).toBe("turn-0");
+    deliveries.record("chat-new", "turn-new", "digest");
+
+    expect(deliveries.sentTurnId("chat-0", "digest")).toBe("turn-0");
+    expect(deliveries.sentTurnId("chat-1", "digest")).toBeNull();
   });
 
   it("forgets the oldest chats once it tracks too many prompt deliveries", () => {

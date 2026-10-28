@@ -18,6 +18,7 @@ const threadId = "scratch-fixture-thread";
 require("node:readline").createInterface({ input: process.stdin }).on("line", line => {
   const message = JSON.parse(line);
   if (message.method === "initialize") send({ id: message.id, result: { userAgent: "scratch-fixture" } });
+  if (message.method === "config/read") return send({ id: message.id, result: { config: {} } });
   if (message.method === "model/list") send({ id: message.id, result: { data: [], nextCursor: null } });
   if (message.method === "account/rateLimits/read") send({ id: message.id, result: { rateLimits: null } });
   if (message.method === "thread/goal/get") send({ id: message.id, result: { goal: null } });

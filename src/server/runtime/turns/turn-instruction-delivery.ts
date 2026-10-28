@@ -20,6 +20,27 @@ export function chatInstruction(conversationId: string): HiddenProviderInstructi
   return { label: "inertia-chat", text: `This chat's id is ${conversationId}.` };
 }
 
+export function instructionPack(
+  conversationId: string,
+  capabilityInstructions: readonly HiddenProviderInstruction[],
+): readonly HiddenProviderInstruction[] {
+  return capabilityInstructions.length === 0
+    ? []
+    : [...capabilityInstructions, chatInstruction(conversationId)];
+}
+
+export function sessionInstructionText(
+  harnessId: string,
+  pack: readonly HiddenProviderInstruction[],
+): string | undefined {
+  const text = systemInstructionText(pack);
+  return text !== undefined
+    && watcherHarnessProfile(harnessId).sessionInstruction
+    && Buffer.byteLength(text, "utf8") <= MAX_SYSTEM_INSTRUCTION_BYTES
+    ? text
+    : undefined;
+}
+
 export const MAX_TRACKED_PROMPT_DELIVERIES = 1_024;
 
 export class PromptInstructionDeliveries {
@@ -33,7 +54,14 @@ export class PromptInstructionDeliveries {
 
   sentTurnId(conversationId: string, digest: string): string | null {
     const delivery = this.sent.get(conversationId);
-    return delivery?.digest === digest ? delivery.turnId : null;
+    if (delivery?.digest !== digest) return null;
+    this.sent.delete(conversationId);
+    this.sent.set(conversationId, delivery);
+    return delivery.turnId;
+  }
+
+  forget(conversationId: string): void {
+    this.sent.delete(conversationId);
   }
 }
 
@@ -69,17 +97,17 @@ export function resolveHiddenInstructionDelivery(
     && !ledger.promptWithheld(turn.id)
     && !ledger.compactedSince(conversation.id, turn.requestedAt);
   const text = systemInstructionText(input.pack);
-  const bytes = text === undefined ? 0 : Buffer.byteLength(text, "utf8");
-  const profile = watcherHarnessProfile(input.harnessId);
-  const systemChannel = text !== undefined
-    && profile.sessionInstruction
-    && bytes <= MAX_SYSTEM_INSTRUCTION_BYTES;
+  const systemChannel = sessionInstructionText(input.harnessId, input.pack) !== undefined;
   const digest = text === undefined ? "" : createHash("sha256").update(text, "utf8").digest("hex");
   const sessionHoldsPack = (sessionId: string): boolean => {
     if (!systemChannel) return false;
     const origin = ledger.sessionOrigin(conversation.id, sessionId);
-    return origin !== null
-      && origin.sessionInstructionDigest === digest
+    if (origin === null) return false;
+    const compaction = watcherHarnessProfile(input.harnessId).sessionInstructionRecordedAtCompaction
+      ? ledger.latestCompaction(conversation.id, origin.requestedAt)
+      : null;
+    if (compaction !== null) return compaction.sessionInstructionDigest === digest;
+    return origin.sessionInstructionDigest === digest
       && !ledger.compactedSince(conversation.id, origin.requestedAt);
   };
   const promptPackHeld = (): boolean => {

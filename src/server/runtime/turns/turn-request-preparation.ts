@@ -1,4 +1,4 @@
-import type { AgentActivity, Conversation } from "../../../shared/contracts";
+import type { AgentActivity, Conversation, ProviderInfo } from "../../../shared/contracts";
 import {
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
@@ -34,8 +34,9 @@ import {
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
 import {
-  chatInstruction,
+  instructionPack,
   resolveHiddenInstructionDelivery,
+  sessionInstructionText,
   systemInstructionText,
   type PromptInstructionDeliveries,
 } from "./turn-instruction-delivery";
@@ -50,6 +51,8 @@ import type {
 } from "./turn-controller-types";
 
 const CUSTOM_BACKEND_RESTORED_HISTORY_BYTES = 48 * 1_024;
+
+type InstructionRoute = Parameters<typeof routeUsesTrustedHostBridge>[0];
 
 export type PreparedActiveTurn = Omit<
   ActiveTurn,
@@ -152,6 +155,36 @@ function retireUsageLimitSnooze(
   dependencies.store.updateConversation(conversationId, { snoozedUntil: null });
 }
 
+function routeHostBridgeAttested(
+  providerInfo: readonly ProviderInfo[],
+  route: InstructionRoute,
+): boolean {
+  const capabilityContract = providerInfo.find(({ id }) => id === route.providerId)?.capabilityContract;
+  return capabilityContract !== undefined
+    && capabilityContract.installationVerified
+    && capabilityContract.hostToolBridgeAvailable
+    && capabilityContract.harnessId === route.harnessId
+    && routeUsesTrustedHostBridge(route);
+}
+
+export function compactionSessionInstruction(
+  dependencies: Pick<PrepareTurnRequestDependencies, "store" | "hooks">,
+  conversation: Conversation,
+  route: InstructionRoute,
+): string | undefined {
+  const watcher = dependencies.store.watcherLinks.policyForConversation(conversation.id);
+  if (
+    !routeHostBridgeAttested(dependencies.hooks.providerInfo(), route)
+    || (watcher !== null && watcher.status !== "detached")
+    || (route.providerId === "codex"
+      && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
+  ) return undefined;
+  return sessionInstructionText(
+    route.harnessId,
+    instructionPack(conversation.id, dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []),
+  );
+}
+
 export function resolveTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
@@ -192,16 +225,7 @@ export function resolveTurnRequest(
   const watcherTurn = watcherTurnPolicy(dependencies.store, conversation, route.harnessId, request);
   const readOnlyWatcher = watcherTurn?.readOnly;
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
-  const capabilityContract = exactProvider?.capabilityContract;
-  const hostToolBridgeAttested = capabilityContract !== undefined
-    && capabilityContract.installationVerified
-    && capabilityContract.hostToolBridgeAvailable
-    && capabilityContract.harnessId === route.harnessId
-    && routeUsesTrustedHostBridge({
-      providerId: route.providerId,
-      harnessId: route.harnessId,
-      backendProfile: route.backendProfile,
-    });
+  const hostToolBridgeAttested = routeHostBridgeAttested(providerInfo, route);
   const capabilityInstructions = hostToolBridgeAttested && !watcherTurn
     ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
     : [];
@@ -299,9 +323,7 @@ export function resolveTurnRequest(
     deliveries: dependencies.instructionDeliveries,
     conversation,
     harnessId: route.harnessId,
-    pack: resumesImportedCodex || capabilityInstructions.length === 0
-      ? []
-      : [...capabilityInstructions, chatInstruction(conversation.id)],
+    pack: resumesImportedCodex ? [] : instructionPack(conversation.id, capabilityInstructions),
     resumedSessionId: canResume ? conversation.providerSessionId : null,
     latestTurn,
     promptWithheld: request.goalStart !== undefined,

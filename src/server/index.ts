@@ -135,7 +135,7 @@ import {
   prepareRuntimeStartupRecovery,
   runtimeSafetyError,
 } from "./runtime-startup-recovery";
-import { runtimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
+import { providerRunOwnershipDiagnostics, runtimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
 import { RuntimeStartupBlockerError } from
   "../shared/runtime-startup-diagnostics";
 export type {
@@ -465,7 +465,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         selectedConversationId: snapshot.activeConversationId,
         activeConversationIds,
         runningProviderConversationIds: new Set(providers.activeConversationIds()),
-        providerRunOwnershipConversationIds: providerRunOwnership.map(({ conversationId }) => conversationId),
+        ...providerRunOwnershipDiagnostics(store, providerRunOwnership),
         terminalOwnershipCount: terminals.ownedResourceCount(), interactionCount: pendingApprovals.size + pendingInputs.size,
         windowsCleanupFailures: windowsCleanupFailures(),
       }),

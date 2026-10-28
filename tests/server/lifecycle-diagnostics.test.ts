@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { parseRuntimeLifecycleDiagnosticSnapshot } from "../../src/shared/lifecycle-diagnostics";
 import {
+  providerRunOwnershipDiagnostics,
   runtimeLifecycleDiagnosticSnapshot,
   type RuntimeLifecycleDiagnosticInput,
 } from "../../src/server/lifecycle-diagnostics";
+import type { RuntimeStore } from "../../src/server/database";
+import type { OwnedProviderRun } from "../../src/server/persistence/provider-run-ownership-repository";
 import type { ContinuationReasonCode } from "../../src/shared/continuation-policy";
 import {
   nativeModelSelection,
@@ -271,6 +274,33 @@ describe("runtime lifecycle diagnostics", () => {
         "provider-cleanup-pending",
       ],
     });
+  });
+
+  it("counts only rows of open turns as active work and reports the rest as unconfirmed", () => {
+    const statuses: Record<string, string> = { "finished-turn": "cancelled", "open-turn": "running" };
+    const store = { agentTurn: (turnId: string) => ({ status: statuses[turnId] }) } as unknown as RuntimeStore;
+    const rows = [
+      { conversationId: "finished-chat", turnId: "finished-turn" },
+      { conversationId: "open-chat", turnId: "open-turn" },
+    ] as unknown as OwnedProviderRun[];
+    expect(providerRunOwnershipDiagnostics(store, rows)).toEqual({
+      providerRunOwnershipConversationIds: ["open-chat"],
+      unconfirmedProviderCleanupCount: 1,
+    });
+  });
+
+  it("does not report finished turns' unconfirmed cleanup as something to wait for", () => {
+    const input = diagnosticInput();
+    input.activeConversationIds = [];
+    input.runningProviderConversationIds = new Set();
+    input.providerRunOwnershipConversationIds = [];
+    input.unconfirmedProviderCleanupCount = 2;
+    const snapshot = runtimeLifecycleDiagnosticSnapshot(input);
+
+    expect(snapshot.startupBlockerCodes).not.toContain("provider-cleanup-pending");
+    expect(snapshot.actionableState).not.toBe("waiting-for-provider-cleanup");
+    expect(snapshot.unconfirmedProviderCleanupCount).toBe(2);
+    expect(parseRuntimeLifecycleDiagnosticSnapshot(snapshot)).toEqual(snapshot);
   });
 
   it("detects equal-count provider ownership with different identities", () => {

@@ -88,6 +88,18 @@ export const DIAGNOSTIC_CATALOG = {
     cause: "A usable provider connection could not be confirmed. Its underlying cause is unknown.",
     nextStep: "Check provider status and your connection. Review any partial work before starting again.", action: "providers",
   },
+  "provider.cleanup-unconfirmed": {
+    severity: "warning", subsystem: "provider", operation: "turn",
+    title: "A provider process could not be confirmed stopped", causeKnown: false,
+    cause: "The chat was released after the bounded stop, but the provider process tree was not proven to exit. It may still be running.",
+    nextStep: "Check for a leftover provider process before deleting this chat or its checkout.", action: "conversation",
+  },
+  "provider.discovery-cleanup-unconfirmed": {
+    severity: "warning", subsystem: "provider", operation: "provider-connect",
+    title: "A provider check could not be confirmed stopped", causeKnown: false,
+    cause: "A provider check ended, but its process was not proven to exit. The provider is paused until a clean check.",
+    nextStep: "Open Settings > Agents and choose Refresh all providers.", action: "providers",
+  },
   "turn.failed": {
     severity: "error", subsystem: "provider", operation: "turn",
     title: "An agent turn did not complete", causeKnown: false,
@@ -136,6 +148,42 @@ export const DIAGNOSTIC_CATALOG = {
     cause: "The supervised runtime reached readiness again. This does not mean interrupted work was completed.",
     nextStep: "Review previous failures separately before deciding what to continue.",
   },
+  "runtime.cleanup-unconfirmed": {
+    severity: "warning", subsystem: "runtime", operation: "runtime-lifecycle",
+    title: "Earlier agent processes may still be running", causeKnown: true,
+    cause: "A previous local runtime exited before every process it started was confirmed stopped. Its unfinished turns were marked interrupted.",
+    nextStep: "Inertia retries the cleanup when its local service restarts. If an agent still seems active in a project, restart your computer before running it there again.",
+  },
+  "runtime.unhandled-rejection": {
+    severity: "warning", subsystem: "runtime", operation: "runtime-lifecycle",
+    title: "The local runtime caught an unexpected error", causeKnown: false,
+    cause: "An internal operation failed without handling its error. The runtime kept running, but that operation may not have finished.",
+    nextStep: "Review the conversation you were using. Restart Inertia if something stays stuck.",
+  },
+  "runtime.uncaught-exception": {
+    severity: "error", subsystem: "runtime", operation: "runtime-lifecycle",
+    title: "The local runtime restarted after an unexpected error", causeKnown: false,
+    cause: "An internal error could not be handled safely, so the runtime restarted.",
+    nextStep: "Wait for reconnection, then review interrupted conversations. Inertia will not replay interrupted agent work.",
+  },
+  "runtime.process-start-rejected": {
+    severity: "warning", subsystem: "runtime", operation: "runtime-lifecycle",
+    title: "A process could not be started safely", causeKnown: true,
+    cause: "The process guardian did not confirm a new process before it ran, so only that process was not started. Other conversations keep running.",
+    nextStep: "Try the action again. If this keeps happening, the computer may be under heavy load.",
+  },
+  "runtime.process-quarantined": {
+    severity: "warning", subsystem: "runtime", operation: "runtime-lifecycle",
+    title: "A process could not be confirmed stopped", causeKnown: false,
+    cause: "The process guardian could not prove that one process and its children stopped. Its record is kept so cleanup can finish at the next start.",
+    nextStep: "Other conversations keep running. Quit and reopen Inertia when convenient.",
+  },
+  "runtime.root-process-running": {
+    severity: "warning", subsystem: "runtime", operation: "runtime-lifecycle",
+    title: "A root-owned process started by the agent is still running", causeKnown: true,
+    cause: "A process started with administrator rights, for example through sudo, outlived its parent. Inertia cannot stop it without those rights.",
+    nextStep: "Stop that process yourself, for example with sudo, then quit and reopen Inertia.",
+  },
   "command.failed": {
     severity: "error", subsystem: "application", operation: "command",
     title: "An app operation could not complete", causeKnown: false,
@@ -182,6 +230,11 @@ export const diagnosticContextSchema = z.object({
   commandType: z.string().max(80).regex(/^[a-z][A-Za-z0-9]*(?:[.-][A-Za-z0-9]+)*$/u).optional(),
 }).strict();
 
+export const PROCESS_CLEANUP_FAILURE_REASONS = [
+  "invalid-pid", "incomplete-scan", "no-exit-budget", "exit-unconfirmed",
+  "graceful-unconfirmed", "closed-unconfirmed", "owned-stop-unconfirmed",
+] as const;
+
 export const diagnosticIncidentSchema = z.object({
   schemaVersion: z.literal(1),
   id: uuidSchema,
@@ -195,6 +248,7 @@ export const diagnosticIncidentSchema = z.object({
     httpStatus: z.number().int().min(100).max(599).optional(),
     exitCode: z.number().int().min(-255).max(255).optional(),
     silenceMs: z.number().int().min(0).max(7 * 24 * 60 * 60 * 1_000).optional(),
+    cleanupReason: z.enum(PROCESS_CLEANUP_FAILURE_REASONS).optional(),
   }).strict().default({}),
 }).strict();
 export type DiagnosticIncident = z.infer<typeof diagnosticIncidentSchema>;

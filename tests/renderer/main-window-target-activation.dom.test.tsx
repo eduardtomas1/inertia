@@ -127,6 +127,8 @@ beforeEach(() => {
       return await new Promise<ServerEvent>(() => undefined);
     },
     subscribe: () => () => undefined,
+    runtimeStopped: null,
+    restartRuntime: async () => undefined,
   } satisfies InertiaConnection;
   Object.defineProperty(window, "inertia", {
     configurable: true,

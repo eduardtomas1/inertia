@@ -28,6 +28,8 @@ import {
   linuxGuardianProcessTreeGone,
   readLinuxProcessCgroup,
 } from "../../src/node/runtime-owned-process-linux-cgroup";
+import { LINUX_RUNTIME_OWNED_GUARDIAN_MARKER } from "../../src/node/runtime-owned-process-linux-orphans";
+import { linuxProcessCanExecute } from "../../src/node/runtime-owned-process-posix";
 import { runtimeOwnedProcessWriterName } from
   "../../src/node/runtime-owned-process-session-journal";
 import {
@@ -314,22 +316,40 @@ describe.skipIf(!currentCgroup || !existsSync(guardianPath))(
     it.each([
       ["a still-populated scope", () => currentCgroup],
       ["no recorded scope", () => null],
-    ])("keeps refusing with %s and tells the user what to do", async (_label, scopeOf) => {
-      const { dataDirectory, claimNames } = postOomDataDirectory(scopeOf());
-      const { spawn, supervisor } = startSupervisor(dataDirectory);
+    ])("reaps marked leftovers and starts with %s", async (_label, scopeOf) => {
+      const guardians: Array<{ pid: number; startTimeTicks: string }> = [];
+      const { dataDirectory, claimNames } = postOomDataDirectory(scopeOf(), () => {
+        const guardianProcess = deadLinuxProcess();
+        guardians.push(guardianProcess);
+        return guardianProcess;
+      });
+      const launched = spawnSync("/bin/sh", ["-c", "/bin/sleep 30 >/dev/null 2>&1 & echo $!"], {
+        encoding: "utf8",
+        env: {
+          PATH: "/usr/bin:/bin",
+          [LINUX_RUNTIME_OWNED_GUARDIAN_MARKER]: `${guardians[0]!.pid}:${guardians[0]!.startTimeTicks}`,
+        },
+      });
+      const leftoverPid = Number(launched.stdout.trim());
+      const leftover = readLinuxProcessIdentity(leftoverPid);
+      try {
+        expect(leftover).not.toBeNull();
+        const { spawn, supervisor } = startSupervisor(dataDirectory);
 
-      await vi.waitFor(() => {
-        expect(supervisor.snapshot().phase).toBe("stopped");
-      }, { timeout: 5_000 });
+        await vi.waitFor(() => {
+          expect(spawn).toHaveBeenCalledOnce();
+        }, { timeout: 5_000 });
 
-      expect(spawn).not.toHaveBeenCalled();
-      expect(supervisor.snapshot().lastError).toEqual(expect.stringContaining(
-        "restart your computer",
-      ));
-      expect(readdirSync(dataDirectory)).toEqual(expect.arrayContaining([
-        ...claimNames,
-        runtimeOwnedProcessWriterName(priorGeneration),
-      ]));
+        expect(supervisor.snapshot().lastError).toBeNull();
+        expect(linuxProcessCanExecute(leftoverPid)).toBe(false);
+        const remaining = readdirSync(dataDirectory);
+        for (const name of claimNames) expect(remaining).not.toContain(name);
+        expect(remaining).not.toContain(runtimeOwnedProcessWriterName(priorGeneration));
+      } finally {
+        if (leftover && readLinuxProcessIdentity(leftoverPid)?.startTimeTicks === leftover.startTimeTicks) {
+          process.kill(leftoverPid, "SIGKILL");
+        }
+      }
     });
 
     it("retires a reused guardian PID without signalling its new owner", async () => {

@@ -21,6 +21,7 @@ import { recoverInterruptedTurns } from
   "./runtime/turns/turn-recovery.js";
 import { ProviderMaintenanceJournal } from "./provider/maintenance-journal.js";
 import { RuntimeStartupBlockerError } from "../shared/runtime-startup-diagnostics.js";
+import { createIncidentReporter } from "../node/application-incidents.js";
 
 export interface RuntimeStartupRecovery {
   readonly dataDirectory: string;
@@ -30,6 +31,7 @@ export interface RuntimeStartupRecovery {
   readonly manualModernDarwinRecovery:
     ModernDarwinRecoveryAuthorityDescriptor | undefined;
   readonly authorizedModernGenerationIds: ReadonlySet<string>;
+  readonly exitedUnconfirmedGenerations: readonly string[];
   readonly priorBootLeasesCleared: boolean;
   readonly runtimeSafetyLock: boolean;
 }
@@ -52,6 +54,7 @@ export async function initializeRuntimePersistence(
     manuallyRetiredGenerations,
     manualModernDarwinRecovery,
     authorizedModernGenerationIds,
+    exitedUnconfirmedGenerations,
     priorBootLeasesCleared,
     runtimeSafetyLock,
   } = startup;
@@ -72,6 +75,11 @@ export async function initializeRuntimePersistence(
     }
     if (priorBootLeasesCleared) {
       store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
+    }
+    if (!runtimeSafetyLock) {
+      for (const generationId of exitedUnconfirmedGenerations) {
+        store.providerRunOwnership.clearRuntimeGeneration(generationId);
+      }
     }
     const testRecordLimit = process.env.NODE_ENV === "test"
       ? Number(process.env.INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS ?? 0)
@@ -152,6 +160,11 @@ export async function initializeRuntimePersistence(
           options.runtimeGenerationId,
         );
       }
+      if (exitedUnconfirmedGenerations.length > 0) {
+        createIncidentReporter(options.onIncident, options.runtimeGenerationId)({
+          code: "runtime.cleanup-unconfirmed", outcome: "unknown",
+        });
+      }
     }
     return { conversationAttachments, recovery, providerMaintenanceJournal };
   } catch (error) {
@@ -201,6 +214,19 @@ export function prepareRuntimeStartupRecovery(
       || confirmedGenerations.includes(generationId)
     ))
   ) throw new Error("The manual legacy runtime recovery authorities are invalid.");
+  const exitedUnconfirmedGenerations =
+    options.exitedUnconfirmedRuntimeGenerationIds ?? [];
+  if (
+    exitedUnconfirmedGenerations.length > 32
+    || new Set(exitedUnconfirmedGenerations).size
+      !== exitedUnconfirmedGenerations.length
+    || exitedUnconfirmedGenerations.some((generationId) => (
+      !validRuntimeGenerationId(generationId)
+      || generationId === options.runtimeGenerationId
+      || confirmedGenerations.includes(generationId)
+      || manuallyRetiredGenerations.includes(generationId)
+    ))
+  ) throw new Error("The exited runtime generations are invalid.");
 
   const dataDirectory = resolve(options.dataDirectory);
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
@@ -254,6 +280,7 @@ export function prepareRuntimeStartupRecovery(
     lease: typeof retainedGenerationLeases[number],
   ): boolean => lease.runtimeGenerationId === options.runtimeGenerationId
     && lease.systemBootId === options.systemBootId;
+  const exitedGenerationIds = new Set(exitedUnconfirmedGenerations);
   const runtimeSafetyLock = options.priorRuntimeCleanupUnconfirmed === true
     || !runtimeGenerationLeases.isValid()
     || !retainedGenerationLeases.some(currentGenerationOwner)
@@ -262,6 +289,8 @@ export function prepareRuntimeStartupRecovery(
       && !(lease.systemBootId === "unavailable"
         && authorizedLegacyGenerationIds.has(lease.runtimeGenerationId))
       && !authorizedModernGenerationIds.has(lease.runtimeGenerationId)
+      && !(lease.systemBootId === options.systemBootId
+        && exitedGenerationIds.has(lease.runtimeGenerationId))
     ));
   return {
     dataDirectory,
@@ -270,6 +299,7 @@ export function prepareRuntimeStartupRecovery(
     manuallyRetiredGenerations,
     manualModernDarwinRecovery,
     authorizedModernGenerationIds,
+    exitedUnconfirmedGenerations,
     priorBootLeasesCleared,
     runtimeSafetyLock,
   };

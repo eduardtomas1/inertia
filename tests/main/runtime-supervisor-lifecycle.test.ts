@@ -136,6 +136,22 @@ describe("RuntimeSupervisor lifecycle", () => {
     expect(supervisor.snapshot().restartScheduled).toBe(platform !== "darwin");
   });
 
+  it("restarts a macOS runtime without the explicit recovery sheet when exact recovery succeeds", async () => {
+    const { children, supervisor } = createHarness({
+      platform: "darwin", runtimeProcessGuardianPath: resolve(dataDirectory, "test-guardian"),
+      recoverOwnedProcesses: () => true,
+    });
+    supervisor.start(); children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    await vi.advanceTimersByTimeAsync(0);
+    children[0].exit(17);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(supervisor.canResumeWithModernDarwinRecovery()).toBe(false);
+    expect(supervisor.snapshot().restartScheduled).toBe(true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(children).toHaveLength(2);
+  });
+
   it.each([0, 10_000])("bounds repeated containment failures after exact cleanup takes %i ms", async (cleanupDelay) => {
     const { children, supervisor } = createHarness({ platform: "linux" });
     supervisor.start();
@@ -257,6 +273,58 @@ describe("RuntimeSupervisor lifecycle", () => {
     expect(children).toHaveLength(1);
     expect(supervisor.snapshot()).toMatchObject({ phase: "stopped", lastError: null });
     expect(recoverOwnedProcesses).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["locks the replacement while", false, true],
+    ["does not lock the replacement once", true, undefined],
+  ] as const)("%s an exited generation's attachment helper cleanup is unconfirmed", async (_label, helperStops, locked) => {
+    let rejectResult!: (error: Error) => void;
+    let rejectStopped!: (error: Error) => void;
+    let resolveTermination!: () => void;
+    const authority = {
+      root: resolve(tmpdir(), "conversation-attachments"),
+      dev: "1", ino: "2", uid: "501",
+    };
+    const runner = vi.fn((_operation: unknown, signal?: AbortSignal) => {
+      const result = new Promise<void>((_resolve, reject) => { rejectResult = reject; });
+      signal?.addEventListener("abort", () => rejectResult(new Error("cancelled")), { once: true });
+      const stopped = new Promise<void>((_resolve, reject) => { rejectStopped = reject; });
+      const termination = new Promise<void>((resolveTerminationPromise) => {
+        resolveTermination = resolveTerminationPromise;
+      });
+      return { result, stopped, termination, ready: Promise.resolve(false) };
+    });
+    const { children, supervisor } = createHarness({
+      platform: "linux", conversationAttachmentStoreRunner: runner as never,
+      conversationAttachmentStoreAuthority: authority, recoverOwnedProcesses: () => false,
+    });
+    supervisor.start(); children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    children[0].message({
+      type: "runtime.conversation-attachment-store-request",
+      requestId: crypto.randomUUID(),
+      encodedOperation: encodeConversationAttachmentStoreOperation({
+        operation: "remove", root: authority.root, rootDev: authority.dev,
+        rootIno: authority.ino, rootUid: authority.uid, name: crypto.randomUUID(),
+      }),
+    });
+    children[0].message({ type: "runtime.shutdown-unconfirmed", reason: "owned-process-cleanup" });
+    children[0].exit(137);
+    rejectStopped(new Error("utility exit unconfirmed"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(supervisor.snapshot()).toMatchObject({ phase: "stopped",
+      lastError: "Conversation attachment storage shutdown could not be confirmed." });
+    if (helperStops) {
+      resolveTermination();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+
+    expect(supervisor.restartFromUser()).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children).toHaveLength(2);
+    children[1].spawn();
+    expect(startOptions(children[1]).priorRuntimeCleanupUnconfirmed).toBe(locked);
   });
 
   it("keeps arbitrary child errors private across every unavailable operation", async () => {
@@ -684,5 +752,196 @@ describe("RuntimeSupervisor lifecycle", () => {
       pid: null,
       restartScheduled: false,
     });
+  });
+});
+
+function startOptions(child: FakeUtilityProcess) {
+  const start = child.messages.findLast((message) => message.type === "runtime.start");
+  if (start?.type !== "runtime.start") throw new Error("Expected a runtime start command.");
+  return start.options;
+}
+
+describe("RuntimeSupervisor restart reconciliation", () => {
+  it("reconciles exact owned cleanup before restarting after a confirmed tree kill", async () => {
+    const recoverOwnedProcesses = vi.fn(() => true);
+    const { children, supervisor } = createHarness({ platform: "linux", recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    const firstGeneration = startOptions(children[0]).runtimeGenerationId;
+    await vi.advanceTimersByTimeAsync(2_000);
+    children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recoverOwnedProcesses).toHaveBeenCalledWith(
+      firstGeneration, "test:00000000-0000-4000-8000-000000000001", expect.any(Number));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(children).toHaveLength(2);
+    children[1].spawn();
+    const replacement = startOptions(children[1]);
+    expect(replacement.priorRuntimeCleanupUnconfirmed).toBeUndefined();
+    expect(replacement.confirmedTerminatedRuntimeGenerationIds).toEqual([firstGeneration]);
+  });
+
+  it("reconciles a quarantined generation again before the scheduled replacement starts", async () => {
+    const recoverOwnedProcesses = vi.fn<() => boolean>().mockReturnValueOnce(false).mockReturnValue(true);
+    const { children, supervisor } = createHarness({ platform: "linux", recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    const firstGeneration = startOptions(children[0]).runtimeGenerationId;
+    await vi.advanceTimersByTimeAsync(2_000);
+    children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(recoverOwnedProcesses).toHaveBeenCalledTimes(2);
+    expect(children).toHaveLength(2);
+    children[1].spawn();
+    const replacement = startOptions(children[1]);
+    expect(replacement.priorRuntimeCleanupUnconfirmed).toBeUndefined();
+    expect(replacement.confirmedTerminatedRuntimeGenerationIds).toEqual([firstGeneration]);
+  });
+
+  it("names an exited generation with unconfirmed child cleanup instead of safety-locking its replacement", async () => {
+    const recoverOwnedProcesses = vi.fn(() => false);
+    const { children, supervisor } = createHarness({ platform: "linux", recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    const firstGeneration = startOptions(children[0]).runtimeGenerationId;
+    await vi.advanceTimersByTimeAsync(2_000);
+    children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(children).toHaveLength(2);
+    children[1].spawn();
+    const replacement = startOptions(children[1]);
+    expect(replacement.priorRuntimeCleanupUnconfirmed).toBeUndefined();
+    expect(replacement.exitedUnconfirmedRuntimeGenerationIds).toEqual([firstGeneration]);
+  });
+
+  it.each(["linux", "darwin", "win32"] as const)("restarts from the app on %s after automatic restarts stop", async (platform) => {
+    const { children, supervisor } = createHarness({ platform });
+    supervisor.start();
+    for (let index = 0; index < 4; index += 1) {
+      children[index]!.spawn();
+      children[index]!.message({ type: "runtime.stopped" });
+      children[index]!.exit(1);
+      await vi.advanceTimersByTimeAsync(8_000);
+    }
+    expect(children).toHaveLength(4);
+    expect(supervisor.snapshot()).toMatchObject({ phase: "stopped", restartScheduled: false });
+    expect(supervisor.canRestartFromUser()).toBe(true);
+    let unavailable: unknown;
+    try { supervisor.connection(); } catch (error) { unavailable = error; }
+    expect((unavailable as RuntimeConnectionUnavailableError).connection).toMatchObject({
+      code: "runtime-stopped", restartable: true,
+    });
+    expect((unavailable as RuntimeConnectionUnavailableError).connection.message).not.toMatch(/restarting Inertia|restart your computer/iu);
+
+    expect(supervisor.restartFromUser()).toBe(true);
+    expect(children).toHaveLength(5);
+    expect(supervisor.snapshot()).toMatchObject({ phase: "starting", restartAttempt: 0, lastError: null });
+    children[4]!.spawn();
+    const restarted = startOptions(children[4]!);
+    for (const receiptRuntimeGenerationId of restarted.confirmedTerminatedRuntimeGenerationIds ?? []) {
+      children[4]!.message({ type: "runtime.cleanup-receipt-consumed", receiptRuntimeGenerationId,
+        currentRuntimeGenerationId: restarted.runtimeGenerationId });
+    }
+    children[4]!.message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    expect(supervisor.connection()).toEqual({ websocketUrl: runtimeUrl });
+    expect(supervisor.restartFromUser()).toBe(false);
+  });
+
+  it("tells a detached chat window to restart from the main window", async () => {
+    const { children, supervisor } = createHarness({ platform: "linux" });
+    supervisor.start();
+    for (let index = 0; index < 4; index += 1) {
+      children[index]!.spawn();
+      children[index]!.message({ type: "runtime.stopped" });
+      children[index]!.exit(1);
+      await vi.advanceTimersByTimeAsync(8_000);
+    }
+    expect(supervisor.canRestartFromUser()).toBe(true);
+    let unavailable: unknown;
+    try { supervisor.detachedConnection(crypto.randomUUID(), "renderer:1"); } catch (error) { unavailable = error; }
+    expect(unavailable).toBeInstanceOf(RuntimeConnectionUnavailableError);
+    expect((unavailable as RuntimeConnectionUnavailableError).connection).toEqual({
+      unavailable: true, code: "runtime-stopped", retryable: false,
+      message: "The local service stopped. Restart it from the main window.",
+    });
+  });
+
+  it("restarts from the app after an unconfirmed exit and names the exited generation", async () => {
+    const { children, supervisor } = createHarness({ platform: "linux", recoverOwnedProcesses: () => false });
+    supervisor.start();
+    children[0].spawn();
+    const firstGeneration = startOptions(children[0]).runtimeGenerationId;
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    children[0].message({ type: "runtime.shutdown-unconfirmed", reason: "owned-process-cleanup" });
+    children[0].exit(137);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot().phase).toBe("stopped");
+
+    expect(supervisor.restartFromUser()).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children).toHaveLength(2);
+    children[1].spawn();
+    expect(startOptions(children[1]).priorRuntimeCleanupUnconfirmed).toBeUndefined();
+    expect(startOptions(children[1]).exitedUnconfirmedRuntimeGenerationIds).toEqual([firstGeneration]);
+  });
+
+  it("does not restart from the app before start, after quit, or past the boot recovery gate", async () => {
+    const unused = createHarness();
+    expect(unused.supervisor.canRestartFromUser()).toBe(false);
+    expect(unused.supervisor.restartFromUser()).toBe(false);
+    expect(unused.children).toHaveLength(0);
+
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    const stopped = supervisor.stop();
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+    await expect(stopped).resolves.toBe(true);
+    expect(supervisor.restartFromUser()).toBe(false);
+    expect(children).toHaveLength(1);
+
+    const gated = new RuntimeSupervisor({
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
+      workerOptions: { dataDirectory, defaultWorkspacePath: resolve(tmpdir(), "inertia workspace"), enableProviders: false },
+      spawn: () => { throw new Error("must not spawn"); },
+      runtimeRecoveryBlocked: true,
+    });
+    gated.start();
+    expect(gated.restartFromUser()).toBe(false);
+    expect(gated.snapshot().phase).toBe("stopped");
+  });
+
+  it("confirms the first quit after a quarantined generation becomes recoverable", async () => {
+    const recoverOwnedProcesses = vi.fn<() => boolean>().mockReturnValueOnce(false).mockReturnValue(true);
+    const { children, supervisor } = createHarness({ platform: "linux", recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    await vi.advanceTimersByTimeAsync(2_000);
+    children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(supervisor.stop()).resolves.toBe(true);
+    expect(children).toHaveLength(1);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
+    expect(supervisor.snapshot()).toMatchObject({ phase: "stopped", lastError: null });
+  });
+
+  it("confirms quit of a clean generation after reconciling an earlier quarantined one", async () => {
+    const recoverOwnedProcesses = vi.fn<() => boolean>()
+      .mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValue(true);
+    const { children, supervisor } = createHarness({ platform: "linux", recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    await vi.advanceTimersByTimeAsync(2_000);
+    children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(500);
+    children[1].spawn();
+    children[1].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    const stopped = supervisor.stop();
+    children[1].message({ type: "runtime.stopped" });
+    children[1].exit(0);
+    await expect(stopped).resolves.toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
   });
 });

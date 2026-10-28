@@ -1246,7 +1246,8 @@ describe("RuntimeSupervisor", () => {
       resolve: vi.fn(async () => trustedAttachment),
       release: vi.fn(async () => true),
     };
-    const { children, supervisor } = createHarness({ attachmentBroker });
+    const recoverOwnedProcesses = vi.fn(() => false);
+    const { children, supervisor } = createHarness({ attachmentBroker, recoverOwnedProcesses });
     supervisor.start();
     children[0].spawn();
     children[0].message({
@@ -1268,6 +1269,7 @@ describe("RuntimeSupervisor", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     children[0].exit(1);
     await vi.advanceTimersByTimeAsync(0);
+    expect(recoverOwnedProcesses).toHaveBeenCalledOnce();
     expect(attachmentBroker.release).not.toHaveBeenCalled();
     expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
   });
@@ -2025,7 +2027,7 @@ describe("RuntimeSupervisor", () => {
     cleanupReceiptPublish.mockRestore();
   });
 
-  it("bounds crash-and-reconnect attempts and quarantines prior generations", () => {
+  it("bounds crash-and-reconnect attempts and quarantines prior generations", async () => {
     const crashCount = 3;
     const { children, supervisor } = createHarness({
       stableUptimeMs: 60_000,
@@ -2059,7 +2061,7 @@ describe("RuntimeSupervisor", () => {
         restartScheduled: false,
       });
       if (cycle === 2) break;
-      vi.advanceTimersByTime(runtimeRestartDelayMs(cycle));
+      await vi.advanceTimersByTimeAsync(runtimeRestartDelayMs(cycle));
       expect(children).toHaveLength(cycle + 2);
     }
     expect(children).toHaveLength(3);
@@ -2097,7 +2099,7 @@ describe("RuntimeSupervisor", () => {
   });
 
   it("owns the full shutdown deadline before posting to the worker", async () => {
-    const { children, forceKill, supervisor } = createHarness();
+    const { children, forceKill, supervisor } = createHarness({ recoverOwnedProcesses: () => false });
     supervisor.start();
     children[0].spawn();
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });

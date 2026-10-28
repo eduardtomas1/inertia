@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import { ActivityGroup } from "../../src/renderer/src/components/response-timeline/activity";
+import { STOP_REPEAT_LATCH_MS } from "../../src/renderer/src/utils/composerPrimaryAction";
+import { PROVIDER_SILENCE_NOTICE_MS } from "../../src/renderer/src/components/response-timeline/ProviderSilenceNote";
+import { PROVIDER_ACTIVITY_PUBLISH_INTERVAL_MS } from "../../src/shared/run-state";
 import {
   THINKING_LINE_MAX_DWELL_MS,
   THINKING_LINE_MIN_DWELL_MS,
@@ -935,9 +938,73 @@ describe("agent loading and trace DOM", () => {
     const stopping = screen.getByRole("button", {
       name: "Stop Codex · Codex App Server run",
     });
-    expect(stopping).toBeDisabled();
+    expect(stopping).toBeEnabled();
     expect(stopping).toHaveTextContent("Stopping");
     fireEvent.click(stopping);
-    expect(onStop).not.toHaveBeenCalled();
+    expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("says how long the provider has been silent on the working line once it passes three minutes", () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.parse("2026-08-12T12:10:00.000Z");
+      vi.setSystemTime(now);
+      const onStop = vi.fn<() => void>();
+      const summary = (providerActivityAt: string, runState?: AgentTurn["runState"], id = "turn-agent-loading") => ({
+        conversationId,
+        turn: {
+          ...agentTurn("running", runState),
+          id,
+          providerActivityAt,
+        } as unknown as NonNullable<React.ComponentProps<typeof ResponseTimeline>["latestTurnSummary"]>["turn"],
+      });
+      const quietSince = new Date(now - PROVIDER_SILENCE_NOTICE_MS - PROVIDER_ACTIVITY_PUBLISH_INTERVAL_MS).toISOString();
+      const props = (latestTurnSummary: ReturnType<typeof summary>, runState?: AgentTurn["runState"]) => ({
+        ...stateProps({ runState }, onStop),
+        latestTurnSummary,
+      });
+      const elapsed = (container: HTMLElement) => container.querySelector(".turn-working-elapsed");
+
+      const { container, rerender } = render(<ResponseTimeline {...props(summary(quietSince))} />);
+      expect(elapsed(container)).toHaveTextContent("No output for 3 min");
+      expect(container.querySelector(".turn-working-silence")).toHaveAttribute("aria-live", "polite");
+
+      act(() => { vi.advanceTimersByTime(60_000); });
+      expect(elapsed(container)).toHaveTextContent("No output for 4 min");
+
+      rerender(<ResponseTimeline {...props(summary(new Date(Date.now()).toISOString()))} />);
+      expect(elapsed(container)).not.toHaveTextContent("No output");
+
+      rerender(<ResponseTimeline {...props(summary(quietSince, undefined, "another-turn"))} />);
+      expect(elapsed(container)).not.toHaveTextContent("No output");
+
+      const waiting = { state: "waiting-for-approval" as const, providerState: null, revision: 2 };
+      rerender(<ResponseTimeline {...props(summary(quietSince, waiting), waiting)} />);
+      expect(container).not.toHaveTextContent("No output");
+
+      const cancelling = { state: "cancelling" as const, providerState: null, revision: 3 };
+      rerender(<ResponseTimeline {...props(summary(quietSince, cancelling), cancelling)} />);
+      expect(container).not.toHaveTextContent("No output");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a double click on the working line Stop but lets a later press force the stop", () => {
+    vi.useFakeTimers();
+    try {
+      const { onStop } = renderState({
+        runState: { state: "cancelling", providerState: "cancel/requested", revision: 5 },
+      });
+      const stopping = screen.getByRole("button", { name: "Stop Codex · Codex App Server run" });
+      fireEvent.click(stopping);
+      fireEvent.click(stopping);
+      expect(onStop).toHaveBeenCalledOnce();
+      act(() => { vi.advanceTimersByTime(STOP_REPEAT_LATCH_MS); });
+      fireEvent.click(stopping);
+      expect(onStop).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

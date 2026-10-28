@@ -221,11 +221,11 @@ describe("installed Claude SDK owned transport", () => {
       releaseCleanup();
       await expect(run.result).resolves.toMatchObject({
         status: "failed",
-        ...(cleanupConfirmed
-          ? { error: kind === "ignored"
-              ? "Claude transport exceeded the bounded event rate for this run."
-              : "Claude transport sent an oversized stdout line.", failure: { reason: "protocol-overflow" } }
-          : { error: "Claude Code process tree could not be confirmed stopped.", cleanupConfirmed: false }),
+        error: kind === "ignored"
+          ? "Claude transport exceeded the bounded event rate for this run."
+          : "Claude transport sent an oversized stdout line.",
+        failure: { reason: "protocol-overflow" },
+        cleanupConfirmed,
       });
       expect(terminateProcessTree).toHaveBeenCalledOnce();
     } finally {

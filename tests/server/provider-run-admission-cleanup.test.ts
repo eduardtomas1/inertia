@@ -46,6 +46,7 @@ function fixture() {
   const resolveBackendLaunchOptions = vi.fn((_input, environment) => ({ environment }));
   const coordinator = new ProviderRunCoordinator({
     cancelGraceMs: 1,
+    forceStopBudgetMs: 1,
     harnessRegistry: new AgentHarnessRegistry([{ ...createCodexAppServerHarness(), start }]),
     metadataCache: new ProviderMetadataCache(),
     resolveBackendLaunchOptions,
@@ -364,7 +365,7 @@ describe("provider admission cleanup proof", () => {
     await expect(coordinator.stopOwned(input.conversationId, input)).resolves.toBe("missing");
   });
 
-  it("does not turn a post-start exception into proof of cleanup", async () => {
+  it("does not turn a post-start exception into proof of cleanup and detaches it when stopped", async () => {
     const { coordinator, input, start, capabilityAdmissible, release } = fixture();
     capabilityAdmissible.mockReturnValue(true);
     start.mockImplementationOnce(() => { throw new Error("Harness failed after invocation."); });
@@ -372,7 +373,7 @@ describe("provider admission cleanup proof", () => {
     capabilityAdmissible.mockReturnValue(false);
     expect(() => coordinator.run(input)).toThrow("already has an active provider run");
     await expect(coordinator.stopOwned(input.conversationId, input)).resolves.toBe("force-detached");
-    expect(coordinator.isRunning(input.conversationId)).toBe(true);
+    expect(coordinator.isRunning(input.conversationId)).toBe(false);
     expect(release).not.toHaveBeenCalled();
   });
 });

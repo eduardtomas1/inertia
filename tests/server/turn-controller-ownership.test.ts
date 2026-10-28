@@ -34,7 +34,7 @@ it.each([
   runtime.store.close();
 });
 
-it("retains orphaned follow-up images until exact provider cleanup, including a failed first cleanup", async () => {
+it("retains orphaned follow-up images until the provider stop returns, including a failed first cleanup", async () => {
   const runtime = await createTurnControllerTestRuntime();
   runtime.provider.deferOwnedStop();
   const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start" });
@@ -45,7 +45,8 @@ it("retains orphaned follow-up images until exact provider cleanup, including a 
   lease.release(); runtime.controller.cancel(runtime.conversationId);
   await flushTurnControllerTestPromises(); expect(cleanup).not.toHaveBeenCalled();
   runtime.provider.resolveOwnedStop();
-  await flushTurnControllerTestPromises(); expect(cleanup).not.toHaveBeenCalled();
+  await flushTurnControllerTestPromises();
+  expect(cleanup).toHaveBeenCalledTimes(2);
   runtime.provider.resolve({ status: "cancelled" });
   await flushTurnControllerTestPromises();
   expect(cleanup).toHaveBeenCalledTimes(2);
@@ -67,11 +68,12 @@ it("rejects cancellation with a stale run or turn owner", async () => {
   runtime.store.close();
 });
 
-it("does not report a stopped managed turn while its exact provider ownership remains", async () => {
+it("does not report a stopped managed turn while its unfinished turn still owns the provider run", async () => {
   const owner = { turnId: "old-turn", runId: "old-run" };
-  const store = { providerRunOwnership: { forConversation: () => [owner] } } as unknown as RuntimeStore;
+  const agentTurn = () => ({ status: "running" });
+  const store = { providerRunOwnership: { forConversation: () => [owner] }, agentTurn } as unknown as RuntimeStore;
   const turns = { cancelOwned: () => true, waitForProviderCleanup: async () => undefined, activeIdentity: () => null } as unknown as TurnController;
   await expect(stopOwnedManagedTurn(store, turns, "chat", owner)).rejects.toThrow("cleanup was not confirmed");
-  const replacement = { providerRunOwnership: { forConversation: () => [{ turnId: "new-turn", runId: "new-run" }] } } as unknown as RuntimeStore;
+  const replacement = { providerRunOwnership: { forConversation: () => [{ turnId: "new-turn", runId: "new-run" }] }, agentTurn } as unknown as RuntimeStore;
   await expect(stopOwnedManagedTurn(replacement, turns, "chat", owner)).resolves.toBeUndefined();
 });

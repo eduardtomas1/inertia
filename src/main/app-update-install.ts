@@ -4,7 +4,11 @@ import type {
   AppUpdateInstallRuntimeContext,
   AppUpdaterInstallResult,
 } from "./electron-app-updater.js";
-import { finishNormalShutdownAfterCleanup } from "./privileged-shutdown.js";
+import {
+  finishNormalShutdownAfterCleanup,
+  finishNormalShutdownWithinDeadline,
+} from "./privileged-shutdown.js";
+import { normalShutdownDeadlineMs } from "./privileged-shutdown-deadline.js";
 
 interface UpdateService {
   current(): AppUpdateStatus;
@@ -34,6 +38,8 @@ export interface AppUpdateInstallCoordinatorOptions {
   cleanup(): Promise<boolean>;
   handoffContext?(): AppUpdateInstallRuntimeContext | null;
   finishNormalShutdown(): void;
+  normalShutdownDeadlineMs?: number;
+  recordUnconfirmedExit?(): void;
   onUnconfirmedShutdown?(): void;
   reportError(error: unknown): void;
 }
@@ -113,6 +119,10 @@ export class AppUpdateInstallCoordinator {
     return false;
   }
 
+  normalShutdownInProgress(): boolean {
+    return this.normalShutdownPending;
+  }
+
   /** A second instance or activation may retry only a failed normal cleanup. */
   retryUnconfirmedNormalShutdown(): boolean {
     if (
@@ -144,15 +154,17 @@ export class AppUpdateInstallCoordinator {
       .then(async () => await this.options.service.abortInstall?.())
       .then(async () => await pendingInstall?.catch(() => undefined))
       .then(() => this.releasePreparation())
-      .then(() => this.options.cleanup())
-      .then((cleanupConfirmed) => {
-        const finished = finishNormalShutdownAfterCleanup({
-          cleanupConfirmed,
+      .then(async () => {
+        await finishNormalShutdownWithinDeadline({
+          cleanup: () => this.options.cleanup(),
+          deadlineMs: this.options.normalShutdownDeadlineMs
+            ?? normalShutdownDeadlineMs(this.options.platform ?? process.platform),
           finish: this.options.finishNormalShutdown,
-          onUnconfirmed: () => this.reportUnconfirmedShutdown(),
+          recordUnconfirmedExit: () => this.options.recordUnconfirmedExit?.(),
+          reportCleanupFailure: this.options.reportError,
         });
-        this.normalShutdownUnconfirmed = !finished;
-        return finished;
+        this.normalShutdownUnconfirmed = false;
+        return true;
       })
       .catch((error: unknown) => {
         this.options.reportError(error);

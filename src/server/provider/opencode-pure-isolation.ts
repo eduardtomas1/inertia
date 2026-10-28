@@ -34,8 +34,9 @@ import {
 const PROOF_TIMEOUT_MS = 10_000;
 const PLUGIN_OBSERVATION_MS = 5_000;
 const MAX_PROOF_CACHE_ENTRIES = 16;
+const CLEANUP_FAILURE_RETRY_MS = 60_000;
 const proofCache = new Set<string>();
-const cleanupFailureCache = new Set<string>();
+const cleanupFailureCache = new Map<string, number>();
 const inFlightProofs = new Map<string, Promise<void>>();
 const lifetimeInFlightProofs = new WeakMap<AbortSignal, Map<string, Promise<void>>>();
 
@@ -308,6 +309,10 @@ async function runProof(
   }
 }
 
+export function clearOpenCodePureIsolationCleanupFailures(): void {
+  cleanupFailureCache.clear();
+}
+
 export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
   executable,
   version,
@@ -332,9 +337,14 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
       ? Math.min(options?.requestTimeoutMs ?? PROOF_TIMEOUT_MS, PROOF_TIMEOUT_MS)
       : PROOF_TIMEOUT_MS;
     identity = await executableIdentity(executable, version);
-    if (cleanupFailureCache.has(identity)) {
+    const cleanupFailedAt = cleanupFailureCache.get(identity);
+    if (
+      cleanupFailedAt !== undefined
+      && performance.now() - cleanupFailedAt < CLEANUP_FAILURE_RETRY_MS
+    ) {
       return { cleanupConfirmed: false, outcome: "operational-error" };
     }
+    cleanupFailureCache.delete(identity);
     if (proofCache.has(identity)) {
       return { cleanupConfirmed: true, outcome: "verified" };
     }
@@ -390,7 +400,7 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
     return { cleanupConfirmed: true, outcome: "verified" };
   } catch (error) {
     if (identity && error instanceof OpenCodePureIsolationCleanupError) {
-      cleanupFailureCache.add(identity);
+      cleanupFailureCache.set(identity, performance.now());
     }
     if (error instanceof OpenCodePureIsolationCleanupError) {
       return { cleanupConfirmed: false, outcome: "operational-error" };

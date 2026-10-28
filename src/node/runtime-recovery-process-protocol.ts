@@ -22,6 +22,7 @@ export interface RuntimeRecoveryWorkerOptions {
   manualModernDarwinRecovery?: ModernDarwinRecoveryAuthorityDescriptor;
   /** Main-owned quarantine after an earlier utility process exited unconfirmed. */
   priorRuntimeCleanupUnconfirmed?: true;
+  exitedUnconfirmedRuntimeGenerationIds?: readonly string[];
 }
 
 export type RuntimeRecoveryWorkerEvent =
@@ -96,6 +97,30 @@ export function parseRuntimeRecoveryWorkerOptions(
     )
   ) return null;
 
+  const hasExited = Object.hasOwn(
+    options,
+    "exitedUnconfirmedRuntimeGenerationIds",
+  );
+  const exitedIds = hasExited
+    && Array.isArray(options.exitedUnconfirmedRuntimeGenerationIds)
+    ? options.exitedUnconfirmedRuntimeGenerationIds
+    : null;
+  if (
+    hasExited
+    && (
+      !exitedIds
+      || exitedIds.length < 1
+      || exitedIds.length > 32
+      || new Set(exitedIds).size !== exitedIds.length
+      || exitedIds.some((generationId) => (
+        !validRuntimeGenerationId(generationId)
+        || generationId === currentRuntimeGenerationId
+        || confirmedRuntimeGenerationIds.includes(generationId)
+        || (legacyIds?.includes(generationId) ?? false)
+      ))
+    )
+  ) return null;
+
   const modern = hasModern && plainObject(options.manualModernDarwinRecovery)
     ? options.manualModernDarwinRecovery
     : null;
@@ -122,13 +147,14 @@ export function parseRuntimeRecoveryWorkerOptions(
         || generationId === currentRuntimeGenerationId
         || confirmedRuntimeGenerationIds.includes(generationId)
         || (legacyIds?.includes(generationId) ?? false)
+        || (exitedIds?.includes(generationId) ?? false)
       ))
     )
   ) return null;
 
   return {
     keyCount: Number(hasGuardian) + Number(hasLegacy)
-      + Number(hasModern) + Number(hasUnconfirmed),
+      + Number(hasModern) + Number(hasUnconfirmed) + Number(hasExited),
     options: {
       ...(hasGuardian
         ? { runtimeProcessGuardianPath: options.runtimeProcessGuardianPath as string }
@@ -146,6 +172,9 @@ export function parseRuntimeRecoveryWorkerOptions(
           }
         : {}),
       ...(hasUnconfirmed ? { priorRuntimeCleanupUnconfirmed: true } : {}),
+      ...(exitedIds
+        ? { exitedUnconfirmedRuntimeGenerationIds: [...exitedIds] as string[] }
+        : {}),
     },
   };
 }

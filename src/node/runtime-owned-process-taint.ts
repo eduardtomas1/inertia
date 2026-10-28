@@ -1,5 +1,9 @@
-import type { RuntimeOwnedProcessDiagnostic } from "./runtime-owned-process-diagnostic.js";
+import type {
+  RuntimeOwnedProcessDiagnostic,
+  RuntimeOwnedProcessFault,
+} from "./runtime-owned-process-diagnostic.js";
 import type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
+import type { ActiveRuntimeOwnedProcessRegistry } from "./runtime-owned-process-active.js";
 import type { LinuxGuardianExecutableIdentity } from
   "./runtime-owned-process-linux.js";
 
@@ -15,7 +19,9 @@ export interface RuntimeOwnedProcessRegistryOptions {
     Promise<DarwinProcessIdentity | null>;
   readonly readDarwinSessionEmptyAsync?: (sessionId: number, abortSignal?: AbortSignal) =>
     Promise<boolean | null>;
+  readonly readDarwinEscapeesAsync?: ActiveRuntimeOwnedProcessRegistry["readDarwinEscapeesAsync"];
   readonly onTainted?: (diagnostic: RuntimeOwnedProcessDiagnostic) => void;
+  readonly onProcessFault?: (fault: RuntimeOwnedProcessFault) => void;
 }
 
 export interface RuntimeOwnedProcessTaintState {

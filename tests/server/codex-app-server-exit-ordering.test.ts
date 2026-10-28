@@ -111,6 +111,10 @@ describe("Codex App Server exit ordering", () => {
       expect(result.failure?.technicalDetail).toContain("Reason: process-exit");
       expect(result.failure?.technicalDetail).not.toContain("super-secret-value");
       expect(app.terminateProcessTree).toHaveBeenCalledOnce();
+      let confirmed: boolean | null = null;
+      void result.cleanupConfirmation?.then((value) => { confirmed = value; });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(confirmed).toBe(false);
     },
   );
 

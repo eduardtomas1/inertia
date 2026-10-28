@@ -949,6 +949,10 @@ static int watch_mode(int argc, char **argv, int handoff) {
       return (stop_pending_requested || stop_requested) ? 143 : 69;
     }
   }
+  char owner_marker[48] = {0}; unsigned long long owner_start = 0;
+  if (!handoff && (!read_start(getpid(), &owner_start)
+    || snprintf(owner_marker, sizeof(owner_marker), "%d:%llu", (int)getpid(), owner_start)
+      >= (int)sizeof(owner_marker))) return 70;
   int gate[2]; if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, gate)) return 70;
   // Block before fork: the child must never run a guardian handler in the
   // interval before restoring payload dispositions.
@@ -972,6 +976,7 @@ static int watch_mode(int argc, char **argv, int handoff) {
       _exit(125);
 #endif
     }
+    if (!handoff && setenv("INERTIA_RUNTIME_OWNED_GUARDIAN", owner_marker, 1)) _exit(126);
     execvp(argv[payload_argument], &argv[payload_argument]);
     _exit(errno == ENOENT ? 127 : 126);
   }

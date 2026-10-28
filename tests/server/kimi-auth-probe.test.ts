@@ -208,9 +208,7 @@ describe("Kimi initialize-only authentication discovery", () => {
 
   it.each([
     { withDescendant: false, name: "retires the real owned guardian before returning" },
-    { withDescendant: true, name: process.platform === "darwin"
-      ? "rejects fork-tainted macOS cleanup and retains its durable ownership claim"
-      : "retires the real owned guardian and its descendant before returning" },
+    { withDescendant: true, name: "retires the real owned guardian and its descendant before returning" },
   ])("$name", async ({ withDescendant }) => {
     const app = fixture("terminal", withDescendant);
     const registryRoot = join(app.root, "runtime-owned");
@@ -224,21 +222,13 @@ describe("Kimi initialize-only authentication discovery", () => {
     const journal = new RuntimeOwnedProcessJournal(registryRoot);
     try {
       expect(deactivate).toBeTypeOf("function");
-      const forkUncertainty = process.platform === "darwin" && withDescendant;
-      const pending = probeKimiAuthentication(app.command, app.root, app.environment);
-      if (forkUncertainty) {
-        // macOS NOTE_FORK cannot certify every descendant's identity. Strict
-        // cancellation must retain that claim even after known children stop.
-        await expect(pending).rejects.toBeInstanceOf(ProcessTreeTerminationError);
-      } else {
-        await expect(pending).resolves.toEqual(terminal);
-      }
+      await expect(probeKimiAuthentication(app.command, app.root, app.environment)).resolves.toEqual(terminal);
       const capture = app.capture();
       if (withDescendant) expect(capture.descendantPid).toBeGreaterThan(0);
       else expect(capture.descendantPid).toBeUndefined();
       assertStopped(capture);
-      expect(journal.records(generation)).toHaveLength(forkUncertainty ? 1 : 0);
-      expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(forkUncertainty);
+      expect(journal.records(generation)).toHaveLength(0);
+      expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(false);
     } finally { deactivate?.(); await removePortableFixture(app.root); }
   });
 });

@@ -290,7 +290,7 @@ describe("Claude turn reliability", () => {
     // New Claude turns stay fail-closed, with an actionable reason instead of
     // an opaque capability attestation error.
     expect(() => manager.run(claudeInput("claude-paused")))
-      .toThrow(/Claude is paused because Inertia could not confirm .* Restart Inertia to continue\./u);
+      .toThrow(/Claude is paused because Inertia could not confirm .* Open Settings > Agents and choose Refresh all providers to recover\./u);
   });
 
   it("drops unattested advisory metadata instead of failing the turn", async () => {

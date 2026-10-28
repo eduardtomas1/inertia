@@ -83,6 +83,63 @@ describe("useInertiaConnection", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
+  it("reports a stopped runtime and restarts it through the runtime connection channel", async () => {
+    const getRuntimeConnection = vi.fn()
+      .mockResolvedValueOnce({
+        unavailable: true,
+        code: "runtime-stopped",
+        retryable: false,
+        restartable: true,
+        message: "The local service stopped. Restart it to continue.",
+      })
+      .mockResolvedValueOnce({
+        unavailable: true,
+        code: "runtime-starting",
+        retryable: true,
+        message: "The local service is starting.",
+      })
+      .mockResolvedValue({ websocketUrl: "ws://127.0.0.1:12345/runtime/test" });
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getRuntimeConnection, onRuntimeReady: vi.fn(() => vi.fn()) },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(hook.result.current.runtimeStopped).toEqual({
+      restartable: true, message: "The local service stopped. Restart it to continue.",
+    }));
+    expect(hook.result.current.status).toBe("offline");
+
+    await act(async () => hook.result.current.restartRuntime());
+
+    expect(getRuntimeConnection).toHaveBeenNthCalledWith(2, { restart: true });
+    expect(hook.result.current.runtimeStopped).toBeNull();
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1), { timeout: 2_000 });
+    expect(getRuntimeConnection).toHaveBeenLastCalledWith();
+  });
+
+  it("reports a stopped runtime that cannot be restarted from the app", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection: vi.fn().mockResolvedValue({
+          unavailable: true,
+          code: "prior-runtime-cleanup-unconfirmed",
+          retryable: false,
+          message: "Restart the computer.",
+        }),
+        onRuntimeReady: vi.fn(() => vi.fn()),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(hook.result.current.runtimeStopped).toEqual({
+      restartable: false, message: "Restart the computer.",
+    }));
+  });
+
   it("reconnects and returns online after the runtime socket fails before opening", async () => {
     const getRuntimeConnection = vi.fn().mockResolvedValue({
       websocketUrl: "ws://127.0.0.1:12345/runtime/test",

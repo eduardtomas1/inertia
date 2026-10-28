@@ -25,7 +25,8 @@ import {
   type AppImageHandoffRecoveryExpectation,
 } from "./appimage-installed-identity.js";
 import { appImageReplaceable } from "./app-update-capability.js";
-import { finishNormalShutdownAfterCleanup } from "./privileged-shutdown.js";
+import { finishNormalShutdownWithinDeadline } from "./privileged-shutdown.js";
+import { normalShutdownDeadlineMs } from "./privileged-shutdown-deadline.js";
 import {
   recoverLinuxAppUpdateCandidateClaim,
   retireLinuxAppUpdateCandidateClaimAfterAdmission,
@@ -33,6 +34,7 @@ import {
 import { LinuxAppUpdateCandidateClaimJournal } from
   "./linux-app-update-candidate-claim.js";
 import {
+  markLinuxShutdownInProgress,
   requestLinuxSingletonLaunch,
   type LinuxSingletonContention,
 } from "./linux-singleton-launch.js";
@@ -65,13 +67,17 @@ export interface AppUpdateStartupOptions {
   onSecondInstance?(argv: readonly string[], workingDirectory: string): void;
   updateInstallCoordinator(): {
     allowBeforeQuit(): boolean;
+    normalShutdownInProgress?(): boolean;
     retryUnconfirmedNormalShutdown?(): boolean;
   } | null;
   recordBeforeQuit(): void;
+  markShutdownInProgress?(): void;
   cleanupBeforeQuit(): Promise<boolean>;
   finishNormalShutdown(): void;
   onUnconfirmedShutdown(): void;
   reportCleanupFailure(error: unknown): void;
+  readonly normalShutdownDeadlineMs?: number;
+  reportShutdownInProgress?(): void;
   reportSingletonContention?(notice: LinuxSingletonContention): void | Promise<void>;
   validateCandidateBootstrap(
     operationId: string,
@@ -85,9 +91,15 @@ export interface AppUpdateStartupOptions {
 
 export function registerApplicationLifecycle(options: AppUpdateStartupOptions): void {
   const application = options.application;
+  let normalShutdownStarted = false;
   const focusOrRetryShutdown = (): void => {
+    const coordinator = options.updateInstallCoordinator();
+    if (normalShutdownStarted || coordinator?.normalShutdownInProgress?.()) {
+      options.reportShutdownInProgress?.();
+      return;
+    }
     options.focusMainWindow();
-    options.updateInstallCoordinator()?.retryUnconfirmedNormalShutdown?.();
+    coordinator?.retryUnconfirmedNormalShutdown?.();
   };
   application.on("second-instance", (_event, argv, workingDirectory) => {
     if (Array.isArray(argv) && typeof workingDirectory === "string") options.onSecondInstance?.(argv, workingDirectory);
@@ -102,14 +114,19 @@ export function registerApplicationLifecycle(options: AppUpdateStartupOptions): 
     if (coordinator?.allowBeforeQuit()) return;
     event.preventDefault();
     options.recordBeforeQuit();
-    if (coordinator) return;
-    void options.cleanupBeforeQuit().then((cleanupConfirmed) => {
-      finishNormalShutdownAfterCleanup({
-        cleanupConfirmed,
-        finish: options.finishNormalShutdown,
-        onUnconfirmed: options.onUnconfirmedShutdown,
-      });
-    }, options.reportCleanupFailure);
+    if (options.platform === "linux") {
+      if (options.markShutdownInProgress) options.markShutdownInProgress();
+      else markLinuxShutdownInProgress(options.profileDirectory);
+    }
+    if (coordinator || normalShutdownStarted) return;
+    normalShutdownStarted = true;
+    void finishNormalShutdownWithinDeadline({
+      cleanup: options.cleanupBeforeQuit,
+      deadlineMs: options.normalShutdownDeadlineMs ?? normalShutdownDeadlineMs(options.platform),
+      finish: options.finishNormalShutdown,
+      recordUnconfirmedExit: options.onUnconfirmedShutdown,
+      reportCleanupFailure: options.reportCleanupFailure,
+    });
   });
 }
 

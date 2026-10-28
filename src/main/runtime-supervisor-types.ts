@@ -47,6 +47,8 @@ export interface RuntimeProcessRecord {
   startupRecoveryDeadlineExtended: boolean;
   ready: boolean;
   acceptingReady: boolean;
+  exited: boolean;
+  utilityCleanupUnconfirmed: boolean;
   cleanupConfirmed: boolean;
   cleanupRecoveryRequired: boolean;
   durableProcessContainment: RuntimeOwnedProcessContainment | null;
@@ -151,6 +153,7 @@ export interface RuntimeSupervisorOptions {
     | "confirmedTerminatedRuntimeGenerationIds"
     | "manuallyRetiredRuntimeGenerationIds"
     | "priorRuntimeCleanupUnconfirmed"
+    | "exitedUnconfirmedRuntimeGenerationIds"
   >;
   systemBootId?: string;
   /** Main-owned user decision gate; no process recovery or worker spawn occurs. */
@@ -198,6 +201,7 @@ export interface RuntimeSupervisorOptions {
   ) => void;
   onMascotStatus?: (feed: import("../shared/mascot-feed.js").MascotFeed | null) => void;
   onRestartRequested?: (event: Extract<RuntimeWorkerEvent, { type: "runtime.restart-requested" }>, generation: number) => void;
+  requestExplicitRecovery?: () => boolean;
   onStateChange?: (snapshot: RuntimeSupervisorSnapshot) => void;
   onIncident?: import("../node/application-incidents.js").IncidentSink;
 }

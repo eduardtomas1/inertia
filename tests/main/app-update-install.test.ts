@@ -6,6 +6,7 @@ import type { AppUpdaterInstallResult } from
   "../../src/main/electron-app-updater";
 import {
   finishNormalShutdownAfterCleanup,
+  finishPrivilegedExit,
   RetryablePrivilegedCleanup,
 } from "../../src/main/privileged-shutdown";
 import type { AppUpdateInstallBlocker, AppUpdateStatus } from "../../src/shared/desktop";
@@ -270,7 +271,7 @@ describe("application update install coordination", () => {
     expect(update.quitAndInstall).not.toHaveBeenCalled();
   });
 
-  it("does not exit when normal quit takes ownership of unconfirmed install cleanup", async () => {
+  it("exits with evidence when normal quit takes ownership of unconfirmed install cleanup", async () => {
     const events: string[] = [];
     const update = service(events);
     let resolveCleanup!: (confirmed: boolean) => void;
@@ -279,6 +280,7 @@ describe("application update install coordination", () => {
     });
     const cleanup = vi.fn(() => cleanupResult);
     const finishNormalShutdown = vi.fn();
+    const recordUnconfirmedExit = vi.fn();
     const onUnconfirmedShutdown = vi.fn();
     const coordinator = new AppUpdateInstallCoordinator({
       service: update,
@@ -289,6 +291,7 @@ describe("application update install coordination", () => {
       privateConnect: () => null,
       cleanup,
       finishNormalShutdown,
+      recordUnconfirmedExit,
       onUnconfirmedShutdown,
       reportError: vi.fn(),
     });
@@ -299,8 +302,9 @@ describe("application update install coordination", () => {
     resolveCleanup(false);
 
     await expect(installing).resolves.toMatchObject({ state: "failed" });
-    await vi.waitFor(() => expect(onUnconfirmedShutdown).toHaveBeenCalledOnce());
-    expect(finishNormalShutdown).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
+    expect(recordUnconfirmedExit).toHaveBeenCalledOnce();
+    expect(onUnconfirmedShutdown).not.toHaveBeenCalled();
     expect(update.quitAndInstall).not.toHaveBeenCalled();
   });
 
@@ -328,35 +332,39 @@ describe("application update install coordination", () => {
     expect(update.quitAndInstall).not.toHaveBeenCalled();
   });
 
-  it("keeps a normal quit fail-closed when privileged cleanup is unconfirmed", async () => {
+  it("exits a normal quit with evidence when privileged cleanup is unconfirmed", async () => {
     const events: string[] = [];
     const finishNormalShutdown = vi.fn(() => events.push("normal-exit"));
-    const onUnconfirmedShutdown = vi.fn(() => events.push("cleanup-unconfirmed"));
+    const recordUnconfirmedExit = vi.fn(() => events.push("unconfirmed-exit"));
+    const onUnconfirmedShutdown = vi.fn();
     const coordinator = new AppUpdateInstallCoordinator({
       service: service(events),
       runtime: () => null,
       privateConnect: () => null,
       cleanup: vi.fn(async () => { events.push("cleanup"); return false; }),
       finishNormalShutdown,
+      recordUnconfirmedExit,
       onUnconfirmedShutdown,
       reportError: vi.fn(),
     });
 
     expect(coordinator.allowBeforeQuit()).toBe(false);
-    await vi.waitFor(() => expect(onUnconfirmedShutdown).toHaveBeenCalledOnce());
-    expect(events).toEqual(["cleanup", "cleanup-unconfirmed"]);
-    expect(finishNormalShutdown).not.toHaveBeenCalled();
+    expect(coordinator.normalShutdownInProgress()).toBe(true);
+    await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
+    expect(events).toEqual(["cleanup", "unconfirmed-exit", "normal-exit"]);
+    expect(onUnconfirmedShutdown).not.toHaveBeenCalled();
   });
 
-  it("coalesces a retry after failed normal cleanup and exits once confirmed", async () => {
-    const cleanup = vi.fn()
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+  it("coalesces a retry after a failed update abort and exits once confirmed", async () => {
+    const cleanup = vi.fn(async () => true);
     const finishNormalShutdown = vi.fn();
     const onUnconfirmedShutdown = vi.fn();
     const coordinator = new AppUpdateInstallCoordinator({
       platform: "linux",
-      service: service([]),
+      service: {
+        ...service([]),
+        abortInstall: vi.fn().mockRejectedValueOnce(new Error("rollback unconfirmed")).mockResolvedValue(undefined),
+      },
       runtime: () => null,
       privateConnect: () => null,
       cleanup,
@@ -367,33 +375,36 @@ describe("application update install coordination", () => {
 
     expect(coordinator.allowBeforeQuit()).toBe(false);
     await vi.waitFor(() => expect(onUnconfirmedShutdown).toHaveBeenCalledOnce());
+    expect(cleanup).not.toHaveBeenCalled();
     expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(true);
     expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(false);
     await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
-    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
-  it("retains one retry requested while normal cleanup is in flight", async () => {
-    let resolveFirstCleanup!: (confirmed: boolean) => void;
-    const cleanup = vi.fn()
-      .mockImplementationOnce(() => new Promise<boolean>((resolve) => {
-        resolveFirstCleanup = resolve;
+  it("retains one retry requested while a failing update abort is in flight", async () => {
+    let rejectFirstAbort!: (error: Error) => void;
+    const abortInstall = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+        rejectFirstAbort = reject;
       }))
-      .mockResolvedValueOnce(true);
+      .mockResolvedValue(undefined);
+    const cleanup = vi.fn(async () => true);
     const finishNormalShutdown = vi.fn();
     const coordinator = new AppUpdateInstallCoordinator({
-      platform: "linux", service: service([]), runtime: () => null,
+      platform: "linux", service: { ...service([]), abortInstall }, runtime: () => null,
       privateConnect: () => null, cleanup, finishNormalShutdown,
       onUnconfirmedShutdown: vi.fn(), reportError: vi.fn(),
     });
 
     expect(coordinator.allowBeforeQuit()).toBe(false);
-    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(abortInstall).toHaveBeenCalledOnce());
     expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(true);
     expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(false);
-    resolveFirstCleanup(false);
+    rejectFirstAbort(new Error("rollback unconfirmed"));
     await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
-    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(abortInstall).toHaveBeenCalledTimes(2);
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
   it("drops an in-flight retry request after successful cleanup", async () => {
@@ -417,30 +428,36 @@ describe("application update install coordination", () => {
     expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(false);
   });
 
-  it.each(["darwin", "win32"] as const)("allows a later explicit quit to retry only an unconfirmed snapshot on %s", async (platform) => {
-    const cleanup = vi.fn().mockRejectedValueOnce(new SnapshotCleanupUnconfirmedError()).mockResolvedValueOnce(true);
+  it.each(["darwin", "win32"] as const)("exits with evidence when snapshot cleanup is unconfirmed on %s", async (platform) => {
+    const snapshotError = new SnapshotCleanupUnconfirmedError();
+    const cleanup = vi.fn().mockRejectedValueOnce(snapshotError);
     const finishNormalShutdown = vi.fn();
+    const recordUnconfirmedExit = vi.fn();
     const onUnconfirmedShutdown = vi.fn();
+    const reportError = vi.fn();
     const coordinator = new AppUpdateInstallCoordinator({
       platform, service: service([]), runtime: () => null, privateConnect: () => null,
-      cleanup, finishNormalShutdown, onUnconfirmedShutdown, reportError: vi.fn(),
+      cleanup, finishNormalShutdown, recordUnconfirmedExit, onUnconfirmedShutdown, reportError,
     });
-    expect(coordinator.allowBeforeQuit()).toBe(false);
-    await vi.waitFor(() => expect(onUnconfirmedShutdown).toHaveBeenCalledOnce());
-    expect(finishNormalShutdown).not.toHaveBeenCalled();
     expect(coordinator.allowBeforeQuit()).toBe(false);
     expect(coordinator.allowBeforeQuit()).toBe(false);
     await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
-    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(reportError).toHaveBeenCalledWith(snapshotError);
+    expect(recordUnconfirmedExit).toHaveBeenCalledOnce();
+    expect(onUnconfirmedShutdown).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
-  it.each(["darwin", "win32"] as const)("retries a failed normal cleanup on %s", async (platform) => {
-    const cleanup = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  it.each(["darwin", "win32"] as const)("retries a normal quit whose update abort failed on %s", async (platform) => {
+    const cleanup = vi.fn(async () => true);
     const finishNormalShutdown = vi.fn();
     const onUnconfirmedShutdown = vi.fn();
     const coordinator = new AppUpdateInstallCoordinator({
       platform,
-      service: service([]),
+      service: {
+        ...service([]),
+        abortInstall: vi.fn().mockRejectedValueOnce(new Error("rollback unconfirmed")).mockResolvedValue(undefined),
+      },
       runtime: () => null,
       privateConnect: () => null,
       cleanup,
@@ -453,12 +470,13 @@ describe("application update install coordination", () => {
     await vi.waitFor(() => expect(onUnconfirmedShutdown).toHaveBeenCalledOnce());
     expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(true);
     await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
-    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
-  it("keeps a normal quit fail-closed when privileged cleanup rejects", async () => {
+  it("exits a normal quit with evidence when privileged cleanup rejects", async () => {
     const cleanupError = new Error("cleanup rejected");
     const finishNormalShutdown = vi.fn();
+    const recordUnconfirmedExit = vi.fn();
     const onUnconfirmedShutdown = vi.fn();
     const reportError = vi.fn();
     const coordinator = new AppUpdateInstallCoordinator({
@@ -467,14 +485,16 @@ describe("application update install coordination", () => {
       privateConnect: () => null,
       cleanup: vi.fn(async () => { throw cleanupError; }),
       finishNormalShutdown,
+      recordUnconfirmedExit,
       onUnconfirmedShutdown,
       reportError,
     });
 
     expect(coordinator.allowBeforeQuit()).toBe(false);
-    await vi.waitFor(() => expect(reportError).toHaveBeenCalledWith(cleanupError));
-    expect(onUnconfirmedShutdown).toHaveBeenCalledOnce();
-    expect(finishNormalShutdown).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
+    expect(reportError).toHaveBeenCalledWith(cleanupError);
+    expect(recordUnconfirmedExit).toHaveBeenCalledOnce();
+    expect(onUnconfirmedShutdown).not.toHaveBeenCalled();
   });
 
   it("exits only after the updater proves native installation was not invoked", async () => {
@@ -733,6 +753,29 @@ describe("application update install coordination", () => {
 });
 
 describe("privileged updater cleanup", () => {
+  it("writes pending diagnostics after closing the window and before the process exits", () => {
+    const events: string[] = [];
+    const exited = new Error("exited");
+    expect(() => finishPrivilegedExit({
+      takeWindow: () => ({ isDestroyed: () => false, destroy: () => events.push("window") }),
+      flushDiagnostics: () => events.push("diagnostics"),
+      recordExit: () => events.push("record"),
+      exit: () => { events.push("exit"); throw exited; },
+    })).toThrow(exited);
+    expect(events).toEqual(["window", "diagnostics", "record", "exit"]);
+  });
+
+  it("still exits when pending diagnostics cannot be written", () => {
+    const exit = vi.fn((): never => { throw new Error("exited"); });
+    expect(() => finishPrivilegedExit({
+      takeWindow: () => null,
+      flushDiagnostics: () => { throw new Error("disk full"); },
+      recordExit: vi.fn(),
+      exit,
+    })).toThrow("exited");
+    expect(exit).toHaveBeenCalledOnce();
+  });
+
   it("refuses normal process exit when privileged cleanup is unconfirmed", () => {
     const finish = vi.fn();
     const onUnconfirmed = vi.fn();

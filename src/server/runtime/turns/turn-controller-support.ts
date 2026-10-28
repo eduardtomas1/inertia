@@ -40,8 +40,15 @@ export function broadcastTurnConversationShell(
   hooks: TurnControllerHooks,
   active: ActiveTurn,
 ): void {
+  broadcastConversationShellFor(hooks, active.conversation.id);
+}
+
+export function broadcastConversationShellFor(
+  hooks: TurnControllerHooks,
+  conversationId: string,
+): void {
   publishTurnProjection(() => hooks.broadcastConversationShell
-    ? hooks.broadcastConversationShell(active.conversation.id)
+    ? hooks.broadcastConversationShell(conversationId)
     : hooks.broadcastSnapshot());
 }
 

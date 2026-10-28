@@ -63,10 +63,12 @@ input.on("line", async (line) => {
 input.on("close", () => { record("eof"); });
 `);
     const taints: unknown[] = [];
+    const faults: unknown[] = [];
     deactivate = activatePreparedRuntimeOwnedProcessRegistry(directory,
       "20000000-0000-4000-8000-000000000002:1", "test:10000000-0000-4000-8000-000000000001", {
         darwinGuardianPath: join(process.cwd(), "resources/generated/runtime-process-guardian/runtime-process-guardian"),
         onTainted: (diagnostic) => { taints.push(diagnostic); },
+        onProcessFault: (fault) => { faults.push(fault); },
       });
     const spawnProcess = ((...args: Parameters<typeof spawn>) => {
       child = spawn(...args);
@@ -76,7 +78,7 @@ input.on("close", () => { record("eof"); });
       { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, HOME: directory,
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", CLAUDE_FIXTURE_STALL: stall ? "1" : "0", CLAUDE_FIXTURE_USAGE_ERROR: usageError ? "1" : "0" },
       directory, timeoutMs, undefined, ["models", "rateLimits"], { spawnProcess }, signal);
-    return { read, receipt, taints };
+    return { read, receipt, taints, faults };
   }
 
   it.each([false, true])("finishes a forked metadata child through EOF, including partial results (usage error: %s)", async (usageError) => {
@@ -94,19 +96,20 @@ input.on("close", () => { record("eof"); });
     expect(runtimeOwnedProcessCleanupConfirmed()).toBe(true);
   });
 
-  it("retains unconfirmed fork cleanup on metadata cancel", async () => {
-    const { read, receipt, taints } = await fixture(true);
+  it("proves a cancelled forked metadata child gone without tainting the registry", async () => {
+    const { read, receipt, taints, faults } = await fixture(true);
     const controller = new AbortController();
     const pending = read(6_000, controller.signal);
     // Attach rejection handling before any awaited fixture observation.
-    const assertion = expect(pending).rejects.toThrow("could not be confirmed stopped");
+    const assertion = expect(pending).rejects.toThrow("Claude metadata discovery was cancelled.");
     const deadline = Date.now() + 5_000;
     while (!await readFile(receipt, "utf8").catch(() => "") && Date.now() < deadline) await sleep(10);
     expect(await readFile(receipt, "utf8")).toBe("fork-completed\n");
     controller.abort();
     await assertion;
-    expect(taints).toContainEqual(expect.objectContaining({ stage: "darwin-guardian-close", signal: "SIGUSR2" }));
-    expect(runtimeOwnedProcessCleanupConfirmed()).toBe(false);
     expect(child?.signalCode).toBe("SIGUSR2");
+    expect(taints).toEqual([]);
+    expect(faults).toEqual([]);
+    expect(runtimeOwnedProcessCleanupConfirmed()).toBe(true);
   });
 });

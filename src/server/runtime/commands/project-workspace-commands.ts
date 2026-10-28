@@ -21,6 +21,8 @@ import { PROVIDER_INFO, type ProviderManager } from "../../providers";
 import type { ProviderInstallationUseTransfer } from
   "../../provider/contracts";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
+import { providerCleanupIncident } from "../../provider/run-cleanup-settlement";
+import type { IncidentObservation } from "../../../node/application-incidents";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
 import type { SecureFileAuthorityRegistry } from "../secure-file-authorities";
 import {
@@ -32,6 +34,7 @@ import {
 } from "../../workspace";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { TurnController } from "../turns/turn-controller";
+import { providerRecoveryRecords } from "../turns/turn-checkout-activity";
 import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import {
   defineRuntimeCommandHandler,
@@ -70,6 +73,7 @@ export interface ProjectWorkspaceCommandDependencies {
   reportTerminalProviderResumeRejection?(
     diagnostic: TerminalProviderResumeRejectionDiagnostic,
   ): void;
+  reportIncident?(observation: IncidentObservation): unknown;
 }
 
 export function createProjectWorkspaceCommandHandler(
@@ -236,7 +240,14 @@ export function createProjectWorkspaceCommandHandler(
             dependencies.store.attachments(id).map(({ id: attachmentId }) =>
               attachmentId));
           const publishRemovedWatcherLinks = dependencies.watchers?.beforeProjectRemove?.(projectId);
-          dependencies.store.removeProject(projectId);
+          const recoveryRecords = latestConversations.flatMap(({ id }) => providerRecoveryRecords(
+            dependencies.store,
+            dependencies.store.providerRunOwnership.forConversation(id),
+          ));
+          dependencies.store.removeProject(projectId, recoveryRecords);
+          for (const identity of recoveryRecords) {
+            dependencies.reportIncident?.(providerCleanupIncident(identity));
+          }
           publishRemovedWatcherLinks?.();
           try {
             const referencedAttachmentIds = dependencies.store

@@ -2,18 +2,17 @@ import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
-export const LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS = 1_500;
-// An immediate close can consume two readiness probes, a claim signal, an
-// observed-claim confirmation after an ambiguously delivered signal, and the
-// exact pending-stop signal before admission settles.
-export const LINUX_RUNTIME_OWNED_GUARDIAN_IMMEDIATE_STOP_ADMISSION_TIMEOUT_MS =
-  5 * LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS;
+export const LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS = 5_000;
+const LINUX_RUNTIME_OWNED_GUARDIAN_SYNC_HELPER_TIMEOUT_MS = 1_500;
+export const LINUX_RUNTIME_OWNED_GUARDIAN_IMMEDIATE_STOP_ADMISSION_TIMEOUT_MS = 7_500;
+const LINUX_GUARDIAN_READINESS_WINDOW_MS = LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS;
+const LINUX_GUARDIAN_READINESS_RETRY_DELAY_MS = 100;
 const LINUX_GUARDIAN_HELPER_OUTPUT_BYTES = 4 * 1024;
 const LINUX_GUARDIAN_MONITOR_FAST_POLL_MS = 50;
 const LINUX_GUARDIAN_MONITOR_IDLE_POLL_MS = 500;
 const LINUX_GUARDIAN_MONITOR_FAST_WINDOW_MS = 1_000;
 const LINUX_GUARDIAN_MONITOR_WAKE_POLL_MS = 0;
-const LINUX_GUARDIAN_UNPROVED_TERMINAL_MS = 19 * LINUX_GUARDIAN_MONITOR_FAST_POLL_MS;
+export const LINUX_GUARDIAN_UNPROVED_TERMINAL_MS = 100 * LINUX_GUARDIAN_MONITOR_FAST_POLL_MS;
 
 export interface LinuxGuardianTerminalMonitor {
   (): void;
@@ -49,6 +48,8 @@ interface LinuxGuardianHelperResult {
 }
 
 type LinuxGuardianTerminalName = "inertia-done" | "inertia-exdone";
+
+export type LinuxGuardianMonitorFailure = "bad-terminal" | "unproved-terminal" | "unreadable";
 
 export function linuxGuardianExecutableMatches(
   guardianPath: string,
@@ -95,6 +96,7 @@ function runLinuxGuardianHelper(
       resolve({ stdout, stderr, status, signal, failed });
     };
     const kill = (): void => {
+      if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
       try { child.kill("SIGKILL"); } catch { failed = true; }
     };
     const stop = (): void => {
@@ -145,7 +147,7 @@ export function verifyLinuxRuntimeOwnedGuardianSandbox(
   if (!isAbsolute(guardianPath)) return null;
   const result = spawnSync(guardianPath, ["seccomp-selftest-identity"], {
     encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
-    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
+    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_SYNC_HELPER_TIMEOUT_MS,
     killSignal: "SIGKILL",
     maxBuffer: LINUX_GUARDIAN_HELPER_OUTPUT_BYTES,
   });
@@ -211,7 +213,7 @@ export function readLinuxGuardianReady(
       && !linuxGuardianExecutableMatches(guardianPath, expectedExecutable))) return null;
   const result = spawnSync(guardianPath, ["ready", String(pid)], {
     encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
-    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
+    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_SYNC_HELPER_TIMEOUT_MS,
     maxBuffer: LINUX_GUARDIAN_HELPER_OUTPUT_BYTES,
   });
   if (result.error || result.status !== 0 || result.signal || result.stderr !== "") return null;
@@ -257,7 +259,9 @@ export async function readLinuxGuardianReadyWithRetriesAsync(
   abortSignal?: AbortSignal,
   expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): Promise<LinuxProcessIdentity | null> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const deadlineAt = Date.now() + LINUX_GUARDIAN_READINESS_WINDOW_MS;
+  for (let attempt = 0; attempt < 2 || Date.now() < deadlineAt; attempt += 1) {
+    if (abortSignal?.aborted) return null;
     const identity = await readLinuxGuardianReadyAsync(
       pid,
       guardianPath,
@@ -266,8 +270,25 @@ export async function readLinuxGuardianReadyWithRetriesAsync(
       expectedExecutable,
     );
     if (identity) return identity;
+    if (Date.now() < deadlineAt) await abortableDelay(LINUX_GUARDIAN_READINESS_RETRY_DELAY_MS, abortSignal);
   }
   return null;
+}
+
+function abortableDelay(delayMs: number, abortSignal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (abortSignal?.aborted) {
+      resolve();
+      return;
+    }
+    const finish = (): void => {
+      clearTimeout(timer);
+      abortSignal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+    abortSignal?.addEventListener("abort", finish, { once: true });
+  });
 }
 
 /**
@@ -451,7 +472,7 @@ export function recoverLinuxGuardianTerminalExact(
     String(helper.ino),
   ], {
     encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
-    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
+    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_SYNC_HELPER_TIMEOUT_MS,
     maxBuffer: LINUX_GUARDIAN_HELPER_OUTPUT_BYTES,
   });
   return !result.error && result.status === 0 && !result.signal
@@ -491,7 +512,7 @@ export function monitorLinuxGuardianTerminal(
   expected: LinuxProcessIdentity,
   guardianPath: string,
   onTerminal: (authorizationObserved: boolean) => boolean,
-  onFailure: () => void,
+  onFailure: (reason: LinuxGuardianMonitorFailure) => void,
   dependencies: {
     readonly readComm?: () => string;
     readonly terminalAuthority?: () => boolean;
@@ -552,12 +573,12 @@ export function monitorLinuxGuardianTerminal(
         return;
       }
       stop();
-      onFailure();
+      onFailure("unreadable");
       return;
     }
     if (comm === "inertia-bad") {
       stop();
-      onFailure();
+      onFailure("bad-terminal");
       return;
     }
     if (comm !== "inertia-done" && comm !== "inertia-exdone") {
@@ -571,10 +592,11 @@ export function monitorLinuxGuardianTerminal(
       if (unprovedTerminalMs >= LINUX_GUARDIAN_UNPROVED_TERMINAL_MS) {
         // A claimed terminal marker without exact hardened authority is unsafe.
         stop();
-        onFailure();
+        onFailure("unproved-terminal");
       }
       return;
     }
+    unprovedTerminalMs = null;
     if (!onTerminal(comm === "inertia-exdone")) return;
     releasePending = true;
     releaseController = new AbortController();

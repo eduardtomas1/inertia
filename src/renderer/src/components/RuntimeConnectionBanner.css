@@ -1,0 +1,29 @@
+.runtime-connection-banner {
+  display: flex;
+  min-width: 0;
+  min-height: 32px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text-muted);
+  background: var(--bg);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+}
+
+.workspace-frame.has-right-panel > .runtime-connection-banner {
+  margin-right: var(--workspace-tools-width);
+}
+
+.runtime-connection-banner > span {
+  min-width: 0;
+}
+
+.runtime-connection-banner > .text-button {
+  min-height: var(--control-height-small);
+  padding: 0 8px;
+  color: var(--text);
+}

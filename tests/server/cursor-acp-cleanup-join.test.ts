@@ -134,7 +134,7 @@ describe("Cursor MCP and process cleanup join", () => {
           status: "failed", cleanupConfirmed: false,
           failure: {
             reason: "provider-error", phase: "cleanup",
-            terminalEvent: terminationConfirmed ? "host-tools/cleanup" : "process-tree/cleanup",
+            terminalEvent: "host-tools/cleanup",
           },
           terminalReason: { outcome: "failed", reason: "provider-error" },
         });

@@ -12,6 +12,7 @@ import {
   type AgentTurnTerminalStatus,
   type ChatAttachment,
   type Conversation,
+  type ConversationShell,
   type SubagentTrace,
 } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
@@ -66,7 +67,7 @@ import { stopActiveSubagent } from "./turn-subagent-stop";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
 import { quarantineActiveDuoTurn } from "../duo/duo-active-turn-quarantine";
-import { hasActiveTurnCheckout, providerConversationIds } from "./turn-checkout-activity";
+import { exitedProviderTurns, hasActiveTurnCheckout, hasLiveProviderRun, liveProviderRunConversationIds, providerConversationIds, turnOwnedProviderRuns } from "./turn-checkout-activity";
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
@@ -197,6 +198,7 @@ export class TurnController {
       fail: (active, message) => {
         this.settle(active, "failed", "turn-timeout", message);
       },
+      onProviderActivity: (active) => broadcastTurnConversationShell(this.hooks, active),
     });
     const onPersistenceFailure = (active: ActiveTurn, error: unknown): void => {
       requestProviderCancellation(this.providers, active.conversation.id);
@@ -298,8 +300,7 @@ export class TurnController {
   isActive(conversationId: string): boolean {
     return this.activeByConversation.has(conversationId)
       || this.providers.isRunning(conversationId)
-      || this.store.providerRunOwnership.forConversation(conversationId)
-        .length > 0;
+      || hasLiveProviderRun(this.store, conversationId);
   }
 
   async withNativeGoalMutation<T>(conversationId: string, operation: () => Promise<T>): Promise<T> {
@@ -320,10 +321,13 @@ export class TurnController {
   hasActiveCheckout(checkoutPath: string): boolean {
     const tracked = [
       ...this.activeByConversation.keys(), ...this.providerRunOwnershipBarriers.keys(),
-      ...this.store.providerRunOwnership.all().map(({ conversationId }) =>
-        conversationId),
+      ...liveProviderRunConversationIds(this.store),
     ];
     return hasActiveTurnCheckout(this.store, this.providers, tracked, checkoutPath);
+  }
+
+  providerCleanupConfirmedLate(identity: { conversationId: string; runId: string; turnId: string }): void {
+    this.runStates.providerCleanupConfirmedLate(identity);
   }
 
   waitForProviderCleanup(conversationIds: readonly string[]): Promise<void>;
@@ -383,7 +387,7 @@ export class TurnController {
         || exactActive.turn.runId !== turn.runId
       )
     ) return false;
-    const ownedRuns = this.store.providerRunOwnership.forConversation(conversationId);
+    const ownedRuns = turnOwnedProviderRuns(this.store, conversationId, turnId);
     if (
       ownedRuns.length > 0
       && !(
@@ -433,6 +437,7 @@ export class TurnController {
       await this.waitForProviderCleanup([conversationId]);
       cleanup = !exactActive.providerRunStarted
         && exactActive.runState.isTerminal()
+        && !this.runStates.providerCleanupUnconfirmed(exactActive)
         ? "confirmed"
         : "unconfirmed";
     } else {
@@ -482,15 +487,13 @@ export class TurnController {
       || this.activeByTurn.has(turnId)
       || this.providerRunOwnershipBarriers.has(conversationId)
       || this.providers.isRunning(conversationId)
-      || this.store.providerRunOwnership.forConversation(conversationId)
-        .length > 0;
+      || hasLiveProviderRun(this.store, conversationId);
   }
 
   activeConversationIds(): string[] {
     return [...new Set([
       ...this.activeByConversation.keys(), ...providerConversationIds(this.store, this.providers),
-      ...this.store.providerRunOwnership.all().map(({ conversationId }) =>
-        conversationId),
+      ...liveProviderRunConversationIds(this.store),
     ])];
   }
 
@@ -886,7 +889,8 @@ export class TurnController {
           );
         },
       ).finally(() => {
-        const cleanupConfirmed = !active.providerRunStarted;
+        const cleanupConfirmed = !active.providerRunStarted
+          && !this.runStates.providerCleanupUnconfirmed(active);
         if (cleanupConfirmed) {
           this.store.providerRunOwnership.clear(
             active.turn.id,
@@ -925,7 +929,13 @@ export class TurnController {
     if (!active) return false;
     if (active.runState.isTerminal()) return this.runStates.retryTerminalPersistence(active);
     requestProviderCancellation(this.providers, conversationId);
-    return this.settle(active, "cancelled", cause, "Stopped");
+    return this.settle(active, "cancelled", cause, "Stopped")
+      || this.runStates.escalateStop(active);
+  }
+
+  isReleasing(conversationId: string): boolean {
+    return this.activeByConversation.has(conversationId)
+      || this.providerRunOwnershipBarriers.has(conversationId);
   }
 
   activeIdentity(conversationId: string): TurnOwnerIdentity | null {
@@ -1212,5 +1222,25 @@ export class TurnController {
 
   private now(): string {
     return this.clock().toISOString();
+  }
+
+  withProviderActivity(conversation: ConversationShell): ConversationShell {
+    const turn = conversation.latestTurn;
+    const active = turn ? this.activeByTurn.get(turn.id) : undefined;
+    const at = active ? this.timeouts.providerActivityAt(active) : null;
+    if (!turn || at === null) return conversation;
+    return { ...conversation, latestTurn: { ...turn, providerActivityAt: new Date(at).toISOString() } };
+  }
+
+  restampProviderActivity(): void {
+    for (const active of this.activeByConversation.values()) {
+      if (!active.runState.isTerminal()) this.timeouts.restampProviderActivity(active);
+    }
+  }
+
+  settleTurnsWhoseProviderExited(reason: string): string[] {
+    return exitedProviderTurns(this.activeByConversation.values(), this.providers)
+      .filter((active) => this.settle(active, "interrupted", "provider-process-exit", reason))
+      .map((active) => active.conversation.id);
   }
 }

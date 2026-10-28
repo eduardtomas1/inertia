@@ -15,7 +15,7 @@ const DARWIN_GUARDIAN_HELPER_OUTPUT_BYTES = 4 * 1024;
 const DARWIN_IDENTITY_HELPER_TIMEOUT_MS = 5_000;
 export const DARWIN_RUNTIME_OWNED_GUARDIAN_ADMISSION_TIMEOUT_MS = 5_500;
 
-interface DarwinGuardianHelperResult {
+export interface DarwinGuardianHelperResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly status: number | null;
@@ -23,7 +23,7 @@ interface DarwinGuardianHelperResult {
   readonly failed: boolean;
 }
 
-function runDarwinGuardianHelper(
+export function runDarwinGuardianHelper(
   guardianPath: string,
   args: readonly string[],
   timeoutMs: number,
@@ -51,7 +51,7 @@ function runDarwinGuardianHelper(
       resolveResult({ stdout, stderr, status, signal, failed });
     };
     const killIfRunning = (): void => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
+      if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
       try { child.kill("SIGKILL"); } catch {
         // The helper may have become terminal between the state check and kill.
       }

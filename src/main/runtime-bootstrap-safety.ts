@@ -20,7 +20,10 @@ import {
   type ModernDarwinRecoveryRootObservation,
   type ModernDarwinRecoverySnapshot,
 } from "../node/runtime-modern-recovery-authorities.js";
-import { runtimeCleanupReceiptIds } from "./runtime-cleanup-receipts.js";
+import {
+  RuntimeCleanupReceiptJournal,
+  runtimeCleanupReceiptIds,
+} from "./runtime-cleanup-receipts.js";
 import {
   LegacyRuntimeRecoveryAuthorityJournal,
   type LegacyRuntimeRecoveryPlatform,
@@ -342,7 +345,9 @@ export async function prepareModernDarwinBootstrapRecovery(
   dataDirectory: string,
   systemBootId: string,
   guardianPath: string | null,
-  options: Omit<ModernDarwinRecoveryRootObservation, "guardianPath"> = {},
+  options: Omit<ModernDarwinRecoveryRootObservation, "guardianPath"> & {
+    readonly publishRecoveredReceipts?: boolean;
+  } = {},
 ): Promise<ModernDarwinBootstrapRecovery> {
   const platform = options.platform ?? process.platform;
   if (
@@ -415,11 +420,7 @@ export async function prepareModernDarwinBootstrapRecovery(
       MAX_RUNTIME_OWNERSHIP_LEAVES,
     );
     const deadlineAt = options.deadlineAt ?? Date.now() + 5_000;
-    // Drain every exact recorded guardian/session boundary first, but retain
-    // the generation session and lease. A macOS descendant may have escaped
-    // its original POSIX session with setsid(), so session emptiness alone is
-    // not proof that every descendant stopped and must never auto-authorize
-    // provider admission.
+    const receipts = new RuntimeCleanupReceiptJournal(dataDirectory);
     for (const lease of prior) {
       const recovery = recoverRuntimeOwnedProcesses(
         dataDirectory,
@@ -431,7 +432,18 @@ export async function prepareModernDarwinBootstrapRecovery(
           darwinGuardianPath: guardianPath,
         },
       );
-      if (recovery) await Promise.resolve(recovery).catch(() => false);
+      const recovered = recovery
+        ? await Promise.resolve(recovery).catch(() => false)
+        : false;
+      if (
+        options.publishRecoveredReceipts === true
+        && recovered === true
+        && !receipts.has(lease.runtimeGenerationId)
+        && owned.finishSession(
+          lease.runtimeGenerationId,
+          () => receipts.publish(lease.runtimeGenerationId),
+        )
+      ) leases.clearRuntimeGeneration(lease.runtimeGenerationId);
     }
     if (prior.length === 0) {
       return {

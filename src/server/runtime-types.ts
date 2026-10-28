@@ -62,6 +62,7 @@ export interface RuntimeOptions {
   manuallyRetiredRuntimeGenerationIds?: readonly string[];
   manualModernDarwinRecovery?: ModernDarwinRecoveryAuthorityDescriptor;
   priorRuntimeCleanupUnconfirmed?: boolean;
+  exitedUnconfirmedRuntimeGenerationIds?: readonly string[];
   onCleanupReceiptConsumed?: (
     receiptRuntimeGenerationId: string,
     currentRuntimeGenerationId: string,

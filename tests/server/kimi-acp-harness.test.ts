@@ -1271,11 +1271,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] },
     configOptions: [],
   } });
-  if (message.method === "session/prompt") return send({
-    jsonrpc: "2.0",
-    id: message.id,
-    result: { stopReason: "end_turn" },
-  });
+  if (message.method === "session/prompt") {
+    send({ jsonrpc: "2.0", method: "session/update", params: {
+      sessionId: "kimi-cleanup-session",
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done" } },
+    } });
+    return send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: { stopReason: "end_turn" },
+    });
+  }
 });
 `;
     const cleanup = await runFailure(
@@ -1289,14 +1295,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       }),
     );
     expect(cleanup.result).toMatchObject({
-      status: "failed",
+      status: "completed",
+      text: "Done",
       cleanupConfirmed: false,
-      failure: {
-        reason: "process-exit",
-        phase: "cleanup",
-        terminalEvent: "process/cleanup",
-      },
     });
+    expect(cleanup.result.error).toBeUndefined();
+    expect(cleanup.result.failure).toBeUndefined();
+    await expect(cleanup.result.cleanupConfirmation).resolves.toBe(false);
     await cleanup.manager.disposeAll().catch(() => undefined);
   }, 90_000);
 

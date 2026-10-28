@@ -183,6 +183,7 @@ interface QuarantineRecord {
   identity: ProviderInstallationIdentity;
   operationId: string;
   reason: string;
+  kind: ProviderInstallationUseKind | "maintenance";
 }
 
 interface DrainWaiter {
@@ -200,6 +201,16 @@ const MAX_WAIT_TIMEOUT_MS = 60_000;
 const POST_MAINTENANCE_VERIFICATION_KINDS: ReadonlySet<
   ProviderInstallationUseKind
 > = new Set([
+  "metadata-discovery",
+  "auth-discovery",
+  "compatibility-probe",
+  "isolation-proof",
+  "drift-verification",
+]);
+
+export const USER_RECOVERABLE_QUARANTINE_KINDS: ReadonlySet<ProviderInstallationUseKind> = new Set([
+  "provider-run",
+  "provider-server",
   "metadata-discovery",
   "auth-discovery",
   "compatibility-probe",
@@ -340,14 +351,16 @@ export class ProviderInstallationLeaseCoordinator {
     }
     const state = this.state(identity.scopeId);
     const blockers = this.blockers(identity);
-    if (
-      state.maintenance
-      || state.quarantine
+    const quarantines = [state.quarantine, this.quarantineByBoundary.get(identity.boundaryId)]
+      .filter((quarantine) => quarantine !== null && quarantine !== undefined);
+    const maintained = Boolean(state.maintenance)
       || this.maintenanceByBoundary.has(identity.boundaryId)
-      || this.quarantineByBoundary.has(identity.boundaryId)
-    ) {
+      || quarantines.some(({ kind }) => kind === "maintenance" || !USER_RECOVERABLE_QUARANTINE_KINDS.has(kind));
+    if (maintained || quarantines.length > 0) {
       throw new ProviderInstallationAdmissionError(
-        "The provider installation is unavailable while maintenance owns it.",
+        maintained
+          ? "The provider installation is unavailable while maintenance owns it."
+          : "The provider installation is paused because an earlier provider process could not be confirmed stopped. Open Settings > Agents and choose Refresh all providers.",
         blockers,
       );
     }
@@ -359,7 +372,7 @@ export class ProviderInstallationLeaseCoordinator {
       if (!active || state.uses.get(token) !== record) return false;
       active = false;
       state.uses.delete(token);
-      this.quarantineState(state, identity, owner.operationId, reason);
+      this.quarantineState(state, identity, owner.operationId, reason, owner.kind);
       this.notifyDrain(state);
       return true;
     };
@@ -564,6 +577,31 @@ export class ProviderInstallationLeaseCoordinator {
     );
   }
 
+  liftQuarantine(
+    identity: ProviderInstallationIdentity,
+    operationId: string,
+  ): boolean {
+    const state = this.states.get(identity.scopeId);
+    let lifted = false;
+    if (state?.quarantine?.operationId === operationId) {
+      state.quarantine = null;
+      lifted = true;
+    }
+    if (this.quarantineByBoundary.get(identity.boundaryId)?.operationId === operationId) {
+      this.quarantineByBoundary.delete(identity.boundaryId);
+      lifted = true;
+    }
+    if (lifted && !this.quarantineByBoundary.has(identity.boundaryId)) {
+      const remaining = [...this.states.values()].find((candidate) =>
+        candidate.quarantine?.identity.boundaryId === identity.boundaryId);
+      if (remaining?.quarantine) {
+        this.quarantineByBoundary.set(identity.boundaryId, remaining.quarantine);
+      }
+    }
+    if (state) this.deleteIfEmpty(identity.scopeId, state);
+    return lifted;
+  }
+
   /** Provider-scoped guard used immediately before logical route mutation. */
   hasProviderAuthority(providerId: ProviderId): boolean {
     return [...this.states.values()].some((state) => (
@@ -596,7 +634,37 @@ export class ProviderInstallationLeaseCoordinator {
       this.quarantineMaintenance(state.maintenance, reason, identity);
       return;
     }
-    this.quarantineState(state, identity, owner.operationId, reason);
+    this.quarantineState(state, identity, owner.operationId, reason, owner.kind);
+  }
+
+  liftProviderQuarantines(
+    providerId: ProviderId,
+    kinds: ReadonlySet<ProviderInstallationUseKind>,
+  ): number {
+    if (this.hasProviderMaintenance(providerId)) return 0;
+    const liftable = new Set([
+      ...[...this.states.values()].flatMap(({ quarantine }) => quarantine ? [quarantine] : []),
+      ...this.quarantineByBoundary.values(),
+    ].filter(({ identity, kind }) =>
+      identity.providerId === providerId && kind !== "maintenance" && kinds.has(kind)));
+    let lifted = 0;
+    for (const { identity, operationId } of liftable) {
+      if (this.liftQuarantine(identity, operationId)) lifted += 1;
+    }
+    return lifted;
+  }
+
+  activeUseCount(providerId: ProviderId): number {
+    return [...this.states.values()].reduce((count, state) => count
+      + [...state.uses.values()].filter(({ identity }) => identity.providerId === providerId).length
+      + (state.maintenance?.identity.providerId === providerId
+        ? state.maintenance.verificationUses.size
+        : 0), 0);
+  }
+
+  private hasProviderMaintenance(providerId: ProviderId): boolean {
+    return [...this.maintenanceByBoundary.values()].some(({ identity }) => identity.providerId === providerId)
+      || [...this.states.values()].some(({ maintenance }) => maintenance?.identity.providerId === providerId);
   }
 
   private acquireVerificationUse(
@@ -741,6 +809,7 @@ export class ProviderInstallationLeaseCoordinator {
         scope.identity,
         maintenance.operationId,
         reason,
+        "maintenance",
       );
     }
     if (!maintenance.scopes.has(observedIdentity.scopeId)) {
@@ -749,6 +818,7 @@ export class ProviderInstallationLeaseCoordinator {
         observedIdentity,
         maintenance.operationId,
         reason,
+        "maintenance",
       );
     }
     maintenance.verificationUses.clear();
@@ -915,10 +985,11 @@ export class ProviderInstallationLeaseCoordinator {
     identity: ProviderInstallationIdentity,
     operationId: string,
     reasonInput: string,
+    kind: QuarantineRecord["kind"],
   ): void {
     const reason = reasonInput.replaceAll("\0", "").trim().slice(0, 240)
       || "provider-installation-cleanup-unconfirmed";
-    state.quarantine ??= { identity, operationId, reason };
+    state.quarantine ??= { identity, operationId, reason, kind };
     this.quarantineByBoundary.set(
       identity.boundaryId,
       this.quarantineByBoundary.get(identity.boundaryId) ?? state.quarantine,

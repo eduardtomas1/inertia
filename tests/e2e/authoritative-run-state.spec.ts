@@ -137,7 +137,7 @@ test("projects exact live run states in the real Electron shell", async ({
     await expect(cancellingTurn.locator(".turn-working-status"))
       .toContainText("Codex App Server · OpenAI stopping");
     await expect(cancellingTurn.locator(".turn-stop-action"))
-      .toBeDisabled();
+      .toBeEnabled();
     await expect(cancellingTurn.locator(".turn-stop-action"))
       .toHaveText("Stopping");
     const stoppingScreenshot = testInfo.outputPath(

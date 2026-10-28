@@ -84,11 +84,10 @@ it("does not publish the underlying process-tree termination error", async () =>
   });
   const result = await run.result;
   expect(terminateProcessTree).toHaveBeenCalledOnce();
-  expect(result).toMatchObject({ status: "failed", cleanupConfirmed: false,
-    error: "OpenCode server process tree could not be confirmed stopped.",
-    failure: { phase: "cleanup", terminalEvent: "process-tree/cleanup" } });
-  expect(result.failure?.technicalDetail).toContain("OpenCode server process tree could not be confirmed stopped.");
-  expect(statuses.at(-1)).toMatchObject({ status: "failed", message: result.error });
+  expect(result).toMatchObject({ status: "completed", cleanupConfirmed: false });
+  expect(result.error).toBeUndefined();
+  expect(result.failure).toBeUndefined();
+  expect(statuses.at(-1)).toMatchObject({ status: "completed" });
   expect(JSON.stringify({ result, statuses })).not.toContain(credential);
   expect(JSON.stringify({ result, statuses })).not.toContain("cleanup cause");
 });

@@ -129,6 +129,32 @@ describe("Linux lifecycle notice wiring", () => {
     expect(application.quit).not.toHaveBeenCalled();
   });
 
+  it("tells a relaunch during quit that Inertia closes by itself, once at a time", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    let dismiss!: () => void;
+    const application = {
+      getVersion: () => "0.0.51", quit: vi.fn(), whenReady: vi.fn(async () => undefined),
+    };
+    const nativeDialog = { showMessageBox: vi.fn(() => new Promise<{
+      response: number; checkboxChecked: boolean;
+    }>((resolve) => { dismiss = () => resolve({ response: 0, checkboxChecked: false }); })) };
+    const notices = createLifecycleNotices(application, nativeDialog, vi.fn(), () => false);
+    notices.reportShutdownInProgress();
+    notices.reportShutdownInProgress();
+    await vi.waitFor(() => expect(nativeDialog.showMessageBox).toHaveBeenCalledOnce());
+    expect(nativeDialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Inertia is still shutting down",
+      detail: expect.stringContaining("will close by itself"),
+      buttons: ["OK"],
+    }));
+    dismiss();
+    await vi.waitFor(() => {
+      notices.reportShutdownInProgress();
+      expect(nativeDialog.showMessageBox).toHaveBeenCalledTimes(2);
+    });
+    expect(application.quit).not.toHaveBeenCalled();
+  });
+
   it("does not display native contention dialogs in automated fixtures", async () => {
     vi.stubEnv("NODE_ENV", "test");
     const application = {

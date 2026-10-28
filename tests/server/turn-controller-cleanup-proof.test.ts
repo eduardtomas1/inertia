@@ -39,10 +39,9 @@ describe("TurnController exact provider cleanup proof", () => {
       turnId: queued.turn.id,
     });
     expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
-      status: "running",
-      runState: { state: "cancelling" },
       terminalReason: null,
     });
+    expect(runtime.store.agentTurn(queued.turn.id).runState?.state).not.toBe("cancelling");
     expect(runtime.store.providerRunOwnership.forConversation(
       runtime.conversationId,
     )).toHaveLength(1);
@@ -67,7 +66,7 @@ describe("TurnController exact provider cleanup proof", () => {
     { result: "missing" as const, isRunning: false },
     { result: "identity-mismatch" as const, isRunning: true },
   ])(
-    "retains authority when synchronous launch cleanup is $result",
+    "finalizes a failed launch but keeps its ownership row when launch cleanup is $result",
     async ({ result, isRunning }) => {
       const runtime = await testRuntime();
       const attachment = await testAttachment(
@@ -98,19 +97,14 @@ describe("TurnController exact provider cleanup proof", () => {
         turnId: queued.turn.id,
       });
       expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
-        status: "running",
-        runState: { state: "cancelling" },
-        terminalReason: null,
+        status: "failed",
+        terminalReason: "turn-start-failed",
       });
       expect(runtime.store.providerRunOwnership.forConversation(
         runtime.conversationId,
       )).toHaveLength(1);
-      expect(runtime.attachmentReleases).toEqual([]);
-      expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
-      expect(() => runtime.controller.queue({
-        conversationId: runtime.conversationId,
-        content: "A replacement must remain quarantined.",
-      })).toThrow("already has an active turn");
+      expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(isRunning);
       runtime.store.close();
     },
   );
@@ -190,7 +184,7 @@ describe("TurnController exact provider cleanup proof", () => {
     runtime.store.close();
   });
 
-  it("retains authority for a mismatched terminal result", async () => {
+  it("finalizes a mismatched terminal result as failed but keeps its ownership row", async () => {
     const runtime = await testRuntime();
     const queued = runtime.controller.queue({
       conversationId: runtime.conversationId,
@@ -211,14 +205,13 @@ describe("TurnController exact provider cleanup proof", () => {
       turnId: queued.turn.id,
     });
     expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
-      status: "running",
-      runState: { state: "cancelling" },
-      terminalReason: null,
+      status: "failed",
+      terminalReason: "provider-error",
     });
     expect(runtime.store.providerRunOwnership.forConversation(
       runtime.conversationId,
     )).toHaveLength(1);
-    expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
+    expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
     runtime.store.close();
   });
 });

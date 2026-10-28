@@ -33,6 +33,16 @@ function fromRow(row: OwnedProviderRunRow): OwnedProviderRun {
   };
 }
 
+export function releaseProviderRecoveryRecords(
+  database: Database.Database,
+  records: readonly { turnId: string; runId: string }[],
+): void {
+  const release = database.prepare(`
+    DELETE FROM provider_run_ownership WHERE turn_id = ? AND run_id = ?
+  `);
+  for (const { turnId, runId } of records) release.run(turnId, runId);
+}
+
 export class ProviderRunOwnershipRepository {
   constructor(private readonly database: Database.Database) {}
 

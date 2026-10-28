@@ -1,5 +1,6 @@
 import type { RuntimeOwnedProcessContainment } from "../node/runtime-owned-processes.js";
 import type { RuntimeWorkerCommand } from "../node/runtime-process-protocol.js";
+import type { RuntimePriorCleanupEvidence } from "./runtime-supervisor-stop-recovery.js";
 import type {
   RuntimeProcessRecord,
   RuntimeSupervisorOptions,
@@ -11,7 +12,7 @@ export interface RuntimeProcessContainmentAdmissionOptions {
   readonly workerOptions: RuntimeSupervisorOptions["workerOptions"];
   readonly isCurrent: (record: RuntimeProcessRecord) => boolean;
   readonly isRunningDesired: () => boolean;
-  readonly hasQuarantinedProcesses: () => boolean;
+  readonly priorCleanupEvidence: () => RuntimePriorCleanupEvidence;
   readonly persist: (
     record: RuntimeProcessRecord,
     containment: RuntimeOwnedProcessContainment,
@@ -112,9 +113,7 @@ export class RuntimeProcessContainmentAdmission {
                 record.modernDarwinRecoveryAuthority,
             }
           : {}),
-        ...(this.options.hasQuarantinedProcesses()
-          ? { priorRuntimeCleanupUnconfirmed: true }
-          : {}),
+        ...this.options.priorCleanupEvidence(),
       },
     });
     // Containment has its own bounded admission window. Worker readiness begins

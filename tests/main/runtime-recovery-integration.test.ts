@@ -17,10 +17,6 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
-import {
-  authorizeModernDarwinRuntimeRecovery,
-  prepareModernDarwinBootstrapRecovery,
-} from "../../src/main/runtime-bootstrap-safety";
 import { windowsRuntimeJobName } from "../../src/main/windows-runtime-job";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 import { RuntimeStore } from "../../src/server/database";
@@ -303,78 +299,31 @@ describe("runtime recovery supervisor integration", () => {
       /timed out.*before cancellation was confirmed/u,
     );
     expect(existsSync(markerPath)).toBe(true);
-    if (process.platform === "darwin") {
-      await waitFor(
-        () => supervisor.snapshot().phase === "stopped",
-        "explicit macOS recovery admission",
-        diagnostics,
-      );
-      const recovery = await prepareModernDarwinBootstrapRecovery(
-        dataDirectory,
-        systemBootId,
-        runtimeProcessGuardianPath,
-      );
-      expect(recovery.blocked).toBe(false);
-      expect(recovery.candidate).not.toBeNull();
-      const authority = authorizeModernDarwinRuntimeRecovery(
-        dataDirectory,
-        recovery.candidate!,
-        systemBootId,
-        runtimeProcessGuardianPath,
-      );
-      expect(authority).not.toBeNull();
-      expect(supervisor.resumeWithModernDarwinRecovery(authority!)).toBe(true);
-      await waitFor(
-        () => supervisor.snapshot().phase === "ready"
-          && supervisor.snapshot().generation === 2,
-        "replacement runtime generation readiness",
-        diagnostics,
-      );
-      await supervisor.databaseRecovery("export", exportPath);
-      expect(existsSync(exportPath)).toBe(true);
-      expect(supervisor.snapshot()).toMatchObject({
-        phase: "ready",
-        generation: 2,
-      });
-    } else {
-      await waitFor(
-        () => supervisor.snapshot().generation >= 2
-          && supervisor.snapshot().pid === null
-          && supervisor.snapshot().startupBlockerCode
-            === "prior-runtime-cleanup-unconfirmed",
-        "replacement runtime safety rejection",
-        diagnostics,
-      );
-      expect(states.some((state) => /^ready:[2-9][0-9]*:/u.test(state)))
-        .toBe(false);
-      await expect(supervisor.databaseRecovery(
-        "import",
-        recoveryPath,
-        targetDirectory,
-      )).rejects.toThrow(/runtime startup is blocked.*prior process cleanup/iu);
-      await expect(supervisor.stop()).resolves.toBe(false);
-      expect(supervisor.snapshot().phase).toBe("stopped");
-
-      const database = new Database(join(dataDirectory, "inertia.sqlite"), {
-        readonly: true,
-        fileMustExist: true,
-      });
-      try {
-        expect(database.pragma("integrity_check", { simple: true })).toBe("ok");
-        expect(database.prepare("SELECT COUNT(*) AS count FROM projects").get())
-          .toEqual({ count: 0 });
-      } finally {
-        database.close();
-      }
+    await waitFor(
+      () => supervisor.snapshot().phase === "ready"
+        && supervisor.snapshot().generation === 2,
+      "replacement runtime generation readiness after exact cleanup reconciliation",
+      diagnostics,
+    );
+    expect(states.some((state) => state.startsWith("stopped:"))).toBe(false);
+    await supervisor.databaseRecovery("export", exportPath);
+    expect(JSON.parse(readFileSync(exportPath, "utf8"))).toMatchObject({ projects: [] });
+    await expect(supervisor.stop()).resolves.toBe(process.platform !== "win32");
+    const database = new Database(join(dataDirectory, "inertia.sqlite"), {
+      readonly: true,
+      fileMustExist: true,
+    });
+    try {
+      expect(database.pragma("integrity_check", { simple: true })).toBe("ok");
+      expect(database.prepare("SELECT COUNT(*) AS count FROM projects").get())
+        .toEqual({ count: 0 });
+    } finally {
+      database.close();
     }
     expect(readFileSync(markerPath, "utf8")).toBe("staging-published\n");
     expect(readFileSync(recoveryPath, "utf8")).toContain("Recovered one");
     expect(existsSync(targetDirectory)).toBe(true);
-    const retainedEntries = await readdir(targetDirectory);
-    if (process.platform === "darwin") expect(retainedEntries).toEqual([]);
-    else expect(retainedEntries).toEqual([
-      expect.stringMatching(/^recovered-[0-9a-f-]{36}$/u),
-    ]);
+    expect(await readdir(targetDirectory)).toEqual([]);
   }, 45_000);
 
   it("cancels a near-limit import while its isolated transaction is busy", async () => {

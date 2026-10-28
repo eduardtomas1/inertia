@@ -35,9 +35,12 @@ export function releaseFailedPidClaimIfStopped(
   claim.releaseConfirmation = confirmation;
   claim.settleReleaseConfirmation = settleConfirmation;
   registry.pendingReleaseConfirmations.add(confirmation);
-  void confirmation.then(() => {
+  void confirmation.then((confirmed) => {
     registry.pendingReleaseConfirmations.delete(confirmation);
     claim.settleReleaseConfirmation = null;
+    if (!confirmed && !claim.released && claim.releaseConfirmation === confirmation) {
+      claim.releaseConfirmation = null;
+    }
   });
   const deadlineAt = Date.now() + PROCESS_GROUP_EXIT_WAIT_MS;
   const poll = (): void => {

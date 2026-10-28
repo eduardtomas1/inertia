@@ -261,7 +261,7 @@ process.exit(2);
     });
   });
 
-  it("requests recovery once when provider discovery asynchronously taints ownership", async () => {
+  it("quarantines a provider discovery guardian once instead of tainting ownership when it closes by signal", async () => {
     const root = temporaryRoot();
     const executable = join(root, "codex");
     const identity = {
@@ -274,6 +274,7 @@ process.exit(2);
       startTimeMicroseconds: 123_456,
     };
     const requestRecovery = vi.fn();
+    const quarantined = vi.fn();
     const deactivate = activateRuntimeOwnedProcessRegistry(
       root,
       "40000000-0000-4000-8000-000000000004:1",
@@ -283,7 +284,13 @@ process.exit(2);
         darwinGuardianPath: "/trusted/runtime-process-guardian",
         readDarwinGuardianReadyAsync: async () => identity,
         readDarwinIdentity: () => identity,
+        readDarwinSessionEmptyAsync: async () => true,
+        readDarwinEscapeesAsync: async () => ({
+          absent: false,
+          remaining: [{ pid: 5_151, startTimeSeconds: "1756100001", startTimeMicroseconds: 7 }],
+        }),
         onTainted: requestRecovery,
+        onProcessFault: quarantined,
       },
     );
     if (deactivate) ownershipDeactivators.push(deactivate);
@@ -334,7 +341,12 @@ process.exit(2);
       });
 
       expect(detection).toMatchObject({ available: true, canRun: true });
-      expect(requestRecovery).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(quarantined).toHaveBeenCalledOnce());
+      expect(quarantined).toHaveBeenCalledWith({
+        kind: "quarantined",
+        diagnostic: { stage: "darwin-guardian-close", signal: "SIGUSR2" },
+      });
+      expect(requestRecovery).not.toHaveBeenCalled();
     } finally {
       processKill.mockRestore();
     }

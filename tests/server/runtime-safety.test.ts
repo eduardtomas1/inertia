@@ -272,6 +272,85 @@ describe("runtime recovery safety command boundary", () => {
     }
   });
 
+  it("starts after an exited generation and interrupts its turns while retaining its cleanup evidence", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-runtime-safety-"));
+    const dataDirectory = join(root, "data");
+    const workspaceDirectory = join(root, "workspace");
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const exitedGenerationId = "40000000-0000-4000-8000-000000000004:1";
+    const currentGenerationId = "40000000-0000-4000-8000-000000000004:2";
+    const bootId = "test:00000000-0000-4000-8000-000000000004";
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    mkdirSync(workspaceDirectory);
+    const seed = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
+    const project = seed.createProject("Exited runtime", workspaceDirectory);
+    const conversation = seed.createConversation(project.id, "Interrupted exited run");
+    const userMessage = seed.createMessage(conversation.id, "Keep going");
+    const turn = seed.createAgentTurn({
+      id: "exited-runtime-turn", conversationId: conversation.id, runId: "exited-runtime-run",
+      userMessageId: userMessage.id, providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "codex-local", model: "gpt-test", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "supervised", configurationRevision: 0,
+      association: "authoritative",
+    });
+    seed.updateAgentTurnLifecycle(turn.id, { status: "running" });
+    seed.updateConversation(conversation.id, { status: "running" });
+    seed.providerRunOwnership.record(turn.id, conversation.id, turn.runId,
+      exitedGenerationId, bootId, new Date().toISOString());
+    seed.close();
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(exitedGenerationId, bootId)).toBe(true);
+    const incidents: string[] = [];
+    try {
+      const runtime = await startTestRuntime({
+        dataDirectory, defaultWorkspacePath: workspaceDirectory, enableProviders: false,
+        runtimeGenerationId: currentGenerationId, systemBootId: bootId,
+        exitedUnconfirmedRuntimeGenerationIds: [exitedGenerationId],
+        onIncident: (incident) => { incidents.push(incident.code); },
+      });
+      await runtime.close();
+      expect(incidents).toContain("runtime.cleanup-unconfirmed");
+      const reopened = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
+      expect(reopened.providerRunOwnership.all()).toEqual([]);
+      expect(reopened.agentTurn(turn.id)).toMatchObject({ status: "interrupted", terminalReason: "runtime-restart" });
+      reopened.close();
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory).all().map(({ runtimeGenerationId }) =>
+        runtimeGenerationId)).toContain(exitedGenerationId);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the safety lock for a retained generation whose worker exit was not observed", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-runtime-safety-"));
+    const dataDirectory = join(root, "data");
+    const workspaceDirectory = join(root, "workspace");
+    const bootId = "test:00000000-0000-4000-8000-000000000005";
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    mkdirSync(workspaceDirectory);
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish("50000000-0000-4000-8000-000000000005:1", bootId)).toBe(true);
+    expect(leases.publish("50000000-0000-4000-8000-000000000005:2", bootId)).toBe(true);
+    try {
+      await expect(startTestRuntime({
+        dataDirectory, defaultWorkspacePath: workspaceDirectory, enableProviders: false,
+        runtimeGenerationId: "50000000-0000-4000-8000-000000000005:3", systemBootId: bootId,
+        exitedUnconfirmedRuntimeGenerationIds: ["50000000-0000-4000-8000-000000000005:1"],
+      })).rejects.toThrow("Runtime startup is blocked");
+      await expect(startTestRuntime({
+        dataDirectory, defaultWorkspacePath: workspaceDirectory, enableProviders: false,
+        runtimeGenerationId: "50000000-0000-4000-8000-000000000005:4", systemBootId: bootId,
+        priorRuntimeCleanupUnconfirmed: true,
+        exitedUnconfirmedRuntimeGenerationIds: [
+          "50000000-0000-4000-8000-000000000005:1",
+          "50000000-0000-4000-8000-000000000005:2",
+          "50000000-0000-4000-8000-000000000005:3",
+        ],
+      })).rejects.toThrow("Runtime startup is blocked");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("accepts a missing legacy lease only as an idempotent authority replay", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-runtime-safety-"));
     const dataDirectory = join(root, "data");

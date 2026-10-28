@@ -26,6 +26,8 @@ import {
   type TurnInteractionCommandDependencies,
 } from "../../src/server/runtime/commands/turn-interaction-commands";
 import type { TurnAdmissionLease } from "../../src/server/runtime/turns/turn-controller-types";
+import { waitForProviderCleanupBarriers } from "../../src/server/runtime/turns/turn-admission-coordinator";
+import { ownedProviderStopBudgetMs } from "../../src/server/provider/run-cleanup-settlement";
 import { hold as holdForUpdate, release as releaseUpdateHold } from "../../src/server/runtime/update-hold";
 import { MESSAGE_SEND_PREPARATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
@@ -306,7 +308,7 @@ describe("update hold", () => {
 });
 
 describe("turn stop cleanup", () => {
-  it("does not acknowledge Stop until provider cleanup is confirmed", async () => {
+  it("does not acknowledge Stop until the stopped turn leaves the active set", async () => {
     let release!: () => void;
     const cleanup = new Promise<void>((resolve) => {
       release = resolve;
@@ -332,9 +334,10 @@ describe("turn stop cleanup", () => {
       settled = true;
     });
 
-    await vi.waitFor(() => expect(waitForProviderCleanup).toHaveBeenCalledWith([
-      conversationId,
-    ]));
+    await vi.waitFor(() => expect(waitForProviderCleanup).toHaveBeenCalledWith(
+      [conversationId],
+      expect.any(Number),
+    ));
     expect(settled).toBe(false);
 
     release();
@@ -342,28 +345,78 @@ describe("turn stop cleanup", () => {
     expect(cancel).toHaveBeenCalledWith(conversationId);
   });
 
-  it("reports that Resume remains unavailable when cleanup is unconfirmed", async () => {
+  it("acknowledges Stop at its deadline when the turn never leaves the active set", async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+      });
+      const barriers = new Map([[conversationId, new Promise<void>(() => undefined)]]);
+      const cancel = vi.fn(() => true);
+      Object.assign(runtime.turns, {
+        cancel,
+        waitForProviderCleanup: (ids: readonly string[], deadlineAt: number) =>
+          waitForProviderCleanupBarriers(barriers, ids, deadlineAt),
+      });
+      vi.mocked(runtime.turns.isActive).mockReturnValue(true);
+      Object.assign(runtime.isolatedRuns, {
+        stopConversation: vi.fn(() => false),
+      });
+      const handler = createTurnInteractionCommandHandler(runtime);
+      const stop = () => handler({} as never, {
+        type: "agent.stop",
+        requestId: "33333333-3333-4333-8333-333333333333",
+        payload: { conversationId },
+      });
+
+      let outcome: unknown = null;
+      void stop().then((value) => { outcome = value; });
+      await vi.advanceTimersByTimeAsync(ownedProviderStopBudgetMs() + 1_900);
+      expect(outcome).toBeNull();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(outcome).toBe("mutation");
+
+      const second = stop();
+      await vi.advanceTimersByTimeAsync(ownedProviderStopBudgetMs() + 2_100);
+      await expect(second).resolves.toBe("mutation");
+      expect(cancel).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("stop racing settlement", () => {
+  it.each([
+    [true, "mutation"],
+    [false, "This thread does not have an active run."],
+  ] as const)("acknowledges a Stop that races its turn's own settlement only while that run is releasing (%s)", async (releasing, expected) => {
     const runtime = dependencies({
       queue: vi.fn(),
       relinquishAll: vi.fn(async () => undefined),
     });
+    const waitForProviderCleanup = vi.fn(async () => undefined);
     Object.assign(runtime.turns, {
-      cancel: vi.fn(() => true),
-      waitForProviderCleanup: vi.fn(async () => undefined),
+      cancel: vi.fn(() => false),
+      isReleasing: vi.fn(() => releasing),
+      waitForProviderCleanup,
     });
-    vi.mocked(runtime.turns.isActive).mockReturnValue(true);
     Object.assign(runtime.isolatedRuns, {
       stopConversation: vi.fn(() => false),
     });
-    const handler = createTurnInteractionCommandHandler(runtime);
-
-    await expect(handler({} as never, {
+    const stop = createTurnInteractionCommandHandler(runtime)({} as never, {
       type: "agent.stop",
       requestId: "33333333-3333-4333-8333-333333333333",
       payload: { conversationId },
-    })).rejects.toThrow(
-      "provider cleanup could not be confirmed. Resume remains unavailable",
-    );
+    });
+    if (releasing) {
+      await expect(stop).resolves.toBe(expected);
+      expect(waitForProviderCleanup).toHaveBeenCalledWith([conversationId], expect.any(Number));
+    } else {
+      await expect(stop).rejects.toThrow(expected);
+      expect(waitForProviderCleanup).not.toHaveBeenCalled();
+    }
   });
 });
 

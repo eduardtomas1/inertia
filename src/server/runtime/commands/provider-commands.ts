@@ -34,6 +34,13 @@ export interface ProviderCommandDependencies {
 export function createProviderCommandHandler(
   dependencies: ProviderCommandDependencies,
 ): RuntimeCommandHandler {
+  const recoverInstallations = (providerId?: ProviderInfo["id"]): void => {
+    for (const id of providerId ? [providerId] : PROVIDER_IDS) {
+      if (!dependencies.providerMaintenance.hasBlockingAuthority(id)) {
+        dependencies.providers.recoverInstallation(id);
+      }
+    }
+  };
   return defineRuntimeCommandHandler([
     "app.refresh",
     "provider.refresh",
@@ -68,6 +75,7 @@ export function createProviderCommandHandler(
           });
           return "handled";
         }
+        recoverInstallations(command.payload.providerId);
         await dependencies.refreshProviderInfo(
           command.payload.providerId,
           true,
@@ -100,6 +108,7 @@ export function createProviderCommandHandler(
           command.payload.cols,
           command.payload.rows,
           () => {
+            recoverInstallations(command.payload.providerId);
             void dependencies.refreshProviderInfo(
               command.payload.providerId,
               true,

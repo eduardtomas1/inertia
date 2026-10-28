@@ -159,21 +159,16 @@ setInterval(() => {}, 1000);
         return { cancel: () => undefined };
       },
     });
-    // Darwin cannot prove containment after NOTE_FORK on forced cancellation.
-    // Retain its fail-closed claim even after all known processes stop.
-    const cleanupUnconfirmed = process.platform === "darwin" && descendants;
     const outcome = read.then(() => null, (error: unknown) => error);
     try {
       await waitFor("catalog subprocess", () => existsSync(join(root, "pids.json")), 15_000);
       if (descendants) await waitFor("catalog descendant readiness", () => existsSync(join(root, "child-ready")), 15_000);
       if (mode === "cancel") controller.abort();
       else expire();
-      expect(await outcome).toMatchObject(cleanupUnconfirmed
-        ? { code: "process-tree-termination-unconfirmed" }
-        : { message: "Antigravity model discovery did not return a valid catalog." });
+      expect(await outcome).toMatchObject({ message: "Antigravity model discovery did not return a valid catalog." });
       const pids: number[] = JSON.parse(readFileSync(join(root, "pids.json"), "utf8"));
       for (const pid of pids) expect(executableProcessExists(pid)).toBe(false);
-      expect(journal.records(generation)).toHaveLength(cleanupUnconfirmed ? 1 : 0);
+      expect(journal.records(generation)).toHaveLength(0);
     } finally {
       controller.abort();
       await outcome;

@@ -1,4 +1,5 @@
 import type { AgentTurnStatus } from "../../../shared/contracts";
+import { PROVIDER_ACTIVITY_PUBLISH_INTERVAL_MS } from "../../../shared/run-state";
 import { randomUUID } from "node:crypto";
 import type { IncidentObservation } from "../../../node/application-incidents";
 import type { ActiveTurn, TurnTimerScheduler } from "./turn-controller-types";
@@ -19,11 +20,13 @@ interface TurnTimeoutCoordinatorOptions {
   readonly now?: () => number;
   readonly observationMs?: number;
   readonly suspendedMs?: (fromMs: number, toMs: number) => number;
+  readonly onProviderActivity?: (active: ActiveTurn) => void;
 }
 
 /** Owns the silence watchdog and the independent process-lifetime fail-safe. */
 export class TurnTimeoutCoordinator {
   private readonly observations = new WeakMap<ActiveTurn, { startedAt: number }>();
+  private readonly providerActivity = new WeakMap<ActiveTurn, number>();
   constructor(private readonly options: TurnTimeoutCoordinatorOptions) {}
 
   start(active: ActiveTurn): void {
@@ -42,6 +45,7 @@ export class TurnTimeoutCoordinator {
 
   /** Human approval/input time does not count as provider inactivity. */
   activity(active: ActiveTurn): void {
+    this.publishProviderActivity(active);
     const ended = active.runState.isTerminal() || HUMAN_WAIT_STATUSES.has(this.options.status(active));
     this.stopObservation(active, ended ? "ended" : "recovered");
     if (active.timeoutTimer !== null) {
@@ -67,7 +71,28 @@ export class TurnTimeoutCoordinator {
     }, this.options.inactivityMs);
   }
 
-  stop(active: ActiveTurn): void { this.stopObservation(active, "ended"); }
+  stop(active: ActiveTurn): void {
+    this.stopObservation(active, "ended");
+    this.providerActivity.delete(active);
+  }
+
+  restampProviderActivity(active: ActiveTurn): void {
+    if (!this.providerActivity.has(active)) return;
+    this.providerActivity.set(active, this.now());
+    this.options.onProviderActivity?.(active);
+  }
+
+  providerActivityAt(active: ActiveTurn): number | null {
+    return this.providerActivity.get(active) ?? null;
+  }
+
+  private publishProviderActivity(active: ActiveTurn): void {
+    const now = this.now();
+    const published = this.providerActivity.get(active);
+    if (published !== undefined && now - published < PROVIDER_ACTIVITY_PUBLISH_INTERVAL_MS) return;
+    this.providerActivity.set(active, now);
+    this.options.onProviderActivity?.(active);
+  }
 
   private now(): number { return this.options.now?.() ?? Date.now(); }
 

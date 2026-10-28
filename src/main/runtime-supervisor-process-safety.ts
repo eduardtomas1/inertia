@@ -1,10 +1,18 @@
+import { readFileSync } from "node:fs";
+
+import {
+  createIncidentReporter,
+  type IncidentSink,
+} from "../node/application-incidents.js";
 import { RuntimeGenerationLeaseJournal } from
   "../node/runtime-generation-leases.js";
 import { RuntimeOwnedProcessJournal } from
   "../node/runtime-owned-processes.js";
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
-import { recoverRuntimeOwnedProcesses } from
-  "./runtime-owned-process-recovery.js";
+import {
+  recoverRuntimeOwnedProcesses,
+  type RuntimeOwnedOrphan,
+} from "./runtime-owned-process-recovery.js";
 import { forceKillRuntimeProcessTree } from "./runtime-process-tree.js";
 import { RuntimeSupervisorRecoveryAdmission } from
   "./runtime-supervisor-recovery-admission.js";
@@ -52,6 +60,10 @@ export function createRuntimeSupervisorProcessSafety(options: {
           deadlineAt,
           ...(guardianPath ? { darwinGuardianPath: guardianPath } : {}),
           ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),
+          onUnsignalledOrphans: reportUnsignalledOrphans(
+            configuration.onIncident,
+            runtimeGenerationId,
+          ),
         },
       ));
   const armProcessContainment = configuration.armProcessContainment
@@ -97,8 +109,33 @@ export function createRuntimeSupervisorProcessSafety(options: {
       receipts: options.receipts,
       ...(guardianPath ? { darwinGuardianPath: guardianPath } : {}),
       ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),
+      onUnsignalledOrphans: reportUnsignalledOrphans(configuration.onIncident, null),
     }),
   };
+}
+
+export function reportUnsignalledOrphans(
+  sink: IncidentSink | undefined,
+  runtimeGenerationId: string | null,
+  procRoot = "/proc",
+): (orphans: readonly RuntimeOwnedOrphan[]) => void {
+  return (orphans) => {
+    createIncidentReporter(sink, runtimeGenerationId)({
+      code: orphans.some((orphan) => linuxProcessOwnedByRoot(orphan.pid, procRoot))
+        ? "runtime.root-process-running"
+        : "runtime.process-quarantined",
+      outcome: "unknown",
+    });
+  };
+}
+
+function linuxProcessOwnedByRoot(pid: number, procRoot: string): boolean {
+  try {
+    return readFileSync(`${procRoot}/${pid}/status`, "utf8")
+      .match(/^Uid:\s+(\d+)/mu)?.[1] === "0";
+  } catch {
+    return false;
+  }
 }
 
 export function createRuntimeProcessContainmentAdmission(options: {
@@ -107,7 +144,9 @@ export function createRuntimeProcessContainmentAdmission(options: {
   readonly workerOptions: RuntimeSupervisorOptions["workerOptions"];
   readonly isCurrent: (record: RuntimeProcessRecord) => boolean;
   readonly isRunningDesired: () => boolean;
-  readonly hasQuarantinedProcesses: () => boolean;
+  readonly priorCleanupEvidence: RuntimeProcessContainmentAdmissionOptions[
+    "priorCleanupEvidence"
+  ];
   readonly persist: RuntimeProcessContainmentAdmissionOptions["persist"];
   readonly post: RuntimeProcessContainmentAdmissionOptions["post"];
   readonly onStartPosted: RuntimeProcessContainmentAdmissionOptions[

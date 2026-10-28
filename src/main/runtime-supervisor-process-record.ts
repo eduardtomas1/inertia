@@ -130,6 +130,8 @@ export function createRuntimeProcessRecord(options: {
     startupRecoveryDeadlineExtended: false,
     ready: false,
     acceptingReady: true,
+    exited: false,
+    utilityCleanupUnconfirmed: false,
     cleanupConfirmed: false,
     cleanupRecoveryRequired: false,
     durableProcessContainment: null,

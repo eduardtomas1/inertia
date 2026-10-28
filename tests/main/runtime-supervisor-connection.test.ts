@@ -84,6 +84,21 @@ describe("runtime supervisor connection", () => {
     });
   });
 
+  it("offers the in-app restart for a stopped local service that can be restarted", () => {
+    expect(unavailableRuntimeConnection({
+      phase: "stopped", startupBlockerCode: null, restartable: true,
+    }, "linux")).toEqual({
+      unavailable: true,
+      code: "runtime-stopped",
+      retryable: false,
+      restartable: true,
+      message: "The local service stopped. Restart it to continue.",
+    });
+    expect(unavailableRuntimeConnection({
+      phase: "stopped", startupBlockerCode: "prior-runtime-cleanup-unconfirmed", restartable: true,
+    }, "linux")).toMatchObject({ code: "prior-runtime-cleanup-unconfirmed", restartable: true });
+  });
+
   it("gives stranded Windows profiles a supported recovery step without retrying or deleting state", () => {
     const state = {
       phase: "stopped",

@@ -7,19 +7,25 @@ import {
   readlinkSync,
   readSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
 import type { InertiaReleaseChannel } from "./release-channel.js";
 import { readLinuxSingletonManifest } from "./linux-singleton-metadata.js";
+import { normalShutdownDeadlineMs } from "./privileged-shutdown-deadline.js";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 // This is a launch grace period, not authority to extend or bypass cleanup.
 // Longer cleanup remains with its owner; the notice asks the user to reopen.
 const WAIT_MS = 5_000;
+const QUIT_WAIT_MS = normalShutdownDeadlineMs("linux");
 const POLL_MS = 100;
+const SHUTDOWN_MARKER = "InertiaShutdownInProgress";
 
 export interface LinuxSingletonContention {
   readonly requestedVersion: string;
@@ -166,6 +172,31 @@ function inspectOwner(options: LaunchOptions, inspection: Inspection): Owner | n
   }
 }
 
+export function markLinuxShutdownInProgress(
+  profileDirectory: string,
+  readText: Inspection["readText"] = readBoundedText,
+): boolean {
+  try {
+    const identity = `${process.pid}:${startTime(process.pid, { ...defaults(), readText })}`;
+    const temporary = join(profileDirectory, `.${SHUTDOWN_MARKER}-${process.pid}`);
+    rmSync(temporary, { force: true });
+    writeFileSync(temporary, identity, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    renameSync(temporary, join(profileDirectory, SHUTDOWN_MARKER));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ownerReportsShutdown(options: LaunchOptions, owner: Owner, inspection: Inspection): boolean {
+  try {
+    return inspection.readText(join(options.profileDirectory, SHUTDOWN_MARKER), 64)
+      === `${owner.pid}:${owner.startTime}`;
+  } catch {
+    return false;
+  }
+}
+
 function missing(error: unknown): boolean {
   return !!error && typeof error === "object" && "code" in error
     && (error.code === "ENOENT" || error.code === "ESRCH");
@@ -217,12 +248,12 @@ export async function requestLinuxSingletonLaunch(
   const wait = dependencies.wait ?? ((milliseconds) => new Promise<void>((resolve) => {
     setTimeout(resolve, milliseconds);
   }));
-  const deadline = now() + WAIT_MS;
+  const startedAt = now();
   let runningVersion = owner?.version ?? null;
   if (owner) {
     // Never repeat notifications to a healthy owner while waiting. A new lock
     // attempt is allowed only after the observed owner exits or releases it.
-    for (let remainingPolls = WAIT_MS / POLL_MS; remainingPolls >= 0; remainingPolls -= 1) {
+    for (let remainingPolls = Math.ceil(QUIT_WAIT_MS / POLL_MS); remainingPolls >= 0; remainingPolls -= 1) {
       const state = ownerState(options, owner, inspection);
       if (state === "released") {
         if (options.requestLock()) return true;
@@ -233,7 +264,8 @@ export async function requestLinuxSingletonLaunch(
         runningVersion = null;
         break;
       }
-      const remaining = deadline - now();
+      const waitMs = ownerReportsShutdown(options, owner, inspection) ? QUIT_WAIT_MS : WAIT_MS;
+      const remaining = startedAt + waitMs - now();
       if (remaining <= 0 || remainingPolls === 0) break;
       await wait(Math.min(POLL_MS, remaining));
     }

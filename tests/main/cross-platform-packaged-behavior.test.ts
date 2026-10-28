@@ -127,9 +127,16 @@ describe("cross-platform packaged behavior contract", () => {
     const quitEnd = updateStartup.indexOf("\n  });", quitStart);
     const quitHandler = updateStartup.slice(quitStart, quitEnd);
     expect(quitHandler).toContain("coordinator?.allowBeforeQuit()");
-    expect(quitHandler).toContain("options.cleanupBeforeQuit().then(");
-    expect(quitHandler).toContain("finishNormalShutdownAfterCleanup({");
-    expect(quitHandler).toContain("cleanupConfirmed,");
+    expect(quitHandler).toContain("finishNormalShutdownWithinDeadline({");
+    expect(quitHandler).toContain("cleanup: options.cleanupBeforeQuit,");
+    const installCoordinator = await source("src/main/app-update-install.ts");
+    expect(installCoordinator).toContain("await finishNormalShutdownWithinDeadline({");
+    const privilegedShutdown = await source("src/main/privileged-shutdown.ts");
+    const deadlineStart = privilegedShutdown.indexOf("export async function finishNormalShutdownWithinDeadline");
+    const deadlineHandler = privilegedShutdown.slice(deadlineStart, privilegedShutdown.indexOf("\n}\n", deadlineStart));
+    expect(deadlineHandler).toContain("options.cleanup()");
+    expect(deadlineHandler).toContain("finishNormalShutdownAfterCleanup({");
+    expect(deadlineHandler).toContain("cleanupConfirmed,");
     expect(main.indexOf("conversationAttachments = null")).toBeGreaterThan(
       main.indexOf("closeConversationAttachmentAccess(retainedAttachments)"),
     );

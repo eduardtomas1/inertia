@@ -36,9 +36,10 @@ import { recoverProviderMaintenanceJournal } from
   "./provider/maintenance-recovery";
 import { createProviderInfoRefresh, providerInstallationVerifier } from "./provider/provider-info-refresh";
 import { ProviderTerminalResumeRegistry } from "./provider/terminal-resume";
+import { providerCleanupIncident } from "./provider/run-cleanup-settlement";
 import { TerminalManager } from "./terminal";
 import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
-import { runRuntimeShutdownPhases, RuntimeShutdownDeadlineError } from "./runtime-shutdown";
+import { runRuntimeShutdownPhases, RuntimeShutdownDeadlineError, settleAllOrThrow } from "./runtime-shutdown";
 import { createTestShutdownTrace } from "./runtime/test-shutdown-trace";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError, userCorrectableRuntimeError } from "./runtime-errors";
@@ -166,7 +167,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     {
       preserveExisting: runtimeSafetyLock
         || manuallyRetiredGenerations.length > 0
-        || authorizedModernGenerationIds.size > 0,
+        || authorizedModernGenerationIds.size > 0
+        || startupRecovery.exitedUnconfirmedGenerations.length > 0,
     },
   );
   const databasePath = join(dataDirectory, "inertia.sqlite");
@@ -337,6 +339,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     installationLeases: providerInstallationLeases,
     lifetimeSignal: runtimeLifetimeAbort.signal,
     conversationProviderGate: (conversationId, providerId) => store.assertConversationProvider(conversationId, providerId),
+    onRunCleanupUnconfirmed: (identity, reason) => commandIncidents.report(providerCleanupIncident(identity, reason)),
+    onRunCleanupConfirmedLate: (identity) => turns.providerCleanupConfirmedLate(identity),
     commands: options.codexBinaryPath
       ? { codex: options.codexBinaryPath }
       : savedSettings.codexBinaryPath
@@ -432,7 +436,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     const providerMaintenanceStates = providerMaintenance.diagnosticStates();
     const providerRunOwnership = store.providerRunOwnership.all();
     const conversations = snapshot.conversations.map((conversation) => ({
-      ...conversation,
+      ...(turns?.withProviderActivity(conversation) ?? conversation),
       pendingApproval: approvalConversationIds.has(conversation.id),
       pendingInput: inputConversationIds.has(conversation.id),
       compaction: compactions.state(conversation.id),
@@ -480,7 +484,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     broadcast({
       type: "conversation.shell.updated",
       conversation: {
-        ...conversation,
+        ...(turns?.withProviderActivity(conversation) ?? conversation),
         pendingApproval: [...pendingApprovals.values()].some(
           (request) => request.conversationId === conversationId,
         ),
@@ -782,6 +786,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
         creation: agentThreads.creation,
         contextRequests: agentThreads.contextRequests,
+        reportIncident: commandIncidents.report,
       }),
       queuedMessages.turnInteractionHandler,
       createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.shellSnapshot().settings, refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }),
@@ -848,6 +853,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         reportTerminalProviderResumeRejection: (diagnostic) => {
           console.warn("Terminal provider resume rejected.", diagnostic);
         },
+        reportIncident: commandIncidents.report,
         send,
       }),
     ],
@@ -1015,7 +1021,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     websocketUrl,
     focusMascotChat: (conversationId, request) => mascotStatus.focus(conversationId, request),
     databaseRecovery: store.databaseRecoveryReport(),
-    recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot),
+    recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot, turns, refreshProviderInfo.rediscoverAfterSystemResume),
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
     releaseUpdatePreparation: (operationId) =>
       updatePreparation.release(operationId),
@@ -1206,6 +1212,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           await runRuntimeShutdownPhases({
             quiesceRuntimeWork: ({ deadlineAt }) => shutdownTrace.observe("commands", async () => {
               turnGitArtifacts.beginShutdown(deadlineAt);
+              providers.beginShutdown(deadlineAt);
               await gitInspectionLifecycle.cancelAndDrainWhile(async () => {
                 await gitScanCoordinator.cancelAndDrainWhile(async () => {
                   await updatePreparation.drainTracked();
@@ -1225,14 +1232,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
               await shutdownTrace.observe("artifact-settlement", () => turnGitArtifacts.settleShutdown());
             },
             terminateClients: () => shutdownTrace.observe("clients", () => runtimeSync.terminateAll((client) => client.terminate())),
-            closeServer: async () => {
-              const results = await Promise.allSettled([
-                shutdownTrace.observe("websocket", () => webSocketBoundary.close()),
-                shutdownTrace.observe("http-server", () => new Promise<void>((resolveClose) => server.close(() => resolveClose()))),
-              ]);
-              const failed = results.find((result) => result.status === "rejected");
-              if (failed) throw failed.reason;
-            },
+            closeServer: () => settleAllOrThrow([
+              shutdownTrace.observe("websocket", () => webSocketBoundary.close()),
+              shutdownTrace.observe("http-server", () => new Promise<void>((resolveClose) => server.close(() => resolveClose()))),
+            ]),
             closeStore: () => shutdownTrace.observe("store", () => store.backupAndClose()),
           });
         } catch (error) {

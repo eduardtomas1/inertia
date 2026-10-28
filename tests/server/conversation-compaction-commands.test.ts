@@ -774,8 +774,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       payload: { conversationId },
     })).rejects.toThrow("checkout remain locked");
 
-    expect(cancel).toHaveBeenCalledWith(true);
-    expect(manager.isRunning(conversationId)).toBe(true);
+    expect(manager.isRunning(conversationId)).toBe(false);
     expect(reservations.isActive(conversationId)).toBe(true);
     expect(authority.hasConversation(conversationId)).toBe(true);
     expect(send).not.toHaveBeenCalled();

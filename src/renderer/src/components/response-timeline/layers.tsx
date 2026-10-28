@@ -1,4 +1,4 @@
-import { lazy, Suspense, useLayoutEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
@@ -13,6 +13,7 @@ import { formatFullDateTime, formatMessageTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
 import { sessionRecoveryDetail } from "../../utils/sessionRecovery";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
+import { STOP_REPEAT_LATCH_MS } from "../../utils/composerPrimaryAction";
 import {
   collapsedUserRequestPreview,
   shouldCollapseUserRequest,
@@ -48,6 +49,7 @@ import {
   WorkLog,
 } from "./activity";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
+import { ProviderSilenceNote } from "./ProviderSilenceNote";
 import {
   ChangedFilesSummary,
   shouldShowChangedFilesSummary,
@@ -258,6 +260,21 @@ export function AgentExecutionLayer({
 }): React.JSX.Element {
   const runState = agentRunStateForTurn(turn.agentTurn);
   const stopping = runState === "cancelling";
+  const shellTurn = props.latestTurnSummary?.conversationId === props.conversationId
+    && props.latestTurnSummary.turn.id === turn.id
+    ? props.latestTurnSummary.turn
+    : null;
+  const providerActivityAt = runState === "starting" || runState === "running"
+    || runState === "delegated" || runState === "retrying"
+    ? shellTurn?.providerActivityAt ?? null
+    : null;
+  const stopPressedAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const pressStop = (): void => {
+    const pressedAt = Date.now();
+    if (pressedAt - stopPressedAtRef.current < STOP_REPEAT_LATCH_MS) return;
+    stopPressedAtRef.current = pressedAt;
+    props.onStop();
+  };
   const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
   const settledCompactions = useMemo(
     () => turn.isActive
@@ -315,13 +332,14 @@ export function AgentExecutionLayer({
                 startedAt={timerStart}
                 excludedMs={turn.agentTurn.suspendedDurationMs}
               />
+              {providerActivityAt && <ProviderSilenceNote activityAt={providerActivityAt} />}
             </span>
             <button
               type="button"
               className="turn-stop-action"
               aria-label={`Stop ${providerLabel} run`}
-              disabled={stopping}
-              onClick={props.onStop}
+              aria-busy={stopping || undefined}
+              onClick={pressStop}
             >
               <span>{stopping ? "Stopping" : "Stop"}</span>
             </button>

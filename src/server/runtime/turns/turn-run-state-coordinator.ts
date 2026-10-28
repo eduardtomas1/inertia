@@ -9,9 +9,14 @@ import {
 } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
 import type { ProviderRunFailure } from "../../provider/contracts";
+import { ownedProviderStopBudgetMs } from "../../provider/run-cleanup-settlement";
+import type { OwnedProviderStopResult } from "../../provider/run-coordinator";
 import { deletePendingInteraction } from "../pending-interaction-registry";
 import type { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
-import { broadcastTurnConversationShell } from "./turn-controller-support";
+import {
+  broadcastConversationShellFor,
+  broadcastTurnConversationShell,
+} from "./turn-controller-support";
 import type {
   ActiveTurn,
   TurnControllerHooks,
@@ -35,9 +40,47 @@ interface TurnRunStateCoordinatorOptions {
   track(value: void | Promise<void> | undefined): void;
 }
 
+interface ProviderRunOwner {
+  conversationId: string;
+  runId: string;
+  turnId: string;
+}
+
+const PROVIDER_STOP_UNCONFIRMED_NOTE =
+  "The provider process could not be confirmed stopped; it may still be running.";
+const PROVIDER_STOP_LAST_RESORT_EXTRA_MS = 5_000;
+
+function withProviderStopNote(message: string | undefined): string {
+  if (!message) return PROVIDER_STOP_UNCONFIRMED_NOTE;
+  return /[.!?]$/u.test(message)
+    ? `${message} ${PROVIDER_STOP_UNCONFIRMED_NOTE}`
+    : `${message}. ${PROVIDER_STOP_UNCONFIRMED_NOTE}`;
+}
+
 /** Durable reducer/projection boundary for one exact active root run. */
 export class TurnRunStateCoordinator {
+  private readonly unconfirmedProviderStops = new WeakSet<ActiveTurn>();
+
   constructor(private readonly options: TurnRunStateCoordinatorOptions) {}
+
+  providerCleanupUnconfirmed(active: ActiveTurn): boolean {
+    return this.unconfirmedProviderStops.has(active);
+  }
+
+  providerCleanupConfirmedLate(identity: ProviderRunOwner): void {
+    const barrier = this.options.providerRunOwnershipBarriers.get(identity.conversationId);
+    if (barrier) {
+      const retry = (): void => this.providerCleanupConfirmedLate(identity);
+      this.options.track(barrier.then(retry, retry));
+      return;
+    }
+    const { store } = this.options;
+    const owned = store.providerRunOwnership.forConversation(identity.conversationId)
+      .some((row) => row.runId === identity.runId && row.turnId === identity.turnId);
+    if (!owned || !isAgentTurnTerminalStatus(store.agentTurn(identity.turnId).status)) return;
+    store.providerRunOwnership.clear(identity.turnId, identity.runId);
+    broadcastConversationShellFor(this.options.hooks, identity.conversationId);
+  }
 
   transition(
     active: ActiveTurn,
@@ -137,6 +180,20 @@ export class TurnRunStateCoordinator {
     this.projectLive(active, runState.state);
   }
 
+  escalateStop(active: ActiveTurn): boolean {
+    if (!active.providerRunStarted || active.runState.isTerminal()) return false;
+    if (!active.providerStopStarted) {
+      this.stopOwnedProviderAndRelease(active);
+      return true;
+    }
+    void this.options.providers.stopOwned(
+      active.conversation.id,
+      { runId: active.turn.runId, turnId: active.turn.id },
+      0,
+    ).catch(() => undefined);
+    return true;
+  }
+
   retryTerminalPersistence(active: ActiveTurn): boolean {
     if (!active.runState.isTerminal() || active.providerRunStarted) return false;
     return this.options.settlement.retryTerminalPersistence(active);
@@ -169,6 +226,7 @@ export class TurnRunStateCoordinator {
   private finalizeDeferredSettlement(
     active: ActiveTurn,
     releaseMode: "tracked" | "joined" = "tracked",
+    stopUnconfirmed = false,
   ): boolean {
     const pending = active.deferredSettlement;
     if (
@@ -180,7 +238,9 @@ export class TurnRunStateCoordinator {
       active,
       pending.status,
       pending.cause,
-      pending.message,
+      stopUnconfirmed && pending.cause === "user-cancelled"
+        ? withProviderStopNote(pending.message)
+        : pending.message,
       pending.failure,
     );
     if (settled) active.deferredSettlement = null;
@@ -242,23 +302,40 @@ export class TurnRunStateCoordinator {
     if (active.providerStopStarted) return;
     active.providerStopStarted = true;
     const conversationId = active.conversation.id;
+    let expire!: () => void;
+    const expired = new Promise<"expired">((resolve) => {
+      expire = () => resolve("expired");
+    });
+    const lastResort = this.options.scheduler.setTimeout(
+      expire,
+      ownedProviderStopBudgetMs() + PROVIDER_STOP_LAST_RESORT_EXTRA_MS,
+    );
     const task = (async () => {
-      let cleanupConfirmed = false;
+      let outcome: OwnedProviderStopResult | "expired" | "failed" = "failed";
       try {
-        const result = await this.options.providers.stopOwned(conversationId, {
-          runId: active.turn.runId,
-          turnId: active.turn.id,
-        });
-        cleanupConfirmed = result === "settled";
+        outcome = await Promise.race([
+          this.options.providers.stopOwned(conversationId, {
+            runId: active.turn.runId,
+            turnId: active.turn.id,
+          }),
+          expired,
+        ]);
       } catch {
         // The durable pre-stop marker intentionally remains fail-closed.
       }
-      if (cleanupConfirmed) {
-        active.providerRunStarted = false;
+      this.options.scheduler.clearTimeout(lastResort);
+      active.providerRunStarted = false;
+      if (outcome === "settled") {
         this.options.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
-        this.finalizeDeferredSettlement(active, "joined");
-        await this.options.release(active);
+      } else {
+        this.unconfirmedProviderStops.add(active);
       }
+      this.finalizeDeferredSettlement(
+        active,
+        "joined",
+        outcome === "force-detached" || outcome === "failed" || outcome === "expired",
+      );
+      await this.options.release(active);
     })();
     const barrier = task.finally(() => {
       if (this.options.providerRunOwnershipBarriers.get(conversationId) === barrier) {

@@ -1,7 +1,14 @@
-import type { RuntimeOwnedProcessDiagnostic } from "./runtime-owned-process-diagnostic.js";
+import type {
+  RuntimeOwnedProcessDiagnostic,
+  RuntimeOwnedProcessFault,
+} from "./runtime-owned-process-diagnostic.js";
 import type { ChildProcess } from "node:child_process";
 
 import type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
+import type {
+  DarwinGuardianEscapeeCensus,
+  DarwinGuardianIdentity,
+} from "./runtime-owned-process-darwin-orphans.js";
 import type {
   LinuxProcessIdentity,
   RuntimeOwnedProcessPlatform,
@@ -32,6 +39,10 @@ export interface ActiveRuntimeOwnedProcessRegistry {
     sessionId: number,
     abortSignal?: AbortSignal,
   ) => Promise<boolean | null>;
+  readonly readDarwinEscapeesAsync: (
+    guardian: DarwinGuardianIdentity,
+    options: { readonly reap: boolean; readonly timeoutMs: number; readonly abortSignal?: AbortSignal },
+  ) => Promise<DarwinGuardianEscapeeCensus>;
   readonly claims: WeakMap<ChildProcess, ActiveRuntimeOwnedProcessClaim>;
   readonly activeLinuxMonitors: Set<() => void>;
   readonly admissionController: AbortController;
@@ -40,6 +51,7 @@ export interface ActiveRuntimeOwnedProcessRegistry {
   readonly pendingIntentRetirements: Set<RuntimeOwnedIntentRetirement>;
   active: boolean;
   readonly onTainted: (diagnostic: RuntimeOwnedProcessDiagnostic) => void;
+  readonly onProcessFault: (fault: RuntimeOwnedProcessFault) => void;
   tainted: boolean;
 }
 
@@ -61,12 +73,14 @@ export interface ActiveRuntimeOwnedProcessClaim {
   admissionSucceeded: boolean;
   groupExitReleaseAttempts: number;
   admission: Promise<boolean> | null;
+  abortAdmissionWhenStopping?: () => void;
   releaseConfirmation: Promise<boolean> | null;
   settleReleaseConfirmation: ((confirmed: boolean) => void) | null;
   linuxIdentity?: LinuxProcessIdentity;
   darwinIdentity?: DarwinProcessIdentity;
   darwinStopSignalSent?: boolean;
   darwinStopBarrier?: Promise<boolean>;
+  darwinQuarantined?: boolean;
   settleLinuxMonitorConfirmation?: (confirmed: boolean) => void;
   stopLinuxMonitor?: () => void;
   linuxReleaseHelper?: Promise<boolean>;

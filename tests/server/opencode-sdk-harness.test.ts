@@ -1643,7 +1643,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     }))).resolves.toMatchObject({ status: "completed" });
   });
 
-  it("does not emit completion when owned-server cleanup is unconfirmed", async () => {
+  it("keeps a completed result when only owned-server cleanup is unconfirmed", async () => {
     const root = portableFixtureRoot("OpenCode unconfirmed run cleanup");
     roots.push(root);
     const capturePath = join(root, "capture.json");
@@ -1676,19 +1676,14 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       onStatus: ({ status }) => statuses.push(status),
     });
     expect(result).toMatchObject({
-      status: "failed",
-      error: "OpenCode server process tree could not be confirmed stopped.",
+      status: "completed",
       cleanupConfirmed: false,
-      failure: {
-        reason: "provider-error",
-        message: "OpenCode server process tree could not be confirmed stopped.",
-        phase: "cleanup",
-        terminalEvent: "process-tree/cleanup",
-      },
     });
-    expect(result.failure?.message).toBe(result.error);
-    expect(statuses).not.toContain("completed");
-    expect(statuses.at(-1)).toBe("failed");
+    expect(result.error).toBeUndefined();
+    expect(result.failure).toBeUndefined();
+    await expect(result.cleanupConfirmation).resolves.toBe(false);
+    expect(statuses).not.toContain("failed");
+    expect(statuses.at(-1)).toBe("completed");
   });
 
   it("replays an early permission after prompt receipt, then cancels the owned session", async () => {
@@ -2219,22 +2214,25 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       })]),
     );
 
-    await expect(manager.run(nativeProviderRunInput({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-inactive-unconfirmed-cleanup",
       cwd: root,
       prompt: "Wait forever",
       interactionMode: "build",
       access: "supervised",
-    }))).resolves.toMatchObject({
+    }));
+    expect(result).toMatchObject({
       status: "failed",
-      error: expect.stringMatching(
-        /event stream became inactive.*Cleanup also failed: OpenCode server process tree could not be confirmed stopped\./u,
-      ),
+      error: expect.stringMatching(/event stream became inactive/u),
       cleanupConfirmed: false,
     });
-    expect(manager.activeConversationIds()).toContain(
-      "opencode-inactive-unconfirmed-cleanup",
+    expect(result.error).not.toContain("could not be confirmed stopped");
+    await vi.waitFor(() => {
+      expect(manager.activeConversationIds()).toEqual([]);
+    });
+    await expect(manager.disposeAll()).rejects.toThrow(
+      "Provider process cleanup could not be confirmed",
     );
   });
 

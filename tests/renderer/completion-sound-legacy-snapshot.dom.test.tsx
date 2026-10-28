@@ -85,6 +85,8 @@ beforeEach(() => {
     runtimeGeneration: null,
     status: "online",
     error: null,
+    runtimeStopped: null,
+    restartRuntime: async () => undefined,
     databaseRecoveryNotice: null,
     dismissDatabaseRecoveryNotice: () => undefined,
     clearError: () => undefined,

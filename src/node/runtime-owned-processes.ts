@@ -6,6 +6,7 @@ import {
   releaseIfGroupExited,
 } from "./runtime-owned-process-release.js";
 import { guardianCloseDiagnostic, guardianSignalName, type RuntimeOwnedProcessDiagnostic } from "./runtime-owned-process-diagnostic.js";
+import { startLinuxAdmissionBudget } from "./runtime-owned-process-linux-admission-budget.js";
 import type { ChildProcess } from "node:child_process";
 import { isAbsolute } from "node:path";
 import type {
@@ -61,6 +62,14 @@ import {
   taintRuntimeOwnedProcessRegistry,
   type RuntimeOwnedProcessRegistryOptions,
 } from "./runtime-owned-process-taint.js";
+import { quarantineClosedDarwinGuardian } from "./runtime-owned-process-darwin-policy.js";
+import { readDarwinGuardianEscapeesAsync } from "./runtime-owned-process-darwin-orphans.js";
+import {
+  linuxAdmissionFailureTaintsRegistry,
+  linuxAdmissionFault,
+  linuxMonitorFault,
+  reportRuntimeOwnedProcessFault,
+} from "./runtime-owned-process-linux-policy.js";
 export {
   RuntimeOwnedProcessJournal,
   readLinuxProcessIdentity,
@@ -170,6 +179,10 @@ export function activateRuntimeOwnedProcessRegistry(
             abortSignal,
           )
         : null),
+    readDarwinEscapeesAsync: options.readDarwinEscapeesAsync
+      ?? (async (guardian, escapeeOptions) => darwinGuardianPath
+        ? await readDarwinGuardianEscapeesAsync(guardian, darwinGuardianPath, escapeeOptions)
+        : { absent: null, remaining: [] }),
     claims: new WeakMap(),
     activeLinuxMonitors: new Set(),
     admissionController: new AbortController(),
@@ -178,6 +191,7 @@ export function activateRuntimeOwnedProcessRegistry(
     pendingIntentRetirements: new Set(),
     active: true,
     onTainted: options.onTainted ?? (() => undefined),
+    onProcessFault: options.onProcessFault ?? (() => undefined),
     tainted: false,
   };
   activeRegistry = registry;
@@ -243,6 +257,7 @@ export function requestRuntimeOwnedGuardianStop(
   if (registry.platform === "linux") {
     claim.stopRequested = true;
     wakeLinuxMonitor(claim);
+    claim.abortAdmissionWhenStopping?.();
     if (claim.admission) return claim.admission;
     if (claim.linuxIdentity && registry.darwinGuardianPath) {
       return stopExactLinuxGuardian(registry, claim, claim.linuxIdentity, () => activeRegistry === registry);
@@ -309,10 +324,14 @@ function monitorLinuxGuardian(
       if (retired && authorizationObserved) claim.authorizationObserved = true;
       return retired;
     },
-    () => {
+    (reason) => {
       registry.activeLinuxMonitors.delete(stopTrackedMonitor);
       claim.stopLinuxMonitor = undefined;
-      taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { stage: "linux-guardian-monitor", ...(claim.probe ? { probe: claim.probe } : {}) });
+      if (activeRegistry === registry) {
+        reportRuntimeOwnedProcessFault(registry, linuxMonitorFault(reason, durableClaim.process.pid, {
+          stage: "linux-guardian-monitor", ...(claim.probe ? { probe: claim.probe } : {}),
+        }));
+      }
       settleLinuxMonitorConfirmation(false);
     },
     {
@@ -356,6 +375,7 @@ async function admitLinuxGuardian(
   const guardianPath = registry.darwinGuardianPath;
   let durableClaim: RuntimeOwnedProcessClaim | null = null;
   let stage: RuntimeOwnedProcessDiagnostic["stage"] = "linux-readiness";
+  const budget = startLinuxAdmissionBudget(registry.admissionController.signal, claim);
   try {
     if (!guardianPath || activeRegistry !== registry) {
       throw new Error("The Linux owned process guardian is unavailable.");
@@ -364,7 +384,7 @@ async function admitLinuxGuardian(
       pid,
       guardianPath,
       process.pid,
-      registry.admissionController.signal,
+      budget.signal,
       registry.linuxGuardianExecutable!,
     );
     if (!identity || activeRegistry !== registry || registry.tainted) {
@@ -391,14 +411,14 @@ async function admitLinuxGuardian(
       identity,
       guardianPath,
       "claim",
-      registry.admissionController.signal,
+      budget.signal,
     );
     if (!claimed) {
       const observedClaimed = await readLinuxGuardianClaimedAsync(
         pid,
         guardianPath,
         process.pid,
-        registry.admissionController.signal,
+        budget.signal,
         registry.linuxGuardianExecutable!,
       );
       claimed = Boolean(
@@ -426,14 +446,14 @@ async function admitLinuxGuardian(
       owned.process as LinuxProcessIdentity,
       guardianPath,
       "exec",
-      registry.admissionController.signal,
+      budget.signal,
     );
     if (!authorized) {
       const observedOwned = await readLinuxGuardianOwnedAsync(
         pid,
         guardianPath,
         process.pid,
-        registry.admissionController.signal,
+        budget.signal,
         registry.linuxGuardianExecutable!,
       );
       authorized = Boolean(
@@ -456,7 +476,12 @@ async function admitLinuxGuardian(
     return true;
   } catch {
     if (activeRegistry !== registry) return false;
-    taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { stage, ...(claim.probe ? { probe: claim.probe } : {}) });
+    const diagnostic = { stage, ...(claim.probe ? { probe: claim.probe } : {}) };
+    if (linuxAdmissionFailureTaintsRegistry(stage)) {
+      taintRuntimeOwnedProcessRegistry(registry, true, diagnostic);
+    } else {
+      reportRuntimeOwnedProcessFault(registry, linuxAdmissionFault(diagnostic));
+    }
     if (guardianPath) {
       if (claim.linuxIdentity) {
         await signalLinuxGuardianExactAsync(
@@ -495,6 +520,8 @@ async function admitLinuxGuardian(
       }
     }
     return false;
+  } finally {
+    budget.dispose();
   }
 }
 
@@ -741,7 +768,9 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     child.once("close", (code, signal) => {
       // Guardian-level signals are the fail-closed containment marker.
       if (typeof code !== "number" || signal !== null) {
-        taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, guardianCloseDiagnostic("darwin-guardian-close", signal, code));
+        quarantineClosedDarwinGuardian(registry, claim, child.pid ?? 0, {
+          ...guardianCloseDiagnostic("darwin-guardian-close", signal, code), ...(claim.probe ? { probe: claim.probe } : {}),
+        }, () => activeRegistry === registry);
         return;
       }
       settleNormallyClosedDarwinGuardian(registry, claim);
@@ -869,6 +898,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
           if (claim.released) return true;
           claim.stopRequested = true;
           wakeLinuxMonitor(claim);
+          claim.abortAdmissionWhenStopping?.();
           if (!claim.admission && claim.linuxIdentity && registry.darwinGuardianPath) {
             stopBarrier = stopExactLinuxGuardian(registry, claim, claim.linuxIdentity, () => activeRegistry === registry);
           }
@@ -925,7 +955,8 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         waitForGuardianStop: async () => await stopBarrier,
         releaseIfGroupExited: (exitSignal) => {
           if (exitSignal !== 0) {
-            taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, guardianCloseDiagnostic("darwin-pid-close", guardianSignalName(exitSignal)));
+            quarantineClosedDarwinGuardian(registry, claim, confirmedOwned.pid,
+              guardianCloseDiagnostic("darwin-pid-close", guardianSignalName(exitSignal)), () => activeRegistry === registry);
             return;
           }
           settleNormallyClosedDarwinGuardian(registry, claim);

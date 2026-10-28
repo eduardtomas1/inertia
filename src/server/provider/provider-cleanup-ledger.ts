@@ -49,12 +49,14 @@ function describeProviderCleanup(
 
 export function providerCleanupUnconfirmedError(sources: {
   runCleanupConfirmed: boolean;
+  probesSettled?: boolean;
   installationUncertain: boolean;
   discovery: ProviderCleanupDiagnostics;
   metadata: ProviderCleanupDiagnostics;
 }): Error | null {
   const unconfirmed = [
     ...(sources.runCleanupConfirmed ? [] : ["provider runs"]),
+    ...(sources.probesSettled === false ? ["in-flight provider probes"] : []),
     ...(sources.installationUncertain ? ["installation authority"] : []),
     ...describeProviderCleanup("discovery", sources.discovery),
     ...describeProviderCleanup("metadata", sources.metadata),

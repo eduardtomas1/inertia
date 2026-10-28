@@ -681,7 +681,7 @@ describe("macOS runtime process guardian", () => {
   );
 
   it.runIf(process.platform === "darwin")(
-    "keeps graceful fork-tainted cleanup fail closed",
+    "keeps graceful fork-tainted cleanup fail closed until the marked escapee is reaped",
     async () => {
       const directory = temporaryDirectory();
       const payloadSourcePath = join(directory, "double-fork-payload.c");
@@ -775,6 +775,12 @@ describe("macOS runtime process guardian", () => {
           platform: "darwin",
           darwinGuardianPath: guardianPath,
         }).records(runtimeGenerationId)).toHaveLength(1);
+        await expect.poll(() => owned.confirmStopped(), { timeout: 5_000 }).toBe(true);
+        await expect.poll(() => processIsAlive(escapedPid)).toBe(false);
+        expect(new RuntimeOwnedProcessJournal(directory, {
+          platform: "darwin",
+          darwinGuardianPath: guardianPath,
+        }).records(runtimeGenerationId)).toEqual([]);
       } finally {
         for (const pid of [rootPid, escapedPid]) {
           if (pid <= 1 || !processIsAlive(pid)) continue;

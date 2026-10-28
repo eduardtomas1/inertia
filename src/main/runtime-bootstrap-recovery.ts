@@ -118,6 +118,7 @@ export async function prepareRuntimeBootstrapRecovery(
     dataDirectory,
     bootstrapSafety.systemBootId,
     runtimeProcessGuardianPath,
+    { publishRecoveredReceipts: true },
   );
   modernDarwinRecoveryAuthority = modernDarwinRecovery.authority;
   let modernRecoveryReady = !modernDarwinRecovery.blocked

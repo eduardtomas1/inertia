@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { prepareModernDarwinBootstrapRecovery } from "../../src/main/runtime-bootstrap-safety";
+import { runtimeCleanupReceiptIds } from "../../src/main/runtime-cleanup-receipts";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-process-journal";
 import {
@@ -31,18 +32,28 @@ function fixture(recordedBootId = bootId) {
   expect(journal.startSession(generationId, recordedBootId)).toBe(true);
   const capability = journal.sessionCapability(generationId, recordedBootId)!;
   const recover = () => prepareModernDarwinBootstrapRecovery(root, bootId,
-    guardianPath, { platform: "darwin", deadlineAt: Date.now() + 100 });
+    guardianPath, { platform: "darwin", deadlineAt: Date.now() + 100, publishRecoveredReceipts: true });
   return { root, journal, capability, recover };
 }
 
 describe("exited Darwin generation crash-partial recovery", () => {
-  it.each(["begin", "claim", "retire"] as const)(
+  it("publishes a receipt and offers no consent for an exactly recovered empty generation", async () => {
+    const { root, journal, recover } = fixture();
+    writeFileSync(join(root, runtimeOwnedProcessWriterName(generationId),
+      ".runtime-owned-child-40000000-0000-4000-8000-000000000004.begin.tmp"), '{"state":', { mode: 0o600 });
+    expect(journal.records(generationId)).toBeNull();
+
+    expect(await recover()).toEqual({ authority: null, candidate: null, blocked: false });
+    expect(runtimeCleanupReceiptIds(root)).toEqual([generationId]);
+    expect(new RuntimeGenerationLeaseJournal(root).all()).toEqual([]);
+    expect(journal.sessionExact(generationId)).toBeNull();
+  });
+
+  it.each(["claim", "retire"] as const)(
     "offers consent after fencing an interrupted %s write without losing committed claims",
     async (phase) => {
       const { root, journal, capability, recover } = fixture();
-      const ownershipId = phase === "begin"
-        ? "40000000-0000-4000-8000-000000000004"
-        : journal.begin(generationId, bootId, capability);
+      const ownershipId = journal.begin(generationId, bootId, capability);
       if (phase === "retire") {
         journal.claim(ownershipId, generationId, bootId, 12345, process.pid, {
           observedDarwinIdentity: {
@@ -89,7 +100,8 @@ describe("exited Darwin generation crash-partial recovery", () => {
   );
 
   it("retains an unavailable boot identity while recovering its exact modern session", async () => {
-    const { root, journal, recover } = fixture("unavailable");
+    const { root, journal, capability, recover } = fixture("unavailable");
+    journal.begin(generationId, "unavailable", capability);
     writeFileSync(join(root, runtimeOwnedProcessWriterName(generationId),
       ".runtime-owned-child-40000000-0000-4000-8000-000000000004.begin.tmp"), "{", { mode: 0o600 });
     expect(journal.records(generationId)).toBeNull();
@@ -99,7 +111,17 @@ describe("exited Darwin generation crash-partial recovery", () => {
     expect(result.blocked).toBe(false);
     expect(result.authority).toBeNull();
     expect(result.candidate?.generations[0]?.lease.systemBootId).toBe("unavailable");
-    expect(result.candidate?.generations[0]?.records).toEqual([]);
+    expect(result.candidate?.generations[0]?.records).toHaveLength(1);
+  });
+
+  it("completes an unavailable boot identity's exactly empty modern session without consent", async () => {
+    const { root, journal, recover } = fixture("unavailable");
+    writeFileSync(join(root, runtimeOwnedProcessWriterName(generationId),
+      ".runtime-owned-child-40000000-0000-4000-8000-000000000004.begin.tmp"), "{", { mode: 0o600 });
+    expect(journal.records(generationId)).toBeNull();
+
+    expect(await recover()).toEqual({ authority: null, candidate: null, blocked: false });
+    expect(runtimeCleanupReceiptIds(root)).toEqual([generationId]);
   });
 
   it("does not fence a session whose canonical name has a foreign generation identity", async () => {

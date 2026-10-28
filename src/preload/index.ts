@@ -8,6 +8,7 @@ import type {
   MainWindowTargetRequest,
   PendingDetachedChatDraft,
   PreviewStateUpdate,
+  RuntimeConnectionRequest,
   RuntimeConnectionResult,
 } from "../shared/desktop.js";
 import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
@@ -184,8 +185,10 @@ const bridge: MainWindowBridge = Object.freeze({
       handler,
     );
   },
-  getRuntimeConnection: () =>
-    ipcRenderer.invoke(IPC.getRuntimeConnection) as Promise<RuntimeConnectionResult>,
+  getRuntimeConnection: (request?: RuntimeConnectionRequest) =>
+    (request
+      ? ipcRenderer.invoke(IPC.getRuntimeConnection, { restart: request.restart === true })
+      : ipcRenderer.invoke(IPC.getRuntimeConnection)) as Promise<RuntimeConnectionResult>,
   onRuntimeReady: (listener: () => void) => {
     const handler = () => listener();
     ipcRenderer.on(IPC.runtimeReady, handler);

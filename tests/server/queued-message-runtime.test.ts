@@ -377,16 +377,19 @@ describe("durable runtime message queue", () => {
     } finally { await f.close(); }
   });
 
-  it("never starts queued work while exact provider cleanup remains unconfirmed", async () => {
+  it("waits for the provider stop, then starts queued work once unconfirmed cleanup releases the chat", async () => {
     const f = await fixture();
     try {
       const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
       f.controller.start(initial.turn.id); f.provider.deferOwnedStop("force-detached");
       const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
       f.provider.resolve({ status: "completed" }); await flushTurnControllerTestPromises();
-      f.provider.resolveOwnedStop(); await f.drain();
       expect(f.provider.runCount).toBe(1);
       expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+      f.provider.resolveOwnedStop(); await f.drain();
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("completed");
+      expect(f.provider.runCount).toBe(2);
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
     } finally { await f.close(); }
   });
 

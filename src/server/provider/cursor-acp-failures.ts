@@ -12,26 +12,44 @@ import {
 } from "../posix-cleanup-diagnostics";
 import { acpResumeStep, acpSessionUnavailable } from "./session-unavailable";
 
-export function cursorCleanupResult(
+export function cursorProcessCleanupResult(
   outcome: ProviderRunResult,
   child: ChildProcessWithoutNullStreams,
   workspaceRoot: string,
-  subject: "process-tree" | "host-tools",
-  cleanupDiagnostic: PosixCleanupDiagnostic | null = null,
+  cleanupDiagnostic: PosixCleanupDiagnostic | null,
 ): ProviderRunResult {
-  const error = subject === "process-tree"
-    ? "Cursor ACP process tree could not be confirmed stopped."
-    : "Cursor Inertia chat tools could not be cleaned up.";
-  const priorFailure = outcome.failure
+  const unconfirmed: ProviderRunResult = {
+    ...outcome,
+    exitCode: child.exitCode,
+    signal: child.signalCode,
+    cleanupConfirmed: false,
+  };
+  if (outcome.status !== "failed" || !outcome.failure || !cleanupDiagnostic) {
+    return unconfirmed;
+  }
+  const technicalDetail = sanitizeProviderActivityDetail(
+    [outcome.failure.technicalDetail, describePosixCleanupDiagnostic(cleanupDiagnostic)]
+      .filter(Boolean).join("\n"),
+    { workspaceRoot, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS },
+  );
+  return {
+    ...unconfirmed,
+    failure: {
+      ...outcome.failure,
+      ...(technicalDetail ? { technicalDetail } : {}),
+    },
+  };
+}
+
+export function cursorHostToolsCleanupResult(
+  outcome: ProviderRunResult,
+  child: ChildProcessWithoutNullStreams,
+  workspaceRoot: string,
+): ProviderRunResult {
+  const error = "Cursor Inertia chat tools could not be cleaned up.";
+  const technicalDetail = outcome.failure
     ? cursorPriorFailureDetail(outcome.failure, workspaceRoot)
     : undefined;
-  const technicalDetail = cleanupDiagnostic
-    ? sanitizeProviderActivityDetail(
-        [describePosixCleanupDiagnostic(cleanupDiagnostic), priorFailure]
-          .filter(Boolean).join("\n"),
-        { workspaceRoot, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS },
-      )
-    : priorFailure;
   return {
     ...outcome,
     status: "failed",
@@ -42,7 +60,7 @@ export function cursorCleanupResult(
       reason: "provider-error",
       message: error,
       phase: "cleanup",
-      terminalEvent: `${subject}/cleanup`,
+      terminalEvent: "host-tools/cleanup",
       ...(technicalDetail ? { technicalDetail } : {}),
     },
     cleanupConfirmed: false,

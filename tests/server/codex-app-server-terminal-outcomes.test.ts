@@ -671,7 +671,7 @@ describe("Codex App Server terminal outcomes", () => {
   );
 
   it.each([true, false])(
-    "preserves public cancellation before a terminal error only when cleanup is confirmed: %s",
+    "preserves public cancellation before a terminal error whether or not cleanup is confirmed: %s",
     async (cleanupConfirmed) => {
       const app = fixture(true);
       await vi.advanceTimersByTimeAsync(0);
@@ -680,10 +680,9 @@ describe("Codex App Server terminal outcomes", () => {
       app.finishCleanup(cleanupConfirmed);
 
       await expect(app.run.result).resolves.toMatchObject({
-        status: cleanupConfirmed ? "cancelled" : "failed", cleanupConfirmed,
+        status: "cancelled", cleanupConfirmed,
       });
-      if (cleanupConfirmed) expect((await app.run.result).failure).toBeUndefined();
-      else expect((await app.run.result).failure).toBeDefined();
+      expect((await app.run.result).failure).toBeUndefined();
     },
   );
 

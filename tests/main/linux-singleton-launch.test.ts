@@ -4,7 +4,14 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { requestLinuxSingletonLaunch } from "../../src/main/linux-singleton-launch";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+
+import {
+  markLinuxShutdownInProgress,
+  requestLinuxSingletonLaunch,
+} from "../../src/main/linux-singleton-launch";
+import { normalShutdownDeadlineMs } from "../../src/main/privileged-shutdown-deadline";
 import type { InertiaReleaseChannel } from "../../src/main/release-channel";
 
 const pid = 314159;
@@ -12,6 +19,8 @@ const executable = "/tmp/.mount_Inertia/inertia";
 const profileDirectory = "/profiles/stable";
 const lockPath = join(profileDirectory, "SingletonLock");
 const manifestPath = join("/tmp/.mount_Inertia", "resources", "app.asar", "package.json");
+const quitDeadlineMs = normalShutdownDeadlineMs("linux");
+const shutdownMarkerPath = join(profileDirectory, "InertiaShutdownInProgress");
 
 function processStat(birth = "1234"): string {
   return `${pid} (inertia) S 1 ${pid} ${Array<string>(16).fill("0").join(" ")} ${birth} 0`;
@@ -71,14 +80,40 @@ describe("Linux ordinary AppImage singleton launch", () => {
     expect(test.reportContention).not.toHaveBeenCalled();
   });
 
-  it("waits a bounded interval for a different version without repeated focus notifications", async () => {
+  it("waits for a quitting different version's quit deadline without repeated focus notifications", async () => {
     const test = fixture();
+    test.files.set(shutdownMarkerPath, `${pid}:1234`);
+    expect(await requestLinuxSingletonLaunch(test.options, test.inspection)).toBe(false);
+    expect(test.requestLock).toHaveBeenCalledOnce();
+    expect(test.inspection.now()).toBe(quitDeadlineMs);
+    expect(test.reportContention).toHaveBeenCalledExactlyOnceWith({
+      requestedVersion: "0.0.52", runningVersion: "0.0.47",
+    });
+  });
+
+  it.each([
+    ["is simply open", null],
+    ["left a shutdown marker from an earlier process", `${pid}:999`],
+  ] as const)("waits only the short launch grace when a different version %s", async (_label, marker) => {
+    const test = fixture();
+    if (marker) test.files.set(shutdownMarkerPath, marker);
     expect(await requestLinuxSingletonLaunch(test.options, test.inspection)).toBe(false);
     expect(test.requestLock).toHaveBeenCalledOnce();
     expect(test.inspection.now()).toBe(5_000);
     expect(test.reportContention).toHaveBeenCalledExactlyOnceWith({
       requestedVersion: "0.0.52", runningVersion: "0.0.47",
     });
+  });
+
+  it("extends the wait when the open owner starts quitting during the launch grace", async () => {
+    const test = fixture();
+    const original = test.inspection.wait.getMockImplementation()!;
+    test.inspection.wait.mockImplementation(async (milliseconds) => {
+      await original(milliseconds);
+      if (test.inspection.now() === 1_000) test.files.set(shutdownMarkerPath, `${pid}:1234`);
+    });
+    expect(await requestLinuxSingletonLaunch(test.options, test.inspection)).toBe(false);
+    expect(test.inspection.now()).toBe(quitDeadlineMs);
   });
 
   it("continues the selected launch if the notified owner exits immediately", async () => {
@@ -103,17 +138,18 @@ describe("Linux ordinary AppImage singleton launch", () => {
     expect(test.reportContention).not.toHaveBeenCalled();
   });
 
-  it("observes an owner exit at the launch grace deadline", async () => {
+  it("observes an owner exit at the quit deadline", async () => {
     const test = fixture();
+    test.files.set(shutdownMarkerPath, `${pid}:1234`);
     const original = test.inspection.wait.getMockImplementation()!;
     test.inspection.wait.mockImplementation(async (milliseconds) => {
       await original(milliseconds);
-      if (test.inspection.now() === 5_000) test.files.delete(`/proc/${pid}/stat`);
+      if (test.inspection.now() === quitDeadlineMs) test.files.delete(`/proc/${pid}/stat`);
     });
     test.requestLock.mockReturnValueOnce(false).mockReturnValueOnce(true);
     expect(await requestLinuxSingletonLaunch(test.options, test.inspection)).toBe(true);
     expect(test.requestLock).toHaveBeenCalledTimes(2);
-    expect(test.inspection.now()).toBe(5_000);
+    expect(test.inspection.now()).toBe(quitDeadlineMs);
     expect(test.reportContention).not.toHaveBeenCalled();
   });
 
@@ -226,7 +262,22 @@ describe("Linux ordinary AppImage singleton launch", () => {
     const test = fixture();
     test.inspection.now = () => 0;
     expect(await requestLinuxSingletonLaunch(test.options, test.inspection)).toBe(false);
-    expect(test.inspection.wait).toHaveBeenCalledTimes(50);
+    expect(test.inspection.wait).toHaveBeenCalledTimes(Math.ceil(quitDeadlineMs / 100));
     expect(test.requestLock).toHaveBeenCalledOnce();
+  });
+
+  it("marks its own quit with its exact process identity for a relaunching version", () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-shutdown-marker-"));
+    try {
+      const ownStat = `${process.pid} (inertia) S 1 ${process.pid} ${Array<string>(16).fill("0").join(" ")} 4321 0`;
+      expect(markLinuxShutdownInProgress(directory, () => ownStat)).toBe(true);
+      const marker = join(directory, "InertiaShutdownInProgress");
+      expect(readFileSync(marker, "utf8")).toBe(`${process.pid}:4321`);
+      if (process.platform !== "win32") expect(statSync(marker).mode & 0o777).toBe(0o600);
+      expect(markLinuxShutdownInProgress(join(directory, "missing"), () => ownStat)).toBe(false);
+      expect(markLinuxShutdownInProgress(directory, () => "unreadable")).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

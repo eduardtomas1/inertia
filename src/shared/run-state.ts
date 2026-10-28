@@ -16,6 +16,7 @@ export const AGENT_RUN_STATES = [
 ] as const;
 
 export type AgentRunState = (typeof AGENT_RUN_STATES)[number];
+export const PROVIDER_ACTIVITY_PUBLISH_INTERVAL_MS = 30_000;
 export type AgentRunTerminalState = Extract<
   AgentRunState,
   "completed" | "failed" | "cancelled" | "interrupted"

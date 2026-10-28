@@ -521,7 +521,7 @@ export function ChatWorkspace({
       : null;
     const inFlight = stopsInFlightRef.current.get(stopOwner);
     if (inFlight) {
-      await inFlight;
+      await onStop();
       return;
     }
     const detail = stoppedConversationId

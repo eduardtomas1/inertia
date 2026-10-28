@@ -3,9 +3,7 @@ export type { CodexControlContext } from "./provider/usage-context";
 import { randomUUID } from "node:crypto";
 
 import type { AgentApprovalDecision } from "./provider/interactions";
-import { officiallyAllowsModelSwitchWithinSession } from "../shared/continuation-policy";
 import type { ProviderAuthMethod } from "../shared/provider";
-import { officialPresetEndpoint } from "./runtime/backends/backend-profile-presets";
 import {
   CURSOR_ACP_TERMINAL_RESUME_VERIFIED_VERSION,
   cursorVersionHasVerifiedAcpTerminalResume,
@@ -14,13 +12,8 @@ import {
   type BackendCompatibilityProbeResult,
 } from "../shared/backend-probe";
 import {
-  versionedContinuationIdentityForSelection,
-  providerIdForHarness,
-  modelSelectionSchema,
   modelBackendProfileSchema,
-  currentKnownHarnessIdSchema,
   providerNativeBackendProfile,
-  resolveHarnessBackendCompatibility,
   type HarnessBackendCompatibility,
   type ModelBackendProfile,
   type ModelSelection,
@@ -60,6 +53,7 @@ import {
   type ProviderSteerInput,
 } from "./provider/contracts";
 import { detectProvider } from "./provider/discovery";
+import { resolveModelRoute } from "./provider/model-route-resolution";
 import type {
   ProviderInstallationReadContext,
   ProviderManagerDetectionOptions,
@@ -82,8 +76,13 @@ import {
 import {
   ProviderManagerInstallationAuthority,
 } from "./provider/provider-manager-installation";
+import {
+  ProviderInstallationRecovery,
+  type ProviderInstallationEvent,
+} from "./provider/provider-installation-recovery";
 import { ProviderCapabilityAuthority } from
   "./provider/provider-capability-authority";
+import { verifyProviderInstallationConformance } from "./provider/installation-conformance";
 import {
   admittedCustomBackendCapabilities,
   admittedCustomBackendProbeEvidence,
@@ -97,6 +96,10 @@ import {
   type OwnedProviderStopResult,
 } from "./provider/run-coordinator";
 import {
+  DEFAULT_PROVIDER_CANCEL_GRACE_MS,
+  drainBeforeShutdownReserve,
+} from "./provider/run-cleanup-settlement";
+import {
   providerTerminalResumeLaunch,
   type ProviderTerminalResumeLaunch,
 } from "./provider/terminal-resume";
@@ -104,10 +107,10 @@ import {
 export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider };
 export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
 export type { OwnedProviderStopResult } from "./provider/run-coordinator";
+export type { ProviderInstallationEvent } from "./provider/provider-installation-recovery";
 export type * from "./provider/agent-harness";
 export type * from "./provider/contracts";
 export type * from "./provider/provider-manager-types";
-const DEFAULT_CANCEL_GRACE_MS = 2_000;
 const PRODUCTION_MANAGER_CONSTRUCTION = Symbol("production-provider-manager");
 const TEST_MANAGER_CONSTRUCTION = Symbol("test-provider-manager");
 type ProviderManagerConstructionAuthority =
@@ -137,6 +140,7 @@ export class ProviderManager {
   private readonly lifetimeSignal: AbortSignal;
   private readonly ownedLifetimeAbort?: AbortController;
   private readonly auxiliaryOperations = new Set<Promise<unknown>>();
+  private shutdownDeadlineAt: number | null = null;
   private readonly backendProfiles = new Map<string, ModelBackendProfile>();
   private readonly backendCompatibilities = new Map<string, HarnessBackendCompatibility>();
   private readonly backendProbeResults = new Map<string, BackendCompatibilityProbeResult>();
@@ -146,6 +150,7 @@ export class ProviderManager {
   private readonly conversationProviderGate: ProviderManagerOptions["conversationProviderGate"];
   private readonly installationLeases?: ProviderInstallationLeaseCoordinator;
   private readonly installationAuthority: ProviderManagerInstallationAuthority;
+  private readonly installationRecovery: ProviderInstallationRecovery;
   private readonly capabilityAuthority: ProviderCapabilityAuthority;
   private readonly runCoordinator: ProviderRunCoordinator;
   private processEnvironment: NodeJS.ProcessEnv | undefined;
@@ -210,12 +215,13 @@ export class ProviderManager {
       );
     }
     this.commands = { ...options.commands };
-    this.cancelGraceMs = Math.max(100, Math.min(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS, 30_000));
+    this.cancelGraceMs = Math.max(100, Math.min(options.cancelGraceMs ?? DEFAULT_PROVIDER_CANCEL_GRACE_MS, 30_000));
     this.harnessRegistry = harnessRegistry;
     this.metadataCache = options.metadataCache ?? new ProviderMetadataCache();
     this.detectProviderImplementation = options.detectProvider ?? detectProvider;
     this.backendProbeNow = options.backendProbeNow ?? (() => new Date());
     this.installationLeases = options.installationLeases;
+    this.installationRecovery = new ProviderInstallationRecovery(this.installationLeases);
     this.installationAuthority = new ProviderManagerInstallationAuthority({
       providerRecoveryPending: options.providerRecoveryPending,
       leases: this.installationLeases,
@@ -225,6 +231,8 @@ export class ProviderManager {
         this.configuredInstallationBoundary(providerId),
       invalidateEvidence: (providerId) =>
         this.invalidateInstallationEvidence(providerId),
+      onCleanupUnconfirmed: (providerId) =>
+        this.installationRecovery.report(providerId, "probe-cleanup-unconfirmed"),
     });
     this.capabilityAuthority = new ProviderCapabilityAuthority({
       metadataCache: this.metadataCache,
@@ -260,6 +268,7 @@ export class ProviderManager {
     this.conversationProviderGate = options.conversationProviderGate;
     this.runCoordinator = new ProviderRunCoordinator({
       cancelGraceMs: this.cancelGraceMs,
+      forceStopBudgetMs: options.forceStopBudgetMs,
       harnessRegistry: this.harnessRegistry,
       metadataCache: this.metadataCache,
       resolveBackendLaunchOptions: this.resolveBackendLaunchOptions,
@@ -300,13 +309,29 @@ export class ProviderManager {
           "provider-run",
           input.runId,
         );
+        const finished = this.installationRecovery.trackRun(input.providerId);
         return {
-          release: () => this.installationAuthority.release(admission),
+          release: () => {
+            const released = this.installationAuthority.release(admission);
+            if (released) finished();
+            return released;
+          },
           quarantine: (reason) => {
             this.installationAuthority.quarantine(admission, reason);
           },
+          liftQuarantine: () => {
+            finished();
+            if (admission) this.installationLeases?.liftQuarantine(admission.identity, admission.owner.operationId);
+          },
         };
       },
+      onCleanupUnconfirmed: (identity, cleanupReason) => {
+        options.onRunCleanupUnconfirmed?.(identity, cleanupReason);
+        this.installationRecovery.report(identity.providerId, "run-cleanup-unconfirmed");
+      },
+      onCleanupConfirmedLate: options.onRunCleanupConfirmedLate,
+      onQuarantinedRunSettled: (providerId) =>
+        this.installationRecovery.report(providerId, "run-cleanup-unconfirmed"),
     });
     for (const providerId of PROVIDER_IDS) {
       const profile = providerNativeBackendProfile(providerId);
@@ -508,68 +533,13 @@ export class ProviderManager {
   }
 
   resolveModelRoute(selectionInput: ModelSelection): ResolvedModelRoute {
-    const selection = modelSelectionSchema.parse(selectionInput);
-    const harnessId = currentKnownHarnessIdSchema.safeParse(selection.harnessId);
-    const providerId = providerIdForHarness(selection.harnessId);
-    if (!harnessId.success || !providerId) {
-      throw new ProviderRuntimeError("invalid_input", `Unknown agent harness '${selection.harnessId}'.`);
-    }
-    const backendProfile = this.backendProfiles.get(selection.backendProfileId);
-    if (!backendProfile || !backendProfile.enabled) {
-      throw new ProviderRuntimeError(
-        "invalid_input",
-        `Model backend '${selection.backendProfileDisplayName}' is unavailable.`,
-      );
-    }
-    if (backendProfile.configurationRevision !== selection.backendConfigurationRevision) {
-      throw new ProviderRuntimeError(
-        "invalid_input",
-        `Model backend '${backendProfile.displayName}' changed. Start a new chat before continuing.`,
-      );
-    }
-    const explicit = this.backendCompatibilities.get(
-      `${selection.harnessId}\0${selection.backendProfileId}`,
-    );
-    const probe = this.backendProbeResults.get(
-      `${selection.backendProfileId}\0${selection.modelId}`,
-    );
-    // Custom profiles are always adjudicated from exact probe evidence. An
-    // optimistic registration must never bypass a stale or failed probe.
-    const compatibility = backendProfile.source === "custom"
-      ? resolveHarnessBackendCompatibility(harnessId.data, backendProfile, {
-          evaluatedAt: this.backendProbeNow(),
-          modelId: selection.modelId,
-          probe,
-          officialEndpoint: officialPresetEndpoint(backendProfile),
-        })
-      : explicit ?? resolveHarnessBackendCompatibility(
-          harnessId.data,
-          backendProfile,
-          {
-            evaluatedAt: this.backendProbeNow(),
-            modelId: selection.modelId,
-            probe,
-          },
-        );
-    const providerCompatibilityToken = this.capabilityAuthority.continuationToken(
-      providerId,
-      harnessId.data,
-      backendProfile,
-      compatibility,
-      selection.modelId,
-    );
-    return {
-      providerId,
-      harnessId: harnessId.data,
-      backendProfile,
-      compatibility,
-      continuationIdentity: versionedContinuationIdentityForSelection(
-        selection,
-        backendProfile.endpointIdentity,
-        !officiallyAllowsModelSwitchWithinSession(compatibility),
-        providerCompatibilityToken,
-      ),
-    };
+    return resolveModelRoute({
+      backendProfiles: this.backendProfiles,
+      backendCompatibilities: this.backendCompatibilities,
+      backendProbeResults: this.backendProbeResults,
+      backendProbeNow: this.backendProbeNow,
+      capabilityAuthority: this.capabilityAuthority,
+    }, selectionInput);
   }
 
   providerInstallationIdentityForMaintenance(
@@ -641,9 +611,9 @@ export class ProviderManager {
     // installation authority; initial discovery must resolve the configured
     // command again before correlating its historical metadata.
     const admissionExecutable = resolvedExecutable ?? configured;
-    const allowUnboundInitialResolution = !resolvedExecutable
-      && canonicalProviderExecutable(configured) === null;
+    const pathCommand = canonicalProviderExecutable(configured) === null;
     const backendProfile = providerNativeBackendProfile(providerId);
+    if (!installationVerificationAuthority) this.installationRecovery.liftForDetection(providerId);
     const admission = this.installationAuthority.acquire(
       providerId,
       admissionExecutable,
@@ -666,7 +636,7 @@ export class ProviderManager {
     } catch (error) {
       const cleanupUnconfirmed = this.auxiliaryCleanupUnconfirmed.recordFailure(providerId, error);
       if (cleanupUnconfirmed) {
-        this.installationAuthority.quarantine(
+        this.installationAuthority.quarantineUnconfirmedCleanup(
           admission,
           "provider-discovery-cleanup-unconfirmed",
         );
@@ -677,13 +647,19 @@ export class ProviderManager {
       throw error;
     }
     try {
-      this.installationAuthority.settleDetection(
+      const replaced = this.installationAuthority.settleDetection(
         admission,
         detection,
         backendProfile,
         installationVerificationAuthority,
-        allowUnboundInitialResolution,
+        pathCommand
+          && !this.installationRecovery.hasActiveRun(providerId)
+          && (!resolvedExecutable || this.installationRecovery.replacementAdmissible(providerId)),
       );
+      if (replaced && resolvedExecutable) {
+        this.capabilityAuthority.invalidate(providerId);
+        this.metadataCache.invalidate(providerId);
+      }
     } catch (error) {
       this.invalidateInstallationEvidence(providerId);
       throw error;
@@ -793,7 +769,21 @@ export class ProviderManager {
       && this.metadataCache.processCleanupConfirmed(providerId);
   }
 
+  observeInstallationEvents(
+    listener: (event: ProviderInstallationEvent) => void,
+  ): () => void {
+    return this.installationRecovery.observe(listener);
+  }
+
+  recoverInstallation(providerId: ProviderId): void {
+    if (!this.installationRecovery.liftForUser(providerId)) return;
+    if (canonicalProviderExecutable(this.configuredInstallationBoundary(providerId)) === null) {
+      this.resolvedCommands.delete(providerId);
+    }
+  }
+
   setCommand(providerId: ProviderId, command?: string): void {
+    this.recoverInstallation(providerId);
     this.assertProviderConfigurationMutable(providerId);
     const value = command?.trim();
     if (value) this.commands[providerId] = value;
@@ -982,14 +972,14 @@ export class ProviderManager {
         { ...metadataOptions, signal },
       );
     } catch (error) {
-      this.installationAuthority.quarantine(
+      this.installationAuthority.quarantineUnconfirmedCleanup(
         admission,
         "provider-metadata-terminal-outcome-unavailable",
       );
       throw error;
     }
     if (!this.metadataCache.processCleanupConfirmed(providerId)) {
-      this.installationAuthority.quarantine(
+      this.installationAuthority.quarantineUnconfirmedCleanup(
         admission,
         "provider-metadata-cleanup-unconfirmed",
       );
@@ -1004,50 +994,12 @@ export class ProviderManager {
     return metadata;
   }
 
-  async verifyInstallationConformance(
+  verifyInstallationConformance(
     providerId: ProviderId,
     cwd: string,
     authority: ProviderInstallationVerificationAuthority,
   ): Promise<ProviderInstallationIdentity> {
-    if (authority.providerId !== providerId) {
-      throw new ProviderRuntimeError(
-        "lifecycle_corruption",
-        "Provider installation verification authority has the wrong owner.",
-      );
-    }
-    const context = { installationVerificationAuthority: authority };
-    const detection = await this.detect(providerId, {
-      ...context,
-      cwd,
-      refreshEnvironment: true,
-      probeAuthentication: true,
-    });
-    if (
-      !detection.available
-      || !(detection.protocolVerified ?? detection.canRun)
-      || !(detection.canRun || detection.authState === "unauthenticated")
-      || !detection.executable
-      || !detection.version
-      || !detection.cleanupConfirmed
-    ) {
-      throw new ProviderRuntimeError(
-        "invalid_input",
-        "The provider installation failed its native protocol conformance probe.",
-      );
-    }
-    if (detection.canRun) await this.metadata(providerId, cwd, { ...context, force: true });
-    if (!this.providerCapabilityContract(providerId).installationVerified) {
-      throw new ProviderRuntimeError(
-        "invalid_input",
-        "The provider installation could not produce a verified capability contract.",
-      );
-    }
-    return this.installationAuthority.identity(
-      providerId,
-      detection.executable,
-      providerNativeBackendProfile(providerId),
-      detection.version,
-    );
+    return verifyProviderInstallationConformance(this, providerId, cwd, authority);
   }
 
   claudeUsage(cwd: string): ReturnType<typeof readManagedClaudeUsage> {
@@ -1098,7 +1050,7 @@ export class ProviderManager {
       );
     } catch (error) {
       if (isProcessTreeTerminationUnconfirmed(error)) {
-        this.installationAuthority.quarantine(
+        this.installationAuthority.quarantineUnconfirmedCleanup(
           admission,
           "claude-skill-discovery-cleanup-unconfirmed",
         );
@@ -1120,7 +1072,11 @@ export class ProviderManager {
     input: ProviderRunInput,
     callbacks: ProviderRunCallbacks = {},
   ): Promise<ProviderRunResult> {
-    return this.runCoordinator.run(input, callbacks);
+    return this.installationRecovery.observeRun(
+      input.providerId,
+      callbacks,
+      (observed) => this.runCoordinator.run(input, observed),
+    );
   }
 
   compact(
@@ -1178,15 +1134,22 @@ export class ProviderManager {
     return this.runCoordinator.stopOwned(conversationId, identity, graceMs);
   }
 
+  beginShutdown(deadlineAt: number): void {
+    this.shutdownDeadlineAt ??= deadlineAt;
+    this.runCoordinator.beginShutdown(deadlineAt);
+  }
+
   async disposeAll(): Promise<void> {
     this.ownedLifetimeAbort?.abort(
       new Error("The provider manager is shutting down."),
     );
-    while (this.auxiliaryOperations.size > 0) {
-      await Promise.allSettled(this.auxiliaryOperations);
-    }
+    const probesSettled = await drainBeforeShutdownReserve(
+      this.auxiliaryOperations,
+      this.shutdownDeadlineAt,
+    );
     const cleanupFailure = providerCleanupUnconfirmedError({
       runCleanupConfirmed: await this.runCoordinator.disposeAll(),
+      probesSettled,
       installationUncertain: this.installationAuthority.uncertain,
       discovery: this.auxiliaryCleanupUnconfirmed.diagnostics(),
       metadata: this.metadataCache.processCleanupDiagnostics(),

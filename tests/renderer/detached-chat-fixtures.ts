@@ -112,6 +112,8 @@ export function recordingConnection(
     databaseRecoveryNotice: null,
     dismissDatabaseRecoveryNotice: clearError,
     clearError,
+    runtimeStopped: null,
+    restartRuntime: async () => undefined,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => { listeners.delete(listener); };

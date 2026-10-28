@@ -46,6 +46,7 @@ export function composerFollowUpState({
 // accepts a turn. Keep the local latch long enough to bridge a loaded renderer
 // while still recovering in test/offline routes that accept without a turn.
 export const COMPOSER_ACTION_STALE_FALLBACK_MS = 3_000;
+export const STOP_REPEAT_LATCH_MS = 1_000;
 
 export function composerPrimaryActionState({
   sendEligible,

@@ -22,6 +22,7 @@ import {
   linuxProcessGroupCanExecute,
 } from "../node/runtime-owned-process-posix";
 import {
+  activeRuntimeOwnedProcessPlatform,
   awaitRuntimeOwnedProcessStopped,
   confirmRuntimeOwnedProcessStopped,
   requestRuntimeOwnedGuardianStop,
@@ -32,6 +33,9 @@ const DEFAULT_TERMINATION_WAIT_MS = 2_000;
 // The native macOS guardian owns a five-second bounded tree-drain proof; keep
 // the caller alive for that complete proof inside the runtime shutdown budget.
 const DARWIN_TERMINATION_WAIT_MS = 5_000;
+const LINUX_TERMINATION_WAIT_MS = 10_000;
+const LATE_CLEANUP_CONFIRMATION_EXTRA_MS = 5_000;
+const MAX_LATE_CLEANUP_CONFIRMATION_MS = 30_000;
 const PROCESS_GROUP_POLL_MS = 10;
 const WINDOWS_RESOURCE_SETTLE_MS = 100;
 
@@ -193,10 +197,26 @@ export function createOwnedProcessTreeTermination(
 ): OwnedProcessTreeTermination {
   let forceRequested = false;
   let termination: Promise<void> | undefined;
+  let failure: { error: unknown } | null = null;
+  let recheck: Promise<void> | null = null;
 
   return (force) => {
     forceRequested ||= force;
-    termination ??= (async () => {
+    if (failure) {
+      const prior = failure;
+      recheck ??= lateCleanupConfirmation(
+        child,
+        forceTerminationBudgetMs(process.platform),
+      ).then((confirmed) => {
+        recheck = null;
+        if (!confirmed) throw prior.error;
+        failure = null;
+        termination = Promise.resolve();
+      });
+      return recheck;
+    }
+    if (termination) return termination;
+    termination = (async () => {
       const startedAt = performance.now();
       const confirmOwnership = (): boolean => {
         try {
@@ -231,8 +251,63 @@ export function createOwnedProcessTreeTermination(
         throw new ProcessTreeTerminationError(subject);
       }
     })();
+    termination.catch((error: unknown) => {
+      failure = { error };
+    });
     return termination;
   };
+}
+
+export function forceTerminationBudgetMs(platform: NodeJS.Platform): number {
+  return platform === "linux"
+    ? LINUX_TERMINATION_WAIT_MS
+    : platform === "darwin"
+      ? DARWIN_TERMINATION_WAIT_MS
+      : DEFAULT_TERMINATION_WAIT_MS;
+}
+
+export function providerCleanupConfirmationBudgetMs(
+  platform: NodeJS.Platform = process.platform,
+): number {
+  return Math.min(
+    MAX_LATE_CLEANUP_CONFIRMATION_MS,
+    forceTerminationBudgetMs(platform) + LATE_CLEANUP_CONFIRMATION_EXTRA_MS,
+  );
+}
+
+export function lateCleanupConfirmation(
+  child: ChildProcess,
+  budgetMs: number,
+): Promise<boolean> {
+  const boundedBudgetMs = Number.isFinite(budgetMs)
+    ? Math.max(0, Math.min(Math.trunc(budgetMs), MAX_LATE_CLEANUP_CONFIRMATION_MS))
+    : 0;
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (confirmed: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off("close", confirm);
+      resolve(confirmed);
+    };
+    const confirm = (): void => {
+      try {
+        const confirmation = runtimeOwnedProcessStopConfirmation(child);
+        if (confirmation !== false || process.platform === "win32") {
+          finish(confirmation === true);
+          return;
+        }
+        awaitRuntimeOwnedProcessStopped(child).then(finish, () => finish(false));
+      } catch {
+        finish(false);
+      }
+    };
+    const timer = setTimeout(() => finish(false), boundedBudgetMs);
+    timer.unref?.();
+    if (directChildResourcesAreClosed(child)) confirm();
+    else child.once("close", confirm);
+  });
 }
 
 function confirmedBefore(
@@ -1008,9 +1083,18 @@ export async function terminateProcessTreeAndWait(
     // entire bounded close/retirement proof, and never fall through to a raw
     // PID/PGID signal while this guardian owns the request.
     await guardianStopBarrier;
-    const childClosed = await waitForObservedDirectChildClose(waitMs);
+    const guardianWaitMs = dependencies.waitMs === undefined
+      ? forceTerminationBudgetMs(platform)
+      : waitMs;
+    const ownershipDeadline = Date.now() + guardianWaitMs;
+    const childClosed = await waitForObservedDirectChildClose(guardianWaitMs);
     if (!childClosed) return reported(false, "owned-stop-unconfirmed");
-    const ownershipDeadline = Date.now() + waitMs;
+    if (activeRuntimeOwnedProcessPlatform() === "darwin") {
+      return reported(
+        await confirmedBefore(awaitRuntimeOwnedProcessStopped(child), ownershipDeadline),
+        "owned-stop-unconfirmed",
+      );
+    }
     while (!confirmRuntimeOwnedProcessStopped(child)) {
       const remainingMs = ownershipDeadline - Date.now();
       if (remainingMs <= 0) return reported(false, "owned-stop-unconfirmed");

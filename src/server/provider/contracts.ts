@@ -1,6 +1,9 @@
 import type { ZodType } from "zod";
 
-import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
+import type {
+  PosixCleanupDiagnostic,
+  PosixCleanupFailureReason,
+} from "../posix-cleanup-diagnostics";
 
 import type {
   AgentGoalStatus,
@@ -557,6 +560,8 @@ export interface ProviderRunResult extends ProviderRunIdentity {
   failure?: ProviderRunFailure;
   /** True only after authoritative complete process-tree cleanup. */
   cleanupConfirmed: boolean;
+  cleanupConfirmation?: Promise<boolean>;
+  cleanupReason?: PosixCleanupFailureReason;
 }
 
 export function providerRunIdentity(
@@ -708,6 +713,7 @@ export interface ProviderManagerOptions {
   providerRecoveryPending?: (providerId: ProviderId) => boolean;
   commands?: Partial<Record<ProviderId, string>>;
   cancelGraceMs?: number;
+  forceStopBudgetMs?: number;
   /** Runtime-owned cancellation authority shared by passive provider operations. */
   lifetimeSignal?: AbortSignal;
   backendProfiles?: readonly ModelBackendProfile[];
@@ -727,6 +733,11 @@ export interface ProviderManagerOptions {
     context: ProviderBackendLaunchContext,
   ) => ProviderBackendLaunchOptions | Promise<ProviderBackendLaunchOptions>;
   conversationProviderGate?: (conversationId: string, providerId: ProviderId) => void;
+  onRunCleanupUnconfirmed?: (
+    identity: ProviderRunIdentity,
+    cleanupReason?: PosixCleanupFailureReason,
+  ) => void;
+  onRunCleanupConfirmedLate?: (identity: ProviderRunIdentity) => void;
 }
 
 export interface ProviderBackendLaunchContext {

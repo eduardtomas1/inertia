@@ -18,3 +18,11 @@ export function privilegedShutdownEnvelopeMs(
         + WINDOWS_RUNTIME_JOB_BROKER_FORCE_CLOSE_MARGIN_MS
       : 0);
 }
+
+export const NORMAL_SHUTDOWN_MARGIN_MS = 5_000;
+
+export function normalShutdownDeadlineMs(
+  platform: NodeJS.Platform = process.platform,
+): number {
+  return privilegedShutdownEnvelopeMs(platform) + NORMAL_SHUTDOWN_MARGIN_MS;
+}

@@ -16,20 +16,29 @@ import type { AppSnapshot } from "../../src/shared/contracts";
 const requestId = "33333333-3333-4333-8333-333333333333";
 const socket = {} as WebSocket;
 
-function handler(outcome: ManualUsageRefreshOutcome) {
+function handler(outcome: ManualUsageRefreshOutcome, blockedByMaintenance: readonly string[] = []) {
+  const events: string[] = [];
   const dependencies = {
-    providers: {} as ProviderManager,
+    providers: {
+      recoverInstallation: vi.fn((providerId: string) => { events.push(`recover:${providerId}`); }),
+      authLaunch: vi.fn(async () => ({
+        executable: "/tools/claude", args: ["login"], env: {}, installationUse: null,
+      })),
+    } as unknown as ProviderManager,
     providerMaintenance: {
       refresh: vi.fn(async () => []),
+      hasBlockingAuthority: vi.fn((providerId: string) => blockedByMaintenance.includes(providerId)),
     } as unknown as ProviderMaintenanceController,
-    terminals: {} as TerminalManager,
+    terminals: {
+      createProcess: vi.fn(() => "terminal-1"),
+    } as unknown as TerminalManager,
     defaultWorkspacePath: "/workspace",
     currentSnapshot: () => ({}) as AppSnapshot,
-    refreshProviderInfo: vi.fn(async () => undefined),
+    refreshProviderInfo: vi.fn(async (providerId?: string) => { events.push(`refresh:${providerId ?? "all"}`); }),
     refreshProviderUsage: vi.fn(async () => outcome),
     send: vi.fn(),
   } satisfies ProviderCommandDependencies;
-  return { dependencies, handle: createProviderCommandHandler(dependencies) };
+  return { dependencies, events, handle: createProviderCommandHandler(dependencies) };
 }
 
 describe("provider.refresh for usage", () => {
@@ -80,5 +89,41 @@ describe("provider.refresh for usage", () => {
     });
     expect(dependencies.refreshProviderUsage).not.toHaveBeenCalled();
     expect(dependencies.refreshProviderInfo).toHaveBeenCalledWith("claude", true, true);
+  });
+});
+
+describe("provider.refresh recovery", () => {
+  it("lifts the provider's quarantines before it detects again", async () => {
+    const { events, handle } = handler("unsupported");
+    await handle(socket, {
+      type: "provider.refresh",
+      requestId,
+      payload: { providerId: "claude" },
+    });
+    expect(events).toEqual(["recover:claude", "refresh:claude"]);
+  });
+
+  it("lifts every provider without maintenance authority on Refresh all providers", async () => {
+    const { events, handle } = handler("unsupported", ["codex"]);
+    await handle(socket, {
+      type: "provider.refresh",
+      requestId,
+      payload: {},
+    });
+    expect(events).toEqual([
+      "recover:claude", "recover:cursor", "recover:kimi", "recover:opencode", "recover:antigravity", "refresh:all",
+    ]);
+  });
+
+  it("lifts the provider's quarantines when its sign-in terminal exits", async () => {
+    const { dependencies, events, handle } = handler("unsupported");
+    await handle(socket, {
+      type: "provider.auth.start",
+      requestId,
+      payload: { providerId: "claude", cols: 80, rows: 24 },
+    });
+    const onExit = vi.mocked(dependencies.terminals.createProcess).mock.calls[0]![7] as () => void;
+    onExit();
+    await vi.waitFor(() => expect(events).toEqual(["recover:claude", "refresh:claude"]));
   });
 });

@@ -1,3 +1,4 @@
+import type { PosixCleanupFailureReason } from "../posix-cleanup-diagnostics";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ProviderRateLimit, SubagentTaskUsage } from "../../shared/contracts";
 import type { ProviderSkillInput } from "../../shared/contracts";
@@ -134,6 +135,8 @@ export interface CodexAppServerResult {
   compatibilityError?: "full-access-unsupported" | "fast-mode-unsupported";
   continuationError?: "stale-provider-session" | "resume-rejected";
   cleanupConfirmed: boolean;
+  cleanupConfirmation?: Promise<boolean>;
+  cleanupReason?: PosixCleanupFailureReason;
 }
 
 export interface CodexAppServerRun {

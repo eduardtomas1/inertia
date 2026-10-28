@@ -46,6 +46,8 @@ const connection: InertiaConnection = {
   runtimeGeneration: null,
   status: "offline",
   error: null,
+  runtimeStopped: null,
+  restartRuntime: async () => undefined,
   databaseRecoveryNotice: null,
   dismissDatabaseRecoveryNotice: () => undefined,
   clearError: () => undefined,

@@ -80,6 +80,7 @@ export interface ConversationLatestTurnSummary {
   updatedAt: string;
   usageLimited?: boolean;
   failureKind?: import("../turn-lifecycle").TurnFailureKind;
+  providerActivityAt?: string;
 }
 
 export interface ProviderReasoningOption {

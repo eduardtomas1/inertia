@@ -7,6 +7,7 @@ import type {
 } from "../../src/server/runtime/turns/turn-controller-types";
 import { TurnTimeoutCoordinator } from "../../src/server/runtime/turns/turn-timeout-coordinator";
 import { AuthoritativeRunStateEngine } from "../../src/server/runtime/run-state-engine";
+import { PROVIDER_ACTIVITY_PUBLISH_INTERVAL_MS } from "../../src/shared/run-state";
 
 class FakeScheduler implements TurnTimerScheduler {
   readonly callbacks = new Map<object, () => void>();
@@ -247,5 +248,68 @@ describe("TurnTimeoutCoordinator", () => {
 
       expect(status).toHaveBeenCalledOnce();
     }
+  });
+});
+
+describe("TurnTimeoutCoordinator provider activity", () => {
+  it("publishes the provider activity time at most once per interval and forgets it on stop", () => {
+    let now = 1_000;
+    const onProviderActivity = vi.fn();
+    const coordinator = new TurnTimeoutCoordinator({
+      scheduler: new FakeScheduler(),
+      inactivityMs: 6 * 60 * 60 * 1_000,
+      maxLifetimeMs: 7 * 60 * 60 * 1_000,
+      status: () => "running",
+      cancel: vi.fn(),
+      fail: vi.fn(),
+      now: () => now,
+      onProviderActivity,
+    });
+    const active = activeTurn();
+    expect(coordinator.providerActivityAt(active)).toBeNull();
+
+    coordinator.start(active);
+    expect(coordinator.providerActivityAt(active)).toBe(1_000);
+    expect(onProviderActivity).toHaveBeenCalledOnce();
+
+    now += PROVIDER_ACTIVITY_PUBLISH_INTERVAL_MS - 1;
+    coordinator.activity(active);
+    expect(coordinator.providerActivityAt(active)).toBe(1_000);
+    expect(onProviderActivity).toHaveBeenCalledOnce();
+
+    now += 1;
+    coordinator.activity(active);
+    expect(coordinator.providerActivityAt(active)).toBe(1_000 + PROVIDER_ACTIVITY_PUBLISH_INTERVAL_MS);
+    expect(onProviderActivity).toHaveBeenCalledTimes(2);
+
+    coordinator.stop(active);
+    expect(coordinator.providerActivityAt(active)).toBeNull();
+  });
+
+  it("restarts a live turn's published provider activity time after a system resume", () => {
+    let now = 1_000;
+    const onProviderActivity = vi.fn();
+    const coordinator = new TurnTimeoutCoordinator({
+      scheduler: new FakeScheduler(),
+      inactivityMs: 6 * 60 * 60 * 1_000,
+      maxLifetimeMs: 7 * 60 * 60 * 1_000,
+      status: () => "running",
+      cancel: vi.fn(),
+      fail: vi.fn(),
+      now: () => now,
+      onProviderActivity,
+    });
+    const active = activeTurn();
+    coordinator.start(active);
+    now += 40 * 60 * 1_000;
+
+    coordinator.restampProviderActivity(active);
+    expect(coordinator.providerActivityAt(active)).toBe(now);
+    expect(onProviderActivity).toHaveBeenCalledTimes(2);
+
+    coordinator.stop(active);
+    coordinator.restampProviderActivity(active);
+    expect(coordinator.providerActivityAt(active)).toBeNull();
+    expect(onProviderActivity).toHaveBeenCalledTimes(2);
   });
 });

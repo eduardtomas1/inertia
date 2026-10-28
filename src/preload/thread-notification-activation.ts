@@ -1,21 +1,21 @@
-export class ThreadNotificationActivationBuffer {
-  private readonly listeners = new Set<(conversationId: string) => void>();
-  private pendingConversationId: string | null = null;
+export class ThreadNotificationActivationBuffer<Activation = string> {
+  private readonly listeners = new Set<(activation: Activation) => void>();
+  private pendingActivation: Activation | null = null;
 
-  receive(conversationId: string): void {
+  receive(activation: Activation): void {
     if (this.listeners.size === 0) {
       // Navigation is singular: while the renderer boots, the latest click is
       // the exact destination the user most recently requested.
-      this.pendingConversationId = conversationId;
+      this.pendingActivation = activation;
       return;
     }
-    for (const listener of this.listeners) listener(conversationId);
+    for (const listener of this.listeners) listener(activation);
   }
 
-  subscribe(listener: (conversationId: string) => void): () => void {
+  subscribe(listener: (activation: Activation) => void): () => void {
     this.listeners.add(listener);
-    const pending = this.pendingConversationId;
-    this.pendingConversationId = null;
+    const pending = this.pendingActivation;
+    this.pendingActivation = null;
     if (pending) listener(pending);
     return () => {
       this.listeners.delete(listener);

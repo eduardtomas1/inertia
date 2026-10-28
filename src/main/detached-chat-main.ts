@@ -16,7 +16,9 @@ import {
   parseDetachedChatDraftHandoff,
   parseDetachedChatWindowOpenRequest,
   parseDetachedChatWindowRequest,
+  parseMainWindowTarget,
   type DesktopWindowContext,
+  type MainWindowTarget,
   type PendingDetachedChatDraft,
   type DetachedChatWindowSummary,
 } from "../shared/desktop.js";
@@ -81,6 +83,10 @@ export interface DetachedChatMainOptions {
     diagnostic: DetachedChatDraftStoreDiagnostic,
   ) => void;
   onDock(conversationId: string): void | Promise<void>;
+  onOpenInMainWindow(
+    sourceConversationId: string,
+    target: MainWindowTarget,
+  ): void | Promise<void>;
 }
 
 type TrustedWindowRole = DesktopWindowContext["role"];
@@ -113,6 +119,12 @@ function conversationId(value: unknown): string {
     throw new Error("Invalid detached-chat conversation");
   }
   return value;
+}
+
+function mainWindowTarget(value: unknown): MainWindowTarget {
+  const target = parseMainWindowTarget(value);
+  if (!target) throw new Error("Invalid main-window target");
+  return target;
 }
 
 function liveWindow(window: BrowserWindow | null): window is BrowserWindow {
@@ -280,6 +292,24 @@ export class DetachedChatMain {
       },
     );
     this.#options.ipcMain.handle(
+      DETACHED_CHAT_IPC.openInMain,
+      async (event, ...args) => {
+        const context = this.#assertDetachedIpc(event, args.length, 1);
+        if (this.#shuttingDown) {
+          throw new Error("Detached chats are shutting down.");
+        }
+        if (this.#scheduledClosures.has(event.sender)) {
+          throw new Error("This chat window is closing.");
+        }
+        const target = mainWindowTarget(args[0]);
+        if (
+          target.kind === "conversation"
+          && this.#manager.focus(target.conversationId)
+        ) return;
+        await this.#options.onOpenInMainWindow(context.conversationId, target);
+      },
+    );
+    this.#options.ipcMain.handle(
       DETACHED_CHAT_IPC.close,
       (event, ...args) => {
         this.#persistDraftForEvent(event, args);
@@ -304,6 +334,7 @@ export class DetachedChatMain {
     for (const channel of Object.values(DETACHED_CHAT_IPC)) {
       if (
         channel !== DETACHED_CHAT_IPC.windowsChanged
+        && channel !== DETACHED_CHAT_IPC.mainWindowTarget
         && channel !== DETACHED_CHAT_IPC.draftChanged
         && channel !== DETACHED_CHAT_IPC.draftMirrored
         && channel !== DETACHED_CHAT_IPC.persistDraft

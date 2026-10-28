@@ -59,7 +59,7 @@ test("colours a project from the filter menu, updates every surface and window l
   await page.getByRole("menuitem", { name: "Open chat in new window" }).click();
   const popup = await opened;
   await expect(popup.locator(".detached-chat-shell")).toBeVisible();
-  await expect(popup.locator(".detached-chat-project")).toContainText("Munich - Etendo");
+  await expect(popup.locator(".header-breadcrumb-project")).toContainText("Munich - Etendo");
 
   const trigger = page.getByRole("button", { name: "Filter work by project" });
   await trigger.click();
@@ -80,8 +80,8 @@ test("colours a project from the filter menu, updates every surface and window l
   }
   expect(await color(otherRows.first().locator(".activity-thread-project-meta"))).toBe(untintedName);
   await expect(page.locator(".header-breadcrumb-project .project-name-tinted")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
-  await expect(popup.locator(".detached-chat-project .project-name-tinted")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
-  await expect(popup.locator(".detached-chat-project svg")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
+  await expect(popup.locator(".header-breadcrumb-project .project-name-tinted")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
+  await expect(popup.locator(".header-breadcrumb-project svg")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
 
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Customise Munich - Etendo" })).toBeFocused();

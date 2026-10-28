@@ -35,6 +35,7 @@ const DETACHED_CHAT_IPC = {
   retarget: "inertia:detached-chat-retarget",
   dock: "inertia:detached-chat-dock",
   close: "inertia:detached-chat-close",
+  openInMain: "inertia:detached-chat-open-in-main",
 } as const;
 
 const bridge = Object.freeze({
@@ -57,6 +58,12 @@ const bridge = Object.freeze({
     ipcRenderer.invoke(DETACHED_CHAT_IPC.dock, draft) as ReturnType<
       DesktopBridge["dockDetachedChat"]
     >,
+  openInMainWindow: (
+    target: Parameters<DesktopBridge["openInMainWindow"]>[0],
+  ) => ipcRenderer.invoke(
+    DETACHED_CHAT_IPC.openInMain,
+    target,
+  ) as ReturnType<DesktopBridge["openInMainWindow"]>,
   closeDetachedChat: (draft: string) =>
     ipcRenderer.invoke(DETACHED_CHAT_IPC.close, draft) as ReturnType<
       DesktopBridge["closeDetachedChat"]

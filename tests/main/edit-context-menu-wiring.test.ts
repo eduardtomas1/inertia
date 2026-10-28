@@ -60,6 +60,7 @@ function detachedWindow() {
     registerRendererProtocol: vi.fn(),
     registerHealthRenderer: () => () => undefined,
     onDock: vi.fn(),
+    onOpenInMainWindow: vi.fn(),
   });
   detached.options!.createBrowserWindow({});
   return electron.windows.at(-1)!;

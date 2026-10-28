@@ -60,6 +60,7 @@ import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
 import { useLaunchIntro } from "../hooks/useLaunchIntro";
 import { useSidebarCollapseMotion } from "../hooks/useSidebarCollapseMotion";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
+import type { MainWindowTargetAppActions } from "../hooks/useMainWindowTargets";
 import type { AppView } from "../appView";
 import type { UsageViewProps } from "./UsageView";
 import {
@@ -80,6 +81,9 @@ const MultiSpawnDialog = lazy(async () => ({
 const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
 const ThreadNotifications = lazy(async () => ({
   default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
+}));
+const MainWindowTargets = lazy(async () => ({
+  default: (await import("../hooks/useMainWindowTargets")).MainWindowTargets,
 }));
 const CompletionSounds = lazy(async () => ({
   default: (await import("../hooks/useCompletionSounds")).CompletionSounds,
@@ -182,6 +186,7 @@ interface AppLayoutProps {
   splitConversationIds: ReadonlySet<string>;
   splitViewFull: boolean;
   detachedConversationIds: ReadonlySet<string>;
+  mainWindowTargetActions: MainWindowTargetAppActions;
   detachedChatLimitReached: boolean;
   conversationSuppressedInMain: boolean;
   scenePanel: WorkspacePanelActions;
@@ -308,6 +313,7 @@ export const AppLayout = memo(function AppLayout({
   splitConversationIds,
   splitViewFull,
   detachedConversationIds,
+  mainWindowTargetActions,
   detachedChatLimitReached,
   conversationSuppressedInMain,
   scenePanel,
@@ -649,6 +655,12 @@ export const AppLayout = memo(function AppLayout({
           enabled={settings.desktopNotifications}
           onlyInBackground={settings.notifyOnlyInBackground}
           onActivate={notificationActions.activate}
+        />
+        <MainWindowTargets
+          snapshot={connection.snapshot}
+          detachedConversationIds={detachedConversationIds}
+          activateConversation={notificationActions.activate}
+          actions={mainWindowTargetActions}
         />
         {settings.completionSound.enabled && <CompletionSounds snapshot={connection.snapshot} settings={settings.completionSound} />}
       </Suspense>

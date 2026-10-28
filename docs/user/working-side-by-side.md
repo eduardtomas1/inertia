@@ -35,3 +35,5 @@ In a two-chat split, selecting the second chat in the sidebar moves it to the pr
 Choose **Open chat in new window** in a chat's actions, or the window button in its pane header. The chat moves into its own window with its draft; up to eight chats can have their own windows at once. Choosing the chat again in the sidebar focuses its window.
 
 A chat that has its own window can't be added to split view or dragged into it.
+
+The window carries the chat's tools: the Plan, Goal, Agents, Changes, Files, Attachments, Usage and Terminal panels, project actions, prompt presets, the checkout strip and the chat menu (rename, pin, settle, snooze, mark unread, copy). Commit, push and pull request actions sit in its header. Anything that belongs to the main window, such as settings, provider sign-in, a new chat or another chat, opens there while the chat window stays open. The Browser panel, watcher dock, scratch prompts and context from other chats stay in the main window.

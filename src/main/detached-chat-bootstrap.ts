@@ -12,8 +12,9 @@ import type { DetachedChatDraftStoreDiagnostic } from "./detached-chat-draft-sto
 import { hardenDesktopSession } from "./preview-broker.js";
 import { registerEditContextMenu } from "./edit-context-menu.js";
 import type { ResolvedWindowTheme } from "./window-appearance.js";
+import type { MainWindowTargetHandlers } from "./main-window-targets.js";
 
-export interface DetachedChatBootstrapOptions {
+export interface DetachedChatBootstrapOptions extends MainWindowTargetHandlers {
   mainWindow(): BrowserWindow | null;
   rendererUrl: string;
   userDataDirectory: string;
@@ -30,7 +31,6 @@ export interface DetachedChatBootstrapOptions {
     conversationId: string,
   ): void;
   registerHealthRenderer(contents: Electron.WebContents): () => void;
-  onDock(conversationId: string): void | Promise<void>;
 }
 
 export function createDetachedChatMain(
@@ -67,6 +67,7 @@ export function createDetachedChatMain(
     theme: options.theme,
     onDraftStoreDiagnostic: options.onDraftStoreDiagnostic,
     onDock: options.onDock,
+    onOpenInMainWindow: options.onOpenInMainWindow,
   });
 }
 

@@ -210,11 +210,39 @@ describe("surface context menu IPC", () => {
       .rejects.toThrow("owned conversation");
     await expect(show({ kind: "terminal", hasSelection: false, clearable: true, anchor }))
       .rejects.toThrow("owned conversation");
+    await expect(show({ kind: "terminal", conversationId: otherConversationId, hasSelection: false, clearable: true, anchor }))
+      .rejects.toThrow("owned conversation");
     expect(electron.build).not.toHaveBeenCalled();
     const result = show({ kind: "message", conversationId, role: "user", hasSelection: false, anchor });
     await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
     choose("Copy message");
     await expect(result).resolves.toBe("copy-message");
+  });
+
+  it("lets a detached chat show the terminal menu for its own conversation's terminal", async () => {
+    const context = {
+      role: "detached-chat", conversationId, alwaysOnTop: false, draft: "",
+    } as DesktopWindowContext;
+    const { show } = fixture({ context });
+    const result = show({ kind: "terminal", conversationId, hasSelection: true, clearable: true, anchor });
+    await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
+    expect(shape()).toEqual(["Copy", "role:paste:Paste", "Select all", "-", "Clear"]);
+    choose("Clear");
+    await expect(result).resolves.toBe("terminal-clear");
+  });
+
+  it("keeps the main window's terminal menus available with or without a conversation", async () => {
+    const { show } = fixture();
+    for (const request of [
+      { kind: "terminal", hasSelection: false, clearable: false, anchor },
+      { kind: "terminal", conversationId: otherConversationId, hasSelection: false, clearable: true, anchor },
+    ]) {
+      const result = show(request);
+      await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
+      choose("Select all");
+      await expect(result).resolves.toBe("terminal-select-all");
+      electron.popup.mockClear();
+    }
   });
 
   it("refuses when the sender has no live window", async () => {

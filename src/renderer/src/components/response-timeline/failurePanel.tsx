@@ -20,6 +20,11 @@ import { navigateDiagnosticContext } from "../../utils/diagnosticNavigation";
 import { TooltipButton } from "../TooltipButton";
 import "./failureDiagnostics.css";
 
+function diagnosticNavigationAvailable(): boolean {
+  const bridge = window.inertia as { queryDiagnostics?: unknown; openInMainWindow?: unknown } | undefined;
+  return typeof bridge?.queryDiagnostics === "function" || typeof bridge?.openInMainWindow === "function";
+}
+
 function DiagnosticFacts({ facts }: { facts: FailureDiagnosticFact[] }): React.JSX.Element {
   return (
     <dl className="turn-failure-facts">
@@ -57,7 +62,7 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
       <div className="turn-failure-summary">
         <p id={headingId}>{presentation.summary}</p>
         <div className="turn-failure-actions" aria-label="Failure diagnostic actions">
-          {typeof window.inertia?.queryDiagnostics === "function" && <button type="button" className="turn-failure-action" onClick={() => navigateDiagnosticContext({
+          {diagnosticNavigationAvailable() && <button type="button" className="turn-failure-action" onClick={() => navigateDiagnosticContext({
             section: "help", anchor: "diagnostics-incidents", selection: { turnId: turn.id },
           })}>View diagnostics</button>}
           <TooltipButton

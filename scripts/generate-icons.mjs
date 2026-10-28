@@ -9,6 +9,9 @@ const SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 192, 256, 512, 1024];
 const MARK_SCALE = 1.433904;
 const MARK_OFFSET_X = -230.045101;
 const MARK_OFFSET_Y = -202.800933;
+const KEYLINE_INK = [7, 7, 10];
+const KEYLINE_WIDTH_AT_1024 = 30;
+const MIN_KEYLINE_PIXELS = 0.75;
 const EXPECTED_SOURCE_MARKERS = [
   'viewBox="0 0 1024 1024"',
   `transform="translate(${MARK_OFFSET_X} ${MARK_OFFSET_Y}) scale(${MARK_SCALE})"`,
@@ -83,41 +86,52 @@ const body = [
 ];
 const cursor = [[520, 184], [706, 307], [637, 329], [686, 402], [629, 440], [580, 364], [535, 415]];
 
-function isWhiteMark(x, y) {
+function isMark(x, y, grow = 0) {
   for (let index = 1; index < shoulder.length; index += 1) {
-    if (distanceToSegment(x, y, ...shoulder[index - 1], ...shoulder[index]) <= 33) return true;
+    if (distanceToSegment(x, y, ...shoulder[index - 1], ...shoulder[index]) <= 33 + grow) return true;
   }
   for (const stroke of body) {
     for (let index = 1; index < stroke.length; index += 1) {
-      if (distanceToSegment(x, y, ...stroke[index - 1], ...stroke[index]) <= 36) return true;
+      if (distanceToSegment(x, y, ...stroke[index - 1], ...stroke[index]) <= 36 + grow) return true;
     }
   }
   if (pointInPolygon(x, y, cursor)) return true;
   for (let index = 0; index < cursor.length; index += 1) {
-    if (distanceToSegment(x, y, ...cursor[index], ...cursor[(index + 1) % cursor.length]) <= 6.5) return true;
+    if (distanceToSegment(x, y, ...cursor[index], ...cursor[(index + 1) % cursor.length]) <= 6.5 + grow) return true;
   }
   return false;
 }
 
 function renderIcon(size) {
   const samples = size >= 512 ? 2 : 4;
+  const keylinePixels = Math.max(MIN_KEYLINE_PIXELS, (size * KEYLINE_WIDTH_AT_1024) / 1024);
+  const keyline = (keylinePixels * (1024 / size)) / MARK_SCALE;
   const output = Buffer.alloc(size * size * 4);
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       let markCoverage = 0;
+      let haloCoverage = 0;
       for (let sampleY = 0; sampleY < samples; sampleY += 1) {
         for (let sampleX = 0; sampleX < samples; sampleX += 1) {
           const sourceX = (((x + (sampleX + 0.5) / samples) / size) * 1024 - MARK_OFFSET_X) / MARK_SCALE;
           const sourceY = (((y + (sampleY + 0.5) / samples) / size) * 1024 - MARK_OFFSET_Y) / MARK_SCALE;
-          if (isWhiteMark(sourceX, sourceY)) markCoverage += 1;
+          if (isMark(sourceX, sourceY)) {
+            markCoverage += 1;
+            haloCoverage += 1;
+          } else if (isMark(sourceX, sourceY, keyline)) {
+            haloCoverage += 1;
+          }
         }
       }
       const totalSamples = samples * samples;
       const offset = (y * size + x) * 4;
-      output[offset] = 255;
-      output[offset + 1] = 255;
-      output[offset + 2] = 255;
-      output[offset + 3] = Math.round((markCoverage / totalSamples) * 255);
+      const ink = haloCoverage - markCoverage;
+      for (let channel = 0; channel < 3; channel += 1) {
+        output[offset + channel] = haloCoverage === 0
+          ? 255
+          : Math.round((255 * markCoverage + KEYLINE_INK[channel] * ink) / haloCoverage);
+      }
+      output[offset + 3] = Math.round((haloCoverage / totalSamples) * 255);
     }
   }
   return encodePng(size, size, output);

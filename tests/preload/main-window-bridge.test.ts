@@ -77,6 +77,7 @@ describe("main window preload", () => {
       "onDetachedChatWindowsChanged",
       "onDiagnosticsChanged",
       "onLaunchRequest",
+      "onMainWindowTarget",
       "onPreviewState",
       "onPrivateConnectState",
       "onRuntimeReady",
@@ -124,6 +125,7 @@ describe("main window preload", () => {
       "setDetachedChatAlwaysOnTop",
       "retargetDetachedChat",
       "dockDetachedChat",
+      "openInMainWindow",
       "closeDetachedChat",
       "persistDetachedChatDraft",
       "mirrorDetachedChatDraft",
@@ -131,6 +133,30 @@ describe("main window preload", () => {
       expect(bridge).not.toHaveProperty(detachedOnly);
     }
     expect(electron.sendSync).not.toHaveBeenCalled();
+  });
+
+  it("holds the latest detached-chat target until the workbench subscribes and drops malformed pushes", () => {
+    const channel = "inertia:detached-chat-main-window-target";
+    const registration = electron.on.mock.calls.find(([name]) => name === channel);
+    expect(registration).toBeDefined();
+    const push = registration![1] as (event: unknown, value: unknown) => void;
+    const sourceConversationId = "11111111-1111-4111-8111-111111111111";
+    const older = { sourceConversationId, target: { kind: "settings", page: "agents" } };
+    const latest = { sourceConversationId, target: { kind: "usage-limits" } };
+
+    push({}, older);
+    push({}, latest);
+    push({}, "not a request");
+    push({}, null);
+    const listener = vi.fn();
+    const dispose = bridge.onMainWindowTarget(listener);
+    expect(listener.mock.calls).toEqual([[latest]]);
+
+    push({}, older);
+    expect(listener.mock.calls).toEqual([[latest], [older]]);
+    dispose();
+    push({}, latest);
+    expect(listener).toHaveBeenCalledTimes(2);
   });
 
   it("forwards only a boolean capture choice and no arguments when clearing diagnostics", async () => {

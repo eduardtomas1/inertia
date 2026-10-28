@@ -4,6 +4,7 @@ import {
   Suspense,
   useLayoutEffect,
   useRef,
+  type ReactNode,
 } from "react";
 import { PanelBottom, PanelRight } from "lucide-react";
 
@@ -29,6 +30,7 @@ interface PanelLayoutControlsProps {
   onToggleRightPanel: () => void;
   onOpenUsage: () => void;
   onWidthChange?: (width: number) => void;
+  children?: ReactNode;
 }
 
 export const PanelLayoutControls = memo(function PanelLayoutControls({
@@ -45,6 +47,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   onToggleRightPanel,
   onOpenUsage,
   onWidthChange,
+  children,
 }: PanelLayoutControlsProps): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null);
   const onWidthChangeRef = useRef(onWidthChange);
@@ -99,6 +102,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
           <span className="corner-toggle-count" aria-hidden="true">{activeBackgroundTaskCount}</span>
         )}
       </IconButton>
+      {children}
     </div>
   );
 });

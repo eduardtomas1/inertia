@@ -53,7 +53,7 @@ const bridge = {
   getPlatform: () => bridge.platform,
 };
 
-function renderTerminal() {
+function renderTerminal(withConversation = true) {
   const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => (
     sent.type === "terminal.create"
       ? { type: "terminal.created", requestId: sent.requestId, terminalId }
@@ -62,7 +62,7 @@ function renderTerminal() {
   render(
     <TerminalSession
       projectId="11111111-1111-4111-8111-111111111111"
-      conversationId="22222222-2222-4222-8222-222222222222"
+      {...(withConversation ? { conversationId: "22222222-2222-4222-8222-222222222222" } : {})}
       projectName="Inertia" status="online" fontSize={13} theme="light"
       colorTheme="inertia" lightColorTheme="inertia" darkColorTheme="inertia"
       sendCommand={sendCommand} subscribe={() => () => undefined}
@@ -104,7 +104,17 @@ describe("workspace terminal context menu", () => {
     expect(event).toBe(false);
     expect(terminal.focus).toHaveBeenCalled();
     expect(bridge.showContextMenu).toHaveBeenCalledExactlyOnceWith({
-      kind: "terminal", hasSelection: true, clearable: true, anchor: { x: 30, y: 50 },
+      kind: "terminal", conversationId: "22222222-2222-4222-8222-222222222222",
+      hasSelection: true, clearable: true, anchor: { x: 30, y: 50 },
+    });
+  });
+
+  it("omits the conversation from a project terminal's menu request", async () => {
+    const { mount } = renderTerminal(false);
+    await waitFor(() => expect(document.querySelector(".terminal-panel")).toHaveAttribute("data-terminal-state", "ready"));
+    fireEvent.contextMenu(mount, { clientX: 4, clientY: 8 });
+    expect(bridge.showContextMenu).toHaveBeenCalledExactlyOnceWith({
+      kind: "terminal", hasSelection: false, clearable: true, anchor: { x: 4, y: 8 },
     });
   });
 

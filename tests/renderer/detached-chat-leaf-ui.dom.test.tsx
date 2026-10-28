@@ -1,14 +1,13 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConversationActionsMenu } from "../../src/renderer/src/components/ConversationActionsMenu";
 import { ConversationSplitView } from "../../src/renderer/src/components/ConversationSplitView";
 import { Sidebar } from "../../src/renderer/src/components/Sidebar";
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
-import {
-  DetachedContextHandoffNotice,
-  preserveDetachedDraftBeforeUnload,
-} from "../../src/renderer/src/DetachedChatApp";
+import { preserveDetachedDraftBeforeUnload } from "../../src/renderer/src/DetachedChatApp";
+import { DetachedContextHandoffNotice } from "../../src/renderer/src/components/detached/detachedContextRequests";
+import { DetachedChromeFallback } from "../../src/renderer/src/components/detached/DetachedWindowChrome";
 import {
   defaultSettings,
   type AppSnapshot,
@@ -407,5 +406,36 @@ describe("detached chat leaf controls", () => {
     expect(onRemoveProject).not.toHaveBeenCalled();
     fireEvent.click(marker.closest("button")!);
     expect(onSelectConversation).toHaveBeenCalledWith(conversation);
+  });
+});
+
+describe("DetachedChromeFallback", () => {
+  it("keeps the corner controls width current when the controls resize", () => {
+    const callbacks: ResizeObserverCallback[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) { callbacks.push(callback); }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+    let width = 96;
+    const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => ({ width } as DOMRect));
+    try {
+      const { container } = render(
+        <DetachedChromeFallback
+          title="Detachable ownership"
+          windowActions={{ alwaysOnTop: false, pinning: false, onToggleAlwaysOnTop: noOp, onDock: noOp, onClose: noOp }}
+        />,
+      );
+      const frame = container.querySelector<HTMLElement>(".workspace-frame")!;
+      expect(frame.style.getPropertyValue("--workspace-corner-controls-width")).toBe("96px");
+      width = 120;
+      act(() => { for (const callback of callbacks) callback([], {} as ResizeObserver); });
+      expect(frame.style.getPropertyValue("--workspace-corner-controls-width")).toBe("120px");
+    } finally {
+      bounds.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 });

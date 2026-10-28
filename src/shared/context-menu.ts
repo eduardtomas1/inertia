@@ -36,6 +36,7 @@ export type ContextMenuRequest =
     }
   | {
       kind: "terminal";
+      conversationId?: string;
       hasSelection: boolean;
       clearable: boolean;
       anchor: ContextMenuAnchor;
@@ -69,6 +70,7 @@ const OPTIONAL_CONVERSATION: ReadonlySet<ContextMenuRequest["kind"]> = new Set([
   "project-link",
   "diff-file",
   "file",
+  "terminal",
 ]);
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -147,6 +149,6 @@ export function parseContextMenuRequest(value: unknown): ContextMenuRequest | nu
       };
     case "terminal":
       if (typeof value.hasSelection !== "boolean" || typeof value.clearable !== "boolean") return null;
-      return { kind, hasSelection: value.hasSelection, clearable: value.clearable, anchor };
+      return { kind, ...conversation, hasSelection: value.hasSelection, clearable: value.clearable, anchor };
   }
 }

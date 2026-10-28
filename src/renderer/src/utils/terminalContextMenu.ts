@@ -21,11 +21,17 @@ export function terminalPasteKeyHandler(
 export function terminalContextMenu(
   terminal: () => Terminal | null,
   clearable: boolean,
+  conversationId?: string,
 ): (event: MouseEvent<HTMLElement>) => void {
   const handlers = contextMenuHandlers<HTMLElement>(
     () => {
       const current = terminal();
-      return current ? { kind: "terminal", hasSelection: current.hasSelection(), clearable } : null;
+      return current ? {
+        kind: "terminal",
+        ...(conversationId ? { conversationId } : {}),
+        hasSelection: current.hasSelection(),
+        clearable,
+      } : null;
     },
     (action) => {
       const current = terminal();

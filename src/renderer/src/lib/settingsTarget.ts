@@ -1,16 +1,6 @@
-export const SETTINGS_SECTION_IDS = [
-  "appearance",
-  "chats",
-  "notifications",
-  "keyboard",
-  "projects",
-  "agents",
-  "devices",
-  "data",
-  "help",
-] as const;
+import { SETTINGS_SECTION_IDS, type SettingsSection } from "@shared/settings-sections";
 
-export type SettingsSection = typeof SETTINGS_SECTION_IDS[number];
+export { SETTINGS_SECTION_IDS, type SettingsSection };
 
 const LEGACY_SETTINGS_SECTIONS = {
   general: { section: "appearance" },

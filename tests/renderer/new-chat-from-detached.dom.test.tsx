@@ -123,6 +123,32 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+describe("main window while the active chat is in its own window", () => {
+  it("renders no tools panel or terminal for the detached chat", async () => {
+    const { default: App } = await import("../../src/renderer/src/App");
+    const { container } = render(<App />);
+    await act(async () => { await vi.dynamicImportSettled(); });
+    expect(await screen.findByRole("region", { name: "Detached chat: Popped out chat" }, { timeout: 5_000 }))
+      .toBeInTheDocument();
+    const rightPanelToggle = await waitFor(() => {
+      const toggle = container.querySelector<HTMLButtonElement>("[data-right-panel-toggle]");
+      expect(toggle).not.toBeNull();
+      return toggle!;
+    }, { timeout: 5_000 });
+    fireEvent.click(rightPanelToggle);
+    fireEvent.keyDown(window, { key: "j", metaKey: true });
+    await act(async () => { await vi.dynamicImportSettled(); });
+
+    expect(screen.queryByRole("complementary", { name: "Workspace tools" })).not.toBeInTheDocument();
+    expect(container.querySelector(".terminal-dock")).toBeNull();
+    const toggles = screen.getAllByRole("button", {
+      name: "Unavailable while this chat is detached.",
+    });
+    expect(toggles).toHaveLength(2);
+    for (const toggle of toggles) expect(toggle).toBeDisabled();
+  });
+});
+
 describe("new chat while the active chat is in its own window", () => {
   it("shows the new chat instead of the detached chat placeholder", async () => {
     const { default: App } = await import("../../src/renderer/src/App");

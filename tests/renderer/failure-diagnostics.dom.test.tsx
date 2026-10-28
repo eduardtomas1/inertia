@@ -250,6 +250,27 @@ describe("turn failure diagnostics", () => {
     expect(document.body.textContent).not.toContain("provider-session-secret");
   });
 
+  it("offers diagnostics in a chat window that hands them to the main window", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { copyText: vi.fn(), openInMainWindow: vi.fn() } as unknown as typeof window.inertia,
+    });
+    renderFailure();
+    await openFailureDetails();
+    expect(await screen.findByRole("button", { name: "View diagnostics" })).toBeVisible();
+  });
+
+  it("leaves diagnostics out where no window can show them", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { copyText: vi.fn() } as unknown as typeof window.inertia,
+    });
+    renderFailure();
+    await openFailureDetails();
+    await screen.findByRole("button", { name: "Copy diagnostics" });
+    expect(screen.queryByRole("button", { name: "View diagnostics" })).toBeNull();
+  });
+
   it("copies the bounded diagnostic dossier without request, path, or session content", async () => {
     let completeCopy!: (copied: boolean) => void;
     const copyResult = new Promise<boolean>((resolve) => { completeCopy = resolve; });

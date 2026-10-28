@@ -86,6 +86,7 @@ import { useWatcherSurfaceController } from "./hooks/useWatcherSurface";
 import { WatcherContext } from "./components/watcher/watcherContext";
 import { WatcherAttachHost } from "./components/watcher/WatcherAttachHost";
 const focusPrimaryPreview = (): void => focusWorkspacePreviewAddress("primary");
+const DETACHED_CHAT_TOOLS_REASON = "Unavailable while this chat is detached.";
 
 export function commandMayChangeWorkspaceAuthority(
   command: CommandWithoutId,
@@ -970,6 +971,7 @@ export default function App(): React.JSX.Element {
       || detachedChats.conversationIds.has(conversation.id)
     ),
   );
+  const primaryChatDetached = primaryConversationSuppressed && !draftConversation.conversation;
   const visibleWorkspaceScene = useMemo<WorkspaceSceneProps>(() => ({
     ...workspaceScene,
     chat: {
@@ -978,14 +980,14 @@ export default function App(): React.JSX.Element {
         ? sendingConversationIds.has(conversation.id)
         : false,
     },
-    tools: workspaceScene.tools ? {
+    tools: workspaceScene.tools && !primaryChatDetached ? {
       ...workspaceScene.tools,
       runs: {
         ...workspaceScene.tools.runs,
         onOpenRunPreview: openWorkspaceRunPreview,
       },
     } : null,
-    detachedChat: conversation && primaryConversationSuppressed && !draftConversation.conversation ? {
+    detachedChat: conversation && primaryChatDetached ? {
       title: conversation.title,
       windowOpen: detachedChats.conversationIds.has(conversation.id),
       onActivate: () => selectConversation(conversation),
@@ -994,9 +996,8 @@ export default function App(): React.JSX.Element {
   }), [
     conversation,
     detachedChats.conversationIds,
-    draftConversation.conversation,
     openWorkspaceRunPreview,
-    primaryConversationSuppressed,
+    primaryChatDetached,
     selectConversation,
     sendingConversationIds,
     splitPanes.splitScene,
@@ -1077,6 +1078,9 @@ export default function App(): React.JSX.Element {
     acknowledgeActivity,
     dismissActivity,
   });
+  const mainWindowTargetActions = useStableActions({
+    selectConversation, createConversation, openSettings, connectProvider, openBackendSetup, reportUnavailable: setActionError,
+  });
   const multiSpawnActions = useStableActions({
     openDialog: multiSpawn.openDialog,
     closeDialog: multiSpawn.closeDialog,
@@ -1150,10 +1154,11 @@ export default function App(): React.JSX.Element {
       splitConversationIds={split.splitConversationIds}
       splitViewFull={!split.freeOwner}
       detachedConversationIds={detachedChats.conversationIds}
+      mainWindowTargetActions={mainWindowTargetActions}
       detachedChatLimitReached={detachedChats.atLimit}
       conversationSuppressedInMain={primaryConversationSuppressed}
       scenePanel={primarySceneLayout}
-      workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
+      workspaceToolsUnavailableReason={primaryChatDetached ? DETACHED_CHAT_TOOLS_REASON : workspaceToolsUnavailableReason}
       gitStatus={gitStatus}
       branches={branches} branchesLoading={workspaceTools.branchesLoading} branchesError={workspaceTools.branchesError}
       projectActions={projectActions}

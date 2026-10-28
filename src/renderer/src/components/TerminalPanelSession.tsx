@@ -1076,7 +1076,7 @@ export function TerminalSession({
         <div
           className="terminal-mount"
           ref={containerRef}
-          onContextMenu={terminalContextMenu(() => terminalRef.current, true)}
+          onContextMenu={terminalContextMenu(() => terminalRef.current, true, conversationId)}
         />
         {sessionState !== "ready" && (
           <div className="terminal-overlay" role="status">

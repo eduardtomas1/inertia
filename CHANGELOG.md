@@ -2,6 +2,70 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.80 — 2026-10-28
+
+A chat's own window with the main window's tools, an agent Browser with its
+own viewport and screenshots, a Stop that always finishes, leaner agent
+instructions, and a larger app icon.
+
+### Chat windows
+
+- A chat opened in its own window now has the main window's panels (Plan,
+  Goal, Agents, Changes, Files, Attachments, Usage and Terminal), composer
+  presets, the branch strip, the chat menu, Git actions and your keybindings.
+  Settings, sign-in, new chats and Diagnostics open in the main window.
+- A chat's terminals keep running when you open it in its own window or bring
+  it back, including dev servers and resumed agent CLIs.
+- Duo, the compact-on-return setting and narrow window headers work in a
+  chat's own window, a revise there no longer moves the main window's chat,
+  and its terminal is no longer attached twice.
+
+### Browser agent
+
+- The agent's Browser has its own viewport: Fit, Desktop, Tablet, Mobile or a
+  custom size, with a light or dark colour scheme, chosen from the panel.
+- Screenshots reach Claude and Codex models that accept images, after your
+  approval in Supervised mode. A page showing a secret field is never sent.
+- New hover, select and logs tools; console text is marked as untrusted page
+  data for the agent.
+- The first navigation in Supervised mode no longer fails.
+
+### Stop, restart and providers
+
+- Stop always finishes, and pressing it again forces it. "Stopping" appears
+  only when you stopped the turn.
+- Refresh and automatic rediscovery bring a provider back after a crash, a
+  CLI update or a sign-in.
+- The local service can be restarted from the banner on every platform, and
+  Quit always exits.
+- When the local service can't start for a safety reason, the banner shows
+  that reason and what to do, instead of a Restart that would fail again.
+- A quiet agent shows "No output for N min" after three minutes of silence,
+  counted again after the computer sleeps.
+- On Linux, chats no longer get stuck on "Stopping", and on macOS a turn that
+  ran a command no longer ends in "The local runtime crashed".
+- After a stop whose cleanup couldn't be confirmed, Diagnostics shows
+  "Provider cleanup unconfirmed" instead of waiting on it.
+
+### Agent instructions
+
+- Inertia's instructions go to each agent session once instead of with every
+  message, tool descriptions are shorter, tool errors say what to do next,
+  and the agent knows its chat's id.
+- Agents are again told that "[redacted]" hides a secret they must never
+  type, and to use the Inertia Browser rather than Playwright.
+- Imported CLI chats get the Build-mode instructions on their first Inertia
+  turn, and a Claude chat gets Inertia's instructions again after a manual
+  compaction that ran without them.
+- The sidebar update button no longer stays on "Checking for updates…".
+
+### Look and feel
+
+- A larger app icon: the white Inertia figure without a tile, with a thin
+  graphite edge so it reads on light taskbars, docks and panels. The sidebar
+  and welcome screen use the new mark with a larger wordmark.
+- The Inertia mark stays visible in Windows High Contrast.
+
 ## 0.0.79 — 2026-10-27
 
 API key chats that work end to end, a readable selection highlight in dark

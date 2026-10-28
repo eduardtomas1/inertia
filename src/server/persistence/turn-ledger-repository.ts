@@ -463,12 +463,16 @@ export class TurnLedgerRepository {
   ): { sessionInstructionDigest: string | null } | null {
     const titles = CONTEXT_COMPACTION_ACTIVITY_TITLES;
     const row = this.context.database.prepare(`
-      SELECT compaction.turn_id, compaction.created_at FROM (
-        SELECT NULL AS turn_id, created_at FROM messages
+      SELECT compaction.turn_id, compaction.created_at, compaction.receipt, compaction.receipt_digest FROM (
+        SELECT NULL AS turn_id, created_at, 1 AS receipt,
+          CASE WHEN json_valid(compaction_json)
+            THEN json_extract(compaction_json, '$.sessionInstructionDigest')
+          END AS receipt_digest
+        FROM messages
         WHERE conversation_id = ? AND turn_id IS NULL AND role = 'system'
           AND compaction_json IS NOT NULL AND created_at >= ?
         UNION ALL
-        SELECT turn_id, created_at FROM activities
+        SELECT turn_id, created_at, 0 AS receipt, NULL AS receipt_digest FROM activities
         WHERE conversation_id = ? AND kind = 'status' AND status = 'completed'
           AND title IN (${titles.map(() => "?").join(", ")}) AND created_at >= ?
       ) AS compaction
@@ -477,8 +481,15 @@ export class TurnLedgerRepository {
     `).get(conversationId, since, conversationId, ...titles, since) as {
       turn_id: string | null;
       created_at: string;
+      receipt: number;
+      receipt_digest: unknown;
     } | undefined;
     if (!row) return null;
+    if (row.receipt === 1) {
+      return {
+        sessionInstructionDigest: isSessionInstructionDigest(row.receipt_digest) ? row.receipt_digest : null,
+      };
+    }
     const digest = this.context.database.prepare(`
       SELECT CASE WHEN json_valid(manifest.manifest_json)
         THEN json_extract(manifest.manifest_json, '$.sessionInstructionDigest')

@@ -69,10 +69,10 @@
       "opencode": 793
     },
     "inertia_browser_logs": {
-      "claude": 458,
-      "codex": 316,
-      "cursorKimi": 420,
-      "opencode": 420
+      "claude": 515,
+      "codex": 373,
+      "cursorKimi": 477,
+      "opencode": 477
     },
     "inertia_browser_tabs": {
       "claude": 397,
@@ -160,26 +160,26 @@
     }
   },
   "instructions": {
-    "inertia-frontend-workbench": 427,
+    "inertia-frontend-workbench": 541,
     "inertia-orchestration": 331,
     "mcp-initialize:claude": 0,
     "mcp-initialize:http": 0
   },
   "totals": {
     "claude": {
-      "withBrowser": 19669,
+      "withBrowser": 19840,
       "withoutBrowser": 7811
     },
     "codex": {
-      "withBrowser": 15953,
+      "withBrowser": 16124,
       "withoutBrowser": 6380
     },
     "cursorKimi": {
-      "withBrowser": 18690,
+      "withBrowser": 18861,
       "withoutBrowser": 7431
     },
     "opencode": {
-      "withBrowser": 18681,
+      "withBrowser": 18852,
       "withoutBrowser": 7431
     }
   }

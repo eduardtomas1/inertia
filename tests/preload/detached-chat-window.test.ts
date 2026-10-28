@@ -117,9 +117,10 @@ describe("detached chat preload", () => {
     await bridge.setDetachedChatAlwaysOnTop(true);
     await bridge.retargetDetachedChat(request);
     const target = { kind: "new-chat" as const, projectId: projectPath.projectId };
-    await bridge.dockDetachedChat("dock draft");
+    const terminalIds = ["66666666-6666-4666-8666-666666666666"];
+    await bridge.dockDetachedChat("dock draft", terminalIds);
     await bridge.openInMainWindow(target);
-    await bridge.closeDetachedChat("close draft");
+    await bridge.closeDetachedChat("close draft", []);
     expect(bridge.persistDetachedChatDraft("native-close draft")).toBe(true);
     expect(bridge.mirrorDetachedChatDraft("live popup draft")).toBe(true);
     await bridge.getRuntimeConnection();
@@ -146,9 +147,9 @@ describe("detached chat preload", () => {
       [DETACHED_CHAT_IPC.getWindowContext],
       [DETACHED_CHAT_IPC.setAlwaysOnTop, true],
       [DETACHED_CHAT_IPC.retarget, request],
-      [DETACHED_CHAT_IPC.dock, "dock draft"],
+      [DETACHED_CHAT_IPC.dock, "dock draft", terminalIds],
       [DETACHED_CHAT_IPC.openInMain, target],
-      [DETACHED_CHAT_IPC.close, "close draft"],
+      [DETACHED_CHAT_IPC.close, "close draft", []],
       ["inertia:runtime-connection"],
       ["inertia:copy-text", "copy me"],
       ["inertia:select-attachments", "images"],

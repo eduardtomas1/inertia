@@ -14,6 +14,7 @@ import {
 import {
   MAX_TRACKED_PROMPT_DELIVERIES,
   PromptInstructionDeliveries,
+  sessionInstructionDigest,
 } from "../../src/server/runtime/turns/turn-instruction-delivery";
 import {
   TurnController,
@@ -103,9 +104,20 @@ async function runTurn(
   return input;
 }
 
-function compact(runtime: TurnControllerTestRuntime, providerId: ProviderId, clock: () => Date): void {
+function compact(
+  runtime: TurnControllerTestRuntime,
+  providerId: ProviderId,
+  clock: () => Date,
+  sentInstruction?: string,
+): void {
   runtime.store.createMessage(runtime.conversationId, "/compact", "system", [], null, clock().toISOString(), {
-    compaction: { providerId, beforeTokens: 100, afterTokens: 10, instructionForwarded: false },
+    compaction: {
+      providerId,
+      beforeTokens: 100,
+      afterTokens: 10,
+      instructionForwarded: false,
+      sessionInstructionDigest: sentInstruction === undefined ? null : sessionInstructionDigest(sentInstruction),
+    },
   });
 }
 
@@ -302,7 +314,7 @@ describe("hidden instruction delivery", () => {
     await runTurn(runtime, "one", "session-1", runtime.controller, { compactionActivity: "Claude compacted context" });
     const after = await runTurn(runtime, "two");
     const settled = await runTurn(runtime, "three");
-    compact(runtime, "claude", clock);
+    compact(runtime, "claude", clock, sessionText(runtime.conversationId));
     const afterReceipt = await runTurn(runtime, "four");
     let restartIds = 0;
     const restarted = new TurnController(runtime.store, runtime.provider, new Map(), new Map(), new Map(), hooks, {
@@ -317,6 +329,20 @@ describe("hidden instruction delivery", () => {
     expect(settled.prompt).toBe("three");
     expect(afterReceipt.prompt).toBe(`four\n\n${INSTRUCTIONS_HEADER}\n[build-mode]\n${BUILD_MODE_INSTRUCTION}`);
     expect(afterRestart.prompt).toBe("five");
+    runtime.store.close();
+  });
+
+  it("re-sends a Claude session's pack after a compaction that ran without it", async () => {
+    const { runtime, clock } = await chatRuntime("claude");
+
+    await runTurn(runtime, "one");
+    const settled = await runTurn(runtime, "two");
+    compact(runtime, "claude", clock);
+    const afterUnattested = await runTurn(runtime, "three");
+
+    expect(settled.prompt).toBe("two");
+    expect(afterUnattested.prompt).toContain("ORCHESTRATION_PACK_TEXT");
+    expect(afterUnattested.sessionInstruction).toBe(sessionText(runtime.conversationId));
     runtime.store.close();
   });
 

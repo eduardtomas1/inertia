@@ -4,6 +4,7 @@ import { prepareComposerDetachment } from "../../utils/composerOwnership";
 import { dockInMainWith, openInMain, type MainWindowTarget } from "../../utils/detachedHandoff";
 import { UUID_PATTERN } from "@shared/request-identifiers";
 import { legacySettingsTarget } from "../../lib/settingsTarget";
+import { liveTerminalIdsForHandoff } from "../terminalTabStorage";
 import {
   DIAGNOSTIC_NAVIGATION_EVENT,
   parseDiagnosticNavigation,
@@ -37,8 +38,16 @@ function diagnosticHandoffTarget(target: DiagnosticNavigation): MainWindowTarget
   };
 }
 
+export function detachedTerminalIds(
+  projectId: string | null,
+  conversationId: string,
+): string[] {
+  return projectId ? liveTerminalIdsForHandoff(projectId, conversationId) : [];
+}
+
 export function useDetachedHandoff(
   conversationId: string,
+  projectId: string | null,
   setActionError: Dispatch<SetStateAction<string | null>>,
 ): DetachedHandoff {
   const dockInMain = useCallback(() => {
@@ -48,13 +57,16 @@ export function useDetachedHandoff(
       setActionError(preparation.reason);
       return;
     }
-    void dockInMainWith(preparation.draft).catch((error: unknown) => {
+    void dockInMainWith(
+      preparation.draft,
+      detachedTerminalIds(projectId, conversationId),
+    ).catch((error: unknown) => {
       setActionError(publicError(
         error,
         "This chat could not be returned to the main window.",
       ));
     });
-  }, [conversationId, setActionError]);
+  }, [conversationId, projectId, setActionError]);
   const openTarget = useCallback((target: MainWindowTarget) => {
     setActionError(null);
     void openInMain(target).catch((error: unknown) => {

@@ -232,6 +232,18 @@ describe("Settings composite updates", () => {
     expect(health).toHaveTextContent("Waiting for provider cleanup · 1 active turn · 1 open interaction");
     expect(document.body).not.toHaveTextContent("conversation-secret-id");
 
+    view.rerender(<SettingsView
+      {...properties}
+      lifecycleDiagnostics={{
+        ...lifecycleDiagnostics,
+        startupBlockerCodes: [],
+        actionableState: "safe-and-ready",
+        ownedResources: { ...lifecycleDiagnostics.ownedResources, providerRuns: 0, turns: 0, interactions: 0 },
+        unconfirmedProviderCleanupCount: 2,
+      }}
+    />);
+    expect(health).toHaveTextContent("Safe and ready · 0 active turns · 0 open interactions · Provider cleanup unconfirmed (2)");
+
     const blockedUpdate: AppUpdateStatus = {
       revision: 2,
       channel: "stable",

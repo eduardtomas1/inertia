@@ -194,6 +194,7 @@ interface InstallationState {
   uses: Map<symbol, UseRecord>;
   maintenance: MaintenanceRecord | null;
   quarantine: QuarantineRecord | null;
+  queuedQuarantines: QuarantineRecord[];
   drainWaiters: Set<DrainWaiter>;
 }
 
@@ -583,8 +584,13 @@ export class ProviderInstallationLeaseCoordinator {
   ): boolean {
     const state = this.states.get(identity.scopeId);
     let lifted = false;
+    const queued = state?.queuedQuarantines.findIndex((record) => record.operationId === operationId) ?? -1;
+    if (state && queued >= 0) {
+      state.queuedQuarantines.splice(queued, 1);
+      lifted = true;
+    }
     if (state?.quarantine?.operationId === operationId) {
-      state.quarantine = null;
+      state.quarantine = state.queuedQuarantines.shift() ?? null;
       lifted = true;
     }
     if (this.quarantineByBoundary.get(identity.boundaryId)?.operationId === operationId) {
@@ -643,7 +649,8 @@ export class ProviderInstallationLeaseCoordinator {
   ): number {
     if (this.hasProviderMaintenance(providerId)) return 0;
     const liftable = new Set([
-      ...[...this.states.values()].flatMap(({ quarantine }) => quarantine ? [quarantine] : []),
+      ...[...this.states.values()].flatMap(({ quarantine, queuedQuarantines }) =>
+        quarantine ? [quarantine, ...queuedQuarantines] : []),
       ...this.quarantineByBoundary.values(),
     ].filter(({ identity, kind }) =>
       identity.providerId === providerId && kind !== "maintenance" && kinds.has(kind)));
@@ -831,6 +838,7 @@ export class ProviderInstallationLeaseCoordinator {
       uses: new Map(),
       maintenance: null,
       quarantine: null,
+      queuedQuarantines: [],
       drainWaiters: new Set(),
     };
     this.states.set(scopeId, created);
@@ -989,7 +997,12 @@ export class ProviderInstallationLeaseCoordinator {
   ): void {
     const reason = reasonInput.replaceAll("\0", "").trim().slice(0, 240)
       || "provider-installation-cleanup-unconfirmed";
-    state.quarantine ??= { identity, operationId, reason, kind };
+    const record = { identity, operationId, reason, kind };
+    if (state.quarantine === null) state.quarantine = record;
+    else if (
+      state.quarantine.operationId !== operationId
+      && !state.queuedQuarantines.some((queued) => queued.operationId === operationId)
+    ) state.queuedQuarantines.push(record);
     this.quarantineByBoundary.set(
       identity.boundaryId,
       this.quarantineByBoundary.get(identity.boundaryId) ?? state.quarantine,

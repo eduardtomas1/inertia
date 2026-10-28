@@ -278,6 +278,30 @@ describe("CLI conversation import authority and persistence", () => {
       runtime.store.close();
     }
   });
+  it.each(["codex", "claude"] as const)("sends the Build-mode instruction once when an imported %s chat continues its session", async (providerId) => {
+    const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId, modelId: "provider-default" }) });
+    try {
+      const sessionId = randomUUID();
+      const selection = providerNativeModelSelection({ providerId });
+      const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
+      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "c".repeat(64), providerId, sessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const });
+      const prompts: string[] = [];
+      for (const content of ["Continue.", "Keep going."]) {
+        const queued = runtime.controller.queue({ conversationId, content });
+        runtime.controller.start(queued.turn.id);
+        expect(runtime.provider.input?.sessionId).toBe(sessionId);
+        prompts.push(runtime.provider.input!.prompt);
+        runtime.provider.resolve({ status: "completed", sessionId });
+        await flushTurnControllerTestPromises();
+        expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed");
+      }
+      expect(prompts[0]).toContain("[build-mode]");
+      expect(prompts[1]).not.toContain("[build-mode]");
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
   it("treats a later session of an imported chat like any other chat once that session is gone", async () => {
     const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }) });
     try {
@@ -315,17 +339,26 @@ describe("CLI conversation import authority and persistence", () => {
       const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
       const importedSessionId = randomUUID();
       const imported = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "7".repeat(64), providerId: "codex", sessionId: importedSessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const });
-      const observed: Array<{ instructions: number; hostTools: unknown }> = [];
+      const observed: Array<{ instructions: number; hostTools: unknown; prompt: string; sessionInstruction: string | undefined }> = [];
       for (const conversationId of [runtime.conversationId, imported]) {
         const queued = runtime.controller.queue({ conversationId, content: "Continue." });
         runtime.controller.start(queued.turn.id);
-        observed.push({ instructions: runtime.store.turnExecutionManifest(queued.turn.id)!.internalInstructionCount, hostTools: runtime.provider.callbacks?.hostTools });
+        observed.push({
+          instructions: runtime.store.turnExecutionManifest(queued.turn.id)!.internalInstructionCount,
+          hostTools: runtime.provider.callbacks?.hostTools,
+          prompt: runtime.provider.input!.prompt,
+          sessionInstruction: runtime.provider.input!.sessionInstruction,
+        });
         runtime.provider.resolve({ status: "completed", sessionId: conversationId === imported ? importedSessionId : randomUUID() });
         await flushTurnControllerTestPromises();
       }
       expect(observed[0]!.hostTools).toBe(bridge);
+      expect(observed[0]!.sessionInstruction).toContain("HARNESS_POLICY");
       expect(observed[1]!.hostTools).toBeUndefined();
-      expect(observed[1]!.instructions).toBe(observed[0]!.instructions - 1);
+      expect(observed[1]!.sessionInstruction).toBeUndefined();
+      expect(observed[1]!.prompt).not.toContain("HARNESS_POLICY");
+      expect(observed[1]!.prompt).toContain("[build-mode]");
+      expect(observed[1]!.instructions).toBe(observed[0]!.instructions);
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();

@@ -1006,6 +1006,14 @@ textarea {
   height: 34px;
 }
 
+@media (forced-colors: active) {
+  .brand-logo,
+  .welcome-guide-logo {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}
+
 .brand-name {
   font-size: var(--text-lg);
   font-weight: 600;

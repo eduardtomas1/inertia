@@ -257,7 +257,7 @@ describe("conversation.compact-and-send", () => {
     expect(compact).toHaveBeenCalledOnce();
     expect(compact.mock.calls[0]![1]).toBeUndefined();
     expect(store.createMessage).toHaveBeenCalledWith(conversationId, "/compact", "system", [], null, undefined, {
-      compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: null, instructionForwarded: false, trigger: "on-return" },
+      compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: null, instructionForwarded: false, trigger: "on-return", sessionInstructionDigest: null },
     });
     expect(attachmentResolver.resolvePayloads).toHaveBeenCalledWith([attachment], requestId, expect.any(AbortSignal));
     expect(queue).toHaveBeenCalledWith(expect.objectContaining({
@@ -291,7 +291,7 @@ describe("conversation.compact-and-send", () => {
         turnId,
         userMessageId,
         disposition: "new-turn",
-        compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: null, instructionForwarded: false, trigger: "on-return" },
+        compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: null, instructionForwarded: false, trigger: "on-return", sessionInstructionDigest: null },
       },
     });
   });
@@ -590,7 +590,7 @@ describe("manual compaction state", () => {
     expect(during).toEqual({ state: "compacting", trigger: "manual", startedAt: expect.any(String) });
     expect(timeline).toEqual(["shell:compacting", "shell:idle"]);
     expect(store.createMessage).toHaveBeenCalledWith(conversationId, "/compact keep the tests", "system", [], null, undefined, {
-      compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: null, instructionForwarded: true, trigger: "manual" },
+      compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: null, instructionForwarded: true, trigger: "manual", sessionInstructionDigest: null },
     });
     expect(sentResult(send)).toMatchObject({ result: { kind: "conversation.compacted" } });
     expect(compactions.isCompacting(conversationId)).toBe(false);

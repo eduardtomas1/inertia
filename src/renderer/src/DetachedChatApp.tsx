@@ -16,7 +16,7 @@ import { clearMessageSearchFocus, requestMessageSearchFocus } from "./utils/mess
 import "./detached-chat.css";
 import { DetachedWorkspace } from "./components/detached/DetachedWorkspace";
 import { newChatTarget } from "./components/detached/detachedTargets";
-import { useDetachedHandoff } from "./components/detached/useDetachedHandoff";
+import { detachedTerminalIds, useDetachedHandoff } from "./components/detached/useDetachedHandoff";
 import { useDetachedShortcuts } from "./components/detached/useDetachedShortcuts";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
@@ -177,7 +177,7 @@ export default function DetachedChatApp({
     });
   }, [conversationId, conversationTitle]);
 
-  const handoff = useDetachedHandoff(conversationId, setActionError);
+  const handoff = useDetachedHandoff(conversationId, projectId, setActionError);
   const closeWindow = useCallback(() => {
     setActionError(null);
     const preparation = prepareComposerDetachment(conversationId);
@@ -185,10 +185,13 @@ export default function DetachedChatApp({
       setActionError(preparation.reason);
       return;
     }
-    void window.inertia.closeDetachedChat(preparation.draft).catch((error: unknown) => {
+    void window.inertia.closeDetachedChat(
+      preparation.draft,
+      detachedTerminalIds(projectId, conversationId),
+    ).catch((error: unknown) => {
       setActionError(publicError(error, "This window could not be closed."));
     });
-  }, [conversationId]);
+  }, [conversationId, projectId]);
   const openInMain = handoff.openInMain;
   useDetachedShortcuts({
     keybindings: settings.keybindings,
@@ -260,6 +263,7 @@ export default function DetachedChatApp({
     >
       <DetachedWorkspace
         conversationId={conversationId}
+        terminalHandoffIds={windowContext.terminalIds}
         connection={connection}
         settings={settings}
         handoff={handoff}

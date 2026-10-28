@@ -7,6 +7,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { Conversation, ServerEvent } from "../../src/shared/contracts";
 import { useConversationNavigation } from "../../src/renderer/src/hooks/useConversationNavigation";
 import type { DetachedChatWindowsController } from "../../src/renderer/src/hooks/useDetachedChatWindows";
+import {
+  liveTerminalIdsForHandoff,
+  markTerminalPanelMounted,
+  terminalStorageKey,
+} from "../../src/renderer/src/components/TerminalPanelSupport";
 import { conversation, deferred } from "./composer-fixtures";
 
 const appSource = readFileSync(resolve("src/renderer/src/App.tsx"), "utf8");
@@ -19,6 +24,7 @@ function bindAppAction(name: string, dependencies: {
   selectConversation: (conversation: Conversation) => void;
   setActionError: (message: string | null) => void;
   conversation: Conversation;
+  [dependency: string]: unknown;
 }): (conversation: Conversation) => void {
   const exported = appAst.program.body.find((node) => node.type === "ExportDefaultDeclaration");
   if (exported?.declaration.type !== "FunctionDeclaration") throw new Error("App was not found");
@@ -96,5 +102,49 @@ describe.each(["openConversationInWindow", "openConversationInSplit"])("%s detac
     });
     expect(f.select).toHaveBeenCalledExactlyOnceWith("conversation.select", newer.id, undefined);
     expect(f.error.mock.calls.flat()).not.toContainEqual(expect.any(String));
+  });
+});
+
+describe("openConversationInWindow terminal handoff", () => {
+  it("captures the live terminal ids before suppression unmounts the panel", async () => {
+    const storageKey = terminalStorageKey(target.projectId, target.id);
+    const terminalIds = ["81818181-8181-4181-8181-818181818181"];
+    window.sessionStorage.setItem(storageKey, JSON.stringify(terminalIds));
+    const unmountPanel = markTerminalPanelMounted(storageKey);
+    const open = vi.fn(async () => ({
+      conversationId: target.id,
+      alwaysOnTop: false,
+      disposition: "opened" as const,
+    }));
+    const detachedChats: DetachedChatWindowsController = {
+      ready: true, windows: [], conversationIds: new Set(), atLimit: false,
+      focus: vi.fn(), open,
+    };
+    const invoke = bindAppAction("openConversationInWindow", {
+      detachedChats,
+      selectConversation: vi.fn(),
+      setActionError: vi.fn(),
+      conversation: primary,
+      prepareComposerDetachment: () => ({ status: "ready", draft: "" }),
+      suppressedMainConversationIds: new Set<string>(),
+      splitOwnerOf: () => null,
+      setSuppressedMainConversationIds: vi.fn(() => unmountPanel()),
+      setSplitPaneConversation: vi.fn(),
+      liveTerminalIdsForHandoff,
+      detachedChatWindowTitle: (title: string) => title,
+    });
+    try {
+      invoke(target);
+      expect(liveTerminalIdsForHandoff(target.projectId, target.id)).toEqual([]);
+      await vi.waitFor(() => expect(open).toHaveBeenCalledExactlyOnceWith({
+        conversationId: target.id,
+        title: target.title,
+        draft: "",
+        terminalIds,
+      }));
+    } finally {
+      unmountPanel();
+      window.sessionStorage.clear();
+    }
   });
 });

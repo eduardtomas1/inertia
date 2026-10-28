@@ -315,6 +315,37 @@ describe("provider installation lease coordinator", () => {
     reader.release({ cleanupConfirmed: true });
   });
 
+  it("keeps an installation quarantined until every unconfirmed run on it is lifted", () => {
+    const coordinator = new ProviderInstallationLeaseCoordinator();
+    const installation = identity();
+    const first = coordinator.acquireUse(installation, { kind: "provider-run", operationId: "run-a" });
+    const second = coordinator.acquireUse(installation, { kind: "provider-run", operationId: "run-b" });
+    expect(first.quarantine("provider-use-cleanup-unconfirmed")).toBe(true);
+    expect(second.quarantine("provider-use-cleanup-unconfirmed")).toBe(true);
+
+    expect(coordinator.liftQuarantine(installation, "run-a")).toBe(true);
+    expect(coordinator.isQuarantined(installation)).toBe(true);
+    expect(() => coordinator.acquireUse(installation, {
+      kind: "provider-run",
+      operationId: "replacement-run",
+    })).toThrowError(ProviderInstallationAdmissionError);
+
+    expect(coordinator.liftQuarantine(installation, "run-b")).toBe(true);
+    expect(coordinator.isQuarantined(installation)).toBe(false);
+    coordinator.acquireUse(installation, { kind: "provider-run", operationId: "admitted-run" })
+      .release({ cleanupConfirmed: true });
+  });
+
+  it("lifts every queued quarantine of a provider at once", () => {
+    const coordinator = new ProviderInstallationLeaseCoordinator();
+    const installation = identity();
+    const uses = ["run-a", "run-b"].map((operationId) =>
+      coordinator.acquireUse(installation, { kind: "provider-run", operationId }));
+    for (const use of uses) use.quarantine("provider-use-cleanup-unconfirmed");
+    expect(coordinator.liftProviderQuarantines("claude", new Set(["provider-run"]))).toBe(2);
+    expect(coordinator.isQuarantined(installation)).toBe(false);
+  });
+
   it("retains quarantine after unconfirmed use cleanup or a mismatched maintenance receipt", async () => {
     const useCoordinator = new ProviderInstallationLeaseCoordinator();
     const installation = identity();

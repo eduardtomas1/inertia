@@ -264,7 +264,7 @@ describe("detached chat main-process boundary", () => {
       await value.ipc.invoke(
         DETACHED_CHAT_IPC.open,
         eventFor(value.main.webContents),
-        { conversationId: FIRST_ID, title: "Canary chat", draft: "" },
+        { conversationId: FIRST_ID, title: "Canary chat", draft: "", terminalIds: [] },
       );
       expect(value.popups[0]?.title).toBe("Canary chat — Inertia Canary");
     } finally {
@@ -276,7 +276,7 @@ describe("detached chat main-process boundary", () => {
     const value = fixture();
     try {
       await value.ipc.invoke(DETACHED_CHAT_IPC.open, eventFor(value.main.webContents), {
-        conversationId: FIRST_ID, title: "Closing chat", draft: "Keep the closing draft",
+        conversationId: FIRST_ID, title: "Closing chat", draft: "Keep the closing draft", terminalIds: [],
       });
       const popup = value.popups[0]!;
       popup.emit("close");
@@ -287,7 +287,7 @@ describe("detached chat main-process boundary", () => {
 
       // An unrelated lifecycle broadcast must not retire the still-owned draft.
       await value.ipc.invoke(DETACHED_CHAT_IPC.open, eventFor(value.main.webContents), {
-        conversationId: SECOND_ID, title: "Other chat", draft: "",
+        conversationId: SECOND_ID, title: "Other chat", draft: "", terminalIds: [],
       });
       expect(await value.ipc.invoke(DETACHED_CHAT_IPC.getWindowContext, eventFor(popup.webContents))).toMatchObject({
         conversationId: FIRST_ID, draft: "Keep the closing draft",
@@ -315,6 +315,7 @@ describe("detached chat main-process boundary", () => {
           conversationId: FIRST_ID,
           title: "Build the feature",
           draft: "initial draft",
+          terminalIds: [],
         },
       );
       expect(opened).toEqual({
@@ -397,6 +398,7 @@ describe("detached chat main-process boundary", () => {
         conversationId: FIRST_ID,
         alwaysOnTop: false,
         draft: "initial draft",
+        terminalIds: [],
       });
       expect(value.main.webContents.sent).toContainEqual({
         channel: DETACHED_CHAT_IPC.windowsChanged,
@@ -410,6 +412,7 @@ describe("detached chat main-process boundary", () => {
           conversationId: FIRST_ID,
           title: "Renamed",
           draft: "must not replace the live owner",
+          terminalIds: [],
         },
       );
       expect(duplicate).toMatchObject({ disposition: "focused" });
@@ -426,19 +429,20 @@ describe("detached chat main-process boundary", () => {
       await value.ipc.invoke(
         DETACHED_CHAT_IPC.open,
         eventFor(value.main.webContents),
-        { conversationId: FIRST_ID, title: "First", draft: "draft" },
+        { conversationId: FIRST_ID, title: "First", draft: "draft", terminalIds: [] },
       );
       const popup = value.popups[0]!;
 
       await expect(value.ipc.invoke(
         DETACHED_CHAT_IPC.open,
         eventFor(popup.webContents),
-        { conversationId: SECOND_ID, title: "Second", draft: "draft" },
+        { conversationId: SECOND_ID, title: "Second", draft: "draft", terminalIds: [] },
       )).rejects.toThrow("Rejected untrusted renderer request");
       await expect(value.ipc.invoke(
         DETACHED_CHAT_IPC.close,
         eventFor(value.main.webContents),
         "draft",
+        [],
       )).rejects.toThrow("Rejected untrusted renderer request");
       await expect(value.ipc.invoke(
         DETACHED_CHAT_IPC.getWindows,
@@ -522,7 +526,7 @@ describe("detached chat main-process boundary", () => {
         await value.ipc.invoke(
           DETACHED_CHAT_IPC.open,
           eventFor(value.main.webContents),
-          { conversationId, title, draft: "" },
+          { conversationId, title, draft: "", terminalIds: [] },
         );
       }
       const partitions = value.popups.map((popup) =>
@@ -545,7 +549,7 @@ describe("detached chat main-process boundary", () => {
       await expect(value.ipc.invoke(
         DETACHED_CHAT_IPC.open,
         eventFor(value.main.webContents),
-        { conversationId: FIRST_ID, title: "First", draft: "draft" },
+        { conversationId: FIRST_ID, title: "First", draft: "draft", terminalIds: [] },
       )).rejects.toThrow("protocol unavailable");
       expect(value.popups).toHaveLength(1);
       expect(value.popups[0]?.destroyCalls).toBe(1);
@@ -561,7 +565,7 @@ describe("detached chat main-process boundary", () => {
       await value.ipc.invoke(
         DETACHED_CHAT_IPC.open,
         eventFor(value.main.webContents),
-        { conversationId: FIRST_ID, title: "First", draft: "initial draft" },
+        { conversationId: FIRST_ID, title: "First", draft: "initial draft", terminalIds: [] },
       );
       const popup = value.popups[0]!;
       const persistenceEvent = eventFor(
@@ -668,7 +672,7 @@ describe("detached chat main-process boundary", () => {
       await value.ipc.invoke(
         DETACHED_CHAT_IPC.open,
         eventFor(value.main.webContents),
-        { conversationId: FIRST_ID, title: "First", draft: "initial" },
+        { conversationId: FIRST_ID, title: "First", draft: "initial", terminalIds: [] },
       );
       const popup = value.popups[0]!;
       const mirrorEvent = eventFor(popup.webContents) as unknown as IpcMainEvent;
@@ -710,11 +714,11 @@ describe("detached chat main-process boundary", () => {
         await value.ipc.invoke(
           DETACHED_CHAT_IPC.open,
           eventFor(value.main.webContents),
-          { conversationId, title, draft: "" },
+          { conversationId, title, draft: "", terminalIds: [] },
         );
       }
       const [first, second] = value.popups;
-      await value.ipc.invoke(DETACHED_CHAT_IPC.close, eventFor(first!.webContents), "kept draft");
+      await value.ipc.invoke(DETACHED_CHAT_IPC.close, eventFor(first!.webContents), "kept draft", []);
       await afterIpcReply();
       expect(first!.destroyed).toBe(true);
       expect(second!.destroyed).toBe(false);
@@ -724,6 +728,7 @@ describe("detached chat main-process boundary", () => {
         DETACHED_CHAT_IPC.close,
         eventFor(value.main.webContents),
         "",
+        [],
       )).rejects.toThrow("Rejected untrusted renderer request");
       await afterIpcReply();
       expect(value.main.destroyed).toBe(false);
@@ -747,7 +752,7 @@ describe("detached chat main-process boundary", () => {
         await value.ipc.invoke(
           DETACHED_CHAT_IPC.open,
           eventFor(value.main.webContents),
-          { conversationId: FIRST_ID, title: "First", draft: "initial" },
+          { conversationId: FIRST_ID, title: "First", draft: "initial", terminalIds: [] },
         );
         return value.popups.at(-1)!;
       };
@@ -763,6 +768,7 @@ describe("detached chat main-process boundary", () => {
         DETACHED_CHAT_IPC.close,
         eventFor(explicitlyClosed.webContents),
         "closed draft",
+        [],
       );
       expect(explicitlyClosed.destroyed).toBe(false);
       await afterIpcReply();
@@ -776,11 +782,13 @@ describe("detached chat main-process boundary", () => {
         DETACHED_CHAT_IPC.dock,
         eventFor(docked.webContents),
         "docked draft",
+        [],
       );
       await value.ipc.invoke(
         DETACHED_CHAT_IPC.dock,
         eventFor(docked.webContents),
         "newer docked draft",
+        [],
       );
       expect(docked.destroyed).toBe(false);
       await afterIpcReply();
@@ -792,20 +800,26 @@ describe("detached chat main-process boundary", () => {
     }
   });
 
-  it("docks with the draft alone and rejects any extra argument", async () => {
+  it("docks with the draft and terminal ids and rejects any extra argument", async () => {
     const value = fixture();
     try {
       await value.ipc.invoke(
         DETACHED_CHAT_IPC.open,
         eventFor(value.main.webContents),
-        { conversationId: FIRST_ID, title: "First", draft: "" },
+        { conversationId: FIRST_ID, title: "First", draft: "", terminalIds: [] },
       );
       const popup = value.popups[0]!;
       await expect(value.ipc.invoke(
         DETACHED_CHAT_IPC.dock,
         eventFor(popup.webContents),
         "draft",
+        [],
         { kind: "settings", page: "agents" },
+      )).rejects.toThrow("Rejected untrusted renderer request");
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.dock,
+        eventFor(popup.webContents),
+        "draft",
       )).rejects.toThrow("Rejected untrusted renderer request");
       await afterIpcReply();
       expect(popup.destroyed).toBe(false);
@@ -823,7 +837,7 @@ describe("detached chat main-process boundary", () => {
         await value.ipc.invoke(
           DETACHED_CHAT_IPC.open,
           eventFor(value.main.webContents),
-          { conversationId, title, draft: "" },
+          { conversationId, title, draft: "", terminalIds: [] },
         );
       }
       const [first, second] = value.popups;
@@ -902,17 +916,17 @@ describe("detached chat main-process boundary", () => {
         await value.ipc.invoke(
           DETACHED_CHAT_IPC.open,
           eventFor(value.main.webContents),
-          { conversationId, title, draft: "" },
+          { conversationId, title, draft: "", terminalIds: [] },
         );
       }
       const [first, second] = value.popups;
-      await value.ipc.invoke(DETACHED_CHAT_IPC.close, eventFor(first!.webContents), "closing draft");
+      await value.ipc.invoke(DETACHED_CHAT_IPC.close, eventFor(first!.webContents), "closing draft", []);
       await expect(value.ipc.invoke(
         DETACHED_CHAT_IPC.openInMain,
         eventFor(first!.webContents),
         target,
       )).rejects.toThrow("This chat window is closing.");
-      await value.ipc.invoke(DETACHED_CHAT_IPC.dock, eventFor(second!.webContents), "docking draft");
+      await value.ipc.invoke(DETACHED_CHAT_IPC.dock, eventFor(second!.webContents), "docking draft", []);
       await expect(value.ipc.invoke(
         DETACHED_CHAT_IPC.openInMain,
         eventFor(second!.webContents),
@@ -935,7 +949,7 @@ describe("detached chat main-process boundary", () => {
       await value.ipc.invoke(
         DETACHED_CHAT_IPC.open,
         eventFor(value.main.webContents),
-        { conversationId: FIRST_ID, title: "First", draft: "" },
+        { conversationId: FIRST_ID, title: "First", draft: "", terminalIds: [] },
       );
       const popup = value.popups[0]!;
       popup.close = () => {
@@ -973,6 +987,191 @@ describe("detached chat main-process boundary", () => {
       value.coordinator.unregisterIpc();
     } finally {
       rmSync(value.directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("detached chat terminal handoff", () => {
+  const TERMINAL_IDS = [
+    "00000003-1111-4111-8111-111111111111",
+    "00000004-1111-4111-8111-111111111111",
+  ];
+  const NEWER_TERMINAL_IDS = ["00000005-1111-4111-8111-111111111111"];
+
+  async function openFirst(
+    value: Fixture,
+    terminalIds: readonly string[] = TERMINAL_IDS,
+  ): Promise<FakeBrowserWindow> {
+    await value.ipc.invoke(
+      DETACHED_CHAT_IPC.open,
+      eventFor(value.main.webContents),
+      { conversationId: FIRST_ID, title: "First", draft: "", terminalIds },
+    );
+    return value.popups.at(-1)!;
+  }
+
+  function terminalHandoffs(value: Fixture): unknown[] {
+    return value.main.webContents.sent
+      .filter(({ channel }) => channel === DETACHED_CHAT_IPC.terminalHandoff)
+      .map(({ args }) => args);
+  }
+
+  it("relays the main window's terminal ids to the new window only once", async () => {
+    const value = fixture();
+    try {
+      const popup = await openFirst(value);
+      expect(await value.ipc.invoke(
+        DETACHED_CHAT_IPC.getWindowContext,
+        eventFor(popup.webContents),
+      )).toEqual({
+        role: "detached-chat",
+        conversationId: FIRST_ID,
+        alwaysOnTop: false,
+        draft: "",
+        terminalIds: TERMINAL_IDS,
+      });
+      await openFirst(value, NEWER_TERMINAL_IDS);
+      expect(value.popups).toHaveLength(1);
+      expect(await value.ipc.invoke(
+        DETACHED_CHAT_IPC.getWindowContext,
+        eventFor(popup.webContents),
+      )).toMatchObject({ terminalIds: TERMINAL_IDS });
+      expect(await value.ipc.invoke(
+        DETACHED_CHAT_IPC.getWindowContext,
+        eventFor(value.main.webContents),
+      )).toEqual({ role: "main" });
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("forgets terminal ids with their window and after a failed open", async () => {
+    const failing = fixture(undefined, new Error("protocol unavailable"));
+    try {
+      await expect(openFirst(failing)).rejects.toThrow("protocol unavailable");
+    } finally {
+      await cleanup(failing);
+    }
+    const value = fixture();
+    try {
+      const first = await openFirst(value);
+      first.close();
+      expect(value.coordinator.summaries()).toEqual([]);
+      const reopened = await openFirst(value, []);
+      expect(reopened).not.toBe(first);
+      expect(await value.ipc.invoke(
+        DETACHED_CHAT_IPC.getWindowContext,
+        eventFor(reopened.webContents),
+      )).toMatchObject({ terminalIds: [] });
+      expect(terminalHandoffs(value)).toEqual([]);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("hands the window's terminal ids back to the main window before docking", async () => {
+    let value: Fixture;
+    const sentBeforeDock: unknown[][] = [];
+    value = fixture(() => {
+      sentBeforeDock.push(...terminalHandoffs(value) as unknown[][]);
+    });
+    try {
+      const popup = await openFirst(value);
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.dock,
+        eventFor(popup.webContents),
+        "docked draft",
+        NEWER_TERMINAL_IDS,
+      );
+      expect(terminalHandoffs(value)).toEqual([]);
+      await afterIpcReply();
+      await afterIpcReply();
+      const handoff = [{
+        conversationId: FIRST_ID,
+        terminalIds: NEWER_TERMINAL_IDS,
+        dock: true,
+      }];
+      expect(popup.destroyed).toBe(true);
+      expect(value.docked).toHaveBeenCalledWith(FIRST_ID);
+      expect(sentBeforeDock).toEqual([handoff]);
+      expect(terminalHandoffs(value)).toEqual([handoff]);
+      expect(popup.webContents.sent.map(({ channel }) => channel))
+        .not.toContain(DETACHED_CHAT_IPC.terminalHandoff);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("hands terminal ids back on close without docking", async () => {
+    const value = fixture();
+    try {
+      const popup = await openFirst(value);
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.close,
+        eventFor(popup.webContents),
+        "closed draft",
+        TERMINAL_IDS,
+      );
+      await afterIpcReply();
+      await afterIpcReply();
+      expect(popup.destroyed).toBe(true);
+      expect(value.docked).not.toHaveBeenCalled();
+      expect(terminalHandoffs(value)).toEqual([[{
+        conversationId: FIRST_ID,
+        terminalIds: TERMINAL_IDS,
+        dock: false,
+      }]]);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("refuses malformed terminal ids and untrusted senders before closing anything", async () => {
+    const value = fixture();
+    try {
+      const popup = await openFirst(value);
+      for (const channel of [DETACHED_CHAT_IPC.dock, DETACHED_CHAT_IPC.close]) {
+        for (const terminalIds of [
+          [...TERMINAL_IDS, ...NEWER_TERMINAL_IDS, "00000006-1111-4111-8111-111111111111", "00000007-1111-4111-8111-111111111111"],
+          [TERMINAL_IDS[0], TERMINAL_IDS[0]],
+          ["not-a-terminal"],
+          TERMINAL_IDS[0],
+          null,
+        ]) {
+          await expect(value.ipc.invoke(
+            channel,
+            eventFor(popup.webContents),
+            "draft",
+            terminalIds,
+          )).rejects.toThrow("Invalid detached-chat terminal handoff");
+        }
+        await expect(value.ipc.invoke(
+          channel,
+          eventFor(value.main.webContents),
+          "draft",
+          TERMINAL_IDS,
+        )).rejects.toThrow("Rejected untrusted renderer request");
+      }
+      await afterIpcReply();
+      await afterIpcReply();
+      expect(popup.destroyed).toBe(false);
+      expect(value.docked).not.toHaveBeenCalled();
+      expect(terminalHandoffs(value)).toEqual([]);
+      expect(value.main.webContents.sent.map(({ channel }) => channel))
+        .not.toContain(DETACHED_CHAT_IPC.draftChanged);
+
+      const persistenceEvent = eventFor(
+        popup.webContents,
+      ) as unknown as IpcMainEvent;
+      value.ipc.emit(
+        DETACHED_CHAT_IPC.persistDraft,
+        persistenceEvent,
+        "native close draft",
+        TERMINAL_IDS,
+      );
+      expect(persistenceEvent.returnValue).toBe(false);
+    } finally {
+      await cleanup(value);
     }
   });
 });

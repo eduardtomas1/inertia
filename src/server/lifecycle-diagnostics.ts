@@ -23,6 +23,9 @@ import {
   type LifecycleBuildMetadata,
 } from "../shared/lifecycle-build-metadata";
 import { currentKnownHarnessIdSchema } from "../shared/model-routing";
+import type { RuntimeStore } from "./database";
+import type { OwnedProviderRun } from "./persistence/provider-run-ownership-repository";
+import { liveProviderRunOwnership } from "./runtime/turns/turn-checkout-activity";
 
 const MAX_REPORTED_RUNTIME_UPTIME_MS = 30 * 24 * 60 * 60 * 1_000;
 export interface RuntimeLifecycleDiagnosticInput {
@@ -40,6 +43,7 @@ export interface RuntimeLifecycleDiagnosticInput {
   activeConversationIds: readonly string[];
   runningProviderConversationIds: ReadonlySet<string>;
   providerRunOwnershipConversationIds: readonly string[];
+  unconfirmedProviderCleanupCount?: number;
   terminalOwnershipCount: number;
   interactionCount: number;
   buildMetadata?: LifecycleBuildMetadata | null;
@@ -247,11 +251,25 @@ export function runtimeLifecycleDiagnosticSnapshot(
     unresolvedTurnCount: boundedCount(activeConversationIds.size),
     unresolvedInteractionCount: boundedCount(input.interactionCount),
     actionableState,
+    ...(input.unconfirmedProviderCleanupCount ? {
+      unconfirmedProviderCleanupCount: boundedCount(input.unconfirmedProviderCleanupCount),
+    } : {}),
     ...(input.windowsCleanupFailures?.length ? {
       windowsCleanupFailures: input.windowsCleanupFailures.slice(-8).flatMap((failure) => {
         const parsed = windowsCleanupFailureSchema.safeParse(failure);
         return parsed.success ? [parsed.data] : [];
       }),
     } : {}),
+  };
+}
+
+export function providerRunOwnershipDiagnostics(
+  store: Pick<RuntimeStore, "agentTurn">,
+  owned: readonly OwnedProviderRun[],
+): Pick<RuntimeLifecycleDiagnosticInput, "providerRunOwnershipConversationIds" | "unconfirmedProviderCleanupCount"> {
+  const live = liveProviderRunOwnership(store as RuntimeStore, owned);
+  return {
+    providerRunOwnershipConversationIds: live.map(({ conversationId }) => conversationId),
+    unconfirmedProviderCleanupCount: owned.length - live.length,
   };
 }

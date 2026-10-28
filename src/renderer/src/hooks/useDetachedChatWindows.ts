@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AppSnapshot } from "@shared/contracts";
 import type {
+  DetachedChatTerminalHandoff,
   DetachedChatWindowOpenResult,
   DetachedChatWindowOpenRequest,
   DetachedChatWindowSummary,
 } from "@shared/desktop";
 import { DETACHED_CHAT_WINDOW_LIMIT } from "@shared/desktop";
 import { persistComposerDraft } from "../utils/composerDraftPersistence";
+import { seedTerminalTabs, terminalStorageKey } from "../components/terminalTabStorage";
 
 export interface DetachedChatWindowsController {
   ready: boolean;
@@ -18,15 +21,61 @@ export interface DetachedChatWindowsController {
   focus: (conversationId: string) => Promise<boolean>;
 }
 
+export interface DockedTerminalRequest {
+  dockedTerminalConversationId: string | null;
+  consumeDockedTerminal: () => void;
+}
+
 /**
  * Owns the main renderer's presentation projection of native chat windows.
  * The main process remains authoritative; the initial invoke cannot overwrite
  * a newer lifecycle event that arrived while it was in flight.
  */
-export function useDetachedChatWindows(): DetachedChatWindowsController {
+export function useDetachedChatWindows(
+  snapshot: AppSnapshot | null = null,
+): DetachedChatWindowsController & DockedTerminalRequest {
   const [windows, setWindows] = useState<DetachedChatWindowSummary[]>([]);
   const [windowsReady, setWindowsReady] = useState(false);
   const [draftsReady, setDraftsReady] = useState(false);
+  const [dockedTerminalConversationId, setDockedTerminalConversationId] =
+    useState<string | null>(null);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
+  const pendingTerminalHandoffs = useRef(new Map<string, DetachedChatTerminalHandoff>());
+
+  const applyTerminalHandoff = useCallback((
+    current: AppSnapshot,
+    handoff: DetachedChatTerminalHandoff,
+  ) => {
+    const projectId = current.conversations.find(
+      ({ id }) => id === handoff.conversationId,
+    )?.projectId;
+    if (!projectId) return;
+    seedTerminalTabs(
+      terminalStorageKey(projectId, handoff.conversationId),
+      handoff.terminalIds,
+    );
+    if (handoff.dock && handoff.terminalIds.length > 0) {
+      setDockedTerminalConversationId(handoff.conversationId);
+    }
+  }, []);
+
+  useEffect(() => window.inertia.onDetachedChatTerminalHandoff((handoff) => {
+    const current = snapshotRef.current;
+    if (current) applyTerminalHandoff(current, handoff);
+    else pendingTerminalHandoffs.current.set(handoff.conversationId, handoff);
+  }), [applyTerminalHandoff]);
+
+  useEffect(() => {
+    if (!snapshot || pendingTerminalHandoffs.current.size === 0) return;
+    const pending = [...pendingTerminalHandoffs.current.values()];
+    pendingTerminalHandoffs.current.clear();
+    for (const handoff of pending) applyTerminalHandoff(snapshot, handoff);
+  }, [applyTerminalHandoff, snapshot]);
+  const consumeDockedTerminal = useCallback(
+    () => setDockedTerminalConversationId(null),
+    [],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -115,5 +164,36 @@ export function useDetachedChatWindows(): DetachedChatWindowsController {
     atLimit: windows.length >= DETACHED_CHAT_WINDOW_LIMIT,
     open,
     focus,
-  }), [conversationIds, draftsReady, focus, open, windows, windowsReady]);
+    dockedTerminalConversationId,
+    consumeDockedTerminal,
+  }), [
+    consumeDockedTerminal,
+    conversationIds,
+    dockedTerminalConversationId,
+    draftsReady,
+    focus,
+    open,
+    windows,
+    windowsReady,
+  ]);
+}
+
+export function useDockedTerminalOpen(
+  { dockedTerminalConversationId, consumeDockedTerminal }: DockedTerminalRequest,
+  shownConversationId: string | null,
+  openTerminal: () => void,
+): void {
+  useEffect(() => {
+    if (
+      !dockedTerminalConversationId
+      || shownConversationId !== dockedTerminalConversationId
+    ) return;
+    consumeDockedTerminal();
+    openTerminal();
+  }, [
+    consumeDockedTerminal,
+    dockedTerminalConversationId,
+    openTerminal,
+    shownConversationId,
+  ]);
 }

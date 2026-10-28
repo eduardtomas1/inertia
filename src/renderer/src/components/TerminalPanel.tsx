@@ -17,6 +17,7 @@ import {
   appendTerminalTab,
   claimTerminalPanelOwner,
   isCurrentTerminalPanelOwner,
+  markTerminalPanelMounted,
   MAX_PERSISTED_TERMINAL_TABS,
   newTerminalTab,
   persistTerminalTabs,
@@ -45,6 +46,7 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   useLayoutEffect(() => {
     claimTerminalPanelOwner(storageKey, panelOwner);
   }, [panelOwner, storageKey]);
+  useEffect(() => markTerminalPanelMounted(storageKey), [storageKey]);
   const [initialTabs] = useState(() => readPersistedTerminalTabs(storageKey));
   const [tabs, setTabs] = useState<TerminalTab[]>(initialTabs);
   const [activeId, setActiveId] = useState(initialTabs[0].id);

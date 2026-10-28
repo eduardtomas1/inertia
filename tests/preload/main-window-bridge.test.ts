@@ -74,6 +74,7 @@ describe("main window preload", () => {
       "onAppUpdateStatus",
       "onDetachedChatDraftChanged",
       "onDetachedChatDraftMirrored",
+      "onDetachedChatTerminalHandoff",
       "onDetachedChatWindowsChanged",
       "onDiagnosticsChanged",
       "onLaunchRequest",
@@ -157,6 +158,38 @@ describe("main window preload", () => {
     dispose();
     push({}, latest);
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("delivers only exact terminal handoffs to the workbench", () => {
+    const channel = "inertia:detached-chat-terminal-handoff";
+    const listener = vi.fn();
+    const dispose = bridge.onDetachedChatTerminalHandoff(listener);
+    const registration = electron.on.mock.calls.find(([name]) => name === channel);
+    expect(registration).toBeDefined();
+    const push = registration![1] as (event: unknown, value: unknown) => void;
+    const conversationId = "11111111-1111-4111-8111-111111111111";
+    const terminalId = "22222222-2222-4222-8222-222222222222";
+    const handoff = { conversationId, terminalIds: [terminalId], dock: true };
+
+    push({}, handoff);
+    push({}, { conversationId, terminalIds: [], dock: false });
+    for (const malformed of [
+      null,
+      "handoff",
+      { conversationId, terminalIds: [terminalId] },
+      { ...handoff, extra: true },
+      { ...handoff, conversationId: "not-a-uuid" },
+      { ...handoff, terminalIds: ["not-a-uuid"] },
+      { ...handoff, terminalIds: [terminalId, terminalId] },
+      { ...handoff, terminalIds: Array.from({ length: 5 }, (_, index) => `2222222${index}-2222-4222-8222-222222222222`) },
+      { ...handoff, dock: "yes" },
+    ]) push({}, malformed);
+    expect(listener.mock.calls).toEqual([
+      [handoff],
+      [{ conversationId, terminalIds: [], dock: false }],
+    ]);
+    dispose();
+    expect(electron.removeListener).toHaveBeenCalledWith(channel, registration![1]);
   });
 
   it("forwards only a boolean capture choice and no arguments when clearing diagnostics", async () => {

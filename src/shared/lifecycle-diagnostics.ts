@@ -152,6 +152,7 @@ export const runtimeLifecycleDiagnosticSnapshotSchema = /* @__PURE__ */ (() => z
     unresolvedTurnCount: boundedCount,
     unresolvedInteractionCount: boundedCount,
     actionableState: z.enum(LIFECYCLE_ACTIONABLE_STATES),
+    unconfirmedProviderCleanupCount: boundedCount.optional(),
     windowsCleanupFailures: z.array(windowsCleanupFailureSchema).max(8).optional(),
   })
   .strict())();

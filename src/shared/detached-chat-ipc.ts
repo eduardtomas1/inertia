@@ -8,6 +8,7 @@ export const DETACHED_CHAT_IPC = {
   windowsChanged: "inertia:detached-chat-windows-changed",
   draftChanged: "inertia:detached-chat-draft-changed",
   draftMirrored: "inertia:detached-chat-draft-mirrored",
+  terminalHandoff: "inertia:detached-chat-terminal-handoff",
   getPendingDrafts: "inertia:detached-chat-pending-drafts",
   acknowledgeDraft: "inertia:detached-chat-acknowledge-draft",
   persistDraft: "inertia:detached-chat-persist-draft",

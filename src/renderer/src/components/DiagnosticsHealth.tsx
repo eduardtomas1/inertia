@@ -63,6 +63,9 @@ export function DiagnosticsHealth({ runtime, lifecycleDiagnostics, appUpdateStat
     lifecycleDiagnostics
       ? `${lifecycleDiagnostics.ownedResources.turns} active ${lifecycleDiagnostics.ownedResources.turns === 1 ? "turn" : "turns"}`
         + ` · ${lifecycleDiagnostics.ownedResources.interactions} open ${lifecycleDiagnostics.ownedResources.interactions === 1 ? "interaction" : "interactions"}`
+        + (lifecycleDiagnostics.unconfirmedProviderCleanupCount
+          ? ` · Provider cleanup unconfirmed (${lifecycleDiagnostics.unconfirmedProviderCleanupCount})`
+          : "")
       : null,
     health ? `Measured ${formatDiagnosticTime(health.sampledAt)}` : null,
   ].filter(Boolean).join(" · ");

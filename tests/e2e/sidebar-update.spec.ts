@@ -25,6 +25,7 @@ test("sidebar updater uses real main actions, bounded notes and safe restart in 
   // blocked by the unrelated startup check while its icon says "checking".
   await expect(button).toHaveAccessibleName("Up to date — check again");
   await expect(button).toHaveAttribute("data-update-state", "idle");
+  await expect(button.locator(".update-status-icon")).toHaveClass("update-status-icon");
   await app.electronApp.evaluate(async ({ ipcMain, BrowserWindow }, url) => {
     const load = process.getBuiltinModule("module").createRequire(url);
     const module = load(url) as typeof import("./support/sidebar-update-fixture");
@@ -63,8 +64,15 @@ test("sidebar updater uses real main actions, bounded notes and safe restart in 
       await expect(button).toHaveAttribute("data-update-state", "checking");
       await expect(page.locator(".update-status-icon:is(.is-spin-start, .is-spinning)")).toHaveCSS("animation-name", "sidebar-update-half-turn");
       await capture("update-checking-dark");
+      await page.evaluate(() => { for (const animation of document.querySelector(".update-status-icon")!.getAnimations()) animation.pause(); });
       await app.electronApp.evaluate(() => (globalThis as FixtureGlobal).sidebarUpdateFixture.finishCheck());
       await expect(button).toHaveAttribute("data-update-state", "available");
+      await expect(button).toHaveAccessibleName("Update 1.2.3 ready to download");
+      await expect(button).not.toHaveAttribute("aria-disabled");
+      await expect(button.locator(".update-status-icon")).toHaveClass(/\bis-(?:spin-start|spinning)\b/u);
+      await page.evaluate(() => { for (const animation of document.querySelector(".update-status-icon")!.getAnimations()) animation.play(); });
+      await expect(button.locator(".update-status-icon:not(.is-spin-start, .is-spinning, .is-spin-settle) svg.lucide-download")).toHaveCount(1);
+      await expect(button).toHaveAccessibleName("Update 1.2.3 ready to download");
       await button.hover();
       await expect(popup.getByRole("heading", { name: "What’s changed in 1.2.3" })).toBeVisible();
       await capture("update-available-dark");

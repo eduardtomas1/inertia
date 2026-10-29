@@ -744,20 +744,19 @@ export class TurnController {
   start(turnId: string): boolean {
     const active = this.activeByTurn.get(turnId);
     if (!active || active.runState.isTerminal() || this.closing) return false;
-    this.beginStart(active);
-
-    const priorProviderCleanup = this.providerRunOwnershipBarriers.get(
-      active.conversation.id,
-    );
-    if (priorProviderCleanup) {
-      this.track(priorProviderCleanup
-        .catch(() => undefined)
-        .then(() => {
-          this.captureBeforeAndStartProvider(active);
-        }));
-      return true;
-    }
-    return this.captureBeforeAndStartProvider(active);
+    return this.store.orchestration.dispatchStart(active.turn.runId, () => {
+      this.beginStart(active);
+      const priorProviderCleanup = this.providerRunOwnershipBarriers.get(active.conversation.id);
+      if (priorProviderCleanup) {
+        this.track(priorProviderCleanup
+          .catch(() => undefined)
+          .then(() => {
+            this.captureBeforeAndStartProvider(active);
+          }));
+        return true;
+      }
+      return this.captureBeforeAndStartProvider(active);
+    });
   }
 
   private beginStart(active: ActiveTurn): void {

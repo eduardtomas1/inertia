@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { OrchestrationConflict, type CommandSource, type JsonValue } from "../../orchestration-v2/types";
 
 import type WebSocket from "ws";
 
@@ -87,6 +88,9 @@ function classifiedMessageSendError(
   error: unknown,
   stage: MessageSendStage,
 ): RuntimeRequestError {
+  if (error instanceof OrchestrationConflict && error.code === "cleanup-pending") {
+    return new RuntimeRequestError(publicRuntimeError(error), MESSAGE_ADMISSION_UNAVAILABLE);
+  }
   if (error instanceof RuntimeRequestError && error.delivery === "ambiguous") return error;
   const code = `message-send/${stage}/unexpected`;
   if (stage === "turn-publication") {
@@ -170,6 +174,15 @@ export function createTurnInteractionCommandHandler(
     switch (command.type) {
       case "message.send": {
         if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+        const orchestrationRequest: CommandSource = { actorId: "human", commandId: command.requestId,
+          command: JSON.parse(JSON.stringify(command)) as JsonValue };
+        const accepted = dependencies.store.orchestration.acceptedRequest(command.payload.conversationId, orchestrationRequest);
+        if (accepted) {
+          dependencies.send(socket, { type: "request.result", requestId: command.requestId,
+            result: { kind: "message.accepted", conversationId: accepted.turn.conversationId,
+              turnId: accepted.turn.id, userMessageId: accepted.message.id, disposition: "new-turn" } });
+          return "handled";
+        }
         const scheduledDispatch = dependencies.limitResetDispatch ?? dependencies.restartContinuationDispatch;
         let messageSendStage: MessageSendStage = "conversation-state";
         let conversation: ReturnType<RuntimeStore["conversation"]>;
@@ -790,6 +803,7 @@ export function createTurnInteractionCommandHandler(
             && !dependencies.store.hasConversationMessages(conversation.id);
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
+                orchestrationRequest,
                 queuedMessageId: dependencies.queuedMessage?.id,
                 limitResetPlanId: dependencies.limitResetDispatch?.planId,
                 restartContinuationPlanId: dependencies.restartContinuationDispatch?.planId,

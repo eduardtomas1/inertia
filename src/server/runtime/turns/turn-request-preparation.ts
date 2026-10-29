@@ -88,7 +88,7 @@ export function prepareTurnRequest(
   onAdoptionFailure?: (queued: QueuedTurn, error: unknown) => void,
 ): PreparedTurnRequest {
   const resolved = resolveTurnRequest(dependencies, request);
-  const queued = dependencies.store.beginAgentTurn(resolved.input);
+  const queued = dependencies.store.beginOrchestratedAgentTurn(resolved.input, request.orchestrationRequest);
   try {
     if (resolved.handoffFromTurnId) {
       retireUsageLimitSnooze(dependencies, queued.turn.conversationId, resolved.handoffFromTurnId);

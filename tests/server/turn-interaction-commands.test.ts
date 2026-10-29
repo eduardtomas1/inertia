@@ -172,6 +172,7 @@ function dependencies(options: {
   } as unknown as ProviderInfo;
   return {
     store: {
+      orchestration: { acceptedRequest: vi.fn(() => null) },
       conversation: vi.fn(() => ({
         id: conversationId,
         title: "Existing conversation",
@@ -421,6 +422,22 @@ describe("stop racing settlement", () => {
 });
 
 describe("new-turn admission recovery", () => {
+  it("replays an accepted request before interpreting a duplicate as an active-turn follow-up", async () => {
+    const queue = vi.fn();
+    const runtime = dependencies({ queue, relinquishAll: vi.fn(async () => undefined) });
+    const accepted = queuedTurn();
+    vi.mocked(runtime.store.orchestration.acceptedRequest).mockReturnValue(accepted as never);
+    const socket = {} as never;
+    await expect(createTurnInteractionCommandHandler(runtime)(socket, messageCommand())).resolves.toBe("handled");
+    expect(queue).not.toHaveBeenCalled();
+    expect(runtime.turns.isActive).not.toHaveBeenCalled();
+    expect(runtime.send).toHaveBeenCalledWith(socket, {
+      type: "request.result", requestId: messageCommand().requestId,
+      result: { kind: "message.accepted", conversationId, turnId: accepted.turn.id,
+        userMessageId: accepted.message.id, disposition: "new-turn" },
+    });
+  });
+
   it.each([
     { stage: "conversation-state", failure: "conversation" },
     { stage: "active-route", failure: "active-route" },

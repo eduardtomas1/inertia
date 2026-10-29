@@ -1,4 +1,5 @@
 import { CheckpointError } from "./checkpoints";
+import { OrchestrationConflict } from "./orchestration-v2/types";
 import { RecordNotFoundError } from "./database";
 import { ConversationHistoryTooLargeError, ConversationProviderChangeError } from "./persistence/errors";
 import { GitError } from "./git";
@@ -37,6 +38,11 @@ export function userCorrectableRuntimeError(error: unknown): boolean {
 }
 
 export function publicRuntimeError(error: unknown): string {
+  if (error instanceof OrchestrationConflict) {
+    if (error.code === "cleanup-pending") return "The previous provider process has not been confirmed stopped. Wait for cleanup before starting another turn.";
+    if (error.code === "command-conflict") return "This request identity was already used for different work. Refresh the chat before retrying.";
+    return "The chat changed while this request was being prepared. Refresh it before retrying.";
+  }
   if (error instanceof AttachmentResolutionError) {
     return ATTACHMENT_RESOLUTION_PUBLIC_ERROR;
   }

@@ -787,6 +787,11 @@
       "version": 106,
       "name": "PersistDuoComparisonBriefs",
       "digest": "5f178914d0fa96fece0a0ad3c5dab4c1362971ed3c93d02d0a923457f0aec920"
+    },
+    {
+      "version": 107,
+      "name": "OrchestrationV2EventStore",
+      "digest": "7ba9c14f3ec99e39d64d53484e91f0c7d06d9f20409acbaf1330bb87a8421c34"
     }
   ]
 }

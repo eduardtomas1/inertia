@@ -1,14 +1,16 @@
-# ORCHESTRATOR V2 — research dossier
+# ORCHESTRATOR V2 — research and implementation
 
-Research date: **2026-10-29**. This phase studies Inertia and T3 Code, preserves the findings locally, and prepares a design discussion. It contains no application implementation.
+Research date: **2026-10-29**. The research phase is complete. The user subsequently authorized coding and explicitly selected the full audited T3 Code orchestration system. Implementation is underway on `orchestrator-v2`; PR #686 must remain unmerged.
 
-**Main conclusion:** Inertia already has strong exact-turn ownership, cleanup, context, queue and workspace safeguards. The most useful next layer is durable coordination between those systems: explicit dispatch/effect identity, managed-child result delivery and authorized parent continuation. T3's implementation provides concrete patterns and failure cases, but copying its entire architecture or provider list is unnecessary.
+**Current scope:** [Implementation plan and completion contract](implementation-plan.md). The earlier incremental recommendation in the design discussion is superseded by the user's direction. The evidence in the research documents remains useful; its proposed scope does not constrain this implementation.
 
 ## Reading order
 
 | Document | Purpose |
 | --- | --- |
-| [Design discussion and comparison](design-discussion.md) | Capability gaps, invariants to preserve, choices before coding, proposed phases and acceptance scenarios. Start here. |
+| [Implementation plan](implementation-plan.md) | Full T3 target, completion checklist, active ownership and integration boundaries. Start here. |
+| [Implementation progress](implementation-progress.md) | Production integration checkpoints, executed checks and remaining work. |
+| [Design discussion and comparison](design-discussion.md) | Research comparison and historical proposal; the reduced-scope recommendation is superseded. |
 | [Inertia current state](inertia-current-state.md) | Independent audit of current execution, providers, contexts, managed/native children, workflows, persistence, workspace and client behavior. |
 | [Inertia source map](inertia-source-map.md) | Implementation symbols, line anchors, inspected test assertions and audit limitations. |
 | [T3 orchestration study](t3code-orchestration.md) | Domain model, transaction/outbox boundary, provider transitions, handoff/fork/delegation, recovery, MCP and migration. |
@@ -58,4 +60,4 @@ The full Inertia `npm run check` passed under Node 22.23.2: **1,404 test files /
 
 T3's source and selected tests were inspected, not executed. No live provider, T3 UI, Windows/Linux runtime or packaging behavior was exercised. The public fetch could not retrieve Maria's complete long post; the supplied screenshots/accessibility text define the announcement coverage. These limits are reflected in the individual documents.
 
-The next step is to agree on the first behavior, authorization model and acceptance criteria in [design-discussion.md](design-discussion.md), then authorize implementation.
+Implementation status and remaining work are tracked in [implementation-plan.md](implementation-plan.md). The verification numbers above describe the research base, not validation of subsequent code changes.

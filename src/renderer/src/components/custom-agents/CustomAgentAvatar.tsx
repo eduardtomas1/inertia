@@ -46,7 +46,7 @@ const GLYPH_PLATE_FROM = 40;
 const MARK_SHADOW_FROM = 28;
 
 function markInset(size: number): number {
-  return size <= 24 ? 0 : size < 48 ? 2 : 4;
+  return size <= 24 ? 1 : size < 48 ? 2 : 4;
 }
 
 export interface CustomAgentIdentity {

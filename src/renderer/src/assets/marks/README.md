@@ -17,7 +17,8 @@ render: 256 × 256 pixels, transparent, lossy WebP at quality 90.
 The body is porcelain white and the props are graphite; no accent colour is baked
 in. The agent's accent comes from the tile behind the figure. Dark renders carry
 a stronger rim light; light renders use a lower rim and a warmer fill. All six share
-one orthographic framing, so the figure never jumps when you switch marks.
+one orthographic camera and one framing scale, so the figure never jumps when you
+switch marks.
 
 ## Provenance
 
@@ -30,20 +31,39 @@ The source file is read only; the render script never saves it.
 ## Regeneration
 
 Use Blender 5.2 with `blender-run`, plus system Python 3 with Pillow (WebP support).
-Render into a scratch folder, then copy the twelve WebPs into this folder:
+Render the twelve PNGs into a scratch folder, then frame and import them:
 
 ```sh
 blender-run --threads 2 source-assets/mascot/inertia-mascot-pickup.blend \
   scripts/custom-agent-marks/render-marks.py -- --output /tmp/agent-marks
-scripts/custom-agent-marks/import-renders.sh /tmp/agent-marks
+scripts/custom-agent-marks/import-renders.sh /tmp/agent-marks /tmp/marks-framed
 ```
 
-`render-marks.py` renders with Cycles on the CPU (two threads, 24 samples, a fixed
-seed, denoised) and waits while the machine is busy. It also writes
-`contact-sheet.png` and `readability.png` (each mark at 32 and 20 pixels on both
-tile colours) for review; those stay in the scratch folder. Pass `--only runner,scout`
-to render a subset, or `--inspection` for the AgX view transform. The import script
-copies only the twelve `<mark>-<theme>.webp` files and stops if one is missing.
+`render-marks.py` renders 256-pixel PNGs with Cycles on the CPU (two threads, 24
+samples, a fixed seed, denoised) and waits while the machine is busy. Pass
+`--only runner,scout` to render a subset, or `--inspection` for the AgX view
+transform.
+
+`import-renders.sh` checks that all twelve `<mark>-<theme>.png` files exist, then
+runs `frame-renders.py`, which needs no Blender and writes the WebPs straight into
+this folder. For each render it:
+
+1. Tones the pixels. Light renders get a contrast curve of 1.3 around the mean
+   opaque luminance of the six light renders, then a highlight lift of 0.5 that
+   eases in above 45 percent, so porcelain reads white and graphite reads dark on
+   pale tiles. Dark renders get a brightness factor of 1.06. Alpha is untouched.
+2. Crops to the alpha bounding box (alpha above 8) and pads it to a square with a
+   7 percent margin on each side, centred on that box. When the box heights differ
+   by more than 10 percent, every render shares one square sized from the largest
+   box so the family keeps one scale.
+3. Resizes to 256 pixels with Lanczos on premultiplied alpha, so edges get no dark
+   fringe, and saves a WebP at quality 90, method 6, with alpha.
+
+The optional second argument is a review folder for `contact-sheet.png` (every
+framed mark on the dark and light tile colours) and `readability.png` (each mark
+before and after at 36 and 20 pixels, at 2x and 1x, with the real tile insets).
+Look at both before committing. Run `frame-renders.py --help` to try other
+margins or tone values against the same renders.
 
 ## Renderer use
 
@@ -65,9 +85,9 @@ bake one in; that lets the figure lift off the ground while an agent runs.
 
 | Tile | Where | Inset | Figure box | Shadow |
 | ---: | --- | ---: | ---: | --- |
-| 18 | message badge | 0 | 18 | no |
-| 20 | composer chip, `/calling` rows, preset chips | 0 | 20 | no |
-| 24 | reserved | 0 | 24 | no |
+| 18 | message badge | 1 | 16 | no |
+| 20 | composer chip, `/calling` rows, preset chips | 1 | 18 | no |
+| 24 | reserved | 1 | 22 | no |
 | 32 | empty-state hero | 2 | 28 | yes |
 | 36 | call block header, settings rows | 2 | 32 | yes |
 | 40 | mark gallery options | 2 | 36 | yes |

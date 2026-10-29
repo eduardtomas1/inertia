@@ -137,7 +137,7 @@ describe("called agent badge", () => {
     expect(avatar).toHaveAttribute("data-mark", "guard");
     expect(avatar).not.toHaveAttribute("data-live");
     expect(avatar.style.getPropertyValue("--agent-avatar-size")).toBe("18px");
-    expect(avatar.style.getPropertyValue("--agent-mark-inset")).toBe("0px");
+    expect(avatar.style.getPropertyValue("--agent-mark-inset")).toBe("1px");
     expect(avatar.querySelector("img")).toBeNull();
     const css = readFileSync("src/renderer/src/components/response-timeline/MessageAgentCall.css", "utf8").replaceAll("\r\n", "\n");
     expect(css).toMatch(/\.message-agent-call \.custom-agent-avatar::before,\n\.message-agent-call \.custom-agent-avatar::after \{\n  content: none;/u);

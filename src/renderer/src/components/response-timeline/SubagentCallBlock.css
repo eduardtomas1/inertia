@@ -47,6 +47,22 @@
   z-index: 1;
 }
 
+.subagent-call::after {
+  position: absolute;
+  z-index: 2;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(to right, var(--call-tint) 2px, transparent 2px);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.subagent-call[data-live="true"]::after {
+  opacity: 1;
+}
+
 .subagent-call[data-live="true"]::before {
   opacity: 0.6;
 }
@@ -141,22 +157,6 @@
 
 .subagent-call-header:hover {
   background: var(--fill);
-}
-
-.subagent-call-header::before {
-  position: absolute;
-  inset-block: 8px;
-  inset-inline-start: -1px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--call-tint);
-  content: "";
-  opacity: 0;
-  transition: opacity var(--dur) var(--ease);
-}
-
-.subagent-call[data-live="true"] .subagent-call-header::before {
-  opacity: 1;
 }
 
 .subagent-call-title {
@@ -340,8 +340,8 @@
 @media (prefers-reduced-motion: reduce) {
   .subagent-call,
   .subagent-call::before,
+  .subagent-call::after,
   .subagent-call-header,
-  .subagent-call-header::before,
   .subagent-call-chevron,
   .subagent-call-fold {
     transition: none;
@@ -361,8 +361,8 @@
     display: none;
   }
 
-  .subagent-call-header::before {
+  .subagent-call::after {
     forced-color-adjust: none;
-    background: Highlight;
+    background: linear-gradient(to right, Highlight 2px, transparent 2px);
   }
 }

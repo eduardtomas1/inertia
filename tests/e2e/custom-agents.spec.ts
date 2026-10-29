@@ -472,11 +472,16 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
   await editor.getByRole("radio", { name: "Target" }).click();
   await expect(editor.getByRole("radio", { name: "Target" })).toHaveAttribute("aria-checked", "true");
   await expect(editor.getByRole("radio", { name: "Scout" })).toHaveAttribute("aria-checked", "false");
+  await expect(editor.locator(".custom-agent-identity-preview")).toHaveAttribute("data-icon-kind", "symbol");
+  await editor.getByRole("radio", { name: "Scout" }).click();
+  await expect(editor.getByRole("radio", { name: "Scout" })).toHaveAttribute("aria-checked", "true");
+  await expect(editor.getByRole("radio", { name: "Target" })).toHaveAttribute("aria-checked", "false");
   await editor.getByRole("radio", { name: "Teal" }).click();
   await expect(editor.getByRole("radio", { name: "Teal" })).toHaveAttribute("aria-checked", "true");
   await editor.getByRole("radio", { name: "Blue" }).click();
   await expect(editor.getByRole("radio", { name: "Blue" })).toHaveAttribute("aria-checked", "true");
-  await expect(editor.locator(".custom-agent-identity-preview")).toHaveAttribute("data-icon-kind", "symbol");
+  await expect(editor.locator(".custom-agent-identity-preview")).toHaveAttribute("data-icon-kind", "mark");
+  await expect(editor.locator(".custom-agent-identity-preview")).toHaveAttribute("data-mark", "scout");
   await editor.getByRole("button", { name: "Save", exact: true }).click();
   await expect(editor).toHaveCount(0);
 
@@ -487,7 +492,7 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
   await expect.poll(() => storedAgents().map(({ name: agentName, handle: agentHandle, icon, accent, blocks }) => ({
     agentName, agentHandle, icon, accent, blocks: blocks.length,
   }))).toEqual([{
-    agentName: "Code reviewer", agentHandle: "code-reviewer", icon: { kind: "symbol", name: "target" }, accent: "blue", blocks: 4,
+    agentName: "Code reviewer", agentHandle: "code-reviewer", icon: { kind: "mark", name: "scout" }, accent: "blue", blocks: 4,
   }]);
 
   await reviewerRow.getByRole("button", { name: "Duplicate Code reviewer" }).click();
@@ -511,7 +516,7 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
   expect(exported.agents[0]).toMatchObject({
     name: "Code reviewer",
     handle: "code-reviewer",
-    icon: { kind: "symbol", name: "target" },
+    icon: { kind: "mark", name: "scout" },
     accent: "blue",
   });
 
@@ -684,7 +689,8 @@ test("shows a called agent's live and finished subagent work in the transcript",
   await expect(header.locator(".subagent-elapsed")).toHaveText(/^\d+s$/u);
   const avatar = header.locator(".custom-agent-avatar");
   await expect(avatar).toHaveAttribute("data-live", "true");
-  await expect(avatar).toHaveAttribute("data-icon-kind", "symbol");
+  await expect(avatar).toHaveAttribute("data-icon-kind", "mark");
+  await expect(avatar).toHaveAttribute("data-mark", "scout");
   await expect(live.locator(".subagent-call-task")).toHaveText(LIVE_TITLE);
   await expect(live.locator('.subagent-call-activity[data-tone="live"]')).toHaveText(LIVE_ACTIVITY);
   const children = live.getByRole("list", { name: "Agents started by Code reviewer" });

@@ -410,7 +410,7 @@ describe("custom agents settings", () => {
     expect(container.querySelector("svg")).toBeNull();
     expect(avatars.map((avatar) => avatar.dataset.mark)).toEqual(sizes.map(() => "scout"));
     expect(avatars.map((avatar) => avatar.dataset.iconKind)).toEqual(sizes.map(() => "mark"));
-    expect(avatars.map((avatar) => avatar.style.getPropertyValue("--agent-mark-inset"))).toEqual(["0px", "0px", "0px", "2px", "2px", "2px", "4px", "4px"]);
+    expect(avatars.map((avatar) => avatar.style.getPropertyValue("--agent-mark-inset"))).toEqual(["1px", "1px", "1px", "2px", "2px", "2px", "4px", "4px"]);
     expect(avatars.map((avatar) => avatar.querySelector(".custom-agent-avatar-figure")?.getAttribute("data-shadow") ?? null))
       .toEqual([null, null, null, "true", "true", "true", "true", "true"]);
     const symbol = render(<CustomAgentAvatar agent={{ ...identity, icon: { kind: "symbol", name: "search" } }} size={36} />).container.firstElementChild as HTMLElement;

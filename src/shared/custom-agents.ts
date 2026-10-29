@@ -50,12 +50,12 @@ export const CUSTOM_AGENT_MARK_NAMES = [
 ] as const;
 
 export const CUSTOM_AGENT_MARK_LABELS: Readonly<Record<CustomAgentMarkName, string>> = {
-  runner: "Runner",
-  scout: "Scout",
-  guard: "Guard",
+  runner: "Workflow planner",
+  scout: "Investigator",
+  guard: "Marketing",
   builder: "Builder",
-  scribe: "Scribe",
-  spark: "Spark",
+  scribe: "Writer",
+  spark: "Creative",
 };
 
 export const CUSTOM_AGENT_BLOCK_KINDS = [

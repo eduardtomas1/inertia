@@ -90,7 +90,8 @@ const budgets = {
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
-  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324,
+  // The themed mark refresh measures 242,951 CSS bytes (+81), with no extra headroom.
+  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 81,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
@@ -120,7 +121,8 @@ const budgets = {
   deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 6 + 22 + 5 + 25_894 + 226,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
-  deferredCustomAgentsSettingsJavaScript: 29_962 + 8_423 + 1_353 + 423,
+  // Role labels for the themed marks: 40,166 deferred bytes (+5).
+  deferredCustomAgentsSettingsJavaScript: 29_962 + 8_423 + 1_353 + 423 + 5,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
   deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43,
@@ -203,7 +205,8 @@ const budgets = {
   // (foundation) and 5,734 bytes of eager renderer wiring, after subtracting
   // the separately capped deferred dock and attach dialog closures. The review
   // fixes add 1,078 core bytes.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 25_206 + 5_537 + 549,
+  // The renamed shared mark labels add 24 bytes (2,478,799 measured).
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 25_206 + 5_537 + 549 + 24,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

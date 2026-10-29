@@ -89,7 +89,7 @@ describe("custom agent contracts", () => {
 
   it("accepts the six marks as a strict icon kind with labels", () => {
     expect(CUSTOM_AGENT_MARK_NAMES).toEqual(["runner", "scout", "guard", "builder", "scribe", "spark"]);
-    expect(CUSTOM_AGENT_MARK_NAMES.map((name) => CUSTOM_AGENT_MARK_LABELS[name])).toEqual(["Runner", "Scout", "Guard", "Builder", "Scribe", "Spark"]);
+    expect(CUSTOM_AGENT_MARK_NAMES.map((name) => CUSTOM_AGENT_MARK_LABELS[name])).toEqual(["Workflow planner", "Investigator", "Marketing", "Builder", "Writer", "Creative"]);
     for (const name of CUSTOM_AGENT_MARK_NAMES) expect(valid(draft({ icon: { kind: "mark", name } }))).toBe(true);
     expect(valid(draft({ icon: { kind: "mark", name: "shield" as never } }))).toBe(false);
     expect(valid(draft({ icon: { kind: "mark", name: "scout", data: "x" } as never }))).toBe(false);

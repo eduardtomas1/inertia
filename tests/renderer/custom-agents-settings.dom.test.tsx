@@ -433,7 +433,7 @@ describe("custom agents settings", () => {
     expect(groups.slice(0, 2)).toEqual(["Mark", "Symbol"]);
     const gallery = within(panel).getByRole("radiogroup", { name: "Mark" });
     const marks = within(gallery).getAllByRole("radio");
-    expect(marks.map((mark) => mark.getAttribute("aria-label"))).toEqual(["Runner", "Scout", "Guard", "Builder", "Scribe", "Spark"]);
+    expect(marks.map((mark) => mark.getAttribute("aria-label"))).toEqual(["Workflow planner", "Investigator", "Marketing", "Builder", "Writer", "Creative"]);
     expect(marks.every((mark) => mark.getAttribute("aria-checked") === "false")).toBe(true);
     expect(marks.map((mark) => mark.tabIndex)).toEqual([0, -1, -1, -1, -1, -1]);
     const tiles = marks.map((mark) => mark.querySelector<HTMLElement>(".custom-agent-avatar")!);
@@ -455,7 +455,7 @@ describe("custom agents settings", () => {
     expect(tiles.every((tile) => tile.style.getPropertyValue("--agent-tint-light") === tint)).toBe(true);
     fireEvent.click(within(panel).getByRole("radio", { name: "Pen" }));
     expect(marks.some((mark) => mark.getAttribute("aria-checked") === "true")).toBe(false);
-    fireEvent.click(within(panel).getByRole("radio", { name: "Guard" }));
+    fireEvent.click(within(panel).getByRole("radio", { name: "Marketing" }));
     fireEvent.click(within(panel).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     expect(request.mock.calls[0]![0]).toEqual({

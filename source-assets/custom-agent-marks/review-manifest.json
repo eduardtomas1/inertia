@@ -1,0 +1,86 @@
+[
+  {
+    "role": "investigator",
+    "size": [
+      900,
+      900
+    ],
+    "alpha_bounds": [
+      306,
+      88,
+      684,
+      828
+    ],
+    "blend_bytes": 292720
+  },
+  {
+    "role": "builder",
+    "size": [
+      900,
+      900
+    ],
+    "alpha_bounds": [
+      306,
+      88,
+      581,
+      832
+    ],
+    "blend_bytes": 258768
+  },
+  {
+    "role": "marketer",
+    "size": [
+      900,
+      900
+    ],
+    "alpha_bounds": [
+      308,
+      88,
+      571,
+      828
+    ],
+    "blend_bytes": 206220
+  },
+  {
+    "role": "workflow-planner",
+    "size": [
+      900,
+      900
+    ],
+    "alpha_bounds": [
+      291,
+      88,
+      609,
+      828
+    ],
+    "blend_bytes": 243639
+  },
+  {
+    "role": "writer",
+    "size": [
+      900,
+      900
+    ],
+    "alpha_bounds": [
+      299,
+      88,
+      545,
+      828
+    ],
+    "blend_bytes": 218695
+  },
+  {
+    "role": "creative",
+    "size": [
+      900,
+      900
+    ],
+    "alpha_bounds": [
+      250,
+      88,
+      573,
+      828
+    ],
+    "blend_bytes": 236233
+  }
+]

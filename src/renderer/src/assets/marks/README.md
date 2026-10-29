@@ -1,69 +1,42 @@
 # Custom agent marks
 
-Six porcelain figures that a custom agent can wear instead of a symbol or an
-uploaded PNG. Each mark is the Inertia runner from the app mascot, posed with one
-graphite prop that hints at a role. Every mark has a dark-theme and a light-theme
-render: 256 × 256 pixels, transparent, lossy WebP at quality 90.
+Six cute standing characters with floating logo heads and role-specific outfits.
+The heads are 30% smaller than the initial themed study. Every mark has a
+transparent 256×256 WebP for dark and light tiles (quality 90).
 
-| Mark | Prop | Files |
+| Stable ID | Character | Files |
 | --- | --- | --- |
-| Runner | none, a plain forward stride | [dark](runner-dark.webp) · [light](runner-light.webp) |
-| Scout | open magnifying ring beside the head | [dark](scout-dark.webp) · [light](scout-light.webp) |
-| Guard | round shield with a porcelain rim | [dark](guard-dark.webp) · [light](guard-light.webp) |
-| Builder | open-jaw wrench over the shoulder | [dark](builder-dark.webp) · [light](builder-light.webp) |
-| Scribe | pen held in a writing gesture | [dark](scribe-dark.webp) · [light](scribe-light.webp) |
-| Spark | lightning shape behind the rear foot | [dark](spark-dark.webp) · [light](spark-light.webp) |
+| runner | Workflow planner — sturdy vest, linked checklist and floating numbers | [dark](runner-dark.webp) · [light](runner-light.webp) |
+| scout | Investigator — trench coat, glasses and magnifier | [dark](scout-dark.webp) · [light](scout-light.webp) |
+| guard | Marketing — seafoam cardigan, phone and megaphone pin | [dark](guard-dark.webp) · [light](guard-light.webp) |
+| builder | Builder / Fixer — denim overalls, tool belt and wrench | [dark](builder-dark.webp) · [light](builder-light.webp) |
+| scribe | Writer — mulberry cardigan, open notebook and pen | [dark](scribe-dark.webp) · [light](scribe-light.webp) |
+| spark | Creative — clay apron, sketchbook, pencil and pocket brush | [dark](spark-dark.webp) · [light](spark-light.webp) |
 
-The body is porcelain white and the props are graphite; no accent colour is baked
-in. The agent's accent comes from the tile behind the figure. Dark renders carry
-a stronger rim light; light renders use a lower rim and a warmer fill. All six share
-one orthographic camera and one framing scale, so the figure never jumps when you
-switch marks.
+IDs remain unchanged so saved agents and exported files continue to resolve.
+The picker labels describe the new characters. Outfit colours are baked in;
+the agent's chosen accent still colours its surrounding tile.
 
-## Provenance
+## Provenance and regeneration
 
-The marks are new poses of the mascot rig in
-[`source-assets/mascot/inertia-mascot-pickup.blend`](../../../../../source-assets/mascot/README.md):
-the same continuous runner mesh, corrective smoothing, cursor shells, graphite
-midframe and materials. The props are simple bevelled meshes added at render time.
-The source file is read only; the render script never saves it.
+Editable Blender scenes, studio previews and transparent source renders live in
+[`source-assets/custom-agent-marks`](../../../../../source-assets/custom-agent-marks/README.md).
+The shared generator uses the seven-vertex outline from `inertia-logo.svg`.
+The former Roman worker is retained only as an archived study.
 
-## Regeneration
-
-Use Blender 5.2 with `blender-run`, plus system Python 3 with Pillow (WebP support).
-Render the twelve PNGs into a scratch folder, then frame and import them:
+After rebuilding the six models using that README, export and review:
 
 ```sh
-blender-run --threads 2 source-assets/mascot/inertia-mascot-pickup.blend \
-  scripts/custom-agent-marks/render-marks.py -- --output /tmp/agent-marks
-scripts/custom-agent-marks/import-renders.sh /tmp/agent-marks /tmp/marks-framed
+python3 scripts/custom-agent-marks/review-themed-family.py
+python3 scripts/custom-agent-marks/export-themed-marks.py
 ```
 
-`render-marks.py` renders 256-pixel PNGs with Cycles on the CPU (two threads, 24
-samples, a fixed seed, denoised) and waits while the machine is busy. Pass
-`--only runner,scout` to render a subset, or `--inspection` for the AgX view
-transform.
-
-`import-renders.sh` checks that all twelve `<mark>-<theme>.png` files exist, then
-runs `frame-renders.py`, which needs no Blender and writes the WebPs straight into
-this folder. For each render it:
-
-1. Tones the pixels. Light renders get a contrast curve of 1.3 around the mean
-   opaque luminance of the six light renders, then a highlight lift of 0.5 that
-   eases in above 45 percent, so porcelain reads white and graphite reads dark on
-   pale tiles. Dark renders get a brightness factor of 1.06. Alpha is untouched.
-2. Crops to the alpha bounding box (alpha above 8) and pads it to a square with a
-   7 percent margin on each side, centred on that box. When the box heights differ
-   by more than 10 percent, every render shares one square sized from the largest
-   box so the family keeps one scale.
-3. Resizes to 256 pixels with Lanczos on premultiplied alpha, so edges get no dark
-   fringe, and saves a WebP at quality 90, method 6, with alpha.
-
-The optional second argument is a review folder for `contact-sheet.png` (every
-framed mark on the dark and light tile colours) and `readability.png` (each mark
-before and after at 36 and 20 pixels, at 2x and 1x, with the real tile insets).
-Look at both before committing. Run `frame-renders.py --help` to try other
-margins or tone values against the same renders.
+The exporter uses `frame-renders.py`: alpha bounds above 8, a 7% margin,
+premultiplied-alpha Lanczos resizing, then WebP at quality 90. Both variants use
+the same source geometry and camera. Light images use contrast 1.1 without
+highlight lift; dark images use brightness 1.06. This keeps the coloured outfits
+readable. Review sheets are written to `source-assets/custom-agent-marks/app-review`.
+The original `render-marks.py` remains only for reproducing the retired runner set.
 
 ## Renderer use
 
@@ -95,5 +68,5 @@ bake one in; that lets the figure lift off the ground while an agent runs.
 | 64 | editor preview | 4 | 56 | yes |
 
 Below a 28-pixel figure box the props do not read, and the mark is simply the
-Inertia runner. The agent's name and accent always sit beside the mark, so the UI
+floating-cursor character. The agent's name and accent always sit beside the mark, so the UI
 never relies on the figure alone to show a role.

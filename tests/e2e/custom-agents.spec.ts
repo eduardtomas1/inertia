@@ -463,7 +463,7 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
   await expect(handle).toHaveValue("reviewer");
   await expect(editor.getByRole("textbox", { name: "Description" })).toHaveValue(CUSTOM_AGENT_PRESETS[0]!.summary);
   await expect(editor.locator(".custom-agent-block-kind")).toHaveText(["Role", "Directions", "Must", "Must not"]);
-  await expect(editor.getByRole("radio", { name: "Scout" })).toHaveAttribute("aria-checked", "true");
+  await expect(editor.getByRole("radio", { name: "Investigator" })).toHaveAttribute("aria-checked", "true");
   await expect(editor.getByRole("radio", { name: "Blue" })).toHaveAttribute("aria-checked", "true");
 
   await name.fill("Code reviewer");
@@ -471,10 +471,10 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
   await expect(editor.getByText("Call it with /calling code-reviewer", { exact: true })).toBeVisible();
   await editor.getByRole("radio", { name: "Target" }).click();
   await expect(editor.getByRole("radio", { name: "Target" })).toHaveAttribute("aria-checked", "true");
-  await expect(editor.getByRole("radio", { name: "Scout" })).toHaveAttribute("aria-checked", "false");
+  await expect(editor.getByRole("radio", { name: "Investigator" })).toHaveAttribute("aria-checked", "false");
   await expect(editor.locator(".custom-agent-identity-preview")).toHaveAttribute("data-icon-kind", "symbol");
-  await editor.getByRole("radio", { name: "Scout" }).click();
-  await expect(editor.getByRole("radio", { name: "Scout" })).toHaveAttribute("aria-checked", "true");
+  await editor.getByRole("radio", { name: "Investigator" }).click();
+  await expect(editor.getByRole("radio", { name: "Investigator" })).toHaveAttribute("aria-checked", "true");
   await expect(editor.getByRole("radio", { name: "Target" })).toHaveAttribute("aria-checked", "false");
   await editor.getByRole("radio", { name: "Teal" }).click();
   await expect(editor.getByRole("radio", { name: "Teal" })).toHaveAttribute("aria-checked", "true");

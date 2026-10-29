@@ -120,6 +120,7 @@ const budgets = {
   deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 6 + 22 + 5 + 25_894 + 226,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
+  deferredCustomAgentsSettingsJavaScript: 32 * kibibyte,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
   deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43,
@@ -644,6 +645,12 @@ const deferredCliConversationImportJavaScriptBytes = await assetBytes(`assets/${
 const deferredProjectSettingsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[0]}`);
 const deferredThreadActionsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[1]}`);
 const deferredReviewNoteJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[2]}`);
+const customAgentsSettingsEntry = assetNames.find((name) => /^CustomAgentsSettings-.*\.js$/u.test(name));
+if (!customAgentsSettingsEntry) throw new Error("Missing deferred Custom agents settings");
+if (entryJavaScriptClosure.has(customAgentsSettingsEntry) || mainWorkbenchJavaScriptClosure.has(customAgentsSettingsEntry) || detachedChatJavaScriptClosure.has(customAgentsSettingsEntry)) {
+  throw new Error("Custom agents settings must stay deferred from the initial chat routes");
+}
+const deferredCustomAgentsSettingsJavaScriptBytes = await assetBytes(`assets/${customAgentsSettingsEntry}`);
 const [projectCustomizeEntry, projectColorContrastEntry] = ["ProjectCustomizePanel", "project-color-contrast"].map((prefix) => {
   const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
   if (!entry) throw new Error(`Missing deferred project appearance surface: ${prefix}`);
@@ -752,6 +759,7 @@ const coreJavaScriptBytes =
   - deferredTasksViewJavaScriptBytes
   - deferredIconRegionJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
+  - deferredCustomAgentsSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
   - deferredProjectCustomizeJavaScriptBytes
@@ -797,6 +805,7 @@ const measurements = {
   deferredTasksViewJavaScript: deferredTasksViewJavaScriptBytes,
   deferredIconRegionJavaScript: deferredIconRegionJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
+  deferredCustomAgentsSettingsJavaScript: deferredCustomAgentsSettingsJavaScriptBytes,
   deferredCliConversationImportJavaScript: deferredCliConversationImportJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,

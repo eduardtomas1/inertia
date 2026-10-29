@@ -95,6 +95,7 @@ import type { MainFailureCode } from "./runtime-diagnostic-events.js";
 import { attachRuntimeStderr, RuntimeStderrJournal } from "./runtime-stderr-journal.js";
 import { setDiagnosticsReportSource } from "./diagnostic-export.js";
 import { registerCompletionSoundIpc } from "./completion-sound-main.js";
+import { registerCustomAgentFileIpc } from "./custom-agent-file-main.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { confirmPreviewPageUnload } from "./preview-unload-confirm.js";
@@ -402,6 +403,7 @@ function registerIpcHandlers(): void {
     directory: join(app.getPath("userData"), "completion-sounds"),
     defaultPath: () => app.getPath("music"),
   });
+  registerCustomAgentFileIpc({ ipcMain, assertTrusted: assertTrustedIpc, window: () => mainWindow, dialog, defaultPath: () => app.getPath("documents") });
   ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     const context = assertTrustedChatIpc(event, args.length, Math.min(args.length, 1));

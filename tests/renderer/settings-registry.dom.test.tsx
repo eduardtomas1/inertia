@@ -103,9 +103,9 @@ afterEach(() => {
 });
 
 describe("Settings section registry", () => {
-  it("lists the nine sections once, in order, with distinct icons and unique row ids", () => {
+  it("lists the ten sections once, in order, with distinct icons and unique row ids", () => {
     expect(SETTINGS_SECTIONS.map(({ id, label }) => [id, label])).toEqual([
-      ["appearance", "Appearance"], ["chats", "Chats"], ["notifications", "Notifications"], ["keyboard", "Keyboard"],
+      ["appearance", "Appearance"], ["chats", "Chats"], ["custom-agents", "Custom agents"], ["notifications", "Notifications"], ["keyboard", "Keyboard"],
       ["projects", "Projects"], ["agents", "Agents"], ["devices", "Devices & integrations"], ["data", "Data"], ["help", "Help"],
     ]);
     expect([...SETTINGS_SECTION_IDS]).toEqual(SETTINGS_SECTIONS.map(({ id }) => id));

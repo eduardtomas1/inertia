@@ -1,6 +1,7 @@
 import { memo, type ComponentType } from "react";
 import {
   Bell,
+  Bot,
   CircleHelp,
   Database,
   FolderOpen,
@@ -33,6 +34,9 @@ import {
 import { settingsSectionRows, type SettingsRowMetadata } from "./settingsRows";
 
 type SectionLoader<Props> = SurfaceLoader<{ default: ComponentType<Props> }>;
+
+const EMPTY_AGENTS: NonNullable<SettingsSectionContext["customAgents"]> = [];
+const EMPTY_SKILLS: NonNullable<SettingsSectionContext["skills"]> = [];
 
 export interface SettingsSectionDefinition {
   id: SettingsSection;
@@ -98,6 +102,19 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       onUpdate: context.onUpdate,
       onSetDefaultModel: context.onSetDefaultModel,
       onSetBackendDefault: context.onSetBackendDefault,
+    }),
+  }),
+  defineSection({
+    ...settingsSectionRows("custom-agents"),
+    icon: Bot,
+    load: lazySection(async () => (await import("./custom-agents/CustomAgentsSettings")).CustomAgentsSettings),
+    prefetch: [],
+    select: (context) => ({
+      agents: context.customAgents ?? EMPTY_AGENTS,
+      skills: context.skills ?? EMPTY_SKILLS,
+      confirmDestructiveActions: context.settings.confirmDestructiveActions,
+      disabled: context.disabled,
+      request: context.onSaveCommand ?? context.onReportCommand,
     }),
   }),
   defineSection({

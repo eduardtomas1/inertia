@@ -54,6 +54,7 @@ describe("main window preload", () => {
       "createPrivateConnectInvitation",
       "denyPrivateConnectPairing",
       "downloadAppUpdate",
+      "exportCustomAgents",
       "exportDiagnostics",
       "exportRecoveryData",
       "finishAttachmentHandoff",
@@ -69,6 +70,7 @@ describe("main window preload", () => {
       "getWindowContext",
       "importAttachments",
       "importCompletionSound",
+      "importCustomAgents",
       "importRecoveryData",
       "installAppUpdate",
       "onAppUpdateStatus",
@@ -200,6 +202,16 @@ describe("main window preload", () => {
       ["inertia:diagnostics-set-capture", false],
       ["inertia:diagnostics-set-capture", false],
       ["inertia:diagnostics-clear"],
+    ]);
+  });
+
+  it("routes custom agent export and import through the one file channel", async () => {
+    const payload = { format: "inertia-custom-agents", version: 1, exportedAt: "2026-10-29T10:00:00.000Z", agents: [] } as never;
+    await bridge.exportCustomAgents(payload);
+    await bridge.importCustomAgents();
+    expect(electron.invoke.mock.calls).toEqual([
+      ["inertia:custom-agent-file", "export", payload],
+      ["inertia:custom-agent-file", "import"],
     ]);
   });
 });

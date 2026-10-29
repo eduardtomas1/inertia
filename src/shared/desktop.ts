@@ -15,6 +15,7 @@ import type {
 import type { RuntimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
 import type { DiagnosticPage, DiagnosticQuery, RendererDiagnostic } from "./application-diagnostics";
 import type { CompletionSoundImport } from "./completion-sound";
+import type { CustomAgentDraft, CustomAgentExport } from "./custom-agents";
 import type { ContextMenuAction, ContextMenuRequest } from "./context-menu";
 import { isProjectRelativePath, UUID_PATTERN } from "./request-identifiers";
 import {
@@ -745,6 +746,16 @@ export interface LaunchProjectRequest {
   realPath: string | null;
 }
 
+export type CustomAgentExportResult =
+  | { status: "exported" }
+  | { status: "cancelled" }
+  | { status: "rejected"; message: string };
+
+export type CustomAgentImportResult =
+  | { status: "imported"; agents: CustomAgentDraft[] }
+  | { status: "cancelled" }
+  | { status: "rejected"; message: string };
+
 export interface DesktopBridge {
   /** Identifies the main workbench or one main-owned fixed-chat renderer. */
   getWindowContext: () => Promise<DesktopWindowContext>;
@@ -882,6 +893,8 @@ export interface DesktopBridge {
   importCompletionSound: (keep: readonly string[]) => Promise<CompletionSoundImport>;
   readCompletionSound: (file: string) => Promise<Uint8Array | null>;
   removeCompletionSound: (file: string) => Promise<void>;
+  exportCustomAgents: (payload: CustomAgentExport) => Promise<CustomAgentExportResult>;
+  importCustomAgents: () => Promise<CustomAgentImportResult>;
   onThreadNotificationActivated: (listener: (conversationId: string) => void) => () => void;
   /** Samples aggregate local app resource use and fixed Inertia-owned storage paths. */
   getAppHealth: () => Promise<AppHealthSnapshot>;

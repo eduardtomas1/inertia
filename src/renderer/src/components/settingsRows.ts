@@ -68,6 +68,14 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["terminal-font-size", "Terminal font size", ["font", "text size", "zoom", "terminal"]],
     ],
   }),
+  section("custom-agents", "Custom agents", {
+    "Your agents": [
+      ["custom-agent-new", "New agent", ["custom agents", "calling", "/calling", "subagent", "create agent", "add agent", "persona", "instructions", "handle"]],
+      ["custom-agent-import", "Import agents", ["custom agents", "import", "json", "file", "share"]],
+      ["custom-agent-export", "Export all agents", ["custom agents", "export", "backup", "json", "file", "share"]],
+      ["custom-agent-presets", "Presets", ["custom agents", "starter", "template", "reviewer", "test writer", "docs writer", "refactorer"]],
+    ],
+  }),
   section("notifications", "Notifications", {
     Alerts: [
       ["desktop-notifications", "Desktop notifications", ["alerts", "notify", "mute", "general"]],

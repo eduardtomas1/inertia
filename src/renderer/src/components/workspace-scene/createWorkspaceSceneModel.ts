@@ -559,6 +559,8 @@ export function createWorkspaceSceneModel({
         ({ archivedAt }) => archivedAt !== null,
       ) ?? [],
       databaseBackup: connection.snapshot?.databaseBackup,
+      customAgents: connection.snapshot?.customAgents ?? EMPTY_LIST,
+      skills: currentWorkflow?.skills ?? EMPTY_LIST,
       lifecycleDiagnostics: connection.status === "online"
         ? connection.snapshot?.lifecycleDiagnostics
         : undefined,

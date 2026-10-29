@@ -95,11 +95,11 @@ afterEach(() => {
 });
 
 describe("Settings navigation landmark", () => {
-  it("lists the nine sections in a labelled navigation landmark", () => {
+  it("lists the ten sections in a labelled navigation landmark", () => {
     render(<SettingsView {...settingsViewProps({ target: { section: "appearance" } })} />);
     const navigation = screen.getByRole("navigation", { name: "Settings sections" });
     expect(within(navigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "Appearance", "Chats", "Notifications", "Keyboard", "Projects", "Agents", "Devices & integrations", "Data", "Help",
+      "Appearance", "Chats", "Custom agents", "Notifications", "Keyboard", "Projects", "Agents", "Devices & integrations", "Data", "Help",
     ]);
   });
 });

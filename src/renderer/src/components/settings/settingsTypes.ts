@@ -1,4 +1,5 @@
 import type {
+  AgentSkillSummary,
   AppSettings,
   AppSettingsUpdate,
   BackendDiscoveredModel,
@@ -17,6 +18,7 @@ import type {
   RuntimeLifecycleDiagnosticSnapshot,
 } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
+import type { CustomAgent } from "@shared/custom-agents";
 import type { BackendProfileUpdateInput } from "../../lib/backendProfileCommands";
 import type { BackendProbeOutcome } from "../../hooks/useBackendProfiles";
 import type { ProviderAuthMethod } from "@shared/provider";
@@ -38,6 +40,8 @@ export interface SettingsViewProps {
   projects: Project[];
   conversations: Conversation[];
   archived: Conversation[];
+  customAgents?: readonly CustomAgent[];
+  skills?: readonly AgentSkillSummary[];
   databaseBackup?: DatabaseBackupStatus;
   lifecycleDiagnostics?: RuntimeLifecycleDiagnosticSnapshot;
   onUpdate: (settings: AppSettingsUpdate) => Promise<void>;

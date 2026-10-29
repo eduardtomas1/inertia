@@ -1,0 +1,613 @@
+{
+  "studyDate": "2026-10-29",
+  "timezone": "Europe/Madrid",
+  "inertiaBase": "9340d9f2b66a880890337d1b1563d5944ce7025d",
+  "upstreamRepo": "pingdotgg/t3code",
+  "pr": {
+    "number": 2829,
+    "url": "https://github.com/pingdotgg/t3code/pull/2829",
+    "title": "feat(orchestrator): introduce new orchestrator",
+    "created_at": "2026-05-27T19:52:16Z",
+    "merged_at": "2026-10-02T19:22:22Z",
+    "merge_commit_sha": "de343914273eceb852a1d1d739cd1d38df7796ee",
+    "head_sha": "b37fcea42f43ca1276eea20d5c7ea355e16a169a",
+    "commits": 823,
+    "changed_files": 1912,
+    "additions": 380729,
+    "deletions": 203651
+  },
+  "upstreamSnapshot": {
+    "sha": "dd148481531a0a090780a2ade20588566db099a2",
+    "committedAt": "2026-10-29T20:43:23Z",
+    "title": "perf(server): idle servers run 100x fewer background queries and 4.8M fewer spans a day (#27098)"
+  },
+  "sourceCache": ".cache/orchestrator-v2/t3code",
+  "releaseBoundaries": {
+    "firstStableV2": {
+      "tag": "v0.1.0",
+      "publishedAt": "2026-10-15T23:18:08Z"
+    },
+    "latestStableObserved": {
+      "tag": "v0.1.5",
+      "publishedAt": "2026-10-29T13:08:50Z"
+    },
+    "latestNightlyObserved": {
+      "tag": "v0.1.6-nightly.20261029.3892",
+      "publishedAt": "2026-10-29T18:50:30Z"
+    }
+  },
+  "postMergeCommitCount": 3695,
+  "sourceGroups": [
+    {
+      "id": "T01",
+      "topic": "Execution ownership and current architecture",
+      "paths": [
+        "docs/internals/overview.md",
+        "docs/internals/providers.md",
+        "docs/orchestration-v2/README.md"
+      ]
+    },
+    {
+      "id": "T02",
+      "topic": "Graph and typed identities",
+      "paths": [
+        "packages/contracts/src/orchestrationV2.ts",
+        "docs/orchestration-v2/entity-ids-and-correlation.md",
+        "docs/orchestration-v2/core-graph-and-data-model.md"
+      ]
+    },
+    {
+      "id": "T03",
+      "topic": "Command admission, transactions and receipts",
+      "paths": [
+        "apps/server/src/orchestration-v2/Orchestrator.ts",
+        "apps/server/src/orchestration-v2/EventSink.ts",
+        "apps/server/src/orchestration-v2/ThreadCommandExecutor.ts",
+        "apps/server/src/orchestration-v2/FoundationPersistence.test.ts"
+      ]
+    },
+    {
+      "id": "T04",
+      "topic": "Durable side effects and execution lanes",
+      "paths": [
+        "apps/server/src/orchestration-v2/EffectOutbox.ts",
+        "apps/server/src/orchestration-v2/EffectWorker.ts",
+        "apps/server/src/orchestration-v2/EffectWorker.test.ts"
+      ]
+    },
+    {
+      "id": "T05",
+      "topic": "Queue delivery and finalization",
+      "paths": [
+        "apps/server/src/orchestration-v2/QueuedRunOrder.ts",
+        "apps/server/src/orchestration-v2/QueuedRunOrder.test.ts",
+        "apps/server/src/orchestration-v2/RunFinalizationService.ts",
+        "apps/server/src/orchestration-v2/RunFinalizationQueue.test.ts"
+      ]
+    },
+    {
+      "id": "T06",
+      "topic": "Provider selection and transition planning",
+      "paths": [
+        "apps/server/src/orchestration-v2/ProviderSwitchService.ts",
+        "apps/server/src/orchestration-v2/ProviderSessionTransitionPolicy.ts",
+        "apps/server/src/orchestration-v2/ProviderSwitchService.test.ts",
+        "apps/server/src/orchestration-v2/testkit/ProviderSwitch.integration.test.ts"
+      ]
+    },
+    {
+      "id": "T07",
+      "topic": "Portable history selection and delivery",
+      "paths": [
+        "packages/provider-core/src/server/handoffBudget.ts",
+        "apps/server/src/orchestration-v2/ContextHandoffService.ts",
+        "apps/server/src/orchestration-v2/ContextHandoffDelivery.ts",
+        "apps/server/src/orchestration-v2/ContextHandoffBudget.test.ts"
+      ]
+    },
+    {
+      "id": "T08",
+      "topic": "Turn start and fallback recovery",
+      "paths": [
+        "apps/server/src/orchestration-v2/ProviderTurnStartService.ts",
+        "apps/server/src/orchestration-v2/ProviderTurnStartService.test.ts"
+      ]
+    },
+    {
+      "id": "T09",
+      "topic": "Forks and lineage",
+      "paths": [
+        "apps/server/src/orchestration-v2/ThreadForkService.ts",
+        "apps/server/src/orchestration-v2/ThreadForkService.test.ts",
+        "docs/orchestration-v2/thread-lineage-and-context-transfer.md"
+      ]
+    },
+    {
+      "id": "T10",
+      "topic": "Delegation and completion delivery",
+      "paths": [
+        "apps/server/src/mcp/OrchestratorMcpService.ts",
+        "apps/server/src/mcp/OrchestratorMcpService.test.ts",
+        "apps/server/src/orchestration-v2/NotificationMailbox.ts",
+        "apps/server/src/orchestration-v2/DelegatedCompletionDelivery.test.ts"
+      ]
+    },
+    {
+      "id": "T11",
+      "topic": "Native subagent projection",
+      "paths": [
+        "apps/server/src/orchestration-v2/SubagentProjection.test.ts",
+        "packages/client-runtime/src/state/threadSubagents.ts",
+        "packages/client-runtime/src/state/threadSubagents.test.ts",
+        "apps/server/src/mcp/TaskCancelNativeSubagent.integration.test.ts"
+      ]
+    },
+    {
+      "id": "T12",
+      "topic": "Agent tools and explicit targets",
+      "paths": [
+        "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+        "apps/server/src/mcp/toolkits/thread/tools.ts",
+        "apps/server/src/mcp/toolkits/thread/handlers.ts",
+        "apps/server/src/mcp/toolkits/project/handlers.ts",
+        "docs/orchestration-v2/orchestrator-mcp-server.md"
+      ]
+    },
+    {
+      "id": "T13",
+      "topic": "MCP credentials, authorization and race checks",
+      "paths": [
+        "apps/server/src/mcp/McpSessionRegistry.ts",
+        "apps/server/src/mcp/McpToolAccess.ts",
+        "apps/server/src/mcp/threadAccess.ts",
+        "apps/server/src/mcp/McpToolAccess.test.ts",
+        "apps/server/src/mcp/McpToolAccess.race.test.ts",
+        "apps/server/src/mcp/McpSessionRegistry.test.ts"
+      ]
+    },
+    {
+      "id": "T14",
+      "topic": "Restart reconciliation and continuation",
+      "paths": [
+        "apps/server/src/orchestration-v2/ProviderRuntimeRecoveryService.ts",
+        "apps/server/src/orchestration-v2/ProviderRuntimeRecoveryService.test.ts",
+        "apps/server/src/orchestration-v2/ProviderRuntimeRecoveryService.regression.test.ts",
+        "apps/server/src/orchestration-v2/RestartContinuation.ts",
+        "apps/server/src/orchestration-v2/RestartContinuation.test.ts"
+      ]
+    },
+    {
+      "id": "T15",
+      "topic": "Usage limits",
+      "paths": [
+        "apps/server/src/orchestration-v2/UsageLimitRecoveryWorker.ts"
+      ]
+    },
+    {
+      "id": "T16",
+      "topic": "Provider contract and instance registry",
+      "paths": [
+        "packages/provider-core/src/server/ProviderAdapter.ts",
+        "apps/server/src/provider/ProviderInstanceRegistry.ts",
+        "apps/server/src/provider/ProviderRegistry.ts",
+        "docs/orchestration-v2/provider-capability-system.md"
+      ]
+    },
+    {
+      "id": "T17",
+      "topic": "Codex native turns and revert",
+      "paths": [
+        "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+        "apps/server/src/provider/CodexThreadRevert.ts",
+        "apps/server/src/orchestration-v2/testkit/CodexReplayFixtures.integration.test.ts"
+      ]
+    },
+    {
+      "id": "T18",
+      "topic": "Claude native integration",
+      "paths": [
+        "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+        "apps/server/src/orchestration-v2/testkit/ClaudeReplayFixtures.integration.test.ts"
+      ]
+    },
+    {
+      "id": "T19",
+      "topic": "Pi integration",
+      "paths": [
+        "packages/provider-pi/src/server/adapter.ts",
+        "apps/server/src/orchestration-v2/testkit/PiReplayFixtures.integration.test.ts"
+      ]
+    },
+    {
+      "id": "T20",
+      "topic": "Cursor SDK and account isolation",
+      "paths": [
+        "packages/provider-cursor/src/server/adapter.ts",
+        "packages/provider-cursor/src/server/CursorAgentSdk.ts",
+        "packages/provider-cursor/src/server/auth.ts",
+        "packages/provider-cursor/src/server/credentialStore.ts",
+        "apps/server/src/orchestration-v2/testkit/CursorReplayFixtures.integration.test.ts"
+      ]
+    },
+    {
+      "id": "T21",
+      "topic": "OpenCode versions and server ownership",
+      "paths": [
+        "packages/provider-opencode/src/server/adapter.ts",
+        "packages/provider-opencode/src/server/v2/adapter.ts",
+        "packages/provider-opencode/src/server/v2/OpenCode2Server.ts",
+        "packages/provider-opencode/src/server/OpenCodeServerLedger.ts",
+        "apps/server/src/orchestration-v2/testkit/OpenCodeReplayFixtures.integration.test.ts"
+      ]
+    },
+    {
+      "id": "T22",
+      "topic": "ACP registry and negotiated runtime",
+      "paths": [
+        "packages/provider-acp-registry/src/server/AcpRegistrySupport.ts",
+        "packages/provider-acp-registry/src/server/adapter.ts",
+        "packages/provider-acp/src/server/adapter.ts",
+        "packages/provider-acp/src/server/AcpSessionRuntime.ts",
+        "apps/server/src/orchestration-v2/testkit/AcpRegistryReplayFixtures.integration.test.ts"
+      ]
+    },
+    {
+      "id": "T23",
+      "topic": "Worktrees, launch and ownership",
+      "paths": [
+        "apps/server/src/mcp/WorktreeMcpService.ts",
+        "apps/server/src/mcp/WorktreeMcpService.test.ts",
+        "apps/server/src/orchestration-v2/ThreadLaunchService.ts",
+        "apps/server/src/orchestration-v2/ThreadLaunchService.test.ts"
+      ]
+    },
+    {
+      "id": "T24",
+      "topic": "Checkpoint and filesystem reversal safety",
+      "paths": [
+        "apps/server/src/orchestration-v2/CheckpointRollbackService.ts",
+        "apps/server/src/orchestration-v2/CheckpointRestoreSafety.ts",
+        "apps/server/src/orchestration-v2/CheckpointRestoreSafety.test.ts",
+        "apps/server/src/orchestration-v2/CheckpointScopeOwnership.test.ts",
+        "apps/server/src/orchestration-v2/CheckpointRollbackService.test.ts"
+      ]
+    },
+    {
+      "id": "T25",
+      "topic": "Scheduling and server-owned settlement",
+      "paths": [
+        "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+        "apps/server/src/scheduledTasks/ScheduledTaskService.schedule.test.ts",
+        "apps/server/src/scheduledTasks/ScheduledTaskService.interval.test.ts",
+        "apps/server/src/orchestration-v2/ThreadSettlementService.ts"
+      ]
+    },
+    {
+      "id": "T26",
+      "topic": "Migration and durable schema compatibility",
+      "paths": [
+        "apps/server/src/persistence/Migrations/055_OrchestrationV2.ts",
+        "apps/server/src/persistence/Migrations.ts",
+        "apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts",
+        "apps/server/src/orchestration-v2/legacy/LegacyV1Cutover.integration.test.ts",
+        "docs/internals/legacy-orchestration-migration.md",
+        "docs/user/thread-migration.md"
+      ]
+    },
+    {
+      "id": "T27",
+      "topic": "Client projections and bounded history",
+      "paths": [
+        "packages/client-runtime/src/state/orchestrationV2Projection.ts",
+        "packages/client-runtime/src/state/orchestrationV2Projection.test.ts",
+        "packages/client-runtime/src/state/boundedThreadSnapshotHttp.ts",
+        "docs/internals/connection-runtime.md"
+      ]
+    },
+    {
+      "id": "T28",
+      "topic": "Replay and transport-level verification",
+      "paths": [
+        "apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts",
+        "apps/server/src/orchestration-v2/testkit/ProviderReplayFixtures.ts",
+        "apps/server/src/orchestration-v2/testkit/OrchestratorReplayRecovery.integration.test.ts",
+        "docs/orchestration-v2/testing-strategy.md"
+      ]
+    }
+  ],
+  "providedPosts": [
+    "https://x.com/theo/status/2106123856759120317",
+    "https://x.com/theo/status/2106104507260436925",
+    "https://x.com/maria_rcks/status/2106113165066944776"
+  ],
+  "limitations": [
+    "Long X post could not be retrieved in full; user-supplied screenshots and accessibility text define announcement coverage.",
+    "Upstream source and tests were inspected, not executed.",
+    "Current refers to the pinned main snapshot, not a promise that all behavior shipped in the observed stable release."
+  ],
+  "selectedEvolutionCommits": [
+    {
+      "sha": "06e627448bc1ee58487c1a2a9d6bf8d5ef479af3",
+      "committedAt": "2026-10-05T05:32:55Z",
+      "subject": "feat(server): T3 MCP tools take explicit thread and project targets (#15219)"
+    },
+    {
+      "sha": "2f85686d9dca5ec98c892a2a26c321e09d746d71",
+      "committedAt": "2026-10-06T21:09:35Z",
+      "subject": "feat(server): every T3 MCP tool declares who may call it (#16335)"
+    },
+    {
+      "sha": "25629a76a0458bdeb707483722894158af090b41",
+      "committedAt": "2026-10-14T00:39:02Z",
+      "subject": "feat(server): run delegated tasks in separate worktrees (#19102)"
+    },
+    {
+      "sha": "dba8297da4f25cb1063d623ec8a4bf3ec1f01715",
+      "committedAt": "2026-10-18T19:11:07Z",
+      "subject": "fix(server): reject worktree delegation from a checkout outside the project (#20213)"
+    },
+    {
+      "sha": "892cdaf4df9a794c23e55bb0148a70eba0188f12",
+      "committedAt": "2026-10-20T04:15:58Z",
+      "subject": "fix(server): limit restart loops within a five-minute window (#20306)"
+    },
+    {
+      "sha": "529d8063cc43ca004cb34a3440b6135bcec45955",
+      "committedAt": "2026-10-18T18:47:28Z",
+      "subject": "fix(server): queued messages land after a resume that ran before them (#17773)"
+    },
+    {
+      "sha": "11ce406d2cf1581748a3eb150716071f6674ec8e",
+      "committedAt": "2026-10-17T02:11:43Z",
+      "subject": "fix(server): background subagents keep T3 tools after the parent turn ends (#19751)"
+    },
+    {
+      "sha": "924fb0c4d4941f9d186e46030ab358ebbdb064f8",
+      "committedAt": "2026-10-15T03:17:08Z",
+      "subject": "fix(server): a delegated task's question ends the parent's blocking wait (#19538)"
+    },
+    {
+      "sha": "4f5ff17172c5f2bde61a09aafb23011ae4d38538",
+      "committedAt": "2026-10-20T07:03:05Z",
+      "subject": "fix(server): deliver subagent results without history handoffs (#22117)"
+    },
+    {
+      "sha": "2bc2d80e79c6051fcd26adcbfd579a1d8813b638",
+      "committedAt": "2026-10-20T05:40:09Z",
+      "subject": "revert: #15464 (MCP agents respond to approvals) (#22152)"
+    },
+    {
+      "sha": "60f2246358050fa70c7aee3cd685fefaaaaf81db",
+      "committedAt": "2026-10-20T05:04:27Z",
+      "subject": "fix(server): stopped usage-limit threads no longer auto-resume (#21114)"
+    },
+    {
+      "sha": "e27de4ead0d5e84890ba8f3faa32fdbe3defe110",
+      "committedAt": "2026-10-20T04:51:25Z",
+      "subject": "fix(server): delegated completions preserve finished parent runs (#20025)"
+    },
+    {
+      "sha": "07242abff3cf2004a703ae631eae1416574a5f30",
+      "committedAt": "2026-10-27T19:44:59Z",
+      "subject": "fix(server): recover handoffs when target context is exhausted (#25610)"
+    },
+    {
+      "sha": "888e444c1afe4619660b12cbd224e4e95ee7b2cb",
+      "committedAt": "2026-10-27T21:04:24Z",
+      "subject": "feat(server): t3_thread_launch takes clientRequestId (#16654)"
+    },
+    {
+      "sha": "867112cda0906960f6340171c5424600a1ac1d28",
+      "committedAt": "2026-10-27T23:11:01Z",
+      "subject": "fix(server): agent questions stay answerable after a server restart (#19229)"
+    },
+    {
+      "sha": "36d4d711b79c73eb33131944f73ea4a8c6156484",
+      "committedAt": "2026-10-27T14:17:36Z",
+      "subject": "fix(server): bound hung delegated stop effects so later runs can start (#25675)"
+    },
+    {
+      "sha": "ed44f251d89d4dae2f8dcf11c24fb3dec9dda4c7",
+      "committedAt": "2026-10-27T01:49:07Z",
+      "subject": "feat(server): cut T3's MCP tool schemas by a third and merge 18 tools into action tools (#25423)"
+    },
+    {
+      "sha": "594f1ce2eb3f1a2f41e71476a83b1522c5b65dd9",
+      "committedAt": "2026-10-27T21:04:26Z",
+      "subject": "feat(server): delegate_task to a linked environment (#16719)"
+    },
+    {
+      "sha": "8298664e9e46ad8af2c8966cfb4c08a2a31898a4",
+      "committedAt": "2026-10-29T02:37:31Z",
+      "subject": "fix(server,cursor,opencode): refresh provider usage when a turn hits its usage limit (#26234)"
+    },
+    {
+      "sha": "9acb76929e17aa27e961f51e0b8679d7c0431c8e",
+      "committedAt": "2026-10-29T12:07:43Z",
+      "subject": "fix(server): queue Copilot follow-ups without killing background agents (#26715)"
+    },
+    {
+      "sha": "dd148481531a0a090780a2ade20588566db099a2",
+      "committedAt": "2026-10-29T20:43:23Z",
+      "subject": "perf(server): idle servers run 100x fewer background queries and 4.8M fewer spans a day (#27098)"
+    }
+  ],
+  "landmarks": [
+    {
+      "topic": "Atomic command commit",
+      "path": "apps/server/src/orchestration-v2/EventSink.ts",
+      "line": 635,
+      "symbol": "const commitCommandEffect ="
+    },
+    {
+      "topic": "Ordered post-commit publication",
+      "path": "apps/server/src/orchestration-v2/EventSink.ts",
+      "line": 259,
+      "symbol": "const commitThenPublish ="
+    },
+    {
+      "topic": "Process-bound effects",
+      "path": "apps/server/src/orchestration-v2/EffectOutbox.ts",
+      "line": 138,
+      "symbol": "export const PROCESS_BOUND_EFFECT_TYPES"
+    },
+    {
+      "topic": "Replay-safe effects",
+      "path": "apps/server/src/orchestration-v2/EffectOutbox.ts",
+      "line": 125,
+      "symbol": "export const REPLAY_SAFE_EFFECT_TYPES"
+    },
+    {
+      "topic": "Delivery ordering",
+      "path": "apps/server/src/orchestration-v2/QueuedRunOrder.ts",
+      "line": 12,
+      "symbol": "export function queuedRunsInDeliveryOrder"
+    },
+    {
+      "topic": "Provider transition decision",
+      "path": "apps/server/src/orchestration-v2/ProviderSessionTransitionPolicy.ts",
+      "line": 32,
+      "symbol": "export function decideProviderSessionTransition"
+    },
+    {
+      "topic": "Historical entry normalization",
+      "path": "packages/provider-core/src/server/handoffBudget.ts",
+      "line": 127,
+      "symbol": "export function historicalMessage"
+    },
+    {
+      "topic": "Budget calculation",
+      "path": "packages/provider-core/src/server/handoffBudget.ts",
+      "line": 99,
+      "symbol": "export function handoffBudget"
+    },
+    {
+      "topic": "Whole-entry history selection",
+      "path": "packages/provider-core/src/server/handoffBudget.ts",
+      "line": 214,
+      "symbol": "export function selectHistory"
+    },
+    {
+      "topic": "Delivery uncertainty",
+      "path": "apps/server/src/orchestration-v2/ContextHandoffDelivery.ts",
+      "line": 143,
+      "symbol": "export class ContextHandoffDeliveryUncertainError"
+    },
+    {
+      "topic": "Native/inline delivery",
+      "path": "apps/server/src/orchestration-v2/ContextHandoffDelivery.ts",
+      "line": 16,
+      "symbol": "export const deliverContextHandoffs"
+    },
+    {
+      "topic": "Forkable source states",
+      "path": "apps/server/src/orchestration-v2/ThreadForkService.ts",
+      "line": 35,
+      "symbol": "export function isForkableSourceRunStatus"
+    },
+    {
+      "topic": "Usage-limit recovery candidate",
+      "path": "apps/server/src/orchestration-v2/UsageLimitRecoveryWorker.ts",
+      "line": 11,
+      "symbol": "export function limitRecoveryCommand"
+    },
+    {
+      "topic": "Restart continuation cap",
+      "path": "apps/server/src/orchestration-v2/RestartContinuation.ts",
+      "line": 33,
+      "symbol": "const MAX_CONTINUATION_CHAIN"
+    },
+    {
+      "topic": "Restart continuation decision",
+      "path": "apps/server/src/orchestration-v2/RestartContinuation.ts",
+      "line": 111,
+      "symbol": "export function restartContinuationRun"
+    },
+    {
+      "topic": "Codex rollback",
+      "path": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+      "line": 7569,
+      "symbol": "rollbackThread: Effect.fn(\"CodexAdapterV2.rollbackThread\")"
+    },
+    {
+      "topic": "Codex native fork",
+      "path": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+      "line": 7645,
+      "symbol": "forkThread: Effect.fn(\"CodexAdapterV2.forkThread\")"
+    },
+    {
+      "topic": "MCP live caller",
+      "path": "apps/server/src/mcp/threadAccess.ts",
+      "line": 123,
+      "symbol": "export const isLiveCallerShell"
+    },
+    {
+      "topic": "MCP explicit target read",
+      "path": "apps/server/src/mcp/threadAccess.ts",
+      "line": 181,
+      "symbol": "export const readThread ="
+    },
+    {
+      "topic": "MCP questions only",
+      "path": "apps/server/src/mcp/toolkits/thread/handlers.ts",
+      "line": 53,
+      "symbol": "const readQuestion ="
+    },
+    {
+      "topic": "MCP launch retry namespace",
+      "path": "apps/server/src/mcp/toolkits/project/handlers.ts",
+      "line": 63,
+      "symbol": "const launchCommandId ="
+    },
+    {
+      "topic": "MCP token lifetime",
+      "path": "apps/server/src/mcp/McpSessionRegistry.ts",
+      "line": 64,
+      "symbol": "const DEFAULT_LIVENESS_WINDOW_MS"
+    },
+    {
+      "topic": "Worktree handoff serialization",
+      "path": "apps/server/src/mcp/WorktreeMcpService.ts",
+      "line": 67,
+      "symbol": "const handoffThreadsInFlight"
+    },
+    {
+      "topic": "Provider rollback before file restore",
+      "path": "apps/server/src/orchestration-v2/CheckpointRollbackService.ts",
+      "line": 276,
+      "symbol": "if (input.restoreFiles !== false) yield* checkpoints.restore"
+    },
+    {
+      "topic": "Cursor platform-specific sandbox policy",
+      "path": "packages/provider-cursor/src/server/adapter.ts",
+      "line": 176,
+      "symbol": "export function cursorRuntimeAgentPolicy"
+    }
+  ],
+  "mergeLandmarks": [
+    {
+      "topic": "Outbox already at merge",
+      "path": "apps/server/src/orchestration-v2/EffectOutbox.ts",
+      "line": 118,
+      "symbol": "export const PROCESS_BOUND_EFFECT_TYPES"
+    },
+    {
+      "topic": "Atomic commit already at merge",
+      "path": "apps/server/src/orchestration-v2/EventSink.ts",
+      "line": 490,
+      "symbol": "const commitCommandEffect ="
+    },
+    {
+      "topic": "Historical command context already at merge",
+      "path": "apps/server/src/orchestration-v2/ContextHandoffBudget.ts",
+      "line": 140,
+      "symbol": "export function historicalMessage"
+    },
+    {
+      "topic": "Paginated Codex rollback already at merge",
+      "path": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+      "line": 6127,
+      "symbol": "rollbackThread: (threadInput) =>"
+    }
+  ]
+}

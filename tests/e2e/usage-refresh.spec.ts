@@ -104,8 +104,8 @@ test("Refresh usage shows its progress, reports a failed read and reads only quo
   await expect(usage.getByRole("status")).toHaveText("Could not refresh. Showing cached usage.");
   await expect(refresh).toBeEnabled();
 
-  await rm(join(app.workspaceDirectory, "quota-release"));
   await writeFile(join(app.workspaceDirectory, "quota-mode"), "ok-slow", "utf8");
+  await rm(join(app.workspaceDirectory, "quota-release"));
   await refresh.click();
   await expect(pending).toBeDisabled();
   await writeFile(join(app.workspaceDirectory, "quota-release"), "", "utf8");

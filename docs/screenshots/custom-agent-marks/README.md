@@ -53,13 +53,24 @@ and partially visible rows at scroll boundaries. Visual review checked the
 changed controls for actual overlap and clipping in both themes and at the
 narrower transcript viewport.
 
+After capture, the chat-row character was reduced from 56 px to 36 px and
+its spacing tightened. The light-theme focus/running accent selector was also
+corrected. Captures 06, 07, 12 and 13 still show the earlier chat size and need
+refreshing; the browser reached its per-turn tool limit. The final changes are
+checked by the focused tests and production build, without a new visual check.
+
 ## Validation
 
-- 54 focused settings, composer and called-agent tests pass.
+- 57 focused settings, composer, called-agent and attribution-badge tests pass
+  across four files after the final resize.
 - `npm run check:quality` passes after the final changes.
 - `npm run build:bundle` passes, including the renderer budget checks.
-- The combined `npm run check` was terminated with SIGTERM (exit 143) during
-  Vitest. A standalone full suite is running; its result will be recorded here.
+- The first combined `npm run check` was terminated with SIGTERM (exit 143).
+  The standalone full suite then completed: 17,786 tests passed, 107 skipped and
+  two avatar-size assertions failed. The badge test still expected 18 px, and
+  the running suite used the earlier 56 px transcript module while the test
+  had changed to 36 px. Both files pass in the fresh 57-test focused run. The
+  complete suite was not repeated after the final resize.
 - The six-model Blender artifact review passes.
 
 Final measurements: 40,313 bytes of deferred custom-agent settings JavaScript,

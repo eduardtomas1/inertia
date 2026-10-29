@@ -131,13 +131,13 @@ describe("called agent badge", () => {
     expect(container.querySelector(".message-agent-call-delivery")).toHaveTextContent(/^in role$/u);
   });
 
-  it("wears an 18 px mark that never shows the live ring or glow, with the separator drawn in CSS", () => {
+  it("wears a 24 px mark without an inset, live ring or glow, with the separator drawn in CSS", () => {
     const { container } = render(<MessageAgentCall attribution={{ ...attribution, icon: { kind: "mark", name: "guard" }, delivery: "in-role" }} />);
     const avatar = container.querySelector<HTMLElement>(".custom-agent-avatar")!;
     expect(avatar).toHaveAttribute("data-mark", "guard");
     expect(avatar).not.toHaveAttribute("data-live");
-    expect(avatar.style.getPropertyValue("--agent-avatar-size")).toBe("18px");
-    expect(avatar.style.getPropertyValue("--agent-mark-inset")).toBe("1px");
+    expect(avatar.style.getPropertyValue("--agent-avatar-size")).toBe("24px");
+    expect(avatar.style.getPropertyValue("--agent-mark-inset")).toBe("0px");
     expect(avatar.querySelector("img")).toBeNull();
     const css = readFileSync("src/renderer/src/components/response-timeline/MessageAgentCall.css", "utf8").replaceAll("\r\n", "\n");
     expect(css).toMatch(/\.message-agent-call \.custom-agent-avatar::before,\n\.message-agent-call \.custom-agent-avatar::after \{\n  content: none;/u);

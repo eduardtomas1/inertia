@@ -310,7 +310,7 @@ describe("SubagentCallBlock", () => {
     expect(scrolledBack.container.querySelector(".subagent-call")).not.toHaveAttribute("data-settled");
   });
 
-  it("shows a called mark at 56 px without an inset and flags the stopping state on the block", async () => {
+  it("shows a called mark at 36 px without an inset and flags the stopping state on the block", async () => {
     let finish: () => void = () => undefined;
     const onStopSubagent = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     const marked = { ...reviewer, icon: { kind: "mark" as const, name: "scout" as const } };
@@ -319,7 +319,7 @@ describe("SubagentCallBlock", () => {
     const avatar = block.querySelector<HTMLElement>(".subagent-call-header .custom-agent-avatar")!;
     expect(avatar).toHaveAttribute("data-mark", "scout");
     expect(avatar).toHaveAttribute("data-live", "true");
-    expect(avatar.style.getPropertyValue("--agent-avatar-size")).toBe("56px");
+    expect(avatar.style.getPropertyValue("--agent-avatar-size")).toBe("36px");
     expect(avatar.style.getPropertyValue("--agent-mark-inset")).toBe("0px");
     expect(avatar.querySelector(".custom-agent-avatar-figure")).toHaveAttribute("data-shadow", "true");
     expect(avatar.querySelector("img")).toBeNull();

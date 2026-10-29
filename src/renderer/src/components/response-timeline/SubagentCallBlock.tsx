@@ -96,7 +96,7 @@ function SubagentCallBlockComponent({
         aria-controls={bodyId}
         onClick={toggle}
       >
-        <CustomAgentAvatar agent={agent} size={agent.icon.kind === "mark" ? 56 : 32} live={live} />
+        <CustomAgentAvatar agent={agent} size={agent.icon.kind === "mark" ? 36 : 32} live={live} />
         <span className="subagent-call-title">
           <strong>{agent.name}</strong>
           <span className="subagent-call-line" data-tone={line?.tone}>

@@ -10,6 +10,8 @@ export const SECRET_FILE_NAME = "tailscale-authkey";
 export const SECRET_SAVED_REPLY = "Tailscale is up on both VMs. The simulator can reach them through the tailnet now.";
 export const SECRET_DECLINED_REPLY = "Understood. I'll keep the VMs on the local network and skip the tailnet for now.";
 
+export const SECRET_OUTPUT_TRACE_PREFIX = `trace:${"0123456789abcdef".repeat(72)};auth-key=`;
+
 export interface SecretProviderEvent {
   event: "thread" | "turn" | "tool-result";
   tools?: string[];
@@ -42,15 +44,16 @@ const complete = (turn) => send({ method: "turn/completed", params: {
   threadId, turn: { id: turn.id, status: "completed", items: [], error: null },
 } });
 const afterSaved = (turn, file) => {
-  const command = "cat '" + file + "'";
+  const command = "tailscale up --auth-key=file:'" + file + "' --trace";
   const itemId = turn.id + "-cat";
   const value = fs.readFileSync(file, "utf8");
   const middle = Math.max(1, Math.floor(value.length / 2));
+  const head = ${JSON.stringify(SECRET_OUTPUT_TRACE_PREFIX)};
   notify(turn, "item/started", { item: { id: itemId, type: "commandExecution", command, status: "inProgress" } });
-  notify(turn, "item/commandExecution/outputDelta", { itemId, delta: value.slice(0, middle) });
+  notify(turn, "item/commandExecution/outputDelta", { itemId, delta: head + value.slice(0, middle) });
   notify(turn, "item/commandExecution/outputDelta", { itemId, delta: value.slice(middle) + "\\n" });
   notify(turn, "item/completed", { item: {
-    id: itemId, type: "commandExecution", command, status: "completed", aggregatedOutput: value + "\\n", exitCode: 0,
+    id: itemId, type: "commandExecution", command, status: "completed", aggregatedOutput: head + value + "\\n", exitCode: 0,
   } });
   message(turn, turn.id + "-done", ${JSON.stringify(SECRET_SAVED_REPLY)});
   complete(turn);

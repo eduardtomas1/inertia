@@ -11,6 +11,7 @@ import {
   SECRET_DECLINED_REPLY,
   SECRET_DESCRIPTION,
   SECRET_FILE_NAME,
+  SECRET_OUTPUT_TRACE_PREFIX,
   SECRET_PLAN_MESSAGE,
   SECRET_SAVED_REPLY,
   SECRET_TITLE,
@@ -61,6 +62,7 @@ async function settleFrame(target: Page): Promise<void> {
 async function capture(target: Page, name: string, clipFrom?: Locator): Promise<void> {
   if (!CAPTURE_DIRECTORY) return;
   await mkdir(CAPTURE_DIRECTORY, { recursive: true });
+  await target.mouse.move(WIDTH - 4, Math.round(HEIGHT / 2));
   await settleFrame(target);
   const session = await target.context().newCDPSession(target);
   try {
@@ -115,6 +117,24 @@ async function centre(locator: Locator, block: ScrollLogicalPosition = "center")
   await locator.evaluate((element, position) => element.scrollIntoView({ block: position }), block);
 }
 
+async function toLatest(target: Page): Promise<void> {
+  const jump = target.locator(".timeline-follow-controls").getByRole("button", { name: "Jump to latest" });
+  if (await jump.isVisible()) await jump.click();
+  await expect(target.locator(".timeline-jump")).toHaveCount(0);
+}
+
+async function settledChanges(target: Page, turn: Locator): Promise<void> {
+  const settled = async (timeout: number): Promise<void> => {
+    await expect(turn.getByRole("button", { name: "Run details" })).toBeVisible({ timeout });
+    await expect(target.getByText("Capturing changes…", { exact: true })).toHaveCount(0, { timeout });
+  };
+  await expect(async () => {
+    await settled(1_000);
+    await target.waitForTimeout(1_500);
+    await settled(100);
+  }).toPass({ timeout: 45_000 });
+}
+
 async function toolResults(): Promise<SecretProviderEvent[]> {
   return (await secretProviderEvents(app.workspaceDirectory)).filter((event) => event.event === "tool-result");
 }
@@ -166,6 +186,11 @@ function secretNeedles(): Buffer[] {
   ];
 }
 
+function secretHalves(): string[] {
+  const middle = Math.floor(SECRET.length / 2);
+  return [SECRET.slice(0, middle), SECRET.slice(middle)];
+}
+
 async function openAgentSecrets(target: Page): Promise<Locator> {
   await target.getByRole("button", { name: "Settings", exact: true }).click();
   await target.getByRole("button", { name: "Data", exact: true }).click();
@@ -173,6 +198,10 @@ async function openAgentSecrets(target: Page): Promise<Locator> {
   await expect(group).toBeVisible();
   await expect(group.getByRole("heading", { name: "Agent secrets" })).toBeVisible();
   return group;
+}
+
+function cardAbove(group: Locator): Locator {
+  return group.locator("xpath=preceding-sibling::*[1]");
 }
 
 async function backToWorkspace(target: Page): Promise<void> {
@@ -293,11 +322,12 @@ test("asks for a secret in a private card and hands the agent only a file path",
   if (await disclosure.getAttribute("aria-expanded") !== "true") await disclosure.click();
   const output = turn.locator(".agent-activity-output");
   await expect(output).toBeVisible();
-  await expect(output).toContainText("[redacted]");
+  await expect(output).toContainText(`${SECRET_OUTPUT_TRACE_PREFIX.slice(-9)}[redacted]`);
   await expect(output).not.toContainText(SECRET);
 
   const html = await target.evaluate(() => document.documentElement.outerHTML);
   expect(html).not.toContain(SECRET);
+  for (const half of secretHalves()) expect(html).not.toContain(half);
   expect(html).toContain("[redacted]");
 
   const data = join(app.testDirectory, "data");
@@ -305,13 +335,25 @@ test("asks for a secret in a private card and hands the agent only a file path",
     const bytes = await readFile(join(data, name)).catch(() => Buffer.alloc(0));
     if (name === "inertia.sqlite") expect(bytes.length).toBeGreaterThan(0);
     for (const needle of secretNeedles()) expect(bytes.includes(needle), `${name} holds the secret`).toBe(false);
+    for (const half of secretHalves()) expect(bytes.includes(Buffer.from(half, "utf8")), `${name} holds part of the secret`).toBe(false);
   }
   const logs = join(app.testDirectory, "electron-profile", "logs");
   expect(await exists(join(logs, "runtime"))).toBe(true);
   expect(await filesContaining(logs, secretNeedles(), new Set())).toEqual([]);
   expect(await filesContaining(app.testDirectory, secretNeedles(), new Set([agentSecretsDirectory()]))).toEqual([]);
 
-  await captureThemes(target, "02-card-saved.png", "09-card-saved-light.png", () => centre(row, "start"));
+  await settledChanges(target, turn);
+  await captureThemes(target, "02-card-saved.png", "09-card-saved-light.png", async () => {
+    await output.evaluate((element) => {
+      for (let node: Element | null = element; node; node = node.parentElement) {
+        if (node.scrollHeight > node.clientHeight + 1 && getComputedStyle(node).overflowY !== "visible") {
+          node.scrollTop = node.scrollHeight;
+          return;
+        }
+      }
+    });
+    await toLatest(target);
+  });
 });
 
 test("lists the saved secret in Settings and revokes it there", async () => {
@@ -333,13 +375,13 @@ test("lists the saved secret in Settings and revokes it there", async () => {
   expect(copy).not.toContain(file);
   expect(copy).not.toContain("agent-secrets");
 
-  await captureThemes(target, "05-settings-agent-secrets.png", "10-settings-agent-secrets-light.png", () => centre(group));
+  await captureThemes(target, "05-settings-agent-secrets.png", "10-settings-agent-secrets-light.png", () => centre(cardAbove(group), "start"));
 
   await entry.getByRole("button", { name: `Revoke ${SECRET_TITLE}` }).click();
   await expect(group.getByText("No agent secrets are active.", { exact: true })).toBeVisible();
   await expect.poll(() => exists(file)).toBe(false);
   await expect.poll(() => exists(dirname(file))).toBe(false);
-  await centre(group);
+  await centre(cardAbove(group), "start");
   await capture(target, "06b-settings-after-revoke.png");
 
   await backToWorkspace(target);
@@ -372,7 +414,8 @@ test("tells the agent when the user declines", async () => {
   await expect(target.locator("[data-secret-request-notice]")).toHaveCount(0);
   await expect(turn.getByText(SECRET_DECLINED_REPLY)).toBeVisible({ timeout: 30_000 });
   expect(await readdir(agentSecretsDirectory()).catch(() => [])).toEqual([]);
-  await captureThemes(target, "04-card-declined.png", null, () => centre(row));
+  await settledChanges(target, turn);
+  await captureThemes(target, "04-card-declined.png", null, () => toLatest(target));
 });
 
 test("answers the request from a detached chat window", async () => {
@@ -401,7 +444,8 @@ test("answers the request from a detached chat window", async () => {
   await expect(row).toHaveAttribute("data-secret-request-state", "saved");
   await expect(turn.getByText(SECRET_SAVED_REPLY)).toBeVisible({ timeout: 30_000 });
   expect(await popup.evaluate(() => document.documentElement.outerHTML)).not.toContain(SECRET);
-  await centre(row);
+  await settledChanges(popup, turn);
+  await toLatest(popup);
   await capture(popup, "07b-detached-window-saved.png");
   restoredFile = file;
   await popup.close();

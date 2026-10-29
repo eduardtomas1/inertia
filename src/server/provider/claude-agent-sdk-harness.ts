@@ -357,6 +357,7 @@ function startClaudeRun(
       }
       const identity = await prepareClaudeTurnIdentity({
         skills: options.input.skills ?? [],
+        ...(options.input.customAgent ? { customAgent: options.input.customAgent } : {}),
         cwd: options.input.cwd,
         environment: options.environment,
         timeoutMs: CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS,

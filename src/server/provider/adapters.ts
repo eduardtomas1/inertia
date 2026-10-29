@@ -14,6 +14,12 @@ import {
 } from "../../shared/model-routing";
 import { MAX_CLAUDE_TURN_BUDGET_USD } from "../../shared/project-preferences";
 import {
+  customAgentHandleFromNativeName,
+  MAX_CUSTOM_AGENT_COMPILED_CHARS,
+  MAX_CUSTOM_AGENT_SKILL_NAME_CHARS,
+  MAX_CUSTOM_AGENT_SKILLS,
+} from "../../shared/custom-agents";
+import {
   PROVIDER_IDS,
   ProviderRuntimeError,
   type ProviderId,
@@ -25,6 +31,31 @@ const MAX_SKILL_COUNT = 8;
 
 function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
+}
+
+const MAX_CUSTOM_AGENT_NATIVE_DESCRIPTION_CHARS = 400;
+
+function boundedLine(value: unknown, maxChars: number): boolean {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && value.length <= maxChars
+    && !/[\0\r\n]/u.test(value);
+}
+
+function validCustomAgent(value: ProviderRunInput["customAgent"]): boolean {
+  if (value === undefined) return true;
+  return typeof value === "object"
+    && value !== null
+    && customAgentHandleFromNativeName(value.nativeName) !== null
+    && boundedLine(value.description, MAX_CUSTOM_AGENT_NATIVE_DESCRIPTION_CHARS)
+    && typeof value.instructions === "string"
+    && value.instructions.trim().length > 0
+    && value.instructions.length <= MAX_CUSTOM_AGENT_COMPILED_CHARS
+    && !value.instructions.includes("\0")
+    && Array.isArray(value.skills)
+    && value.skills.length <= MAX_CUSTOM_AGENT_SKILLS
+    && new Set(value.skills).size === value.skills.length
+    && value.skills.every((skill) => boundedLine(skill, MAX_CUSTOM_AGENT_SKILL_NAME_CHARS));
 }
 
 function validSystemLevelInstruction(value: unknown, channelAvailable: boolean): boolean {
@@ -218,6 +249,7 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       || input.goalContinuationExpected !== undefined
       || (input.imagePaths?.length ?? 0) > 0
       || (input.skills?.length ?? 0) > 0
+      || input.customAgent !== undefined
       || (input.operation.instruction !== undefined && (
         !instruction
         || instruction.length > 4_000
@@ -288,6 +320,9 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     )
   )) {
     throw new ProviderRuntimeError("invalid_input", "A skill reference is invalid.");
+  }
+  if (!validCustomAgent(input.customAgent)) {
+    throw new ProviderRuntimeError("invalid_input", "The called custom agent is invalid.");
   }
   return conversationId;
 }

@@ -610,6 +610,34 @@ function unselectedStagingEntries(
   return entries;
 }
 
+function preferredFirst(
+  entries: readonly StagingEntry[],
+  preferred: ReadonlySet<string>,
+): StagingEntry[] {
+  return [
+    ...entries.filter(({ name }) => preferred.has(name)),
+    ...entries.filter(({ name }) => !preferred.has(name)),
+  ];
+}
+
+async function preferredDiscoveredSkills(
+  roots: readonly SkillRoot[],
+  control: ClaudeSkillOperationControl,
+): Promise<DiscoveredSkill[]> {
+  const state = { bytes: 0, entries: 0, skills: 0 };
+  const skills: DiscoveredSkill[] = [];
+  for (const root of roots) {
+    checkClaudeSkillOperation(control);
+    try {
+      skills.push(...await discoverRootSkills(root, state, control));
+    } catch {
+      checkClaudeSkillOperation(control);
+    }
+    if (state.entries >= MAX_DISCOVERY_ENTRIES || state.skills >= MAX_DISCOVERED_SKILLS) break;
+  }
+  return skills.slice(0, MAX_DISCOVERED_SKILLS);
+}
+
 async function stageSkillEntry(
   skill: StagingEntry,
   destination: string,
@@ -753,24 +781,35 @@ export async function stageClaudeSkillPlugin(
   options: ClaudeSkillOperationControl & {
     metadataOnly?: boolean;
     includeDiscovered?: boolean;
+    preferredSkillNames?: readonly string[];
   } = {},
 ): Promise<StagedClaudeSkillPlugin | null> {
   checkClaudeSkillOperation(options);
-  if (skills.length === 0 && !options.includeDiscovered) return null;
+  const preferred = new Set(options.preferredSkillNames ?? []);
+  if (skills.length === 0 && !options.includeDiscovered && preferred.size === 0) return null;
   if (skills.length > MAX_DISCOVERED_SKILLS) {
     throw new Error("Claude skill staging exceeds the bounded skill limit.");
   }
   const roots = await claudeSkillRoots(cwd, environment, options);
   const selected = await selectedStagingEntries(skills, roots, options);
+  const selectedNames = new Set(selected.map(({ name }) => name));
   const entries = options.includeDiscovered
     ? [
         ...selected,
-        ...unselectedStagingEntries(
-          await discoverSkillsInRoots(roots, options),
-          new Set(selected.map(({ name }) => name)),
+        ...preferredFirst(
+          unselectedStagingEntries(await discoverSkillsInRoots(roots, options), selectedNames),
+          preferred,
         ),
       ]
-    : selected;
+    : preferred.size > 0
+      ? [
+          ...selected,
+          ...unselectedStagingEntries(
+            await preferredDiscoveredSkills(roots, options),
+            selectedNames,
+          ).filter(({ name }) => preferred.has(name)),
+        ]
+      : selected;
   if (entries.length === 0) return null;
 
   const tempPrefix = join(tmpdir(), "inertia-claude-skills-");

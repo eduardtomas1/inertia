@@ -39,6 +39,7 @@ type OpenCodeSettledStatus = Extract<
 interface OpenCodeChildTrace {
   parentSessionId: string;
   name: string | null;
+  role: string | null;
   description: string | null;
   status: SubagentTraceStatus;
   providerStatus: "busy" | "idle" | null;
@@ -169,6 +170,7 @@ export class OpenCodeSubagentProjection {
     const child: OpenCodeChildTrace = {
       parentSessionId,
       name: boundedSubagentText(info?.title, MAX_SUBAGENT_LABEL_CHARS),
+      role: null,
       description: null,
       status: "spawned",
       providerStatus: null,
@@ -323,6 +325,7 @@ export class OpenCodeSubagentProjection {
       || isTerminalSubagentStatus(child.status)
     ) return;
     const input = objectValue(state?.input);
+    child.role = boundedSubagentText(input?.subagent_type, MAX_SUBAGENT_LABEL_CHARS) ?? child.role;
     child.description = boundedSubagentText(
       input?.prompt,
       MAX_SUBAGENT_DESCRIPTION_CHARS,
@@ -372,7 +375,7 @@ export class OpenCodeSubagentProjection {
         : child.parentSessionId,
       parentProviderToolUseId: null,
       providerToolUseId: null,
-      providerRole: null,
+      providerRole: child.role,
       providerName: child.name,
       ...(child.providerStatus ? { providerStatus: child.providerStatus } : {}),
       status: child.status,

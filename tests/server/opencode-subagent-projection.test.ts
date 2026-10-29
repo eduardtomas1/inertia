@@ -129,6 +129,7 @@ describe("OpenCode delegated-agent projection", () => {
     expect(latest(CHILD)).toMatchObject({
       status: "spawned",
       description: "Read the parser and report",
+      providerRole: "explore",
     });
 
     observe(
@@ -427,6 +428,38 @@ describe("OpenCode delegated-agent projection", () => {
     expect(failed).not.toHaveProperty("model");
     expect(failed.toolUseCount).toBe(1);
     expect(updates.every(({ result }) => result === null || !result.includes("Delegated prompt"))).toBe(true);
+  });
+
+  it("captures the task's subagent type as the provider role for custom agent attribution", () => {
+    const { observe, latest } = harness({});
+    observe(
+      created(CHILD, ROOT, "Review the patch"),
+      part(ROOT, {
+        id: "root-task",
+        messageID: "root-assistant",
+        type: "tool",
+        callID: "root-task-call",
+        tool: "task",
+        state: {
+          status: "running",
+          input: { description: "Review", prompt: "Review the patch", subagent_type: "inertia-reviewer" },
+          metadata: { sessionId: CHILD },
+        },
+      }),
+      part(ROOT, {
+        id: "root-task",
+        messageID: "root-assistant",
+        type: "tool",
+        callID: "root-task-call",
+        tool: "task",
+        state: {
+          status: "running",
+          input: { description: "Review", prompt: "Review the patch", subagent_type: 42 },
+          metadata: { sessionId: CHILD },
+        },
+      }),
+    );
+    expect(latest(CHILD)).toMatchObject({ providerRole: "inertia-reviewer", providerName: "Review the patch" });
   });
 
   it("attributes task input only to a child of the session that ran the task", () => {

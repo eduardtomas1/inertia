@@ -16,7 +16,7 @@ import type { HiddenProviderInstruction } from "./turns/request-context";
 const ORCHESTRATION_INSTRUCTION: HiddenProviderInstruction = {
   label: "inertia-orchestration",
   text: [
-    "Chat tools start real top-level chats: delegate only concrete, independent work with an explicit owner and success criteria, never as hidden subagents.",
+    "Chat tools start real top-level chats: delegate only concrete, independent work with an explicit owner and success criteria, never as hidden subagents, except when the user calls a custom agent with /calling, which you delegate as instructed.",
     "A started chat is not finished work; read its status and latest result before relying on it.",
     "Inertia asks the user before every call that changes a chat, whatever the access mode.",
   ].join(" "),
@@ -44,7 +44,7 @@ export function createInertiaHarnessCapabilities(
 ): HarnessCapabilityRegistry {
   const packs: HarnessCapabilityPack[] = [{
     id: "inertia.orchestration",
-    revision: 3,
+    revision: 4,
     title: "Inertia orchestration",
     summary: "Bounded, approval-owned coordination of independent top-level Inertia chats.",
     instructions: [ORCHESTRATION_INSTRUCTION],

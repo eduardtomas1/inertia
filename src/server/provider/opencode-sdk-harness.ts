@@ -18,6 +18,7 @@ import {
   type ProviderUnconfirmedCleanup,
 } from "./provider-unconfirmed-cleanup";
 import { watcherCommandEnvironment } from "../runtime/watcher/read-only-commands";
+import { openCodeCustomAgentEnvironment } from "./opencode-custom-agent";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -426,7 +427,10 @@ function startOpenCodeRun(
     let cleanupConfirmed = true;
     try {
       const credentials = ownedOpenCodeCredentials(options.environment);
-      const owned = ownedOpenCodeEnvironment(options.environment, credentials);
+      const owned = openCodeCustomAgentEnvironment(
+        ownedOpenCodeEnvironment(options.environment, credentials),
+        options.input.customAgent,
+      );
       const environment = options.input.readOnlyProfile === "watcher" ? watcherCommandEnvironment(owned) : owned;
       launchCredentials = credentialEncodings([
         ...launchCredentialValues(environment),

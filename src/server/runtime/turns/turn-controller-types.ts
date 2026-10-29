@@ -38,6 +38,8 @@ import type { DocumentAttachmentContext } from "../attachments/document-attachme
 import type { DeltaTimerScheduler } from "./turn-stream-coalescer";
 import type { TurnStreamChannel } from "./turn-stream-channel";
 import type { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
+import type { CustomAgentTraceAttribution } from "./turn-custom-agent-traces";
+import type { CustomAgentCallAttribution } from "../../../shared/custom-agents";
 import type { StreamingTrace } from "../test-streaming-trace";
 import type { AuthoritativeRunStateEngine } from "../run-state-engine";
 import type { WatcherNoteAttribution } from "../../../shared/watcher";
@@ -390,6 +392,8 @@ export interface ActiveTurn {
   approvalIds: Set<string>;
   inputIds: Set<string>;
   subagentTelemetry?: TurnSubagentTelemetry;
+  customAgentCall?: CustomAgentCallAttribution;
+  customAgentTraces?: CustomAgentTraceAttribution;
   onSettled?: QueueTurnRequest["onSettled"];
   readOnlyWatcher?: ReadOnlyWatcherTurn;
 }

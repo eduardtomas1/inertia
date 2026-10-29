@@ -28,6 +28,7 @@ import type {
 import type { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
 import type { TurnStreamProjection } from "./turn-stream-projection";
 import { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
+import { CustomAgentTraceAttribution } from "./turn-custom-agent-traces";
 import { isReadOnlyWriteActivity } from "./turn-read-only-watcher";
 
 export interface TurnProviderEventProjectorOptions {
@@ -326,6 +327,12 @@ export class TurnProviderEventProjector {
     event: ProviderSubagentEvent,
     updatedAt: string,
   ): ReturnType<RuntimeStore["upsertSubagentTrace"]> {
+    const customAgentId = active.customAgentCall
+      ? (active.customAgentTraces ??= new CustomAgentTraceAttribution(
+          active.customAgentCall,
+          active.turn.providerId,
+        )).resolve(event)
+      : null;
     const persisted = this.options.store.upsertSubagentTrace({
       conversationId: active.conversation.id,
       runId: active.turn.runId,
@@ -338,6 +345,7 @@ export class TurnProviderEventProjector {
       providerToolUseId: event.providerToolUseId,
       providerRole: event.providerRole,
       providerName: event.providerName,
+      ...(customAgentId ? { customAgentId } : {}),
       providerStatus: event.providerStatus ?? null,
       status: event.status,
       isLive: event.isLive,

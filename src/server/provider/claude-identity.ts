@@ -4,6 +4,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type { ProviderSkillInput } from "../../shared/contracts";
+import type { ProviderCustomAgentInput } from "./contracts";
 import { loadClaudeAgents } from "./claude-agents";
 import {
   loadClaudeInstructions,
@@ -33,6 +34,7 @@ export interface ClaudeTurnIdentity {
 
 export interface ClaudeTurnIdentityInput {
   skills: readonly ProviderSkillInput[];
+  customAgent?: ProviderCustomAgentInput;
   cwd: string;
   environment: NodeJS.ProcessEnv;
   timeoutMs: number;
@@ -84,6 +86,7 @@ async function stageIdentitySkills(
         ...input.filesystem,
         signal: deadline.signal,
         includeDiscovered,
+        ...(input.customAgent ? { preferredSkillNames: input.customAgent.skills } : {}),
       }),
       deadline.signal,
     );
@@ -108,11 +111,14 @@ export async function prepareClaudeTurnIdentity(
   }
   try {
     const staged = new Set(skills?.skillNames ?? []);
-    const agents = await optionalIdentity(input, {}, async (control) =>
+    const discovered = await optionalIdentity(input, {}, async (control) =>
       await loadClaudeAgents(input.cwd, input.environment, control, (name) => {
         const qualified = `${CLAUDE_ISOLATED_SKILL_PLUGIN_NAME}:${name}`;
         return staged.has(qualified) ? qualified : name;
       }));
+    const agents = input.customAgent
+      ? withClaudeCustomAgent(discovered, input.customAgent, staged)
+      : discovered;
     const instructions = await optionalIdentity(input, NO_INSTRUCTIONS, async (control) =>
       await loadClaudeInstructions(input.cwd, input.environment, control));
     return { skills, agents, instructions };
@@ -120,6 +126,25 @@ export async function prepareClaudeTurnIdentity(
     await skills?.cleanup().catch(() => undefined);
     throw error;
   }
+}
+
+export function withClaudeCustomAgent(
+  agents: Readonly<Record<string, AgentDefinition>>,
+  customAgent: ProviderCustomAgentInput,
+  stagedSkillNames: ReadonlySet<string>,
+): Record<string, AgentDefinition> {
+  const skills = customAgent.skills
+    .map((name) => `${CLAUDE_ISOLATED_SKILL_PLUGIN_NAME}:${name}`)
+    .filter((qualified) => stagedSkillNames.has(qualified));
+  return {
+    ...Object.fromEntries(Object.entries(agents).filter(([name]) => name !== customAgent.nativeName)),
+    [customAgent.nativeName]: {
+      description: customAgent.description,
+      prompt: customAgent.instructions,
+      ...(skills.length > 0 ? { skills } : {}),
+      background: false,
+    },
+  };
 }
 
 export function claudeIdentityOptions(

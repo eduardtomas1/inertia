@@ -81,6 +81,13 @@ export interface ProviderDetectionOptions {
   signal?: AbortSignal;
 }
 
+export interface ProviderCustomAgentInput {
+  nativeName: string;
+  description: string;
+  instructions: string;
+  skills: readonly string[];
+}
+
 interface ProviderRunRequest {
   /** Native discovery/event compatibility projection; never used for routing. */
   providerId: ProviderId;
@@ -112,6 +119,7 @@ interface ProviderRunRequest {
   imagePaths?: readonly string[];
   attachmentReadRoots?: readonly string[];
   skills?: readonly ProviderSkillInput[];
+  customAgent?: ProviderCustomAgentInput;
   /**
    * Privileged Codex-only launch mode for a user-authored native goal. The
    * App Server owns the automatic turns started by this mutation; `prompt`

@@ -25,6 +25,7 @@ import type {
 } from "../../utils/responseTimeline";
 import type { TerminalTurnProjections } from "../../utils/terminalTurnProjection";
 import type { ConversationContextCommandRunner } from "../conversation-context/types";
+import type { SecretRequestCommandRunner } from "../../utils/response-timeline/secretRequests";
 
 export interface ResponseTimelineProps {
   turns: AgentTurn[];
@@ -81,6 +82,7 @@ export interface ResponseTimelineProps {
     answers: Record<string, string[]>,
   ) => Promise<void>;
   onConversationContextCommand?: ConversationContextCommandRunner;
+  onSecretRequestCommand?: SecretRequestCommandRunner;
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
   onOpenTurnDiff: (turnId: string, path?: string) => void;
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;

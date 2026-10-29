@@ -172,6 +172,9 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["attachment-auto-remove", "Free space automatically when full", ["cleanup", "evict", "disk", "storage"]],
       ["attachment-remove-oldest", "Remove oldest files", ["cleanup", "delete attachments", "disk", "storage"]],
     ],
+    "Agent secrets": [
+      ["agent-secrets", "Agent secrets", ["secret", "token", "api key", "auth key", "password", "credential", "revoke", "keychain"]],
+    ],
     "Export and import": [
       ["recovery-export", "Portable conversation recovery export", ["import", "export", "backup", "recovery", "archive"]],
     ],

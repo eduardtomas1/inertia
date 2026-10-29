@@ -16,7 +16,6 @@ import {
 } from "react";
 import {
   FolderPlus,
-  MessageCircleQuestion,
   SquarePen,
 } from "lucide-react";
 import clsx from "clsx";
@@ -71,7 +70,8 @@ import {
   turnEventOwner,
   type TerminalTurnProjections,
 } from "../utils/terminalTurnProjection";
-import { revealAgentInputRequest } from "../utils/agentInputNavigation";
+import { PendingRequestNotices } from "./PendingRequestNotices";
+import { pendingSecretRequest, type SecretRequestCommandRunner } from "../utils/response-timeline/secretRequests";
 import { DuoJudgeNoticeSlot } from "./DuoJudgeNoticeContext";
 import {
   initialTranscriptNavigation,
@@ -211,6 +211,7 @@ type ChatWorkspaceProps = {
   contextPackets?: readonly ConversationContextPacketSummary[];
   watcherWakes?: readonly WatcherWakeSummary[];
   onConversationContextCommand?: ConversationContextCommandRunner;
+  onSecretRequestCommand?: SecretRequestCommandRunner;
   onQueueCommand?: QueueCommandRunner;
   onLimitResetCommand?: LimitResetCommandRunner;
   previewContextUrl?: string | null;
@@ -330,6 +331,7 @@ export function ChatWorkspace({
   contextPackets = EMPTY_CONTEXT_PACKETS,
   watcherWakes,
   onConversationContextCommand,
+  onSecretRequestCommand,
   onQueueCommand,
   onLimitResetCommand,
   previewContextUrl,
@@ -585,6 +587,7 @@ export function ChatWorkspace({
     ? { conversationId, turn: latestTurnSummary }
     : null, [conversationId, latestTurnSummary]);
   const pendingInputRequest = visibleInputRequests.at(-1) ?? null;
+  const pendingSecret = useMemo(() => pendingSecretRequest(ownedMessages), [ownedMessages]);
   const contentSignal = `${ownedTurns.length}:${ownedTurns.at(-1)?.updatedAt ?? ""}:${ownedMessages.length}:${ownedMessages.at(-1)?.content.length ?? 0}:${ownedActivities.length}:${ownedSubagents.length}:${ownedSubagents.at(-1)?.updatedAt ?? ""}:${ownedPlans.length}:${ownedCheckpoints.length}:${ownedTurnGitArtifacts.length}:${ownedTurnGitArtifacts.at(-1)?.status ?? ""}:${ownedTurnGitArtifacts.at(-1)?.capturedAt ?? ""}:${ownedApprovals.length}:${ownedInputRequests.length}`;
 
   const clearReaderIntent = useCallback((): void => {
@@ -709,21 +712,18 @@ export function ChatWorkspace({
     onLatestContentVisibilityChange?.(event.followsLatest);
   }, [clearPendingFinalAnswerNavigation, navigate, onLatestContentVisibilityChange]);
 
-  const revealPendingInput = useCallback((): void => {
-    if (!pendingInputRequest) return;
+  const revealPendingRequest = useCallback((reveal: () => boolean): void => {
     let remainingFrames = 4;
-    const reveal = (): boolean => {
-      if (revealAgentInputRequest(pendingInputRequest.id)) return true;
+    const attempt = (): boolean => {
+      if (reveal()) return true;
       remainingFrames -= 1;
-      if (remainingFrames > 0) {
-        window.requestAnimationFrame(() => reveal());
-      }
+      if (remainingFrames > 0) window.requestAnimationFrame(() => attempt());
       return false;
     };
-    reveal();
+    attempt();
     scrollToLatest("auto");
-    window.requestAnimationFrame(() => reveal());
-  }, [pendingInputRequest, scrollToLatest]);
+    window.requestAnimationFrame(() => attempt());
+  }, [scrollToLatest]);
 
   useLayoutEffect(() => {
     smoothSettleRef.current?.();
@@ -1069,6 +1069,7 @@ export function ChatWorkspace({
                 : undefined}
               activities={ownedActivities}
               subagents={ownedSubagents} customAgents={customAgents} onStopSubagent={onStopSubagent}
+              onSecretRequestCommand={onSecretRequestCommand}
               reasonings={ownedReasonings}
               plans={ownedPlans}
               checkpoints={ownedCheckpoints}
@@ -1123,28 +1124,7 @@ export function ChatWorkspace({
 
       <div ref={composerRegionRef} className="composer-region">
         <TimelineJumpToLatest visible={showJump} scrollElementRef={scrollRef} onJump={scrollToLatest} />
-        {pendingInputRequest && (
-          <div
-            className="pending-input-notice"
-            role="status"
-            aria-live="polite"
-          >
-            <MessageCircleQuestion size={14} aria-hidden="true" />
-            <span>
-              <strong>Agent needs your answer</strong>
-              <small>{pendingInputRequest.questions.length === 1
-                ? "1 question is waiting"
-                : `${pendingInputRequest.questions.length} questions are waiting`}</small>
-            </span>
-            <button
-              type="button"
-              aria-controls={`agent-input-request-${pendingInputRequest.id}`}
-              onClick={revealPendingInput}
-            >
-              Answer
-            </button>
-          </div>
-        )}
+        <PendingRequestNotices inputRequest={pendingInputRequest} secretRequest={pendingSecret} onReveal={revealPendingRequest} />
         <DuoJudgeNoticeSlot
           conversationId={conversation.id}
           conversationStatus={conversation.status}

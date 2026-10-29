@@ -64,6 +64,7 @@ describe("detached chat preload", () => {
       "prepareAttachmentHandoff",
       "releaseAttachment",
       "retargetDetachedChat",
+      "saveAgentSecret",
       "selectAttachments",
       "setDetachedChatAlwaysOnTop",
       "showContextMenu",
@@ -142,6 +143,8 @@ describe("detached chat preload", () => {
       role: "user" as const, hasSelection: false, anchor: { x: 1, y: 2 },
     };
     await bridge.showContextMenu(menu);
+    const secret = { conversationId, requestId: handoff.requestId, secret: "tskey-detached" };
+    await bridge.saveAgentSecret(secret);
 
     expect(electron.invoke.mock.calls).toEqual([
       [DETACHED_CHAT_IPC.getWindowContext],
@@ -164,6 +167,7 @@ describe("detached chat preload", () => {
       ["inertia:open-project-path", projectPath],
       ["inertia:open-external", "https://example.com/"],
       ["inertia:show-context-menu", menu],
+      ["inertia:save-agent-secret", secret],
     ]);
     expect(electron.sendSync).toHaveBeenCalledWith(
       DETACHED_CHAT_IPC.persistDraft,

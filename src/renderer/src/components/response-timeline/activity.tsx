@@ -58,6 +58,7 @@ import {
 } from "../../utils/responseTimeline";
 import {
   withHtmlRenders,
+  withSecretRequests,
   withLiveCommentary,
   type TurnWorkStreamEntry,
 } from "../../utils/response-timeline/execution";
@@ -81,6 +82,7 @@ import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
 import { SubagentCallBlock } from "./SubagentCallBlock";
+import { SecretRequestCard } from "./SecretRequestCard";
 import { mergeSubagentCalls, type SubagentCallEntry } from "../../utils/response-timeline/subagentCalls";
 import { StreamingMarkdownText } from "./StreamingMarkdownText";
 import {
@@ -652,6 +654,9 @@ function ExecutionStream({
             </div>
           );
         }
+        if (entry.kind === "secret-request") {
+          return <div role="listitem" key={entry.id}><SecretRequestCard message={entry.message} /></div>;
+        }
         if (entry.kind === "subagent-call") {
           return (
             <div role="listitem" key={entry.id}>
@@ -955,7 +960,7 @@ export function WorkLog({
     }), previousDurableStream.current);
     previousDurableStream.current = next;
     const layered = layeredHtmlRenders(turn);
-    return withHtmlRenders(next, turn.htmlRenders.filter((message) => !layered.includes(message)));
+    return withSecretRequests(withHtmlRenders(next, turn.htmlRenders.filter((message) => !layered.includes(message))), turn.secretRequests);
   }, [turn]);
   const durableStream = useMemo(() => mergeSubagentCalls(renderedStream, subagentCalls), [renderedStream, subagentCalls]);
   // Transient text is the final visible execution entry unless follow-ups
@@ -1092,7 +1097,7 @@ export function WorkLog({
 
   const exchange = stream.filter((entry) =>
     entry.kind === "follow-up"
-    || entry.kind === "html-render" || entry.kind === "subagent-call"
+    || entry.kind === "html-render" || entry.kind === "subagent-call" || entry.kind === "secret-request"
     || (entry.kind === "commentary" && entry.answer));
   const workStream = exchange.length > 0
     ? stream.filter((entry) => !exchange.includes(entry))

@@ -101,3 +101,63 @@
     border: 1px solid CanvasText;
   }
 }
+
+.agent-secrets {
+  display: grid;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.agent-secrets-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.agent-secret-facts {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-secret-facts > :not(:first-child)::before {
+  margin-inline-end: 6px;
+  color: var(--text-faint);
+  content: "·";
+}
+
+.agent-secret-chat {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-overflow: ellipsis;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+.agent-secret-chat:hover {
+  color: var(--text);
+  text-decoration-color: currentColor;
+}
+
+.agent-secrets-footer {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+}

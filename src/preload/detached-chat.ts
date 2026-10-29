@@ -24,6 +24,7 @@ const IPC = {
   showContextMenu: "inertia:show-context-menu",
   snapshot: "inertia:snapshot",
   snapshotReady: "inertia:snapshot-ready",
+  saveAgentSecret: "inertia:save-agent-secret",
 } as const;
 // Keep preload entry points self-contained: sandboxed Electron preloads cannot
 // require Rollup's relative shared chunks at runtime.
@@ -89,6 +90,8 @@ const bridge = Object.freeze({
     ipcRenderer.on(IPC.runtimeReady, handler);
     return () => ipcRenderer.removeListener(IPC.runtimeReady, handler);
   },
+  saveAgentSecret: (request: Parameters<DesktopBridge["saveAgentSecret"]>[0]) =>
+    ipcRenderer.invoke(IPC.saveAgentSecret, request) as ReturnType<DesktopBridge["saveAgentSecret"]>,
   copyText: (text: string) =>
     ipcRenderer.invoke(
       IPC.copyText,

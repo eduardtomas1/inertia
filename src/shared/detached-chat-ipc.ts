@@ -34,6 +34,7 @@ export type DetachedChatBridge = Pick<
   | "getRuntimeConnection"
   | "onRuntimeReady"
   | "copyText"
+  | "saveAgentSecret"
   | "snapshot"
   | "onSnapshot"
   | "selectAttachments"

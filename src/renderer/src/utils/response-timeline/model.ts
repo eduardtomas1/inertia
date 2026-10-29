@@ -17,6 +17,7 @@ import type {
 import type { WatcherNoteAttribution, WatcherWakeSummary } from "@shared/watcher";
 import { activityNeedsAttention } from "./activity-attention";
 import { providerBackendName } from "../providerBackendName";
+import { isSecretRequestMessage, type SecretRequestMessage } from "./secretRequests";
 
 /** Current workspace status is intentionally not accepted by the timeline. */
 export type TurnGitArtifactSummary = TurnGitArtifact;
@@ -34,6 +35,7 @@ export interface ResponseTurn {
   systemMessages: ChatMessage[];
   /** Visual replies: turn-scoped system messages carrying a valid `htmlRender`, in message order. */
   htmlRenders: ChatMessage[];
+  secretRequests: SecretRequestMessage[];
   activities: AgentActivity[];
   reasonings: AgentReasoning[];
   reasoning: AgentReasoning | null;
@@ -265,8 +267,9 @@ function buildTurn(
   // or keep clean settled work from consolidating into Run details.
   const htmlRenders = scopedMessages.filter(({ role, htmlRender }) =>
     role === "system" && isHtmlRenderReference(htmlRender));
-  const systemMessages = scopedMessages.filter(({ role, htmlRender }) =>
-    role === "system" && !isHtmlRenderReference(htmlRender));
+  const secretRequests = scopedMessages.filter(isSecretRequestMessage);
+  const systemMessages = scopedMessages.filter((message) =>
+    message.role === "system" && !isHtmlRenderReference(message.htmlRender) && !isSecretRequestMessage(message));
   const turnActivities = (indexes.activitiesByTurn.get(agentTurn.id) ?? [])
     .filter((activity) =>
       activity.conversationId === agentTurn.conversationId)
@@ -305,6 +308,7 @@ function buildTurn(
     terminalAssistantMessage,
     systemMessages,
     htmlRenders,
+    secretRequests,
     activities,
     reasonings,
     reasoning: latestReasoning(reasonings),
@@ -388,6 +392,7 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
     turn.assistantMessages.forEach(({ id }) => claimedMessageIds.add(id));
     turn.systemMessages.forEach(({ id }) => claimedMessageIds.add(id));
     turn.htmlRenders.forEach(({ id }) => claimedMessageIds.add(id));
+    turn.secretRequests.forEach(({ id }) => claimedMessageIds.add(id));
     if (turn.checkpoint) claimedCheckpointIds.add(turn.checkpoint.id);
   }
 
@@ -626,6 +631,7 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
     && sameReferences(left.commentaryMessages, right.commentaryMessages)
     && sameReferences(left.systemMessages, right.systemMessages)
     && sameReferences(left.htmlRenders, right.htmlRenders)
+    && sameReferences(left.secretRequests, right.secretRequests)
     && sameReferences(left.activities, right.activities)
     && sameReferences(left.reasonings, right.reasonings)
     && sameReferences(left.plans, right.plans)

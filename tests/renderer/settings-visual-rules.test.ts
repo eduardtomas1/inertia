@@ -139,6 +139,32 @@ describe("data section", () => {
   });
 });
 
+describe("agent secrets", () => {
+  const data = "../../src/renderer/src/components/settings/sections/DataSettings.css";
+  const card = "../../src/renderer/src/components/response-timeline/SecretRequestCard.css";
+
+  it("lists secrets as quiet settings rows with no accent", () => {
+    expect(rule(data, ".agent-secrets-footer")).toContain("border-top: 1px solid var(--line-soft);");
+    expect(rule(data, ".agent-secret-facts")).toContain("font-variant-numeric: tabular-nums;");
+    expect(source(data)).not.toMatch(/var\(--accent/u);
+  });
+
+  it("gives the pending card one accent edge, a quiet outline and no glow", () => {
+    expect(rule(card, ".secret-request-card")).toContain("border: 1px solid var(--line-soft);");
+    expect(rule(card, ".secret-request-card.is-pending::after")).toContain("background: linear-gradient(to right, var(--accent) 2px, transparent 2px);");
+    const accents = source(card).replace(/@media \(forced-colors: active\)[\s\S]*$/u, "").match(/var\(--accent\)/gu) ?? [];
+    expect(accents).toHaveLength(2);
+    expect(rule(card, ".secret-request-field:has(> input:focus)")).toContain("border-color: var(--accent);");
+    expect(source(card)).not.toMatch(/box-shadow|outline: 2px|font-size:\s*\d+px|#[0-9a-f]{3,8}\b/iu);
+  });
+
+  it("keeps settled rows one control tall and handles reduced motion and forced colours", () => {
+    expect(rule(card, ".secret-request-card.is-settled")).toContain("height: calc(var(--ui-control-height) + 4px);");
+    expect(source(card)).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?transition: none;/u);
+    expect(source(card)).toMatch(/@media \(forced-colors: active\) \{[\s\S]*?Highlight 2px/u);
+  });
+});
+
 describe("help section", () => {
   it("keeps diagnostics dividers quiet and the issue report fields on the shared input", () => {
     const diagnostics = "../../src/renderer/src/components/DiagnosticsSettings.css";

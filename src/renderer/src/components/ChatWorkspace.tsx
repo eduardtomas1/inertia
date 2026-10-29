@@ -61,7 +61,8 @@ import type { ComposerAttachmentImportLease } from "../utils/composerAttachments
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
-import { shouldFollowTimeline } from "../utils/responseTimeline";
+import { useReaderScrollIntent } from "../hooks/useReaderScrollIntent";
+import { readerScrollReachesLatest, shouldFollowTimeline } from "../utils/responseTimeline";
 import {
   EMPTY_STREAMING_AGENT_SOURCE,
   useStreamingAgentState,
@@ -396,6 +397,8 @@ export function ChatWorkspace({
   const followCorrectionFrameRef = useRef<number | null>(null);
   const smoothSettleRef = useRef<(() => void) | null>(null);
   const readerIntentReleaseTimerRef = useRef<number | null>(null);
+  const lastReaderScrollTopRef = useRef<number | null>(null);
+  const liveTurnRef = useRef(false);
   const goalRef = useRef(goal);
   goalRef.current = goal;
   const retryGoal = useCallback<ChatGoalControlProps["onRetry"]>(
@@ -501,6 +504,7 @@ export function ChatWorkspace({
     ? latestTurnSummary.status
     : stopTurn?.status ?? null;
   const stopOwner = `${conversationId ?? "none"}:${stopTurn?.id ?? "unknown"}`;
+  liveTurnRef.current = Boolean(stopTurnStatus && !isAgentTurnTerminalStatus(stopTurnStatus));
   useEffect(() => {
     if (!stopTurnStatus || isAgentTurnTerminalStatus(stopTurnStatus)) {
       stopsInFlightRef.current.clear();
@@ -728,6 +732,7 @@ export function ChatWorkspace({
     finalAnswerAutoScrollOwnerRef.current = null;
     clearPendingFinalAnswerNavigation();
     clearReaderIntent();
+    lastReaderScrollTopRef.current = null;
     navigate({
       type: "conversation.changed",
       conversationId,
@@ -845,16 +850,28 @@ export function ChatWorkspace({
   }, [history, noteResponseTimelineNavigationIntent]);
   useOlderHistoryNearTop(scrollRef, history && { ...history, loadOlder: loadOlderNearTop });
 
+  const { noteWheelIntent, noteTouchIntent, noteKeyIntent, continueTouchIntent, aimsAtLatest } =
+    useReaderScrollIntent(noteReaderIntent);
+
   const noteReaderKeyboardIntent = (
     event: React.KeyboardEvent<HTMLDivElement>,
   ): void => {
-    if (isTranscriptReaderNavigationKey(event.key)) noteReaderIntent();
+    if (!isTranscriptReaderNavigationKey(event.key)) return;
+    noteReaderIntent();
+    noteKeyIntent(event.key);
   };
 
   const onTranscriptScroll = (): void => {
     const element = scrollRef.current;
     if (!element) return;
-    const follows = shouldFollowTimeline(element.scrollTop, element.clientHeight, element.scrollHeight);
+    const previousScrollTop = lastReaderScrollTopRef.current;
+    lastReaderScrollTopRef.current = element.scrollTop;
+    continueTouchIntent();
+    const intentional = readerIntentRef.current;
+    const follows = intentional
+      ? readerScrollReachesLatest({ scrollTop: element.scrollTop, clientHeight: element.clientHeight,
+          scrollHeight: element.scrollHeight, previousScrollTop, live: liveTurnRef.current, aimedAtLatest: aimsAtLatest() })
+      : shouldFollowTimeline(element.scrollTop, element.clientHeight, element.scrollHeight);
     if (finalAnswerAutoScrollOwnerRef.current !== null) {
       onLatestContentVisibilityChange?.(follows);
       return;
@@ -863,11 +880,9 @@ export function ChatWorkspace({
       onLatestContentVisibilityChange?.(follows);
       return;
     }
-    const intentional = readerIntentRef.current;
     // A queued programmatic scroll can still report the bottom after fresh
-    // wheel intent. Keep the bounded gesture guard until it expires: neither
-    // that event nor a small upward movement within the follow tolerance
-    // proves that the reader has finished navigating.
+    // wheel intent. Keep the bounded gesture guard until it expires: that
+    // event does not prove that the reader has finished navigating.
     const scrolled = {
       type: "reader.scrolled",
       conversationId: conversationId ?? "",
@@ -1011,8 +1026,9 @@ export function ChatWorkspace({
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+Home Alt+End Alt+G"
         tabIndex={0}
         onScroll={onTranscriptScroll}
-        onWheelCapture={noteReaderIntent}
-        onTouchStartCapture={noteReaderIntent}
+        onWheelCapture={noteWheelIntent}
+        onTouchStartCapture={noteTouchIntent}
+        onTouchMoveCapture={noteTouchIntent}
         onPointerDownCapture={(event) => {
           if (event.target === event.currentTarget) noteReaderIntent();
         }}

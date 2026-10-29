@@ -785,6 +785,27 @@ export function resolveTimelineKeyboardIntent(
   return null;
 }
 
+const READER_AT_LATEST_THRESHOLD = 2;
+const READER_LIVE_REJOIN_THRESHOLD = 32;
+
+export function readerScrollReachesLatest(input: {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  previousScrollTop: number | null;
+  live: boolean;
+  aimedAtLatest?: boolean;
+}): boolean {
+  const movedUp = input.previousScrollTop !== null && input.scrollTop < input.previousScrollTop;
+  if (input.aimedAtLatest && !movedUp) return true;
+  return shouldFollowTimeline(
+    input.scrollTop,
+    input.clientHeight,
+    input.scrollHeight,
+    input.live && !movedUp ? READER_LIVE_REJOIN_THRESHOLD : READER_AT_LATEST_THRESHOLD,
+  );
+}
+
 export function shouldFollowTimeline(scrollTop: number, clientHeight: number, scrollHeight: number, threshold = 120): boolean {
   if (![scrollTop, clientHeight, scrollHeight].every(Number.isFinite)) return true;
   return Math.max(0, scrollHeight - clientHeight - scrollTop) <= threshold;

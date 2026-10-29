@@ -23,6 +23,7 @@ import {
   estimateTimelineRenderWeight,
   estimateTimelineRowSize,
   isTurnGitArtifactWithoutChanges,
+  readerScrollReachesLatest,
   shouldAdjustTimelineScrollPosition,
   shouldFollowTimeline,
   shouldShowTurnGitArtifactSummary,
@@ -949,6 +950,27 @@ describe("quiet-ledger timeline virtualization estimates", () => {
 
     expect(shouldFollowTimeline(1_380, 500, 2_000)).toBe(true);
     expect(shouldFollowTimeline(1_200, 500, 2_000)).toBe(false);
+  });
+
+  it("follows a reader's own scroll only at the latest content, with a downward rejoin margin while live or when aimed at the end", () => {
+    const reach = (scrollTop: number, previousScrollTop: number | null, live: boolean) =>
+      readerScrollReachesLatest({ scrollTop, clientHeight: 500, scrollHeight: 2_000, previousScrollTop, live });
+
+    expect(reach(1_500, 1_400, false)).toBe(true);
+    expect(reach(1_498, 1_400, false)).toBe(true);
+    expect(reach(1_440, 1_300, false)).toBe(false);
+    expect(reach(1_400, 1_500, false)).toBe(false);
+    expect(reach(1_480, 1_300, true)).toBe(true);
+    expect(reach(1_480, null, true)).toBe(true);
+    expect(reach(1_460, 1_300, true)).toBe(false);
+    expect(reach(1_490, 1_500, true)).toBe(false);
+    expect(reach(1_499, 1_500, true)).toBe(true);
+    expect(readerScrollReachesLatest({
+      scrollTop: 1_400, clientHeight: 500, scrollHeight: 2_000, previousScrollTop: 1_300, live: true, aimedAtLatest: true,
+    })).toBe(true);
+    expect(readerScrollReachesLatest({
+      scrollTop: 1_400, clientHeight: 500, scrollHeight: 2_000, previousScrollTop: 1_450, live: true, aimedAtLatest: true,
+    })).toBe(false);
   });
 
   it("keeps hundreds of rows and thousands of events bounded, keyed, and memoizable", () => {

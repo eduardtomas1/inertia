@@ -815,7 +815,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     const scrollElement = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root) return;
-    pendingLayoutAnchor.current = captureTranscriptPosition(root, scrollElement);
+    pendingLayoutAnchor.current = captureTranscriptPosition(root, scrollElement, props.followsLatest);
   };
   restoreLayoutAnchorRef.current = () => {
     const layoutAnchor = pendingLayoutAnchor.current;
@@ -931,11 +931,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     if (!scroll || !root) return;
     const remember = (): void => {
       if (layoutAnchorActive.current || turnAnchorActive.current) return;
-      rememberTranscriptPosition(props.conversationId, captureTranscriptPosition(root, scroll));
+      rememberTranscriptPosition(props.conversationId, captureTranscriptPosition(root, scroll, props.followsLatest));
     };
     scroll.addEventListener("scroll", remember, { passive: true });
     return () => scroll.removeEventListener("scroll", remember);
-  }, [props.conversationId, props.detailLoading, props.scrollElementRef, props.timelineElementRef, timeline.length]);
+  }, [props.conversationId, props.detailLoading, props.followsLatest, props.scrollElementRef, props.timelineElementRef, timeline.length]);
 
   const beginReaderTimelineNavigation = useCallback((): void => {
     cancelLayoutAnchorRestoration.current?.();

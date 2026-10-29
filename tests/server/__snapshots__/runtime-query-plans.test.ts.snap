@@ -67,6 +67,13 @@ exports[`hot query plans on a seeded runtime database > snapshots every app snap
     ],
   },
   {
+    "query": "SELECT id, name, handle, description, icon_json, accent, blocks_json, skills_json, position, revision, created_at, updated_at FROM custom_agents ORDER BY positi…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN custom_agents USING INDEX custom_agents_position_idx",
+    ],
+  },
+  {
     "query": "SELECT id, title, note, priority, due_date, due_time, project_id, completed_at, conversation_id, linked_at, created_at, updated_at FROM todos ORDER BY created_a…",
     "withStatistics": "same",
     "withoutStatistics": [

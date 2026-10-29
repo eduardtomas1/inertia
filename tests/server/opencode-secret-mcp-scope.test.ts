@@ -10,7 +10,7 @@ import {
 } from "../../src/server/provider/host-tool-mcp-config";
 import { createOpenCodeHostTools, openCodePermissions, type OpenCodeHostTools } from "../../src/server/provider/opencode-host-tools";
 import { hostToolActivityTitle } from "../../src/shared/activity-display";
-import { SECRET_REQUEST_TOOL_NAME, SECRET_REQUEST_WAIT_MS_BY_PROVIDER } from "../../src/shared/agent-secrets";
+import { SECRET_REQUEST_TOOL_NAME, SECRET_REQUEST_WAIT_MS_BY_PROVIDER } from "../../src/node/agent-secrets";
 
 interface AddedServer {
   name: string;

@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   AGENT_SECRET_MAX_LENGTH,
+  isSecretRequestReference,
+  type SecretRequestReference,
+} from "../../src/shared/agent-secrets";
+import {
   SECRET_REQUEST_FALLBACK_INSTRUCTION,
   SECRET_REQUEST_ROUTES,
   SECRET_REQUEST_TOOL_INPUT_SCHEMA,
@@ -11,7 +15,6 @@ import {
   agentSecretReference,
   agentSecretValueIssue,
   isAgentSecretValue,
-  isSecretRequestReference,
   normalizeAgentSecretValue,
   normalizeSecretRequestToolInput,
   parseSaveAgentSecretRequest,
@@ -21,8 +24,7 @@ import {
   secretRequestPlaceholderText,
   secretRequestRemoteLine,
   secretRequestToolInputSchema,
-  type SecretRequestReference,
-} from "../../src/shared/agent-secrets";
+} from "../../src/node/agent-secrets";
 import { BACKEND_CREDENTIAL_MASK, isBackendSecretReference } from "../../src/shared/backend-credentials";
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
 import { secretRequestResultValidators } from "../../src/shared/contracts/client-command/secret-requests";

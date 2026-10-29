@@ -3,6 +3,7 @@ import type { ComponentProps } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatWorkspace } from "../../src/renderer/src/components/ChatWorkspace";
+import { createStreamingAgentStore } from "../../src/renderer/src/hooks/useStreamingAgentState";
 import type { SecretRequestReference } from "../../src/shared/agent-secrets";
 import type {
   AgentTurn,
@@ -304,9 +305,10 @@ describe("secret requests in the chat workspace", () => {
     expect(notice).toHaveTextContent("Enter it in the private card, not here");
     const reveal = screen.getByRole("button", { name: "Enter secret" });
     expect(reveal).toHaveAttribute("aria-controls", `secret-request-${REQUEST_ID}`);
+    const field = await screen.findByLabelText("Tailscale auth key", { selector: "input" });
     screen.getByLabelText("Message").focus();
     fireEvent.click(reveal);
-    expect(screen.getByLabelText("Tailscale auth key", { selector: "input" })).toHaveFocus();
+    expect(field).toHaveFocus();
   });
 
   it("saves through the bridge and declines through the scene's runtime command runner", async () => {
@@ -341,8 +343,59 @@ describe("secret requests in the chat workspace", () => {
       />,
     );
     await waitFor(() => expect(screen.queryByText("Agent is asking for a secret")).toBeNull());
-    const row = screen.getByRole("region", { name: "Asking for a secret: Tailscale auth key" });
+    expect(screen.queryByRole("region", { name: /Tailscale auth key/u })).toBeNull();
+    const row = document.getElementById(`secret-request-${REQUEST_ID}`)!;
     expect(row).toHaveAttribute("data-secret-request-state", "declined");
     expect(row).toHaveTextContent("Declined");
+  });
+
+  it("keeps earlier prose above a pending card and later streamed text below it without remounting the card", async () => {
+    const activeConversation = conversation("13131313-1313-4131-8131-131313131313");
+    const runningTurn = turn(activeConversation, 1, "running");
+    const props = workspaceProps(activeConversation);
+    const streaming = createStreamingAgentStore();
+    const prose = "I need the Tailscale auth key before the VMs can join.";
+    const later = "Thanks, joining the VMs to the tailnet now.";
+    const commentary: ChatMessage = {
+      id: `${runningTurn.id}-plan`,
+      conversationId: activeConversation.id,
+      turnId: runningTurn.id,
+      role: "assistant",
+      content: prose,
+      attachments: [],
+      createdAt: runningTurn.requestedAt.replace(".000Z", ".499Z"),
+    };
+    const workspace = (messages: ChatMessage[]) => (
+      <ChatWorkspace
+        {...props}
+        latestTurnSummary={latestTurnSummary(runningTurn, "running")}
+        turns={[runningTurn]}
+        messages={[requestMessage(runningTurn), ...messages]}
+        streaming={streaming}
+        onSecretRequestCommand={onSecretRequestCommand}
+      />
+    );
+    const view = render(workspace([]));
+    act(() => streaming.update([prose, "", "text"]));
+    await screen.findByText(prose, undefined, { timeout: 5_000 });
+
+    act(() => streaming.update(["", "", null]));
+    view.rerender(workspace([commentary, secretMessage(runningTurn)]));
+    const field = await screen.findByLabelText("Tailscale auth key", { selector: "input" }, { timeout: 5_000 });
+    const card = document.getElementById(`secret-request-${REQUEST_ID}`)!;
+    expect(screen.getAllByText(prose)).toHaveLength(1);
+    const before = screen.getByText(prose);
+    expect(before.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    field.focus();
+    fireEvent.change(field, { target: { value: "tskey-par" } });
+    act(() => streaming.update([later, "", "text"]));
+    const after = await screen.findByText(later);
+    expect(card.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.getElementById(`secret-request-${REQUEST_ID}`)).toBe(card);
+    expect(screen.getByLabelText("Tailscale auth key", { selector: "input" })).toBe(field);
+    expect(field).toHaveValue("tskey-par");
+    expect(field).toHaveFocus();
   });
 });

@@ -4,17 +4,19 @@ import type Database from "better-sqlite3";
 
 import {
   SECRET_REQUEST_MAX_ACTIVE,
-  SECRET_REQUEST_MAX_PENDING_PER_CONVERSATION,
-  SECRET_REQUEST_MAX_PER_TURN,
   isSecretRequestDescription,
-  isSecretRequestFileName,
-  isSecretRequestProviderId,
   isSecretRequestTitle,
   isSecretRequestTtlHours,
-  secretRequestPlaceholderText,
   type SecretRequestReference,
   type SecretRequestStatus,
 } from "../../shared/agent-secrets";
+import {
+  SECRET_REQUEST_MAX_PENDING_PER_CONVERSATION,
+  SECRET_REQUEST_MAX_PER_TURN,
+  isSecretRequestFileName,
+  isSecretRequestProviderId,
+  secretRequestPlaceholderText,
+} from "../../node/agent-secrets";
 import type { AgentTurn, ChatMessage } from "../../shared/contracts";
 import type { ProviderId } from "../../shared/provider";
 import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";

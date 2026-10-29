@@ -12,7 +12,7 @@ import { createConversationCommandHandler } from "../../src/server/runtime/comma
 import type { ProviderHostToolCall, ProviderHostToolResult } from "../../src/server/provider/contracts";
 import { AgentSecretService } from "../../src/server/runtime/agent-secrets/agent-secret-service";
 import { agentSecretRoot } from "../../src/server/runtime/agent-secrets/secret-files";
-import { agentSecretReference, SECRET_REQUEST_TOOL_NAME } from "../../src/shared/agent-secrets";
+import { agentSecretReference, SECRET_REQUEST_TOOL_NAME } from "../../src/node/agent-secrets";
 import type { RuntimeMutationEvent } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 

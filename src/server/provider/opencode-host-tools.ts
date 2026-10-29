@@ -4,7 +4,7 @@ import { readOnlyCommandPathProblem } from "../runtime/watcher/read-only-command
 import { classifyReadOnlyCommand, type ReadOnlyCommandContext } from "../runtime/watcher/read-only-commands";
 import type { ProviderHostToolBridge, ProviderRunInput } from "./contracts";
 import type { AgentApprovalDecision, AgentApprovalRequest } from "./interactions";
-import { SECRET_REQUEST_TOOL_NAME } from "../../shared/agent-secrets";
+import { SECRET_REQUEST_TOOL_NAME } from "../../node/agent-secrets";
 import {
   INERTIA_HOST_MCP_NAME,
   INERTIA_SECRET_MCP_NAME,

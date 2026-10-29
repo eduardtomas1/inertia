@@ -9,7 +9,7 @@ import { AgentSecretService } from "../../src/server/runtime/agent-secrets/agent
 import { STREAM_PROJECTION_FLUSH_INTERVAL_MS } from "../../src/server/runtime/turns/turn-stream-channel";
 import type { TurnSecretOutputFilter } from "../../src/server/runtime/turns/turn-secret-output";
 import type { FakeTurnScheduler } from "../support/fake-turn-provider";
-import { SECRET_REQUEST_TOOL_NAME } from "../../src/shared/agent-secrets";
+import { SECRET_REQUEST_TOOL_NAME } from "../../src/node/agent-secrets";
 import {
   cleanupTurnControllerTestDirectories,
   createTurnControllerTestRuntime,

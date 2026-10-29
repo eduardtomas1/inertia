@@ -17,7 +17,7 @@ import { backendSecretReferenceForProfile } from "../node/backend-secret-referen
 import { FILE_OPEN_NO_FOLLOW } from
   "../node/platform-file-open-flags.js";
 
-import { agentSecretReference, isAgentSecretValue } from "../shared/agent-secrets.js";
+import { agentSecretReference, isAgentSecretValue } from "../node/agent-secrets.js";
 import {
   BACKEND_CREDENTIAL_MASK,
   type BackendCredentialStatus,

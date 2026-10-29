@@ -310,6 +310,23 @@ describe("settled secret request rows", () => {
     });
   });
 
+  it.each([
+    ["A program is still using this secret's file, so Inertia couldn't delete it. Close it and try again.",
+      "A program is still using this secret's file, so Inertia couldn't delete it. Close it and try again."],
+    ["That secret is no longer active.", "That secret is no longer active."],
+    ["EBUSY: resource busy or locked, unlink '/home/me/agent-secrets/token/key'", "Couldn't revoke. Try again."],
+  ])("shows only a vetted revoke failure and keeps the saved status (%s)", async (thrown, shown) => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    const runner = vi.fn<SecretRequestCommandRunner>(async () => { throw new Error(thrown); });
+    render(workspace(<SecretRequestCard message={message(settled("saved"))} />, { runner }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Revoke Tailscale auth key" })); });
+    expect(screen.getByRole("alert")).toHaveTextContent(shown);
+    expect(document.body.textContent).not.toContain("EBUSY");
+    expect(document.body.textContent).not.toContain("/home/me");
+    expect(screen.getByText("Saved · expires in 23h")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Revoke Tailscale auth key" })).toBeEnabled();
+  });
+
   it("announces the transition in a polite live region", () => {
     const pending = reference();
     const { rerender } = render(workspace(<SecretRequestCard message={message(pending)} />));

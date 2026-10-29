@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AGENT_SECRET_REVOKE_ERRORS } from "@shared/agent-secret-revoke-errors";
 import type { ServerEvent } from "@shared/contracts";
 import type { SecretRequestListEntry } from "@shared/contracts/client-command/secret-requests";
 import type { CommandWithoutId } from "../../../lib/runtimeCommands";
@@ -6,6 +7,7 @@ import {
   secretRequestExpiry,
   secretRequestSavedAgo,
   secretRequestStorageLabel,
+  secretRevokeFailure,
 } from "../../../utils/response-timeline/secretRequests";
 import { SettingsGroup, SettingStatus } from "../SettingsLayout";
 import { useSettingAction } from "../useSettingAction";
@@ -75,17 +77,38 @@ export function AgentSecretsSettings({
     if (disabled || action.busy || secrets.length === 0) return;
     restoreFocus.current = true;
     await action.run(async () => {
+      let revoked = 0;
+      let failure: unknown = null;
       for (const secret of secrets) {
-        await requestRef.current({ type: "secret-request.revoke", payload: { requestId: secret.requestId } });
+        try {
+          await requestRef.current({ type: "secret-request.revoke", payload: { requestId: secret.requestId } });
+          revoked += 1;
+        } catch (error) {
+          if (secrets.length === 1 || secretRevokeFailure(error) !== AGENT_SECRET_REVOKE_ERRORS.notActive) failure ??= error;
+        }
       }
+      if (failure !== null) throw failure;
+      return revoked;
     }, {
       key: secrets.length === 1 ? secrets[0]!.requestId : "all",
       exclusive: true,
-      success: secrets.length === 1 ? "Secret revoked." : `${secrets.length} secrets revoked.`,
-      failure: "The secret could not be revoked.",
+      success: (revoked) => revoked === 0 ? null : revoked === 1 ? "Secret revoked." : `${revoked} secrets revoked.`,
+      failure: (error) => secretRevokeFailure(error, "The secret could not be revoked."),
     });
     await refresh();
   };
+
+  const revokeButton = (targets: readonly SecretRequestListEntry[], key: string, label: string, name?: string): React.JSX.Element => (
+    <button
+      type="button"
+      className="secondary-button agent-secret-revoke"
+      aria-label={name}
+      aria-disabled={disabled || action.busy || undefined}
+      onClick={() => void revoke(targets)}
+    >
+      {action.pending === key ? "Revoking…" : label}
+    </button>
+  );
 
   const secrets = state.status === "ready" ? state.secrets : [];
   return (
@@ -131,31 +154,14 @@ export function AgentSecretsSettings({
                       <span>{secretRequestStorageLabel(secret.storage)}</span>
                     </small>
                   </span>
-                  <button
-                    type="button"
-                    className="secondary-button agent-secret-revoke"
-                    aria-label={`Revoke ${secret.title}`}
-                    aria-disabled={disabled || action.busy || undefined}
-                    onClick={() => void revoke([secret])}
-                  >
-                    {action.pending === secret.requestId ? "Revoking…" : "Revoke"}
-                  </button>
+                  {revokeButton([secret], secret.requestId, "Revoke", `Revoke ${secret.title}`)}
                 </li>
               );
             })}
           </ul>
         )}
         {secrets.length >= 2 && (
-          <div className="agent-secrets-footer">
-            <button
-              type="button"
-              className="secondary-button"
-              aria-disabled={disabled || action.busy || undefined}
-              onClick={() => void revoke(secrets)}
-            >
-              {action.pending === "all" ? "Revoking…" : "Revoke all"}
-            </button>
-          </div>
+          <div className="agent-secrets-footer">{revokeButton(secrets, "all", "Revoke all")}</div>
         )}
         {action.notice && (
           <div className="agent-secrets-notice">

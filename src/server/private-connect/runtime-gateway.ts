@@ -22,7 +22,7 @@ import {
 import { privateConnectRuntimeGrantAllowsConversation } from "../../shared/private-connect/runtime-grants";
 import { isTurnCheckpointUnavailableActivity } from "../../shared/turn-checkpoint";
 import { htmlRenderContextLine } from "../../shared/html-render-reference";
-import { secretRequestRemoteLine } from "../../shared/agent-secrets";
+import { secretRequestRemoteLine } from "../../node/agent-secrets";
 import {
   privateConnectPromptSafetyIsUsable,
   UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY,

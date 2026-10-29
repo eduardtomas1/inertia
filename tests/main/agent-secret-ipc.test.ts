@@ -9,7 +9,7 @@ import {
   type AgentSecretSender,
   type AgentSecretVault,
 } from "../../src/main/agent-secret-ipc";
-import { AGENT_SECRET_SAVE_ERRORS } from "../../src/shared/agent-secrets";
+import { AGENT_SECRET_SAVE_ERRORS } from "../../src/shared/agent-secret-save-errors";
 import {
   CredentialVault,
   type CredentialEncryptionBackend,
@@ -20,7 +20,7 @@ import type {
   RuntimeAgentSecretDelivery,
   RuntimeAgentSecretDeliveryOutcome,
 } from "../../src/main/runtime-agent-secret-coordinator";
-import { agentSecretReference } from "../../src/shared/agent-secrets";
+import { agentSecretReference } from "../../src/node/agent-secrets";
 import { BACKEND_CREDENTIAL_MASK } from "../../src/shared/backend-credentials";
 import { DESKTOP_IPC } from "../../src/shared/desktop-ipc";
 

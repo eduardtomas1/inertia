@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { AGENT_SECRET_SAVE_ERRORS, type SecretRequestReference } from "../../src/shared/agent-secrets";
+import { AGENT_SECRET_SAVE_ERRORS } from "../../src/shared/agent-secret-save-errors";
+import { AGENT_SECRET_REVOKE_ERRORS } from "../../src/shared/agent-secret-revoke-errors";
+import type { SecretRequestReference } from "../../src/shared/agent-secrets";
 import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
 import {
   buildResponseTimeline,
@@ -15,13 +17,14 @@ import {
   estimateSecretRequestHeight,
   isSecretRequestMessage,
   pendingSecretRequest,
+  secretRequestAnnouncement,
   secretRequestExpiry,
-  secretRequestFootnote,
   secretRequestSavedAgo,
   secretRequestStatusText,
-  secretSaveFailureMessage,
+  secretRevokeFailure,
   type SecretRequestMessage,
 } from "../../src/renderer/src/utils/response-timeline/secretRequests";
+import { secretRequestFootnote, secretSaveFailureMessage } from "../../src/renderer/src/utils/response-timeline/secretRequestForm";
 
 const conversationId = "15151515-1515-4151-8151-151515151515";
 const turnId = "turn-secret-model";
@@ -232,5 +235,20 @@ describe("secret request copy", () => {
     }
     expect(secretSaveFailureMessage(new Error(AGENT_SECRET_SAVE_ERRORS.limit))).toBe("Too many agent secrets are active. Revoke one in Settings, then try again.");
     expect(secretSaveFailureMessage(new Error(AGENT_SECRET_SAVE_ERRORS.fileFailed))).toBe("Inertia couldn't write the private file. Try again.");
+  });
+
+  it("shows only the vetted runtime revoke failures and falls back otherwise", () => {
+    expect(secretRevokeFailure(new Error(AGENT_SECRET_REVOKE_ERRORS.inUse)))
+      .toBe("A program is still using this secret's file, so Inertia couldn't delete it. Close it and try again.");
+    expect(secretRevokeFailure(new Error(AGENT_SECRET_REVOKE_ERRORS.notActive))).toBe("That secret is no longer active.");
+    expect(secretRevokeFailure(new Error("EBUSY: resource busy or locked, unlink '/home/me/.inertia/agent-secrets/x/key'")))
+      .toBe("Couldn't revoke. Try again.");
+    expect(secretRevokeFailure("tskey-123", "The secret could not be revoked.")).toBe("The secret could not be revoked.");
+  });
+
+  it("announces each settled transition", () => {
+    expect(["pending", "saved", "declined", "ended", "expired", "revoked"].map((status) =>
+      secretRequestAnnouncement(status as SecretRequestReference["status"])))
+      .toEqual(["", "Secret saved", "Declined", "Request ended", "Secret expired", "Secret revoked"]);
   });
 });

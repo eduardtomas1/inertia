@@ -1,7 +1,7 @@
 import type { McpServer } from "@agentclientprotocol/sdk/unstable";
 import type { McpRemoteConfig } from "@opencode-ai/sdk/v2";
 
-import { SECRET_REQUEST_WAIT_MS_BY_PROVIDER } from "../../shared/agent-secrets";
+import { SECRET_REQUEST_WAIT_MS_BY_PROVIDER } from "../../node/agent-secrets";
 
 import {
   MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES,

@@ -101,6 +101,58 @@ describe("Settings → Data → Agent secrets", () => {
     expect(screen.getByText("3 secrets revoked.")).toBeInTheDocument();
   });
 
+  it("keeps revoking all when one listed secret expired meanwhile", async () => {
+    const request = server([entry(1), entry(2), entry(3)]);
+    const fallback = request.getMockImplementation()!;
+    request.mockImplementation(async (command) => {
+      if (command.type === "secret-request.revoke" && command.payload.requestId === entry(2).requestId) {
+        throw new Error("That secret is no longer active.");
+      }
+      return await fallback(command);
+    });
+    render(<AgentSecretsSettings disabled={false} request={request} />);
+    const all = await screen.findByRole("button", { name: "Revoke all" });
+    await act(async () => { fireEvent.click(all); });
+    const revoked = request.mock.calls.flatMap(([command]) => command.type === "secret-request.revoke" ? [command.payload.requestId] : []);
+    expect(revoked).toEqual([entry(1).requestId, entry(2).requestId, entry(3).requestId]);
+    expect(await screen.findByText("2 secrets revoked.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("revokes the rest but reports a secret whose file is still in use", async () => {
+    const inUse = "A program is still using this secret's file, so Inertia couldn't delete it. Close it and try again.";
+    const request = server([entry(1), entry(2), entry(3)]);
+    const fallback = request.getMockImplementation()!;
+    request.mockImplementation(async (command) => {
+      if (command.type === "secret-request.revoke" && command.payload.requestId === entry(1).requestId) throw new Error(inUse);
+      return await fallback(command);
+    });
+    render(<AgentSecretsSettings disabled={false} request={request} />);
+    const all = await screen.findByRole("button", { name: "Revoke all" });
+    await act(async () => { fireEvent.click(all); });
+    expect(await screen.findByText(inUse)).toBeInTheDocument();
+    const list = screen.getByRole("list", { name: "Active agent secrets" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list).getByText("Tailscale auth key 1")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["That secret is no longer active.", "That secret is no longer active."],
+    ["unlink failed at C:\\Users\\me\\agent-secrets\\token", "The secret could not be revoked."],
+  ])("reports a single revoke failure with vetted copy only (%s)", async (thrown, shown) => {
+    const request = server([entry(1)]);
+    const fallback = request.getMockImplementation()!;
+    request.mockImplementation(async (command) => {
+      if (command.type === "secret-request.revoke") throw new Error(thrown);
+      return await fallback(command);
+    });
+    render(<AgentSecretsSettings disabled={false} request={request} />);
+    const revoke = await screen.findByRole("button", { name: "Revoke Tailscale auth key 1" });
+    await act(async () => { fireEvent.click(revoke); });
+    expect(await screen.findByText(shown)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("Users");
+  });
+
   it("does not revoke while settings are disabled", async () => {
     const request = server([entry(1)]);
     render(<AgentSecretsSettings disabled request={request} />);

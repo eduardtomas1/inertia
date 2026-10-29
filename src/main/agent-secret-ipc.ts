@@ -1,12 +1,8 @@
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 
-import {
-  AGENT_SECRET_SAVE_ERRORS,
-  agentSecretValueIssue,
-  parseSaveAgentSecretRequest,
-  type SaveAgentSecretRequest,
-  type SaveAgentSecretResult,
-} from "../shared/agent-secrets.js";
+import { agentSecretValueIssue, parseSaveAgentSecretRequest } from "../node/agent-secrets.js";
+import { AGENT_SECRET_SAVE_ERRORS } from "../shared/agent-secret-save-errors.js";
+import type { SaveAgentSecretRequest, SaveAgentSecretResult } from "../shared/agent-secrets.js";
 import { DESKTOP_IPC } from "../shared/desktop-ipc.js";
 import type { AgentSecretVaultWrite } from "./credential-vault.js";
 import type {

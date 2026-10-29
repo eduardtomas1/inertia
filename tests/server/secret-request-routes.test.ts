@@ -20,7 +20,7 @@ import {
   SECRET_REQUEST_TOOL_NAME,
   SECRET_REQUEST_WAIT_MS_BY_PROVIDER,
   secretRequestWaitMs,
-} from "../../src/shared/agent-secrets";
+} from "../../src/node/agent-secrets";
 import { hostToolActivityTitle } from "../../src/shared/activity-display";
 import { PROVIDER_IDS } from "../../src/server/runtime/backends/backend-profile-model";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";

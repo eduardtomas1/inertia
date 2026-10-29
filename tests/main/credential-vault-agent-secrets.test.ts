@@ -9,7 +9,7 @@ import {
   type CredentialVaultPersistence,
 } from "../../src/main/credential-vault";
 import { runtimeCredentialBroker } from "../../src/main/runtime-credential-broker";
-import { agentSecretReference } from "../../src/shared/agent-secrets";
+import { agentSecretReference } from "../../src/node/agent-secrets";
 
 const SECRET = "tskey-auth-kQ7xZ9pL2mN4";
 

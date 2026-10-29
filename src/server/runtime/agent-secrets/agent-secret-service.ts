@@ -1,11 +1,13 @@
 import {
   SECRET_REQUEST_MAX_ACTIVE,
-  agentSecretReference,
-  isAgentSecretValue,
-  secretRequestWaitMs,
   type SecretRequestStorage,
   type SecretRequestStatus,
 } from "../../../shared/agent-secrets";
+import {
+  agentSecretReference,
+  isAgentSecretValue,
+  secretRequestWaitMs,
+} from "../../../node/agent-secrets";
 import type { AgentTurn, ChatMessage, Conversation, RuntimeMutationEvent } from "../../../shared/contracts";
 import type { SecretRequestListEntry } from "../../../shared/contracts/client-command/secret-requests";
 import type { ProviderId } from "../../../shared/provider";

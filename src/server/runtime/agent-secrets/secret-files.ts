@@ -4,7 +4,8 @@ import { chmod, mkdir, open, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { FILE_OPEN_NO_FOLLOW } from "../../../node/platform-file-open-flags";
-import { AGENT_SECRET_MAX_LENGTH, isAgentSecretValue, isSecretRequestFileName } from "../../../shared/agent-secrets";
+import { AGENT_SECRET_MAX_LENGTH } from "../../../shared/agent-secrets";
+import { isAgentSecretValue, isSecretRequestFileName } from "../../../node/agent-secrets";
 
 export const AGENT_SECRETS_DIRECTORY = "agent-secrets";
 

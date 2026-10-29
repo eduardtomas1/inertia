@@ -57,7 +57,7 @@ import {
 import { createInertiaHarnessCapabilities } from "./inertia-harness-capabilities";
 import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
 import { HtmlRenderHostTool } from "./html-render-host-tool";
-import { SECRET_REQUEST_TOOL_NAME } from "../../shared/agent-secrets";
+import { SECRET_REQUEST_TOOL_NAME } from "../../node/agent-secrets";
 import type { AgentSecretHostToolSource } from "./agent-secrets/agent-secret-service";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
 import { ManagedMutationQueue } from "./managed-mutation-queue";

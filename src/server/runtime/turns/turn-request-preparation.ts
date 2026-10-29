@@ -43,7 +43,7 @@ import {
 } from "./turn-instruction-delivery";
 import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
 import { rejectGoalCustomAgentCall, resolveCustomAgentCall } from "./custom-agent-call";
-import { SECRET_REQUEST_FALLBACK_INSTRUCTION } from "../../../shared/agent-secrets";
+import { SECRET_REQUEST_FALLBACK_INSTRUCTION } from "../../../node/agent-secrets";
 import type {
   ActiveTurn,
   QueuedTurn,

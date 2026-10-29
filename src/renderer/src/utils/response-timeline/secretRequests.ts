@@ -1,11 +1,6 @@
 import type { ChatMessage, ServerEvent } from "@shared/contracts";
-import {
-  AGENT_SECRET_SAVE_ERRORS,
-  AGENT_SECRET_VALUE_ISSUES,
-  type SecretRequestReference,
-  type SecretRequestStatus,
-  type SecretRequestStorage,
-} from "@shared/agent-secrets";
+import { AGENT_SECRET_REVOKE_ERRORS } from "@shared/agent-secret-revoke-errors";
+import type { SecretRequestReference, SecretRequestStatus, SecretRequestStorage } from "@shared/agent-secrets";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 
 export type SecretRequestMessage = ChatMessage & { turnId: string; secretRequest: SecretRequestReference };
@@ -18,9 +13,7 @@ export type SecretRequestCommandRunner = (
 ) => Promise<ServerEvent>;
 
 export const SECRET_REQUEST_LABEL = "Asking for a secret";
-export const SECRET_REQUEST_PLACEHOLDER = "Paste the secret";
-export const SECRET_REQUEST_SAVE_FAILED = "The secret could not be saved. Try again.";
-export const SECRET_REQUEST_MIN_LENGTH_ISSUE = AGENT_SECRET_VALUE_ISSUES.tooShort;
+export const SECRET_REQUEST_REVOKE_FAILED = "Couldn't revoke. Try again.";
 export const SECRET_REQUEST_READ_ONLY = "Waiting for your answer in the main window";
 
 const SETTLED_COPY: Readonly<Record<Exclude<SecretRequestStatus, "pending" | "saved">, string>> = {
@@ -30,31 +23,11 @@ const SETTLED_COPY: Readonly<Record<Exclude<SecretRequestStatus, "pending" | "sa
   revoked: "Revoked",
 };
 
-const ANNOUNCEMENTS: Readonly<Partial<Record<SecretRequestStatus, string>>> = {
-  saved: "Secret saved",
-  declined: "Declined",
-  ended: "Request ended",
-  expired: "Secret expired",
-  revoked: "Secret revoked",
-};
-
-const KNOWN_FAILURES: readonly string[] = [
-  ...Object.values(AGENT_SECRET_VALUE_ISSUES),
-  ...Object.values(AGENT_SECRET_SAVE_ERRORS),
-];
-
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 
 export function isSecretRequestMessage(message: ChatMessage): message is SecretRequestMessage {
-  const reference = message.secretRequest;
-  return message.role === "system"
-    && typeof message.turnId === "string"
-    && typeof reference === "object"
-    && reference !== null
-    && typeof reference.requestId === "string"
-    && typeof reference.title === "string"
-    && typeof reference.status === "string";
+  return message.role === "system" && typeof message.turnId === "string" && message.secretRequest !== undefined;
 }
 
 export function pendingSecretRequest(messages: readonly ChatMessage[]): SecretRequestMessage | null {
@@ -67,11 +40,6 @@ export function pendingSecretRequest(messages: readonly ChatMessage[]): SecretRe
 
 export function secretRequestElementId(requestId: string): string {
   return `secret-request-${requestId}`;
-}
-
-export function secretRequestFootnote(ttlHours: number): string {
-  const hours = Number.isSafeInteger(ttlHours) && ttlHours > 0 ? ttlHours : 24;
-  return `Kept out of chat, in a private file this agent's commands can read for ${hours} ${hours === 1 ? "hour" : "hours"}`;
 }
 
 export function secretRequestExpiry(expiresAt: string | null, now: number): string {
@@ -103,18 +71,13 @@ export function secretRequestStatusText(reference: SecretRequestReference, now: 
 }
 
 export function secretRequestAnnouncement(status: SecretRequestStatus): string {
-  return ANNOUNCEMENTS[status] ?? "";
+  if (status === "pending") return "";
+  return status === "declined" || status === "ended" ? SETTLED_COPY[status] : `Secret ${status}`;
 }
 
-export function secretSaveFailureMessage(error: unknown): string {
+export function secretRevokeFailure(error: unknown, fallback = SECRET_REQUEST_REVOKE_FAILED): string {
   const message = error instanceof Error ? error.message : "";
-  return KNOWN_FAILURES.find((known) => message.endsWith(known)) ?? SECRET_REQUEST_SAVE_FAILED;
-}
-
-export function secretValueIssue(value: string): string | null {
-  const secret = value.trim();
-  if (secret.length === 0) return null;
-  return secret.length < 4 ? SECRET_REQUEST_MIN_LENGTH_ISSUE : null;
+  return Object.values(AGENT_SECRET_REVOKE_ERRORS).find((known) => message.endsWith(known)) ?? fallback;
 }
 
 export const SECRET_REQUEST_SETTLED_HEIGHT = 36;

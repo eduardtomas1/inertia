@@ -1,17 +1,19 @@
 import {
   SECRET_REQUEST_MAX_ACTIVE,
   SECRET_REQUEST_MAX_DESCRIPTION_LENGTH,
-  SECRET_REQUEST_MAX_FILE_NAME_LENGTH,
-  SECRET_REQUEST_MAX_PER_TURN,
   SECRET_REQUEST_MAX_TITLE_LENGTH,
   SECRET_REQUEST_MAX_TTL_HOURS,
   SECRET_REQUEST_MIN_TTL_HOURS,
+} from "../../../shared/agent-secrets";
+import {
+  SECRET_REQUEST_MAX_FILE_NAME_LENGTH,
+  SECRET_REQUEST_MAX_PER_TURN,
   SECRET_REQUEST_TOOL_INPUT_SCHEMA,
   SECRET_REQUEST_TOOL_NAME,
   normalizeSecretRequestToolInput,
   secretRequestToolInputSchema,
   type NormalizedSecretRequestInput,
-} from "../../../shared/agent-secrets";
+} from "../../../node/agent-secrets";
 import type { AgentSecretRequestErrorCode } from "../../persistence/agent-secret-request-repository";
 import type { ProviderHostToolDefinition, ProviderHostToolResult } from "../../provider/contracts";
 

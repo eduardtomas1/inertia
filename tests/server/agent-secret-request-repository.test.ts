@@ -12,7 +12,8 @@ import {
   type CreateAgentSecretRequestInput,
 } from "../../src/server/persistence/agent-secret-request-repository";
 import { chatMessageSchema } from "../../src/shared/contracts/chat-message-schema";
-import { secretRequestPlaceholderText, type SecretRequestReference } from "../../src/shared/agent-secrets";
+import { type SecretRequestReference } from "../../src/shared/agent-secrets";
+import { secretRequestPlaceholderText } from "../../src/node/agent-secrets";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const directories: string[] = [];

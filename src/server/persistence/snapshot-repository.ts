@@ -64,6 +64,7 @@ import {
 import { ConversationHistoryTooLargeError } from "./errors";
 import { PromptPresetRepository } from "./prompt-preset-repository";
 import { TodoRepository } from "./todo-repository";
+import { CustomAgentRepository } from "./custom-agent-repository";
 import { cachedStatement } from "./statement-cache";
 import { withLatestPlanDocument } from "./latest-plan-document";
 import { conversationAttachmentGallery } from "./conversation-attachment-gallery";
@@ -107,10 +108,12 @@ type SnapshotPersistenceContext = Pick<PersistenceContext, "database"> & {
 export class SnapshotRepository {
   readonly promptPresets: PromptPresetRepository;
   readonly todos: TodoRepository;
+  readonly customAgents: CustomAgentRepository;
 
   constructor(private readonly context: SnapshotPersistenceContext) {
     this.promptPresets = new PromptPresetRepository(context.database);
     this.todos = new TodoRepository(context.database);
+    this.customAgents = new CustomAgentRepository(context.database);
   }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {
@@ -157,6 +160,7 @@ export class SnapshotRepository {
       runs: (this.context.database.prepare("SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200").all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
       promptPresets: this.promptPresets.list(),
+      customAgents: this.customAgents.list(),
       todos: this.todos.list(),
       settings: settingsFromState(state),
       activeProjectId: state.active_project_id,
@@ -198,6 +202,7 @@ export class SnapshotRepository {
       ).all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
       promptPresets: this.promptPresets.list(),
+      customAgents: this.customAgents.list(),
       todos: this.todos.list(),
       watchers: watcherLinkViews(this.context.database),
       settings: settingsFromState(state),
@@ -301,7 +306,7 @@ export class SnapshotRepository {
         ORDER BY created_at DESC, id DESC LIMIT ?`, conversationId, limits.activities).map(activityFromRow),
       subagents: newest<SubagentTraceRow>(`SELECT id, conversation_id, run_id, turn_id, provider_id, provider_task_id,
           provider_agent_id, parent_trace_id, parent_provider_agent_id, parent_provider_tool_use_id,
-          provider_tool_use_id, provider_role, provider_name, provider_status, status, is_live,
+          provider_tool_use_id, provider_role, provider_name, custom_agent_id, provider_status, status, is_live,
           NULL AS description, NULL AS progress, NULL AS result, NULL AS model, NULL AS activity,
           NULL AS usage_json, NULL AS tool_use_count, NULL AS duration_ms, sequence, created_at, updated_at
         FROM subagent_traces WHERE conversation_id = ?

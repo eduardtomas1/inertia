@@ -1,4 +1,6 @@
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
+import { CUSTOM_AGENTS_SCHEMA_VERSION } from "./migrations/custom-agents";
+import { CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS } from "./custom-agents-schema";
 
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
@@ -133,6 +135,22 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "prompt_cache_source",
   ]],
   [106, "messages", ["duo_comparison_json"]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents", [
+    "id",
+    "name",
+    "handle",
+    "description",
+    "icon_json",
+    "accent",
+    "blocks_json",
+    "skills_json",
+    "position",
+    "revision",
+    "created_at",
+    "updated_at",
+  ]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, "messages", ["custom_agent_call_json"]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, "subagent_traces", ["custom_agent_id"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -179,6 +197,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [98, ["conversation_title_locks"]],
   [99, ["watcher_links", "watcher_wakes"]],
   [103, ["turn_failure_kinds"]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, ["custom_agents"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -203,6 +222,7 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "messages_conversation_created_idx"],
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "activities_conversation_created_idx"],
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "reasonings_conversation_created_idx"],
+    [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_position_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [
@@ -229,5 +249,6 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
       "(select count(*) from todos where completed_at is null) >= 200",
       "raise(abort,",
     ]],
+    [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_count_limit", CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS],
   ],
 };

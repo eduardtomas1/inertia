@@ -40,7 +40,8 @@ function brief(overrides: Partial<DuoComparisonBrief> = {}): DuoComparisonBrief 
 
 describe("Duo comparison brief column", () => {
   it("is registered at its declared schema version", () => {
-    expect(DUO_COMPARISON_BRIEFS_SCHEMA_VERSION).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+    expect(DUO_COMPARISON_BRIEFS_SCHEMA_VERSION).toBe(106);
+    expect(DUO_COMPARISON_BRIEFS_SCHEMA_VERSION).toBeLessThanOrEqual(CURRENT_DATABASE_SCHEMA_VERSION);
     expect(runtimeMigrationCatalog().find(({ version }) => version === DUO_COMPARISON_BRIEFS_SCHEMA_VERSION))
       .toMatchObject({ name: duoComparisonBriefsMigration.name, up: duoComparisonBriefsMigration.up });
   });
@@ -62,7 +63,7 @@ describe("Duo comparison brief column", () => {
 
       expect(columns()).toContain("duo_comparison_json");
       expect(database.prepare("SELECT * FROM messages ORDER BY rowid").all())
-        .toEqual(before.map((row) => ({ ...(row as object), duo_comparison_json: null })));
+        .toEqual(before.map((row) => ({ ...(row as object), duo_comparison_json: null, custom_agent_call_json: null })));
       expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 105 ORDER BY version").all()).toEqual(history);
       expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
 

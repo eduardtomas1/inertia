@@ -39,6 +39,7 @@ import {
   todoSchema,
   todosSerializedBytes,
 } from "../todos";
+import { customAgentSchema, MAX_CUSTOM_AGENTS } from "../custom-agents";
 import { watcherLinkCollectionCoherent } from "./watcher-schema";
 
 function exhaustiveOptions<T extends string>(
@@ -151,6 +152,20 @@ export function todoCollectionCoherent(value: unknown): boolean {
     && todosSerializedBytes(todos) <= MAX_TODOS_SERIALIZED_BYTES;
 }
 
+export function customAgentCollectionCoherent(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > MAX_CUSTOM_AGENTS) return false;
+  const parsed = value.map((entry) => customAgentSchema.safeParse(entry));
+  if (parsed.some((result) => !result.success)) return false;
+  const agents = parsed.flatMap((result) => result.success
+    ? [result.data]
+    : []);
+  return new Set(agents.map(({ id }) => id)).size === agents.length
+    && new Set(agents.map(({ handle }) => handle)).size === agents.length
+    && agents.every(({ position }, index) =>
+      index === 0 || position > (agents[index - 1]?.position ?? -1));
+}
+
 const CONVERSATION_DETAIL_SCOPED_COLLECTIONS = [
   "agentTurns", "turnGitArtifacts", "messages", "activities", "subagents",
   "reasonings", "usage", "plans", "goals", "checkpoints", "reviewSummaries",
@@ -260,6 +275,7 @@ export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): bool
       || conversationProjects.get(value.activeConversationId) === value.activeProjectId)
     && promptPresetCollectionCoherent(value.promptPresets)
     && todoCollectionCoherent(value.todos)
+    && customAgentCollectionCoherent(value.customAgents)
     && watcherLinkCollectionCoherent(value.watchers, conversationProjects, projectIds);
 }
 

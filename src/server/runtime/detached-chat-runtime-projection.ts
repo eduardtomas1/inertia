@@ -92,6 +92,7 @@ export function projectDetachedChatSnapshot(
     backendDefaults: [],
     settings: projectedSettings(snapshot.settings),
     promptPresets: snapshot.promptPresets ?? [],
+    customAgents: snapshot.customAgents ?? [],
     todos: [],
     ...(snapshot.watchers ? {
       watchers: snapshot.watchers.filter((link) => watcherLinkTouches(link, conversationId)),

@@ -291,7 +291,7 @@ export class TurnLedgerRepository {
         input.attachments ?? [],
         null,
         input.requestedAt,
-        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, duoComparison: input.duoComparison },
+        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, duoComparison: input.duoComparison, customAgentCall: input.customAgentCall },
       );
       const turn = this.create({
         ...input,

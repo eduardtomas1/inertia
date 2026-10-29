@@ -202,6 +202,7 @@ export interface MessageRow {
   private_connect_device_id?: string | null;
   watcher_note_json?: string | null;
   duo_comparison_json?: string | null;
+  custom_agent_call_json?: string | null;
   compaction_json?: string | null;
   html_render_json?: string | null;
   id: string;
@@ -239,6 +240,7 @@ export interface SubagentTraceRow {
   provider_tool_use_id: string | null;
   provider_role: string | null;
   provider_name: string | null;
+  custom_agent_id?: string | null;
   provider_status: string | null;
   status: SubagentTraceStatus;
   is_live: 0 | 1;

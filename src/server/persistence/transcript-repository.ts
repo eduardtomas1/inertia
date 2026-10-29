@@ -7,6 +7,7 @@ import { isHtmlRenderReference } from "../../shared/html-render";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
 import { DUO_COMPARISON_BRIEF_MAX_BYTES, duoComparisonBriefSchema, type DuoComparisonBrief } from "../../shared/duo-comparison-brief";
+import { customAgentCallAttributionSchema, type CustomAgentCallAttribution } from "../../shared/custom-agents";
 import { AGENT_TURN_STATUSES, isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { randomUUID } from "node:crypto";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
@@ -59,6 +60,12 @@ function validDuoComparison(role: ChatMessage["role"], turnId: string | null, br
   const parsed = duoComparisonBriefSchema.safeParse(brief);
   if (role !== "user" || turnId !== null || !parsed.success
     || Buffer.byteLength(JSON.stringify(parsed.data)) > DUO_COMPARISON_BRIEF_MAX_BYTES) throw new Error("Invalid Duo comparison brief.");
+  return parsed.data;
+}
+
+function validCustomAgentCall(call: CustomAgentCallAttribution): CustomAgentCallAttribution {
+  const parsed = customAgentCallAttributionSchema.safeParse(call);
+  if (!parsed.success) throw new Error("Invalid custom agent attribution.");
   return parsed.data;
 }
 
@@ -180,9 +187,11 @@ export class TranscriptRepository {
     if (options.privateConnectDeviceId !== undefined) message.privateConnectDeviceId = options.privateConnectDeviceId;
     if (watcherNote) message.watcherNote = watcherNote;
     if (duoComparison) message.duoComparison = duoComparison;
+    const customAgentCall = options.customAgentCall === undefined ? undefined : validCustomAgentCall(options.customAgentCall);
+    if (customAgentCall) message.customAgentCall = customAgentCall;
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null });
+      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, custom_agent_call_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @customAgentCallJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null, customAgentCallJson: customAgentCall ? JSON.stringify(customAgentCall) : null });
       this.context.database.prepare(`
         UPDATE conversations
         SET updated_at = ?, settled_at = NULL,

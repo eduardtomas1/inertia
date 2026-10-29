@@ -334,6 +334,10 @@ export class ExecutionLedgerRepository {
       ),
     };
     const usage = validateSubagentTaskUsage(input.usage);
+    const customAgentId = typeof input.customAgentId === "string"
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(input.customAgentId)
+      ? input.customAgentId
+      : null;
 
     if (existing) {
       this.context.database.prepare(`
@@ -355,6 +359,7 @@ export class ExecutionLedgerRepository {
             ),
             provider_role = COALESCE(@providerRole, provider_role),
             provider_name = COALESCE(@providerName, provider_name),
+            custom_agent_id = COALESCE(@customAgentId, custom_agent_id),
             provider_status = COALESCE(@providerStatus, provider_status),
             status = @status,
             is_live = @isLive,
@@ -376,6 +381,7 @@ export class ExecutionLedgerRepository {
       `).run({
         id: existing.id,
         ...normalized,
+        customAgentId,
         usageJson: subagentTaskUsageJson(mergeSubagentTaskUsage(
           subagentTraceFromRow(existing).usage,
           usage,
@@ -406,6 +412,7 @@ export class ExecutionLedgerRepository {
       turnId: input.turnId,
       providerId: input.providerId,
       ...normalized,
+      ...(customAgentId ? { customAgentId } : {}),
       usage,
       status: input.status,
       isLive: input.isLive,
@@ -422,7 +429,7 @@ export class ExecutionLedgerRepository {
         provider_name, provider_status, status, is_live,
         description, progress, result, model, activity,
         usage_json, tool_use_count, duration_ms, sequence,
-        created_at, updated_at
+        created_at, updated_at, custom_agent_id
       ) VALUES (
         @id, @conversationId, @runId, @turnId, @providerId,
         @providerTaskId, @providerAgentId, @parentTraceId,
@@ -431,10 +438,11 @@ export class ExecutionLedgerRepository {
         @providerName, @providerStatus, @status, @isLive,
         @description, @progress, @result, @model, @activity,
         @usageJson, @toolUseCount, @durationMs, @sequence,
-        @createdAt, @updatedAt
+        @createdAt, @updatedAt, @customAgentId
       )
     `).run({
       ...normalized,
+      customAgentId,
       id: trace.id,
       conversationId: trace.conversationId,
       runId: trace.runId,

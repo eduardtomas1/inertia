@@ -44,5 +44,18 @@ export function removeWatcherLinksFromLegacyFixture(database: Database.Database)
   if ((database.pragma("table_info(messages)") as Array<{ name: string }>).some(({ name }) => name === "duo_comparison_json")) {
     database.exec("ALTER TABLE messages DROP COLUMN duo_comparison_json");
   }
+  removeCustomAgentsFromLegacyFixture(database);
   database.exec("DELETE FROM schema_migrations WHERE version >= 99");
+}
+
+export function removeCustomAgentsFromLegacyFixture(database: Database.Database): void {
+  database.exec(`
+    DROP TRIGGER IF EXISTS custom_agents_count_limit;
+    DROP TABLE IF EXISTS custom_agents;
+  `);
+  for (const [table, column] of [["messages", "custom_agent_call_json"], ["subagent_traces", "custom_agent_id"]] as const) {
+    if ((database.pragma(`table_info(${table})`) as Array<{ name: string }>).some(({ name }) => name === column)) {
+      database.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+    }
+  }
 }

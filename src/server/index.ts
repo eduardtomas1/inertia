@@ -80,9 +80,7 @@ import {
 } from "./runtime/commands/duo-commands";
 import { createWatcherRuntime, type WatcherRuntime } from "./runtime/watcher/watcher-runtime";
 import { createWatcherTurnPolicy } from "./runtime/watcher/watcher-turn-policy";
-import {
-  createIsolatedReviewCommandHandler,
-} from "./runtime/commands/isolated-review-commands";
+import { createIsolatedReviewCommandHandler } from "./runtime/commands/isolated-review-commands";
 import {
   createProjectWorkspaceCommandHandler,
 } from "./runtime/commands/project-workspace-commands";
@@ -99,6 +97,7 @@ import { createConversationCompactionCommandHandler } from "./runtime/commands/c
 import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
+import { createCustomAgentCommandHandler } from "./runtime/commands/custom-agent-commands";
 import {
   createAgentWorkflowCommandHandler,
 } from "./runtime/commands/agent-workflow-commands";
@@ -757,6 +756,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, visibleLaunchIds: detachedChatRuntimeSecurity.visibleDuoLaunchIds, broadcastSnapshot: flushSnapshot, send }),
       watchers.handler,
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
+      createCustomAgentCommandHandler({ store }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork,

@@ -30,6 +30,7 @@ import { persistTurnFailureKindsMigration } from "./persist-turn-failure-kinds";
 import { persistCompactOnReturnMigration } from "./persist-compact-on-return";
 import { duoComparisonBriefsMigration } from "./duo-comparison-briefs";
 import { turnScopedIndexesMigration } from "./turn-scoped-indexes";
+import { customAgentsMigration } from "./custom-agents";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -63,4 +64,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   persistCompactOnReturnMigration,
   turnScopedIndexesMigration,
   duoComparisonBriefsMigration,
+  customAgentsMigration,
 ];

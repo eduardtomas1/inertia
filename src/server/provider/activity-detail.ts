@@ -76,7 +76,10 @@ export function redactExactCredentials(value: string, credentials: readonly stri
  * secret with escape codes would otherwise pass the matcher and be re-joined by
  * the later sanitizer.
  */
+const TERMINAL_CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/u;
+
 export function stripTerminalControlSequences(value: string): string {
+  if (!TERMINAL_CONTROL.test(value)) return value;
   let text = value.replace(/\r\n?/gu, "\n");
   for (const pattern of ANSI_ESCAPE) text = text.replace(pattern, "");
   return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu, "");
@@ -168,8 +171,10 @@ export function sanitizeProviderActivityDetail(
   text = scrubPathPrefix(text, options.workspaceRoot, "<workspace>");
   text = scrubPathPrefix(text, options.homeDirectory ?? homedir(), "<home>");
   text = text
-    .replace(/\b[A-Za-z]:\\(?:Users|Temp)\\(?:[^\\\s]+\\)*[^\\\s]*/giu, "<path>")
-    .replace(/\/(?:Users|home|private\/tmp|tmp)(?:\/[^\s,;:]+)+/gu, "<path>");
+    .replace(/(["'])[A-Za-z]:\\(?:Users|Temp)\\(?:(?!\1)[^\n])*\1/giu, "$1<path>$1")
+    .replace(/(["'])\/(?:Users|home|private\/tmp|tmp)\/(?:(?!\1)[^\n])*\1/gu, "$1<path>$1")
+    .replace(/\b[A-Za-z]:\\(?:Users|Temp)\\(?:[^\\\s"'`]+\\)*[^\\\s"'`]*/giu, "<path>")
+    .replace(/\/(?:Users|home|private\/tmp|tmp)(?:\/(?:[^\s,;:"'`\\]|\\.)+)+/gu, "<path>");
   if (!options.preserveWhitespace) text = text.trim();
   if (!text) return null;
   return boundProviderActivityDetail(

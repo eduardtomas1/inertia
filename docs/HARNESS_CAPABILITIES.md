@@ -68,6 +68,13 @@ suggestion and only when it is plain ASCII (letters, digits, `_`, `.`, `:`,
 malformed, and a name that is only padded with whitespace or a byte-order mark
 gets the suggestion on both transports.
 
+Inertia host tools share an allowance of 1,024 admitted calls per turn,
+including Browser inspection and interaction calls. At most eight calls may
+be pending at once. A concurrency refusal can be retried after a call finishes;
+`host_tool_budget_exhausted` requires a new turn. Calls admitted before a
+failure or cancellation still consume the allowance, and reused call identities
+remain rejected. These limits do not replace permission or approval checks.
+
 `inertia.frontend-workbench` composes the Browser tools described in
 `docs/AGENT_BROWSER.md`. Its guidance holds only what the tool descriptions do
 not already say: snapshot before and after each meaningful UI change, exercise

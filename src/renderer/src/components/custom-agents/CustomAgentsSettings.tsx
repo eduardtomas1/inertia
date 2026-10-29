@@ -406,7 +406,7 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
                             rows.report({ tone: "error", text: LIMIT_MESSAGE });
                             return;
                           }
-                          rowAction({ agentId: agent.id }, () => send({
+                          void rowAction({ agentId: agent.id }, () => send({
                             type: "custom-agent.duplicate",
                             payload: { agentId: agent.id, expectedRevision: agent.revision },
                           }), "Duplicated");

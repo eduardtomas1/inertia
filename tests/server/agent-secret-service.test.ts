@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, linkSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -663,6 +663,66 @@ describe("agent secret service: lifecycle hardening", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps redacting a value whose private file stays locked across a restart, without restoring it, until a sweep deletes it", async () => {
+    const first = await openHarness();
+    const { requestId, file } = await saved(first);
+    const token = basenameOf(dirname(file));
+    services.splice(services.indexOf(first.service), 1);
+    const second = await openHarness({
+      directory: first.directory,
+      vault: { [agentSecretReference(requestId)]: SECRET },
+      start: false,
+    });
+    second.clock.now = first.clock.now + 2 * 60 * 60_000;
+    second.locked.add(token);
+    expect(() => second.service.start()).not.toThrow();
+    await second.service.restore();
+    expect(readFileSync(file, "utf8")).toBe(SECRET);
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("expired");
+    expect(second.resolveVault).not.toHaveBeenCalled();
+    expect(second.forgotten).toContain(agentSecretReference(requestId));
+    expect(second.service.filePath(requestId)).toBeNull();
+    expect(second.service.list()).toEqual([]);
+    expect(second.service.output.text(`late cat → ${SECRET}`)).toBe("late cat → [redacted]");
+    second.service.sweep();
+    expect(second.service.output.text(SECRET)).toBe("[redacted]");
+    second.locked.delete(token);
+    second.service.sweep();
+    expect(existsSync(dirname(file))).toBe(false);
+    expect(second.service.output.values()).toEqual([]);
+    first.service.shutdown();
+  });
+
+  it.skipIf(!POSIX)("never reads a retained value through a symlink, a shared file or a hard link", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-secret-retained-"));
+    directories.push(directory);
+    const root = agentSecretRoot(directory);
+    const outside = join(directory, "outside");
+    await mkdir(outside, { recursive: true, mode: 0o700 });
+    await writeFile(join(outside, "secret"), "outside-value-1234", { mode: 0o600 });
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    const tokens = { linkedDir: "a".repeat(32), shared: "b".repeat(32), linkedFile: "c".repeat(32), hardLink: "d".repeat(32), kept: "e".repeat(32) };
+    symlinkSync(outside, join(root, tokens.linkedDir));
+    for (const token of [tokens.shared, tokens.linkedFile, tokens.hardLink, tokens.kept]) await mkdir(join(root, token), { mode: 0o700 });
+    await writeFile(join(root, tokens.shared, "secret"), "shared-value-1234", { mode: 0o644 });
+    symlinkSync(join(outside, "secret"), join(root, tokens.linkedFile, "secret"));
+    linkSync(join(outside, "secret"), join(root, tokens.hardLink, "secret"));
+    await writeFile(join(root, tokens.kept, "secret"), "retained-value-1234", { mode: 0o600 });
+    const harness = await openHarness({ directory, start: false });
+    for (const token of Object.values(tokens)) harness.locked.add(token);
+    harness.service.start();
+    expect(harness.service.output.values()).toEqual(expect.arrayContaining(["retained-value-1234"]));
+    for (const value of ["outside-value-1234", "shared-value-1234"]) {
+      expect(harness.service.output.text(value)).toBe(value);
+    }
+    expect(readFileSync(join(outside, "secret"), "utf8")).toBe("outside-value-1234");
+    harness.locked.clear();
+    harness.service.sweep();
+    expect(readdirSync(root)).toEqual([]);
+    expect(readFileSync(join(outside, "secret"), "utf8")).toBe("outside-value-1234");
+    expect(harness.service.output.values()).toEqual([]);
   });
 
   it("rejects a value that fails validation in the runtime and keeps the request pending", async () => {

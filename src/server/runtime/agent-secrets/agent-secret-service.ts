@@ -24,7 +24,9 @@ import {
   clearAgentSecretRoot,
   ensureAgentSecretRoot,
   newAgentSecretFileToken,
+  readRetainedAgentSecretValues,
   removeAgentSecretDirectory,
+  retainedAgentSecretTokens,
   writeAgentSecretFile,
 } from "./secret-files";
 import { SecretOutputRedactor } from "./secret-output-redactor";
@@ -111,7 +113,7 @@ export class AgentSecretService {
   private readonly platform: NodeJS.Platform;
   private readonly pending = new Map<string, PendingRequest>();
   private readonly active = new Map<string, ActiveSecret>();
-  private readonly lingering = new Map<string, string>();
+  private readonly lingering = new Map<string, readonly string[]>();
   private restoring: AgentSecretRequestRecord[] = [];
   private expiryTimer: NodeJS.Timeout | null = null;
   private sweepTimer: NodeJS.Timeout | null = null;
@@ -135,7 +137,7 @@ export class AgentSecretService {
       ensureAgentSecretRoot(this.root);
     } catch {
     }
-    clearAgentSecretRoot(this.root);
+    this.recoverRetainedFiles();
     try {
       this.settleStoredRequests();
     } catch {
@@ -144,6 +146,15 @@ export class AgentSecretService {
     const interval = Math.max(1_000, this.dependencies.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS);
     this.sweepTimer = setInterval(() => this.sweep(), interval);
     this.sweepTimer.unref?.();
+  }
+
+  private recoverRetainedFiles(): void {
+    for (const token of retainedAgentSecretTokens(this.root)) {
+      if (this.removeFile(token)) continue;
+      this.lingering.set(token, readRetainedAgentSecretValues(this.root, token, this.platform));
+    }
+    clearAgentSecretRoot(this.root, new Set(this.lingering.keys()));
+    this.refreshActive();
   }
 
   private settleStoredRequests(): void {
@@ -194,8 +205,10 @@ export class AgentSecretService {
       }
       if (this.active.get(record.id)?.token !== token) {
         this.discardFile(token, value);
-        this.refreshActive();
+      } else {
+        this.lingering.delete(token);
       }
+      this.refreshActive();
     }
   }
 
@@ -383,11 +396,11 @@ export class AgentSecretService {
       }
     } catch {
     }
+    const kept = [...this.active.values()].map(({ token }) => token);
     for (const token of this.lingering.keys()) {
-      if (this.removeFile(token)) this.lingering.delete(token);
+      if (kept.includes(token) || this.removeFile(token)) this.lingering.delete(token);
     }
     this.refreshActive();
-    const kept = [...this.active.values()].map(({ token }) => token);
     clearAgentSecretRoot(this.root, new Set([...kept, ...this.lingering.keys()]));
   }
 
@@ -458,7 +471,7 @@ export class AgentSecretService {
   }
 
   private discardFile(token: string, value: string): void {
-    if (!this.removeFile(token)) this.lingering.set(token, value);
+    if (!this.removeFile(token)) this.lingering.set(token, [value]);
   }
 
   private transition(requestId: string, from: readonly SecretRequestStatus[], to: SecretRequestStatus): boolean {
@@ -474,7 +487,7 @@ export class AgentSecretService {
   }
 
   private refreshActive(): void {
-    this.output.setValues([...[...this.active.values()].map(({ value }) => value), ...this.lingering.values()]);
+    this.output.setValues([...[...this.active.values()].map(({ value }) => value), ...[...this.lingering.values()].flat()]);
     this.scheduleExpiry();
   }
 

@@ -269,7 +269,7 @@ test("positions a completed answer at the viewport start by default", async () =
       "ready\n",
       "utf8",
     );
-    await expect(finalAnswer).toBeVisible({ timeout: 10_000 });
+    await expect(finalAnswer).toBeVisible();
     await expect.poll(() => finalAnswer.evaluate((answer) => {
       const viewport = answer.closest<HTMLElement>(".message-scroll")
         ?.getBoundingClientRect();

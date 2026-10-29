@@ -924,6 +924,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     pendingLayoutAnchor.current = null;
   }, [props.followsLatest]);
 
+  const rememberedFollowMode = useRef<{ conversationId: string; followsLatest?: boolean } | null>(null);
   useEffect(() => {
     if (props.detailLoading || timeline.length === 0) return;
     const scroll = props.scrollElementRef?.current;
@@ -933,6 +934,9 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       if (layoutAnchorActive.current || turnAnchorActive.current) return;
       rememberTranscriptPosition(props.conversationId, captureTranscriptPosition(root, scroll, props.followsLatest));
     };
+    const previous = rememberedFollowMode.current;
+    rememberedFollowMode.current = { conversationId: props.conversationId, followsLatest: props.followsLatest };
+    if (previous?.conversationId === props.conversationId && previous.followsLatest !== props.followsLatest) remember();
     scroll.addEventListener("scroll", remember, { passive: true });
     return () => scroll.removeEventListener("scroll", remember);
   }, [props.conversationId, props.detailLoading, props.followsLatest, props.scrollElementRef, props.timelineElementRef, timeline.length]);

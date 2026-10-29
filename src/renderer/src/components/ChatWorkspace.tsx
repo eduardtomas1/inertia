@@ -858,7 +858,7 @@ export function ChatWorkspace({
   ): void => {
     if (!isTranscriptReaderNavigationKey(event.key)) return;
     noteReaderIntent();
-    noteKeyIntent(event.key);
+    noteKeyIntent(event.altKey ? null : event.key);
   };
 
   const onTranscriptScroll = (): void => {

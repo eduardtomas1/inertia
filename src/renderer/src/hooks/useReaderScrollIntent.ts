@@ -5,7 +5,7 @@ const TOUCH_SCROLL_QUIET_MS = 150;
 export function useReaderScrollIntent(noteReaderIntent: () => void): {
   noteWheelIntent: () => void;
   noteTouchIntent: () => void;
-  noteKeyIntent: (key: string) => void;
+  noteKeyIntent: (key: string | null) => void;
   continueTouchIntent: () => void;
   aimsAtLatest: () => boolean;
 } {
@@ -23,7 +23,7 @@ export function useReaderScrollIntent(noteReaderIntent: () => void): {
       touchTimerRef.current = null;
     }, TOUCH_SCROLL_QUIET_MS);
   }, [noteReaderIntent]);
-  const noteKeyIntent = useCallback((key: string): void => {
+  const noteKeyIntent = useCallback((key: string | null): void => {
     aimedAtLatestRef.current = key === "End";
   }, []);
   const continueTouchIntent = useCallback((): void => {

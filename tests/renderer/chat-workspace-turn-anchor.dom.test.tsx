@@ -1860,6 +1860,31 @@ describe("transcript following motion", () => {
       expect(transcript.scrollTop).toBe(scrollTop);
     });
 
+    it.each([
+      { altKey: true, follows: false },
+      { altKey: false, follows: true },
+    ])("treats End as heading for the latest content only without Alt (Alt: $altKey)", async ({ altKey, follows }) => {
+      const { transcript, scrollTo, grow } = await guardedFollow();
+      await act(async () => vi.advanceTimersByTime(750));
+      fireEvent.wheel(transcript, { deltaY: -400 });
+      transcript.scrollTop = 0;
+      fireEvent.scroll(transcript);
+      await act(async () => vi.advanceTimersByTime(750));
+      fireEvent.keyDown(transcript, { key: "End", altKey });
+      transcript.scrollTop = 200;
+      fireEvent.scroll(transcript);
+      expect(screen.queryByRole("button", { name: "Jump to latest" }) === null).toBe(follows);
+      scrollTo.mockClear();
+      grow(true);
+      await act(async () => vi.advanceTimersByTime(1_000));
+      if (follows) {
+        expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: "auto" });
+      } else {
+        expect(scrollTo).not.toHaveBeenCalled();
+        expect(transcript.scrollTop).toBe(200);
+      }
+    });
+
     it("keeps a reader who stops just above the latest content and follows once they reach it", async () => {
       const { transcript, scrollTo, grow } = await guardedFollow();
       await act(async () => vi.advanceTimersByTime(750));

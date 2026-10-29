@@ -720,8 +720,14 @@ function reclaimHeldGuardianBuildLock(
     const authority = lstatSync(claimant.authorityPath, {
       throwIfNoEntry: false,
     });
-    const current = lstatSync(lockPath, { throwIfNoEntry: false });
-    const proof = lstatSync(claimant.proofPath, { throwIfNoEntry: false });
+    const current = lstatSync(lockPath, {
+      bigint: true,
+      throwIfNoEntry: false,
+    });
+    const proof = lstatSync(claimant.proofPath, {
+      bigint: true,
+      throwIfNoEntry: false,
+    });
     if (
       finalActive.length !== 1 ||
       finalActive[0] !== claimant.generation ||

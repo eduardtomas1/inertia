@@ -1,13 +1,13 @@
 // @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
-import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { appendFile, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 const usageCodexAppServer = `
-const { appendFileSync, readFileSync } = require("node:fs");
+const { appendFileSync, existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const readline = require("node:readline");
 appendFileSync(join(__dirname, "codex-calls.log"), process.argv.slice(2).join(" ") + "\\n");
@@ -32,7 +32,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.method === "account/rateLimits/read") {
     const mode = quotaMode();
-    setTimeout(() => {
+    const respond = () => {
       if (mode.startsWith("ok")) {
         send({ id: message.id, result: { rateLimits: {
           limitId: "codex",
@@ -42,7 +42,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       } else {
         send({ id: message.id, error: { code: -32000, message: "usage unavailable" } });
       }
-    }, mode.endsWith("slow") ? 1500 : 0);
+    };
+    if (!mode.endsWith("slow")) {
+      respond();
+      return;
+    }
+    const gate = setInterval(() => {
+      if (!existsSync(join(__dirname, "quota-release"))) return;
+      clearInterval(gate);
+      respond();
+    }, 25);
     return;
   }
   send({ id: message.id, result: {} });
@@ -60,7 +69,7 @@ test.beforeAll(async () => {
       await writeFile(join(workspaceDirectory, "quota-mode"), "fail", "utf8");
       await appendFile(
         join(workspaceDirectory, ".git", "info", "exclude"),
-        "quota-mode\ncodex-calls.log\n",
+        "quota-mode\nquota-release\ncodex-calls.log\n",
         "utf8",
       );
     },
@@ -91,12 +100,15 @@ test("Refresh usage shows its progress, reports a failed read and reads only quo
   const pending = usage.getByRole("button", { name: "Refreshing…" });
   await expect(pending).toBeDisabled();
   await expect(usage.locator(".workspace-surface-heading small")).toHaveText("Refreshing");
+  await writeFile(join(app.workspaceDirectory, "quota-release"), "", "utf8");
   await expect(usage.getByRole("status")).toHaveText("Could not refresh. Showing cached usage.");
   await expect(refresh).toBeEnabled();
 
   await writeFile(join(app.workspaceDirectory, "quota-mode"), "ok-slow", "utf8");
+  await rm(join(app.workspaceDirectory, "quota-release"));
   await refresh.click();
   await expect(pending).toBeDisabled();
+  await writeFile(join(app.workspaceDirectory, "quota-release"), "", "utf8");
   await expect(usage.getByRole("status")).toHaveCount(0);
   await expect(usage.getByText("62% left")).toBeVisible();
   await expect(usage.getByText("89% left")).toBeVisible();

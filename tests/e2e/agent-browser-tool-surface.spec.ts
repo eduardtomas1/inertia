@@ -232,6 +232,14 @@ test("an agent lays the page out at a desktop size inside a narrower panel and s
     await selectWorkspaceTool(panel, "Browser");
     await navigate(path);
     await expect.poll(() => app.nativePreviewIsVisible(`${app.previewUrl}${path}`)).toBe(true);
+    const stage = panel.locator(".preview-safe-stage");
+    await expect.poll(async () => {
+      const box = await stage.boundingBox();
+      const view = (await app.nativePreviewSnapshot(`${app.previewUrl}${path}`)).bounds;
+      return box !== null && view !== null
+        && view.x === Math.round(box.x) && view.y === Math.round(box.y)
+        && view.width === Math.round(box.width) && view.height === Math.round(box.height);
+    }).toBe(true);
     const panelWidth = await pageValue<number>(path, "innerWidth");
     expect(panelWidth).toBeLessThan(1_280);
 

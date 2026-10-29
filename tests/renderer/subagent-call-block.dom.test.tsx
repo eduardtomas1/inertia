@@ -5,6 +5,8 @@ import type { SubagentTrace } from "../../src/shared/contracts";
 import type { CustomAgent, CustomAgentCallAttribution } from "../../src/shared/custom-agents";
 import { SubagentCallBlock, SubagentCallList } from "../../src/renderer/src/components/response-timeline/SubagentCallBlock";
 import { SubagentCallContext, type SubagentCallContextValue } from "../../src/renderer/src/components/response-timeline/subagentCallContext";
+import { createSubagentCallMemory } from "../../src/renderer/src/components/response-timeline/subagentCallMemory";
+import { workspaceSceneCallbacks, type WorkspaceSceneActions } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
 import {
   customAgentsById,
   partitionSubagentCalls,
@@ -13,6 +15,7 @@ import {
   type SubagentCallEntry,
 } from "../../src/renderer/src/utils/response-timeline/subagentCalls";
 import { taskTrace } from "./background-task-fixtures";
+import { formatElapsed } from "../../src/renderer/src/utils/response-timeline/timing";
 
 const AGENT_ID = "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1";
 
@@ -113,6 +116,27 @@ describe("subagent call partition", () => {
     expect(sameSubagentCallsForTurn(traces, traces, [reviewer], [{ ...reviewer, name: "Renamed" }])).toBe(false);
     const plain = [taskTrace()];
     expect(sameSubagentCallsForTurn(plain, plain, [reviewer], [])).toBe(true);
+    const working = taskTrace({ id: "working", status: "running", isLive: true });
+    expect(sameSubagentCallsForTurn([working], [{ ...working, activity: "Editing", sequence: 9 }], [reviewer], [reviewer])).toBe(true);
+    expect(sameSubagentCallsForTurn([working], [{ ...working, status: "completed", isLive: false }], [reviewer], [reviewer])).toBe(false);
+  });
+
+  it("keeps the stop and custom agent settings callbacks stable across scene rebuilds", async () => {
+    const stopSubagent = vi.fn(async () => {
+      throw new Error("Already stopped.");
+    });
+    const openSettings = vi.fn();
+    const actions = { stopSubagent, openSettings } as unknown as WorkspaceSceneActions;
+    const setActionError = vi.fn();
+    const first = workspaceSceneCallbacks(actions, setActionError);
+    const second = workspaceSceneCallbacks(actions, setActionError);
+    expect(second.stopSubagent).toBe(first.stopSubagent);
+    expect(second.openCustomAgentSettings).toBe(first.openCustomAgentSettings);
+    second.openCustomAgentSettings();
+    expect(openSettings).toHaveBeenCalledWith({ section: "custom-agents" });
+    await expect(second.stopSubagent(call())).rejects.toThrow("Already stopped.");
+    expect(setActionError).toHaveBeenCalledWith("Already stopped.");
+    expect(workspaceSceneCallbacks(actions, vi.fn()).stopSubagent).not.toBe(first.stopSubagent);
   });
 });
 
@@ -214,5 +238,81 @@ describe("SubagentCallBlock", () => {
     const list = screen.getByRole("list", { name: "Agents started by Code reviewer" });
     expect(within(list).getByRole("listitem")).toHaveTextContent("Test runner");
     expect(within(list).getByRole("listitem")).toHaveTextContent("Completed");
+  });
+
+  it("keeps a call's open state across the settle remount and plays the entrance once", () => {
+    const memory = createSubagentCallMemory();
+    const value = context({ autoCollapse: true, memory });
+    const live = render(
+      <SubagentCallContext.Provider value={value}>
+        <SubagentCallList entries={[entryFor([call({ id: "settle-failed", status: "running", isLive: true })])]} />
+      </SubagentCallContext.Provider>,
+    );
+    expect(live.container.querySelector(".subagent-call")).toHaveClass("is-entering");
+    live.unmount();
+    const settled = render(
+      <SubagentCallContext.Provider value={value}>
+        <SubagentCallList entries={[entryFor([call({ id: "settle-failed", status: "failed", isLive: false })])]} />
+      </SubagentCallContext.Provider>,
+    );
+    expect(screen.getByRole("button", { name: /Code reviewer/u })).toHaveAttribute("aria-expanded", "true");
+    expect(settled.container.querySelector(".subagent-call")).not.toHaveClass("is-entering");
+    settled.unmount();
+
+    const done = entryFor([call({ id: "hand-opened", status: "completed", isLive: false, result: "Done." })]);
+    const first = renderBlock(done, value);
+    fireEvent.click(screen.getByRole("button", { name: /Code reviewer/u }));
+    expect(screen.getByRole("button", { name: /Code reviewer/u })).toHaveAttribute("aria-expanded", "true");
+    first.unmount();
+    const again = renderBlock(done, value);
+    expect(screen.getByRole("button", { name: /Code reviewer/u })).toHaveAttribute("aria-expanded", "true");
+    expect(again.container.querySelector(".subagent-call")).not.toHaveClass("is-entering");
+    again.unmount();
+
+    renderBlock(entryFor([call({ id: "settle-done", status: "running", isLive: true })]), value).unmount();
+    renderBlock(entryFor([call({ id: "settle-done", status: "completed", isLive: false, result: "Done." })]), value);
+    expect(screen.getByRole("button", { name: /Code reviewer/u })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("follows a later change to the auto-collapse setting", () => {
+    const entry = entryFor([call({ status: "completed", isLive: false, result: "Done." })]);
+    const view = renderBlock(entry, context({ autoCollapse: true }));
+    const header = screen.getByRole("button", { name: /Code reviewer/u });
+    expect(header).toHaveAttribute("aria-expanded", "false");
+    view.rerender(
+      <SubagentCallContext.Provider value={context({ autoCollapse: false })}>
+        <SubagentCallBlock entry={entry} />
+      </SubagentCallContext.Provider>,
+    );
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    view.rerender(
+      <SubagentCallContext.Provider value={context({ autoCollapse: true })}>
+        <SubagentCallBlock entry={entry} />
+      </SubagentCallContext.Provider>,
+    );
+    expect(header).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("names the stop button by its visible state and shows the measured duration in the header", async () => {
+    let finish: () => void = () => undefined;
+    const onStopSubagent = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const trace = call({ status: "running", isLive: true });
+    const view = renderBlock({ ...entryFor([trace]), canStop: true }, context({ onStopSubagent }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop Code reviewer" }));
+    const stopping = screen.getByRole("button", { name: "Stopping Code reviewer" });
+    expect(stopping).toHaveTextContent("Stopping");
+    finish();
+    await screen.findByRole("button", { name: "Stop Code reviewer" });
+    view.unmount();
+
+    renderBlock(entryFor([call({
+      status: "completed",
+      isLive: false,
+      createdAt: "2026-10-29T08:00:00.000Z",
+      updatedAt: "2026-10-29T08:05:00.000Z",
+      durationMs: 12_000,
+    })]), context({ autoCollapse: false }));
+    const header = screen.getByRole("button", { name: /Code reviewer/u });
+    expect(header.querySelector(".subagent-elapsed")).toHaveTextContent(formatElapsed(12_000));
   });
 });

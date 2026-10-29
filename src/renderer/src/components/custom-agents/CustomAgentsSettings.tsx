@@ -47,6 +47,12 @@ interface RowTarget {
   handle?: string;
 }
 
+interface PendingMove {
+  agentId: string;
+  index: number;
+  direction: "up" | "down";
+}
+
 const COUNT_VISIBLE_FROM = 30;
 const GHOST_SYMBOLS: readonly CustomAgentIconName[] = ["orbit", "search", "pen"];
 const LIMIT_MESSAGE = `You can keep up to ${MAX_CUSTOM_AGENTS} agents. Delete one to add another.`;
@@ -82,6 +88,9 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
   const confirmCancel = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef<HTMLElement | null>(null);
   const newButton = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const createdHandle = useRef<string | null>(null);
+  const pendingMove = useRef<PendingMove | null>(null);
 
   const ordered = useMemo(() => [...agents].sort((left, right) => left.position - right.position), [agents]);
   const skillNames = useMemo(
@@ -106,8 +115,27 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
     if (!target) return;
     restoreFocus.current = null;
     if (target.isConnected) target.focus();
+    else newButton.current?.focus();
+  });
+  useLayoutEffect(() => {
+    const handle = createdHandle.current;
+    const created = handle ? ordered.find((agent) => agent.handle === handle) : undefined;
+    if (!created) return;
+    createdHandle.current = null;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== newButton.current) return;
+    rowButton(created.id, "edit")?.focus();
+  });
+  useLayoutEffect(() => {
+    const move = pendingMove.current;
+    if (!move || ordered[move.index]?.id !== move.agentId) return;
+    pendingMove.current = null;
+    if (!document.activeElement || document.activeElement === document.body) rowButton(move.agentId, move.direction)?.focus();
   });
 
+  function rowButton(agentId: string, action: "up" | "down" | "edit"): HTMLButtonElement | null {
+    return list.current?.querySelector<HTMLButtonElement>(`[data-agent-id="${CSS.escape(agentId)}"] [data-row-action="${action}"]`) ?? null;
+  }
   const send = async (command: CommandWithoutId): Promise<void> => {
     if (unavailable || !request) throw new Error("Custom agents are unavailable right now.");
     await request(command);
@@ -130,10 +158,10 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
     const preset = CUSTOM_AGENT_PRESETS.find(({ id }) => id === presetId);
     if (preset) openNew(customAgentDraftFromPreset(preset, handles), true, trigger);
   };
-  const rowAction = (target: RowTarget, operation: () => Promise<void>, success: string | null): void => {
-    if (unavailable || rows.busy) return;
+  const rowAction = (target: RowTarget, operation: () => Promise<void>, success: string | null): Promise<boolean> => {
+    if (unavailable || rows.busy) return Promise.resolve(false);
     setRowTarget(target);
-    void rows.run(operation, { success, failure: saveFailureMessage });
+    return rows.run(operation, { success, failure: saveFailureMessage });
   };
   const rowNotice = (agent: CustomAgent) => rowTarget && (rowTarget.agentId === agent.id || rowTarget.handle === agent.handle) ? rows.notice : null;
   const move = (index: number, offset: number): void => {
@@ -142,10 +170,14 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
     const agentIds = ordered.map(({ id }) => id);
     const [moved] = agentIds.splice(index, 1);
     agentIds.splice(target, 0, moved!);
-    rowAction({ agentId: moved }, () => send({
+    const pending = { agentId: moved!, index: target, direction: offset < 0 ? "up" as const : "down" as const };
+    pendingMove.current = pending;
+    void rowAction({ agentId: moved }, () => send({
       type: "custom-agent.reorder",
       payload: { expectedAgentIds: ordered.map(({ id }) => id), agentIds },
-    }), null);
+    }), null).then((saved) => {
+      if (!saved && pendingMove.current === pending) pendingMove.current = null;
+    });
   };
   const remove = (agent: CustomAgent): void => {
     if (unavailable || rows.busy) return;
@@ -213,6 +245,8 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
   const saveNew = async (agent: CustomAgentDraft): Promise<void> => {
     await send(customAgentCreateCommand(agent, "reject"));
     closeEditor(false);
+    restoreFocus.current = newButton.current;
+    createdHandle.current = agent.handle;
     setRowTarget({ handle: agent.handle });
     rows.report({ tone: "saved", text: "Saved" });
   };
@@ -237,7 +271,7 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
           skills={skillNames}
           disabled={unavailable}
           onCancel={() => closeEditor()}
-          onSave={saveExisting(agent)}
+          onSave={saveExisting(editingAgent ?? agent)}
         />
       );
     }
@@ -284,7 +318,7 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
           </span>
           <span className="custom-agents-toolbar-item" data-setting-id="custom-agent-import">
             <button type="button" className="secondary-button" disabled={unavailable || !canImport} aria-disabled={header.busy || undefined} onClick={importAgents}>
-              Import<span className="visually-hidden"> agents</span>…
+              <span>Import<span className="visually-hidden"> agents</span>…</span>
             </button>
           </span>
           <span className="custom-agents-toolbar-item" data-setting-id="custom-agent-export">
@@ -295,7 +329,7 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
               aria-disabled={header.busy || undefined}
               onClick={() => { if (!header.busy) exportAgents(ordered, null); }}
             >
-              Export all<span className="visually-hidden"> agents</span>
+              <span>Export all<span className="visually-hidden"> agents</span></span>
             </button>
           </span>
           {ordered.length >= COUNT_VISIBLE_FROM && (
@@ -318,7 +352,7 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
         )}
 
         {(ordered.length > 0 || newEditor) && (
-          <ul className="custom-agent-list" aria-label="Custom agents">
+          <ul ref={list} className="custom-agent-list" aria-label="Custom agents">
             {newEditor && <li className="custom-agent-row is-new is-open">{editor(null)}</li>}
             {ordered.map((agent, index) => {
               const open = editingAgent?.id === agent.id;
@@ -336,14 +370,15 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
                       <small className="custom-agent-row-meta">{customAgentSummary(agent)}</small>
                     </span>
                     <div className="custom-agent-row-actions" role="group" aria-label={`${agent.name} actions`}>
-                      <IconButton label={`Move ${agent.name} up`} disabled={unavailable} aria-disabled={index === 0 || rowBusy} onClick={() => move(index, -1)}>
+                      <IconButton label={`Move ${agent.name} up`} data-row-action="up" disabled={unavailable} aria-disabled={index === 0 || rowBusy} onClick={() => move(index, -1)}>
                         <ArrowUp size={14} aria-hidden="true" />
                       </IconButton>
-                      <IconButton label={`Move ${agent.name} down`} disabled={unavailable} aria-disabled={index === ordered.length - 1 || rowBusy} onClick={() => move(index, 1)}>
+                      <IconButton label={`Move ${agent.name} down`} data-row-action="down" disabled={unavailable} aria-disabled={index === ordered.length - 1 || rowBusy} onClick={() => move(index, 1)}>
                         <ArrowDown size={14} aria-hidden="true" />
                       </IconButton>
                       <IconButton
                         label={`Edit ${agent.name}`}
+                        data-row-action="edit"
                         disabled={unavailable}
                         aria-expanded={open}
                         onClick={(event) => {

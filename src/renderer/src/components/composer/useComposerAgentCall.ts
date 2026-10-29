@@ -1,4 +1,4 @@
-import { useId, useMemo, useState, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { CustomAgent } from "@shared/custom-agents";
 import { paletteScore } from "../../utils/paletteMatch";
 import {
@@ -9,17 +9,37 @@ import {
   nextSidebarNavigationIndex,
   type SidebarNavigationKey,
 } from "../../utils/sidebarModel";
+import { persistCalledAgentId, readCalledAgentId } from "./calledAgentStorage";
+
+export { persistCalledAgentId, readCalledAgentId } from "./calledAgentStorage";
 
 const CALLING_PATTERN = /^\/calling(?:\s+([\w-]*))?$/u;
-const CALLED_AGENT_KEY_PREFIX = "inertia:called-agent:";
+const CALLING_INVOCATION_PATTERN = /^\/calling(?:\s+([\w-]+))?(?:\s+([\s\S]*))?$/u;
+const TYPED_CALL_PATTERN = /^\/calling\s+([\w-]+)\s+([\s\S]*)$/u;
 const NO_CUSTOM_AGENTS: readonly CustomAgent[] = [];
-const knownAgents = new Map<string, CustomAgent>();
+const LOADING_MESSAGE = "Custom agents are still loading. Try again in a moment.";
+const DELETED_MESSAGE = "The agent you called was deleted. Remove it to send.";
+const RUNNING_MESSAGE = "Wait for this turn to finish before calling an agent.";
 
 type SuggestionKeyEvent = Parameters<typeof handleComposerSuggestionKey>[0];
+
+export type AgentCallSubmission =
+  | { kind: "send"; content: string; agentId: string | null }
+  | { kind: "hold"; error: string | null };
 
 export function parseCallingCommand(message: string): string | null {
   const match = CALLING_PATTERN.exec(message.trim());
   return match ? (match[1] ?? "").toLowerCase() : null;
+}
+
+export function parseCallingInvocation(message: string): { handle: string | null; rest: string } | null {
+  const match = CALLING_INVOCATION_PATTERN.exec(message.trim());
+  return match ? { handle: match[1]?.toLowerCase() ?? null, rest: (match[2] ?? "").trim() } : null;
+}
+
+export function parseTypedCall(message: string): { handle: string; rest: string } | null {
+  const match = TYPED_CALL_PATTERN.exec(message.trimStart());
+  return match ? { handle: match[1]!.toLowerCase(), rest: match[2]!.trimStart() } : null;
 }
 
 export function rankCustomAgents(
@@ -42,24 +62,6 @@ export function rankCustomAgents(
     .map(({ agent }) => agent);
 }
 
-export function readCalledAgentId(conversationId: string): string | null {
-  try {
-    return window.localStorage.getItem(`${CALLED_AGENT_KEY_PREFIX}${conversationId}`);
-  } catch {
-    return null;
-  }
-}
-
-export function persistCalledAgentId(conversationId: string, agentId: string | null): void {
-  try {
-    const key = `${CALLED_AGENT_KEY_PREFIX}${conversationId}`;
-    if (agentId) window.localStorage.setItem(key, agentId);
-    else window.localStorage.removeItem(key);
-  } catch {
-    return;
-  }
-}
-
 export interface ComposerAgentCallOptions {
   conversationId: string;
   message: string;
@@ -78,25 +80,30 @@ export interface ComposerAgentCall {
   activeAgentId: string | null;
   activeOptionId: string | undefined;
   calledAgent: CustomAgent | null;
+  calledAgentId: string | null;
+  calledAgentDeleted: boolean;
   canOpenSettings: boolean;
   setActiveAgentId: (agentId: string) => void;
-  pick: (agent: CustomAgent) => void;
+  pick: (agent: CustomAgent, rest?: string) => void;
   remove: () => void;
   openPicker: () => void;
   openSettings: () => void;
   handleKey: (event: SuggestionKeyEvent) => boolean;
+  resolveSubmit: (message: string, running: boolean) => AgentCallSubmission;
   clearSent: (conversationId: string, agentId: string | undefined) => void;
 }
 
 export function useComposerAgentCall({
   conversationId,
   message,
-  customAgents = NO_CUSTOM_AGENTS,
+  customAgents,
   replaceMessage,
   textareaRef,
   onOpenSettings,
 }: ComposerAgentCallOptions): ComposerAgentCall {
   const listboxId = `${useId()}-agents`;
+  const loaded = customAgents !== undefined;
+  const available = customAgents ?? NO_CUSTOM_AGENTS;
   const [called, setCalled] = useState(() => ({
     conversationId,
     agentId: readCalledAgentId(conversationId),
@@ -105,22 +112,24 @@ export function useComposerAgentCall({
     ? called
     : { conversationId, agentId: readCalledAgentId(conversationId) };
   if (current !== called) setCalled(current);
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [highlight, setHighlight] = useState<{ query: string; agentId: string } | null>(null);
   const [dismissedValue, setDismissedValue] = useState<string | null>(null);
   const query = parseCallingCommand(message);
   const agents = useMemo(
-    () => query === null ? NO_CUSTOM_AGENTS : rankCustomAgents(customAgents, query),
-    [customAgents, query],
+    () => query === null ? NO_CUSTOM_AGENTS : rankCustomAgents(available, query),
+    [available, query],
   );
-  const liveCalled = current.agentId
-    ? customAgents.find(({ id }) => id === current.agentId) ?? null
+  const calledAgent = current.agentId
+    ? available.find(({ id }) => id === current.agentId) ?? null
     : null;
-  if (liveCalled) knownAgents.set(liveCalled.id, liveCalled);
-  const calledAgent = liveCalled ?? (current.agentId ? knownAgents.get(current.agentId) ?? null : null);
-  const hasAgents = customAgents.length > 0;
+  const calledAgentDeleted = Boolean(current.agentId && loaded && !calledAgent);
+  const hasAgents = available.length > 0;
   const canOpenSettings = Boolean(onOpenSettings);
   const menuVisible = query !== null && dismissedValue !== message;
-  const active = agents.find(({ id }) => id === highlightedId) ?? agents[0] ?? null;
+  const highlighted = highlight && highlight.query === query
+    ? agents.find(({ id }) => id === highlight.agentId)
+    : undefined;
+  const active = highlighted ?? agents[0] ?? null;
   const activeOptionId = !menuVisible
     ? undefined
     : active
@@ -134,14 +143,23 @@ export function useComposerAgentCall({
     persistCalledAgentId(conversationId, agentId);
     setCalled({ conversationId, agentId });
   };
-  const pick = (agent: CustomAgent): void => {
-    knownAgents.set(agent.id, agent);
+  const pick = (agent: CustomAgent, rest = ""): void => {
     setCalledAgentId(agent.id);
-    setHighlightedId(null);
+    setHighlight(null);
     setDismissedValue(null);
-    replaceMessage("");
+    replaceMessage(rest);
     focusEditor();
   };
+  const pickRef = useRef(pick);
+  useLayoutEffect(() => {
+    pickRef.current = pick;
+  });
+  useEffect(() => {
+    if (!customAgents) return;
+    const typed = parseTypedCall(message);
+    const agent = typed && customAgents.find(({ handle }) => handle === typed.handle);
+    if (typed && agent) pickRef.current(agent, typed.rest);
+  }, [customAgents, message]);
   const remove = (): void => {
     setCalledAgentId(null);
     focusEditor();
@@ -155,10 +173,11 @@ export function useComposerAgentCall({
     setDismissedValue(message);
     onOpenSettings?.();
   };
+  const setActiveAgentId = (agentId: string): void => setHighlight({ query: query ?? "", agentId });
   const move = (key: SidebarNavigationKey): void => {
     if (agents.length === 0) return;
     const next = nextSidebarNavigationIndex(agents.indexOf(active!), key, agents.length);
-    setHighlightedId(agents[next]!.id);
+    setActiveAgentId(agents[next]!.id);
   };
   const handleKey = (event: SuggestionKeyEvent): boolean => {
     if (!menuVisible) return false;
@@ -169,6 +188,28 @@ export function useComposerAgentCall({
     if (!shouldSubmitComposerKey(event)) return false;
     event.preventDefault();
     return true;
+  };
+  const resolveSubmit = (text: string, running: boolean): AgentCallSubmission => {
+    const invocation = parseCallingInvocation(text);
+    if (invocation) {
+      if (!loaded) return { kind: "hold", error: LOADING_MESSAGE };
+      const agent = invocation.handle ? available.find(({ handle }) => handle === invocation.handle) : undefined;
+      if (!agent) {
+        if (invocation.handle) return { kind: "hold", error: `No custom agent answers to /calling ${invocation.handle}.` };
+        setDismissedValue(null);
+        return { kind: "hold", error: null };
+      }
+      if (!invocation.rest) {
+        pick(agent);
+        return { kind: "hold", error: null };
+      }
+      if (running) return { kind: "hold", error: RUNNING_MESSAGE };
+      return { kind: "send", content: invocation.rest, agentId: agent.id };
+    }
+    if (!current.agentId) return { kind: "send", content: text, agentId: null };
+    if (!loaded) return { kind: "hold", error: LOADING_MESSAGE };
+    if (!calledAgent) return { kind: "hold", error: DELETED_MESSAGE };
+    return { kind: "send", content: text, agentId: calledAgent.id };
   };
   const clearSent = (sentConversationId: string, agentId: string | undefined): void => {
     if (!agentId) return;
@@ -187,13 +228,16 @@ export function useComposerAgentCall({
     activeAgentId: active?.id ?? null,
     activeOptionId,
     calledAgent,
+    calledAgentId: current.agentId,
+    calledAgentDeleted,
     canOpenSettings,
-    setActiveAgentId: setHighlightedId,
+    setActiveAgentId,
     pick,
     remove,
     openPicker,
     openSettings,
     handleKey,
+    resolveSubmit,
     clearSent,
   };
 }

@@ -18,7 +18,7 @@
 :root[data-theme="dark"] .subagent-call.has-agent-tint { --call-tint: var(--agent-tint-dark); }
 
 @starting-style {
-  .subagent-call {
+  .subagent-call.is-entering {
     opacity: 0;
     transform: translateY(4px);
   }

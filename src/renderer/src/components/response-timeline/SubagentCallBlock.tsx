@@ -34,19 +34,28 @@ function SubagentCallBlockComponent({
   const context = useContext(SubagentCallContext);
   const { trace, agent } = entry;
   const live = isLiveSubagentTrace(trace);
-  const [expanded, setExpanded] = useState(live || !context.autoCollapse);
+  const [remembered] = useState(() => context.memory?.read(trace.id));
+  const [expanded, setExpanded] = useState(() => remembered?.expanded ?? (live || !context.autoCollapse));
   const [opened, setOpened] = useState(expanded);
   const [stopping, setStopping] = useState(false);
-  const wasLive = useRef(live);
+  const wasLive = useRef(remembered?.live ?? live);
+  const seenAutoCollapse = useRef(context.autoCollapse);
   const bodyId = useId();
   useLayoutEffect(() => {
-    if (wasLive.current && !live && context.autoCollapse && trace.status === "completed") setExpanded(false);
+    if (seenAutoCollapse.current !== context.autoCollapse) {
+      seenAutoCollapse.current = context.autoCollapse;
+      setExpanded(live || !context.autoCollapse);
+      if (live || !context.autoCollapse) setOpened(true);
+    } else if (wasLive.current && !live && context.autoCollapse && trace.status === "completed") setExpanded(false);
     if (!wasLive.current && live) {
       setExpanded(true);
       setOpened(true);
     }
     wasLive.current = live;
   }, [context.autoCollapse, live, trace.status]);
+  useLayoutEffect(() => {
+    context.memory?.write(trace.id, { expanded, live });
+  }, [context.memory, expanded, live, trace.id]);
   const toggle = (): void => {
     onBeforeToggle?.();
     setExpanded((current) => !current);
@@ -64,9 +73,10 @@ function SubagentCallBlockComponent({
   const meta = subagentCallMeta(trace, formatElapsed);
   const canStop = entry.canStop && Boolean(context.onStopSubagent);
   const tint = customAgentTintStyle(agent.accent);
+  const settledDuration = !live && trace.durationMs != null ? formatElapsed(trace.durationMs) : null;
   return (
     <section
-      className={clsx("subagent-call", tint && "has-agent-tint")}
+      className={clsx("subagent-call", tint && "has-agent-tint", !remembered && "is-entering")}
       style={tint}
       data-subagent-call={trace.id}
       data-live={live ? "true" : "false"}
@@ -87,7 +97,9 @@ function SubagentCallBlockComponent({
           <small>
             <span className="subagent-call-status">{subagentStatusLabel(trace)}</span>
             <span aria-hidden="true"> · </span>
-            <SubagentElapsed trace={trace} />
+            {settledDuration
+              ? <span className="subagent-elapsed">{settledDuration}</span>
+              : <SubagentElapsed trace={trace} />}
           </small>
         </span>
         <ChevronDown size={14} className="subagent-call-chevron" aria-hidden="true" />
@@ -146,7 +158,7 @@ function SubagentCallBlockComponent({
                 <button
                   type="button"
                   className="subagent-call-stop"
-                  aria-label={`Stop ${agent.name}`}
+                  aria-label={`${stopping ? "Stopping" : "Stop"} ${agent.name}`}
                   aria-busy={stopping || undefined}
                   disabled={stopping}
                   onClick={stop}

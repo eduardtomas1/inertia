@@ -17,3 +17,12 @@
 @media (prefers-reduced-motion: reduce) {
   .composer-called-agent { animation: none; }
 }
+
+.composer-called-agent.is-deleted > .custom-agent-avatar {
+  opacity: 0.55;
+}
+
+.composer-called-agent.is-deleted strong {
+  color: var(--text-muted);
+  font-weight: 500;
+}

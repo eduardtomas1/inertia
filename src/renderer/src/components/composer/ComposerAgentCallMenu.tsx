@@ -71,7 +71,7 @@ export function ComposerAgentCallMenu({
         ) : (
           <>
             <div className="composer-agent-call-heading" aria-hidden="true">Custom agents</div>
-            <div className="composer-agent-call-group" role="group" aria-label="Custom agents">
+            <div className="composer-agent-call-group" role="presentation">
               {agents.map((agent) => {
                 const active = agent.id === activeAgentId;
                 return (

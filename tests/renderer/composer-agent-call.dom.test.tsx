@@ -6,8 +6,11 @@ import { Composer } from "../../src/renderer/src/components/Composer";
 import { buildComposerTurnRequest } from "../../src/renderer/src/utils/requestContext";
 import {
   parseCallingCommand,
+  parseCallingInvocation,
+  parseTypedCall,
   rankCustomAgents,
 } from "../../src/renderer/src/components/composer/useComposerAgentCall";
+import { forgetCalledAgent } from "../../src/renderer/src/components/composer/calledAgentStorage";
 import { composerProps, conversation } from "./composer-fixtures";
 
 function agent(update: Partial<CustomAgent> & Pick<CustomAgent, "id" | "name" | "handle">): CustomAgent {
@@ -91,6 +94,7 @@ describe("composer /calling", () => {
     expect(screen.queryByRole("listbox", { name: "Composer commands" })).toBeNull();
     expect(within(listbox).getAllByRole("option")).toHaveLength(2);
     expect(listbox).toHaveTextContent("Custom agents");
+    expect(within(listbox).queryByRole("group", { name: "Custom agents" })).toBeNull();
     expect(listbox).toHaveTextContent("/calling code-reviewer");
     expect(input).toHaveAttribute("aria-controls", listbox.id);
     expect(input).toHaveAttribute("aria-activedescendant", `${listbox.id}-${reviewer.id}`);
@@ -106,7 +110,7 @@ describe("composer /calling", () => {
     fireEvent.keyDown(input, { key: "Tab" });
     expect(input).toHaveValue("");
     expect(screen.queryByRole("listbox", { name: "Custom agents" })).toBeNull();
-    const chip = await screen.findByLabelText("Calling Evidence scout");
+    const chip = await screen.findByRole("group", { name: "Calling Evidence scout" });
     expect(chip).toHaveTextContent("Calling as a subagent");
     expect(input).toHaveAttribute("placeholder", "What should Evidence scout do?");
 
@@ -211,5 +215,92 @@ describe("composer /calling", () => {
     fireEvent.keyDown(input, { key: "Tab" });
     expect(onSend).not.toHaveBeenCalled();
     expect(input).toHaveValue("Review after this turn");
+  });
+
+  it("parses a /calling handle followed by the task", () => {
+    expect(parseCallingInvocation("/calling reviewer fix the login bug")).toEqual({ handle: "reviewer", rest: "fix the login bug" });
+    expect(parseCallingInvocation(" /calling Reviewer ")).toEqual({ handle: "reviewer", rest: "" });
+    expect(parseCallingInvocation("/calling")).toEqual({ handle: null, rest: "" });
+    expect(parseCallingInvocation("/callingreviewer")).toBeNull();
+    expect(parseTypedCall("/calling reviewer")).toBeNull();
+    expect(parseTypedCall("/calling reviewer ")).toEqual({ handle: "reviewer", rest: "" });
+    expect(parseTypedCall("/calling reviewer fix it")).toEqual({ handle: "reviewer", rest: "fix it" });
+  });
+
+  it("moves a typed handle and its task into the chip and keeps the task text", async () => {
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(conversation("a4a4a4a4-a4a4-4a4a-8a4a-a4a4a4a4a4a4"), { customAgents: [reviewer, scout], onSend })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "/calling scout collect the failing cases" } });
+    expect(await screen.findByRole("group", { name: "Calling Evidence scout" })).toBeInTheDocument();
+    await waitFor(() => expect(input).toHaveValue("collect the failing cases"));
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("collect the failing cases", [], { calledAgent: { agentId: scout.id } }));
+  });
+
+  it("never sends a dismissed /calling command as plain text", async () => {
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(conversation("b4b4b4b4-b4b4-4b4b-8b4b-b4b4b4b4b4b4"), { customAgents: [reviewer, scout], onSend })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "/calling scout" } });
+    await screen.findByRole("listbox", { name: "Custom agents" });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Custom agents" })).toBeNull();
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(await screen.findByRole("group", { name: "Calling Evidence scout" })).toBeInTheDocument();
+    expect(input).toHaveValue("");
+
+    fireEvent.change(input, { target: { value: "/calling nobody look into it" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("No custom agent answers to /calling nobody.");
+  });
+
+  it("resets the highlight when the query changes so a finished exact handle wins", async () => {
+    const plainReviewer = agent({ id: "c4c4c4c4-c4c4-4c4c-8c4c-c4c4c4c4c4c4", name: "Reviewer", handle: "reviewer", position: 2 });
+    render(<Composer {...composerProps(conversation("d4d4d4d4-d4d4-4d4d-8d4d-d4d4d4d4d4d4"), { customAgents: [reviewer, plainReviewer] })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "/calling rev" } });
+    const listbox = await screen.findByRole("listbox", { name: "Custom agents" });
+    expect(input).toHaveAttribute("aria-activedescendant", `${listbox.id}-${plainReviewer.id}`);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", `${listbox.id}-${reviewer.id}`);
+    fireEvent.change(input, { target: { value: "/calling reviewer" } });
+    await waitFor(() => expect(input).toHaveAttribute("aria-activedescendant", `${listbox.id}-${plainReviewer.id}`));
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByRole("group", { name: "Calling Reviewer" })).toBeInTheDocument();
+  });
+
+  it("marks a deleted called agent, blocks sending and clears the stored chip on remove", async () => {
+    const onSend = vi.fn(async () => undefined);
+    const current = conversation("e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4");
+    const key = `inertia:called-agent:${current.id}`;
+    window.localStorage.setItem(key, "f4f4f4f4-f4f4-4f4f-8f4f-f4f4f4f4f4f4");
+    const { rerender } = render(<Composer {...composerProps(current, { onSend })} />);
+    expect(screen.queryByRole("group", { name: "Agent deleted" })).toBeNull();
+    rerender(<Composer {...composerProps(current, { customAgents: [scout], onSend })} />);
+    const chip = await screen.findByRole("group", { name: "Agent deleted" });
+    expect(chip).toHaveClass("is-deleted");
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "Review this" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("The agent you called was deleted. Remove it to send.");
+    fireEvent.click(within(chip).getByRole("button", { name: "Remove deleted agent" }));
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Agent deleted" })).toBeNull());
+    expect(window.localStorage.getItem(key)).toBeNull();
+  });
+
+  it("forgets the stored chip of a deleted conversation", () => {
+    window.localStorage.setItem("inertia:called-agent:gone", scout.id);
+    forgetCalledAgent("gone");
+    expect(window.localStorage.getItem("inertia:called-agent:gone")).toBeNull();
   });
 });

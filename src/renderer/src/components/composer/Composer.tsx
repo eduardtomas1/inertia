@@ -479,19 +479,21 @@ export const Composer = memo(function Composer({
       setAttachmentError("Follow-ups while the agent is working cannot include a referenced chat. Send this after the turn ends, or remove the reference.");
       return;
     }
+    const call = agentCall.resolveSubmit(message, running);
+    if (call.kind === "hold") { if (call.error) setAttachmentError(call.error); return; }
     const request = running
       ? {
           visibleContent: message.trim(),
           context: undefined,
         }
       : buildComposerTurnRequest(
-          message,
+          call.content,
           attachments,
           promptContext,
           fileReferences,
           selectedPreviewUrlRef.current,
           contextPacketIds,
-          agentCall.calledAgent?.id ?? null,
+          call.agentId,
         );
     if ((!canSend && followUpState !== "ready") || submittingRef.current || stopClaimRef.current || stopping) return;
     const compactAndSend = !running && onCompactAndSend !== undefined && (
@@ -733,7 +735,7 @@ export const Composer = memo(function Composer({
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:
       attachmentsAreImages
-      && !promptContext && !agentCall.calledAgent
+      && !promptContext && !agentCall.calledAgentId
       && !previewContextSelected
       && fileReferences.length === 0
       && messageFits
@@ -742,7 +744,7 @@ export const Composer = memo(function Composer({
     submitting,
     sending,
   });
-  const queueBlocked = !attachmentsAreImages || Boolean(promptContext) || Boolean(agentCall.calledAgent) || previewContextSelected
+  const queueBlocked = !attachmentsAreImages || Boolean(promptContext) || Boolean(agentCall.calledAgentId) || previewContextSelected
     || fileReferences.length > 0 || contextPacketIds.length > 0;
   const canQueue = running && sendEligible && !queueBlocked && !submitting && !sending;
   const documentBlocksFollowUp = running && !attachmentsAreImages;

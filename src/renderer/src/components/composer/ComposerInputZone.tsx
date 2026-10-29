@@ -458,7 +458,7 @@ export function ComposerInputZone({
             </button>
           </div>
         )}
-        {agentCall?.calledAgent && (
+        {(agentCall?.calledAgent || agentCall?.calledAgentDeleted) && (
           <Suspense fallback={null}>
             <ComposerCalledAgentChip agent={agentCall.calledAgent} onRemove={agentCall.remove} />
           </Suspense>

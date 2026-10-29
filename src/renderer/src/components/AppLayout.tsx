@@ -31,6 +31,7 @@ import type {
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useStableActions } from "../hooks/useStableController";
+import { forgetCalledAgent } from "./composer/calledAgentStorage";
 import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { SplitDropZone } from "../utils/splitConversation";
@@ -444,6 +445,7 @@ export const AppLayout = memo(function AppLayout({
           type: "conversation.delete",
           payload: { conversationId: thread.id },
         }).then(async () => {
+          forgetCalledAgent(thread.id);
           const { releaseDeletedComposerQueue } = await import(
             "./composer/ComposerQueuedActions"
           );

@@ -141,6 +141,38 @@ function unsavedChatQueueRunner(run: QueueCommandRunner): QueueCommandRunner {
   return unsaved;
 }
 
+interface StableSceneCallbacks {
+  setActionError: Dispatch<SetStateAction<string | null>>;
+  stopSubagent: (trace: SubagentTrace) => Promise<void>;
+  openCustomAgentSettings: () => void;
+}
+
+const stableSceneCallbacks = new WeakMap<WorkspaceSceneActions, StableSceneCallbacks>();
+
+export function workspaceSceneCallbacks(
+  actions: WorkspaceSceneActions,
+  setActionError: Dispatch<SetStateAction<string | null>>,
+): StableSceneCallbacks {
+  const cached = stableSceneCallbacks.get(actions);
+  if (cached?.setActionError === setActionError) return cached;
+  const created: StableSceneCallbacks = {
+    setActionError,
+    stopSubagent: async (trace) => {
+      try {
+        await actions.stopSubagent(trace);
+      } catch (error) {
+        setActionError(error instanceof Error
+          ? error.message
+          : "The delegated task could not be stopped.");
+        throw error;
+      }
+    },
+    openCustomAgentSettings: () => actions.openSettings({ section: "custom-agents" }),
+  };
+  stableSceneCallbacks.set(actions, created);
+  return created;
+}
+
 export function chatQueueRunner(
   run: QueueCommandRunner | undefined,
   draft: Conversation | null,
@@ -498,16 +530,8 @@ export function createWorkspaceSceneModel({
     persistedConversation?.id ?? null,
     projection.turns,
   );
-  const stopSubagent = async (trace: SubagentTrace): Promise<void> => {
-    try {
-      await actions.stopSubagent(trace);
-    } catch (error) {
-      setActionError(error instanceof Error
-        ? error.message
-        : "The delegated task could not be stopped.");
-      throw error;
-    }
-  };
+  const sceneCallbacks = workspaceSceneCallbacks(actions, setActionError);
+  const stopSubagent = sceneCallbacks.stopSubagent;
   const setGoal = async (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -659,8 +683,8 @@ export function createWorkspaceSceneModel({
       skillsLoading: workflow.loading,
       skillsError: workflow.error,
       promptPresets: connection.snapshot?.promptPresets ?? EMPTY_LIST,
-      customAgents: connection.snapshot?.customAgents ?? EMPTY_LIST,
-      onOpenCustomAgentSettings: () => actions.openSettings({ section: "custom-agents" }),
+      customAgents: connection.snapshot ? connection.snapshot.customAgents ?? EMPTY_LIST : undefined,
+      onOpenCustomAgentSettings: sceneCallbacks.openCustomAgentSettings,
       onStopSubagent: stopSubagent,
       goal: persistedConversation && !globalChatActive ? {
         workflow: currentWorkflow,

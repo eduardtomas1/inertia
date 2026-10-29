@@ -42,6 +42,8 @@ export const CUSTOM_AGENT_SYMBOLS: Readonly<Record<CustomAgentIconName, LucideIc
   braces: Braces,
 };
 
+const GLYPH_PLATE_FROM = 40;
+
 export interface CustomAgentIdentity {
   name: string;
   icon: CustomAgentIcon;
@@ -66,7 +68,7 @@ export function CustomAgentAvatar({
   className?: string;
 }): React.JSX.Element {
   const tint = customAgentTintStyle(agent.accent);
-  const symbolSize = Math.max(10, Math.round(size * 0.58));
+  const symbolSize = size > 24 ? 16 : 14;
   const Symbol = agent.icon.kind === "symbol" ? CUSTOM_AGENT_SYMBOLS[agent.icon.name] ?? Orbit : null;
   return (
     <span
@@ -76,9 +78,11 @@ export function CustomAgentAvatar({
       data-icon-kind={agent.icon.kind}
       aria-hidden="true"
     >
-      {Symbol
-        ? <Symbol size={symbolSize} className="custom-agent-avatar-symbol" />
-        : <img src={agent.icon.kind === "image" ? agent.icon.data : undefined} alt="" width={size} height={size} className="custom-agent-avatar-image" />}
+      {Symbol && size >= GLYPH_PLATE_FROM
+        ? <span className="custom-agent-avatar-glyph"><Symbol size={symbolSize} className="custom-agent-avatar-symbol" /></span>
+        : Symbol
+          ? <Symbol size={symbolSize} className="custom-agent-avatar-symbol" />
+          : <img src={agent.icon.kind === "image" ? agent.icon.data : undefined} alt="" width={size} height={size} className="custom-agent-avatar-image" />}
     </span>
   );
 }

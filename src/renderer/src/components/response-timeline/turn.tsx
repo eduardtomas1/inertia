@@ -26,6 +26,7 @@ import {
 } from "./layers";
 import { HtmlRenderTurnScopeProvider, TurnHtmlRenders } from "./html-render";
 import { SubagentCallContext } from "./subagentCallContext";
+import { transcriptSubagentCallMemory } from "./subagentCallMemory";
 import { sameSubagentCallsForTurn } from "../../utils/response-timeline/subagentCalls";
 import { turnCompletionAnnouncement } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
@@ -160,6 +161,7 @@ function TurnTimelineComponent({
     defaultCodeWrap: props.defaultCodeWrap,
     onOpenProjectFile: props.onOpenTurnFile,
     onStopSubagent: props.onStopSubagent,
+    memory: transcriptSubagentCallMemory,
   }), [
     props.autoCollapseWorkLog,
     props.conversationId,

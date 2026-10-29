@@ -92,6 +92,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
   const addBlockAnchor = useRef<HTMLDivElement>(null);
   const blockFields = useRef(new Map<string, HTMLTextAreaElement>());
   const pendingFocus = useRef<string | null>(null);
+  const form = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     nameInput.current?.focus({ preventScroll: true });
@@ -100,7 +101,9 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
     const target = pendingFocus.current;
     if (!target) return;
     pendingFocus.current = null;
+    const [blockId, direction] = target.split(":");
     if (target === "add") addBlockAnchor.current?.querySelector("button")?.focus();
+    else if (direction) form.current?.querySelector<HTMLButtonElement>(`[data-block-id="${blockId}"] [data-move="${direction}"]`)?.focus();
     else blockFields.current.get(target)?.focus();
   });
 
@@ -123,6 +126,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
     const blocks = [...draft.blocks];
     const [moved] = blocks.splice(index, 1);
     blocks.splice(target, 0, moved!);
+    pendingFocus.current = `${moved!.id}:${offset < 0 ? "up" : "down"}`;
     setBlocks(blocks);
   };
   const removeBlock = (index: number): void => {
@@ -187,6 +191,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
 
   return (
     <form
+      ref={form}
       className="custom-agent-panel"
       aria-label={label}
       noValidate
@@ -318,14 +323,14 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
               const kindLabel = CUSTOM_AGENT_BLOCK_LABELS[block.kind];
               const name = `${kindLabel} block ${index + 1}`;
               return (
-                <li key={block.id} className="custom-agent-block" data-kind={block.kind}>
+                <li key={block.id} className="custom-agent-block" data-kind={block.kind} data-block-id={block.id}>
                   <div className="custom-agent-block-head">
                     <span className="custom-agent-block-kind">{kindLabel}</span>
                     <div className="custom-agent-block-actions" role="group" aria-label={`${name} actions`}>
-                      <IconButton label={`Move ${name} up`} aria-disabled={index === 0 || undefined} disabled={disabled} onClick={() => moveBlock(index, -1)}>
+                      <IconButton label={`Move ${name} up`} data-move="up" aria-disabled={index === 0 || undefined} disabled={disabled} onClick={() => moveBlock(index, -1)}>
                         <ArrowUp size={14} aria-hidden="true" />
                       </IconButton>
-                      <IconButton label={`Move ${name} down`} aria-disabled={index === draft.blocks.length - 1 || undefined} disabled={disabled} onClick={() => moveBlock(index, 1)}>
+                      <IconButton label={`Move ${name} down`} data-move="down" aria-disabled={index === draft.blocks.length - 1 || undefined} disabled={disabled} onClick={() => moveBlock(index, 1)}>
                         <ArrowDown size={14} aria-hidden="true" />
                       </IconButton>
                       <IconButton label={`Remove ${name}`} disabled={disabled} onClick={() => removeBlock(index)}>
@@ -438,7 +443,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
 
       <div className="custom-agent-panel-footer">
         <span className="custom-agent-panel-status">
-          {validation.message && <small className="custom-agent-validation">{validation.message}</small>}
+          <small id={`${ids}-validation`} className="custom-agent-validation" aria-live="polite">{validation.message}</small>
           <SettingNoteStatus notice={action.notice} />
         </span>
         <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
@@ -447,6 +452,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
           className="primary-button"
           disabled={disabled || !validation.agent}
           aria-disabled={busy || undefined}
+          aria-describedby={validation.message ? `${ids}-validation` : undefined}
         >
           Save
         </button>

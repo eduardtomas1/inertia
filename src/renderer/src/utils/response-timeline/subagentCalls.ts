@@ -11,6 +11,7 @@ import {
   subagentTraceLabel,
   type SubagentDisclosureRow,
 } from "../subagentDisclosure";
+import { sameTurnAgentStatus } from "../turnAgentStatus";
 
 export interface SubagentCallIdentity {
   agentId: string | null;
@@ -180,10 +181,8 @@ export function sameSubagentCallsForTurn(
   previousAgents: readonly CustomAgent[] | undefined,
   nextAgents: readonly CustomAgent[] | undefined,
 ): boolean {
-  const sameTraces = previousTraces === nextTraces
-    || (!previousTraces?.length && !nextTraces?.length);
-  return sameTraces && (
-    previousAgents === nextAgents
-    || !nextTraces?.some(({ customAgentId }) => customAgentId)
-  );
+  const called = (traces: readonly SubagentTrace[] | undefined): boolean =>
+    Boolean(traces?.some(({ customAgentId }) => customAgentId));
+  if (!called(previousTraces) && !called(nextTraces)) return sameTurnAgentStatus(previousTraces, nextTraces);
+  return previousTraces === nextTraces && previousAgents === nextAgents;
 }

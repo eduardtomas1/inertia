@@ -1,10 +1,14 @@
+import { readFileSync } from "node:fs";
+
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CustomAgentsSettings } from "../../src/renderer/src/components/custom-agents/CustomAgentsSettings";
 import { settingsEscapeAction } from "../../src/renderer/src/hooks/useSettingsMode";
 import { CUSTOM_AGENT_PRESETS } from "../../src/shared/custom-agent-presets";
-import type { CustomAgent, CustomAgentDraft } from "../../src/shared/custom-agents";
+import { CUSTOM_AGENT_ICON_SIZE, type CustomAgent, type CustomAgentDraft } from "../../src/shared/custom-agents";
+import { CustomAgentAvatar } from "../../src/renderer/src/components/custom-agents/CustomAgentAvatar";
+import { readCustomAgentIcon } from "../../src/renderer/src/components/custom-agents/customAgentImage";
 
 const reviewerId = "11111111-1111-4111-8111-111111111111";
 const writerId = "22222222-2222-4222-8222-222222222222";
@@ -64,6 +68,26 @@ function setup(extra: Partial<React.ComponentProps<typeof CustomAgentsSettings>>
   };
   const view = render(<CustomAgentsSettings {...props} />);
   return { ...view, request, props };
+}
+
+function blurMovedNodes(): () => void {
+  const { appendChild, insertBefore } = Node.prototype;
+  const blurIfMoved = (node: Node): void => {
+    const active = document.activeElement;
+    if (node.isConnected && active && node.contains(active)) (active as HTMLElement).blur();
+  };
+  const append = vi.spyOn(Node.prototype, "appendChild").mockImplementation(function (this: Node, node: Node) {
+    blurIfMoved(node);
+    return appendChild.call(this, node);
+  } as typeof appendChild);
+  const insert = vi.spyOn(Node.prototype, "insertBefore").mockImplementation(function (this: Node, node: Node, child: Node | null) {
+    blurIfMoved(node);
+    return insertBefore.call(this, node, child);
+  } as typeof insertBefore);
+  return () => {
+    append.mockRestore();
+    insert.mockRestore();
+  };
 }
 
 describe("custom agents settings", () => {
@@ -142,8 +166,9 @@ describe("custom agents settings", () => {
   });
 
   it("updates only the changed fields against the revision the editor opened with", async () => {
-    const { request } = setup();
+    const { request, rerender, props } = setup();
     fireEvent.click(screen.getByRole("button", { name: "Edit Reviewer" }));
+    rerender(<CustomAgentsSettings {...props} agents={[writer, { ...reviewer, revision: 4, description: "Changed elsewhere." }]} />);
     const panel = screen.getByRole("form", { name: "Edit Reviewer" });
     fireEvent.change(within(panel).getByLabelText("Description"), { target: { value: "Reads every diff." } });
     fireEvent.click(within(panel).getByRole("radio", { name: "Green" }));
@@ -298,5 +323,101 @@ describe("custom agents settings", () => {
     expect(screen.getByText("30 of 40")).toBeVisible();
     expect(screen.getByRole("button", { name: /^Import agents\s?…$/u })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Export all agents" })).toBeDisabled();
+  });
+
+  it("moves focus to the new agent's Edit button after a create, through the New button meanwhile", async () => {
+    const { rerender, props } = setup();
+    const newButton = screen.getByRole("button", { name: "New agent" });
+    newButton.focus();
+    fireEvent.click(newButton);
+    const panel = screen.getByRole("form", { name: "New agent" });
+    fireEvent.change(within(panel).getByLabelText("Name"), { target: { value: "Triage" } });
+    fireEvent.change(within(panel).getByRole("textbox", { name: "Role block 1" }), { target: { value: "You triage." } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("form", { name: "New agent" })).not.toBeInTheDocument());
+    expect(newButton).toHaveFocus();
+    const triage = agent({ id: "33333333-3333-4333-8333-333333333333", name: "Triage", handle: "triage", position: 2 });
+    rerender(<CustomAgentsSettings {...props} agents={[writer, reviewer, triage]} />);
+    expect(screen.getByRole("button", { name: "Edit Triage" })).toHaveFocus();
+  });
+
+  it("returns focus to the New button when the preset that opened the editor is gone", () => {
+    setup({ agents: [] });
+    const chip = within(screen.getByRole("group", { name: "Presets" })).getByRole("button", { name: "Reviewer" });
+    chip.focus();
+    fireEvent.click(chip);
+    expect(chip.isConnected).toBe(false);
+    fireEvent.click(within(screen.getByRole("form", { name: "New agent" })).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "New agent" })).toHaveFocus();
+  });
+
+  it("keeps focus on the move button after an agent moves down", async () => {
+    const { rerender, props, request } = setup();
+    const down = screen.getByRole("button", { name: "Move Reviewer down" });
+    down.focus();
+    fireEvent.click(down);
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    const restore = blurMovedNodes();
+    rerender(<CustomAgentsSettings {...props} agents={[{ ...writer, position: 0 }, { ...reviewer, position: 1 }]} />);
+    restore();
+    expect(screen.getAllByRole("listitem").map((row) => row.querySelector("strong")?.textContent)).toEqual(["Docs writer", "Reviewer"]);
+    expect(screen.getByRole("button", { name: "Move Reviewer down" })).toHaveFocus();
+  });
+
+  it("keeps focus on a block's move button after it moves down", () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Reviewer" }));
+    const panel = screen.getByRole("form", { name: "Edit Reviewer" });
+    const down = within(panel).getByRole("button", { name: "Move Role block 1 down" });
+    down.focus();
+    const restore = blurMovedNodes();
+    fireEvent.click(down);
+    restore();
+    expect(within(panel).getByRole("button", { name: "Move Role block 2 down" })).toHaveFocus();
+  });
+
+  it("announces why Save is unavailable and keeps toolbar labels in one text run", () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "New agent" }));
+    const panel = screen.getByRole("form", { name: "New agent" });
+    const save = within(panel).getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAccessibleDescription("Give the agent a name.");
+    expect(within(panel).getByText("Give the agent a name.")).toHaveAttribute("aria-live", "polite");
+    expect(within(panel).getByLabelText("Agent image")).toHaveAttribute("accept", "image/png");
+    const importButton = screen.getByRole("button", { name: /^Import agents\s?…$/u });
+    expect(importButton.childNodes).toHaveLength(1);
+    expect(importButton.firstElementChild).toHaveTextContent("Import agents…");
+  });
+
+  it("draws avatar glyphs at 14 or 16 px and defaults an untinted avatar to the muted text colour", () => {
+    const identity = { name: "Scout", icon: { kind: "symbol" as const, name: "search" as const }, accent: null };
+    const { container } = render(<div>{[18, 24, 28, 56].map((size) => <CustomAgentAvatar key={size} agent={identity} size={size} />)}</div>);
+    const glyphs = [...container.querySelectorAll("svg")].map((svg) => svg.getAttribute("width"));
+    expect(glyphs).toEqual(["14", "14", "16", "16"]);
+    expect(container.querySelectorAll(".custom-agent-avatar-glyph")).toHaveLength(1);
+    expect(container.querySelector(".custom-agent-avatar")).not.toHaveClass("has-agent-tint");
+    const css = readFileSync("src/renderer/src/components/custom-agents/CustomAgentAvatar.css", "utf8").replaceAll("\r\n", "\n");
+    expect(css).toMatch(/\.custom-agent-avatar \{\n  --agent-tint: var\(--text-muted\);/u);
+  });
+
+  it("centre-crops a wide PNG to a square before resizing it", async () => {
+    const close = vi.fn();
+    const createImageBitmap = vi.fn(async (..._args: unknown[]) => ({ width: 128, height: 64, close }));
+    vi.stubGlobal("createImageBitmap", createImageBitmap);
+    const context = { drawImage: vi.fn(), imageSmoothingQuality: "low" };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/png;base64,AAAA");
+    const file = new File([new Uint8Array(16)], "wide.png", { type: "image/png" });
+    await expect(readCustomAgentIcon(file)).resolves.toBe("data:image/png;base64,AAAA");
+    expect(createImageBitmap).toHaveBeenLastCalledWith(file, 32, 0, 64, 64, {
+      resizeWidth: CUSTOM_AGENT_ICON_SIZE,
+      resizeHeight: CUSTOM_AGENT_ICON_SIZE,
+      resizeQuality: "high",
+    });
+    await expect(readCustomAgentIcon(new File([new Uint8Array(16)], "photo.jpg", { type: "image/jpeg" })))
+      .rejects.toThrow("Choose a PNG image up to 1 MB.");
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 });

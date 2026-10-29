@@ -1,5 +1,5 @@
 .custom-agent-avatar {
-  --agent-tint: var(--accent);
+  --agent-tint: var(--text-muted);
   position: relative;
   display: inline-grid;
   place-items: center;
@@ -22,6 +22,15 @@
 }
 
 .custom-agent-avatar-symbol { flex-shrink: 0; }
+
+.custom-agent-avatar-glyph {
+  display: inline-grid;
+  place-items: center;
+  inline-size: calc(var(--agent-avatar-size) * 0.58);
+  block-size: calc(var(--agent-avatar-size) * 0.58);
+  border-radius: calc(var(--agent-avatar-size) * 0.18);
+  background: color-mix(in srgb, var(--agent-tint) 14%, transparent);
+}
 
 .custom-agent-avatar-image {
   display: block;

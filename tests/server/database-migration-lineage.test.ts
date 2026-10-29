@@ -69,6 +69,8 @@ const IMPLEMENTATION_SOURCES = new Map<
   number,
   readonly ImplementationSourceDefinition[]
 >([
+  [108, [implementation("src/server/persistence/migrations/native-pi-provider.ts",
+    "PI_TABLES", "quotePiIdentifier", "piTableDefinition", "rebuildPiTable")]],
   [17, [
     implementation(
       "src/server/persistence/migrations/legacy-schema.ts",

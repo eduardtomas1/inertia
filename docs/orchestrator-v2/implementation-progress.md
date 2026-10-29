@@ -79,3 +79,15 @@ Native/portable fork and deferred rollback integration; remaining commands,
 effect publication and client projections. The second Astra chat is implementing
 Pi after completing the Codex/Claude native-operation adapter package. All other
 full-scope items remain open on the completion checklist.
+## Pi persistence compatibility checkpoint
+
+Migration 108 adds the native Pi provider, `pi-rpc` harness and `pi-native`
+protocol to the existing constrained tables. It preserves their data, indexes,
+triggers and foreign keys, and rolls the entire upgrade back on a failed table
+rebuild. Released migration definitions and lineage entries remain unchanged.
+
+Validation: 36 tests across the migration, lineage and Pi upgrade suites passed;
+Node TypeScript and focused lint passed. The upgrade test opens a representative
+released database and admits a real V2 Pi turn after upgrading. Provider runtime
+integration remains in progress in the second chat.
+

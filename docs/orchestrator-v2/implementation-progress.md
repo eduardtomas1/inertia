@@ -41,10 +41,41 @@ These runs overlap; their test counts must not be added. The full final check
 has not yet run for V2. Provider tests are recorded separately in
 `provider-implementation-progress.md`.
 
+## Portable history and provider backings checkpoint — 2026-10-29
+
+Turn preparation now uses deterministic, intact-entry history selection with
+T3's 16k default / 64k maximum budget, current-prompt reservation, known native
+occupancy, context-window and response reserves. Recent user/assistant and
+opening messages receive priority; the final order remains chronological.
+Oversized entries are omitted whole. Provenance and omitted-history retrieval
+instructions accompany the handoff. Historical attachments, private reasoning
+and live tool state are not replayed. Existing endpoint containment, file-change
+metadata, authorized chat references and watcher attribution are preserved.
+
+Native provider backings now have durable instance/workspace/session identity
+and bounded item coverage. A tested Codex → Claude → Codex round trip resumes the
+original Codex session and delivers only intervening context. Uncertain handoff
+delivery prevents native reuse; an ordinary outage alone does not retire a
+valid session. Preparation, dispatch, delivery, abandonment and uncertainty are
+separate durable states. Rejected native resumes can persist a replacement
+handoff before fresh-session retry. Projection replay reproduces backing state.
+
+Validation: 128 tests across eight focused core, backing, portable-history,
+provider-handoff, fallback, configuration and lifecycle suites passed. Node
+TypeScript and architecture checks passed. The shared unit-test TypeScript
+project currently reports the second chat's in-progress Pi union integration;
+these provider changes are not part of this checkpoint. The final full gate is
+still outstanding.
+
+Remaining within this area: native history injection and provider turn anchors,
+general configuration queues and account-switch authorization, full transcript
+item coverage (the first reader covers messages and bounded legacy supplements),
+durable inherited fork history, and reconnect/client exposure. This checkpoint
+does not close the corresponding full-scope checklist items.
+
 ## Next integration work
 
-Provider backing/session history and coverage; deterministic portable context;
-native/portable fork and deferred rollback integration; remaining commands,
+Native/portable fork and deferred rollback integration; remaining commands,
 effect publication and client projections. The second Astra chat is implementing
 Pi after completing the Codex/Claude native-operation adapter package. All other
 full-scope items remain open on the completion checklist.

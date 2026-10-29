@@ -1,5 +1,6 @@
 import { CheckpointError } from "./checkpoints";
 import { OrchestrationConflict } from "./orchestration-v2/types";
+import { PortableHistoryBudgetError } from "./orchestration-v2/portable-history";
 import { RecordNotFoundError } from "./database";
 import { ConversationHistoryTooLargeError, ConversationProviderChangeError } from "./persistence/errors";
 import { GitError } from "./git";
@@ -33,11 +34,12 @@ export class RuntimeRequestError extends Error {
 }
 
 export function userCorrectableRuntimeError(error: unknown): boolean {
-  return error instanceof TodoRepositoryError
+  return error instanceof PortableHistoryBudgetError || error instanceof TodoRepositoryError
     || (error instanceof RuntimeRequestError && error.code === USER_CORRECTABLE_REQUEST);
 }
 
 export function publicRuntimeError(error: unknown): string {
+  if (error instanceof PortableHistoryBudgetError) return error.message;
   if (error instanceof OrchestrationConflict) {
     if (error.code === "cleanup-pending") return "The previous provider process has not been confirmed stopped. Wait for cleanup before starting another turn.";
     if (error.code === "command-conflict") return "This request identity was already used for different work. Refresh the chat before retrying.";

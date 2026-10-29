@@ -11,6 +11,9 @@ import { OrchestrationEffectOutbox } from "./effect-outbox";
 import { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint, durableJson } from "./json";
 import { projectOrchestrationEvent } from "./projector";
+import { readPortableContinuationHistory } from "./portable-history-source";
+import { ProviderBackingRepository } from "./backing-repository";
+import { providerInstanceId } from "./provider-instance";
 import { OrchestrationConflict, type CommandSource, type JsonValue, type OrchestrationEffect } from "./types";
 
 interface TurnProjectionAccess {
@@ -24,6 +27,7 @@ interface TurnProjectionAccess {
 export class OrchestratedTurnRepository {
   readonly events: OrchestrationEventStore;
   readonly effects: OrchestrationEffectOutbox;
+  readonly backings: ProviderBackingRepository;
 
   constructor(
     private readonly database: Database.Database,
@@ -32,6 +36,7 @@ export class OrchestratedTurnRepository {
   ) {
     this.events = new OrchestrationEventStore(database, projectOrchestrationEvent, runtimeId);
     this.effects = new OrchestrationEffectOutbox(database, runtimeId);
+    this.backings = new ProviderBackingRepository(database, this.events);
   }
 
   admit(
@@ -52,15 +57,21 @@ export class OrchestratedTurnRepository {
         return { turn: this.access.agentTurn(result.turnId), message: this.access.message(result.messageId) };
       }
       if (this.hasPendingCleanup(conversation.id)) throw new OrchestrationConflict("cleanup-pending");
+      if (input.providerSessionBefore && input.continuationIdentity) {
+        const backing = this.backings.find({ threadId: conversation.id, providerId: input.providerId,
+          workspaceKey: this.access.conversationPath(conversation.id), identity: input.continuationIdentity,
+          nativeSessionId: input.providerSessionBefore });
+        if (backing) {
+          if (backing.status !== "ready") throw new OrchestrationConflict("revision-conflict");
+          this.database.prepare("UPDATE conversations SET provider_session_id = ?, continuation_identity_json = ? WHERE id = ?")
+            .run(backing.nativeSessionId, JSON.stringify(input.continuationIdentity), conversation.id);
+        }
+      }
       const queued = createCompatibilityTurn();
       const { turn } = queued;
       const selection = modelSelectionSchema.parse(turn.modelSelection);
       const workspaceKey = this.access.conversationPath(conversation.id);
-      const instanceId = commandFingerprint({ providerId: turn.providerId,
-        harnessId: turn.harnessId, backendProfileId: turn.backendProfileId,
-        configurationRevision: turn.configurationRevision,
-        endpointIdentity: turn.continuationIdentity.endpointIdentity,
-        compatibilityToken: turn.continuationIdentity.providerCompatibilityToken ?? null });
+      const instanceId = providerInstanceId(turn.providerId, turn.continuationIdentity);
       const attemptId = randomUUID();
       const events: OrchestrationDomainEvent[] = [];
       if (!this.events.projection("thread", conversation.id)) {
@@ -85,6 +96,8 @@ export class OrchestratedTurnRepository {
           nativeThreadId: null, nativeTurnId: null, interruptRequestedAt: null,
           cleanup: "not-started", runtimeId: this.runtimeId },
       } });
+      if (input.contextHandoff) events.push(this.backings.preparation(turn.runId, attemptId,
+        conversation.id, turn.requestedAt, input.contextHandoff));
       this.events.commit({ ...identity, command,
         expectedRevision: this.events.revision(conversation.id), events,
         effects: [{ id: this.startEffectId(turn.runId), eventIndex: events.length - 1,
@@ -113,6 +126,11 @@ export class OrchestratedTurnRepository {
       WHERE thread_id = ? AND kind = 'attempt'
         AND json_extract(payload_json, '$.cleanup') IN ('pending','unconfirmed') LIMIT 1`)
       .get(threadId) !== undefined;
+  }
+
+  portableHistory(input: Parameters<typeof readPortableContinuationHistory>[1]) {
+    this.access.conversation(input.threadId);
+    return readPortableContinuationHistory(this.database, input);
   }
 
   lifecycle<T>(turnId: string, updateCompatibilityProjection: () => T): T {
@@ -154,6 +172,7 @@ export class OrchestratedTurnRepository {
       projectId: run.projectId, threadId: run.threadId, command: event,
       expectedRevision: this.events.revision(run.threadId), events: [event], result: null });
     if (isAgentTurnTerminalStatus(turn.status)) this.effects.retirePending(this.startEffectId(turn.runId), "run-settled");
+    this.backings.settle(turn);
     if (turn.runState?.state === "cancelling" && attempt.interruptRequestedAt === null) {
       const interrupted: OrchestrationDomainEvent = { type: "attempt.interrupt-requested",
         payload: { runId: run.id, attemptId: attempt.id } };
@@ -209,6 +228,7 @@ export class OrchestratedTurnRepository {
     const claim = intent ? this.claimStart(runId) : null;
     if (intent && !claim) return false;
     try {
+      if (intent) this.backings.dispatch(runId);
       const accepted = dispatch();
       if (claim) this.effects.settle(claim, accepted
         ? { kind: "succeeded" } : { kind: "failed", code: "start-refused" });

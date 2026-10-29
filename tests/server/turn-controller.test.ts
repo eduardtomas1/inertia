@@ -1974,7 +1974,7 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
-  it("does not pair a stale conversation session with another turn's identity", async () => {
+  it("uses the authoritative V2 backing instead of a stale conversation session", async () => {
     const runtime = await testRuntime();
     const first = runtime.controller.queue({
       conversationId: runtime.conversationId,
@@ -2002,12 +2002,11 @@ describe("TurnController authoritative lifecycle", () => {
       content: "Do not reuse unrelated hidden state.",
     });
 
-    expect(next.turn.providerSessionBefore).toBeNull();
-    expect(next.turn.continuationReasonCode)
-      .toBe("missing-continuation-identity");
+    expect(next.turn.providerSessionBefore).toBe("authoritative-session");
+    expect(next.turn.continuationReasonCode).toBe("same-continuation");
     runtime.controller.start(next.turn.id);
-    expect(runtime.provider.input?.sessionId).toBeUndefined();
-    runtime.provider.resolve({ status: "completed", text: "Fresh session." });
+    expect(runtime.provider.input?.sessionId).toBe("authoritative-session");
+    runtime.provider.resolve({ status: "completed", text: "Continued verified session." });
     await flushPromises();
     runtime.store.close();
   });

@@ -139,6 +139,7 @@ export interface AgentTurnLifecycleUpdate {
 
 export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
+  contextHandoff?: import("../../shared/orchestration-backings").PreparedContextHandoff;
   queuedMessageId?: string;
   limitResetPlanId?: string;
   restartContinuationPlanId?: string;

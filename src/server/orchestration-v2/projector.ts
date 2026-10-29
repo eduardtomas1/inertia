@@ -7,6 +7,7 @@ import {
 import { canTransitionAgentTurnStatus, isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { agentTurnStatusForRunState } from "../../shared/run-state";
 import { durableJson } from "./json";
+import { projectBackingEvent } from "./backing-projector";
 import { OrchestrationConflict, type ProjectEvent, type ProjectionWrite } from "./types";
 
 export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
@@ -21,6 +22,10 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   }
   if (!existingThread || existingThread.projectId !== envelope.projectId) throw new OrchestrationConflict("scope-conflict");
   const thread = orchestrationThreadSchema.parse(existingThread.value);
+  if (event.type === "provider.backing-recorded" || event.type === "provider.backing-invalidated" || event.type === "provider.session-cleared"
+    || event.type === "context.handoff-prepared" || event.type === "context.handoff-state-changed") {
+    return projectBackingEvent(event, envelope, read);
+  }
   if (event.type === "thread.configured") {
     if (thread.activeRunId !== null) throw new OrchestrationConflict("revision-conflict");
     return [{ kind: "thread", id: thread.id, value: { ...thread, ...event.payload, updatedAt: envelope.createdAt } }];

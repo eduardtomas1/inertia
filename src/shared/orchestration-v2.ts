@@ -3,8 +3,10 @@ import { z } from "zod";
 import { modelSelectionSchema } from "./model-routing";
 import { agentTurnStatusSchema } from "./turn-lifecycle";
 import { AGENT_RUN_STATES } from "./run-state";
+import { orchestrationIdSchema } from "./orchestration-identities";
+import { orchestrationBackingEventSchema } from "./orchestration-backings";
 
-export const orchestrationIdSchema = z.string().min(1).max(240).regex(/^[^\u0000-\u001f\u007f]+$/u);
+export { orchestrationIdSchema } from "./orchestration-identities";
 const timestamp = z.iso.datetime();
 const nativeId = z.string().min(1).max(1_000);
 
@@ -59,6 +61,7 @@ export const orchestrationAttemptSchema = z.object({
 }).strict();
 
 export const orchestrationDomainEventSchema = z.discriminatedUnion("type", [
+  ...orchestrationBackingEventSchema.options,
   z.object({ type: z.literal("thread.registered"), payload: orchestrationThreadSchema }).strict(),
   z.object({ type: z.literal("thread.configured"), payload: z.object({
     providerId: orchestrationIdSchema,

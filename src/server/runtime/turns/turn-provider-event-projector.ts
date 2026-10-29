@@ -79,6 +79,10 @@ export class TurnProviderEventProjector {
   }
 
   project(active: ActiveTurn, event: ProviderEvent): void {
+    if (event.type === "text" || event.type === "text-snapshot" || event.type === "approval"
+      || event.type === "input" || event.type === "plan") {
+      this.options.store.orchestration.backings.acknowledge(active.turn.runId);
+    }
     switch (event.type) {
       case "text":
         this.options.streams.appendAssistant(active, event.text);
@@ -125,6 +129,7 @@ export class TurnProviderEventProjector {
       }
       case "session":
         updateActiveTurnProviderSession(active, event.sessionId);
+        this.options.store.orchestration.backings.observeSession(active.turn, event.sessionId);
         this.options.store.updateConversation(active.conversation.id, {
           providerSessionId: event.sessionId,
           continuationIdentity: active.turn.continuationIdentity,

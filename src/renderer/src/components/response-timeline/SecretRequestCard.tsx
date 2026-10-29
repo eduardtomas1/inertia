@@ -263,8 +263,8 @@ function SecretRequestCardComponent({ message }: { message: SecretRequestMessage
     <section
       id={secretRequestElementId(reference.requestId)}
       className={interactive ? "secret-request-card is-pending" : "secret-request-card is-settled"}
-      role="region"
-      aria-labelledby={titleId}
+      role={reference.status === "pending" ? "region" : undefined}
+      aria-labelledby={reference.status === "pending" ? titleId : undefined}
       data-secret-request-state={reference.status}
       data-secret-request-mode={reference.status === "pending" && !answerable ? "read-only" : undefined}
     >

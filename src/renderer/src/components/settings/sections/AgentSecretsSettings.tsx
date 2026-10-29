@@ -7,10 +7,10 @@ import {
   secretRequestSavedAgo,
   secretRequestStorageLabel,
 } from "../../../utils/response-timeline/secretRequests";
-import { SettingsGroup } from "../SettingsLayout";
+import { SettingsGroup, SettingStatus } from "../SettingsLayout";
 import { useSettingAction } from "../useSettingAction";
 
-export const AGENT_SECRETS_INTRO = "Secrets you typed into a chat for an agent. Each sits in a private file that agent's commands can read until it expires, plus a copy in your system keychain so it survives a restart. Revoking deletes both. It can't take back a value an agent already used, and Inertia never shows the value again.";
+export const AGENT_SECRETS_INTRO = "Secrets you typed into a chat for an agent. Each sits in a private file that agent's commands can read until it expires. When a system keychain is available, a copy there lets it survive a restart. Revoking deletes both copies. It can't take back a value an agent already used, and Inertia never shows the value again.";
 export const AGENT_SECRETS_REFRESH_MS = 60_000;
 
 type ListState =
@@ -94,7 +94,6 @@ export function AgentSecretsSettings({
       headingId="agent-secrets-heading"
       settingId="agent-secrets"
       description={AGENT_SECRETS_INTRO}
-      notice={action.notice}
     >
       <div className="agent-secrets">
         {state.status === "loading" && <p className="agent-secrets-empty" role="status">Checking agent secrets…</p>}
@@ -156,6 +155,11 @@ export function AgentSecretsSettings({
             >
               {action.pending === "all" ? "Revoking…" : "Revoke all"}
             </button>
+          </div>
+        )}
+        {action.notice && (
+          <div className="agent-secrets-notice">
+            <SettingStatus notice={action.notice} />
           </div>
         )}
       </div>

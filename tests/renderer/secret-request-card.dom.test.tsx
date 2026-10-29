@@ -278,7 +278,8 @@ describe("settled secret request rows", () => {
     ["revoked", "Revoked"],
   ] as const)("renders %s as one row", (status, copy) => {
     render(workspace(<SecretRequestCard message={message(settled(status))} />));
-    const card = screen.getByRole("region", { name: "Asking for a secret: Tailscale auth key" });
+    const card = document.querySelector(`[data-secret-request-state="${status}"]`)!;
+    expect(screen.queryByRole("region", { name: "Asking for a secret: Tailscale auth key" })).toBeNull();
     expect(card).toHaveAttribute("data-secret-request-state", status);
     expect(card).toHaveClass("is-settled");
     expect(card.querySelector(".secret-request-row-status")).toHaveTextContent(copy);

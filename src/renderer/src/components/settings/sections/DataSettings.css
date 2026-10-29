@@ -105,7 +105,7 @@
 .agent-secrets {
   display: grid;
   min-width: 0;
-  padding-top: 4px;
+  padding-block: 4px 8px;
 }
 
 .agent-secrets-empty {
@@ -113,9 +113,13 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 8px;
-  margin: 8px 0 0;
+  margin: 8px 0;
   color: var(--text-muted);
   font-size: var(--text-xs);
+}
+
+.agent-secrets-notice {
+  margin-top: 8px;
 }
 
 .agent-secret-facts {

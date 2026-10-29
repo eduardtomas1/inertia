@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, Check, ImageUp, Plus, Sparkles, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ImageUp, LayoutTemplate, Plus, X } from "lucide-react";
 
 import {
   compileCustomAgentInstructions,
@@ -56,8 +56,8 @@ export interface CustomAgentEditorProps {
 }
 
 const SYMBOL_LABELS: Readonly<Record<CustomAgentIconName, string>> = {
-  bot: "Bot",
-  sparkles: "Sparkles",
+  orbit: "Orbit",
+  star: "Star",
   shield: "Shield",
   search: "Search",
   wrench: "Wrench",
@@ -65,7 +65,7 @@ const SYMBOL_LABELS: Readonly<Record<CustomAgentIconName, string>> = {
   pen: "Pen",
   book: "Book",
   bug: "Bug",
-  compass: "Compass",
+  target: "Target",
   eye: "Eye",
   brush: "Brush",
   rocket: "Rocket",
@@ -83,7 +83,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
   const action = useSettingAction();
   const [draft, setDraft] = useState(initial);
   const [linked, setLinked] = useState(linkHandle);
-  const [lastSymbol, setLastSymbol] = useState<CustomAgentIconName>(initial.icon.kind === "symbol" ? initial.icon.name : "bot");
+  const [lastSymbol, setLastSymbol] = useState<CustomAgentIconName>(initial.icon.kind === "symbol" ? initial.icon.name : "orbit");
   const [imageError, setImageError] = useState<string | null>(null);
   const [skillDraft, setSkillDraft] = useState("");
   const [skillError, setSkillError] = useState<string | null>(null);
@@ -181,7 +181,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
       label: PROJECT_COLOR_PALETTE[name].label,
       className: "custom-agent-swatch",
       style: customAgentTintStyle(name),
-      content: <span className="custom-agent-swatch-dot" aria-hidden="true"><Check size={12} /></span>,
+      content: <span className="custom-agent-swatch-dot" aria-hidden="true"><Check size={14} /></span>,
     })),
   ];
 
@@ -368,7 +368,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
           />
           <CustomAgentMenu<string>
             label="Add from preset"
-            icon={<Sparkles size={14} aria-hidden="true" />}
+            icon={<LayoutTemplate size={14} aria-hidden="true" />}
             disabled={disabled}
             items={CUSTOM_AGENT_PRESETS.map((preset) => ({
               id: preset.id,
@@ -397,7 +397,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
                   disabled={disabled}
                   onClick={() => { if (selected || !skillsFull) toggleSkill(skill); }}
                 >
-                  {selected && <Check size={12} aria-hidden="true" />}
+                  {selected && <Check size={14} aria-hidden="true" />}
                   {skill}
                 </button>
               );

@@ -258,7 +258,7 @@ export interface WorkspaceSceneActions {
   connectProvider: (providerId: ProviderId) => void;
   openProviderSetup: (providerId: ProviderId) => void;
   openBackendSetup: (profileId: string) => void;
-  openSettings: () => void;
+  openSettings: (target?: SettingsTarget) => void;
   openUsageView?: () => void;
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
@@ -659,6 +659,9 @@ export function createWorkspaceSceneModel({
       skillsLoading: workflow.loading,
       skillsError: workflow.error,
       promptPresets: connection.snapshot?.promptPresets ?? EMPTY_LIST,
+      customAgents: connection.snapshot?.customAgents ?? EMPTY_LIST,
+      onOpenCustomAgentSettings: () => actions.openSettings({ section: "custom-agents" }),
+      onStopSubagent: stopSubagent,
       goal: persistedConversation && !globalChatActive ? {
         workflow: currentWorkflow,
         executionStatus: currentGoalExecution,

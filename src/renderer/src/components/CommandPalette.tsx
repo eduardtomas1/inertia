@@ -2,7 +2,8 @@ import { ChevronRight, CircleHelp, Eye, FolderPlus, ListTodo, MessageSquare, Plu
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
-import { MESSAGE_SEARCH_QUERY_MAX, messageSearchPattern, type MessageSearchHit } from "@shared/message-search";
+import { MESSAGE_SEARCH_QUERY_MAX, type MessageSearchHit } from "@shared/message-search";
+import { Highlight, rankPaletteItems } from "../utils/paletteMatch";
 import { useMessageSearch, type MessageSearchCommand } from "../hooks/useMessageSearch";
 import type { SettingsTarget } from "../lib/settingsTarget";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -100,45 +101,18 @@ function watcherPaletteItems(surface: WatcherSurfaceModel | null, conversations:
   ];
 }
 
-function score(label: string, detail: string | undefined, query: string, keywords = ""): number {
-  const target = `${label} ${detail ?? ""} ${keywords}`.toLocaleLowerCase();
-  if (!query) return 1;
-  if (label.toLocaleLowerCase().startsWith(query)) return 4;
-  if (target.split(/\s+/u).some((word) => word.startsWith(query))) return 3;
-  return target.includes(query) ? 2 : 0;
-}
-
 function byGroup(left: PaletteItem, right: PaletteItem): number {
   return groupOrder.indexOf(left.group) - groupOrder.indexOf(right.group);
 }
 
 function filterItems(items: PaletteItem[], query: string, limit = true, wordMatches?: ReadonlySet<string>): PaletteItem[] {
-  const needle = query.trim().toLocaleLowerCase();
-  return items
-    .map((item) => ({ item, rank: score(item.label, item.detail, needle, item.keywords) || (wordMatches?.has(item.id) ? 1 : 0) }))
-    .filter(({ rank }) => rank > 0)
-    .sort((left, right) => right.rank - left.rank)
-    .slice(0, limit ? needle ? 18 : 14 : undefined)
-    .map(({ item }) => item)
-    .sort(byGroup);
+  return rankPaletteItems(items, query, limit ? query.trim() ? 18 : 14 : undefined, wordMatches).sort(byGroup);
 }
 
 function searchItems(items: PaletteItem[], settings: PaletteItem[], query: string): PaletteItem[] {
   if (!query.trim()) return filterItems(items, query);
   const wordMatches = new Set(searchSettings(query, SETTINGS_SECTION_ROWS).flatMap(({ results }) => results.map(({ row }) => `settings:${row.id}`)));
   return [...filterItems(items, query), ...filterItems(settings, query, true, wordMatches)].sort(byGroup);
-}
-
-function Highlight({ text, query }: { text: string; query: string }) {
-  if (!query.trim()) return text;
-  const pattern = new RegExp(messageSearchPattern(query.trim()), "giu");
-  let offset = 0;
-  const parts: React.ReactNode[] = [];
-  for (const match of text.matchAll(pattern)) {
-    parts.push(text.slice(offset, match.index), <mark key={match.index}>{match[0]}</mark>);
-    offset = match.index + match[0].length;
-  }
-  return <>{parts}{text.slice(offset)}</>;
 }
 
 export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onNewThreadWithoutProject, onAddProject, onOpenSettings, onOpenTasks, onAddTask }: CommandPaletteProps): React.JSX.Element | null {

@@ -135,7 +135,7 @@ describe("custom agents settings", () => {
     fireEvent.change(handle, { target: { value: "Code Review" } });
     expect(handle).toHaveValue("code-review");
     expect(save).toBeEnabled();
-    const symbol = within(panel).getByRole("radio", { name: "Compass" });
+    const symbol = within(panel).getByRole("radio", { name: "Target" });
     const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
     Object.defineProperty(escape, "target", { value: symbol });
     expect(settingsEscapeAction(escape)).toBe("release");

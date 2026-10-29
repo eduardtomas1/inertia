@@ -42,7 +42,7 @@ export function blankCustomAgentDraft(): CustomAgentDraft {
     name: "",
     handle: "",
     description: "",
-    icon: { kind: "symbol", name: "bot" },
+    icon: { kind: "symbol", name: "orbit" },
     accent: null,
     blocks: [newCustomAgentBlock("role")],
     skills: [],

@@ -80,6 +80,8 @@ import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
+import { SubagentCallBlock } from "./SubagentCallBlock";
+import { mergeSubagentCalls, type SubagentCallEntry } from "../../utils/response-timeline/subagentCalls";
 import { StreamingMarkdownText } from "./StreamingMarkdownText";
 import {
   advanceThinkingLine,
@@ -650,6 +652,13 @@ function ExecutionStream({
             </div>
           );
         }
+        if (entry.kind === "subagent-call") {
+          return (
+            <div role="listitem" key={entry.id}>
+              <SubagentCallBlock entry={entry} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />
+            </div>
+          );
+        }
         if (entry.kind === "commentary") {
           return (
             <div role="listitem" key={entry.id}>
@@ -884,6 +893,7 @@ export function SettledWorkDetails({
 }
 
 const NO_HELD_FOLLOW_UPS: string[] = [];
+const NO_SUBAGENT_CALLS: readonly SubagentCallEntry[] = [];
 
 export function WorkLog({
   turn,
@@ -893,6 +903,7 @@ export function WorkLog({
   liveContent,
   liveContentStreaming,
   heldFollowUpIds = NO_HELD_FOLLOW_UPS,
+  subagentCalls = NO_SUBAGENT_CALLS,
   showThinking,
   projectRoot,
   projectId,
@@ -909,6 +920,7 @@ export function WorkLog({
   liveContent: string;
   liveContentStreaming: boolean;
   heldFollowUpIds?: string[];
+  subagentCalls?: readonly SubagentCallEntry[];
   showThinking: boolean;
   projectRoot: string;
   projectId: string;
@@ -936,7 +948,7 @@ export function WorkLog({
 
   const includesReasoning = showThinking && Boolean(reasoningContent);
   const previousDurableStream = useRef<TurnExecutionStreamEntry[]>([]);
-  const durableStream = useMemo(() => {
+  const renderedStream = useMemo(() => {
     const next = stabilizeTurnExecutionStream(buildTurnExecutionStream(turn, {
       includeImportantActivities: turn.isActive,
       includeCompactions: turn.isActive,
@@ -945,6 +957,7 @@ export function WorkLog({
     const layered = layeredHtmlRenders(turn);
     return withHtmlRenders(next, turn.htmlRenders.filter((message) => !layered.includes(message)));
   }, [turn]);
+  const durableStream = useMemo(() => mergeSubagentCalls(renderedStream, subagentCalls), [renderedStream, subagentCalls]);
   // Transient text is the final visible execution entry unless follow-ups
   // were saved while it streamed; then it sits just above them. Inserting that
   // one row keeps settled commentary and activity-group identities stable
@@ -1079,7 +1092,7 @@ export function WorkLog({
 
   const exchange = stream.filter((entry) =>
     entry.kind === "follow-up"
-    || entry.kind === "html-render"
+    || entry.kind === "html-render" || entry.kind === "subagent-call"
     || (entry.kind === "commentary" && entry.answer));
   const workStream = exchange.length > 0
     ? stream.filter((entry) => !exchange.includes(entry))

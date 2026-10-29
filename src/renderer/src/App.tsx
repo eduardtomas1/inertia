@@ -3,7 +3,7 @@ import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SettingsProfilePanel, SettingsSection } from "./lib/settingsTarget";
+import type { SettingsProfilePanel, SettingsSection, SettingsTarget } from "./lib/settingsTarget";
 import { useSettingsMode } from "./hooks/useSettingsMode";
 import { useDiagnosticNavigation } from "./hooks/useDiagnosticNavigation";
 import {
@@ -826,7 +826,7 @@ export default function App(): React.JSX.Element {
       connectProvider,
       openProviderSetup,
       openBackendSetup,
-      openSettings: () => openSettings(),
+      openSettings: (target?: SettingsTarget) => openSettings(target),
       openUsageView: () => navigateToView("usage"),
       openConversation: (conversationId: string) => {
         const target = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
@@ -948,7 +948,7 @@ export default function App(): React.JSX.Element {
         connectProvider,
         openProviderSetup,
         openBackendSetup,
-        openSettings: () => openSettings(),
+        openSettings: (target?: SettingsTarget) => openSettings(target),
         openUsageView: () => navigateToView("usage"),
         openProjectPath,
         sendMessageToConversation,

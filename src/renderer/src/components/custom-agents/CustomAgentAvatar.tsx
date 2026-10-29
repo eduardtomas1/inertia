@@ -2,19 +2,19 @@ import type { CSSProperties } from "react";
 import clsx from "clsx";
 import {
   BookOpen,
-  Bot,
   Braces,
   Bug,
-  Compass,
   Eye,
   FlaskConical,
+  Orbit,
   Paintbrush,
   PenLine,
   Rocket,
   Scale,
   Search,
   ShieldCheck,
-  Sparkles,
+  Star,
+  Target,
   Wrench,
   Zap,
   type LucideIcon,
@@ -24,8 +24,8 @@ import { PROJECT_COLOR_PALETTE } from "@shared/project-colors";
 import "./CustomAgentAvatar.css";
 
 export const CUSTOM_AGENT_SYMBOLS: Readonly<Record<CustomAgentIconName, LucideIcon>> = {
-  bot: Bot,
-  sparkles: Sparkles,
+  orbit: Orbit,
+  star: Star,
   shield: ShieldCheck,
   search: Search,
   wrench: Wrench,
@@ -33,7 +33,7 @@ export const CUSTOM_AGENT_SYMBOLS: Readonly<Record<CustomAgentIconName, LucideIc
   pen: PenLine,
   book: BookOpen,
   bug: Bug,
-  compass: Compass,
+  target: Target,
   eye: Eye,
   brush: Paintbrush,
   rocket: Rocket,
@@ -67,7 +67,7 @@ export function CustomAgentAvatar({
 }): React.JSX.Element {
   const tint = customAgentTintStyle(agent.accent);
   const symbolSize = Math.max(10, Math.round(size * 0.58));
-  const Symbol = agent.icon.kind === "symbol" ? CUSTOM_AGENT_SYMBOLS[agent.icon.name] ?? Bot : null;
+  const Symbol = agent.icon.kind === "symbol" ? CUSTOM_AGENT_SYMBOLS[agent.icon.name] ?? Orbit : null;
   return (
     <span
       className={clsx("custom-agent-avatar", tint && "has-agent-tint", className)}

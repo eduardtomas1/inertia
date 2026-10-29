@@ -41,6 +41,9 @@ import {
 } from "../working-indicator/orbMotion";
 import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
 import { TurnAgentsLine } from "./TurnAgentsLine";
+import { MessageAgentCall } from "./MessageAgentCall";
+import { SubagentCallList } from "./SubagentCallBlock";
+import { customAgentsById, partitionSubagentCalls } from "../../utils/response-timeline/subagentCalls";
 import { useFreshRequest } from "./useFreshRequest";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
@@ -157,6 +160,7 @@ export function UserRequestLayer({
       {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
     >
       {requestMeta}
+      {turn.userMessage.customAgentCall && <MessageAgentCall attribution={turn.userMessage.customAgentCall} />}
       <div
         className={clsx("message-body", collapsible && !expanded && "is-collapsed")}
         data-request-content={collapsible ? "collapsible" : "complete"}
@@ -291,6 +295,12 @@ export function AgentExecutionLayer({
   usePublishLiveAgentPhase(turn.isActive
     ? { conversationId: props.conversationId, turnId: turn.id, phase: activePresentation.phase }
     : null);
+  const agentsById = useMemo(() => customAgentsById(props.customAgents), [props.customAgents]);
+  const callAttribution = turn.userMessage.customAgentCall;
+  const subagentCalls = useMemo(
+    () => partitionSubagentCalls(subagents, agentsById, callAttribution, props.turns),
+    [agentsById, callAttribution, props.turns, subagents],
+  );
   return (
     <section
       className={clsx(
@@ -353,6 +363,7 @@ export function AgentExecutionLayer({
             liveContent={liveContent}
             liveContentStreaming={props.streamingChannel === "text"}
             heldFollowUpIds={heldFollowUpIds}
+            subagentCalls={subagentCalls.entries}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}
@@ -373,6 +384,7 @@ export function AgentExecutionLayer({
             reasoningStreaming={false}
             liveContent=""
             liveContentStreaming={false}
+            subagentCalls={subagentCalls.entries}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}
@@ -387,10 +399,13 @@ export function AgentExecutionLayer({
       {settledCompactions.map((entry) => (
         <ContextCompactionActivityMarker key={entry.id} activities={entry.activities} />
       ))}
+      {!turn.isActive && consolidatesSettledWork && (
+        <SubagentCallList entries={subagentCalls.entries} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />
+      )}
       <TurnAgentsLine
         conversationId={props.conversationId}
         turnId={turn.id}
-        subagents={subagents}
+        subagents={subagentCalls.remaining}
         onOpenSurface={props.onOpenSurface}
       />
       <span

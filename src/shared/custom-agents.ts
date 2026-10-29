@@ -19,8 +19,8 @@ export const CUSTOM_AGENT_EXPORT_VERSION = 1;
 export const CUSTOM_AGENT_NATIVE_PREFIX = "inertia-";
 
 export const CUSTOM_AGENT_ICON_NAMES = [
-  "bot",
-  "sparkles",
+  "orbit",
+  "star",
   "shield",
   "search",
   "wrench",
@@ -28,7 +28,7 @@ export const CUSTOM_AGENT_ICON_NAMES = [
   "pen",
   "book",
   "bug",
-  "compass",
+  "target",
   "eye",
   "brush",
   "rocket",

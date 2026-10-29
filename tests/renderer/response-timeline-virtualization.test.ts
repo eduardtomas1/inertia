@@ -1097,10 +1097,15 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     const settledTrace = taskTrace({ id: "settled", status: "completed" });
     const working = { ...settledTrace, id: "working", status: "running" as const, isLive: true };
     const waiting = { ...settledTrace, id: "waiting", status: "waiting" as const, isLive: true };
+    const stableTraces = [working, settledTrace];
+    expect(sameTurnTimelineProps(
+      memoInput(settled, baseProps, stableTraces),
+      memoInput(settled, baseProps, stableTraces),
+    )).toBe(true);
     expect(sameTurnTimelineProps(
       memoInput(settled, baseProps, [working, settledTrace]),
       memoInput(settled, baseProps, [{ ...working, activity: "Editing", toolUseCount: 4, sequence: 9 }, settledTrace]),
-    )).toBe(true);
+    )).toBe(false);
     expect(sameTurnTimelineProps(
       memoInput(settled, baseProps, [working, settledTrace]),
       memoInput(settled, baseProps, [working, { ...settledTrace, status: "failed" }]),

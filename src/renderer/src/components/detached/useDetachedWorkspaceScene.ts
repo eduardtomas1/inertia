@@ -33,6 +33,7 @@ import { useStableActions, useStableController } from "../../hooks/useStableCont
 import { useWorkspaceLayout } from "../../hooks/useWorkspaceLayout";
 import { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
 import type { NewConversationLocation } from "../../lib/newConversation";
+import type { SettingsTarget } from "../../lib/settingsTarget";
 import { withRequestId, type CommandWithoutId } from "../../lib/runtimeCommands";
 import { workspaceRunPreviewUrl } from "../../utils/environmentSummary";
 import { requestSubagentFollowUp } from "../../utils/subagentFollowUp";
@@ -271,7 +272,8 @@ export function useDetachedWorkspaceScene({
     openProviderSetup: () => handoff.openInMain({ kind: "settings", page: "agents" }),
     openBackendSetup: (profileId: string) =>
       handoff.openInMain({ kind: "backend-setup", profileId }),
-    openSettings: () => handoff.openInMain({ kind: "settings", page: "appearance" }),
+    openSettings: (target?: SettingsTarget) =>
+      handoff.openInMain({ kind: "settings", page: target?.section ?? "appearance" }),
     openProjectPath: runtimeActions.openProjectPath,
     followUpSubagent: (trace: SubagentTrace) => {
       requestSubagentFollowUp(conversationId, trace, projection.turns);

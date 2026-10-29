@@ -1,7 +1,6 @@
 import { memo, type ComponentType } from "react";
 import {
   Bell,
-  Bot,
   CircleHelp,
   Database,
   FolderOpen,
@@ -10,6 +9,7 @@ import {
   MonitorSmartphone,
   Palette,
   Plug,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -106,7 +106,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   }),
   defineSection({
     ...settingsSectionRows("custom-agents"),
-    icon: Bot,
+    icon: Users,
     load: lazySection(async () => (await import("./custom-agents/CustomAgentsSettings")).CustomAgentsSettings),
     prefetch: [],
     select: (context) => ({

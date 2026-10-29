@@ -183,6 +183,9 @@ type ChatWorkspaceProps = {
   skillsError: string | null;
   promptPresets?: readonly PromptPreset[];
   promptPresetsEnabled?: boolean;
+  customAgents?: readonly import("@shared/custom-agents").CustomAgent[];
+  onOpenCustomAgentSettings?: () => void;
+  onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
   promptStashEnabled?: boolean;
   conversationContextHandoffEnabled?: boolean;
   agentContextRequestEnabled?: boolean;
@@ -301,7 +304,7 @@ export function ChatWorkspace({
   skillsLoading,
   skillsError,
   promptPresets = EMPTY_PROMPT_PRESETS,
-  promptPresetsEnabled = true,
+  promptPresetsEnabled = true, customAgents, onOpenCustomAgentSettings, onStopSubagent,
   promptStashEnabled = true,
   conversationContextHandoffEnabled = true,
   agentContextRequestEnabled = conversationContextHandoffEnabled,
@@ -1065,7 +1068,7 @@ export function ChatWorkspace({
                 ? onConversationContextCommand
                 : undefined}
               activities={ownedActivities}
-              subagents={ownedSubagents}
+              subagents={ownedSubagents} customAgents={customAgents} onStopSubagent={onStopSubagent}
               reasonings={ownedReasonings}
               plans={ownedPlans}
               checkpoints={ownedCheckpoints}
@@ -1206,7 +1209,7 @@ export function ChatWorkspace({
           compactOnReturnSetting={compactOnReturnSetting}
           onListSkills={onListSkills}
           promptPresets={promptPresets}
-          promptPresetsEnabled={promptPresetsEnabled}
+          promptPresetsEnabled={promptPresetsEnabled} customAgents={customAgents} onOpenCustomAgentSettings={onOpenCustomAgentSettings}
           promptStashEnabled={promptStashEnabled}
           onPromptPresetCommand={onPromptPresetCommand}
           onUpdateConversation={onUpdateConversation}

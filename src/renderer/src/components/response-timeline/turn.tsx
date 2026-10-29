@@ -10,7 +10,6 @@ import {
 import clsx from "clsx";
 import type { SubagentTrace } from "@shared/contracts";
 import { activeWorkIdentityLabel } from "../../utils/finalAnswerIdentity";
-import { sameTurnAgentStatus } from "../../utils/turnAgentStatus";
 import {
   answerTailCommentary,
   type ResponseTurn,
@@ -26,6 +25,8 @@ import {
   UserRequestLayer,
 } from "./layers";
 import { HtmlRenderTurnScopeProvider, TurnHtmlRenders } from "./html-render";
+import { SubagentCallContext } from "./subagentCallContext";
+import { sameSubagentCallsForTurn } from "../../utils/response-timeline/subagentCalls";
 import { turnCompletionAnnouncement } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 
@@ -151,6 +152,23 @@ function TurnTimelineComponent({
     () => onAfterToggle?.(turn.id),
     [onAfterToggle, turn.id],
   );
+  const callContext = useMemo(() => ({
+    autoCollapse: props.autoCollapseWorkLog,
+    projectRoot: props.projectRoot,
+    projectId: props.projectId,
+    conversationId: props.conversationId,
+    defaultCodeWrap: props.defaultCodeWrap,
+    onOpenProjectFile: props.onOpenTurnFile,
+    onStopSubagent: props.onStopSubagent,
+  }), [
+    props.autoCollapseWorkLog,
+    props.conversationId,
+    props.defaultCodeWrap,
+    props.onOpenTurnFile,
+    props.onStopSubagent,
+    props.projectId,
+    props.projectRoot,
+  ]);
 
   useLayoutEffect(() => {
     if (turn.isActive) answerTailWasVisible.current = answerTailVisible;
@@ -222,19 +240,21 @@ function TurnTimelineComponent({
         </p>
       ) : (
         <HtmlRenderTurnScopeProvider>
-          <AgentExecutionLayer
-            turn={railTurn}
-            props={props}
-            subagents={subagents ?? []}
-            providerLabel={providerLabel}
-            reasoningContent={reasoningContent}
-            liveContent={liveContent}
-            heldFollowUpIds={heldFollowUpIds}
-            timerStart={timerStart}
-            completionAnnouncement={completionAnnouncement}
-            onBeforeToggle={handleBeforeToggle}
-            onAfterToggle={handleAfterToggle}
-          />
+          <SubagentCallContext.Provider value={callContext}>
+            <AgentExecutionLayer
+              turn={railTurn}
+              props={props}
+              subagents={subagents ?? []}
+              providerLabel={providerLabel}
+              reasoningContent={reasoningContent}
+              liveContent={liveContent}
+              heldFollowUpIds={heldFollowUpIds}
+              timerStart={timerStart}
+              completionAnnouncement={completionAnnouncement}
+              onBeforeToggle={handleBeforeToggle}
+              onAfterToggle={handleAfterToggle}
+            />
+          </SubagentCallContext.Provider>
 
           <TurnHtmlRenders turn={layeredRenders} />
 
@@ -280,7 +300,7 @@ export function sameTurnTimelineProps(
   const right = next.props;
   return previous.turn === next.turn
     && previous.previousArtifactTurnId === next.previousArtifactTurnId
-    && sameTurnAgentStatus(previous.subagents, next.subagents)
+    && sameSubagentCallsForTurn(previous.subagents, next.subagents, left.customAgents, right.customAgents)
     && previous.onBeforeToggle === next.onBeforeToggle
     && previous.onAfterToggle === next.onAfterToggle
     && left.providerIdentityLabels === right.providerIdentityLabels
@@ -300,6 +320,7 @@ export function sameTurnTimelineProps(
     && left.onCompareTurnArtifacts === right.onCompareTurnArtifacts
     && left.onOpenTurnFile === right.onOpenTurnFile
     && left.onStop === right.onStop
+    && left.onStopSubagent === right.onStopSubagent
     && left.onOpenSurface === right.onOpenSurface
     && left.onConversationContextCommand === right.onConversationContextCommand
     && left.turns === right.turns

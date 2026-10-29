@@ -180,7 +180,7 @@ describe("custom agent contracts", () => {
       revision: 1,
       handle: "reviewer",
       name: "Reviewer",
-      icon: { kind: "symbol", name: "bot" },
+      icon: { kind: "symbol", name: "orbit" },
       accent: null,
       delivery: "in-role",
     };

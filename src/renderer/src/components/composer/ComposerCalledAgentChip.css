@@ -1,0 +1,19 @@
+.composer-called-agent > .custom-agent-avatar {
+  display: inline-grid;
+  flex: 0 0 auto;
+}
+
+.composer-called-agent {
+  animation: composer-called-agent-in var(--dur) var(--ease) backwards;
+}
+
+@keyframes composer-called-agent-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-called-agent { animation: none; }
+}

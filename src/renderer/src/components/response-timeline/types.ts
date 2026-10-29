@@ -1,4 +1,5 @@
 import type { WatcherWakeSummary } from "@shared/watcher";
+import type { CustomAgent } from "@shared/custom-agents";
 import type { ContextCompactionTrigger } from "@shared/context-compaction";
 import type { RefObject } from "react";
 import type {
@@ -32,6 +33,8 @@ export interface ResponseTimelineProps {
   watcherWakes?: readonly WatcherWakeSummary[];
   activities: AgentActivity[];
   subagents?: SubagentTrace[];
+  customAgents?: readonly CustomAgent[];
+  onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
   reasonings: AgentReasoning[];
   plans: AgentPlan[];
   checkpoints: CheckpointSummary[];

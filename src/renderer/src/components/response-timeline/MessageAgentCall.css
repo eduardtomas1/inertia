@@ -1,0 +1,25 @@
+.message-agent-call {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 16px;
+}
+
+.message-agent-call-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-agent-call-delivery {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}

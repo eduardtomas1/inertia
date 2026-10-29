@@ -21,20 +21,6 @@ export function turnAgentStatus(traces: readonly SubagentTrace[]): TurnAgentStat
   return { live, running, total: traces.length, failed };
 }
 
-export function sameTurnAgentStatus(
-  previous: readonly SubagentTrace[] | undefined,
-  next: readonly SubagentTrace[] | undefined,
-): boolean {
-  if (previous === next) return true;
-  const left = turnAgentStatus(previous ?? []);
-  const right = turnAgentStatus(next ?? []);
-  return left === right || (left !== null && right !== null
-    && left.live === right.live
-    && left.running === right.running
-    && left.total === right.total
-    && left.failed === right.failed);
-}
-
 function agents(count: number): string {
   return `${count} ${count === 1 ? "agent" : "agents"}`;
 }

@@ -54,6 +54,7 @@ import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
 import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
+import { useComposerAgentCall } from "./useComposerAgentCall";
 import { harnessImageInputUnavailableReason } from "../../../../shared/provider";
 import { clearPersistedComposerDraft, persistComposerDraft, readComposerDraft } from "../../utils/composerDraftPersistence";
 import { TurnFailureNotice } from "./TurnFailureNotice";
@@ -115,7 +116,7 @@ export const Composer = memo(function Composer({
   compaction: shellCompaction = null,
   compactOnReturnSetting = DEFAULT_COMPACT_ON_RETURN,
   onCompactAndSend,
-  onListSkills, promptPresets = [], promptPresetsEnabled = true,
+  onListSkills, promptPresets = [], promptPresetsEnabled = true, customAgents, onOpenCustomAgentSettings,
   promptStashEnabled = true,
   onPromptPresetCommand = ignorePromptPresetMutation,
   onUpdateConversation,
@@ -427,6 +428,7 @@ export const Composer = memo(function Composer({
     canRestoreStoppedPrompt: () => draftValueRef.current.length === 0 && attachmentsRef.current.length === 0 && pendingAttachmentIdsRef.current.size === 0 && !attachmentImportingRef.current && !submittingRef.current && !promptContext && selectedPreviewUrlRef.current === null && fileReferences.length === 0 && contextPacketIds.length === 0, textareaRef,
   });
   const updateMessage = promptHistoryController.replaceMessage;
+  const agentCall = useComposerAgentCall({ conversationId: conversation.id, message, customAgents, replaceMessage: updateMessage, textareaRef, onOpenSettings: onOpenCustomAgentSettings });
 
   const addFileReference = (path: string): void => {
     if (fileReferences.includes(path)) return;
@@ -489,6 +491,7 @@ export const Composer = memo(function Composer({
           fileReferences,
           selectedPreviewUrlRef.current,
           contextPacketIds,
+          agentCall.calledAgent?.id ?? null,
         );
     if ((!canSend && followUpState !== "ready") || submittingRef.current || stopClaimRef.current || stopping) return;
     const compactAndSend = !running && onCompactAndSend !== undefined && (
@@ -591,6 +594,7 @@ export const Composer = memo(function Composer({
       if (editorUnchanged) {
         clearPersistedComposerDraft(submittedConversationId, submittedDraft);
       }
+      agentCall.clearSent(submittedConversationId, request.context?.calledAgent?.agentId);
       if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
       const acceptedIds = new Set(submittedAttachments.map(({ id }) => id));
       setAttachments((current) => current.filter(({ id }) => !acceptedIds.has(id)));
@@ -729,7 +733,7 @@ export const Composer = memo(function Composer({
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:
       attachmentsAreImages
-      && !promptContext
+      && !promptContext && !agentCall.calledAgent
       && !previewContextSelected
       && fileReferences.length === 0
       && messageFits
@@ -738,7 +742,7 @@ export const Composer = memo(function Composer({
     submitting,
     sending,
   });
-  const queueBlocked = !attachmentsAreImages || Boolean(promptContext) || previewContextSelected
+  const queueBlocked = !attachmentsAreImages || Boolean(promptContext) || Boolean(agentCall.calledAgent) || previewContextSelected
     || fileReferences.length > 0 || contextPacketIds.length > 0;
   const canQueue = running && sendEligible && !queueBlocked && !submitting && !sending;
   const documentBlocksFollowUp = running && !attachmentsAreImages;
@@ -1028,7 +1032,7 @@ export const Composer = memo(function Composer({
         ref={composerRef}
         className={clsx(
           "composer",
-          (menu || slashMatch || commandSurface) && "has-open-menu",
+          (menu || slashMatch || commandSurface || agentCall.menuVisible) && "has-open-menu",
         )}
         aria-label="Message composer"
         aria-busy={submissionPending || followUpPending || attachmentImporting || running || stopping || conversationUpdatePending}
@@ -1118,7 +1122,7 @@ export const Composer = memo(function Composer({
           {...skillCompletion}
           acceptSkill={insertSkill}
           dismissSkills={() => dismissMenu("context-change")}
-          slashMatch={slashMatch}
+          slashMatch={slashMatch} agentCall={agentCall}
           onCompactCommand={() => void compact({ kind: "compact" })}
           compactUnavailableReason={compactUnavailableReason}
           compactNotice={compactOnReturn.notice(compactNotice)}

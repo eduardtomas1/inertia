@@ -48,7 +48,7 @@ interface RowTarget {
 }
 
 const COUNT_VISIBLE_FROM = 30;
-const GHOST_SYMBOLS: readonly CustomAgentIconName[] = ["bot", "search", "pen"];
+const GHOST_SYMBOLS: readonly CustomAgentIconName[] = ["orbit", "search", "pen"];
 const LIMIT_MESSAGE = `You can keep up to ${MAX_CUSTOM_AGENTS} agents. Delete one to add another.`;
 
 function plural(count: number, word: string): string {

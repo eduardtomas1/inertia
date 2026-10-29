@@ -183,7 +183,7 @@ describe("CustomAgentRepository", () => {
       expect(repository.list()).toHaveLength(MAX_CUSTOM_AGENTS);
       expect(() => raw.prepare(`
         INSERT INTO custom_agents (id, name, handle, icon_json, position, created_at, updated_at)
-        VALUES (?, 'Overflow', 'overflow', '{"kind":"symbol","name":"bot"}', 39, ?, ?)
+        VALUES (?, 'Overflow', 'overflow', '{"kind":"symbol","name":"orbit"}', 39, ?, ?)
       `).run(randomUUID(), new Date().toISOString(), new Date().toISOString())).toThrow(/count limit/u);
     } finally {
       raw.close();

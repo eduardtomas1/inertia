@@ -154,7 +154,7 @@ describe("agent secrets", () => {
     expect(rule(card, ".secret-request-card.is-pending::after")).toContain("background: linear-gradient(to right, var(--accent) 2px, transparent 2px);");
     const accents = source(card).replace(/@media \(forced-colors: active\)[\s\S]*$/u, "").match(/var\(--accent\)/gu) ?? [];
     expect(accents).toHaveLength(2);
-    expect(rule(card, ".secret-request-field:has(> input:focus)")).toContain("border-color: var(--accent);");
+    expect(rule(card, ".secret-request-field:focus-within")).toContain("border-color: var(--accent);");
     expect(source(card)).not.toMatch(/box-shadow|outline: 2px|font-size:\s*\d+px|#[0-9a-f]{3,8}\b/iu);
   });
 

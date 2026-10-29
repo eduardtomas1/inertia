@@ -65,7 +65,7 @@ export interface AppFixture {
   recycleRuntime: () => Promise<void>;
   resizeWindow: (width: number, height: number) => Promise<void>;
   expectNoViewportOverflow: () => Promise<void>;
-  restart: () => Promise<{
+  restart: (options?: { afterQuit?: () => Promise<void> | void }) => Promise<{
     electronApp: ElectronApplication;
     page: Page;
   }>;
@@ -879,7 +879,7 @@ export async function createAppFixture(
     recycleRuntime,
     resizeWindow,
     expectNoViewportOverflow: () => expectPageNoViewportOverflow(page),
-    restart: async () => {
+    restart: async (restartOptions) => {
       const previousApp = electronApp;
       if (!previousApp) throw new Error("The Electron fixture is unavailable");
       const previousChild = previousApp.process();
@@ -901,6 +901,7 @@ export async function createAppFixture(
           `Electron fixture restart requires a graceful application exit and settled transport; received ${quit.outcome}/${quit.transportSettled ? "settled" : "unsettled"}.`,
         );
       }
+      await restartOptions?.afterQuit?.();
 
       const diagnosticStart = startupDiagnostics.length;
       const nextApp = await electron.launch(launchOptions);

@@ -715,14 +715,11 @@ static int stop_pending_mode(int argc, char **argv) {
       if (group_absent != 0) { close(pidfd); return group_absent > 0 ? 0 : 3; }
       nanosleep(&pause, NULL); continue;
     }
-    if (confirmed_parent != parent || confirmed_start != start) {
-      close(pidfd); return 3;
-    }
-    if (getpgid(pid) != pid || getsid(pid) != pid) {
-      close(pidfd); return 3;
-    }
-    if (!named_status(pid, "inertia-ready")) {
-      close(pidfd); return 3;
+    if (confirmed_parent != parent || confirmed_start != start
+      || getpgid(pid) != pid || getsid(pid) != pid
+      || !named_status(pid, "inertia-ready")) {
+      if (!pidfd_exited(pidfd)) { close(pidfd); return 3; }
+      continue;
     }
     nanosleep(&pause, NULL);
   }

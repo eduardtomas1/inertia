@@ -103,6 +103,7 @@ export const turnRequestContextSchema = z
       .max(MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN)
       .refine((ids) => new Set(ids).size === ids.length, "Context packets must be unique.")
       .optional(),
+    calledAgent: z.object({ agentId: z.string().uuid() }).strict().optional(),
   })
   .strict();
 

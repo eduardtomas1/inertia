@@ -1,0 +1,52 @@
+.custom-agent-avatar {
+  --agent-tint: var(--accent);
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  inline-size: var(--agent-avatar-size);
+  block-size: var(--agent-avatar-size);
+  border-radius: calc(var(--agent-avatar-size) * 0.3);
+  background: color-mix(in srgb, var(--agent-tint) 14%, var(--fill));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-tint) 28%, transparent);
+  color: var(--agent-tint);
+}
+
+.custom-agent-avatar.has-agent-tint { --agent-tint: var(--agent-tint-light); }
+:root[data-theme="dark"] .custom-agent-avatar.has-agent-tint { --agent-tint: var(--agent-tint-dark); }
+
+.custom-agent-avatar[data-icon-kind="image"] {
+  background: var(--fill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+.custom-agent-avatar-symbol { flex-shrink: 0; }
+
+.custom-agent-avatar-image {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.custom-agent-avatar[data-live="true"]::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  border: 1.5px solid color-mix(in srgb, var(--agent-tint) 70%, transparent);
+  opacity: 0.9;
+  animation: custom-agent-avatar-breathe 2.4s var(--ease) infinite;
+  pointer-events: none;
+}
+
+@keyframes custom-agent-avatar-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(0.96); }
+  50% { opacity: 0.95; transform: scale(1.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .custom-agent-avatar[data-live="true"]::after { animation: none; opacity: 0.7; }
+}

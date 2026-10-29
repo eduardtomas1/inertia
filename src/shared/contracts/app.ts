@@ -346,6 +346,7 @@ export interface AppSnapshot {
   settings: AppSettings;
   /** Present on authoritative snapshots; optional only for legacy fixtures. */
   promptPresets?: PromptPreset[];
+  customAgents?: import("../custom-agents").CustomAgent[];
   todos?: Todo[];
   watchers?: WatcherLinkView[];
   activeProjectId: string | null;

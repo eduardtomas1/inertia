@@ -86,6 +86,7 @@ export interface TurnRequestContext {
   reviewNotes?: TurnReviewNoteContext[];
   /** Opaque immutable packets explicitly selected by the user for this turn. */
   conversationContextPacketIds?: string[];
+  calledAgent?: { agentId: string };
 }
 
 export interface ChatAttachment {
@@ -245,6 +246,7 @@ export interface ChatMessage {
   compaction?: import("../context-compaction").ContextCompaction;
   /** A visual reply the agent published in this turn; system role, always turn-scoped. */
   htmlRender?: import("../html-render").HtmlRenderReference;
+  customAgentCall?: import("../custom-agents").CustomAgentCallAttribution;
   id: string;
   conversationId: string;
   /** System messages may be conversation-scoped; user/assistant turn messages are explicit. */
@@ -310,6 +312,7 @@ export interface SubagentTrace {
   providerToolUseId: string | null;
   providerRole: string | null;
   providerName: string | null;
+  customAgentId?: string | null;
   /** Exact bounded provider status when the transport exposes one. */
   providerStatus: string | null;
   status: SubagentTraceStatus;

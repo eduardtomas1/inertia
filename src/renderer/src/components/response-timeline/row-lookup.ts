@@ -22,8 +22,8 @@ export function findTurnElement(
     .find((element) => element.dataset.turnId === turnId) ?? null;
 }
 
-export function captureTranscriptPosition(root: HTMLElement, scroll: HTMLElement): TranscriptPosition {
-  const wasFollowing = shouldFollowTimeline(scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight);
+export function captureTranscriptPosition(root: HTMLElement, scroll: HTMLElement, following?: boolean): TranscriptPosition {
+  const wasFollowing = following !== false && shouldFollowTimeline(scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight);
   const top = scroll.getBoundingClientRect().top;
   const row = wasFollowing ? undefined : firstVisibleResponseRow(root, top);
   return {

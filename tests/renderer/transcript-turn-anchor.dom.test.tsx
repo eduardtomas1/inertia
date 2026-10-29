@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
-import { forgetTranscriptPosition, rememberTranscriptPosition } from "../../src/renderer/src/utils/transcriptPosition";
+import { forgetTranscriptPosition, readTranscriptPosition, rememberTranscriptPosition } from "../../src/renderer/src/utils/transcriptPosition";
 import { requestTimelineFocus } from "../../src/renderer/src/utils/timelineFocus";
 import type {
   AgentTurn,
@@ -187,6 +187,13 @@ describe("accepted turn viewport anchoring", () => {
       forgetTranscriptPosition(conversationId);
       Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
     }
+  });
+
+  it("refreshes the remembered position when the reader returns to following without another scroll", () => {
+    const view = renderTimeline(vi.fn(), vi.fn(), 2, "turn-none");
+    rememberTranscriptPosition(conversationId, { rowId: null, viewportOffset: 0, scrollTop: 420, wasFollowing: false });
+    view.followLatest();
+    expect(readTranscriptPosition(conversationId)).toMatchObject({ wasFollowing: true });
   });
 
   it("places the exact accepted turn at a stable viewport offset", async () => {

@@ -815,7 +815,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     const scrollElement = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root) return;
-    pendingLayoutAnchor.current = captureTranscriptPosition(root, scrollElement);
+    pendingLayoutAnchor.current = captureTranscriptPosition(root, scrollElement, props.followsLatest);
   };
   restoreLayoutAnchorRef.current = () => {
     const layoutAnchor = pendingLayoutAnchor.current;
@@ -924,6 +924,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     pendingLayoutAnchor.current = null;
   }, [props.followsLatest]);
 
+  const rememberedFollowMode = useRef<{ conversationId: string; followsLatest?: boolean } | null>(null);
   useEffect(() => {
     if (props.detailLoading || timeline.length === 0) return;
     const scroll = props.scrollElementRef?.current;
@@ -931,11 +932,14 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     if (!scroll || !root) return;
     const remember = (): void => {
       if (layoutAnchorActive.current || turnAnchorActive.current) return;
-      rememberTranscriptPosition(props.conversationId, captureTranscriptPosition(root, scroll));
+      rememberTranscriptPosition(props.conversationId, captureTranscriptPosition(root, scroll, props.followsLatest));
     };
+    const previous = rememberedFollowMode.current;
+    rememberedFollowMode.current = { conversationId: props.conversationId, followsLatest: props.followsLatest };
+    if (previous?.conversationId === props.conversationId && previous.followsLatest !== props.followsLatest) remember();
     scroll.addEventListener("scroll", remember, { passive: true });
     return () => scroll.removeEventListener("scroll", remember);
-  }, [props.conversationId, props.detailLoading, props.scrollElementRef, props.timelineElementRef, timeline.length]);
+  }, [props.conversationId, props.detailLoading, props.followsLatest, props.scrollElementRef, props.timelineElementRef, timeline.length]);
 
   const beginReaderTimelineNavigation = useCallback((): void => {
     cancelLayoutAnchorRestoration.current?.();

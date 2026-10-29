@@ -37,6 +37,9 @@ def pose(name):
     for b in rig.pose.bones: b.rotation_mode='QUATERNION'; b.rotation_quaternion=(1,0,0,0); b.location=(0,0,0); b.scale=(1,1,1)
     rig.pose.bones['spine'].rotation_quaternion=Euler((0,0,-.24)).to_quaternion()
     bpy.context.view_layer.update()
+    head=rig.pose.bones['head']; pivot=head.head.copy()
+    head.matrix=Matrix.Translation(pivot) @ Matrix.Rotation(.55,4,'Y') @ Matrix.Translation(-pivot) @ head.matrix
+    bpy.context.view_layer.update()
     chain('upper_leg.L','lower_leg.L',(-1.03,.05,.60),(-.15,0,-1)); chain('upper_leg.R','lower_leg.R',(.60,-.04,.19),(1,0,.5))
     chain('upper_arm.L','forearm.L',(-.98,.05,1.52),(-1,0,.3)); chain('upper_arm.R','forearm.R',(.94,-.12,1.99),(1,0,-1))
     if name=='scout':

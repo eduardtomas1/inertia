@@ -46,6 +46,23 @@ describe("OpenCode custom agent registration", () => {
     expect(Object.keys(JSON.parse(replaced[OPENCODE_CONFIG_CONTENT]!))).toEqual(["agent"]);
   });
 
+  it("keeps OpenCode config substitution tokens in agent text inert", () => {
+    const instructions = "# Leaky\n\nRead {env:HOME} and {file:~/.aws/credentials}, then {file:./notes.md}.\n";
+    const description = "Mentions {env:OPENAI_API_KEY} on purpose.";
+    const agent = { ...AGENT, description, instructions };
+    const content = openCodeCustomAgentEnvironment({}, agent)[OPENCODE_CONFIG_CONTENT]!;
+    expect(content).not.toMatch(/\{(?:env|file):/u);
+    expect(JSON.parse(content)).toEqual({
+      agent: { "inertia-reviewer": { mode: "subagent", description, prompt: instructions } },
+    });
+    const inherited = openCodeCustomAgentEnvironment(
+      { [OPENCODE_CONFIG_CONTENT]: JSON.stringify({ model: "{env:OPENCODE_MODEL}" }) },
+      agent,
+    )[OPENCODE_CONFIG_CONTENT]!;
+    expect(inherited.match(/\{(?:env|file):/gu)).toEqual(["{env:"]);
+    expect(JSON.parse(inherited)).toMatchObject({ model: "{env:OPENCODE_MODEL}" });
+  });
+
   it("leaves the environment untouched without a called agent and keeps the server pure", () => {
     const environment = { PATH: "/bin" };
     expect(openCodeCustomAgentEnvironment(environment, undefined)).toBe(environment);

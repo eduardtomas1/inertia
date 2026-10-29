@@ -75,3 +75,36 @@ it.each([
 ])("rejects a malformed Duo comparison brief %j", (malformed) => {
   expect(chatMessageSchema({ ...message, duoComparison: malformed })).toBe(false);
 });
+
+const customAgentCall = {
+  agentId: "77777777-7777-4777-8777-777777777777",
+  revision: 2,
+  handle: "reviewer",
+  name: "Reviewer",
+  icon: { kind: "symbol", name: "shield" },
+  accent: "teal",
+  delivery: "subagent",
+};
+
+it("accepts custom agent call attribution on user messages", () => {
+  expect(chatMessageSchema({ ...message, customAgentCall })).toBe(true);
+  expect(chatMessageSchema({ ...message, customAgentCall: { ...customAgentCall, accent: null, delivery: "in-role" } })).toBe(true);
+});
+
+it.each(["assistant", "system"])("rejects custom agent call attribution on a %s message", (role) => {
+  expect(chatMessageSchema({ ...message, role, customAgentCall })).toBe(false);
+});
+
+it.each([
+  null,
+  "reviewer",
+  {},
+  { ...customAgentCall, agentId: "agent-1" },
+  { ...customAgentCall, revision: 0 },
+  { ...customAgentCall, handle: "Bad Handle" },
+  { ...customAgentCall, delivery: "inline" },
+  { ...customAgentCall, icon: { kind: "symbol", name: "unknown" } },
+  { ...customAgentCall, instructions: "# Reviewer" },
+])("rejects malformed custom agent call attribution %j", (malformed) => {
+  expect(chatMessageSchema({ ...message, customAgentCall: malformed })).toBe(false);
+});

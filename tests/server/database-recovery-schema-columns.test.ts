@@ -35,6 +35,20 @@ const contextPacketTriggers = [
   "conversation_context_packets_draft_limit",
 ];
 
+const nonUniqueCustomAgentHandles = `
+  CREATE TABLE custom_agents_loose AS SELECT * FROM custom_agents;
+  DROP TABLE custom_agents;
+  ALTER TABLE custom_agents_loose RENAME TO custom_agents;
+  CREATE INDEX custom_agents_position_idx ON custom_agents(position ASC, id ASC);
+  CREATE INDEX custom_agents_handle_idx ON custom_agents(handle);
+  CREATE TRIGGER custom_agents_count_limit
+    BEFORE INSERT ON custom_agents
+    WHEN (SELECT COUNT(*) FROM custom_agents) >= 40
+    BEGIN
+      SELECT RAISE(ABORT, 'custom agent count limit exceeded');
+    END;
+`;
+
 function labelSchema(database: Database.Database, version: number): void {
   if (version < CUSTOM_AGENTS_SCHEMA_VERSION) {
     database.exec(`
@@ -174,6 +188,7 @@ describe("database health check for settings and subagent columns", () => {
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "ALTER TABLE custom_agents DROP COLUMN skills_json" },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "DROP INDEX custom_agents_position_idx" },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "DROP TRIGGER custom_agents_count_limit" },
+    { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: nonUniqueCustomAgentHandles },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "ALTER TABLE messages DROP COLUMN custom_agent_call_json" },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "ALTER TABLE subagent_traces DROP COLUMN custom_agent_id" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
@@ -199,6 +214,18 @@ describe("database health check for settings and subagent columns", () => {
     new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false }).close();
     const primary = new Database(databasePath);
     primary.exec("ALTER TABLE app_state DROP COLUMN notify_only_in_background");
+    const manager = new DatabaseBackupManager(primary, databasePath);
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    primary.close();
+  });
+
+  it("rejects a backup whose custom agent handles are not unique during off-thread validation", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-recovery-columns-"));
+    directories.push(directory);
+    const databasePath = join(directory, "inertia.sqlite");
+    new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false }).close();
+    const primary = new Database(databasePath);
+    primary.exec(nonUniqueCustomAgentHandles);
     const manager = new DatabaseBackupManager(primary, databasePath);
     await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
     primary.close();

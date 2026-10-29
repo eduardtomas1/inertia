@@ -33,6 +33,7 @@ import type { BackendProfileController } from "../backends/backend-profile-contr
 import type { ConversationCompactionStates } from "../conversation-compaction-states";
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
 import type { TurnController } from "../turns/turn-controller";
+import { resolveCustomAgentCall } from "../turns/custom-agent-call";
 import { sessionInstructionDigest } from "../turns/turn-instruction-delivery";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
 import {
@@ -466,9 +467,13 @@ function refuseUnlessCompactableOnReturn(
   dependencies: ConversationCompactionCommandDependencies,
   conversation: Conversation,
   selection: ModelSelection,
+  calledAgent?: { agentId: string },
 ): ((deadline: AbortSignal) => Promise<void>) | null {
   if (conversation.archivedAt !== null) {
     throw new RuntimeRequestError("Unarchive this chat before sending to it.");
+  }
+  if (calledAgent) {
+    resolveCustomAgentCall({ calledAgent, store: dependencies.store, providerId: conversation.providerId });
   }
   if (dependencies.store.watcherLinks.findByWatcher(conversation.id)) {
     throw new RuntimeRequestError("Watcher chats are not compacted on return.");
@@ -632,7 +637,12 @@ export function createConversationCompactionCommandHandler(
         dependencies,
         command.payload.conversationId,
         async (conversation, selection) => {
-          const recheckSignIn = refuseUnlessCompactableOnReturn(dependencies, conversation, selection);
+          const recheckSignIn = refuseUnlessCompactableOnReturn(
+            dependencies,
+            conversation,
+            selection,
+            command.payload.context?.calledAgent,
+          );
           handoff.attachments = await claimAttachments(interaction, command, deadline.signal);
           await recheckSignIn?.(deadline.signal);
         },

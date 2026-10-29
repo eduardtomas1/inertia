@@ -16,7 +16,7 @@ type TraceIdentity = Pick<
   | "providerName"
 >;
 
-const ROLE_ATTESTED_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude"]);
+const ROLE_ATTESTED_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "opencode"]);
 
 export class CustomAgentTraceAttribution {
   private readonly byTask = new Map<string, string | null>();
@@ -42,7 +42,7 @@ export class CustomAgentTraceAttribution {
       ? this.call.agentId
       : parent !== undefined
         ? parent
-        : this.fallback && !this.attributed
+        : this.fallback && !this.attributed && this.anonymous(trace)
           ? this.call.agentId
           : null;
     this.record(trace, customAgentId);
@@ -55,6 +55,11 @@ export class CustomAgentTraceAttribution {
       return normalized === this.nativeName
         || customAgentHandleFromNativeName(normalized) === this.call.handle;
     });
+  }
+
+  private anonymous(trace: TraceIdentity): boolean {
+    return !trace.parentProviderAgentId && !trace.parentProviderToolUseId
+      && [trace.providerRole, trace.providerName].every((value) => !value?.trim());
   }
 
   private known(trace: TraceIdentity): string | null {

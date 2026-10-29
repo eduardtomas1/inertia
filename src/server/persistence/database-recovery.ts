@@ -17,6 +17,7 @@ import Database from "better-sqlite3";
 import { authoritativeRunStateSchemaIsValid } from "./authoritative-run-state-schema";
 import { validAttachmentCapabilities } from "./attachment-capability-schema";
 import { contextPacketTriggersAreValid } from "./context-packet-triggers-schema";
+import { customAgentsSchemaIsValid } from "./custom-agents-schema";
 import {
   type DatabaseSchemaRequirements,
   DATABASE_SCHEMA_REQUIREMENTS,
@@ -160,6 +161,7 @@ function validateOpenDatabase(
   suspendTimingSchemaIsValid: DatabaseSchemaValidator,
   todosSchemaIsValid: DatabaseSchemaValidator,
   contextPacketTriggersAreValid: DatabaseSchemaValidator,
+  customAgentsSchemaIsValid: DatabaseSchemaValidator,
 ): DatabaseValidation {
   const integrityResult = database.prepare(`PRAGMA ${check}`).get() as
     | Record<string, unknown>
@@ -425,6 +427,7 @@ function validateOpenDatabase(
   if (version >= 64 && !runStateSchemaIsValid(database)) return "inconsistent";
   if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "inconsistent";
   if (version >= 96 && !todosSchemaIsValid(database)) return "inconsistent";
+  if (version >= 107 && !customAgentsSchemaIsValid(database)) return "inconsistent";
   for (const [introducedAt, index] of schemaRequirements.indexes) {
     if (version >= introducedAt && !database.prepare(
       "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?",
@@ -463,6 +466,7 @@ function validateDatabase(
       systemSuspendTimingSchemaIsValid,
       todosCountLimitTriggerIsValid,
       contextPacketTriggersAreValid,
+      customAgentsSchemaIsValid,
     );
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -493,6 +497,7 @@ function validateDatabaseOffThread(
     const systemSuspendTimingSchemaIsValid = ${systemSuspendTimingSchemaIsValid.toString()};
     const todosCountLimitTriggerIsValid = ${todosCountLimitTriggerIsValid.toString()};
     const contextPacketTriggersAreValid = ${contextPacketTriggersAreValid.toString()};
+    const customAgentsSchemaIsValid = ${customAgentsSchemaIsValid.toString()};
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
     let result = "corrupt";
@@ -510,6 +515,7 @@ function validateDatabaseOffThread(
         systemSuspendTimingSchemaIsValid,
         todosCountLimitTriggerIsValid,
         contextPacketTriggersAreValid,
+        customAgentsSchemaIsValid,
       );
     } catch {
       result = "corrupt";

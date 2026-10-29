@@ -4,6 +4,7 @@ import { isHtmlRenderReference } from "../html-render-reference";
 import { ACCEPTED_ATTACHMENT_MIME_TYPES } from "../attachments";
 import { watcherNoteAttributionSchema } from "../watcher";
 import { isDuoComparisonBrief } from "../duo-comparison-brief";
+import { customAgentCallAttributionSchema } from "../custom-agents";
 import type { ChatMessage } from "./agent";
 
 type UnknownRecord = Record<string, unknown>;
@@ -55,6 +56,8 @@ export function chatMessageSchema(value: unknown): value is ChatMessage {
       || (value.role === "user" && watcherNoteAttributionSchema.safeParse(value.watcherNote).success))
     && (value.duoComparison === undefined
       || (value.role === "user" && isDuoComparisonBrief(value.duoComparison)))
+    && (value.customAgentCall === undefined
+      || (value.role === "user" && customAgentCallAttributionSchema.safeParse(value.customAgentCall).success))
     && (value.turnId === null || stringField(value, "turnId"))
     && ["user", "assistant", "system"].includes(value.role as string)
     && Array.isArray(value.attachments)

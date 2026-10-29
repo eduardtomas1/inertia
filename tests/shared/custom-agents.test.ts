@@ -6,6 +6,7 @@ import { clientCommandSchema } from "../../src/shared/contracts/client-command";
 import {
   buildCustomAgentExport,
   compileCustomAgentInstructions,
+  CUSTOM_AGENT_INLINE_FRAMING_BYTES,
   customAgentCallAttributionSchema,
   customAgentDraftSchema,
   customAgentExportFileName,
@@ -19,6 +20,7 @@ import {
   MAX_CUSTOM_AGENT_COMPILED_CHARS,
   MAX_CUSTOM_AGENT_DESCRIPTION_CHARS,
   MAX_CUSTOM_AGENT_HANDLE_CHARS,
+  MAX_CUSTOM_AGENT_INSTRUCTION_BYTES,
   MAX_CUSTOM_AGENT_NAME_CHARS,
   MAX_CUSTOM_AGENT_SKILLS,
   uniqueCustomAgentHandle,
@@ -69,6 +71,11 @@ describe("custom agent contracts", () => {
       blocks: Array.from({ length: 4 }, () => ({ id: randomUUID(), kind: "directions" as const, body: "w".repeat(MAX_CUSTOM_AGENT_BLOCK_CHARS) })),
     }))).toBe(false);
     expect(MAX_CUSTOM_AGENT_COMPILED_CHARS).toBeLessThan(4 * MAX_CUSTOM_AGENT_BLOCK_CHARS);
+  });
+
+  it("leaves room for the longest call framing around the largest ASCII instructions", () => {
+    expect(CUSTOM_AGENT_INLINE_FRAMING_BYTES).toBeGreaterThan(0);
+    expect(CUSTOM_AGENT_INLINE_FRAMING_BYTES + MAX_CUSTOM_AGENT_COMPILED_CHARS).toBeLessThanOrEqual(MAX_CUSTOM_AGENT_INSTRUCTION_BYTES);
   });
 
   it("accepts symbol icons and only small normalized PNG images", () => {

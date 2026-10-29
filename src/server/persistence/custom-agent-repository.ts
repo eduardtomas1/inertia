@@ -7,6 +7,7 @@ import {
   customAgentSchema,
   duplicateCustomAgentName,
   MAX_CUSTOM_AGENTS,
+  MAX_CUSTOM_AGENTS_TOTAL_SERIALIZED_LENGTH,
   uniqueCustomAgentHandle,
   type CustomAgent,
   type CustomAgentDraft,
@@ -100,20 +101,27 @@ function uniqueViolation(error: unknown): boolean {
     && (error as { code?: unknown }).code === "SQLITE_CONSTRAINT_UNIQUE";
 }
 
+function serializedLength(agents: readonly CustomAgent[]): number {
+  return JSON.stringify(agents).length;
+}
+
 export class CustomAgentRepository {
+  private cached: CustomAgent[] | null = null;
+
   constructor(
     private readonly database: Database.Database,
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
   list(): CustomAgent[] {
-    return (this.database.prepare(`
+    this.cached ??= (this.database.prepare(`
       SELECT ${AGENT_COLUMNS} FROM custom_agents
       ORDER BY position ASC, id ASC
     `).all() as CustomAgentRow[]).flatMap((row) => {
       const agent = agentFromRow(row);
       return agent ? [agent] : [];
     });
+    return this.cached;
   }
 
   get(agentId: string): CustomAgent | null {
@@ -135,7 +143,7 @@ export class CustomAgentRepository {
     options: { onHandleConflict: CustomAgentHandleConflict },
   ): CustomAgent {
     const draft = parseDraft(input);
-    return this.database.transaction(() => {
+    return this.mutate(() => {
       const count = this.storedIds().length;
       this.assertRoom(count);
       const taken = this.takenHandles();
@@ -152,9 +160,10 @@ export class CustomAgentRepository {
         createdAt: timestamp,
         updatedAt: timestamp,
       });
+      this.assertTotalSize([...this.list(), agent]);
       this.insert(agent);
       return agent;
-    })();
+    });
   }
 
   update(
@@ -162,7 +171,7 @@ export class CustomAgentRepository {
     expectedRevision: number,
     patch: Partial<CustomAgentDraft>,
   ): CustomAgent {
-    return this.database.transaction(() => {
+    return this.mutate(() => {
       const existing = this.requireCurrent(agentId, expectedRevision);
       const draft = parseDraft({
         name: patch.name ?? existing.name,
@@ -182,6 +191,7 @@ export class CustomAgentRepository {
         revision: existing.revision + 1,
         updatedAt: this.now(),
       });
+      this.assertTotalSize(this.list().map((agent) => agent.id === agentId ? next : agent));
       let changes: number;
       try {
         changes = this.database.prepare(`
@@ -208,11 +218,11 @@ export class CustomAgentRepository {
       }
       if (changes !== 1) this.throwStale();
       return next;
-    })();
+    });
   }
 
   duplicate(agentId: string, expectedRevision: number): CustomAgent {
-    return this.database.transaction(() => {
+    return this.mutate(() => {
       const source = this.requireCurrent(agentId, expectedRevision);
       const ids = this.storedIds();
       this.assertRoom(ids.length);
@@ -232,28 +242,29 @@ export class CustomAgentRepository {
         createdAt: timestamp,
         updatedAt: timestamp,
       });
+      this.assertTotalSize([...this.list(), duplicate]);
       this.writePositions(ids, (index) => index < position ? index : index + 1);
       this.insert(duplicate);
       return duplicate;
-    })();
+    });
   }
 
   delete(agentId: string, expectedRevision: number): void {
-    this.database.transaction(() => {
+    this.mutate(() => {
       this.requireCurrent(agentId, expectedRevision);
       const result = this.database.prepare(
         "DELETE FROM custom_agents WHERE id = ? AND revision = ?",
       ).run(agentId, expectedRevision);
       if (result.changes !== 1) this.throwStale();
       this.writePositions(this.storedIds());
-    })();
+    });
   }
 
   reorder(
     expectedAgentIds: readonly string[],
     agentIds: readonly string[],
   ): CustomAgent[] {
-    return this.database.transaction(() => {
+    return this.mutate(() => {
       const currentIds = this.list().map(({ id }) => id);
       const known = new Set(currentIds);
       if (
@@ -273,8 +284,27 @@ export class CustomAgentRepository {
         ...agentIds,
         ...this.storedIds().filter((id) => !ordered.has(id)),
       ]);
+      this.cached = null;
       return this.list();
-    })();
+    });
+  }
+
+  private mutate<T>(work: () => T): T {
+    try {
+      return this.database.transaction(work)();
+    } finally {
+      this.cached = null;
+    }
+  }
+
+  private assertTotalSize(next: readonly CustomAgent[]): void {
+    const length = serializedLength(next);
+    if (length > MAX_CUSTOM_AGENTS_TOTAL_SERIALIZED_LENGTH && length > serializedLength(this.list())) {
+      throw new CustomAgentRepositoryError(
+        "limit",
+        "Together, your custom agents' icons and instructions are too large to save. Use a symbol icon, shorten the instructions or delete an agent you no longer need.",
+      );
+    }
   }
 
   private parseAgent(value: CustomAgent): CustomAgent {

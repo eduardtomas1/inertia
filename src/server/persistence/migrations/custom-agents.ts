@@ -66,7 +66,7 @@ export const customAgentsMigration: DatabaseMigrationDefinition = {
       END;
     ALTER TABLE messages ADD COLUMN custom_agent_call_json TEXT
       CHECK (custom_agent_call_json IS NULL OR (
-        json_valid(custom_agent_call_json)
+        role = 'user' AND json_valid(custom_agent_call_json)
         AND json_type(custom_agent_call_json) = 'object'
         AND length(CAST(custom_agent_call_json AS BLOB)) <= 65536
       ));

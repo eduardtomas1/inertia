@@ -791,7 +791,7 @@ export function customAgentCallFromJson(value: string | null | undefined): Custo
 }
 
 export function messageFromRow(row: MessageRow): ChatMessage {
-  const customAgentCall = customAgentCallFromJson(row.custom_agent_call_json);
+  const customAgentCall = row.role === "user" ? customAgentCallFromJson(row.custom_agent_call_json) : undefined;
   const watcherNote = row.role === "user" ? watcherNoteFromJson(row.watcher_note_json) : undefined;
   const duoComparison = row.role === "user" ? duoComparisonBriefFromJson(row.duo_comparison_json) : undefined;
   let compaction: unknown;
@@ -847,7 +847,7 @@ export function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
     providerToolUseId: row.provider_tool_use_id,
     providerRole: row.provider_role,
     providerName: row.provider_name,
-    ...(row.custom_agent_id ? { customAgentId: row.custom_agent_id } : {}),
+    ...(row.custom_agent_id && customAgentCallAttributionSchema.shape.agentId.safeParse(row.custom_agent_id).success ? { customAgentId: row.custom_agent_id } : {}),
     providerStatus: row.provider_status,
     status: row.status,
     isLive: row.is_live === 1,

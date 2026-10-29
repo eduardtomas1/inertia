@@ -63,9 +63,9 @@ function validDuoComparison(role: ChatMessage["role"], turnId: string | null, br
   return parsed.data;
 }
 
-function validCustomAgentCall(call: CustomAgentCallAttribution): CustomAgentCallAttribution {
+function validCustomAgentCall(role: ChatMessage["role"], call: CustomAgentCallAttribution): CustomAgentCallAttribution {
   const parsed = customAgentCallAttributionSchema.safeParse(call);
-  if (!parsed.success) throw new Error("Invalid custom agent attribution.");
+  if (role !== "user" || !parsed.success) throw new Error("Invalid custom agent attribution.");
   return parsed.data;
 }
 
@@ -187,7 +187,7 @@ export class TranscriptRepository {
     if (options.privateConnectDeviceId !== undefined) message.privateConnectDeviceId = options.privateConnectDeviceId;
     if (watcherNote) message.watcherNote = watcherNote;
     if (duoComparison) message.duoComparison = duoComparison;
-    const customAgentCall = options.customAgentCall === undefined ? undefined : validCustomAgentCall(options.customAgentCall);
+    const customAgentCall = options.customAgentCall === undefined ? undefined : validCustomAgentCall(role, options.customAgentCall);
     if (customAgentCall) message.customAgentCall = customAgentCall;
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {

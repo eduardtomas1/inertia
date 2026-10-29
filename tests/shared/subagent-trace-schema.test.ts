@@ -74,6 +74,11 @@ describe("subagent trace wire validation", () => {
     })).toBe(true);
   });
 
+  it("accepts an absent, null or UUID custom agent identity", () => {
+    expect(accepts({ ...trace, customAgentId: null })).toBe(true);
+    expect(accepts({ ...trace, customAgentId: "6f1c2a64-5d1e-4c55-9d43-1a2b3c4d5e6f" })).toBe(true);
+  });
+
   it.each([
     ["missing model", { model: undefined }],
     ["missing usage", { usage: undefined }],
@@ -93,6 +98,9 @@ describe("subagent trace wire validation", () => {
     ["too many tool uses", { toolUseCount: 1_000_001 }],
     ["fractional duration", { durationMs: 1.5 }],
     ["duration over 31 days", { durationMs: 31 * 24 * 60 * 60 * 1_000 + 1 }],
+    ["empty custom agent identity", { customAgentId: "" }],
+    ["non-UUID custom agent identity", { customAgentId: "agent-reviewer-0000000000000000000000" }],
+    ["numeric custom agent identity", { customAgentId: 7 }],
   ])("rejects %s", (_label, patch) => {
     expect(accepts({ ...trace, ...patch })).toBe(false);
   });

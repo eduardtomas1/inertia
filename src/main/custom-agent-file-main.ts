@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, lstat, open, realpath, rename, unlink, type FileHandle } from "node:fs/promises";
+import { lstat, open, realpath, rename, unlink, type FileHandle } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { BrowserWindow, Dialog, IpcMain, IpcMainInvokeEvent } from "electron";
 
@@ -55,12 +55,12 @@ export async function writeCustomAgentExportFile(selected: string, content: stri
   try {
     file = await open(partial, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | FILE_OPEN_NO_FOLLOW, FILE_MODE);
     await file.writeFile(content, "utf8");
+    await file.chmod(FILE_MODE);
     await file.sync();
     await file.close();
     file = null;
     await rename(partial, target);
     published = true;
-    await chmod(target, FILE_MODE);
   } finally {
     if (file) await file.close().catch(() => undefined);
     if (!published) await removePartial(partial).catch(() => undefined);

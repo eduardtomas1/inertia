@@ -19,7 +19,9 @@ import { publicRuntimeError, userCorrectableRuntimeError } from "../../src/serve
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { customAgentCollectionCoherent } from "../../src/shared/contracts/server-event-discriminants";
 import {
+  MAX_CUSTOM_AGENT_ICON_DATA_LENGTH,
   MAX_CUSTOM_AGENTS,
+  MAX_CUSTOM_AGENTS_TOTAL_SERIALIZED_LENGTH,
   type CustomAgentCallAttribution,
   type CustomAgentDraft,
 } from "../../src/shared/custom-agents";
@@ -205,6 +207,67 @@ describe("CustomAgentRepository", () => {
     expectCode(() => agents.update(agent.id, agent.revision, { icon: { kind: "image", data: oversized } }), "invalid");
   });
 
+  it("reuses one parsed list across snapshots until a mutation changes it", async () => {
+    const { store, databasePath } = await openStore();
+    const agents = store.customAgents();
+    const reader = new Database(databasePath, { readonly: true, fileMustExist: true });
+    const reviewer = agents.create(draft(), { onHandleConflict: "reject" });
+    const first = agents.list();
+    expect(agents.list()).toBe(first);
+    expect(store.shellSnapshot().customAgents).toBe(first);
+    expect(store.snapshot().customAgents).toBe(first);
+    expectCode(() => agents.update(reviewer.id, 9, { name: "Stale" }), "stale");
+    expect(agents.list()).toEqual(first);
+
+    const changes: Array<() => unknown> = [
+      () => agents.create(draft({ name: "Writer", handle: "writer" }), { onHandleConflict: "reject" }),
+      () => agents.update(reviewer.id, 1, { name: "Strict reviewer" }),
+      () => agents.duplicate(reviewer.id, 2),
+      () => agents.reorder(agents.list().map(({ id }) => id), agents.list().map(({ id }) => id).reverse()),
+      () => agents.delete(reviewer.id, 2),
+    ];
+    let previous = agents.list();
+    for (const change of changes) {
+      change();
+      const next = agents.list();
+      expect(next).not.toBe(previous);
+      expect(next).toEqual(new CustomAgentRepository(reader).list());
+      expect(agents.list()).toBe(next);
+      previous = next;
+    }
+    reader.close();
+  });
+
+  it("caps the combined serialized size of every agent", async () => {
+    const { store } = await openStore();
+    const agents = store.customAgents();
+    const header = PNG_ICON.slice(0, PNG_ICON.indexOf("AAAADUlEQVR"));
+    const bigIcon = { kind: "image" as const, data: header.padEnd(MAX_CUSTOM_AGENT_ICON_DATA_LENGTH, "A") };
+    const blocks = () => [0, 1, 2].map(() => ({ id: randomUUID(), kind: "directions" as const, body: "b".repeat(3_900) }));
+    let rejection: unknown = null;
+    for (let index = 0; index < MAX_CUSTOM_AGENTS && rejection === null; index += 1) {
+      try {
+        agents.create(draft({ name: `Agent ${index}`, handle: `agent-${index}`, icon: bigIcon, blocks: blocks() }), { onHandleConflict: "reject" });
+      } catch (error) {
+        rejection = error;
+      }
+    }
+    expect(rejection).toBeInstanceOf(CustomAgentRepositoryError);
+    expect((rejection as CustomAgentRepositoryError).code).toBe("limit");
+    expect(userCorrectableRuntimeError(rejection)).toBe(true);
+    expect(publicRuntimeError(rejection)).toContain("icons and instructions are too large to save");
+    const stored = agents.list();
+    expect(stored.length).toBeLessThan(MAX_CUSTOM_AGENTS);
+    expect(JSON.stringify(stored).length).toBeLessThanOrEqual(MAX_CUSTOM_AGENTS_TOTAL_SERIALIZED_LENGTH);
+
+    const small = agents.create(draft({ handle: "small" }), { onHandleConflict: "reject" });
+    expectCode(() => agents.update(small.id, small.revision, { icon: bigIcon, blocks: blocks() }), "limit");
+    expectCode(() => agents.duplicate(stored[0]!.id, stored[0]!.revision), "limit");
+    const shrunk = agents.update(stored[0]!.id, stored[0]!.revision, { icon: { kind: "symbol", name: "star" } });
+    expect(shrunk.icon).toEqual({ kind: "symbol", name: "star" });
+    expect(agents.list()).toHaveLength(stored.length + 1);
+  });
+
   it("routes the five commands through the repository as snapshot mutations", async () => {
     const { store } = await openStore();
     const handler = createCustomAgentCommandHandler({ store });
@@ -267,6 +330,10 @@ describe("CustomAgentRepository", () => {
     expect(() => store.createMessage(conversation.id, "Bad", "assistant", [], turn.id, undefined, {
       customAgentCall: { ...call, handle: "Not A Handle" },
     })).toThrow(/custom agent attribution/u);
+    expect(() => store.createMessage(conversation.id, "Bad", "assistant", [], turn.id, undefined, {
+      customAgentCall: call,
+    })).toThrow(/custom agent attribution/u);
+    const bare = store.createMessage(conversation.id, "Another request", "user", [], null);
 
     const traceInput = {
       conversationId: conversation.id,
@@ -297,13 +364,16 @@ describe("CustomAgentRepository", () => {
     const raw = new Database(databasePath);
     try {
       raw.prepare("UPDATE messages SET custom_agent_call_json = ? WHERE id = ?")
-        .run(JSON.stringify({ agentId: "not-a-uuid" }), plain.id);
+        .run(JSON.stringify({ agentId: "not-a-uuid" }), bare.id);
+      expect(() => raw.prepare("UPDATE messages SET custom_agent_call_json = ? WHERE id = ?")
+        .run(JSON.stringify(call), plain.id)).toThrow(/CHECK constraint failed/u);
     } finally {
       raw.close();
     }
     const detail = store.conversationDetail(conversation.id)!;
     expect(detail.messages.find(({ id }) => id === message.id)?.customAgentCall).toEqual(call);
     expect(detail.messages.find(({ id }) => id === plain.id)).not.toHaveProperty("customAgentCall");
+    expect(detail.messages.find(({ id }) => id === bare.id)).not.toHaveProperty("customAgentCall");
     expect(detail.subagents.find(({ providerTaskId }) => providerTaskId === "task-1")?.customAgentId).toBe(agent.id);
   });
 });

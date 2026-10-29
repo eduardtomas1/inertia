@@ -473,6 +473,44 @@ describe("conversation.compact-and-send", () => {
     expect(attachmentResolver.resolvePayloads).not.toHaveBeenCalled();
   });
 
+  it("refuses a deleted or oversized called agent before compacting", async () => {
+    const agentId = "66666666-6666-4666-8666-666666666666";
+    const oversized = {
+      id: agentId,
+      name: "Wide",
+      handle: "wide",
+      description: "",
+      icon: { kind: "symbol", name: "star" },
+      accent: null,
+      blocks: [0, 1].map((index) => ({ id: `7777777${index}-7777-4777-8777-777777777777`, kind: "directions", body: "é".repeat(3_999) })),
+      skills: [],
+      position: 0,
+      revision: 1,
+      createdAt: "2026-10-25T08:00:00.000Z",
+      updatedAt: "2026-10-25T08:00:00.000Z",
+    };
+    const calling = (): ReturnType<typeof compactAndSend> => {
+      const command = compactAndSend();
+      return { ...command, payload: { ...command.payload, context: { ...context, calledAgent: { agentId } } } };
+    };
+    for (const [providerId, agent, message] of [
+      ["claude", null, "The custom agent you called no longer exists."],
+      ["codex", oversized, "too long to send with this request"],
+    ] as const) {
+      const { dependencies, compact, attachmentResolver, store } = fixture({ providerId });
+      Object.assign(store, { customAgents: () => ({ get: (id: string) => id === agentId ? agent : null }) });
+      await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, calling()))
+        .rejects.toThrow(message);
+      expect(compact).not.toHaveBeenCalled();
+      expect(attachmentResolver.resolvePayloads).not.toHaveBeenCalled();
+    }
+    const { dependencies, compact, send, store } = fixture();
+    Object.assign(store, { customAgents: () => ({ get: (id: string) => id === agentId ? oversized : null }) });
+    await createConversationCompactionCommandHandler(dependencies)({} as WebSocket, calling());
+    expect(compact).toHaveBeenCalledOnce();
+    expect(sentResult(send)).toMatchObject({ result: { outcome: "sent" } });
+  });
+
   it("checks the Claude sign-in again before compacting a native route", async () => {
     const { dependencies, compact, providerTerminalResumes, provider } = fixture({ preset: "native", routeKind: "account", accountKind: "Console API key" });
     const refreshProviderAccount = vi.fn(async () => {

@@ -39,6 +39,7 @@ const USAGE_KEYS = Object.keys({
 } satisfies Record<keyof SubagentTaskUsage, true>);
 
 const MAX_LABEL_CHARS = 200;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_TOKEN_COUNT = 1_000_000_000_000;
 const MAX_TOOL_USE_COUNT = 1_000_000;
 const MAX_DURATION_MS = 31 * 24 * 60 * 60 * 1_000;
@@ -87,5 +88,7 @@ export function subagentTrace(value: unknown): boolean {
     && nullableLabel(value.activity)
     && subagentTaskUsage(value.usage)
     && nullableInteger(value.toolUseCount, 0, MAX_TOOL_USE_COUNT)
-    && nullableInteger(value.durationMs, 0, MAX_DURATION_MS);
+    && nullableInteger(value.durationMs, 0, MAX_DURATION_MS)
+    && (value.customAgentId === undefined || value.customAgentId === null
+      || (typeof value.customAgentId === "string" && UUID.test(value.customAgentId)));
 }

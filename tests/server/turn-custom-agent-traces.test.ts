@@ -31,11 +31,27 @@ describe("CustomAgentTraceAttribution", () => {
     expect(attribution.resolve(trace({ providerAgentId: "ses-1", providerName: " Inertia-Reviewer " }))).toBe(CALL.agentId);
   });
 
-  it("falls back to the first top-level Codex trace when the task name is free text", () => {
+  it("falls back only to the first top-level trace that carries no role or name", () => {
     const attribution = new CustomAgentTraceAttribution(CALL, "codex");
-    expect(attribution.resolve(trace({ providerAgentId: "thread-1", providerRole: "default", providerName: "Review the patch" }))).toBe(CALL.agentId);
-    expect(attribution.resolve(trace({ providerAgentId: "thread-2", providerRole: "default", providerName: "Other work" }))).toBeNull();
-    expect(attribution.resolve(trace({ providerAgentId: "thread-2", providerRole: "default", providerName: "Other work" }))).toBeNull();
+    expect(attribution.resolve(trace({ providerAgentId: "thread-1", providerRole: "default", providerName: "Review the patch" }))).toBeNull();
+    expect(attribution.resolve(trace({ providerAgentId: "thread-2" }))).toBe(CALL.agentId);
+    expect(attribution.resolve(trace({ providerAgentId: "thread-3" }))).toBeNull();
+  });
+
+  it("never claims a Codex trace whose name does not match, even when it comes first", () => {
+    const attribution = new CustomAgentTraceAttribution(CALL, "codex");
+    expect(attribution.resolve(trace({ providerAgentId: "thread-1", providerName: "Explore" }))).toBeNull();
+    expect(attribution.resolve(trace({ providerAgentId: "thread-2", providerRole: "default", providerName: "inertia-reviewer" }))).toBe(CALL.agentId);
+    expect(attribution.resolve(trace({ providerAgentId: "thread-1", providerName: "Explore" }))).toBeNull();
+  });
+
+  it("waits for the OpenCode subagent type before claiming a child session", () => {
+    const attribution = new CustomAgentTraceAttribution(CALL, "opencode");
+    expect(attribution.resolve(trace({ providerAgentId: "ses-1" }))).toBeNull();
+    expect(attribution.resolve(trace({ providerAgentId: "ses-2", providerName: "Review the patch" }))).toBeNull();
+    expect(attribution.resolve(trace({ providerAgentId: "ses-1", providerRole: "general" }))).toBeNull();
+    expect(attribution.resolve(trace({ providerAgentId: "ses-2", providerName: "Review the patch", providerRole: "inertia-reviewer" }))).toBe(CALL.agentId);
+    expect(attribution.resolve(trace({ providerAgentId: "ses-2", providerRole: null }))).toBe(CALL.agentId);
   });
 
   it("falls back for a Cursor task that carries no role", () => {

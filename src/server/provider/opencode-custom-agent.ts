@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { ProviderCustomAgentInput } from "./contracts";
 
 export const OPENCODE_CONFIG_CONTENT = "OPENCODE_CONFIG_CONTENT";
@@ -36,6 +38,21 @@ export function openCodeCustomAgentConfig(
   };
 }
 
+function substitutionInertJson(value: string): string {
+  return JSON.stringify(value).replace(/\{(?=(?:env|file):)/gu, "\\u007b");
+}
+
+export function openCodeCustomAgentConfigContent(
+  customAgent: ProviderCustomAgentInput,
+  inherited: JsonRecord = {},
+): string {
+  const marker = `inertia-agent-text-${randomUUID()}`;
+  const fields = { description: `${marker}-description`, instructions: `${marker}-instructions` };
+  return JSON.stringify(openCodeCustomAgentConfig({ ...customAgent, ...fields }, inherited))
+    .replace(JSON.stringify(fields.description), () => substitutionInertJson(customAgent.description))
+    .replace(JSON.stringify(fields.instructions), () => substitutionInertJson(customAgent.instructions));
+}
+
 export function openCodeCustomAgentEnvironment(
   environment: NodeJS.ProcessEnv,
   customAgent: ProviderCustomAgentInput | undefined,
@@ -49,6 +66,6 @@ export function openCodeCustomAgentEnvironment(
   );
   return {
     ...rest,
-    [OPENCODE_CONFIG_CONTENT]: JSON.stringify(openCodeCustomAgentConfig(customAgent, inherited)),
+    [OPENCODE_CONFIG_CONTENT]: openCodeCustomAgentConfigContent(customAgent, inherited),
   };
 }

@@ -311,6 +311,34 @@ export class AgentSecretService {
     return Promise.resolve(this.retire(requestId, "revoked"));
   }
 
+  revokeForConversation(conversationId: string): void {
+    if (this.closed) return;
+    const ids = new Set<string>();
+    try {
+      for (const record of this.repository.forConversation(conversationId)) {
+        if (record.status === "saved") ids.add(record.id);
+      }
+    } catch {
+    }
+    for (const [requestId, secret] of this.active) {
+      if (secret.conversationId === conversationId) ids.add(requestId);
+    }
+    if (ids.size === 0) return;
+    for (const requestId of ids) {
+      try {
+        this.repository.transition(requestId, ["saved"], "revoked");
+      } catch {
+      }
+      const secret = this.active.get(requestId);
+      if (secret) {
+        this.active.delete(requestId);
+        this.removeFile(secret.token);
+      }
+      this.forgetVault(requestId);
+    }
+    this.refreshActive();
+  }
+
   list(): SecretRequestListEntry[] {
     const now = this.clock();
     return this.repository.activeSaved()

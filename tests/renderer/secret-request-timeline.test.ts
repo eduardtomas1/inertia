@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { SecretRequestReference } from "../../src/shared/agent-secrets";
+import { AGENT_SECRET_SAVE_ERRORS, type SecretRequestReference } from "../../src/shared/agent-secrets";
 import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
 import {
   buildResponseTimeline,
@@ -223,5 +223,14 @@ describe("secret request copy", () => {
     expect(secretSaveFailureMessage(new Error("Error invoking remote method: Error: The secret must be on a single line."))).toBe("The secret must be on a single line.");
     expect(secretSaveFailureMessage(new Error("boom tskey-123"))).toBe("The secret could not be saved. Try again.");
     expect(secretSaveFailureMessage("tskey-123")).toBe("The secret could not be saved. Try again.");
+  });
+
+  it("shows every fixed main-process save error on the card", () => {
+    expect(Object.values(AGENT_SECRET_SAVE_ERRORS)).toHaveLength(7);
+    for (const message of Object.values(AGENT_SECRET_SAVE_ERRORS)) {
+      expect(secretSaveFailureMessage(new Error(`Error invoking remote method 'inertia:save-agent-secret': Error: ${message}`))).toBe(message);
+    }
+    expect(secretSaveFailureMessage(new Error(AGENT_SECRET_SAVE_ERRORS.limit))).toBe("Too many agent secrets are active. Revoke one in Settings, then try again.");
+    expect(secretSaveFailureMessage(new Error(AGENT_SECRET_SAVE_ERRORS.fileFailed))).toBe("Inertia couldn't write the private file. Try again.");
   });
 });

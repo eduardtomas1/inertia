@@ -128,6 +128,7 @@ export interface ConversationCommandDependencies {
   };
   creation?: ConversationCreationService;
   contextRequests?: ConversationContextRequestCoordinator;
+  agentSecrets?: { revokeForConversation(conversationId: string): void };
   reportIncident?(observation: IncidentObservation): unknown;
 }
 
@@ -747,6 +748,7 @@ export function createConversationCommandHandler(
           const contextTargetConversationIds = dependencies.store.contextPackets
             .targetConversationIdsForSource(finalConversation.id);
           dependencies.contextRequests?.cancelForSource(finalConversation.id);
+          dependencies.agentSecrets?.revokeForConversation(finalConversation.id);
           const publishDeletedWatcherLinks = dependencies.watchers?.beforeConversationDelete?.(finalConversation.id);
           const recoveryRecords = providerRecoveryRecords(
             dependencies.store,

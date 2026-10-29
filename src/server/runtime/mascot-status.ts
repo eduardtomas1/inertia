@@ -16,6 +16,7 @@ const MASCOT_QUIET_AFTER_MS = 10 * MINUTE;
 const MASCOT_DWELL_MS = 1_500;
 const LIFETIME: Record<number, number> = { 4: 24 * 60 * MINUTE, 3: 60 * MINUTE, 2: 7 * 24 * 60 * MINUTE };
 const LONGEST_WAKE = 2_147_483_647;
+const SENSITIVE_INPUT = "Sensitive information is needed. Answer privately in the chat.";
 
 export interface MascotClock {
   now(): number;
@@ -139,6 +140,7 @@ export class MascotStatusPublisher {
       : event.type === "agent.commentary.persisted" ? event.message
       : event.type === "agent.plan.updated" ? event.plan
       : event.type === "agent.input.requested" || event.type === "agent.approval.requested" ? event.request
+      : event.type === "conversation.message.persisted" ? event.message.secretRequest ? event.message : null
       : event.type === "agent.input.resolved" || event.type === "agent.approval.resolved"
         || event.type === "agent.completed" || event.type === "agent.failed" ? event : null;
     if (!owner) return;
@@ -154,7 +156,7 @@ export class MascotStatusPublisher {
       case "agent.input.requested": {
         if (!live) return;
         const first = event.request.questions[0];
-        const message = first?.isSecret ? "Sensitive information is needed. Answer privately in the chat."
+        const message = first?.isSecret ? SENSITIVE_INPUT
           : mascotPreview(first?.question) ?? "Choose which conversation context to share in the chat.";
         requests.set(`input:${event.request.id}`, { phase: "waiting-for-input", message, at: this.clock.now(),
           progress: event.request.questions.length > 1 ? `${event.request.questions.length} questions to answer` : null });
@@ -166,6 +168,15 @@ export class MascotStatusPublisher {
           phase: "waiting-for-approval", message: mascotApprovalLine(event.request), progress: null, at: this.clock.now(),
         });
         break;
+      case "conversation.message.persisted": {
+        const reference = event.message.secretRequest;
+        if (!reference) return;
+        const key = `secret:${reference.requestId}`;
+        if (reference.status !== "pending") { requests.delete(key); break; }
+        if (!live) return;
+        requests.set(key, { phase: "waiting-for-input", message: SENSITIVE_INPUT, progress: null, at: this.clock.now() });
+        break;
+      }
       case "agent.input.resolved": requests.delete(`input:${event.requestId}`); break;
       case "agent.approval.resolved": requests.delete(`approval:${event.requestId}`); break;
       case "agent.activity": {

@@ -12,7 +12,7 @@ import type {
   RuntimeSupervisorTimer,
 } from "./runtime-supervisor-types.js";
 
-export const AGENT_SECRET_DELIVERY_TIMEOUT_MS = 15_000;
+export const AGENT_SECRET_DELIVERY_TIMEOUT_MS = 30_000;
 
 export interface RuntimeAgentSecretDelivery {
   conversationId: string;

@@ -7,6 +7,8 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
+import { createConversationCommandHandler } from "../../src/server/runtime/commands/conversation-commands";
 import type { ProviderHostToolCall, ProviderHostToolResult } from "../../src/server/provider/contracts";
 import { AgentSecretService } from "../../src/server/runtime/agent-secrets/agent-secret-service";
 import { agentSecretRoot } from "../../src/server/runtime/agent-secrets/secret-files";
@@ -383,6 +385,57 @@ describe("agent secret service: pending request, private file and turn wait", ()
     expect(existsSync(dirname(file))).toBe(false);
     expect(harness.service.output.values()).toEqual([]);
     expect(harness.forgotten).toContain(agentSecretReference(requestId));
+  });
+});
+
+describe("agent secret service: conversation delete", () => {
+  it("revokes the deleted conversation's secrets at once and leaves other chats alone", async () => {
+    const harness = await openHarness();
+    const doomed = chat(harness.store, "Doomed");
+    const doomedResult = harness.service.invoke(doomed, call(VALID));
+    const doomedId = pendingId(harness.store);
+    await harness.service.deliver({ conversationId: doomed.conversation.id, requestId: doomedId, secret: SECRET, vaulted: true });
+    const doomedFile = parsed(await doomedResult).file as string;
+    const kept = chat(harness.store, "Kept");
+    const keptResult = harness.service.invoke(kept, call(VALID));
+    const keptId = pendingId(harness.store);
+    await harness.service.deliver({ conversationId: kept.conversation.id, requestId: keptId, secret: "ghp_keptValue12345678", vaulted: true });
+    const keptFile = parsed(await keptResult).file as string;
+    const handler = createConversationCommandHandler({
+      store: harness.store,
+      conversationAttachments: { release: vi.fn(async () => undefined) } as never,
+      providers: {} as never,
+      backendProfileController: {} as never,
+      workspaceRuns: {} as never,
+      providerTerminalResumes: new ProviderTerminalResumeRegistry(harness.store.conversationWork),
+      runtimeSync: {} as never,
+      deletedConversationIds: new Set(),
+      dataDirectory: harness.directory,
+      rememberDeletedConversation: vi.fn(),
+      forgetRemoteTranscript: vi.fn(),
+      broadcastSnapshot: vi.fn(),
+      publicError: (error) => String(error),
+      send: vi.fn(),
+      agentSecrets: harness.service,
+    });
+    const events = harness.events.length;
+
+    await expect(handler({} as never, {
+      type: "conversation.delete",
+      requestId: randomUUID(),
+      payload: { conversationId: doomed.conversation.id },
+    })).resolves.toBe("mutation");
+
+    expect(existsSync(dirname(doomedFile))).toBe(false);
+    expect(harness.forgotten).toEqual([agentSecretReference(doomedId)]);
+    expect(harness.store.agentSecretRequests().find(doomedId)).toBeNull();
+    expect(harness.service.output.values()).not.toContain(SECRET);
+    expect(harness.service.output.values()).toContain("ghp_keptValue12345678");
+    expect(harness.service.filePath(doomedId)).toBeNull();
+    expect(harness.events.slice(events)).toEqual([]);
+    expect(readFileSync(keptFile, "utf8")).toBe("ghp_keptValue12345678");
+    expect(harness.store.agentSecretRequests().find(keptId)?.status).toBe("saved");
+    expect(harness.service.list().map(({ requestId }) => requestId)).toEqual([keptId]);
   });
 });
 

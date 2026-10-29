@@ -1,6 +1,7 @@
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 
 import {
+  AGENT_SECRET_SAVE_ERRORS,
   agentSecretValueIssue,
   parseSaveAgentSecretRequest,
   type SaveAgentSecretRequest,
@@ -12,16 +13,6 @@ import type {
   RuntimeAgentSecretDelivery,
   RuntimeAgentSecretDeliveryOutcome,
 } from "./runtime-agent-secret-coordinator.js";
-
-export const AGENT_SECRET_SAVE_ERRORS = Object.freeze({
-  notPending: "That secret request is no longer pending.",
-  fileFailed: "Inertia couldn't write the private file. Try again.",
-  limit: "Too many agent secrets are active. Revoke one in Settings, then try again.",
-  runtimeUnavailable: "The local runtime is not available. Try again in a moment.",
-  storageStarting: "Secure storage is still starting. Try again in a moment.",
-  invalid: "The secret request is invalid.",
-  foreignConversation: "Detached chats can answer secret requests only for their owned conversation.",
-});
 
 type RejectionReason = Extract<RuntimeAgentSecretDeliveryOutcome, { status: "rejected" }>["reason"];
 

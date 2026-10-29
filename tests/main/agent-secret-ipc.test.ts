@@ -4,12 +4,12 @@ import type { IpcMainInvokeEvent } from "electron";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  AGENT_SECRET_SAVE_ERRORS,
   registerAgentSecretIpc,
   type AgentSecretRuntime,
   type AgentSecretSender,
   type AgentSecretVault,
 } from "../../src/main/agent-secret-ipc";
+import { AGENT_SECRET_SAVE_ERRORS } from "../../src/shared/agent-secrets";
 import {
   CredentialVault,
   type CredentialEncryptionBackend,

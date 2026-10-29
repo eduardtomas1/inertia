@@ -249,14 +249,33 @@ export function normalizeSecretRequestToolInput(value: unknown): NormalizedSecre
   };
 }
 
+export const AGENT_SECRET_VALUE_ISSUES = Object.freeze({
+  notText: "Paste the secret as text.",
+  tooLong: "The secret is longer than 16,384 characters.",
+  blank: "Paste the secret. Only spaces or line breaks were entered.",
+  masked: "Paste the secret itself. The masked placeholder cannot be saved.",
+  multiline: "The secret must be on a single line.",
+  tooShort: "The secret must be at least 4 characters long.",
+});
+
+export const AGENT_SECRET_SAVE_ERRORS = Object.freeze({
+  notPending: "That secret request is no longer pending.",
+  fileFailed: "Inertia couldn't write the private file. Try again.",
+  limit: "Too many agent secrets are active. Revoke one in Settings, then try again.",
+  runtimeUnavailable: "The local runtime is not available. Try again in a moment.",
+  storageStarting: "Secure storage is still starting. Try again in a moment.",
+  invalid: "The secret request is invalid.",
+  foreignConversation: "Detached chats can answer secret requests only for their owned conversation.",
+});
+
 export function agentSecretValueIssue(value: unknown): string | null {
-  if (typeof value !== "string") return "Paste the secret as text.";
-  if (value.length > AGENT_SECRET_MAX_LENGTH) return "The secret is longer than 16,384 characters.";
+  if (typeof value !== "string") return AGENT_SECRET_VALUE_ISSUES.notText;
+  if (value.length > AGENT_SECRET_MAX_LENGTH) return AGENT_SECRET_VALUE_ISSUES.tooLong;
   const secret = value.trim();
-  if (secret.length === 0) return "Paste the secret. Only spaces or line breaks were entered.";
-  if (secret === BACKEND_CREDENTIAL_MASK) return "Paste the secret itself. The masked placeholder cannot be saved.";
-  if (/[\0\r\n]/u.test(secret)) return "The secret must be on a single line.";
-  if (secret.length < AGENT_SECRET_MIN_LENGTH) return "The secret must be at least 4 characters long.";
+  if (secret.length === 0) return AGENT_SECRET_VALUE_ISSUES.blank;
+  if (secret === BACKEND_CREDENTIAL_MASK) return AGENT_SECRET_VALUE_ISSUES.masked;
+  if (/[\0\r\n]/u.test(secret)) return AGENT_SECRET_VALUE_ISSUES.multiline;
+  if (secret.length < AGENT_SECRET_MIN_LENGTH) return AGENT_SECRET_VALUE_ISSUES.tooShort;
   return null;
 }
 

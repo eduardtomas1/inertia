@@ -1,5 +1,11 @@
 import type { ChatMessage, ServerEvent } from "@shared/contracts";
-import type { SecretRequestReference, SecretRequestStatus, SecretRequestStorage } from "@shared/agent-secrets";
+import {
+  AGENT_SECRET_SAVE_ERRORS,
+  AGENT_SECRET_VALUE_ISSUES,
+  type SecretRequestReference,
+  type SecretRequestStatus,
+  type SecretRequestStorage,
+} from "@shared/agent-secrets";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 
 export type SecretRequestMessage = ChatMessage & { turnId: string; secretRequest: SecretRequestReference };
@@ -14,7 +20,7 @@ export type SecretRequestCommandRunner = (
 export const SECRET_REQUEST_LABEL = "Asking for a secret";
 export const SECRET_REQUEST_PLACEHOLDER = "Paste the secret";
 export const SECRET_REQUEST_SAVE_FAILED = "The secret could not be saved. Try again.";
-export const SECRET_REQUEST_MIN_LENGTH_ISSUE = "The secret must be at least 4 characters long.";
+export const SECRET_REQUEST_MIN_LENGTH_ISSUE = AGENT_SECRET_VALUE_ISSUES.tooShort;
 export const SECRET_REQUEST_READ_ONLY = "Waiting for your answer in the main window";
 
 const SETTLED_COPY: Readonly<Record<Exclude<SecretRequestStatus, "pending" | "saved">, string>> = {
@@ -32,15 +38,10 @@ const ANNOUNCEMENTS: Readonly<Partial<Record<SecretRequestStatus, string>>> = {
   revoked: "Secret revoked",
 };
 
-const KNOWN_FAILURES = [
-  "Paste the secret as text.",
-  "The secret is longer than 16,384 characters.",
-  "Paste the secret. Only spaces or line breaks were entered.",
-  "Paste the secret itself. The masked placeholder cannot be saved.",
-  "The secret must be on a single line.",
-  SECRET_REQUEST_MIN_LENGTH_ISSUE,
-  "That secret request is no longer pending.",
-] as const;
+const KNOWN_FAILURES: readonly string[] = [
+  ...Object.values(AGENT_SECRET_VALUE_ISSUES),
+  ...Object.values(AGENT_SECRET_SAVE_ERRORS),
+];
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;

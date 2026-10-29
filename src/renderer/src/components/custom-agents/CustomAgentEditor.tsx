@@ -8,6 +8,8 @@ import {
   CUSTOM_AGENT_BLOCK_KINDS,
   CUSTOM_AGENT_BLOCK_LABELS,
   CUSTOM_AGENT_ICON_NAMES,
+  CUSTOM_AGENT_MARK_LABELS,
+  CUSTOM_AGENT_MARK_NAMES,
   customAgentHandleFromName,
   customAgentSkillNameSchema,
   MAX_CUSTOM_AGENT_BLOCK_CHARS,
@@ -203,8 +205,21 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
       <section className="custom-agent-group" aria-labelledby={`${ids}-identity`}>
         <h4 id={`${ids}-identity`} className="custom-agent-group-title">Identity</h4>
         <div className="custom-agent-identity">
-          <CustomAgentAvatar agent={draft} size={56} className="custom-agent-identity-preview" />
+          <CustomAgentAvatar agent={draft} size={64} className="custom-agent-identity-preview" />
           <div className="custom-agent-identity-controls">
+            <CustomAgentRadioGroup
+              label="Mark"
+              className="custom-agent-marks"
+              value={draft.icon.kind === "mark" ? draft.icon.name : null}
+              disabled={disabled}
+              options={CUSTOM_AGENT_MARK_NAMES.map((name) => ({
+                id: name,
+                label: CUSTOM_AGENT_MARK_LABELS[name],
+                className: "custom-agent-mark",
+                content: <CustomAgentAvatar agent={{ ...draft, icon: { kind: "mark", name } }} size={40} />,
+              }))}
+              onChange={(name) => update({ icon: { kind: "mark", name } })}
+            />
             <CustomAgentRadioGroup
               label="Symbol"
               className="custom-agent-symbols"

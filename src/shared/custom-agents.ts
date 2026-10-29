@@ -40,6 +40,24 @@ export const CUSTOM_AGENT_ICON_NAMES = [
   "braces",
 ] as const;
 
+export const CUSTOM_AGENT_MARK_NAMES = [
+  "runner",
+  "scout",
+  "guard",
+  "builder",
+  "scribe",
+  "spark",
+] as const;
+
+export const CUSTOM_AGENT_MARK_LABELS: Readonly<Record<CustomAgentMarkName, string>> = {
+  runner: "Runner",
+  scout: "Scout",
+  guard: "Guard",
+  builder: "Builder",
+  scribe: "Scribe",
+  spark: "Spark",
+};
+
 export const CUSTOM_AGENT_BLOCK_KINDS = [
   "role",
   "directions",
@@ -103,6 +121,7 @@ export const customAgentDescriptionSchema = z.string()
 
 export const customAgentIconSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("symbol"), name: z.enum(CUSTOM_AGENT_ICON_NAMES) }),
+  z.strictObject({ kind: z.literal("mark"), name: z.enum(CUSTOM_AGENT_MARK_NAMES) }),
   z.strictObject({
     kind: z.literal("image"),
     data: z.string()
@@ -187,6 +206,7 @@ export const customAgentExportSchema = z.strictObject({
 });
 
 export type CustomAgentIconName = typeof CUSTOM_AGENT_ICON_NAMES[number];
+export type CustomAgentMarkName = typeof CUSTOM_AGENT_MARK_NAMES[number];
 export type CustomAgentBlockKind = typeof CUSTOM_AGENT_BLOCK_KINDS[number];
 export type CustomAgentDelivery = typeof CUSTOM_AGENT_DELIVERIES[number];
 export type CustomAgentIcon = z.infer<typeof customAgentIconSchema>;

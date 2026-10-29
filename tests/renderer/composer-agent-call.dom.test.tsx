@@ -11,6 +11,8 @@ import {
   rankCustomAgents,
 } from "../../src/renderer/src/components/composer/useComposerAgentCall";
 import { forgetCalledAgent } from "../../src/renderer/src/components/composer/calledAgentStorage";
+import { ComposerAgentCallMenu } from "../../src/renderer/src/components/composer/ComposerAgentCallMenu";
+import { ComposerCalledAgentChip } from "../../src/renderer/src/components/composer/ComposerCalledAgentChip";
 import { composerProps, conversation } from "./composer-fixtures";
 
 function agent(update: Partial<CustomAgent> & Pick<CustomAgent, "id" | "name" | "handle">): CustomAgent {
@@ -302,5 +304,32 @@ describe("composer /calling", () => {
     window.localStorage.setItem("inertia:called-agent:gone", scout.id);
     forgetCalledAgent("gone");
     expect(window.localStorage.getItem("inertia:called-agent:gone")).toBeNull();
+  });
+
+  it("draws a called mark at 20 px in the chip and the menu rows, never live", () => {
+    const marked = { ...scout, icon: { kind: "mark" as const, name: "scout" as const } };
+    const chip = render(<ComposerCalledAgentChip agent={marked} onRemove={() => undefined} />);
+    const chipAvatar = chip.container.querySelector<HTMLElement>(".custom-agent-avatar")!;
+    expect(chipAvatar).toHaveAttribute("data-mark", "scout");
+    expect(chipAvatar).not.toHaveAttribute("data-live");
+    expect(chipAvatar.style.getPropertyValue("--agent-avatar-size")).toBe("20px");
+    chip.unmount();
+    const menu = render(
+      <ComposerAgentCallMenu
+        listboxId="agents"
+        agents={[marked]}
+        query=""
+        hasAgents
+        activeAgentId={marked.id}
+        canOpenSettings={false}
+        onActiveAgentChange={() => undefined}
+        onPick={() => undefined}
+        onOpenSettings={() => undefined}
+      />,
+    );
+    const row = within(menu.container).getByRole("option");
+    expect(row).toHaveAttribute("data-active", "true");
+    expect(row.querySelector(".custom-agent-avatar")).toHaveAttribute("data-mark", "scout");
+    expect(row.querySelector<HTMLElement>(".custom-agent-avatar")!.style.getPropertyValue("--agent-avatar-size")).toBe("20px");
   });
 });

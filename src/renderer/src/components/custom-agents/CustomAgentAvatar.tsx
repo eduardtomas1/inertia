@@ -43,6 +43,11 @@ export const CUSTOM_AGENT_SYMBOLS: Readonly<Record<CustomAgentIconName, LucideIc
 };
 
 const GLYPH_PLATE_FROM = 40;
+const MARK_SHADOW_FROM = 28;
+
+function markInset(size: number): number {
+  return size <= 24 ? 0 : size < 48 ? 2 : 4;
+}
 
 export interface CustomAgentIdentity {
   name: string;
@@ -69,20 +74,25 @@ export function CustomAgentAvatar({
 }): React.JSX.Element {
   const tint = customAgentTintStyle(agent.accent);
   const symbolSize = size > 24 ? 16 : 14;
-  const Symbol = agent.icon.kind === "symbol" ? CUSTOM_AGENT_SYMBOLS[agent.icon.name] ?? Orbit : null;
+  const { icon } = agent;
+  const Symbol = icon.kind === "symbol" ? CUSTOM_AGENT_SYMBOLS[icon.name] ?? Orbit : null;
+  const inset = icon.kind === "mark" ? markInset(size) : null;
   return (
     <span
       className={clsx("custom-agent-avatar", tint && "has-agent-tint", className)}
-      style={{ ...tint, "--agent-avatar-size": `${size}px` } as CSSProperties}
+      style={{ ...tint, "--agent-avatar-size": `${size}px`, ...(inset === null ? null : { "--agent-mark-inset": `${inset}px` }) } as CSSProperties}
       data-live={live ? "true" : undefined}
-      data-icon-kind={agent.icon.kind}
+      data-icon-kind={icon.kind}
+      data-mark={icon.kind === "mark" ? icon.name : undefined}
       aria-hidden="true"
     >
-      {Symbol && size >= GLYPH_PLATE_FROM
-        ? <span className="custom-agent-avatar-glyph"><Symbol size={symbolSize} className="custom-agent-avatar-symbol" /></span>
-        : Symbol
-          ? <Symbol size={symbolSize} className="custom-agent-avatar-symbol" />
-          : <img src={agent.icon.kind === "image" ? agent.icon.data : undefined} alt="" width={size} height={size} className="custom-agent-avatar-image" />}
+      {inset !== null
+        ? <span className="custom-agent-avatar-figure" data-shadow={size - 2 * inset >= MARK_SHADOW_FROM ? "true" : undefined} />
+        : Symbol && size >= GLYPH_PLATE_FROM
+          ? <span className="custom-agent-avatar-glyph"><Symbol size={symbolSize} className="custom-agent-avatar-symbol" /></span>
+          : Symbol
+            ? <Symbol size={symbolSize} className="custom-agent-avatar-symbol" />
+            : <img src={icon.kind === "image" ? icon.data : undefined} alt="" width={size} height={size} className="custom-agent-avatar-image" />}
     </span>
   );
 }

@@ -104,6 +104,16 @@ describe("custom agent file IPC", () => {
     expect(await (await register({ open: null })).invoke("import")).toEqual({ status: "cancelled" });
   });
 
+  it("round-trips an agent that wears a mark through an export file", async () => {
+    const folder = await directory();
+    const target = join(folder, "marked.json");
+    const marked: CustomAgentDraft = { ...draft, icon: { kind: "mark", name: "guard" } };
+    const markedEnvelope = buildCustomAgentExport([marked], "2026-10-29T10:00:00.000Z");
+    expect(await (await register({ save: target })).invoke("export", markedEnvelope)).toEqual({ status: "exported" });
+    expect(await readFile(target, "utf8")).toContain('"icon": {\n        "kind": "mark",\n        "name": "guard"\n      }');
+    expect(await (await register({ open: target })).invoke("import")).toEqual({ status: "imported", agents: [marked] });
+  });
+
   it("rejects untrusted senders, malformed payloads and unknown actions before any dialog", async () => {
     await expect((await register({ trusted: false })).invoke("import")).rejects.toThrow(/untrusted/u);
     const trusted = await register({ save: "/tmp/never.json" });

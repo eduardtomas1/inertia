@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -272,6 +274,71 @@ describe("SubagentCallBlock", () => {
     renderBlock(entryFor([call({ id: "settle-done", status: "running", isLive: true })]), value).unmount();
     renderBlock(entryFor([call({ id: "settle-done", status: "completed", isLive: false, result: "Done." })]), value);
     expect(screen.getByRole("button", { name: /Code reviewer/u })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("sets data-settled only when a live call settles, never on mount or on restored history", () => {
+    const restored = renderBlock(entryFor([call({ status: "completed", isLive: false, result: "Done." })]), context());
+    expect(restored.container.querySelector(".subagent-call")).not.toHaveAttribute("data-settled");
+    restored.unmount();
+
+    const live = entryFor([call({ status: "running", isLive: true })]);
+    const view = renderBlock(live, context());
+    const block = view.container.querySelector(".subagent-call")!;
+    expect(block).not.toHaveAttribute("data-settled");
+    view.rerender(
+      <SubagentCallContext.Provider value={context()}>
+        <SubagentCallBlock entry={entryFor([call({ status: "completed", isLive: false, result: "Done." })])} />
+      </SubagentCallContext.Provider>,
+    );
+    expect(block).toHaveAttribute("data-settled", "true");
+    view.rerender(
+      <SubagentCallContext.Provider value={context()}>
+        <SubagentCallBlock entry={live} />
+      </SubagentCallContext.Provider>,
+    );
+    expect(block).not.toHaveAttribute("data-settled");
+    view.unmount();
+
+    const memory = createSubagentCallMemory();
+    const value = context({ memory });
+    renderBlock(entryFor([call({ id: "remount", status: "running", isLive: true })]), value).unmount();
+    const settledEntry = entryFor([call({ id: "remount", status: "completed", isLive: false, result: "Done." })]);
+    const remounted = renderBlock(settledEntry, value);
+    expect(remounted.container.querySelector(".subagent-call")).toHaveAttribute("data-settled", "true");
+    remounted.unmount();
+    const scrolledBack = renderBlock(settledEntry, value);
+    expect(scrolledBack.container.querySelector(".subagent-call")).not.toHaveAttribute("data-settled");
+  });
+
+  it("shows a called mark in a 36 px tile and flags the stopping state on the block", async () => {
+    let finish: () => void = () => undefined;
+    const onStopSubagent = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const marked = { ...reviewer, icon: { kind: "mark" as const, name: "scout" as const } };
+    const view = renderBlock({ ...entryFor([call({ status: "running", isLive: true })], [marked]), canStop: true }, context({ onStopSubagent }));
+    const block = view.container.querySelector(".subagent-call")!;
+    const avatar = block.querySelector<HTMLElement>(".subagent-call-header .custom-agent-avatar")!;
+    expect(avatar).toHaveAttribute("data-mark", "scout");
+    expect(avatar).toHaveAttribute("data-live", "true");
+    expect(avatar.style.getPropertyValue("--agent-avatar-size")).toBe("36px");
+    expect(avatar.style.getPropertyValue("--agent-mark-inset")).toBe("2px");
+    expect(avatar.querySelector(".custom-agent-avatar-figure")).toHaveAttribute("data-shadow", "true");
+    expect(avatar.querySelector("img")).toBeNull();
+    expect(block).not.toHaveAttribute("data-stopping");
+    fireEvent.click(screen.getByRole("button", { name: "Stop Code reviewer" }));
+    expect(block).toHaveAttribute("data-stopping", "true");
+    finish();
+    await screen.findByRole("button", { name: "Stop Code reviewer" });
+    expect(block).not.toHaveAttribute("data-stopping");
+  });
+
+  it("keeps every lit effect in CSS: the lift, the haze and the settle flash only run without reduced motion", () => {
+    const css = readFileSync("src/renderer/src/components/response-timeline/SubagentCallBlock.css", "utf8").replaceAll("\r\n", "\n");
+    const motion = css.slice(css.indexOf("@media (prefers-reduced-motion: no-preference)"));
+    expect(motion).toContain("animation: custom-agent-lift 2.4s ease-in-out infinite;");
+    expect(motion).toContain("animation: subagent-call-haze 2.4s ease-in-out infinite;");
+    expect(motion).toContain("animation: subagent-call-settle 600ms var(--ease-fade) forwards;");
+    expect(css).toMatch(/\.subagent-call-body \{[^}]*padding: 0 12px 0 56px;/u);
+    expect(css).toMatch(/\.subagent-call-line \{[^}]*margin: -4px 10px 8px 56px;/u);
   });
 
   it("follows a later change to the auto-collapse setting", () => {

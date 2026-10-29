@@ -23,3 +23,17 @@
   color: var(--text-faint);
   font-size: var(--text-xs);
 }
+
+.message-agent-call-delivery::before {
+  color: var(--text-faint);
+  content: "· ";
+}
+
+.message-agent-call > .custom-agent-avatar {
+  margin-block: -1px;
+}
+
+.message-agent-call .custom-agent-avatar::before,
+.message-agent-call .custom-agent-avatar::after {
+  content: none;
+}

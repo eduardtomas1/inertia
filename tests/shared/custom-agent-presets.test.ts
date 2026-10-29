@@ -5,17 +5,28 @@ import { CUSTOM_AGENT_PRESETS } from "../../src/shared/custom-agent-presets";
 import {
   compileCustomAgentInstructions,
   customAgentDraftSchema,
+  customAgentIconSchema,
   MAX_CUSTOM_AGENT_BLOCK_CHARS,
   MAX_CUSTOM_AGENT_COMPILED_CHARS,
 } from "../../src/shared/custom-agents";
 
-const iconKey = (preset: typeof CUSTOM_AGENT_PRESETS[number]): string =>
-  preset.icon.kind === "symbol" ? preset.icon.name : preset.icon.data;
-
 describe("custom agent presets", () => {
-  it("gives every preset a distinct id and icon", () => {
+  it("gives every preset a distinct id and a valid mark, so agents made from presets wear a figure", () => {
     expect(new Set(CUSTOM_AGENT_PRESETS.map((preset) => preset.id)).size).toBe(CUSTOM_AGENT_PRESETS.length);
-    expect(new Set(CUSTOM_AGENT_PRESETS.map(iconKey)).size).toBe(CUSTOM_AGENT_PRESETS.length);
+    expect(Object.fromEntries(CUSTOM_AGENT_PRESETS.map((preset) => [preset.id, [preset.icon, preset.accent]]))).toEqual({
+      reviewer: [{ kind: "mark", name: "scout" }, "blue"],
+      "test-writer": [{ kind: "mark", name: "guard" }, "green"],
+      "docs-writer": [{ kind: "mark", name: "scribe" }, "pink"],
+      refactorer: [{ kind: "mark", name: "builder" }, "violet"],
+      "security-auditor": [{ kind: "mark", name: "guard" }, "red"],
+      "bug-investigator": [{ kind: "mark", name: "scout" }, "orange"],
+      "performance-investigator": [{ kind: "mark", name: "spark" }, "amber"],
+      "upgrade-planner": [{ kind: "mark", name: "runner" }, "violet"],
+      "accessibility-reviewer": [{ kind: "mark", name: "scout" }, "teal"],
+    });
+    for (const preset of CUSTOM_AGENT_PRESETS) {
+      expect(customAgentIconSchema.safeParse(preset.icon).success).toBe(true);
+    }
   });
 
   it.each(CUSTOM_AGENT_PRESETS.map((preset) => [preset.name, preset] as const))("%s is complete and within bounds", (_name, preset) => {

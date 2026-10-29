@@ -428,7 +428,7 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
   await expect(handle).toHaveValue("reviewer");
   await expect(editor.getByRole("textbox", { name: "Description" })).toHaveValue(CUSTOM_AGENT_PRESETS[0]!.summary);
   await expect(editor.locator(".custom-agent-block-kind")).toHaveText(["Role", "Directions", "Must", "Must not"]);
-  await expect(editor.getByRole("radio", { name: "Search" })).toHaveAttribute("aria-checked", "true");
+  await expect(editor.getByRole("radio", { name: "Scout" })).toHaveAttribute("aria-checked", "true");
   await expect(editor.getByRole("radio", { name: "Blue" })).toHaveAttribute("aria-checked", "true");
 
   await name.fill("Code reviewer");
@@ -436,7 +436,7 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
   await expect(editor.getByText("Call it with /calling code-reviewer", { exact: true })).toBeVisible();
   await editor.getByRole("radio", { name: "Target" }).click();
   await expect(editor.getByRole("radio", { name: "Target" })).toHaveAttribute("aria-checked", "true");
-  await expect(editor.getByRole("radio", { name: "Search" })).toHaveAttribute("aria-checked", "false");
+  await expect(editor.getByRole("radio", { name: "Scout" })).toHaveAttribute("aria-checked", "false");
   await editor.getByRole("radio", { name: "Teal" }).click();
   await expect(editor.getByRole("radio", { name: "Teal" })).toHaveAttribute("aria-checked", "true");
   await editor.getByRole("radio", { name: "Blue" }).click();
@@ -677,7 +677,7 @@ test("shows a called agent's live and finished subagent work in the transcript",
   await expect(badges.nth(0).locator(".message-agent-call-name")).toHaveText("Called Code reviewer");
   await expect(badges.nth(1)).toHaveAttribute("data-delivery", "in-role");
   await expect(badges.nth(1).locator(".message-agent-call-name")).toHaveText("Called Docs writer");
-  await expect(badges.nth(1).locator(".message-agent-call-delivery")).toHaveText("· in role");
+  await expect(badges.nth(1).locator(".message-agent-call-delivery")).toHaveText("in role");
   await expect(page.getByRole("region", { name: /^Called agent / })).toHaveCount(1);
 
   const done = page.getByRole("region", { name: "Called agent Code reviewer" });

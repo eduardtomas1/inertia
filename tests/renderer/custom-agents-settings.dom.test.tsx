@@ -401,6 +401,80 @@ describe("custom agents settings", () => {
     expect(css).toMatch(/\.custom-agent-avatar \{\n  --agent-tint: var\(--text-muted\);/u);
   });
 
+  it("renders a mark as a CSS figure inset by tile size, never an img, with one file rule per mark and theme", () => {
+    const identity = { name: "Scout", icon: { kind: "mark" as const, name: "scout" as const }, accent: "blue" as const };
+    const sizes = [18, 20, 24, 32, 36, 40, 48, 64];
+    const { container } = render(<div>{sizes.map((size) => <CustomAgentAvatar key={size} agent={identity} size={size} />)}</div>);
+    const avatars = [...container.querySelectorAll<HTMLElement>(".custom-agent-avatar")];
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("svg")).toBeNull();
+    expect(avatars.map((avatar) => avatar.dataset.mark)).toEqual(sizes.map(() => "scout"));
+    expect(avatars.map((avatar) => avatar.dataset.iconKind)).toEqual(sizes.map(() => "mark"));
+    expect(avatars.map((avatar) => avatar.style.getPropertyValue("--agent-mark-inset"))).toEqual(["0px", "0px", "0px", "2px", "2px", "2px", "4px", "4px"]);
+    expect(avatars.map((avatar) => avatar.querySelector(".custom-agent-avatar-figure")?.getAttribute("data-shadow") ?? null))
+      .toEqual([null, null, null, "true", "true", "true", "true", "true"]);
+    const symbol = render(<CustomAgentAvatar agent={{ ...identity, icon: { kind: "symbol", name: "search" } }} size={36} />).container.firstElementChild as HTMLElement;
+    expect(symbol).not.toHaveAttribute("data-mark");
+    expect(symbol.style.getPropertyValue("--agent-mark-inset")).toBe("");
+    const css = readFileSync("src/renderer/src/components/custom-agents/CustomAgentAvatar.css", "utf8");
+    for (const mark of ["runner", "scout", "guard", "builder", "scribe", "spark"]) {
+      expect(css).toContain(`.custom-agent-avatar[data-mark="${mark}"] { --agent-mark: url(../../assets/marks/${mark}-dark.webp); }`);
+      expect(css).toContain(`:root[data-theme="light"] .custom-agent-avatar[data-mark="${mark}"] { --agent-mark: url(../../assets/marks/${mark}-light.webp); }`);
+    }
+    expect(css.match(/url\(/gu)).toHaveLength(12);
+    expect(css).not.toContain("pixelated");
+  });
+
+  it("offers the marks as a gallery radio group of draft-tinted tiles, before the symbols", async () => {
+    const { request } = setup();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Reviewer" }));
+    const panel = screen.getByRole("form", { name: "Edit Reviewer" });
+    const groups = within(panel).getAllByRole("radiogroup").map((group) => group.getAttribute("aria-label"));
+    expect(groups.slice(0, 2)).toEqual(["Mark", "Symbol"]);
+    const gallery = within(panel).getByRole("radiogroup", { name: "Mark" });
+    const marks = within(gallery).getAllByRole("radio");
+    expect(marks.map((mark) => mark.getAttribute("aria-label"))).toEqual(["Runner", "Scout", "Guard", "Builder", "Scribe", "Spark"]);
+    expect(marks.every((mark) => mark.getAttribute("aria-checked") === "false")).toBe(true);
+    expect(marks.map((mark) => mark.tabIndex)).toEqual([0, -1, -1, -1, -1, -1]);
+    const tiles = marks.map((mark) => mark.querySelector<HTMLElement>(".custom-agent-avatar")!);
+    expect(tiles.map((tile) => tile.dataset.mark)).toEqual(["runner", "scout", "guard", "builder", "scribe", "spark"]);
+    expect(tiles.every((tile) => tile.classList.contains("has-agent-tint") && tile.style.getPropertyValue("--agent-avatar-size") === "40px")).toBe(true);
+    const preview = panel.querySelector<HTMLElement>(".custom-agent-identity-preview")!;
+    expect(preview.style.getPropertyValue("--agent-avatar-size")).toBe("64px");
+    expect(preview).toHaveAttribute("data-icon-kind", "symbol");
+
+    marks[0]!.focus();
+    fireEvent.keyDown(marks[0]!, { key: "ArrowRight" });
+    expect(marks[1]).toHaveFocus();
+    expect(marks[1]).toHaveAttribute("aria-checked", "true");
+    expect(preview).toHaveAttribute("data-mark", "scout");
+    expect(within(within(panel).getByRole("radiogroup", { name: "Symbol" })).getAllByRole("radio").some((radio) => radio.getAttribute("aria-checked") === "true")).toBe(false);
+    fireEvent.click(within(panel).getByRole("radio", { name: "Green" }));
+    const tint = preview.style.getPropertyValue("--agent-tint-light");
+    expect(tint).not.toBe("");
+    expect(tiles.every((tile) => tile.style.getPropertyValue("--agent-tint-light") === tint)).toBe(true);
+    fireEvent.click(within(panel).getByRole("radio", { name: "Pen" }));
+    expect(marks.some((mark) => mark.getAttribute("aria-checked") === "true")).toBe(false);
+    fireEvent.click(within(panel).getByRole("radio", { name: "Guard" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(request.mock.calls[0]![0]).toEqual({
+      type: "custom-agent.update",
+      payload: { agentId: reviewerId, expectedRevision: 3, icon: { kind: "mark", name: "guard" }, accent: "green" },
+    });
+  });
+
+  it("greets an empty list with three marks and shows preset chips with their marks", () => {
+    const { container } = setup({ agents: [] });
+    const hero = [...container.querySelectorAll<HTMLElement>(".custom-agents-empty-avatars > .custom-agent-avatar")];
+    expect(hero.map((avatar) => avatar.dataset.mark)).toEqual(["scout", "builder", "scribe"]);
+    expect(hero.every((avatar) => avatar.style.getPropertyValue("--agent-avatar-size") === "32px" && avatar.classList.contains("has-agent-tint"))).toBe(true);
+    const chips = within(screen.getByRole("group", { name: "Presets" })).getAllByRole("button");
+    expect(chips.map((chip) => chip.querySelector<HTMLElement>(".custom-agent-avatar")!.dataset.mark))
+      .toEqual(CUSTOM_AGENT_PRESETS.map((preset) => preset.icon.kind === "mark" ? preset.icon.name : null));
+    expect(chips.every((chip) => chip.querySelector<HTMLElement>(".custom-agent-avatar")!.style.getPropertyValue("--agent-avatar-size") === "20px")).toBe(true);
+  });
+
   it("centre-crops a wide PNG to a square before resizing it", async () => {
     const close = vi.fn();
     const createImageBitmap = vi.fn(async (..._args: unknown[]) => ({ width: 128, height: 64, close }));

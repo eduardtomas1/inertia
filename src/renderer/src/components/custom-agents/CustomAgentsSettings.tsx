@@ -9,14 +9,13 @@ import {
   uniqueCustomAgentHandle,
   type CustomAgent,
   type CustomAgentDraft,
-  type CustomAgentIconName,
 } from "@shared/custom-agents";
 import { CUSTOM_AGENT_PRESETS } from "@shared/custom-agent-presets";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import { IconButton } from "../ui";
 import { SettingNoteStatus, SettingsGroup, SettingStatus } from "../settings/SettingsLayout";
 import { useSettingAction } from "../settings/useSettingAction";
-import { CustomAgentAvatar } from "./CustomAgentAvatar";
+import { CustomAgentAvatar, type CustomAgentIdentity } from "./CustomAgentAvatar";
 import { CustomAgentEditor } from "./CustomAgentEditor";
 import {
   blankCustomAgentDraft,
@@ -54,7 +53,11 @@ interface PendingMove {
 }
 
 const COUNT_VISIBLE_FROM = 30;
-const GHOST_SYMBOLS: readonly CustomAgentIconName[] = ["orbit", "search", "pen"];
+const GHOST_AGENTS: readonly CustomAgentIdentity[] = [
+  { name: "Scout", icon: { kind: "mark", name: "scout" }, accent: "blue" },
+  { name: "Builder", icon: { kind: "mark", name: "builder" }, accent: "violet" },
+  { name: "Scribe", icon: { kind: "mark", name: "scribe" }, accent: "pink" },
+];
 const LIMIT_MESSAGE = `You can keep up to ${MAX_CUSTOM_AGENTS} agents. Delete one to add another.`;
 
 function plural(count: number, word: string): string {
@@ -70,7 +73,7 @@ function PresetChips({ disabled, onPick }: { disabled: boolean; onPick: (presetI
     <div className="custom-agent-presets" role="group" aria-label="Presets" data-setting-id="custom-agent-presets">
       {CUSTOM_AGENT_PRESETS.map((preset) => (
         <button key={preset.id} type="button" className="custom-agent-preset" disabled={disabled} onClick={() => onPick(preset.id)}>
-          <CustomAgentAvatar agent={preset} size={18} />
+          <CustomAgentAvatar agent={preset} size={20} />
           {preset.name}
         </button>
       ))}
@@ -341,8 +344,8 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
         {ordered.length === 0 && !newEditor && (
           <div className="custom-agents-empty">
             <span className="custom-agents-empty-avatars" aria-hidden="true">
-              {GHOST_SYMBOLS.map((name) => (
-                <CustomAgentAvatar key={name} agent={{ name, icon: { kind: "symbol", name }, accent: null }} size={32} />
+              {GHOST_AGENTS.map((agent) => (
+                <CustomAgentAvatar key={agent.name} agent={agent} size={32} />
               ))}
             </span>
             <strong>No agents yet</strong>
@@ -359,7 +362,7 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
               return (
                 <li key={agent.id} className={clsx("custom-agent-row", open && "is-open")} data-agent-id={agent.id}>
                   <div className="custom-agent-row-summary">
-                    <CustomAgentAvatar agent={agent} size={32} />
+                    <CustomAgentAvatar agent={agent} size={36} />
                     <span className="custom-agent-row-copy">
                       <span className="custom-agent-row-title">
                         <strong>{agent.name}</strong>

@@ -5,7 +5,7 @@ export const CUSTOM_AGENT_PRESETS: readonly CustomAgentPreset[] = [
     id: "reviewer",
     name: "Reviewer",
     summary: "Reads a change like a careful senior engineer and reports what would break.",
-    icon: { kind: "symbol", name: "search" },
+    icon: { kind: "mark", name: "scout" },
     accent: "blue",
     blocks: [
       {
@@ -30,7 +30,7 @@ export const CUSTOM_AGENT_PRESETS: readonly CustomAgentPreset[] = [
     id: "test-writer",
     name: "Test writer",
     summary: "Writes focused tests that pin down behavior and fail for the right reason.",
-    icon: { kind: "symbol", name: "flask" },
+    icon: { kind: "mark", name: "guard" },
     accent: "green",
     blocks: [
       {
@@ -55,7 +55,7 @@ export const CUSTOM_AGENT_PRESETS: readonly CustomAgentPreset[] = [
     id: "docs-writer",
     name: "Docs writer",
     summary: "Turns code and decisions into short, accurate documentation people actually read.",
-    icon: { kind: "symbol", name: "pen" },
+    icon: { kind: "mark", name: "scribe" },
     accent: "pink",
     blocks: [
       {
@@ -80,7 +80,7 @@ export const CUSTOM_AGENT_PRESETS: readonly CustomAgentPreset[] = [
     id: "refactorer",
     name: "Refactorer",
     summary: "Restructures code in small, behavior-preserving steps with tests green throughout.",
-    icon: { kind: "symbol", name: "wrench" },
+    icon: { kind: "mark", name: "builder" },
     accent: "violet",
     blocks: [
       {
@@ -105,7 +105,7 @@ export const CUSTOM_AGENT_PRESETS: readonly CustomAgentPreset[] = [
     id: "security-auditor",
     name: "Security auditor",
     summary: "Traces untrusted input across privilege boundaries and reports reachable security defects.",
-    icon: { kind: "symbol", name: "shield" },
+    icon: { kind: "mark", name: "guard" },
     accent: "red",
     blocks: [
       {
@@ -130,7 +130,7 @@ export const CUSTOM_AGENT_PRESETS: readonly CustomAgentPreset[] = [
     id: "bug-investigator",
     name: "Bug investigator",
     summary: "Follows a reported failure to its first incorrect state and proposes a discriminating check.",
-    icon: { kind: "symbol", name: "bug" },
+    icon: { kind: "mark", name: "scout" },
     accent: "orange",
     blocks: [
       {
@@ -155,7 +155,7 @@ export const CUSTOM_AGENT_PRESETS: readonly CustomAgentPreset[] = [
     id: "performance-investigator",
     name: "Performance investigator",
     summary: "Separates measured bottlenecks from guesses and recommends the next useful optimization.",
-    icon: { kind: "symbol", name: "zap" },
+    icon: { kind: "mark", name: "spark" },
     accent: "amber",
     blocks: [
       {
@@ -180,7 +180,7 @@ export const CUSTOM_AGENT_PRESETS: readonly CustomAgentPreset[] = [
     id: "upgrade-planner",
     name: "Upgrade planner",
     summary: "Maps a named dependency upgrade to affected call sites, compatibility checks and rollback risks.",
-    icon: { kind: "symbol", name: "rocket" },
+    icon: { kind: "mark", name: "runner" },
     accent: "violet",
     blocks: [
       {
@@ -205,7 +205,7 @@ export const CUSTOM_AGENT_PRESETS: readonly CustomAgentPreset[] = [
     id: "accessibility-reviewer",
     name: "Accessibility reviewer",
     summary: "Checks a user journey for keyboard, focus, naming and visual access barriers.",
-    icon: { kind: "symbol", name: "eye" },
+    icon: { kind: "mark", name: "scout" },
     accent: "teal",
     blocks: [
       {

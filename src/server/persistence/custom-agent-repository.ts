@@ -302,7 +302,7 @@ export class CustomAgentRepository {
     if (length > MAX_CUSTOM_AGENTS_TOTAL_SERIALIZED_LENGTH && length > serializedLength(this.list())) {
       throw new CustomAgentRepositoryError(
         "limit",
-        "Together, your custom agents' icons and instructions are too large to save. Use a symbol icon, shorten the instructions or delete an agent you no longer need.",
+        "Together, your custom agents' icons and instructions are too large to save. Use a mark or symbol icon, shorten the instructions or delete an agent you no longer need.",
       );
     }
   }

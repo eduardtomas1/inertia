@@ -129,3 +129,7 @@
   line-height: 16px;
   white-space: nowrap;
 }
+
+.composer-agent-call-menu [data-active="true"] .composer-agent-call-handle {
+  color: var(--text-muted);
+}

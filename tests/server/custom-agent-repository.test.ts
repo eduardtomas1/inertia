@@ -207,6 +207,16 @@ describe("CustomAgentRepository", () => {
     expectCode(() => agents.update(agent.id, agent.revision, { icon: { kind: "image", data: oversized } }), "invalid");
   });
 
+  it("stores a mark icon through the SQL checks and switches it back to a symbol", async () => {
+    const { store } = await openStore();
+    const agents = store.customAgents();
+    const agent = agents.create(draft({ icon: { kind: "mark", name: "spark" } }), { onHandleConflict: "reject" });
+    expect(agents.get(agent.id)?.icon).toEqual({ kind: "mark", name: "spark" });
+    const updated = agents.update(agent.id, agent.revision, { icon: { kind: "symbol", name: "star" } });
+    expect(agents.get(updated.id)?.icon).toEqual({ kind: "symbol", name: "star" });
+    expectCode(() => agents.update(updated.id, updated.revision, { icon: { kind: "mark", name: "wizard" } as never }), "invalid");
+  });
+
   it("reuses one parsed list across snapshots until a mutation changes it", async () => {
     const { store, databasePath } = await openStore();
     const agents = store.customAgents();

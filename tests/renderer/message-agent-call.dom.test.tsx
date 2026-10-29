@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -126,7 +128,20 @@ describe("called agent badge", () => {
     expect(container.querySelector(".custom-agent-avatar")).toHaveAttribute("aria-hidden", "true");
     expect(container).not.toHaveTextContent("in role");
     rerender(<MessageAgentCall attribution={{ ...attribution, delivery: "in-role" }} />);
-    expect(container.querySelector(".message-agent-call")).toHaveTextContent("Called Code reviewer· in role");
+    expect(container.querySelector(".message-agent-call-delivery")).toHaveTextContent(/^in role$/u);
+  });
+
+  it("wears an 18 px mark that never shows the live ring or glow, with the separator drawn in CSS", () => {
+    const { container } = render(<MessageAgentCall attribution={{ ...attribution, icon: { kind: "mark", name: "guard" }, delivery: "in-role" }} />);
+    const avatar = container.querySelector<HTMLElement>(".custom-agent-avatar")!;
+    expect(avatar).toHaveAttribute("data-mark", "guard");
+    expect(avatar).not.toHaveAttribute("data-live");
+    expect(avatar.style.getPropertyValue("--agent-avatar-size")).toBe("18px");
+    expect(avatar.style.getPropertyValue("--agent-mark-inset")).toBe("0px");
+    expect(avatar.querySelector("img")).toBeNull();
+    const css = readFileSync("src/renderer/src/components/response-timeline/MessageAgentCall.css", "utf8").replaceAll("\r\n", "\n");
+    expect(css).toMatch(/\.message-agent-call \.custom-agent-avatar::before,\n\.message-agent-call \.custom-agent-avatar::after \{\n  content: none;/u);
+    expect(css).toMatch(/\.message-agent-call-delivery::before \{\n  color: var\(--text-faint\);\n  content: "· ";/u);
   });
 
   it("shows the badge above the request and the call block even after the agent was deleted", async () => {
@@ -155,7 +170,7 @@ describe("called agent badge", () => {
     renderTimeline([request, answer], [turn], [trace]);
     const requestRow = await screen.findByRole("article", { name: "Your request" });
     const badge = requestRow.querySelector(".message-agent-call")!;
-    expect(badge).toHaveTextContent("Called Code reviewer· in role");
+    expect(badge).toHaveTextContent("Called Code reviewerin role");
     expect(badge.compareDocumentPosition(requestRow.querySelector(".message-body")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("region", { name: "Called agent Code reviewer" })).toBeInTheDocument();
     expect(screen.queryByText(/1 agent finished/u)).toBeNull();

@@ -38,6 +38,7 @@ function SubagentCallBlockComponent({
   const [expanded, setExpanded] = useState(() => remembered?.expanded ?? (live || !context.autoCollapse));
   const [opened, setOpened] = useState(expanded);
   const [stopping, setStopping] = useState(false);
+  const [settled, setSettled] = useState(false);
   const wasLive = useRef(remembered?.live ?? live);
   const seenAutoCollapse = useRef(context.autoCollapse);
   const bodyId = useId();
@@ -50,7 +51,9 @@ function SubagentCallBlockComponent({
     if (!wasLive.current && live) {
       setExpanded(true);
       setOpened(true);
+      setSettled(false);
     }
+    if (wasLive.current && !live) setSettled(true);
     wasLive.current = live;
   }, [context.autoCollapse, live, trace.status]);
   useLayoutEffect(() => {
@@ -81,6 +84,8 @@ function SubagentCallBlockComponent({
       data-subagent-call={trace.id}
       data-live={live ? "true" : "false"}
       data-status={trace.status}
+      data-stopping={stopping && live ? "true" : undefined}
+      data-settled={settled ? "true" : undefined}
       data-expanded={expanded ? "true" : "false"}
       aria-label={`Called agent ${agent.name}`}
     >
@@ -91,7 +96,7 @@ function SubagentCallBlockComponent({
         aria-controls={bodyId}
         onClick={toggle}
       >
-        <CustomAgentAvatar agent={agent} size={28} live={live} />
+        <CustomAgentAvatar agent={agent} size={36} live={live} />
         <span className="subagent-call-title">
           <strong>{agent.name}</strong>
           <small>

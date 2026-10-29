@@ -7,6 +7,8 @@ import {
   buildCustomAgentExport,
   compileCustomAgentInstructions,
   CUSTOM_AGENT_INLINE_FRAMING_BYTES,
+  CUSTOM_AGENT_MARK_LABELS,
+  CUSTOM_AGENT_MARK_NAMES,
   customAgentCallAttributionSchema,
   customAgentDraftSchema,
   customAgentExportFileName,
@@ -83,6 +85,16 @@ describe("custom agent contracts", () => {
     expect(valid(draft({ icon: { kind: "image", data: png } }))).toBe(true);
     expect(valid(draft({ icon: { kind: "image", data: "data:image/jpeg;base64,/9j/4AAQ" } }))).toBe(false);
     expect(valid(draft({ icon: { kind: "symbol", name: "unknown" as never } }))).toBe(false);
+  });
+
+  it("accepts the six marks as a strict icon kind with labels", () => {
+    expect(CUSTOM_AGENT_MARK_NAMES).toEqual(["runner", "scout", "guard", "builder", "scribe", "spark"]);
+    expect(CUSTOM_AGENT_MARK_NAMES.map((name) => CUSTOM_AGENT_MARK_LABELS[name])).toEqual(["Runner", "Scout", "Guard", "Builder", "Scribe", "Spark"]);
+    for (const name of CUSTOM_AGENT_MARK_NAMES) expect(valid(draft({ icon: { kind: "mark", name } }))).toBe(true);
+    expect(valid(draft({ icon: { kind: "mark", name: "shield" as never } }))).toBe(false);
+    expect(valid(draft({ icon: { kind: "mark", name: "scout", data: "x" } as never }))).toBe(false);
+    expect(valid(draft({ icon: { kind: "symbol", name: "scout" as never } }))).toBe(false);
+    expect(Math.max(...CUSTOM_AGENT_MARK_NAMES.map((name) => JSON.stringify({ kind: "mark", name }).length))).toBeLessThan(40);
   });
 
   it("compiles blocks into ordered markdown sections", () => {
@@ -177,6 +189,12 @@ describe("custom agent contracts", () => {
     expect(customAgentExportSchema.safeParse(envelope).success).toBe(true);
     expect(customAgentExportSchema.safeParse({ ...envelope, agents: [] }).success).toBe(false);
     expect(customAgentExportSchema.safeParse({ ...envelope, version: 2 }).success).toBe(false);
+    const marked = { ...agent, icon: { kind: "mark" as const, name: "scribe" as const } };
+    const roundTrip = customAgentExportSchema.parse(JSON.parse(JSON.stringify(buildCustomAgentExport([marked], "2026-10-29T10:00:00.000Z"))));
+    expect(roundTrip.agents[0]!.icon).toEqual({ kind: "mark", name: "scribe" });
+    expect(customAgentCallAttributionSchema.parse({
+      agentId: marked.id, revision: 3, handle: marked.handle, name: marked.name, icon: marked.icon, accent: null, delivery: "subagent",
+    }).icon).toEqual({ kind: "mark", name: "scribe" });
     expect(customAgentExportFileName([agent])).toMatch(/^inertia-agent-reviewer-\d{4}-\d{2}-\d{2}\.json$/u);
     expect(customAgentExportFileName([agent, agent])).toMatch(/^inertia-agents-\d{4}-\d{2}-\d{2}\.json$/u);
   });

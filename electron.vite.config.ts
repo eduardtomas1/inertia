@@ -156,6 +156,7 @@ export default defineConfig({
       },
       sourcemap: false,
       cssCodeSplit: true,
+      assetsInlineLimit: (filePath) => filePath.replaceAll("\\", "/").includes("/assets/marks/") ? false : undefined,
       chunkSizeWarningLimit: 850,
       rollupOptions: {
         input: { index: resolve("src/renderer/index.html"), mascot: resolve("src/renderer/mascot.html") },

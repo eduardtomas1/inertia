@@ -17,6 +17,7 @@ import {
   type AgentSecretRequestRecord,
 } from "../../persistence/agent-secret-request-repository";
 import type { ProviderHostToolCall, ProviderHostToolResult } from "../../provider/contracts";
+import type { SecretRequestOpening, TurnSecretRequestWaits } from "../turns/turn-secret-output";
 import {
   agentSecretFilePath,
   agentSecretRoot,
@@ -38,12 +39,8 @@ import {
 } from "./secret-request-host-tool";
 
 const HOUR_MS = 60 * 60_000;
-const DEFAULT_SWEEP_INTERVAL_MS = HOUR_MS;
+const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60_000;
 const MAX_TIMER_MS = 2_147_483_647;
-
-export interface AgentSecretTurnWaits {
-  secretWait(conversationId: string, turnId: string, requestId: string, title: string | null): boolean;
-}
 
 export interface AgentSecretVault {
   resolve(secretReference: string): Promise<string | null>;
@@ -51,9 +48,9 @@ export interface AgentSecretVault {
 }
 
 export interface AgentSecretServiceDependencies {
-  store: Pick<RuntimeStore, "agentSecretRequests" | "conversation">;
+  store: Pick<RuntimeStore, "transcriptRepository" | "conversation">;
   dataDirectory: string;
-  turns: AgentSecretTurnWaits;
+  turns: TurnSecretRequestWaits;
   broadcast(event: RuntimeMutationEvent): void;
   credentials?: AgentSecretVault;
   signal?: AbortSignal;
@@ -61,6 +58,7 @@ export interface AgentSecretServiceDependencies {
   platform?: NodeJS.Platform;
   waitMs?: (providerId: ProviderId) => number;
   sweepIntervalMs?: number;
+  removeDirectory?: (root: string, token: string) => void;
 }
 
 export interface AgentSecretHostToolSource {
@@ -74,6 +72,8 @@ export interface AgentSecretDelivery {
   secret: string;
   vaulted: boolean;
 }
+
+export type AgentSecretRevokeOutcome = "revoked" | "not-active" | "in-use";
 
 export type AgentSecretDeliveryOutcome =
   | { status: "delivered"; expiresAt: string; storage: SecretRequestStorage }
@@ -111,6 +111,7 @@ export class AgentSecretService {
   private readonly platform: NodeJS.Platform;
   private readonly pending = new Map<string, PendingRequest>();
   private readonly active = new Map<string, ActiveSecret>();
+  private readonly lingering = new Map<string, string>();
   private restoring: AgentSecretRequestRecord[] = [];
   private expiryTimer: NodeJS.Timeout | null = null;
   private sweepTimer: NodeJS.Timeout | null = null;
@@ -125,7 +126,7 @@ export class AgentSecretService {
   }
 
   private get repository() {
-    return this.dependencies.store.agentSecretRequests();
+    return this.dependencies.store.transcriptRepository.secretRequests;
   }
 
   start(): void {
@@ -135,7 +136,21 @@ export class AgentSecretService {
     } catch {
     }
     clearAgentSecretRoot(this.root);
-    for (const record of this.repository.pendingAll()) this.transition(record.id, ["pending"], "ended");
+    try {
+      this.settleStoredRequests();
+    } catch {
+      this.restoring = [];
+    }
+    const interval = Math.max(1_000, this.dependencies.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS);
+    this.sweepTimer = setInterval(() => this.sweep(), interval);
+    this.sweepTimer.unref?.();
+  }
+
+  private settleStoredRequests(): void {
+    for (const record of this.repository.pendingAll()) {
+      this.transition(record.id, ["pending"], "ended");
+      this.forgetVault(record.id);
+    }
     const now = this.clock();
     for (const record of this.repository.activeSaved()) {
       if (Date.parse(record.expiresAt ?? "") <= now || !record.vaulted || !this.dependencies.credentials) {
@@ -144,9 +159,6 @@ export class AgentSecretService {
       }
       this.restoring.push(record);
     }
-    const interval = Math.max(1_000, this.dependencies.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS);
-    this.sweepTimer = setInterval(() => this.sweep(), interval);
-    this.sweepTimer.unref?.();
   }
 
   async restore(): Promise<void> {
@@ -167,8 +179,11 @@ export class AgentSecretService {
         this.retire(record.id, "expired");
         continue;
       }
+      const token = current.fileToken;
+      this.active.set(record.id, { conversationId: current.conversationId, token, expiresAtMs, value });
+      this.refreshActive();
       try {
-        await writeAgentSecretFile(this.root, current.fileToken, current.fileName, value);
+        await writeAgentSecretFile(this.root, token, current.fileName, value);
       } catch {
         this.retire(record.id, "expired");
         continue;
@@ -177,13 +192,10 @@ export class AgentSecretService {
         clearAgentSecretRoot(this.root);
         return;
       }
-      this.active.set(record.id, {
-        conversationId: current.conversationId,
-        token: current.fileToken,
-        expiresAtMs,
-        value,
-      });
-      this.refreshActive();
+      if (this.active.get(record.id)?.token !== token) {
+        this.discardFile(token, value);
+        this.refreshActive();
+      }
     }
   }
 
@@ -193,6 +205,7 @@ export class AgentSecretService {
     if (this.closed) return secretRequestEndedResult("stopped");
     if (call.signal.aborted) return secretRequestFailure("call_cancelled", "The secret request was cancelled.");
     if (this.activeCount() >= SECRET_REQUEST_MAX_ACTIVE) return secretRequestLimitFailure("active-limit");
+    const opening = this.openRequest(source.conversation.id, source.turn.id);
     let created: AgentSecretRequestChange;
     try {
       created = this.repository.create({
@@ -201,7 +214,7 @@ export class AgentSecretService {
         turnId: source.turn.id,
         providerId: source.turn.providerId,
         ...parsed.input,
-        createdAt: new Date(this.clock()).toISOString(),
+        createdAt: this.cardCreatedAt(opening),
       });
     } catch (error) {
       if (error instanceof AgentSecretRequestError) return secretRequestLimitFailure(error.code);
@@ -253,7 +266,7 @@ export class AgentSecretService {
     if (this.closed) return rejected("ended");
     const entry = this.pending.get(input.requestId);
     if (!entry || entry.conversationId !== input.conversationId || entry.delivering) return rejected("not-pending");
-    if (!isAgentSecretValue(input.secret)) return rejected("file-failed");
+    if (!isAgentSecretValue(input.secret)) return rejected("invalid");
     if (this.activeCount() >= SECRET_REQUEST_MAX_ACTIVE) return rejected("limit");
     entry.delivering = true;
     const token = newAgentSecretFileToken();
@@ -276,12 +289,12 @@ export class AgentSecretService {
         answeredAt: new Date(now).toISOString(),
       });
     } catch (error) {
-      this.removeFile(token);
+      this.discardFile(token, input.secret);
       entry.delivering = false;
       return rejected(error instanceof AgentSecretRequestError ? "limit" : "file-failed");
     }
     if (!change || this.closed) {
-      this.removeFile(token);
+      this.discardFile(token, input.secret);
       return rejected("ended");
     }
     this.active.set(input.requestId, {
@@ -305,10 +318,12 @@ export class AgentSecretService {
     return Promise.resolve(true);
   }
 
-  revoke(requestId: string): Promise<boolean> {
+  revoke(requestId: string): Promise<AgentSecretRevokeOutcome> {
     const record = this.repository.find(requestId);
-    if (record?.status !== "saved") return Promise.resolve(false);
-    return Promise.resolve(this.retire(requestId, "revoked"));
+    if (record?.status !== "saved") return Promise.resolve("not-active");
+    const secret = this.active.get(requestId);
+    if (secret && !this.removeFile(secret.token)) return Promise.resolve("in-use");
+    return Promise.resolve(this.retire(requestId, "revoked") ? "revoked" : "not-active");
   }
 
   revokeForConversation(conversationId: string): void {
@@ -329,11 +344,7 @@ export class AgentSecretService {
         this.repository.transition(requestId, ["saved"], "revoked");
       } catch {
       }
-      const secret = this.active.get(requestId);
-      if (secret) {
-        this.active.delete(requestId);
-        this.removeFile(secret.token);
-      }
+      this.release(requestId);
       this.forgetVault(requestId);
     }
     this.refreshActive();
@@ -363,15 +374,21 @@ export class AgentSecretService {
 
   sweep(): void {
     if (this.closed) return;
-    this.expireDue();
-    for (const [requestId, secret] of this.active) {
-      if (this.repository.find(requestId)?.status === "saved") continue;
-      this.active.delete(requestId);
-      this.removeFile(secret.token);
-      this.forgetVault(requestId);
+    try {
+      this.expireDue();
+      for (const requestId of this.active.keys()) {
+        if (this.repository.find(requestId)?.status === "saved") continue;
+        this.release(requestId);
+        this.forgetVault(requestId);
+      }
+    } catch {
+    }
+    for (const token of this.lingering.keys()) {
+      if (this.removeFile(token)) this.lingering.delete(token);
     }
     this.refreshActive();
-    clearAgentSecretRoot(this.root, new Set([...this.active.values()].map(({ token }) => token)));
+    const kept = [...this.active.values()].map(({ token }) => token);
+    clearAgentSecretRoot(this.root, new Set([...kept, ...this.lingering.keys()]));
   }
 
   shutdown(): void {
@@ -390,6 +407,7 @@ export class AgentSecretService {
       entry.finish({ kind: "ended", reason: "stopped" });
     }
     this.active.clear();
+    this.lingering.clear();
     this.output.setValues([]);
     clearAgentSecretRoot(this.root);
   }
@@ -424,14 +442,23 @@ export class AgentSecretService {
 
   private retire(requestId: string, to: "expired" | "revoked"): boolean {
     const changed = this.transition(requestId, ["saved"], to);
-    const secret = this.active.get(requestId);
-    if (secret) {
-      this.active.delete(requestId);
-      this.removeFile(secret.token);
+    if (this.active.has(requestId)) {
+      this.release(requestId);
       this.refreshActive();
     }
     if (changed) this.forgetVault(requestId);
     return changed;
+  }
+
+  private release(requestId: string): void {
+    const secret = this.active.get(requestId);
+    if (!secret) return;
+    this.active.delete(requestId);
+    this.discardFile(secret.token, secret.value);
+  }
+
+  private discardFile(token: string, value: string): void {
+    if (!this.removeFile(token)) this.lingering.set(token, value);
   }
 
   private transition(requestId: string, from: readonly SecretRequestStatus[], to: SecretRequestStatus): boolean {
@@ -447,7 +474,7 @@ export class AgentSecretService {
   }
 
   private refreshActive(): void {
-    this.output.setValues([...this.active.values()].map(({ value }) => value));
+    this.output.setValues([...[...this.active.values()].map(({ value }) => value), ...this.lingering.values()]);
     this.scheduleExpiry();
   }
 
@@ -459,7 +486,10 @@ export class AgentSecretService {
     const delay = Math.max(0, Math.min(MAX_TIMER_MS, soonest - this.clock()));
     this.expiryTimer = setTimeout(() => {
       this.expiryTimer = null;
-      this.expireDue();
+      try {
+        this.expireDue();
+      } catch {
+      }
       this.scheduleExpiry();
     }, delay);
     this.expiryTimer.unref?.();
@@ -467,16 +497,31 @@ export class AgentSecretService {
 
   private secretWait(conversationId: string, turnId: string, requestId: string, title: string | null): boolean {
     try {
-      return this.dependencies.turns.secretWait(conversationId, turnId, requestId, title);
+      return this.dependencies.turns.wait(conversationId, turnId, requestId, title);
     } catch {
       return false;
     }
   }
 
-  private removeFile(token: string): void {
+  private openRequest(conversationId: string, turnId: string): SecretRequestOpening | null {
     try {
-      removeAgentSecretDirectory(this.root, token);
+      return this.dependencies.turns.open(conversationId, turnId);
     } catch {
+      return null;
+    }
+  }
+
+  private cardCreatedAt(opening: SecretRequestOpening | null): string {
+    const notBefore = opening?.notBefore ? Date.parse(opening.notBefore) + 1 : Number.NaN;
+    return new Date(Number.isFinite(notBefore) ? Math.max(this.clock(), notBefore) : this.clock()).toISOString();
+  }
+
+  private removeFile(token: string): boolean {
+    try {
+      (this.dependencies.removeDirectory ?? removeAgentSecretDirectory)(this.root, token);
+      return true;
+    } catch {
+      return false;
     }
   }
 

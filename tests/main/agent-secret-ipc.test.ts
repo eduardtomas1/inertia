@@ -241,7 +241,7 @@ describe("agent secret save IPC storage", () => {
     ["ended", AGENT_SECRET_SAVE_ERRORS.notPending],
     ["file-failed", AGENT_SECRET_SAVE_ERRORS.fileFailed],
     ["limit", AGENT_SECRET_SAVE_ERRORS.limit],
-    ["unavailable", AGENT_SECRET_SAVE_ERRORS.runtimeUnavailable],
+    ["invalid", AGENT_SECRET_SAVE_ERRORS.invalid],
   ] as const)("removes the vault entry when the runtime rejects with %s", async (reason, message) => {
     const runtime = new FakeRuntime();
     runtime.outcome = { status: "rejected", reason };
@@ -251,12 +251,17 @@ describe("agent secret save IPC storage", () => {
     expect((vault as FakeVault).deletes).toEqual([save.requestId]);
   });
 
-  it("removes the vault entry when delivery throws", async () => {
+  it.each([
+    ["the runtime reply times out", { status: "rejected", reason: "unavailable" } as const],
+    ["delivery throws", new Error(`worker failed with ${SECRET}`)],
+  ])("keeps the vault entry for the runtime to settle when %s, since the save may still land", async (_label, outcome) => {
     const runtime = new FakeRuntime();
-    runtime.outcome = new Error(`worker failed with ${SECRET}`);
+    runtime.outcome = outcome;
     const { invoke, vault } = setup({ runtime });
-    expect((await failure(invoke(request()))).message).toBe(AGENT_SECRET_SAVE_ERRORS.runtimeUnavailable);
-    expect((vault as FakeVault).deletes).toHaveLength(1);
+    const error = await failure(invoke(request()));
+    expect(error.message).toBe(AGENT_SECRET_SAVE_ERRORS.runtimeUnavailable);
+    expect(error.message).not.toContain(SECRET);
+    expect((vault as FakeVault).deletes).toEqual([]);
   });
 
   it("fails without writing when the vault or runtime is not ready", async () => {

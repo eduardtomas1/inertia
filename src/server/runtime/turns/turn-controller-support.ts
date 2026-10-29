@@ -10,6 +10,7 @@ import {
   sanitizeProviderFailureSummary,
 } from "../../provider/activity-detail";
 import type {
+  ProviderEvent,
   ProviderRunFailure,
   ProviderRunResult,
 } from "../../provider/contracts";
@@ -125,6 +126,18 @@ export function previousTurnBoundaryUsage(
     return null;
   }
   return { ...previousTurn.usageAtCompletion };
+}
+
+export function providerEventResumesRun(active: ActiveTurn, event: ProviderEvent): boolean {
+  const state = active.runState.snapshot().state;
+  return (state === "retrying" || state === "delegated")
+    && (
+      event.type === "text"
+      || event.type === "text-snapshot"
+      || event.type === "reasoning-summary"
+      || (event.type === "activity" && event.phase === "started")
+      || event.type === "plan"
+    );
 }
 
 export function publicTurnError(error: unknown): string {

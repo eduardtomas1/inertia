@@ -1,4 +1,4 @@
-import { isAgentSecretValue, SECRET_REQUEST_STORAGES, type SecretRequestStorage } from "../shared/agent-secrets.js";
+import { SECRET_REQUEST_STORAGES, type SecretRequestStorage } from "../shared/agent-secrets.js";
 
 export interface RuntimeAgentSecretDeliverCommand {
   type: "runtime.agent-secret-deliver";
@@ -9,7 +9,7 @@ export interface RuntimeAgentSecretDeliverCommand {
   vaulted: boolean;
 }
 
-export const RUNTIME_AGENT_SECRET_REJECTION_REASONS = ["not-pending", "ended", "file-failed", "limit"] as const;
+export const RUNTIME_AGENT_SECRET_REJECTION_REASONS = ["not-pending", "ended", "file-failed", "limit", "invalid"] as const;
 export type RuntimeAgentSecretRejectionReason = (typeof RUNTIME_AGENT_SECRET_REJECTION_REASONS)[number];
 
 export type RuntimeAgentSecretEvent =
@@ -21,6 +21,12 @@ const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+
 
 function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const MAX_IDENTITY_LENGTH = 128;
+
+function identity(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_IDENTITY_LENGTH;
 }
 
 function uuid(value: unknown): value is string {
@@ -41,9 +47,9 @@ export function parseRuntimeAgentSecretDeliverCommand(value: unknown): RuntimeAg
     || value.type !== "runtime.agent-secret-deliver"
     || Object.keys(value).length !== 6
     || !uuid(value.transportId)
-    || !uuid(value.conversationId)
-    || !uuid(value.requestId)
-    || !isAgentSecretValue(value.secret)
+    || !identity(value.conversationId)
+    || !identity(value.requestId)
+    || typeof value.secret !== "string"
     || typeof value.vaulted !== "boolean"
   ) return null;
   return {

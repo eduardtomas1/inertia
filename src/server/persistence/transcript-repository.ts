@@ -26,6 +26,7 @@ import {
 } from "./codecs";
 import type { PersistenceContext } from "./context";
 import { RecordNotFoundError } from "./errors";
+import { AgentSecretRequestRepository } from "./agent-secret-request-repository";
 import type { MessageRow } from "./rows";
 import {
   appendMessageContentChunks,
@@ -71,7 +72,16 @@ function validCustomAgentCall(role: ChatMessage["role"], call: CustomAgentCallAt
 }
 
 export class TranscriptRepository {
-  constructor(private readonly context: TranscriptPersistenceContext) {}
+  readonly secretRequests: AgentSecretRequestRepository;
+
+  constructor(private readonly context: TranscriptPersistenceContext) {
+    this.secretRequests = new AgentSecretRequestRepository(context.database, {
+      assertAgentTurnIdentity: (conversationId, runId, turnId) =>
+        context.assertAgentTurnIdentity(conversationId, runId, turnId),
+      createMessage: (...input) => this.createMessage(...input),
+      message: (messageId) => this.message(messageId),
+    });
+  }
 
   continuationHistory(
     conversationId: string,

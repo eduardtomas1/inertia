@@ -366,6 +366,13 @@ export class TurnInteractionCoordinator {
     this.broadcastConversationShell(active);
   }
 
+  closeForSecretRequest(active: ActiveTurn): string | null {
+    this.options.streams.closeAssistantSegment(active);
+    this.options.streams.flush(active, "reasoning");
+    const latest = active.latestAssistantMessageId;
+    return latest ? this.options.store.message(latest).createdAt : null;
+  }
+
   secretWait(active: ActiveTurn | undefined, turnId: string, requestId: string, title: string | null): boolean {
     if (!active || active.turn.id !== turnId || !active.runState.acceptsProviderEvents()) return false;
     const waits = this.secretWaits.get(active) ?? new Map<string, string>();

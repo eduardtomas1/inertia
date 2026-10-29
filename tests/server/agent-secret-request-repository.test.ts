@@ -108,7 +108,7 @@ function storedReference(databasePath: string, messageId: string): SecretRequest
 describe("AgentSecretRequestRepository", () => {
   it("creates a pending request and its turn-scoped system message in an active turn", async () => {
     const { store, databasePath, turn } = await openStore();
-    const { request, message } = store.agentSecretRequests().create(input(turn));
+    const { request, message } = store.transcriptRepository.secretRequests.create(input(turn));
     expect(request).toMatchObject({
       conversationId: turn.conversationId,
       turnId: turn.id,
@@ -138,13 +138,13 @@ describe("AgentSecretRequestRepository", () => {
     expect(chatMessageSchema(message)).toBe(true);
     expect(store.message(message.id)).toEqual(message);
     expect(storedReference(databasePath, message.id)).toEqual(reference);
-    expect(store.agentSecretRequests().pendingAll().map(({ id }) => id)).toEqual([request.id]);
-    expect(store.agentSecretRequests().find(request.id)).toEqual(request);
+    expect(store.transcriptRepository.secretRequests.pendingAll().map(({ id }) => id)).toEqual([request.id]);
+    expect(store.transcriptRepository.secretRequests.find(request.id)).toEqual(request);
   });
 
   it("refuses a settled turn and enforces one pending request per chat and three per turn", async () => {
     const { store, turn } = await openStore();
-    const requests = store.agentSecretRequests();
+    const requests = store.transcriptRepository.secretRequests;
     const first = requests.create(input(turn)).request;
     expectCode(() => requests.create(input(turn)), "conversation-pending-limit");
     requests.transition(first.id, ["pending"], "declined");
@@ -162,7 +162,7 @@ describe("AgentSecretRequestRepository", () => {
 
   it("lets the first answer win and never turns a saved secret into a declined one", async () => {
     const { store, databasePath, turn } = await openStore();
-    const requests = store.agentSecretRequests();
+    const requests = store.transcriptRepository.secretRequests;
     const { request } = requests.create(input(turn));
     const saved = requests.transition(request.id, ["pending"], "saved", {
       fileToken: TOKEN,
@@ -185,7 +185,7 @@ describe("AgentSecretRequestRepository", () => {
 
   it("validates the saved fields and reports a memory-only secret", async () => {
     const { store, turn } = await openStore();
-    const requests = store.agentSecretRequests();
+    const requests = store.transcriptRepository.secretRequests;
     const { request } = requests.create(input(turn));
     expect(() => requests.transition(request.id, ["pending"], "saved", { fileToken: "ABC", expiresAt: EXPIRES_AT, vaulted: true }))
       .toThrow("Invalid secret file token.");
@@ -201,7 +201,7 @@ describe("AgentSecretRequestRepository", () => {
 
   it("rewrites the message JSON in the same transaction as the status", async () => {
     const { store, databasePath, turn } = await openStore();
-    const requests = store.agentSecretRequests();
+    const requests = store.transcriptRepository.secretRequests;
     const { request, message } = requests.create(input(turn));
     const blocker = new Database(databasePath);
     blocker.exec(`CREATE TRIGGER block_secret_message BEFORE UPDATE OF secret_request_json ON messages
@@ -222,7 +222,7 @@ describe("AgentSecretRequestRepository", () => {
 
   it("cascades with the conversation", async () => {
     const { store, databasePath, turn } = await openStore();
-    const requests = store.agentSecretRequests();
+    const requests = store.transcriptRepository.secretRequests;
     const { request } = requests.create(input(turn));
     requests.transition(request.id, ["pending"], "saved", { fileToken: TOKEN, expiresAt: EXPIRES_AT, vaulted: true });
     settle(store, turn.id);

@@ -24,6 +24,14 @@ describe("agent secret process protocol", () => {
     ["an untrimmed secret", { ...deliver, secret: " tskey-auth-123" }],
     ["a short secret", { ...deliver, secret: "abc" }],
     ["a multi-line secret", { ...deliver, secret: "tskey\nauth" }],
+    ["a non-uuid request", { ...deliver, requestId: "request" }],
+  ])("passes a delivery with %s through to the runtime, which rejects it instead of stopping", (_label, command) => {
+    expect(parseRuntimeWorkerCommand(command)).toEqual(command);
+  });
+
+  it.each([
+    ["a non-string secret", { ...deliver, secret: 42 }],
+    ["an unbounded request id", { ...deliver, requestId: "r".repeat(129) }],
     ["a non-uuid transport", { ...deliver, transportId: "transport" }],
     ["a missing vault flag", { ...deliver, vaulted: undefined }],
     ["an extra field", { ...deliver, file: "/tmp/secret" }],
@@ -34,7 +42,7 @@ describe("agent secret process protocol", () => {
   it("accepts delivered and rejected events with bounded fields", () => {
     const delivered = { type: "runtime.agent-secret-delivered", transportId, expiresAt: "2026-10-30T10:00:00.000Z", storage: "memory" };
     expect(parseRuntimeWorkerEvent(delivered)).toEqual(delivered);
-    for (const reason of ["not-pending", "ended", "file-failed", "limit"]) {
+    for (const reason of ["not-pending", "ended", "file-failed", "limit", "invalid"]) {
       const rejected = { type: "runtime.agent-secret-rejected", transportId, reason };
       expect(parseRuntimeWorkerEvent(rejected)).toEqual(rejected);
     }

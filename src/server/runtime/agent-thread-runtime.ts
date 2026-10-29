@@ -65,7 +65,7 @@ export function createAgentThreadRuntime(
   const secrets = new AgentSecretService({
     store: dependencies.store,
     dataDirectory: dependencies.dataDirectory,
-    turns: dependencies.turns,
+    turns: dependencies.turns.secretRequests,
     broadcast: dependencies.broadcast,
     ...(dependencies.backendCredentials ? { credentials: dependencies.backendCredentials } : {}),
     ...(dependencies.lifetime ? { signal: dependencies.lifetime } : {}),

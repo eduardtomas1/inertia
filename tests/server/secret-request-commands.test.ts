@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { answerRuntimeAgentSecretDelivery } from "../../src/server/runtime-agent-secret-delivery";
 import {
   createSecretRequestCommandHandler,
+  SECRET_REQUEST_IN_USE_MESSAGE,
   SECRET_REQUEST_NOT_ACTIVE_MESSAGE,
   SECRET_REQUEST_NOT_PENDING_MESSAGE,
 } from "../../src/server/runtime/commands/secret-request-commands";
@@ -28,7 +29,7 @@ describe("secret request commands", () => {
     };
     const service = {
       decline: vi.fn(async () => true),
-      revoke: vi.fn(async () => true),
+      revoke: vi.fn(async () => "revoked" as const),
       list: vi.fn(() => [entry]),
     };
     const { sent, run } = handlerWith(() => service);
@@ -47,11 +48,15 @@ describe("secret request commands", () => {
   });
 
   it("answers fixed messages when the request is no longer pending or active, or the service is missing", async () => {
-    const refusing = handlerWith(() => ({ decline: async () => false, revoke: async () => false, list: () => [] }));
+    const refusing = handlerWith(() => ({ decline: async () => false, revoke: async () => "not-active" as const, list: () => [] }));
     await expect(refusing.run({ type: "secret-request.decline", payload: { conversationId: randomUUID(), requestId: randomUUID() } } as never))
       .rejects.toThrow(SECRET_REQUEST_NOT_PENDING_MESSAGE);
     await expect(refusing.run({ type: "secret-request.revoke", payload: { requestId: randomUUID() } } as never))
       .rejects.toThrow(SECRET_REQUEST_NOT_ACTIVE_MESSAGE);
+    const busy = handlerWith(() => ({ decline: async () => false, revoke: async () => "in-use" as const, list: () => [] }));
+    await expect(busy.run({ type: "secret-request.revoke", payload: { requestId: randomUUID() } } as never))
+      .rejects.toThrow(SECRET_REQUEST_IN_USE_MESSAGE);
+    expect(busy.sent).toEqual([]);
     const missing = handlerWith(() => null);
     await expect(missing.run({ type: "secret-request.decline", payload: { conversationId: randomUUID(), requestId: randomUUID() } } as never))
       .rejects.toThrow(SECRET_REQUEST_NOT_PENDING_MESSAGE);
@@ -88,6 +93,10 @@ describe("runtime worker secret delivery answer", () => {
       },
     }, command);
     expect(thrown).toEqual({ type: "runtime.agent-secret-rejected", transportId: command.transportId, reason: "file-failed" });
+    const invalid = await answerRuntimeAgentSecretDelivery({
+      deliverAgentSecret: async () => ({ status: "rejected", reason: "invalid" }),
+    }, { ...command, secret: " padded " });
+    expect(invalid).toEqual({ type: "runtime.agent-secret-rejected", transportId: command.transportId, reason: "invalid" });
     const stopped = await answerRuntimeAgentSecretDelivery(null, command);
     expect(stopped).toEqual({ type: "runtime.agent-secret-rejected", transportId: command.transportId, reason: "ended" });
     expect(JSON.stringify([delivered, rejected, thrown, stopped])).not.toContain(SECRET);

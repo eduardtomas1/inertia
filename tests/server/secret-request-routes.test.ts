@@ -11,7 +11,7 @@ import { CliConversationDiscovery } from "../../src/server/cli-import/discovery"
 import { RuntimeStore } from "../../src/server/database";
 import { PrivateConnectRuntimeGateway } from "../../src/server/private-connect/runtime-gateway";
 import { privateConnectStoreReads } from "../../src/server/private-connect/store-detail";
-import { openCodeHostMcpConfig } from "../../src/server/provider/host-tool-mcp-config";
+import { OPENCODE_SECRET_MCP_TIMEOUT_MS, openCodeHostMcpConfig } from "../../src/server/provider/host-tool-mcp-config";
 import { createInertiaHarnessCapabilities } from "../../src/server/runtime/inertia-harness-capabilities";
 import {
   SECRET_REQUEST_DEFAULT_WAIT_MS,
@@ -95,7 +95,7 @@ describe("inertia_request_secret registration and routes", () => {
       });
       expect(result).toMatchObject({ success: false });
       expect(JSON.parse(result.text)).toMatchObject({ error: { code: "unknown_tool" } });
-      expect(runtime.store.agentSecretRequests().forConversation(runtime.source.id)).toEqual([]);
+      expect(runtime.store.transcriptRepository.secretRequests.forConversation(runtime.source.id)).toEqual([]);
     } finally {
       await runtime.close();
     }
@@ -110,8 +110,9 @@ describe("inertia_request_secret registration and routes", () => {
       if (SECRET_REQUEST_ROUTES[providerId] !== "prompt-fallback") expect(wait, providerId).toBeGreaterThanOrEqual(5 * 60_000);
     }
     expect(SECRET_REQUEST_ROUTES.antigravity).toBe("prompt-fallback");
-    const timeout = openCodeHostMcpConfig({ url: "http://127.0.0.1:1/mcp", bearerToken: "t".repeat(43) } as never).timeout!;
-    expect(timeout).toBeGreaterThan(secretRequestWaitMs("opencode"));
+    const connection = { url: "http://127.0.0.1:1/mcp", bearerToken: "t".repeat(43) } as never;
+    expect(openCodeHostMcpConfig(connection).timeout).toBe(30_000);
+    expect(openCodeHostMcpConfig(connection, OPENCODE_SECRET_MCP_TIMEOUT_MS).timeout).toBeGreaterThan(secretRequestWaitMs("opencode"));
   });
 
   it("labels the live activity row while asking, after saving and when nothing was saved", () => {
@@ -176,7 +177,7 @@ describe("secret request cards outside the desktop chat", () => {
       reasoningEffort: "", interactionMode: "build", accessMode: "supervised",
       configurationRevision: modelSelection.backendConfigurationRevision, association: "authoritative",
     });
-    const { message } = store.agentSecretRequests().create({
+    const { message } = store.transcriptRepository.secretRequests.create({
       conversationId: source.id, runId: turn.runId, turnId: turn.id, providerId: "codex",
       title: "Tailscale auth key", description: "Create a reusable key.", fileName: "secret", ttlHours: 24,
     });
@@ -205,7 +206,7 @@ describe("secret request cards outside the desktop chat", () => {
     const transcript = store.contextPackets.sourceTranscript(source.id, target.id);
     expect(JSON.stringify(transcript)).not.toContain("Tailscale auth key");
     const token = "0123456789abcdef0123456789abcdef";
-    store.agentSecretRequests().transition(message.secretRequest!.requestId, ["pending"], "saved", {
+    store.transcriptRepository.secretRequests.transition(message.secretRequest!.requestId, ["pending"], "saved", {
       fileToken: token, expiresAt: "2030-01-02T00:00:00.000Z", vaulted: true,
     });
     const saved = await gateway.request({

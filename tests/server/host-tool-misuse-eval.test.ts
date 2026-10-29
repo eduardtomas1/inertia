@@ -60,7 +60,7 @@ async function arrange(setup: readonly MisuseSetup[], runtime: SurfaceRuntime): 
         activate: false,
       }).id;
     } else if (step === "pending-secret-request" || step === "three-secret-requests") {
-      const requests = runtime.store.agentSecretRequests();
+      const requests = runtime.store.transcriptRepository.secretRequests;
       for (let index = 0; index < (step === "pending-secret-request" ? 1 : 3); index += 1) {
         const created = requests.create({
           conversationId: runtime.source.id,

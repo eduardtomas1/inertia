@@ -592,7 +592,7 @@ describe("detached chat runtime authority", () => {
         checkpoint: () => { throw new Error("Not found."); },
         agentTurn: () => { throw new Error("Not found."); },
         findPairedLaunch: () => null,
-        agentSecretRequests: () => ({ find: () => null }),
+        transcriptRepository: { secretRequests: { find: () => null } },
       },
       snapshot,
       pendingApprovals: new Map(),

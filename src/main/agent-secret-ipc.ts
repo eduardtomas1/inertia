@@ -21,6 +21,7 @@ const REJECTION_MESSAGES: Readonly<Record<RejectionReason, string>> = Object.fre
   ended: AGENT_SECRET_SAVE_ERRORS.notPending,
   "file-failed": AGENT_SECRET_SAVE_ERRORS.fileFailed,
   limit: AGENT_SECRET_SAVE_ERRORS.limit,
+  invalid: AGENT_SECRET_SAVE_ERRORS.invalid,
   unavailable: AGENT_SECRET_SAVE_ERRORS.runtimeUnavailable,
 });
 
@@ -97,7 +98,7 @@ export function createAgentSecretSaver(
       if (outcome.status === "delivered") {
         return { status: "saved", expiresAt: outcome.expiresAt, storage: outcome.storage };
       }
-      if (vaulted) await vault.deleteAgentSecret(request.requestId).catch(() => false);
+      if (vaulted && outcome.reason !== "unavailable") await vault.deleteAgentSecret(request.requestId).catch(() => false);
       throw new Error(REJECTION_MESSAGES[outcome.reason]);
     } finally {
       inFlight.delete(request.requestId);

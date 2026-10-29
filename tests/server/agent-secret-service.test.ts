@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -37,6 +37,7 @@ interface Harness {
   forgotten: string[];
   clock: { now: number };
   resolveVault: ReturnType<typeof vi.fn>;
+  locked: Set<string>;
 }
 
 async function openHarness(options: {
@@ -44,6 +45,8 @@ async function openHarness(options: {
   waitMs?: number;
   vault?: Record<string, string>;
   start?: boolean;
+  resolve?: (reference: string) => Promise<string | null>;
+  sweepIntervalMs?: number;
 } = {}): Promise<Harness> {
   const directory = options.directory ?? await mkdtemp(join(tmpdir(), "inertia-secret-service-"));
   if (!options.directory) directories.push(directory);
@@ -57,16 +60,23 @@ async function openHarness(options: {
   const forgotten: string[] = [];
   const clock = { now: Date.parse("2026-10-29T12:00:00.000Z") };
   const vault = options.vault ?? {};
-  const resolveVault = vi.fn(async (reference: string) => vault[reference] ?? null);
+  const resolveVault = vi.fn(options.resolve ?? (async (reference: string) => vault[reference] ?? null));
+  const locked = new Set<string>();
   const service = new AgentSecretService({
     store,
     dataDirectory: directory,
     turns: {
-      secretWait: (conversationId, turnId, requestId, title) => {
+      open: () => ({ notBefore: null }),
+      wait: (conversationId, turnId, requestId, title) => {
         waits.push([conversationId, turnId, requestId, title]);
         return true;
       },
     },
+    removeDirectory: (root, token) => {
+      if (locked.has(token)) throw Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" });
+      rmSync(join(root, token), { recursive: true, force: true });
+    },
+    ...(options.sweepIntervalMs ? { sweepIntervalMs: options.sweepIntervalMs } : {}),
     broadcast: (event) => events.push(event),
     credentials: {
       resolve: resolveVault,
@@ -81,7 +91,7 @@ async function openHarness(options: {
   });
   services.push(service);
   if (options.start !== false) service.start();
-  return { directory, store, service, events, waits, forgotten, clock, resolveVault };
+  return { directory, store, service, events, waits, forgotten, clock, resolveVault, locked };
 }
 
 function chat(store: RuntimeStore, title = "Tailscale") {
@@ -124,7 +134,7 @@ const VALID = {
 };
 
 function pendingId(store: RuntimeStore): string {
-  const [pending] = store.agentSecretRequests().pendingAll();
+  const [pending] = store.transcriptRepository.secretRequests.pendingAll();
   if (!pending) throw new Error("No pending secret request.");
   return pending.id;
 }
@@ -170,7 +180,7 @@ describe("agent secret service: pending request, private file and turn wait", ()
       expect(mode(file)).toBe(0o600);
     }
     expect(harness.waits.at(-1)).toEqual([conversation.id, turn.id, requestId, null]);
-    const record = harness.store.agentSecretRequests().find(requestId)!;
+    const record = harness.store.transcriptRepository.secretRequests.find(requestId)!;
     expect(record).toMatchObject({ status: "saved", vaulted: true, expiresAt: "2026-10-29T18:00:00.000Z" });
     expect(JSON.stringify(harness.events)).not.toContain(SECRET);
     expect(JSON.stringify(harness.events)).not.toContain(tokenDirectory);
@@ -211,7 +221,7 @@ describe("agent secret service: pending request, private file and turn wait", ()
     expect(harness.forgotten).toContain(agentSecretReference(requestId));
     expect(await harness.service.deliver({ conversationId: conversation.id, requestId, secret: SECRET, vaulted: true }))
       .toEqual({ status: "rejected", reason: "not-pending" });
-    expect(harness.store.agentSecretRequests().find(requestId)?.status).toBe("declined");
+    expect(harness.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("declined");
     expect(readdirSync(agentSecretRoot(harness.directory))).toEqual([]);
   });
 
@@ -225,7 +235,7 @@ describe("agent secret service: pending request, private file and turn wait", ()
     expect(parsed(await aborted)).toEqual({
       status: "ended", reason: "cancelled", message: "No answer arrived. Ask again only if still needed.",
     });
-    expect(harness.store.agentSecretRequests().find(abortedId)?.status).toBe("ended");
+    expect(harness.store.transcriptRepository.secretRequests.find(abortedId)?.status).toBe("ended");
     expect(harness.forgotten).toContain(agentSecretReference(abortedId));
 
     const second = chat(harness.store, "Timeout");
@@ -280,15 +290,15 @@ describe("agent secret service: pending request, private file and turn wait", ()
     harness.service.sweep();
     expect(existsSync(firstFile)).toBe(false);
     expect(existsSync(dirname(firstFile))).toBe(false);
-    expect(harness.store.agentSecretRequests().find(firstId)?.status).toBe("expired");
+    expect(harness.store.transcriptRepository.secretRequests.find(firstId)?.status).toBe("expired");
     expect(harness.forgotten).toContain(agentSecretReference(firstId));
     expect(harness.service.output.values()).not.toContain(SECRET);
     expect(existsSync(secondFile)).toBe(true);
 
-    expect(await harness.service.revoke(secondId)).toBe(true);
-    expect(await harness.service.revoke(secondId)).toBe(false);
+    expect(await harness.service.revoke(secondId)).toBe("revoked");
+    expect(await harness.service.revoke(secondId)).toBe("not-active");
     expect(existsSync(dirname(secondFile))).toBe(false);
-    expect(harness.store.agentSecretRequests().find(secondId)?.status).toBe("revoked");
+    expect(harness.store.transcriptRepository.secretRequests.find(secondId)?.status).toBe("revoked");
     expect(harness.forgotten).toContain(agentSecretReference(secondId));
     expect(harness.service.output.values()).toEqual([]);
     expect(harness.service.output.text("ghp_revokedValue1234")).toBe("ghp_revokedValue1234");
@@ -308,7 +318,7 @@ describe("agent secret service: pending request, private file and turn wait", ()
     const waitingId = pendingId(harness.store);
     harness.service.shutdown();
     expect(parsed(await waitingResult)).toMatchObject({ status: "ended", reason: "stopped" });
-    expect(harness.store.agentSecretRequests().find(waitingId)?.status).toBe("ended");
+    expect(harness.store.transcriptRepository.secretRequests.find(waitingId)?.status).toBe("ended");
     expect(readdirSync(agentSecretRoot(harness.directory))).toEqual([]);
     expect(harness.service.output.values()).toEqual([]);
   });
@@ -331,8 +341,8 @@ describe("agent secret service: pending request, private file and turn wait", ()
     void first.service.invoke(pendingSource, call(VALID));
     const pendingRequest = pendingId(store);
     first.service.shutdown();
-    expect(store.agentSecretRequests().find(pendingRequest)?.status).toBe("ended");
-    store.agentSecretRequests().create({
+    expect(store.transcriptRepository.secretRequests.find(pendingRequest)?.status).toBe("ended");
+    store.transcriptRepository.secretRequests.create({
       conversationId: pendingSource.conversation.id,
       runId: pendingSource.turn.runId,
       turnId: pendingSource.turn.id,
@@ -357,7 +367,7 @@ describe("agent secret service: pending request, private file and turn wait", ()
     third.clock.now = first.clock.now + 2 * 60 * 60_000;
     third.service.start();
     expect(existsSync(stray)).toBe(false);
-    const requests = third.store.agentSecretRequests();
+    const requests = third.store.transcriptRepository.secretRequests;
     expect(requests.find(orphanId)?.status).toBe("ended");
     expect(requests.find(memory.requestId)?.status).toBe("expired");
     expect(requests.find(expired.requestId)?.status).toBe("expired");
@@ -428,13 +438,13 @@ describe("agent secret service: conversation delete", () => {
 
     expect(existsSync(dirname(doomedFile))).toBe(false);
     expect(harness.forgotten).toEqual([agentSecretReference(doomedId)]);
-    expect(harness.store.agentSecretRequests().find(doomedId)).toBeNull();
+    expect(harness.store.transcriptRepository.secretRequests.find(doomedId)).toBeNull();
     expect(harness.service.output.values()).not.toContain(SECRET);
     expect(harness.service.output.values()).toContain("ghp_keptValue12345678");
     expect(harness.service.filePath(doomedId)).toBeNull();
     expect(harness.events.slice(events)).toEqual([]);
     expect(readFileSync(keptFile, "utf8")).toBe("ghp_keptValue12345678");
-    expect(harness.store.agentSecretRequests().find(keptId)?.status).toBe("saved");
+    expect(harness.store.transcriptRepository.secretRequests.find(keptId)?.status).toBe("saved");
     expect(harness.service.list().map(({ requestId }) => requestId)).toEqual([keptId]);
   });
 });
@@ -447,7 +457,7 @@ describe("agent secret service: limits and argument misuse", () => {
     const second = await harness.service.invoke(source, call(VALID));
     expect(second.success).toBe(false);
     expect(parsed(second)).toMatchObject({ error: { code: "secret_request_pending" } });
-    expect(harness.store.agentSecretRequests().forConversation(source.conversation.id)).toHaveLength(1);
+    expect(harness.store.transcriptRepository.secretRequests.forConversation(source.conversation.id)).toHaveLength(1);
     await harness.service.decline(source.conversation.id, pendingId(harness.store));
     await first;
     for (let index = 0; index < 2; index += 1) {
@@ -473,7 +483,7 @@ describe("agent secret service: limits and argument misuse", () => {
     }
     const refused = await harness.service.invoke(chat(harness.store, "One more"), call(VALID));
     expect(parsed(refused)).toMatchObject({ error: { code: "secret_limit" } });
-    expect(harness.store.agentSecretRequests().pendingAll()).toEqual([]);
+    expect(harness.store.transcriptRepository.secretRequests.pendingAll()).toEqual([]);
   });
 
   it.each([
@@ -491,7 +501,7 @@ describe("agent secret service: limits and argument misuse", () => {
     expect(parsed(result)).toMatchObject({ error: { code: "invalid_arguments" } });
     expect(result.text).toContain(mention);
     expect(result.text).not.toContain("\"path\"");
-    expect(harness.store.agentSecretRequests().forConversation(source.conversation.id)).toEqual([]);
+    expect(harness.store.transcriptRepository.secretRequests.forConversation(source.conversation.id)).toEqual([]);
     expect(harness.waits).toEqual([]);
   });
 
@@ -501,13 +511,195 @@ describe("agent secret service: limits and argument misuse", () => {
     const refusing = new AgentSecretService({
       store: harness.store,
       dataDirectory: harness.directory,
-      turns: { secretWait: () => false },
+      turns: { open: () => null, wait: () => false },
       broadcast: () => undefined,
       waitMs: () => 60_000,
     });
     services.push(refusing);
     const result = await refusing.invoke(source, call(VALID));
     expect(parsed(result)).toMatchObject({ status: "ended", reason: "cancelled" });
-    expect(harness.store.agentSecretRequests().forConversation(source.conversation.id)[0]?.status).toBe("ended");
+    expect(harness.store.transcriptRepository.secretRequests.forConversation(source.conversation.id)[0]?.status).toBe("ended");
   });
 });
+
+describe("agent secret service: lifecycle hardening", () => {
+  async function saved(harness: Harness, title = "Saved", secret = SECRET, vaulted = true) {
+    const source = chat(harness.store, title);
+    const result = harness.service.invoke(source, call({ ...VALID, title, ttlHours: 1 }));
+    const requestId = pendingId(harness.store);
+    await harness.service.deliver({ conversationId: source.conversation.id, requestId, secret, vaulted });
+    return { source, requestId, file: parsed(await result).file as string };
+  }
+
+  async function flushMicrotasks(): Promise<void> {
+    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+  }
+
+  it("keeps the runtime alive when the secret table cannot be read at start or during a sweep", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-secret-start-"));
+    directories.push(directory);
+    const broken = {
+      get transcriptRepository(): never {
+        throw new Error("database is locked");
+      },
+      conversation: () => {
+        throw new Error("database is locked");
+      },
+    } as never;
+    const service = new AgentSecretService({
+      store: broken,
+      dataDirectory: directory,
+      turns: { open: () => null, wait: () => false },
+      broadcast: () => undefined,
+    });
+    services.push(service);
+    expect(() => service.start()).not.toThrow();
+    expect(() => service.sweep()).not.toThrow();
+    await expect(service.restore()).resolves.toBeUndefined();
+  });
+
+  it("forgets the keychain copy of a request left pending by a crash when it ends it at start", async () => {
+    const first = await openHarness();
+    const source = chat(first.store);
+    void first.service.invoke(source, call(VALID));
+    const requestId = pendingId(first.store);
+    services.splice(services.indexOf(first.service), 1);
+    const second = await openHarness({ directory: first.directory });
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("ended");
+    expect(second.forgotten).toContain(agentSecretReference(requestId));
+    first.service.shutdown();
+  });
+
+  it("registers a restored value for redaction before its file exists again", async () => {
+    const first = await openHarness();
+    const { requestId, file } = await saved(first);
+    first.service.shutdown();
+    let release!: (value: string) => void;
+    const second = await openHarness({
+      directory: first.directory,
+      resolve: () => new Promise<string>((resolve) => {
+        release = resolve;
+      }),
+    });
+    const restoring = second.service.restore();
+    await vi.waitFor(() => expect(second.resolveVault).toHaveBeenCalledWith(agentSecretReference(requestId)));
+    release(SECRET);
+    await flushMicrotasks();
+    expect(existsSync(file)).toBe(false);
+    expect(second.service.output.text(`key ${SECRET}`)).toBe("key [redacted]");
+    await restoring;
+    expect(readFileSync(file, "utf8")).toBe(SECRET);
+  });
+
+  it("does not resurrect a secret revoked while its file was being restored", async () => {
+    const first = await openHarness();
+    const { requestId, file } = await saved(first);
+    first.service.shutdown();
+    let release!: (value: string) => void;
+    const second = await openHarness({
+      directory: first.directory,
+      resolve: () => new Promise<string>((resolve) => {
+        release = resolve;
+      }),
+    });
+    const restoring = second.service.restore();
+    await vi.waitFor(() => expect(second.resolveVault).toHaveBeenCalled());
+    release(SECRET);
+    await flushMicrotasks();
+    expect(await second.service.revoke(requestId)).toBe("revoked");
+    await restoring;
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(dirname(file))).toBe(false);
+    expect(second.service.output.values()).toEqual([]);
+    expect(second.service.filePath(requestId)).toBeNull();
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("revoked");
+  });
+
+  it("refuses to call a locked file revoked, and revokes once the file can be deleted", async () => {
+    const harness = await openHarness();
+    const { requestId, file } = await saved(harness);
+    const token = basenameOf(dirname(file));
+    harness.locked.add(token);
+    expect(await harness.service.revoke(requestId)).toBe("in-use");
+    expect(harness.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("saved");
+    expect(readFileSync(file, "utf8")).toBe(SECRET);
+    expect(harness.service.output.text(SECRET)).toBe("[redacted]");
+    expect(harness.service.list().map(({ requestId: id }) => id)).toEqual([requestId]);
+    expect(harness.forgotten).not.toContain(agentSecretReference(requestId));
+    harness.locked.delete(token);
+    expect(await harness.service.revoke(requestId)).toBe("revoked");
+    expect(existsSync(dirname(file))).toBe(false);
+  });
+
+  it("keeps redacting an expired value whose file is locked and retries the delete on every sweep", async () => {
+    const harness = await openHarness();
+    const { requestId, file } = await saved(harness);
+    const token = basenameOf(dirname(file));
+    harness.locked.add(token);
+    harness.clock.now += 60 * 60_000;
+    harness.service.sweep();
+    expect(harness.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("expired");
+    expect(existsSync(file)).toBe(true);
+    expect(harness.service.output.text(`cat → ${SECRET}`)).toBe("cat → [redacted]");
+    harness.service.sweep();
+    expect(existsSync(file)).toBe(true);
+    harness.locked.delete(token);
+    harness.service.sweep();
+    expect(existsSync(dirname(file))).toBe(false);
+    expect(harness.service.output.values()).toEqual([]);
+  });
+
+  it("expires within one five-minute sweep when the expiry timer was held back by a system suspend", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    try {
+      const harness = await openHarness();
+      const { requestId, file } = await saved(harness);
+      harness.clock.now += 2 * 60 * 60_000;
+      vi.advanceTimersByTime(4 * 60_000);
+      expect(harness.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("saved");
+      vi.advanceTimersByTime(60_000);
+      expect(harness.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("expired");
+      expect(existsSync(dirname(file))).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a value that fails validation in the runtime and keeps the request pending", async () => {
+    const harness = await openHarness();
+    const source = chat(harness.store);
+    const result = harness.service.invoke(source, call(VALID));
+    const requestId = pendingId(harness.store);
+    for (const secret of [" padded ", "ab", "two\nlines"]) {
+      expect(await harness.service.deliver({ conversationId: source.conversation.id, requestId, secret, vaulted: true }))
+        .toEqual({ status: "rejected", reason: "invalid" });
+    }
+    expect(harness.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("pending");
+    expect(await harness.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true }))
+      .toMatchObject({ status: "delivered" });
+    expect(parsed(await result)).toMatchObject({ status: "saved" });
+  });
+
+  it("stamps the card after the assistant text that the turn flushed for it", async () => {
+    const harness = await openHarness();
+    const source = chat(harness.store);
+    const later = new Date(harness.clock.now + 5_000).toISOString();
+    const service = new AgentSecretService({
+      store: harness.store,
+      dataDirectory: harness.directory,
+      turns: { open: () => ({ notBefore: later }), wait: () => true },
+      broadcast: () => undefined,
+      clock: () => harness.clock.now,
+      waitMs: () => 60_000,
+    });
+    services.push(service);
+    void service.invoke(source, call(VALID));
+    const request = harness.store.transcriptRepository.secretRequests.find(pendingId(harness.store))!;
+    expect(request.createdAt).toBe(new Date(Date.parse(later) + 1).toISOString());
+    expect(harness.store.message(request.messageId).createdAt).toBe(request.createdAt);
+  });
+});
+
+function basenameOf(path: string): string {
+  return path.split(/[\\/]/u).at(-1)!;
+}

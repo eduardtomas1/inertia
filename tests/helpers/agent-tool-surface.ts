@@ -124,7 +124,7 @@ export async function createSurfaceRuntime(options: SurfaceRuntimeOptions = {}) 
   const secrets = new AgentSecretService({
     store,
     dataDirectory: root,
-    turns: { secretWait: () => true },
+    turns: { open: () => ({ notBefore: null }), wait: () => true },
     broadcast: (event: RuntimeMutationEvent) => {
       if (event.type !== "conversation.message.persisted" || options.secretAnswer === "none") return;
       const { conversationId, secretRequest } = event.message;

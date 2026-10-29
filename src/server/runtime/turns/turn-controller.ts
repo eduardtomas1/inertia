@@ -47,6 +47,7 @@ import {
   DEFAULT_TURN_MAX_LIFETIME_MS,
   DEFAULT_TURN_TIMEOUT_MS,
   normalizedProviderRunFailure,
+  providerEventResumesRun,
   providerPromiseFailure,
   publicTurnError,
   updateActiveTurnProviderSession,
@@ -93,7 +94,8 @@ import {
 } from "./turn-live-adoption";
 import { requestProviderCancellation } from "./turn-provider-cancellation";
 import { updateInterruptionMessage } from "./turn-update-interruption";
-import { resolveTurnHostTools } from "./turn-provider-host-tools"; import { secretFilteredEvents, secretFilteredResult } from "./turn-secret-output";
+import { resolveTurnHostTools } from "./turn-provider-host-tools";
+import { TurnSecretRequests } from "./turn-secret-output";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
 
@@ -123,6 +125,7 @@ export class TurnController {
   private readonly runStates: TurnRunStateCoordinator;
   private readonly providerEvents: TurnProviderEventProjector;
   private readonly nativeGoals: TurnNativeGoalCoordinator;
+  readonly secretRequests: TurnSecretRequests<ActiveTurn>;
   private readonly settlementTasks = new Set<Promise<void>>();
   private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
   private readonly providerRunOwnershipBarriers = new Map<string, Promise<void>>();
@@ -284,6 +287,12 @@ export class TurnController {
         providerState,
       ),
       observeSubagent: (active, event) => this.observeSubagent(active, event),
+    });
+    this.secretRequests = new TurnSecretRequests({
+      filter: () => this.hooks.secretOutput?.(),
+      active: (conversationId) => this.activeByConversation.get(conversationId),
+      project: (active, event) => this.providerEvents.project(active, event),
+      interactions: this.interactions,
     });
     this.nativeGoals = new TurnNativeGoalCoordinator({
       store: this.store,
@@ -871,7 +880,7 @@ export class TurnController {
         (providerResult) => {
           acknowledge(false);
           try {
-            this.handleProviderResult(active, secretFilteredResult(this.hooks.secretOutput?.(), providerResult, (event) => { if (!active.runState.isTerminal()) this.providerEvents.project(active, event); }));
+            this.handleProviderResult(active, this.secretRequests.result(active, providerResult));
           } catch (error) {
             requestProviderCancellation(this.providers, active.conversation.id);
             this.settle(active, "failed", "stream-persistence-failed", publicTurnError(error));
@@ -1025,8 +1034,6 @@ export class TurnController {
     );
   }
 
-  secretWait(conversationId: string, turnId: string, requestId: string, title: string | null): boolean { return this.interactions.secretWait(this.activeByConversation.get(conversationId), turnId, requestId, title); }
-
   rendererDisconnected(ownerId: string): number {
     let settled = 0;
     for (const active of this.activeByConversation.values()) {
@@ -1088,25 +1095,13 @@ export class TurnController {
     }
     try {
       this.timeouts.activity(active);
-      const currentRunState = active.runState.snapshot().state;
-      if (
-        (currentRunState === "retrying" || currentRunState === "delegated")
-        && (
-          event.type === "text"
-          || event.type === "text-snapshot"
-          || event.type === "reasoning-summary"
-          || (event.type === "activity" && event.phase === "started")
-          || event.type === "plan"
-        )
-      ) {
-        if (this.transition(active, "running")) {
-          broadcastTurnConversationShell(this.hooks, active);
-        }
+      if (providerEventResumesRun(active, event) && this.transition(active, "running")) {
+        broadcastTurnConversationShell(this.hooks, active);
       }
       if (event.type === "text") {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
       }
-      for (const projected of secretFilteredEvents(this.hooks.secretOutput?.(), event)) this.providerEvents.project(active, projected);
+      for (const projected of this.secretRequests.events(event)) this.providerEvents.project(active, projected);
       this.nativeGoals.handleEvent(active, event);
       return true;
     } catch (error) {
@@ -1206,6 +1201,7 @@ export class TurnController {
     active.assistantStream.dispose();
     active.reasoningStream.dispose();
     this.activities.discardPending(active);
+    this.secretRequests.discard(active);
     clearPendingInteractionsForTurn(active, this.pendingApprovals, this.pendingInputs);
     if (this.activeByConversation.get(active.conversation.id) === active) {
       this.activeByConversation.delete(active.conversation.id);

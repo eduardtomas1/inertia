@@ -8,10 +8,7 @@ import { isMascotFocus } from "../shared/mascot.js";
 import { isMascotRequest, parseMascotFeed, type MascotFeed } from "../shared/mascot-feed.js";
 import { isAbsolute } from "node:path";
 import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
-import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
-import { parseRuntimeIssueEvidenceRequest, parseRuntimeIssueEvidenceResult, type RuntimeIssueEvidenceRequest, type RuntimeIssueEvidenceResult } from "./runtime-issue-evidence-protocol";
-import { parseRuntimeHtmlRenderEvent, parseRuntimeHtmlRenderReadCommand, type RuntimeHtmlRenderEvent, type RuntimeHtmlRenderReadCommand } from "./runtime-html-render-protocol";
-import { parseRuntimeAgentSecretDeliverCommand, parseRuntimeAgentSecretEvent, type RuntimeAgentSecretDeliverCommand, type RuntimeAgentSecretEvent } from "./runtime-agent-secret-protocol";
+import { parseRuntimeFeatureWorkerCommand, parseRuntimeFeatureWorkerEvent, type RuntimeFeatureWorkerCommand, type RuntimeFeatureWorkerEvent } from "./runtime-feature-protocol";
 import {
   isBackendCredentialGeneration,
   isBackendCredentialSecret,
@@ -102,7 +99,7 @@ export type RuntimeWorkerCommand =
     }
   | RuntimeUpdateWorkerCommand
   | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
-  | RuntimeHtmlRenderReadCommand | RuntimeAgentSecretDeliverCommand
+  | RuntimeFeatureWorkerCommand
   | {
       type: "runtime.private-connect-request";
       requestId: string;
@@ -144,7 +141,7 @@ export type RuntimeWorkerCommand =
   | RuntimeAttachmentRelinquishResult
   | RuntimeConversationAttachmentStoreResult
   | RuntimeDocumentPreparationResult
-  | RuntimeSecureFileResult | RuntimeAgentBrowserResult | RuntimeIssueEvidenceResult;
+  | RuntimeSecureFileResult;
 
 export type RuntimeCredentialOperation = "resolve" | "status" | "clear" | "forget";
 export type RuntimeCredentialFailureCode = "not-found" | "unavailable" | "invalid";
@@ -320,7 +317,7 @@ export type RuntimeWorkerEvent =
       type: "runtime.secure-file-request";
       requestId: string;
     } & SecureFileRequest)
-  | RuntimeAgentBrowserEvent | RuntimeIssueEvidenceRequest | RuntimeHtmlRenderEvent | RuntimeAgentSecretEvent;
+  | RuntimeFeatureWorkerEvent;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -388,10 +385,8 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     return parseRuntimeConversationAttachmentStoreResult(value);
   }
   if (value.type === "runtime.document-preparation-result") return parseRuntimeDocumentPreparationResult(value);
-  const browserResult = parseRuntimeAgentBrowserResult(value); if (browserResult) return browserResult;
-  if (value.type === "runtime.issue-evidence-result") return parseRuntimeIssueEvidenceResult(value);
-  if (value.type === "runtime.read-html-render") return parseRuntimeHtmlRenderReadCommand(value);
-  if (value.type === "runtime.agent-secret-deliver") return parseRuntimeAgentSecretDeliverCommand(value);
+  const featureCommand = parseRuntimeFeatureWorkerCommand(value);
+  if (featureCommand) return featureCommand;
   if (
     value.type === "runtime.secure-file-result"
     && Object.keys(value).length === 3
@@ -710,13 +705,14 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     const feed = parseMascotFeed(value);
     return feed ? { type: "runtime.mascot-status", ...feed } : null;
   }
-  const updateEvent = parseRuntimeUpdateWorkerEvent(value); if (updateEvent) return updateEvent;
-  const browserEvent = parseRuntimeAgentBrowserEvent(value); if (browserEvent) return browserEvent;
-  if (value.type === "runtime.issue-evidence-request") return parseRuntimeIssueEvidenceRequest(value);
-  const htmlRenderEvent = parseRuntimeHtmlRenderEvent(value); if (htmlRenderEvent) return htmlRenderEvent;
-  const agentSecretEvent = parseRuntimeAgentSecretEvent(value); if (agentSecretEvent) return agentSecretEvent;
-  const recoveryEvent = parseRuntimeRecoveryWorkerEvent(value); if (recoveryEvent) return recoveryEvent;
-  const shutdownEvent = parseRuntimeShutdownUnconfirmedEvent(value); if (shutdownEvent) return shutdownEvent;
+  const updateEvent = parseRuntimeUpdateWorkerEvent(value);
+  if (updateEvent) return updateEvent;
+  const featureEvent = parseRuntimeFeatureWorkerEvent(value);
+  if (featureEvent) return featureEvent;
+  const recoveryEvent = parseRuntimeRecoveryWorkerEvent(value);
+  if (recoveryEvent) return recoveryEvent;
+  const shutdownEvent = parseRuntimeShutdownUnconfirmedEvent(value);
+  if (shutdownEvent) return shutdownEvent;
   if (
     value.type === "runtime.cleanup-receipt-consumed"
     && Object.keys(value).length === 3

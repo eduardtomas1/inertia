@@ -7,10 +7,11 @@ import { defineRuntimeCommandHandler, type RuntimeCommandHandler } from "./comma
 
 export const SECRET_REQUEST_NOT_PENDING_MESSAGE = "That secret request is no longer pending.";
 export const SECRET_REQUEST_NOT_ACTIVE_MESSAGE = "That secret is no longer active.";
+export const SECRET_REQUEST_IN_USE_MESSAGE = "A program is still using this secret's file, so Inertia couldn't delete it. Close it and try again.";
 
 export interface SecretRequestCommandService {
   decline(conversationId: string, requestId: string): Promise<boolean>;
-  revoke(requestId: string): Promise<boolean>;
+  revoke(requestId: string): Promise<"revoked" | "not-active" | "in-use">;
   list(): SecretRequestListEntry[];
 }
 
@@ -40,8 +41,9 @@ export function createSecretRequestCommandHandler(
         return "handled";
       }
       case "secret-request.revoke": {
-        const revoked = await service?.revoke(command.payload.requestId) ?? false;
-        if (!revoked) throw new RuntimeRequestError(SECRET_REQUEST_NOT_ACTIVE_MESSAGE);
+        const outcome = await service?.revoke(command.payload.requestId) ?? "not-active";
+        if (outcome === "in-use") throw new RuntimeRequestError(SECRET_REQUEST_IN_USE_MESSAGE);
+        if (outcome !== "revoked") throw new RuntimeRequestError(SECRET_REQUEST_NOT_ACTIVE_MESSAGE);
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,

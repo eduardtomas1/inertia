@@ -18,7 +18,7 @@ interface DetachedChatRuntimeSecurityStore {
   checkpoint(checkpointId: string): { conversationId: string };
   agentTurn(turnId: string): { conversationId: string };
   findPairedLaunch(launchId: string): Pick<DuoLaunchStatus, "sides" | "comparison"> | null;
-  agentSecretRequests(): { find(requestId: string): { conversationId: string } | null };
+  transcriptRepository: { secretRequests: { find(requestId: string): { conversationId: string } | null } };
 }
 
 interface DetachedChatRuntimeSecurityOptions {
@@ -109,7 +109,7 @@ export function createDetachedChatRuntimeSecurity(
         requestId,
       ) ?? null,
     secretRequestConversationId: (requestId) =>
-      options.store.agentSecretRequests().find(requestId)?.conversationId ?? null,
+      options.store.transcriptRepository.secretRequests.find(requestId)?.conversationId ?? null,
   };
 
   return {

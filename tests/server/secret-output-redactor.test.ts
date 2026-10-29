@@ -112,4 +112,82 @@ describe("secret output redactor: active values never leave the turn controller 
     expect(value.text(`x ${SECRET}`)).toBe(`x ${SECRET}`);
     expect(value.active()).toBe(false);
   });
+
+  it("holds a value split across one command's output deltas until it can be matched whole", () => {
+    const value = redactor();
+    const output = (delta: string, phase: "started" | "completed" = "started"): ProviderEvent => ({
+      ...BASE, type: "activity", kind: "command", phase, label: "cat key", activityId: "cmd-1", outputDelta: delta,
+    });
+    const emitted = [
+      ...value.events(output("key=tskey-auth-kQ")),
+      ...value.events(output("9xZ2mB7vN4")),
+      ...value.events({ ...BASE, type: "usage", usage: {} as never }),
+      ...value.events(output("pL1sR8tW\nok\n", "completed")),
+    ];
+    const joined = emitted.map((event) => (event.type === "activity" ? event.outputDelta ?? "" : "")).join("");
+    expect(joined).toBe("key=[redacted]\nok\n");
+    expect(JSON.stringify(emitted)).not.toContain(SECRET);
+    expect(emitted.at(-1)).toMatchObject({ phase: "completed", activityId: "cmd-1" });
+  });
+
+  it("keeps two commands' output streams apart and flushes an unfinished one at the turn result", () => {
+    const value = redactor();
+    const emitted = [
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "a", activityId: "a", outputDelta: "A tskey-auth-" }),
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "b", activityId: "b", outputDelta: "B kQ9xZ2mB7vN4pL1sR8tW" }),
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "a", activityId: "a", outputDelta: "kQ9xZ2mB7vN4pL1sR8tW done" }),
+    ];
+    const finished = value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult);
+    const byActivity = (id: string) => [...emitted, ...finished.events]
+      .map((event) => (event.type === "activity" && event.activityId === id ? event.outputDelta ?? "" : "")).join("");
+    expect(byActivity("a")).toBe("A [redacted] done");
+    expect(byActivity("b")).toBe("B kQ9xZ2mB7vN4pL1sR8tW");
+    const tail = value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "c", activityId: "c", outputDelta: "C tskey" });
+    const flushed = value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult).events;
+    expect(tail).toEqual([expect.objectContaining({ activityId: "c" })]);
+    expect(tail[0]).not.toHaveProperty("outputDelta", "C tskey");
+    expect(flushed).toEqual([expect.objectContaining({ type: "activity", phase: "started", activityId: "c", outputDelta: "tskey" })]);
+  });
+
+  it("redacts reasoning split across deltas even when other events interleave", () => {
+    const value = redactor();
+    const reasoning = (text: string): ProviderEvent => ({ ...BASE, type: "reasoning-summary", text });
+    const emitted = [
+      ...value.events(reasoning("Using tskey-auth-kQ9x")),
+      ...value.events({ ...BASE, type: "activity", kind: "tool", phase: "started", label: "tool" }),
+      ...value.events(reasoning("Z2mB7vN4pL1sR8tW now.")),
+    ];
+    const text = [...emitted, ...value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult).events]
+      .map((event) => (event.type === "reasoning-summary" ? event.text : "")).join("");
+    expect(text).toBe("Using [redacted] now.");
+  });
+
+  it("does not release a held assistant prefix on events that leave the segment open", () => {
+    const value = redactor();
+    const emitted = [
+      ...value.events(text("key tsk")),
+      ...value.events({ ...BASE, type: "usage", usage: {} as never }),
+      ...value.events({ ...BASE, type: "status", status: "running" }),
+      ...value.events(text("ey-auth-kQ9xZ2mB7vN4pL1sR8tW end")),
+      ...value.events({ ...BASE, type: "text-boundary" }),
+    ];
+    expect(streamed(emitted)).toBe("key [redacted] end");
+  });
+
+  it("retains at most the longest active encoding per stream and drops held text at turn teardown", () => {
+    const value = redactor();
+    const longest = Math.max(...value.values().map((encoding) => encoding.length));
+    let sent = 0;
+    let released = 0;
+    for (let index = 0; index < 50; index += 1) {
+      const chunk = `${"x".repeat(97)}${SECRET.slice(0, 20)}`;
+      sent += chunk.length;
+      released += streamed(value.events(text(chunk))).length;
+      expect(sent - released).toBeGreaterThan(0);
+      expect(sent - released).toBeLessThanOrEqual(longest);
+    }
+    value.discard("t");
+    expect(value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult).events).toEqual([]);
+    expect(streamed(value.events(text("plain")))).toBe("plain");
+  });
 });

@@ -4,13 +4,35 @@ import {
   redactExactCredentials,
   stripTerminalControlSequences,
 } from "../../provider/activity-detail";
-import type { ProviderEvent, ProviderRunResult, ProviderTextEvent } from "../../provider/contracts";
+import type {
+  ProviderActivityEvent,
+  ProviderEvent,
+  ProviderReasoningEvent,
+  ProviderRunResult,
+  ProviderTextEvent,
+} from "../../provider/contracts";
 
 const MAX_DEPTH = 32;
+const MAX_OUTPUT_STREAMS_PER_TURN = 64;
 
-interface TextStream {
+const ASSISTANT_SEGMENT_CLOSERS: ReadonlySet<ProviderEvent["type"]> = new Set([
+  "text-boundary",
+  "text-snapshot",
+  "activity",
+  "plan",
+  "approval",
+  "input",
+]);
+
+interface Stream<T extends ProviderEvent> {
   boundary: BoundarySecretRedactor;
-  template: ProviderTextEvent;
+  template: T;
+}
+
+interface TurnStreams {
+  text: Stream<ProviderTextEvent> | null;
+  reasoning: Stream<ProviderReasoningEvent> | null;
+  outputs: Map<string, Stream<ProviderActivityEvent>>;
 }
 
 export interface SecretOutputResult {
@@ -24,13 +46,31 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+function withoutOutput(event: ProviderActivityEvent): ProviderActivityEvent {
+  const { outputDelta: _outputDelta, ...rest } = event;
+  return rest;
+}
+
+function withOutput(event: ProviderActivityEvent, output: string): ProviderActivityEvent {
+  return output ? { ...event, outputDelta: output } : event;
+}
+
+function outputTemplate(event: ProviderActivityEvent): ProviderActivityEvent {
+  const { outputDelta: _outputDelta, detail: _detail, fileMutation: _fileMutation, ...rest } = event;
+  return { ...rest, phase: "started" };
+}
+
 export class SecretOutputRedactor {
   private encodings: string[] = [];
-  private readonly streams = new Map<string, TextStream>();
+  private readonly turns = new Map<string, TurnStreams>();
 
   setValues(values: readonly string[]): void {
     this.encodings = credentialEncodings([...new Set(values)]);
-    for (const stream of this.streams.values()) stream.boundary.invalidate();
+    for (const turn of this.turns.values()) {
+      turn.text?.boundary.invalidate();
+      turn.reasoning?.boundary.invalidate();
+      for (const output of turn.outputs.values()) output.boundary.invalidate();
+    }
   }
 
   values(): readonly string[] {
@@ -78,50 +118,126 @@ export class SecretOutputRedactor {
   }
 
   events(event: ProviderEvent): readonly ProviderEvent[] {
-    const stream = this.streams.get(event.turnId);
-    if (event.type === "text") {
-      if (!stream && this.encodings.length === 0) return [event];
-      const current = stream ?? this.openStream(event);
-      current.template = event;
-      const text = current.boundary.push(event.text);
-      return text ? [{ ...event, text }] : [];
-    }
-    const flushed = this.flush(event.turnId);
-    const redacted = this.payload(event);
-    return flushed ? [flushed, redacted] : [redacted];
+    const turn = this.turns.get(event.turnId);
+    if (!turn && this.encodings.length === 0) return [event];
+    if (event.type === "text") return this.streamText(event);
+    if (event.type === "reasoning-summary") return this.streamReasoning(event);
+    const closed = ASSISTANT_SEGMENT_CLOSERS.has(event.type) ? this.closeText(event.turnId) : [];
+    if (event.type === "activity") return [...closed, ...this.activity(event)];
+    return [...closed, this.payload(event)];
+  }
+
+  closeText(turnId: string): readonly ProviderEvent[] {
+    const turn = this.turns.get(turnId);
+    const stream = turn?.text;
+    if (!turn || !stream) return [];
+    turn.text = null;
+    this.forgetEmptyTurn(turnId, turn);
+    const text = stream.boundary.finish("significant");
+    return text ? [{ ...stream.template, text }] : [];
   }
 
   result(result: ProviderRunResult): SecretOutputResult {
-    const flushed = this.flush(result.turnId);
-    if (this.encodings.length === 0) return { events: flushed ? [flushed] : [], result };
+    const events = this.finishTurn(result.turnId);
+    if (this.encodings.length === 0) return { events, result };
     const { cleanupConfirmation, ...rest } = result;
     const redacted = this.payload(rest);
     const next = redacted === rest ? result : {
       ...redacted,
       ...(cleanupConfirmation ? { cleanupConfirmation } : {}),
     };
-    return { events: flushed ? [flushed] : [], result: next };
+    return { events, result: next };
   }
 
   discard(turnId: string): void {
-    this.streams.get(turnId)?.boundary.discard();
-    this.streams.delete(turnId);
+    const turn = this.turns.get(turnId);
+    if (!turn) return;
+    this.turns.delete(turnId);
+    turn.text?.boundary.discard();
+    turn.reasoning?.boundary.discard();
+    for (const output of turn.outputs.values()) output.boundary.discard();
   }
 
-  private openStream(event: ProviderTextEvent): TextStream {
-    const stream: TextStream = {
-      boundary: new BoundarySecretRedactor(() => this.encodings),
-      template: event,
-    };
-    this.streams.set(event.turnId, stream);
-    return stream;
+  private streamText(event: ProviderTextEvent): readonly ProviderEvent[] {
+    const turn = this.turnStreams(event.turnId);
+    const stream = turn.text ??= this.open(event);
+    stream.template = event;
+    const text = stream.boundary.push(event.text);
+    return text ? [{ ...event, text }] : [];
   }
 
-  private flush(turnId: string): ProviderTextEvent | null {
-    const stream = this.streams.get(turnId);
-    if (!stream) return null;
-    this.streams.delete(turnId);
-    const text = stream.boundary.finish("significant");
-    return text ? { ...stream.template, text } : null;
+  private streamReasoning(event: ProviderReasoningEvent): readonly ProviderEvent[] {
+    const turn = this.turnStreams(event.turnId);
+    const stream = turn.reasoning ??= this.open(event);
+    stream.template = event;
+    const text = stream.boundary.push(event.text);
+    return text ? [{ ...event, text }] : [];
+  }
+
+  private activity(event: ProviderActivityEvent): readonly ProviderEvent[] {
+    const safe = this.payload(withoutOutput(event));
+    const activityId = event.activityId;
+    const turn = this.turns.get(event.turnId);
+    const existing = activityId ? turn?.outputs.get(activityId) : undefined;
+    if (!activityId || (!existing && !event.outputDelta)) {
+      return [event.outputDelta ? withOutput(safe, this.text(event.outputDelta)) : safe];
+    }
+    const emitted: ProviderEvent[] = [];
+    const streams = this.turnStreams(event.turnId).outputs;
+    let stream = existing;
+    if (!stream) {
+      const evicted = streams.size >= MAX_OUTPUT_STREAMS_PER_TURN ? streams.keys().next().value : undefined;
+      if (evicted !== undefined) emitted.push(...this.finishOutput(streams, evicted));
+      stream = this.open(outputTemplate(safe));
+      streams.set(activityId, stream);
+    }
+    let output = event.outputDelta
+      ? stream.boundary.push(stripTerminalControlSequences(event.outputDelta))
+      : "";
+    if (event.phase !== "started" || event.detail !== undefined) {
+      streams.delete(activityId);
+      output += stream.boundary.finish("significant");
+    } else {
+      stream.template = outputTemplate(safe);
+    }
+    emitted.push(withOutput(safe, output));
+    return emitted;
+  }
+
+  private finishTurn(turnId: string): ProviderEvent[] {
+    const turn = this.turns.get(turnId);
+    if (!turn) return [];
+    const events: ProviderEvent[] = [...this.closeText(turnId)];
+    this.turns.delete(turnId);
+    for (const activityId of turn.outputs.keys()) events.push(...this.finishOutput(turn.outputs, activityId));
+    const reasoning = turn.reasoning;
+    const text = reasoning?.boundary.finish("significant");
+    if (reasoning && text) events.push({ ...reasoning.template, text });
+    return events;
+  }
+
+  private finishOutput(streams: Map<string, Stream<ProviderActivityEvent>>, activityId: string): ProviderEvent[] {
+    const stream = streams.get(activityId);
+    if (!stream) return [];
+    streams.delete(activityId);
+    const output = stream.boundary.finish("significant");
+    return output ? [withOutput(stream.template, output)] : [];
+  }
+
+  private turnStreams(turnId: string): TurnStreams {
+    let turn = this.turns.get(turnId);
+    if (!turn) {
+      turn = { text: null, reasoning: null, outputs: new Map() };
+      this.turns.set(turnId, turn);
+    }
+    return turn;
+  }
+
+  private forgetEmptyTurn(turnId: string, turn: TurnStreams): void {
+    if (!turn.text && !turn.reasoning && turn.outputs.size === 0) this.turns.delete(turnId);
+  }
+
+  private open<T extends ProviderEvent>(template: T): Stream<T> {
+    return { boundary: new BoundarySecretRedactor(() => this.encodings), template };
   }
 }

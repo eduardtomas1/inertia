@@ -115,6 +115,7 @@ import { finishPrivilegedExit, RetryablePrivilegedCleanup } from "./privileged-s
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { registerContextMenuIpc } from "./context-menu-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
+import { registerAgentSecretIpc } from "./agent-secret-ipc.js";
 import { runtimeCredentialBroker } from "./runtime-credential-broker.js";
 import { runtimeIssueEvidenceBroker } from "./runtime-issue-evidence-broker.js";
 import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-bootstrap.js";
@@ -719,6 +720,7 @@ function registerIpcHandlers(): void {
 
   registerCredentialVaultIpc(ipcMain, () => credentialVault, assertTrustedIpc,
     (incident) => runtimeDiagnostics?.recordIncident(incident));
+  registerAgentSecretIpc({ ipcMain, assertTrusted: assertTrustedChatIpc, vault: () => credentialVault, runtime: () => runtimeSupervisor });
 }
 
 async function createMainWindow(): Promise<void> {

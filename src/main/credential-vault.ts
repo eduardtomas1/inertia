@@ -17,6 +17,7 @@ import { backendSecretReferenceForProfile } from "../node/backend-secret-referen
 import { FILE_OPEN_NO_FOLLOW } from
   "../node/platform-file-open-flags.js";
 
+import { agentSecretReference, isAgentSecretValue } from "../shared/agent-secrets.js";
 import {
   BACKEND_CREDENTIAL_MASK,
   type BackendCredentialStatus,
@@ -33,6 +34,16 @@ const VAULT_SCHEMA_VERSION = 2;
 export const MAX_CREDENTIAL_VAULT_BYTES = 1_048_576;
 const MAX_VAULT_ENTRIES = 256;
 const MAX_CIPHERTEXT_BASE64_LENGTH = 65_536;
+const AGENT_SECRET_REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+export type AgentSecretVaultWrite = "stored" | "exists" | "unavailable";
+
+function agentSecretVaultReference(requestId: string): string {
+  if (!AGENT_SECRET_REQUEST_ID.test(requestId)) {
+    throw new CredentialVaultError("invalid-input", "The agent secret request is invalid.");
+  }
+  return agentSecretReference(requestId);
+}
 
 export type CredentialVaultErrorCode =
   | "invalid-input"
@@ -847,6 +858,31 @@ export class CredentialVault {
       removed = true;
     });
     return removed;
+  }
+
+  async setAgentSecret(requestId: string, secret: string): Promise<AgentSecretVaultWrite> {
+    const secretReference = agentSecretVaultReference(requestId);
+    if (!isAgentSecretValue(secret)) {
+      throw new CredentialVaultError("invalid-input", "The agent secret is invalid.");
+    }
+    let result: AgentSecretVaultWrite = "stored";
+    try {
+      await this.enqueueMutation(async () => {
+        if ((await this.load()).entries[secretReference]?.ciphertext) {
+          result = "exists";
+          return;
+        }
+        await this.write(secretReference, secret);
+      });
+    } catch (error) {
+      if (error instanceof CredentialVaultError && error.code === "storage-unavailable") return "unavailable";
+      throw error;
+    }
+    return result;
+  }
+
+  async deleteAgentSecret(requestId: string): Promise<boolean> {
+    return await this.forget(agentSecretVaultReference(requestId));
   }
 
   private async write(secretReference: string, secret: string): Promise<void> {

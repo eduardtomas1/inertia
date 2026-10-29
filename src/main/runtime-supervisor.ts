@@ -31,6 +31,7 @@ import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases
 import type { RuntimeUpdatePreparationCoordinator, RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
 import type { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
 import type { RuntimeHtmlRenderCoordinator } from "./runtime-html-render-coordinator.js";
+import type { RuntimeAgentSecretCoordinator, RuntimeAgentSecretDelivery, RuntimeAgentSecretDeliveryOutcome } from "./runtime-agent-secret-coordinator.js";
 import type { RuntimeHtmlRenderDocument } from "../node/runtime-html-render-protocol.js";
 import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
@@ -105,6 +106,7 @@ export class RuntimeSupervisor {
   private readonly startupRecovery: RuntimeSupervisorStartupRecovery;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
   private readonly htmlRenders: RuntimeHtmlRenderCoordinator;
+  private readonly agentSecrets: RuntimeAgentSecretCoordinator;
   private readonly privateConnectRequests: RuntimePrivateConnectRequestCoordinator;
   private readonly databaseRecoveryRequests: RuntimeDatabaseRecoveryCoordinator;
   private readonly updatePreparation: RuntimeUpdatePreparationCoordinator;
@@ -208,6 +210,7 @@ export class RuntimeSupervisor {
     this.databaseRecoveryRequests = coordinators.databaseRecoveryRequests;
     this.privateConnectRequests = coordinators.privateConnectRequests;
     this.htmlRenders = coordinators.htmlRenders;
+    this.agentSecrets = coordinators.agentSecrets;
     this.updatePreparation = coordinators.updatePreparation;
     this.onRestartRequested = options.onRestartRequested;
     this.requestExplicitRecovery = options.requestExplicitRecovery;
@@ -326,6 +329,9 @@ export class RuntimeSupervisor {
   /** Reads one stored visual reply for the protocol route; `null` when the runtime has no such render. */
   readHtmlRender(renderId: string): Promise<RuntimeHtmlRenderDocument | null> {
     return this.htmlRenders.read(renderId);
+  }
+  deliverAgentSecret(delivery: RuntimeAgentSecretDelivery): Promise<RuntimeAgentSecretDeliveryOutcome> {
+    return this.agentSecrets.deliver(delivery);
   }
   prepareForUpdate(): Promise<RuntimeUpdatePreparationResult> {
     return this.updatePreparation.prepareCurrent();
@@ -671,7 +677,7 @@ export class RuntimeSupervisor {
       return;
     }
     if (this.htmlRenders.handle(record, event)) return;
-    if (event.type === "runtime.agent-secret-delivered" || event.type === "runtime.agent-secret-rejected") return;
+    if (this.agentSecrets.handle(record, event)) return;
     if (event.type === "runtime.private-connect-response") {
       this.privateConnectRequests.handle(record, event);
       return;
@@ -1177,6 +1183,7 @@ export class RuntimeSupervisor {
       pending.reject(new Error(message));
     });
     this.htmlRenders.reject(record, message);
+    this.agentSecrets.reject(record);
   }
   private rejectPrivateConnectRuntimeRequests(
     record: RuntimeProcessRecord | null,

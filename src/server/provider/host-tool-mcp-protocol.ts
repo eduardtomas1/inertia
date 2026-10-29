@@ -27,6 +27,7 @@ export interface ProviderMcpProtocolResult {
 
 export interface ProviderMcpToolOptions {
   destructiveHints?: boolean;
+  includes?(tool: string): boolean;
 }
 
 export function providerMcpTools(
@@ -125,13 +126,19 @@ async function handleRequest(
       return response(message.id, {});
     case "tools/list":
       return response(message.id, {
-        tools: providerMcpTools(runtime.definitions(), options),
+        tools: providerMcpTools(
+          runtime.definitions().filter(({ name }) => options.includes?.(name) ?? true),
+          options,
+        ),
       });
     case "tools/call": {
       const tool = message.params.name;
       const args = message.params.arguments;
       if (typeof tool !== "string" || tool.length < 1 || tool.length > 128) {
         return error(message.id, -32602, "Missing or invalid tool name.");
+      }
+      if (options.includes && !options.includes(tool)) {
+        return error(message.id, -32602, `Tool "${tool}" is not served here.`);
       }
       if (args !== undefined && record(args) === null) {
         return error(message.id, -32602, "Tool arguments must be an object.");

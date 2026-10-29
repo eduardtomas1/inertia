@@ -4,10 +4,17 @@ import { readOnlyCommandPathProblem } from "../runtime/watcher/read-only-command
 import { classifyReadOnlyCommand, type ReadOnlyCommandContext } from "../runtime/watcher/read-only-commands";
 import type { ProviderHostToolBridge, ProviderRunInput } from "./contracts";
 import type { AgentApprovalDecision, AgentApprovalRequest } from "./interactions";
-import { INERTIA_HOST_MCP_NAME, openCodeHostMcpConfig } from "./host-tool-mcp-config";
+import { SECRET_REQUEST_TOOL_NAME } from "../../shared/agent-secrets";
+import {
+  INERTIA_HOST_MCP_NAME,
+  INERTIA_SECRET_MCP_NAME,
+  OPENCODE_SECRET_MCP_TIMEOUT_MS,
+  openCodeHostMcpConfig,
+} from "./host-tool-mcp-config";
 import {
   createProviderHostToolMcpSession,
   type ProviderHostToolMcpConnection,
+  type ProviderHostToolMcpSession,
 } from "./host-tool-mcp-http";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { redactHostToolPayload } from "./host-tool-redaction";
@@ -72,6 +79,7 @@ export function openCodePermissions(
       pattern: "*",
       action: "allow",
     },
+    { permission: `${INERTIA_SECRET_MCP_NAME}_*`, pattern: "*", action: "allow" },
     ...planEdits,
   ];
 }
@@ -108,6 +116,12 @@ function openCodeWatcherCommandContext(input: Pick<ProviderRunInput, "cwd">): Re
   return { cwd: input.cwd, windows: process.platform === "win32", powershell: true };
 }
 
+interface OpenCodeHostMcpServer {
+  name: string;
+  timeout?: number;
+  session: ProviderHostToolMcpSession;
+}
+
 export function createOpenCodeHostTools(input: {
   bridge: ProviderHostToolBridge | undefined;
   conversationId: string;
@@ -128,66 +142,92 @@ export function createOpenCodeHostTools(input: {
     onApproval: input.onApproval,
     onApprovalResolved: input.onApprovalResolved,
   });
-  const session = createProviderHostToolMcpSession(runtime, {}, { destructiveHints: true });
-  let connection: ProviderHostToolMcpConnection | undefined;
-  let installed = false;
+  const servesSecrets = input.bridge.definitions.some(({ name }) => name === SECRET_REQUEST_TOOL_NAME);
+  const servers: OpenCodeHostMcpServer[] = [
+    {
+      name: INERTIA_HOST_MCP_NAME,
+      session: createProviderHostToolMcpSession(runtime, {}, {
+        destructiveHints: true,
+        includes: (tool) => tool !== SECRET_REQUEST_TOOL_NAME,
+      }),
+    },
+    ...(servesSecrets
+      ? [{
+        name: INERTIA_SECRET_MCP_NAME,
+        timeout: OPENCODE_SECRET_MCP_TIMEOUT_MS,
+        session: createProviderHostToolMcpSession(runtime, {}, {
+          destructiveHints: true,
+          includes: (tool: string) => tool === SECRET_REQUEST_TOOL_NAME,
+        }),
+      }]
+      : []),
+  ];
+  const connections: ProviderHostToolMcpConnection[] = [];
+  const installed = new Set<string>();
   let cleanupPromise: Promise<void> | undefined;
+  const closeSessions = async (): Promise<void> => {
+    const closed = await Promise.allSettled(servers.map(({ session }) => session.close()));
+    if (closed.some(({ status }) => status === "rejected")) {
+      throw new Error("OpenCode Inertia chat tools could not be cleaned up.");
+    }
+  };
 
   return {
     install: async (client, initialize) => {
-      connection = await session.start();
-      const response = await initialize(
-        "Inertia chat-tool connection",
-        async (signal) => await client.mcp.add({
-          directory: input.cwd,
-          name: INERTIA_HOST_MCP_NAME,
-          config: openCodeHostMcpConfig(connection!),
-        }, { signal, throwOnError: true }),
-      );
-      // A completed add mutates the owned server even when its returned status
-      // is unexpected, so cleanup must still disconnect it.
-      installed = true;
-      if (response.data?.[INERTIA_HOST_MCP_NAME]?.status !== "connected") {
-        throw new Error("OpenCode did not connect the scoped Inertia chat tools.");
+      for (const server of servers) {
+        const connection = await server.session.start();
+        connections.push(connection);
+        const response = await initialize(
+          "Inertia chat-tool connection",
+          async (signal) => await client.mcp.add({
+            directory: input.cwd,
+            name: server.name,
+            config: openCodeHostMcpConfig(connection, server.timeout),
+          }, { signal, throwOnError: true }),
+        );
+        // A completed add mutates the owned server even when its returned status
+        // is unexpected, so cleanup must still disconnect it.
+        installed.add(server.name);
+        if (response.data?.[server.name]?.status !== "connected") {
+          throw new Error("OpenCode did not connect the scoped Inertia chat tools.");
+        }
       }
     },
     settle: () => runtime.settle(),
-    revoke: () => session.close(),
+    revoke: () => closeSessions(),
     cleanup: (client) => {
       cleanupPromise ??= (async () => {
         runtime.settle();
         let disconnected = true;
-        if (client && installed) {
+        for (const server of servers) {
+          if (!client || !installed.has(server.name)) continue;
           try {
             await withOpenCodeRequestDeadline(
               MCP_DISCONNECT_TIMEOUT_MS,
               "Timed out disconnecting OpenCode Inertia chat tools.",
               async (signal) => await client.mcp.disconnect({
                 directory: input.cwd,
-                name: INERTIA_HOST_MCP_NAME,
+                name: server.name,
               }, { signal, throwOnError: true }),
             );
           } catch {
             disconnected = false;
           }
-          installed = false;
+          installed.delete(server.name);
         }
-        try {
-          await session.close();
-        } catch {
-          throw new Error("OpenCode Inertia chat tools could not be cleaned up.");
-        }
+        await closeSessions();
         if (!disconnected) throw new OpenCodeHostToolDisconnectError();
       })();
       return cleanupPromise;
     },
-    redact: (value) => connection
-      ? value
-          .replaceAll(connection.bearerToken, "[redacted]")
-          .replaceAll(connection.url, "[redacted]")
-      : value,
-    redactPayload: (value) => connection
-      ? redactHostToolPayload(value, [connection.bearerToken, connection.url])
+    redact: (value) => connections.reduce(
+      (text, connection) => text
+        .replaceAll(connection.bearerToken, "[redacted]")
+        .replaceAll(connection.url, "[redacted]"),
+      value,
+    ),
+    redactPayload: (value) => connections.length > 0
+      ? redactHostToolPayload(value, connections.flatMap(({ bearerToken, url }) => [bearerToken, url]))
       : value,
     respondToApproval: (requestId, decision) =>
       runtime.respondToApproval(requestId, decision),

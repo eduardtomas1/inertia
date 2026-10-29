@@ -6,7 +6,7 @@ const LEADING_CD_PATTERN = /^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*&&\s*/u;
 const SETUP_LINE_PATTERN =
   /^(?:#|export\s+[A-Za-z_][A-Za-z0-9_]*=|set\s+[-+][a-zA-Z]+|cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*$|source\s+\S+\s*$|\.\s+\S+\s*$)/u;
 const HOST_TOOL_TITLE =
-  /^(?:Tool\s*·\s*)?(?:mcp_{1,2})?(?:inertia-chat-manager(?:_{1,2}|\s*:\s*))?(inertia_[a-z0-9_]+)(?:\s*:.*)?$/u;
+  /^(?:Tool\s*·\s*)?(?:mcp_{1,2})?(?:inertia-chat-(?:manager|secrets)(?:_{1,2}|\s*:\s*))?(inertia_[a-z0-9_]+)(?:\s*:.*)?$/u;
 const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done: string, failed: string]>> = {
   inertia_render_html: ["Rendering a page", "Rendered a page", "Could not render a page"],
   inertia_request_secret: ["Asking for a secret", "Secret saved", "No secret saved"],

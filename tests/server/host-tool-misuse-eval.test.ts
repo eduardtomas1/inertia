@@ -59,6 +59,21 @@ async function arrange(setup: readonly MisuseSetup[], runtime: SurfaceRuntime): 
       placeholders.$foreign = runtime.store.createConversation(runtime.project.id, "Sibling chat", {
         activate: false,
       }).id;
+    } else if (step === "pending-secret-request" || step === "three-secret-requests") {
+      const requests = runtime.store.agentSecretRequests();
+      for (let index = 0; index < (step === "pending-secret-request" ? 1 : 3); index += 1) {
+        const created = requests.create({
+          conversationId: runtime.source.id,
+          runId: runtime.sourceTurn.runId,
+          turnId: runtime.sourceTurn.id,
+          providerId: "codex",
+          title: `Earlier secret ${index + 1}`,
+          description: "Asked earlier in this turn.",
+          fileName: "secret",
+          ttlHours: 24,
+        });
+        if (step === "three-secret-requests") requests.transition(created.request.id, ["pending"], "declined");
+      }
     } else if (step === "stale-ref") {
       pageTools.locateAgentPageRef.mockResolvedValue({ found: false });
     } else {

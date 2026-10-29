@@ -6,6 +6,7 @@ import {
   RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS,
 } from "./agent-browser-host-tools";
 import { HTML_RENDER_TOOL_DEFINITION } from "./html-render-host-tool";
+import { SECRET_REQUEST_TOOL_DEFINITION } from "./agent-secrets/secret-request-host-tool";
 import {
   HarnessCapabilityRegistry,
   type HarnessCapabilityTool,
@@ -36,6 +37,7 @@ const FRONTEND_INSTRUCTION: HiddenProviderInstruction = {
 interface InertiaHarnessCapabilityInput {
   orchestrationTools: readonly ProviderHostToolDefinition[];
   browserEnabled: boolean;
+  secretsEnabled?: boolean;
   invoke: HarnessCapabilityTool["invoke"];
 }
 
@@ -97,6 +99,19 @@ export function createInertiaHarnessCapabilities(
       tags: ["frontend", "visual-replies"],
       evidenceKinds: ["host-tool-result"],
       scenarioIds: ["inline-rendered-page", "exact-turn-render"],
+    },
+  });
+  if (input.secretsEnabled) packs.push({
+    id: "inertia.secrets",
+    revision: 1,
+    title: "Inertia secrets",
+    summary: "Asks the user for one secret in a private card and hands the agent an expiring private file path, never the value.",
+    instructions: [],
+    tools: [{ definition: SECRET_REQUEST_TOOL_DEFINITION, invoke: input.invoke }],
+    evaluation: {
+      tags: ["permissions", "secrets"],
+      evidenceKinds: ["host-tool-result"],
+      scenarioIds: ["private-secret-card", "exact-turn-secret-wait"],
     },
   });
   return new HarnessCapabilityRegistry(packs);

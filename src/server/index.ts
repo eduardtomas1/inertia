@@ -698,7 +698,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         (settled) => watchers?.onTurnSettled(settled),
         (settled) => testOnlyOnTurnSettled?.(settled),
       ], () => store.createInitialBackup({ quietGraceMs: 1_000 })),
-      testOnlyStreamingTrace: streamingTrace,
+      testOnlyStreamingTrace: streamingTrace, secretOutput: () => agentThreads?.secrets.output,
     },
     {
       runtimeGenerationId: options.runtimeGenerationId,
@@ -710,7 +710,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
     conversationAttachments: initializedConversationAttachments,
-    agentBrowser: options.agentBrowser, watcherPolicy,
+    agentBrowser: options.agentBrowser, watcherPolicy, backendCredentials: options.backendCredentials, lifetime: runtimeLifetimeAbort.signal,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
@@ -749,14 +749,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
-      createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send }),
+      createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send, secretValues: () => agentThreads?.secrets.output.values() ?? [] }),
       queuedMessages.handler,
       ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, visibleLaunchIds: detachedChatRuntimeSecurity.visibleDuoLaunchIds, broadcastSnapshot: flushSnapshot, send }),
       watchers.handler,
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
-      createCustomAgentCommandHandler({ store }), createSecretRequestCommandHandler({ service: () => null, send }),
+      createCustomAgentCommandHandler({ store }), createSecretRequestCommandHandler({ service: () => agentThreads?.secrets ?? null, send }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork,
@@ -1025,7 +1025,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
     releaseUpdatePreparation: (operationId) =>
       updatePreparation.release(operationId),
-    readHtmlRender: (renderId) => store.htmlRenders.read(renderId),
+    readHtmlRender: (renderId) => store.htmlRenders.read(renderId), deliverAgentSecret: (delivery) => agentThreads!.secrets.deliver(delivery),
     resolveProjectPath: (request) => trackRuntimeOperation(async () => {
       if (runtimeSafetyLock) {
         throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));

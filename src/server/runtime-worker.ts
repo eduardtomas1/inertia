@@ -35,6 +35,7 @@ import {
 } from "./runtime-worker-startup-preflight.js";
 import { observeRuntimeStartup } from "./runtime-worker-startup-failure.js";
 import { answerRuntimeHtmlRenderRead } from "./runtime-html-render-reads.js";
+import { answerRuntimeAgentSecretDelivery } from "./runtime-agent-secret-delivery.js";
 import {
   installRuntimeWorkerFaultHandlers,
   runtimeOwnedProcessFaultIncidentCode,
@@ -365,7 +366,7 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   if (command.type === "runtime.agent-secret-deliver") {
-    post({ type: "runtime.agent-secret-rejected", transportId: command.transportId, reason: "not-pending" });
+    void answerRuntimeAgentSecretDelivery(stopping ? null : runtime, command).then(post).catch(() => undefined);
     return;
   }
   if (command.type === "runtime.resolve-project-path") {

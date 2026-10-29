@@ -2,6 +2,7 @@ import type WebSocket from "ws";
 import type { ServerEvent } from "../../../shared/contracts";
 import { providerNativeModelSelection } from "../../../shared/model-routing";
 import { CliConversationDiscovery } from "../../cli-import/discovery";
+import { acpEnvironmentSecretValues } from "../../provider/acp-redaction";
 import type { RuntimeStore } from "../../database";
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -12,10 +13,16 @@ export function createCliConversationCommandHandler(deps: {
   providers: Pick<ProviderManager, "resolveModelRoute">;
   discovery?: CliConversationDiscovery;
   signal?: AbortSignal;
+  secretValues?(): readonly string[];
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
 }): RuntimeCommandHandler {
-  const discovery = deps.discovery ?? new CliConversationDiscovery(undefined, undefined, deps.signal);
+  const environmentSecrets = acpEnvironmentSecretValues(process.env);
+  const discovery = deps.discovery ?? new CliConversationDiscovery(
+    undefined,
+    () => [...environmentSecrets, ...deps.secretValues?.() ?? []].sort((left, right) => right.length - left.length),
+    deps.signal,
+  );
   return defineRuntimeCommandHandler(["conversation.cli.scan", "conversation.cli.preview", "conversation.cli.import"], async (socket, command) => {
     if (command.type !== "conversation.cli.scan" && command.type !== "conversation.cli.preview" && command.type !== "conversation.cli.import") return "not-handled";
     const { projectId } = command.payload;

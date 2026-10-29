@@ -27,6 +27,8 @@ import type {
 } from "../../src/server/provider/interactions";
 import type { RuntimeAgentBrowserBroker } from "../../src/server/runtime/agent-browser-broker-client";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
+import { AgentSecretService } from "../../src/server/runtime/agent-secrets/agent-secret-service";
+import type { RuntimeMutationEvent } from "../../src/shared/contracts";
 import { ConversationContextRequestCoordinator } from "../../src/server/runtime/conversation-context-request-coordinator";
 import type { AccessMode } from "../../src/shared/contracts";
 import { removeTemporaryDirectory } from "./temporary-directory";
@@ -34,7 +36,10 @@ import { removeTemporaryDirectory } from "./temporary-directory";
 export interface SurfaceRuntimeOptions {
   browser?: RuntimeAgentBrowserBroker;
   accessMode?: AccessMode;
+  secretAnswer?: "deliver" | "none";
 }
+
+export const SURFACE_SECRET_VALUE = "surface-secret-value-1234";
 
 export type SurfaceRuntime = Awaited<ReturnType<typeof createSurfaceRuntime>>;
 
@@ -115,6 +120,25 @@ export async function createSurfaceRuntime(options: SurfaceRuntimeOptions = {}) 
     broadcast: vi.fn(),
     broadcastConversationShell: vi.fn(),
   });
+  const secretHolder: { service?: AgentSecretService } = {};
+  const secrets = new AgentSecretService({
+    store,
+    dataDirectory: root,
+    turns: { secretWait: () => true },
+    broadcast: (event: RuntimeMutationEvent) => {
+      if (event.type !== "conversation.message.persisted" || options.secretAnswer === "none") return;
+      const { conversationId, secretRequest } = event.message;
+      if (secretRequest?.status !== "pending") return;
+      queueMicrotask(() => {
+        void secretHolder.service?.deliver({
+          conversationId, requestId: secretRequest.requestId, secret: SURFACE_SECRET_VALUE, vaulted: false,
+        });
+      });
+    },
+    waitMs: () => 50,
+  });
+  secretHolder.service = secrets;
+  secrets.start();
   const manager = new AgentThreadManager({
     store,
     providers: { resolveModelRoute: () => ({ providerId: "codex" }) } as never,
@@ -136,6 +160,7 @@ export async function createSurfaceRuntime(options: SurfaceRuntimeOptions = {}) 
     },
     contextRequests,
     ...(options.browser ? { agentBrowser: options.browser } : {}),
+    agentSecrets: secrets,
     providerInfo: () => [{ id: "codex", canRun: true, statusMessage: null, models: [] }] as never,
     broadcastSnapshot: vi.fn(),
     broadcastConversationShell: vi.fn(),
@@ -166,7 +191,9 @@ export async function createSurfaceRuntime(options: SurfaceRuntimeOptions = {}) 
     bridge,
     turns,
     createManagedChat,
+    secrets,
     close: async () => {
+      secrets.shutdown();
       store.close();
       await removeTemporaryDirectory(root);
     },

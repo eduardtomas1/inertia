@@ -22,6 +22,7 @@ import {
 import { privateConnectRuntimeGrantAllowsConversation } from "../../shared/private-connect/runtime-grants";
 import { isTurnCheckpointUnavailableActivity } from "../../shared/turn-checkpoint";
 import { htmlRenderContextLine } from "../../shared/html-render-reference";
+import { secretRequestRemoteLine } from "../../shared/agent-secrets";
 import {
   privateConnectPromptSafetyIsUsable,
   UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY,
@@ -260,18 +261,20 @@ export class PrivateConnectRuntimeGateway {
           generatedAt: this.now().toISOString(),
           conversation: projectedConversation,
           messages: detail.messages
-            .filter(({ role, htmlRender }) => role === "user" || role === "assistant" || htmlRender)
+            .filter(({ role, htmlRender, secretRequest }) => role === "user" || role === "assistant" || htmlRender || secretRequest)
             .slice(-PRIVATE_CONNECT_RUNTIME_LIMITS.transcriptMessages)
             .map((message) => ({
               id: message.id,
               turnId: message.turnId,
-              role: message.htmlRender ? "assistant" as const : message.role as "user" | "assistant",
+              role: message.htmlRender || message.secretRequest ? "assistant" as const : message.role as "user" | "assistant",
               content: this.transcriptCache.content(
                 request.conversationId,
                 message.id,
                 message.htmlRender
                   ? htmlRenderContextLine(message.htmlRender.title)
-                  : message.watcherNote
+                  : message.secretRequest
+                    ? secretRequestRemoteLine(message.secretRequest)
+                    : message.watcherNote
                     ? `${WATCHER_NOTE_HISTORY_LABELS[message.watcherNote.automatic ? "automatic" : "forwarded"]}\n\n${message.content}`
                     : message.content,
               ),

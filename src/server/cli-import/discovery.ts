@@ -113,7 +113,7 @@ export class CliConversationDiscovery {
   private latest: { key: string; scan: Promise<CliConversationScan> } | null = null;
   constructor(
     private readonly roots: readonly Root[] = cliConversationRoots(),
-    private readonly secrets: readonly string[] = acpEnvironmentSecretValues(process.env),
+    private readonly secrets: readonly string[] | (() => readonly string[]) = acpEnvironmentSecretValues(process.env),
     private readonly signal?: AbortSignal,
     limits: Partial<CliScanLimits> = {},
   ) {
@@ -290,7 +290,7 @@ export class CliConversationDiscovery {
 
   private streamOptions(deadline = Number.POSITIVE_INFINITY): StreamOptions {
     return {
-      secrets: this.secrets, recordBytes: this.limits.recordBytes, maxRecords: this.limits.maxRecords,
+      secrets: typeof this.secrets === "function" ? this.secrets() : this.secrets, recordBytes: this.limits.recordBytes, maxRecords: this.limits.maxRecords,
       deadline: Math.min(deadline, Date.now() + this.limits.readMilliseconds), signal: this.signal,
     };
   }

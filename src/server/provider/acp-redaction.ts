@@ -105,7 +105,7 @@ function normalizedSecrets(values: readonly string[]): string[] {
     .sort((left, right) => right.length - left.length);
 }
 
-class BoundarySecretRedactor {
+export class BoundarySecretRedactor {
   private pending = "";
   private finished = false;
   private root: SecretTrieNode | undefined;
@@ -195,7 +195,7 @@ function isLowSurrogate(text: string, index: number): boolean {
   return unit >= 0xdc00 && unit <= 0xdfff;
 }
 
-type PartialSecretRedaction = "all" | "significant";
+export type PartialSecretRedaction = "all" | "significant";
 
 interface SecretTrieNode {
   readonly children: Map<string, SecretTrieNode>;

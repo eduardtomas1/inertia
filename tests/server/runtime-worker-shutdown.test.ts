@@ -43,6 +43,7 @@ function runtimeWithClose(
     releaseUpdatePreparation: vi.fn(() => true),
     resolveProjectPath: vi.fn(),
     readHtmlRender: vi.fn(() => null),
+    deliverAgentSecret: vi.fn(async () => ({ status: "rejected" as const, reason: "ended" as const })),
     privateConnectRequest: vi.fn(async () => {
       throw new Error("unused");
     }),

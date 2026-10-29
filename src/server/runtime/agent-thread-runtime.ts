@@ -21,6 +21,8 @@ import type {
   RuntimeAgentBrowserBroker,
 } from "./agent-browser-broker-client";
 import type { AgentContextWatcherPolicy } from "./agent-context-tool";
+import { AgentSecretService } from "./agent-secrets/agent-secret-service";
+import type { RuntimeBackendCredentialBroker } from "../runtime-types";
 
 interface AgentThreadRuntimeDependencies {
   store: RuntimeStore;
@@ -34,6 +36,8 @@ interface AgentThreadRuntimeDependencies {
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   agentBrowser?: RuntimeAgentBrowserBroker;
   watcherPolicy?: AgentContextWatcherPolicy;
+  backendCredentials?: RuntimeBackendCredentialBroker;
+  lifetime?: AbortSignal;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;
@@ -44,6 +48,7 @@ export interface AgentThreadRuntime {
   creation: ConversationCreationService;
   manager: AgentThreadManager;
   contextRequests: ConversationContextRequestCoordinator;
+  secrets: AgentSecretService;
 }
 
 /** Compose the one privileged creation path shared by UI and agent tools. */
@@ -57,13 +62,25 @@ export function createAgentThreadRuntime(
     broadcast: dependencies.broadcast,
     broadcastConversationShell: dependencies.broadcastConversationShell,
   });
+  const secrets = new AgentSecretService({
+    store: dependencies.store,
+    dataDirectory: dependencies.dataDirectory,
+    turns: dependencies.turns,
+    broadcast: dependencies.broadcast,
+    ...(dependencies.backendCredentials ? { credentials: dependencies.backendCredentials } : {}),
+    ...(dependencies.lifetime ? { signal: dependencies.lifetime } : {}),
+  });
+  secrets.start();
+  void secrets.restore();
   return {
     creation,
     contextRequests,
+    secrets,
     manager: new AgentThreadManager({
       ...dependencies,
       contextRequests,
       creation,
+      agentSecrets: secrets,
     }),
   };
 }

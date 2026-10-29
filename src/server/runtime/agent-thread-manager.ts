@@ -57,6 +57,8 @@ import {
 import { createInertiaHarnessCapabilities } from "./inertia-harness-capabilities";
 import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
 import { HtmlRenderHostTool } from "./html-render-host-tool";
+import { SECRET_REQUEST_TOOL_NAME } from "../../shared/agent-secrets";
+import type { AgentSecretHostToolSource } from "./agent-secrets/agent-secret-service";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
 import { ManagedMutationQueue } from "./managed-mutation-queue";
 import type { HiddenProviderInstruction } from "./turns/request-context";
@@ -280,6 +282,9 @@ export interface AgentThreadManagerDependencies {
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   watcherPolicy?: AgentContextWatcherPolicy;
   agentBrowser?: RuntimeAgentBrowserBroker;
+  agentSecrets?: {
+    invoke(source: AgentSecretHostToolSource, call: ProviderHostToolCall): Promise<ProviderHostToolResult>;
+  };
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;
@@ -349,6 +354,7 @@ export class AgentThreadManager {
     this.capabilities = createInertiaHarnessCapabilities({
       orchestrationTools: TOOL_DEFINITIONS,
       browserEnabled: this.agentBrowser !== undefined,
+      secretsEnabled: dependencies.agentSecrets !== undefined,
       invoke: async (context, call) => await this.invoke(context, call),
     });
   }
@@ -411,6 +417,9 @@ export class AgentThreadManager {
       const current = this.assertSource(source);
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
       if (call.tool === HTML_RENDER_TOOL_NAME) return this.htmlRenders.invoke({ conversation: current, turn: source.turn }, call);
+      if (call.tool === SECRET_REQUEST_TOOL_NAME && this.dependencies.agentSecrets) {
+        return await this.dependencies.agentSecrets.invoke({ conversation: current, turn: source.turn }, call);
+      }
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
         if (this.dependencies.store.project(current.projectId).preferences?.browserAccess === false) {
           return failure("browser_disabled", "Agent browser access is disabled in this project's settings.");

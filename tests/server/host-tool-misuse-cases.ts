@@ -5,7 +5,9 @@ export type MisuseSetup =
   | "idle-managed-child"
   | "foreign-chat"
   | "stale-ref"
-  | "non-editable-ref";
+  | "non-editable-ref"
+  | "pending-secret-request"
+  | "three-secret-requests";
 
 export interface MisuseCall {
   tool: string;
@@ -43,6 +45,10 @@ export interface MisuseCase {
 const CLAUDE_SDK_UNKNOWN_TOOL = "Claude's MCP SDK answers 'Tool <name> not found' and echoes the provider-sent name before Inertia sees it";
 const NAVIGATE = { tool: "inertia_browser_navigate", arguments: { url: "http://localhost:3000/" } };
 const OPEN_TAB = { tool: "inertia_browser_open_tab", arguments: {} };
+const SECRET_REQUEST = {
+  title: "Tailscale auth key",
+  description: "Create a reusable, ephemeral key in the Tailscale admin console.",
+};
 
 export const MISUSE_CASES: readonly MisuseCase[] = [
   {
@@ -236,6 +242,50 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     mistake: "None: renders one small page.",
     call: { tool: "inertia_render_html", arguments: { html: "<!doctype html><p>Hi</p>", title: "Greeting" } },
     expect: { success: true, includes: ["\"rendered\":true"] },
+  },
+  {
+    id: "secret-ttl-too-long",
+    kind: "bad",
+    mistake: "Asks for a secret that should stay readable for 48 hours.",
+    call: { tool: "inertia_request_secret", arguments: { ...SECRET_REQUEST, ttlHours: 48 } },
+    expect: { success: false, code: "invalid_arguments", includes: ["ttlHours", "24"] },
+  },
+  {
+    id: "secret-description-too-long",
+    kind: "bad",
+    mistake: "Explains the secret in a 900-character description.",
+    call: { tool: "inertia_request_secret", arguments: { ...SECRET_REQUEST, description: "x".repeat(900) } },
+    expect: { success: false, code: "invalid_arguments", includes: ["description", "600"] },
+  },
+  {
+    id: "secret-file-name-path",
+    kind: "bad",
+    mistake: "Uses a relative path as the secret file name.",
+    call: { tool: "inertia_request_secret", arguments: { ...SECRET_REQUEST, fileName: "../x" } },
+    expect: { success: false, code: "invalid_arguments", includes: ["fileName", "slashes"] },
+  },
+  {
+    id: "secret-second-while-pending",
+    kind: "guard",
+    mistake: "Asks for a second secret while the first card is still waiting.",
+    setup: ["pending-secret-request"],
+    call: { tool: "inertia_request_secret", arguments: SECRET_REQUEST },
+    expect: { success: false, code: "secret_request_pending", includes: ["already waiting"] },
+  },
+  {
+    id: "secret-fourth-in-turn",
+    kind: "guard",
+    mistake: "Asks for a fourth secret in one turn.",
+    setup: ["three-secret-requests"],
+    call: { tool: "inertia_request_secret", arguments: SECRET_REQUEST },
+    expect: { success: false, code: "secret_request_limit", includes: ["3 secrets"] },
+  },
+  {
+    id: "secret-valid",
+    kind: "control",
+    mistake: "None: asks for one secret and the user saves it.",
+    call: { tool: "inertia_request_secret", arguments: SECRET_REQUEST },
+    expect: { success: true, includes: ["\"status\":\"saved\"", "\"expiresAt\""], matches: [/^(?![\s\S]*surface-secret-value)/u] },
   },
   {
     id: "unknown-tool-forged-label",

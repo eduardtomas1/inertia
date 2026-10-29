@@ -234,9 +234,7 @@ describe("provider host-tool MCP transport", () => {
       enabled: true,
       headers: { Authorization: `Bearer ${connection.bearerToken}` },
       oauth: false,
-      // Covers the Browser broker's 20 second request deadline and the main
-      // process's longest 30 second navigation settlement window.
-      timeout: 30_000,
+      timeout: 660_000,
     });
   });
 

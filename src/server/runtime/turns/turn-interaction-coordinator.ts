@@ -69,6 +69,7 @@ export class TurnInteractionCoordinator {
     inputs: Set<string>;
   }>();
   private readonly deniedReadOnlyApprovals = new WeakMap<ActiveTurn, Set<string>>();
+  private readonly secretWaits = new WeakMap<ActiveTurn, Map<string, string>>();
 
   constructor(private readonly options: TurnInteractionCoordinatorOptions) {}
 
@@ -365,6 +366,23 @@ export class TurnInteractionCoordinator {
     this.broadcastConversationShell(active);
   }
 
+  secretWait(active: ActiveTurn | undefined, turnId: string, requestId: string, title: string | null): boolean {
+    if (!active || active.turn.id !== turnId || !active.runState.acceptsProviderEvents()) return false;
+    const waits = this.secretWaits.get(active) ?? new Map<string, string>();
+    this.secretWaits.set(active, waits);
+    if (title === null) {
+      if (!waits.delete(requestId)) return false;
+      active.inputIds.delete(requestId);
+    } else {
+      this.options.streams.closeAssistantSegment(active);
+      this.options.streams.flush(active, "reasoning");
+      waits.set(requestId, title);
+      active.inputIds.add(requestId);
+    }
+    this.refreshWaitingState(active);
+    return true;
+  }
+
   resolveInput(active: ActiveTurn, requestId: string): void {
     this.responses(active).inputs.delete(requestId);
     const owner = interactionOwner(active);
@@ -430,6 +448,7 @@ export class TurnInteractionCoordinator {
           id,
         ))
         .find(Boolean);
+      const secretTitle = this.secretWaits.get(active)?.values().next().value;
       if (input) {
         this.options.transition(active, "waiting-for-input");
         this.projectWaiting(
@@ -437,6 +456,9 @@ export class TurnInteractionCoordinator {
           "input",
           input.questions[0]?.question ?? "Waiting for an answer",
         );
+      } else if (secretTitle !== undefined) {
+        this.options.transition(active, "waiting-for-input");
+        this.projectWaiting(active, "input", secretTitle);
       } else {
         this.options.transition(active, "running");
         this.projectConversation(active, "running");

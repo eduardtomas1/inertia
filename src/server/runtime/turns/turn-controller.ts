@@ -93,7 +93,7 @@ import {
 } from "./turn-live-adoption";
 import { requestProviderCancellation } from "./turn-provider-cancellation";
 import { updateInterruptionMessage } from "./turn-update-interruption";
-import { resolveTurnHostTools } from "./turn-provider-host-tools";
+import { resolveTurnHostTools } from "./turn-provider-host-tools"; import { secretFilteredEvents, secretFilteredResult } from "./turn-secret-output";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
 
@@ -871,7 +871,7 @@ export class TurnController {
         (providerResult) => {
           acknowledge(false);
           try {
-            this.handleProviderResult(active, providerResult);
+            this.handleProviderResult(active, secretFilteredResult(this.hooks.secretOutput?.(), providerResult, (event) => { if (!active.runState.isTerminal()) this.providerEvents.project(active, event); }));
           } catch (error) {
             requestProviderCancellation(this.providers, active.conversation.id);
             this.settle(active, "failed", "stream-persistence-failed", publicTurnError(error));
@@ -1025,6 +1025,8 @@ export class TurnController {
     );
   }
 
+  secretWait(conversationId: string, turnId: string, requestId: string, title: string | null): boolean { return this.interactions.secretWait(this.activeByConversation.get(conversationId), turnId, requestId, title); }
+
   rendererDisconnected(ownerId: string): number {
     let settled = 0;
     for (const active of this.activeByConversation.values()) {
@@ -1104,7 +1106,7 @@ export class TurnController {
       if (event.type === "text") {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
       }
-      this.providerEvents.project(active, event);
+      for (const projected of secretFilteredEvents(this.hooks.secretOutput?.(), event)) this.providerEvents.project(active, projected);
       this.nativeGoals.handleEvent(active, event);
       return true;
     } catch (error) {

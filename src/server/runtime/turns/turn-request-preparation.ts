@@ -24,6 +24,7 @@ import {
   assembleTurnRequest,
   type AssembleTurnRequestInput,
   type ConversationContextMaterialization,
+  type HiddenProviderInstruction,
 } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import { PROVIDER_INFO } from "../../provider/catalog";
@@ -42,6 +43,7 @@ import {
 } from "./turn-instruction-delivery";
 import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
 import { rejectGoalCustomAgentCall, resolveCustomAgentCall } from "./custom-agent-call";
+import { SECRET_REQUEST_FALLBACK_INSTRUCTION } from "../../../shared/agent-secrets";
 import type {
   ActiveTurn,
   QueuedTurn,
@@ -110,6 +112,11 @@ interface WatcherTurnPolicy {
   wakeId: string | null;
   readOnly?: ReadOnlyWatcherTurn;
 }
+
+const SECRET_REQUEST_FALLBACK_HIDDEN_INSTRUCTION: HiddenProviderInstruction = {
+  label: "inertia-secrets-fallback",
+  text: SECRET_REQUEST_FALLBACK_INSTRUCTION,
+};
 
 function watcherTurnPolicy(
   store: RuntimeStore,
@@ -232,9 +239,11 @@ export function resolveTurnRequest(
     : null;
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const hostToolBridgeAttested = routeHostBridgeAttested(providerInfo, route);
-  const capabilityInstructions = hostToolBridgeAttested && !watcherTurn
-    ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
-    : [];
+  const capabilityInstructions = watcherTurn
+    ? []
+    : hostToolBridgeAttested
+      ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
+      : [SECRET_REQUEST_FALLBACK_HIDDEN_INSTRUCTION];
   const roleInstructions = request.systemInstructions
     ?? (watcherTurn?.wakeId === null
       ? dependencies.hooks.watcherInstructionsForTurn?.({ conversation, hostTools: hostToolBridgeAttested }) ?? []
@@ -329,7 +338,7 @@ export function resolveTurnRequest(
     deliveries: dependencies.instructionDeliveries,
     conversation,
     harnessId: route.harnessId,
-    pack: resumesImportedCodex ? [] : instructionPack(conversation.id, capabilityInstructions),
+    pack: resumesImportedCodex ? [] : hostToolBridgeAttested ? instructionPack(conversation.id, capabilityInstructions) : capabilityInstructions,
     resumedSessionId: canResume ? conversation.providerSessionId : null,
     latestTurn,
     promptWithheld: request.goalStart !== undefined,

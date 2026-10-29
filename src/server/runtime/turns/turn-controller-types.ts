@@ -41,6 +41,7 @@ import type { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
 import type { CustomAgentTraceAttribution } from "./turn-custom-agent-traces";
 import type { CustomAgentCallAttribution } from "../../../shared/custom-agents";
 import type { StreamingTrace } from "../test-streaming-trace";
+import type { TurnSecretOutputFilter } from "./turn-secret-output";
 import type { AuthoritativeRunStateEngine } from "../run-state-engine";
 import type { WatcherNoteAttribution } from "../../../shared/watcher";
 import type { DuoComparisonBrief } from "../../../shared/duo-comparison-brief";
@@ -208,6 +209,7 @@ export interface TurnControllerHooks {
   onPlanHandoff?(turn: AgentTurn, text: string): void;
   /** Benchmark-only stage attribution; absent in ordinary runtime instances. */
   testOnlyStreamingTrace?: StreamingTrace;
+  secretOutput?(): TurnSecretOutputFilter | undefined;
 }
 
 export type ReadOnlyWatcherViolationKind =

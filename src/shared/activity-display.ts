@@ -9,6 +9,7 @@ const HOST_TOOL_TITLE =
   /^(?:Tool\s*·\s*)?(?:mcp_{1,2})?(?:inertia-chat-manager(?:_{1,2}|\s*:\s*))?(inertia_[a-z0-9_]+)(?:\s*:.*)?$/u;
 const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done: string, failed: string]>> = {
   inertia_render_html: ["Rendering a page", "Rendered a page", "Could not render a page"],
+  inertia_request_secret: ["Asking for a secret", "Secret saved", "No secret saved"],
 };
 
 export function unwrapShellCommand(command: string): string {

@@ -1,6 +1,8 @@
 import type { McpServer } from "@agentclientprotocol/sdk/unstable";
 import type { McpRemoteConfig } from "@opencode-ai/sdk/v2";
 
+import { SECRET_REQUEST_DEFAULT_WAIT_MS } from "../../shared/agent-secrets";
+
 import {
   MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES,
   PROVIDER_HOST_TOOL_MCP_BODY_LIMIT_MESSAGE,
@@ -16,7 +18,7 @@ export const INERTIA_HOST_MCP_NAME = "inertia-chat-manager";
 export const INERTIA_HOST_MCP_URL_ENV = "INERTIA_HOST_MCP_URL";
 export const INERTIA_HOST_MCP_TOKEN_ENV = "INERTIA_HOST_MCP_TOKEN";
 const MAX_STDIO_PROXY_RESPONSE_BYTES = 6 * 1024 * 1024;
-const OPENCODE_HOST_MCP_TIMEOUT_MS = 30_000;
+const OPENCODE_HOST_MCP_TIMEOUT_MS = SECRET_REQUEST_DEFAULT_WAIT_MS + 60_000;
 
 const STDIO_PROXY_SOURCE = String.raw`
 const url=process.env.INERTIA_HOST_MCP_URL;

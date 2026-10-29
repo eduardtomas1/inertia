@@ -97,7 +97,7 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
 
   const ordered = useMemo(() => [...agents].sort((left, right) => left.position - right.position), [agents]);
   const skillNames = useMemo(
-    () => [...new Set(skills.filter(({ enabled }) => enabled).map(({ name }) => name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => [...new Set(skills.filter(({ enabled }) => enabled).map(({ name }) => name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "en")),
     [skills],
   );
   const handles = useMemo(() => ordered.map(({ handle }) => handle), [ordered]);

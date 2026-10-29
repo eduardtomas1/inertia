@@ -154,7 +154,7 @@ describe("SubagentCallBlock", () => {
     expect(header).toHaveTextContent("Running");
     const body = container.querySelector(`#${CSS.escape(header.getAttribute("aria-controls")!)}`)!;
     expect(body).not.toHaveAttribute("inert");
-    expect(body).toHaveTextContent("Review the staged diff for regressions.");
+    expect(header).toHaveTextContent("Review the staged diff for regressions.");
     expect(body).toHaveTextContent("Reading activity.tsx");
     expect(body).toHaveTextContent("sonnet");
   });
@@ -310,7 +310,7 @@ describe("SubagentCallBlock", () => {
     expect(scrolledBack.container.querySelector(".subagent-call")).not.toHaveAttribute("data-settled");
   });
 
-  it("shows a called mark in a 36 px tile and flags the stopping state on the block", async () => {
+  it("shows a called mark at 56 px without an inset and flags the stopping state on the block", async () => {
     let finish: () => void = () => undefined;
     const onStopSubagent = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     const marked = { ...reviewer, icon: { kind: "mark" as const, name: "scout" as const } };
@@ -319,8 +319,8 @@ describe("SubagentCallBlock", () => {
     const avatar = block.querySelector<HTMLElement>(".subagent-call-header .custom-agent-avatar")!;
     expect(avatar).toHaveAttribute("data-mark", "scout");
     expect(avatar).toHaveAttribute("data-live", "true");
-    expect(avatar.style.getPropertyValue("--agent-avatar-size")).toBe("36px");
-    expect(avatar.style.getPropertyValue("--agent-mark-inset")).toBe("2px");
+    expect(avatar.style.getPropertyValue("--agent-avatar-size")).toBe("56px");
+    expect(avatar.style.getPropertyValue("--agent-mark-inset")).toBe("0px");
     expect(avatar.querySelector(".custom-agent-avatar-figure")).toHaveAttribute("data-shadow", "true");
     expect(avatar.querySelector("img")).toBeNull();
     expect(block).not.toHaveAttribute("data-stopping");
@@ -331,14 +331,12 @@ describe("SubagentCallBlock", () => {
     expect(block).not.toHaveAttribute("data-stopping");
   });
 
-  it("keeps every lit effect in CSS: the lift, the haze and the settle flash only run without reduced motion", () => {
-    const css = readFileSync("src/renderer/src/components/response-timeline/SubagentCallBlock.css", "utf8").replaceAll("\r\n", "\n");
+  it("keeps the character lift optional for reduced motion without a card glow", () => {
+    const css = readFileSync("src/renderer/src/components/response-timeline/SubagentCallBlock.css", "utf8");
     const motion = css.slice(css.indexOf("@media (prefers-reduced-motion: no-preference)"));
     expect(motion).toContain("animation: custom-agent-lift 2.4s ease-in-out infinite;");
-    expect(motion).toContain("animation: subagent-call-haze 2.4s ease-in-out infinite;");
-    expect(motion).toContain("animation: subagent-call-settle 600ms var(--ease-fade) forwards;");
-    expect(css).toMatch(/\.subagent-call-body \{[^}]*padding: 0 12px 0 56px;/u);
-    expect(css).toMatch(/\.subagent-call-line \{[^}]*margin: -4px 10px 8px 56px;/u);
+    expect(css).not.toContain("subagent-call-haze");
+    expect(css).not.toContain("radial-gradient");
   });
 
   it("follows a later change to the auto-collapse setting", () => {

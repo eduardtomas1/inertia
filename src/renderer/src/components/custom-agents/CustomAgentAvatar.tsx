@@ -45,10 +45,6 @@ export const CUSTOM_AGENT_SYMBOLS: Readonly<Record<CustomAgentIconName, LucideIc
 const GLYPH_PLATE_FROM = 40;
 const MARK_SHADOW_FROM = 28;
 
-function markInset(size: number): number {
-  return size <= 24 ? 1 : size < 48 ? 2 : 4;
-}
-
 export interface CustomAgentIdentity {
   name: string;
   icon: CustomAgentIcon;
@@ -76,7 +72,7 @@ export function CustomAgentAvatar({
   const symbolSize = size > 24 ? 16 : 14;
   const { icon } = agent;
   const Symbol = icon.kind === "symbol" ? CUSTOM_AGENT_SYMBOLS[icon.name] ?? Orbit : null;
-  const inset = icon.kind === "mark" ? markInset(size) : null;
+  const inset = icon.kind === "mark" ? 0 : null;
   return (
     <span
       className={clsx("custom-agent-avatar", tint && "has-agent-tint", className)}

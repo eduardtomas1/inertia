@@ -122,7 +122,8 @@ const budgets = {
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
   // Role labels for the themed marks: 40,166 deferred bytes (+5).
-  deferredCustomAgentsSettingsJavaScript: 29_962 + 8_423 + 1_353 + 423 + 5,
+  // Larger unframed gallery labels and preview sizes: 40,313 bytes (+147).
+  deferredCustomAgentsSettingsJavaScript: 29_962 + 8_423 + 1_353 + 423 + 5 + 147,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
   deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43,
@@ -206,7 +207,8 @@ const budgets = {
   // the separately capped deferred dock and attach dialog closures. The review
   // fixes add 1,078 core bytes.
   // The renamed shared mark labels add 24 bytes (2,478,799 measured).
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 25_206 + 5_537 + 549 + 24,
+  // Inline called-agent status and larger composer marks: 2,478,858 bytes (+59).
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 25_206 + 5_537 + 549 + 24 + 59,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

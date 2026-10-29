@@ -345,7 +345,7 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
           <div className="custom-agents-empty">
             <span className="custom-agents-empty-avatars" aria-hidden="true">
               {GHOST_AGENTS.map((agent) => (
-                <CustomAgentAvatar key={agent.name} agent={agent} size={32} />
+                <CustomAgentAvatar key={agent.name} agent={agent} size={64} />
               ))}
             </span>
             <strong>No agents yet</strong>
@@ -362,7 +362,7 @@ export function CustomAgentsSettings({ agents, skills, confirmDestructiveActions
               return (
                 <li key={agent.id} className={clsx("custom-agent-row", open && "is-open")} data-agent-id={agent.id}>
                   <div className="custom-agent-row-summary">
-                    <CustomAgentAvatar agent={agent} size={36} />
+                    <CustomAgentAvatar agent={agent} size={agent.icon.kind === "mark" ? 64 : 36} />
                     <span className="custom-agent-row-copy">
                       <span className="custom-agent-row-title">
                         <strong>{agent.name}</strong>

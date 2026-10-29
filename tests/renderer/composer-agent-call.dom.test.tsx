@@ -306,13 +306,13 @@ describe("composer /calling", () => {
     expect(window.localStorage.getItem("inertia:called-agent:gone")).toBeNull();
   });
 
-  it("draws a called mark at 20 px in the chip and the menu rows, never live", () => {
+  it("draws larger called marks in the chip and menu rows, never live", () => {
     const marked = { ...scout, icon: { kind: "mark" as const, name: "scout" as const } };
     const chip = render(<ComposerCalledAgentChip agent={marked} onRemove={() => undefined} />);
     const chipAvatar = chip.container.querySelector<HTMLElement>(".custom-agent-avatar")!;
     expect(chipAvatar).toHaveAttribute("data-mark", "scout");
     expect(chipAvatar).not.toHaveAttribute("data-live");
-    expect(chipAvatar.style.getPropertyValue("--agent-avatar-size")).toBe("20px");
+    expect(chipAvatar.style.getPropertyValue("--agent-avatar-size")).toBe("28px");
     chip.unmount();
     const menu = render(
       <ComposerAgentCallMenu
@@ -330,6 +330,6 @@ describe("composer /calling", () => {
     const row = within(menu.container).getByRole("option");
     expect(row).toHaveAttribute("data-active", "true");
     expect(row.querySelector(".custom-agent-avatar")).toHaveAttribute("data-mark", "scout");
-    expect(row.querySelector<HTMLElement>(".custom-agent-avatar")!.style.getPropertyValue("--agent-avatar-size")).toBe("20px");
+    expect(row.querySelector<HTMLElement>(".custom-agent-avatar")!.style.getPropertyValue("--agent-avatar-size")).toBe("36px");
   });
 });

@@ -1,50 +1,70 @@
-# Themed custom agent marks
+# Custom agents: characters and inline calls
 
-The six standing characters replace the earlier running figures. Cursor heads
-are scaled to 70% of the initial themed studies, keeping their floating gap.
-All twelve runtime WebPs and the editable Blender scenes are updated together.
+All ten screenshot categories from PR #684 are restored with fresh captures.
+The earlier four filenames are retained as aliases to the new full-app views.
 
-- [Family preview](../../../source-assets/custom-agent-marks/family-preview.png)
-- [Outfit details](../../../source-assets/custom-agent-marks/family-details.png)
-- [Runtime marks on dark and light tiles](../../../source-assets/custom-agent-marks/app-review/contact-sheet.png)
-- [Settings list, dark](settings-dark.png) / [light](settings-light.png)
-- [Mark picker, dark](editor-dark.png) / [light](editor-light.png)
+| Capture | Scenario |
+| --- | --- |
+| [01](01-settings-empty.png) | Empty library and presets |
+| [02](02-settings-editor.png) | Editor, larger mark gallery and 128 px character preview |
+| [03](03-settings-list.png) | Six agents with unframed 64 px characters |
+| [04](04-composer-calling-menu.png) | `/calling` suggestions |
+| [05](05-composer-chip.png) | Selected agent and draft, retained after reload |
+| [06](06-transcript-live.png) | Running called agent, child task, activity and stop control |
+| [07](07-transcript-done.png) | Completed call and subsequent in-role Writer call |
+| [08](08-settings-import-notice.png) | Import conflict renamed to `investigator-2` |
+| [09](09-settings-light.png) | Agent library in light appearance |
+| [10](10-marks-family.png) | All twelve bundled WebPs, without frames |
+| [11](11-editor-light.png) | Enlarged gallery in light appearance |
+| [12](12-transcript-expanded-light.png) | Expanded result in light appearance |
+| [13](13-transcript-narrow.png) | Expanded result at 1000 px viewport width |
+
+## Design reference
+
+The called-agent presentation follows T3 Code's
+[`SubagentTimelineLink`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/V2LifecycleRow.tsx):
+a compact identity/detail row with status, elapsed time and a trailing chevron.
+Inertia keeps its expandable report, child tasks and stop action. The surrounding
+card, accent edge, haze and avatar frame are removed. Only the character's small
+lift remains while working; reduced motion disables it.
 
 ## Capture scope
 
-The UI captures use the production `CustomAgentsSettings`, `CustomAgentEditor`,
-`CustomAgentAvatar`, `SettingsPage` and their real styles in a local Vite browser
-fixture. Six synthetic agents supply the role names and descriptions. The
-fixture handles create/update commands in memory; it does not connect to a
-provider, persisted user data, or Electron IPC. Import/export are unavailable
-in this fixture. These are component screenshots, not packaged-app evidence.
+Inertia Browser captured the production `App` and its real settings, composer
+and transcript components in a local Vite fixture. The fixture replaces the
+runtime connection and desktop bridge with synthetic agents, conversation
+turns and subagent events. Create/update/import commands mutate this fixture
+in memory; the import dialog result is simulated. It does not run a real
+provider, read user conversations, or exercise native Electron IPC.
 
-Captured through Inertia Browser at 1280×960. The editor captures isolate the
-production editor component, while list captures use the settings component.
-The real edit → choose mark → save interaction was exercised. Dark and light
-palettes are selected using the application's `data-theme` attribute. No image
-compositing or retouching is applied to the screenshots.
+The gallery sheet displays the actual twelve bundled WebPs. All other captures
+show the full production app shell. Standard captures are 1512×868; the editor
+views are 1512×1180 to show the complete form, and the narrow transcript is
+1000×868. No compositing or retouching is applied to the screenshots.
 
-Snapshot audits found no unnamed, overlapping or clipped interactive controls
-in the final capture viewports. They flag the existing focusable page heading
-as under 24 pixels tall. The source renders and exported WebPs are also inspected
-for transparency, framing and visual consistency.
+The real controls were exercised for edit → choose mark → save, `/calling`
+suggestions → select → reload with the selected agent, and transcript
+collapse/expand. DOM tests cover keyboard selection, stop handling, auto-collapse,
+focus restoration and remembered disclosure state.
+
+Snapshot audits report no unnamed controls. They do flag existing focusable
+shell containers as overlapping their descendants, narrow sidebar separators,
+and partially visible rows at scroll boundaries. Visual review checked the
+changed controls for actual overlap and clipping in both themes and at the
+narrower transcript viewport.
 
 ## Validation
 
-- `npm run check`: quality checks and the full Vitest suite passed (1,419 test
-  files, 17,788 tests; 9 files and 107 tests skipped). The process was terminated
-  during the subsequent bundle build; a fresh `npm run build:bundle` passed,
-  including private-connect and the renderer bundle gates.
-- The mark picker tests verify the renamed labels and unchanged serialized IDs.
-- The six Blender studio/transparent pairs pass the family review script.
-- The twelve bundled WebPs preserve transparent margins and 256×256 dimensions.
+- 54 focused settings, composer and called-agent tests pass.
+- `npm run check:quality` passes after the final changes.
+- `npm run build:bundle` passes, including the renderer budget checks.
+- The combined `npm run check` was terminated with SIGTERM (exit 143) during
+  Vitest. A standalone full suite is running; its result will be recorded here.
+- The six-model Blender artifact review passes.
 
-Packaged Electron, native provider calls, Windows and macOS were not exercised
-for this asset-only update.
+Final measurements: 40,313 bytes of deferred custom-agent settings JavaScript,
+2,478,858 bytes of core JavaScript and 242,951 bytes of entry CSS. The measured
+JavaScript deltas (+147 / +59) are recorded without additional headroom.
 
-The final bundle measurements are 40,166 bytes for deferred custom agent settings,
-2,478,799 bytes for core JavaScript, and 242,951 bytes for entry CSS. Their exact
-measured deltas (+5 / +24 / +81 bytes) are recorded in the bundle gate, without
-additional headroom. Bundled WebP payload drops from 122,498 to 94,790 bytes.
-The focused shared-contract, settings and bundle-import tests pass (35 tests).
+Packaged Electron, live provider calls, Windows and macOS were not exercised
+for this presentation update.

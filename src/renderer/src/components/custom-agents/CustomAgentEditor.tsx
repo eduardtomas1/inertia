@@ -205,7 +205,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
       <section className="custom-agent-group" aria-labelledby={`${ids}-identity`}>
         <h4 id={`${ids}-identity`} className="custom-agent-group-title">Identity</h4>
         <div className="custom-agent-identity">
-          <CustomAgentAvatar agent={draft} size={64} className="custom-agent-identity-preview" />
+          <CustomAgentAvatar agent={draft} size={draft.icon.kind === "mark" ? 128 : 64} className="custom-agent-identity-preview" />
           <div className="custom-agent-identity-controls">
             <CustomAgentRadioGroup
               label="Mark"
@@ -216,7 +216,7 @@ export function CustomAgentEditor({ label, initial, linkHandle, otherHandles, sk
                 id: name,
                 label: CUSTOM_AGENT_MARK_LABELS[name],
                 className: "custom-agent-mark",
-                content: <CustomAgentAvatar agent={{ ...draft, icon: { kind: "mark", name } }} size={40} />,
+                content: <><CustomAgentAvatar agent={{ ...draft, icon: { kind: "mark", name } }} size={64} /><span className="custom-agent-mark-label">{CUSTOM_AGENT_MARK_LABELS[name]}</span></>,
               }))}
               onChange={(name) => update({ icon: { kind: "mark", name } })}
             />

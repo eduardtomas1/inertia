@@ -54,23 +54,11 @@
 :root[data-theme="light"] .custom-agent-avatar[data-mark="scribe"] { --agent-mark: url(../../assets/marks/scribe-light.webp); }
 :root[data-theme="light"] .custom-agent-avatar[data-mark="spark"] { --agent-mark: url(../../assets/marks/spark-light.webp); }
 
-:root[data-theme="light"] .custom-agent-avatar[data-icon-kind="mark"] {
-  background: color-mix(in srgb, var(--agent-tint) 20%, var(--fill));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-tint) 32%, transparent);
+.custom-agent-avatar[data-icon-kind="mark"] {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
-
-.custom-agent-avatar[data-icon-kind="mark"]::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(closest-side at 50% 60%, color-mix(in srgb, var(--agent-tint) 60%, transparent), transparent);
-  opacity: 0;
-  transition: opacity var(--dur-slow) var(--ease);
-  pointer-events: none;
-}
-
-.custom-agent-avatar[data-icon-kind="mark"][data-live="true"]::before { opacity: 0.5; }
 
 .custom-agent-avatar-figure {
   position: absolute;
@@ -109,11 +97,6 @@
   background: radial-gradient(closest-side, color-mix(in srgb, var(--media-scrim) 45%, transparent), transparent);
 }
 
-.custom-agent-avatar[data-icon-kind="mark"][data-live="true"],
-:root[data-theme="light"] .custom-agent-avatar[data-icon-kind="mark"][data-live="true"] {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-tint) 55%, transparent);
-}
-
 .custom-agent-avatar[data-live="true"]:not([data-icon-kind="mark"]) { box-shadow: none; }
 
 .custom-agent-avatar[data-live="true"]::after {
@@ -136,16 +119,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   .custom-agent-avatar,
-  .custom-agent-avatar::before,
   .custom-agent-avatar-figure::before,
   .custom-agent-avatar-figure::after { transition: none; }
   .custom-agent-avatar[data-live="true"]::after { animation: none; opacity: 0.7; }
-  .custom-agent-avatar[data-icon-kind="mark"][data-live="true"]::before { opacity: 0.7; }
 }
 
 @media (forced-colors: active) {
   .custom-agent-avatar { border: 1px solid CanvasText; }
   .custom-agent-avatar[data-live="true"] { outline: 2px solid Highlight; outline-offset: 1px; }
-  .custom-agent-avatar[data-icon-kind="mark"]::before,
   .custom-agent-avatar-figure[data-shadow="true"]::after { display: none; }
 }

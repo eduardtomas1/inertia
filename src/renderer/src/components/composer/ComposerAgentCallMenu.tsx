@@ -87,7 +87,7 @@ export function ComposerAgentCallMenu({
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => onPick(agent)}
                   >
-                    <CustomAgentAvatar agent={agent} size={20} />
+                    <CustomAgentAvatar agent={agent} size={agent.icon.kind === "mark" ? 36 : 20} />
                     <span className="composer-command-copy composer-agent-call-copy">
                       <strong><Highlight text={agent.name} query={query} /></strong>
                       {agent.description && <small>{agent.description}</small>}

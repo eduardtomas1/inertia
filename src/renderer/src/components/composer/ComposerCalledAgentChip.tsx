@@ -21,7 +21,7 @@ export function ComposerCalledAgentChip({
       role="group"
       aria-label={label}
     >
-      <CustomAgentAvatar agent={agent ?? DELETED_AGENT} size={20} />
+      <CustomAgentAvatar agent={agent ?? DELETED_AGENT} size={agent?.icon.kind === "mark" ? 28 : 20} />
       <span>
         <strong>{agent ? agent.name : "Agent deleted"}</strong>
         <small>{agent ? "Calling as a subagent" : "Remove it to send"}</small>

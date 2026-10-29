@@ -401,7 +401,7 @@ describe("custom agents settings", () => {
     expect(css).toMatch(/\.custom-agent-avatar \{\n  --agent-tint: var\(--text-muted\);/u);
   });
 
-  it("renders a mark as a CSS figure inset by tile size, never an img, with one file rule per mark and theme", () => {
+  it("renders a mark as a full-size CSS figure, never an img, with one file rule per mark and theme", () => {
     const identity = { name: "Scout", icon: { kind: "mark" as const, name: "scout" as const }, accent: "blue" as const };
     const sizes = [18, 20, 24, 32, 36, 40, 48, 64];
     const { container } = render(<div>{sizes.map((size) => <CustomAgentAvatar key={size} agent={identity} size={size} />)}</div>);
@@ -410,7 +410,7 @@ describe("custom agents settings", () => {
     expect(container.querySelector("svg")).toBeNull();
     expect(avatars.map((avatar) => avatar.dataset.mark)).toEqual(sizes.map(() => "scout"));
     expect(avatars.map((avatar) => avatar.dataset.iconKind)).toEqual(sizes.map(() => "mark"));
-    expect(avatars.map((avatar) => avatar.style.getPropertyValue("--agent-mark-inset"))).toEqual(["1px", "1px", "1px", "2px", "2px", "2px", "4px", "4px"]);
+    expect(avatars.map((avatar) => avatar.style.getPropertyValue("--agent-mark-inset"))).toEqual(sizes.map(() => "0px"));
     expect(avatars.map((avatar) => avatar.querySelector(".custom-agent-avatar-figure")?.getAttribute("data-shadow") ?? null))
       .toEqual([null, null, null, "true", "true", "true", "true", "true"]);
     const symbol = render(<CustomAgentAvatar agent={{ ...identity, icon: { kind: "symbol", name: "search" } }} size={36} />).container.firstElementChild as HTMLElement;
@@ -425,7 +425,7 @@ describe("custom agents settings", () => {
     expect(css).not.toContain("pixelated");
   });
 
-  it("offers the marks as a gallery radio group of draft-tinted tiles, before the symbols", async () => {
+  it("offers the marks as a gallery radio group of larger unframed characters, before the symbols", async () => {
     const { request } = setup();
     fireEvent.click(screen.getByRole("button", { name: "Edit Reviewer" }));
     const panel = screen.getByRole("form", { name: "Edit Reviewer" });
@@ -438,7 +438,7 @@ describe("custom agents settings", () => {
     expect(marks.map((mark) => mark.tabIndex)).toEqual([0, -1, -1, -1, -1, -1]);
     const tiles = marks.map((mark) => mark.querySelector<HTMLElement>(".custom-agent-avatar")!);
     expect(tiles.map((tile) => tile.dataset.mark)).toEqual(["runner", "scout", "guard", "builder", "scribe", "spark"]);
-    expect(tiles.every((tile) => tile.classList.contains("has-agent-tint") && tile.style.getPropertyValue("--agent-avatar-size") === "40px")).toBe(true);
+    expect(tiles.every((tile) => tile.classList.contains("has-agent-tint") && tile.style.getPropertyValue("--agent-avatar-size") === "64px")).toBe(true);
     const preview = panel.querySelector<HTMLElement>(".custom-agent-identity-preview")!;
     expect(preview.style.getPropertyValue("--agent-avatar-size")).toBe("64px");
     expect(preview).toHaveAttribute("data-icon-kind", "symbol");
@@ -468,7 +468,7 @@ describe("custom agents settings", () => {
     const { container } = setup({ agents: [] });
     const hero = [...container.querySelectorAll<HTMLElement>(".custom-agents-empty-avatars > .custom-agent-avatar")];
     expect(hero.map((avatar) => avatar.dataset.mark)).toEqual(["scout", "builder", "scribe"]);
-    expect(hero.every((avatar) => avatar.style.getPropertyValue("--agent-avatar-size") === "32px" && avatar.classList.contains("has-agent-tint"))).toBe(true);
+    expect(hero.every((avatar) => avatar.style.getPropertyValue("--agent-avatar-size") === "64px" && avatar.classList.contains("has-agent-tint"))).toBe(true);
     const chips = within(screen.getByRole("group", { name: "Presets" })).getAllByRole("button");
     expect(chips.map((chip) => chip.querySelector<HTMLElement>(".custom-agent-avatar")!.dataset.mark))
       .toEqual(CUSTOM_AGENT_PRESETS.map((preset) => preset.icon.kind === "mark" ? preset.icon.name : null));

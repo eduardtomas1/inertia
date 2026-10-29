@@ -1,5 +1,5 @@
 import { memo, useContext, useId, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import clsx from "clsx";
 import { CustomAgentAvatar, customAgentTintStyle } from "../custom-agents/CustomAgentAvatar";
 import { ResponseMarkdown } from "../ResponseMarkdown";
@@ -96,22 +96,24 @@ function SubagentCallBlockComponent({
         aria-controls={bodyId}
         onClick={toggle}
       >
-        <CustomAgentAvatar agent={agent} size={36} live={live} />
+        <CustomAgentAvatar agent={agent} size={agent.icon.kind === "mark" ? 56 : 32} live={live} />
         <span className="subagent-call-title">
           <strong>{agent.name}</strong>
-          <small>
-            <span className="subagent-call-status">{subagentStatusLabel(trace)}</span>
-            <span aria-hidden="true"> · </span>
-            {settledDuration
-              ? <span className="subagent-elapsed">{settledDuration}</span>
-              : <SubagentElapsed trace={trace} />}
-          </small>
+          <span className="subagent-call-line" data-tone={line?.tone}>
+            {expanded ? trace.description : line?.text ?? trace.description}
+          </span>
         </span>
-        <ChevronDown size={14} className="subagent-call-chevron" aria-hidden="true" />
+        <span className="subagent-call-state">
+          <SubagentStatusMark trace={trace} />
+          <span className="subagent-call-status">{subagentStatusLabel(trace)}</span>
+        </span>
+        <span className="subagent-call-time">
+          {settledDuration
+            ? <span className="subagent-elapsed">{settledDuration}</span>
+            : <SubagentElapsed trace={trace} />}
+        </span>
+        <ChevronRight size={14} className="subagent-call-chevron" aria-hidden="true" />
       </button>
-      {!expanded && line && (
-        <p className="subagent-call-line" data-tone={line.tone}>{line.text}</p>
-      )}
       <div className="subagent-call-fold" data-open={expanded ? "true" : "false"}>
         <div
           id={bodyId}
@@ -119,7 +121,6 @@ function SubagentCallBlockComponent({
           aria-hidden={!expanded || undefined}
           inert={!expanded || undefined}
         >
-          {trace.description && <p className="subagent-call-task">{trace.description}</p>}
           {liveActivity && <p className="subagent-call-activity" data-tone="live">{liveActivity}</p>}
           {!live && line && line.tone !== "done" && (
             <p className="subagent-call-activity" data-tone={line.tone}>{line.text}</p>

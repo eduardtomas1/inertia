@@ -5,10 +5,11 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
+import WebSocket from "ws";
 
 import { RuntimeStore } from "../../src/server/database";
 import type { UpsertSubagentTraceInput } from "../../src/server/persistence/types";
-import type { SubagentTaskUsage } from "../../src/shared/contracts";
+import type { ServerEvent, SubagentTaskUsage } from "../../src/shared/contracts";
 import { CUSTOM_AGENT_PRESETS } from "../../src/shared/custom-agent-presets";
 import {
   buildCustomAgentExport,
@@ -119,6 +120,40 @@ function withStore<T>(fixture: AppFixture, operation: (store: RuntimeStore) => T
   } finally {
     store.close();
   }
+}
+
+async function createAgentsThroughRuntime(drafts: readonly CustomAgentDraft[]): Promise<void> {
+  const { websocketUrl } = await app.runtimeSnapshot();
+  if (!websocketUrl) throw new Error("Fixture runtime is unavailable.");
+  const pending = [...drafts];
+  await new Promise<void>((resolve, reject) => {
+    const socket = new WebSocket(websocketUrl, { origin: "inertia://bundle", maxPayload: 2 * 1024 * 1024 });
+    let requestId = "";
+    const finish = (error?: Error): void => {
+      clearTimeout(timer);
+      socket.terminate();
+      if (error) reject(error);
+      else resolve();
+    };
+    const sendNext = (): void => {
+      const agent = pending.shift();
+      if (!agent) {
+        finish();
+        return;
+      }
+      requestId = randomUUID();
+      socket.send(JSON.stringify({ type: "custom-agent.create", requestId, payload: { agent, onHandleConflict: "reject" } }));
+    };
+    const timer = setTimeout(() => finish(new Error("Creating custom agents through the runtime timed out.")), 20_000);
+    socket.on("error", (error) => finish(error));
+    socket.on("message", (data) => {
+      const frame = JSON.parse(data.toString()) as ServerEvent;
+      const event = frame.type === "runtime.event" ? frame.event : frame;
+      if (event.type === "server.welcome") sendNext();
+      else if ((event.type === "request.ok" || event.type === "request.result") && event.requestId === requestId) sendNext();
+      else if (event.type === "request.error" && event.requestId === requestId) finish(new Error(event.message));
+    });
+  });
 }
 
 function storedAgents(): CustomAgent[] {
@@ -482,10 +517,9 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
 
   const portrait = portraitPng();
   expect(customAgentIconSchema.safeParse({ kind: "image", data: portrait }).success).toBe(true);
-  withStore(app, (store) => {
-    const agents = store.customAgents();
-    agents.create(presetDraft("test-writer"), { onHandleConflict: "reject" });
-    agents.create({
+  await createAgentsThroughRuntime([
+    presetDraft("test-writer"),
+    {
       name: "Visual QA",
       handle: "visual-qa",
       description: "Compares screenshots with the design and flags visible drift.",
@@ -493,10 +527,10 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
       accent: "violet",
       blocks: [{ id: randomUUID(), kind: "role", body: "You compare UI screenshots with the design reference and report visible drift." }],
       skills: [],
-    }, { onHandleConflict: "reject" });
-    agents.create(presetDraft("security-auditor"), { onHandleConflict: "reject" });
-    agents.create(presetDraft("docs-writer"), { onHandleConflict: "reject" });
-  });
+    },
+    presetDraft("security-auditor"),
+    presetDraft("docs-writer"),
+  ]);
   await page.reload();
   const seeded = await openCustomAgents(page);
   await expect(agentRows(seeded).locator(".custom-agent-row-title strong")).toHaveText([
@@ -526,7 +560,7 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
   const auditEditor = seeded.getByRole("form", { name: "Edit Security auditor" });
   await expect(auditEditor.getByRole("heading", { name: "Identity", level: 4 })).toBeVisible();
   await expect(auditEditor.getByRole("heading", { name: "Instructions", level: 4 })).toBeAttached();
-  await expect(auditEditor.getByRole("radio", { name: "Shield" })).toHaveAttribute("aria-checked", "true");
+  await expect(auditEditor.getByRole("radio", { name: "Guard" })).toHaveAttribute("aria-checked", "true");
   await expect(auditEditor.getByRole("radio", { name: "Red" })).toHaveAttribute("aria-checked", "true");
   await expect(auditEditor.locator(".custom-agent-block-body").first()).toHaveValue(
     CUSTOM_AGENT_PRESETS.find(({ id }) => id === "security-auditor")!.blocks[0]!.body,

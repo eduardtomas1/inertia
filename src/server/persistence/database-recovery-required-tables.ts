@@ -1,6 +1,7 @@
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
 import { CUSTOM_AGENTS_SCHEMA_VERSION } from "./migrations/custom-agents";
 import { CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS } from "./custom-agents-schema";
+import { AGENT_SECRET_REQUESTS_SCHEMA_VERSION } from "./migrations/agent-secret-requests";
 
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
@@ -151,6 +152,25 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
   ]],
   [CUSTOM_AGENTS_SCHEMA_VERSION, "messages", ["custom_agent_call_json"]],
   [CUSTOM_AGENTS_SCHEMA_VERSION, "subagent_traces", ["custom_agent_id"]],
+  [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "messages", ["secret_request_json"]],
+  [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "agent_secret_requests", [
+    "id",
+    "conversation_id",
+    "turn_id",
+    "run_id",
+    "message_id",
+    "provider_id",
+    "title",
+    "description",
+    "file_name",
+    "file_token",
+    "ttl_hours",
+    "status",
+    "vaulted",
+    "created_at",
+    "answered_at",
+    "expires_at",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -198,6 +218,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [99, ["watcher_links", "watcher_wakes"]],
   [103, ["turn_failure_kinds"]],
   [CUSTOM_AGENTS_SCHEMA_VERSION, ["custom_agents"]],
+  [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, ["agent_secret_requests"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -223,6 +244,8 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "activities_conversation_created_idx"],
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "reasonings_conversation_created_idx"],
     [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_position_idx"],
+    [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "agent_secret_requests_status_expiry_idx"],
+    [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "agent_secret_requests_conversation_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [

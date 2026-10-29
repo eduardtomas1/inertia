@@ -108,3 +108,32 @@ it.each([
 ])("rejects malformed custom agent call attribution %j", (malformed) => {
   expect(chatMessageSchema({ ...message, customAgentCall: malformed })).toBe(false);
 });
+
+const secretRequest = {
+  requestId: "77777777-7777-4777-8777-777777777777",
+  title: "Tailscale auth key",
+  description: "Create a reusable key.\nSettings > Keys.",
+  ttlHours: 24,
+  status: "pending",
+  answeredAt: null,
+  expiresAt: null,
+  storage: null,
+};
+
+it("accepts a secret request only on a turn-scoped system message", () => {
+  expect(chatMessageSchema({ ...message, role: "system", secretRequest })).toBe(true);
+  expect(chatMessageSchema({ ...message, role: "system", turnId: null, secretRequest })).toBe(false);
+  expect(chatMessageSchema({ ...message, secretRequest })).toBe(false);
+  expect(chatMessageSchema({ ...message, role: "assistant", secretRequest })).toBe(false);
+});
+
+it.each([
+  null,
+  {},
+  { ...secretRequest, secret: "tskey-abc" },
+  { ...secretRequest, status: "saved" },
+  { ...secretRequest, title: "" },
+  { ...secretRequest, ttlHours: 48 },
+])("rejects a malformed secret request %j", (malformed) => {
+  expect(chatMessageSchema({ ...message, role: "system", secretRequest: malformed })).toBe(false);
+});

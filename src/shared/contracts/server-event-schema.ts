@@ -1102,7 +1102,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
 }
 import { issueReportResult } from "../issue-report";
 import { messageQueueResultSchema } from "../queued-messages";
-import { updatesRunResultSchema } from "../updates";
+import { updatesRunResultSchema } from "../updates"; import { secretRequestResultValidators } from "./client-command/secret-requests";
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
@@ -1160,6 +1160,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "duo.prepared": (value) => duoPrepared(value),
   "duo.status": (value) => duoStatus(value),
   ...watcherRequestResultValidators,
+  ...secretRequestResultValidators,
   "git.status": (value) => gitStatus(value.status),
   "git.workspace.status": (value) => workspaceGitStatus(value.status),
   "git.diff": (value) => gitDiff(value.diff),

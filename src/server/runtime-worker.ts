@@ -364,6 +364,10 @@ parentPort.on("message", (messageEvent) => {
     );
     return;
   }
+  if (command.type === "runtime.agent-secret-deliver") {
+    post({ type: "runtime.agent-secret-rejected", transportId: command.transportId, reason: "not-pending" });
+    return;
+  }
   if (command.type === "runtime.resolve-project-path") {
     if (!runtime || stopping || updatePreparation) {
       post({

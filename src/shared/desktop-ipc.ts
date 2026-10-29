@@ -50,4 +50,5 @@ export const DESKTOP_IPC = {
   clearBackendCredential: "inertia:clear-backend-credential",
   getBackendCredentialState: "inertia:get-backend-credential-state",
   customAgentFile: "inertia:custom-agent-file",
+  saveAgentSecret: "inertia:save-agent-secret",
 } as const;

@@ -205,6 +205,7 @@ export interface MessageRow {
   custom_agent_call_json?: string | null;
   compaction_json?: string | null;
   html_render_json?: string | null;
+  secret_request_json?: string | null;
   id: string;
   conversation_id: string;
   turn_id: string | null;

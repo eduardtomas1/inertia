@@ -792,6 +792,11 @@
       "version": 107,
       "name": "PersistCustomAgents",
       "digest": "ca4fbfd438ba6e53ce97117d492b6b95290e1ee3084cbed8953b3924cba25366"
+    },
+    {
+      "version": 108,
+      "name": "PersistAgentSecretRequests",
+      "digest": "e9d68b265cdb300db8494d41e373de188fce88754125f135288e68d8458e7ce4"
     }
   ]
 }

@@ -671,6 +671,7 @@ export class RuntimeSupervisor {
       return;
     }
     if (this.htmlRenders.handle(record, event)) return;
+    if (event.type === "runtime.agent-secret-delivered" || event.type === "runtime.agent-secret-rejected") return;
     if (event.type === "runtime.private-connect-response") {
       this.privateConnectRequests.handle(record, event);
       return;

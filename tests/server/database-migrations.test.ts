@@ -27,7 +27,9 @@ import {
   createRuntimeMigrationCatalog,
   type DatabaseMigrationDefinition,
 } from "../../src/server/persistence/migrations/catalog";
-import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
+import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
+import { AGENT_SECRET_REQUESTS_SCHEMA_VERSION, agentSecretRequestsMigration } from "../../src/server/persistence/migrations/agent-secret-requests";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const fixtureDirectory = join(repositoryRoot, "tests", "fixtures", "database");
@@ -1475,7 +1477,7 @@ describe("runtime migration catalog", () => {
       expect(database.prepare("SELECT name FROM sqlite_master WHERE name = 'messages_created_id_idx'").get()).toBeUndefined();
       migrateRuntimeDatabase(database);
       expect(database.prepare("SELECT * FROM messages ORDER BY id").all())
-        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, html_render_json: null, private_connect_device_id: null, watcher_note_json: null, duo_comparison_json: null, custom_agent_call_json: null })));
+        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, html_render_json: null, private_connect_device_id: null, watcher_note_json: null, duo_comparison_json: null, custom_agent_call_json: null, secret_request_json: null })));
       expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 69 ORDER BY version").all()).toEqual(history);
       expect(database.pragma("index_xinfo(messages_created_id_idx)")).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "created_at", desc: 1, key: 1 }),
@@ -2165,6 +2167,7 @@ describe("runtime migration catalog", () => {
       { version: 105 },
       { version: 106 },
       { version: 107 },
+      { version: 108 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2350,4 +2353,54 @@ it("upgrades schema 79 with preserving global attachment settings and persists a
   const restarted = new RuntimeStore(path, directory, { recoverInterruptedRuns: false });
   expect(restarted.shellSnapshot().settings).toMatchObject({ attachmentStorageGiB: 64, autoRemoveOldAttachments: true });
   restarted.close();
+});
+
+it("appends agent secret requests as schema 108 with role and file token checks", async () => {
+  expect(AGENT_SECRET_REQUESTS_SCHEMA_VERSION).toBe(108);
+  expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(AGENT_SECRET_REQUESTS_SCHEMA_VERSION);
+  expect(runtimeMigrationCatalog().find(({ version }) => version === 108)?.name).toBe(agentSecretRequestsMigration.name);
+  const directory = await temporaryDirectory();
+  const path = join(directory, "inertia.sqlite");
+  const legacy = new Database(path);
+  migrateRuntimeDatabase(legacy, 107);
+  expect((legacy.pragma("table_info(messages)") as Array<{ name: string }>).map(({ name }) => name)).not.toContain("secret_request_json");
+  legacy.close();
+  const store = new RuntimeStore(path, directory, { recoverInterruptedRuns: false });
+  const project = store.createProject("Secrets", directory);
+  const conversation = store.createConversation(project.id, "Secrets", {
+    modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "provider-default" }),
+  });
+  const runId = randomUUID();
+  const { turn } = store.beginAgentTurn({
+    conversationId: conversation.id, runId, content: "Log in.", providerId: "codex",
+    modelSelection: store.conversation(conversation.id).modelSelection, reasoningEffort: "",
+    interactionMode: "build", accessMode: "supervised",
+    configurationRevision: store.conversation(conversation.id).modelSelection.backendConfigurationRevision,
+    association: "authoritative",
+  });
+  const system = store.createMessage(conversation.id, "Asked for a secret: Key", "system", [], turn.id);
+  store.close();
+  const database = new Database(path);
+  try {
+    expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(108);
+    const reference = JSON.stringify({ requestId: randomUUID() });
+    expect(() => database.prepare("UPDATE messages SET secret_request_json = ? WHERE id = ?").run(reference, turn.userMessageId))
+      .toThrow(/CHECK constraint failed/u);
+    expect(() => database.prepare("UPDATE messages SET secret_request_json = ? WHERE id = ?").run("not json", system.id))
+      .toThrow(/CHECK constraint failed/u);
+    database.prepare("UPDATE messages SET secret_request_json = ? WHERE id = ?").run(reference, system.id);
+    const insert = (id: string, status: string, fileToken: string | null) => database.prepare(`INSERT INTO agent_secret_requests (
+        id, conversation_id, turn_id, run_id, message_id, provider_id, title, description, file_name, file_token,
+        ttl_hours, status, created_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, 'codex', 'Key', 'Paste it.', 'secret', ?, 24, ?, '2026-10-29T10:00:00.000Z', '2026-10-30T10:00:00.000Z')`)
+      .run(id, conversation.id, turn.id, runId, system.id, fileToken, status);
+    expect(() => insert(randomUUID(), "saved", "A".repeat(32))).toThrow(/CHECK constraint failed/u);
+    expect(() => insert(randomUUID(), "saved", "a".repeat(31))).toThrow(/CHECK constraint failed/u);
+    expect(() => insert(randomUUID(), "saved", null)).toThrow(/CHECK constraint failed/u);
+    expect(() => insert(randomUUID(), "forgotten", null)).toThrow(/CHECK constraint failed/u);
+    insert(randomUUID(), "saved", "0123456789abcdef0123456789abcdef");
+    expect(database.prepare("SELECT COUNT(*) FROM agent_secret_requests").pluck().get()).toBe(1);
+  } finally {
+    database.close();
+  }
 });

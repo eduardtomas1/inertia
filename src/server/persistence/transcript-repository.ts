@@ -4,6 +4,7 @@ import { contextBlockPromptBytes, providerHandoffBlockBytes, providerHandoffFile
 import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
+import { isSecretRequestReference } from "../../shared/agent-secrets";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
 import { DUO_COMPARISON_BRIEF_MAX_BYTES, duoComparisonBriefSchema, type DuoComparisonBrief } from "../../shared/duo-comparison-brief";
@@ -179,11 +180,12 @@ export class TranscriptRepository {
       : requireTimestamp(createdAt, "Message creation time");
     if (options.compaction && (role !== "system" || turnId !== null || !isContextCompaction(options.compaction))) throw new Error("Invalid compaction receipt.");
     if (options.htmlRender && (role !== "system" || turnId === null || !isHtmlRenderReference(options.htmlRender))) throw new Error("Invalid rendered page reference.");
+    if (options.secretRequest && (role !== "system" || turnId === null || !isSecretRequestReference(options.secretRequest))) throw new Error("Invalid secret request reference.");
     if (options.privateConnectDeviceId !== undefined
       && (role !== "user" || !isMessageOriginDeviceId(options.privateConnectDeviceId))) throw new Error("Invalid remote message origin.");
     const watcherNote = options.watcherNote === undefined ? undefined : validWatcherNote(role, options.watcherNote);
     const duoComparison = options.duoComparison === undefined ? undefined : validDuoComparison(role, turnId, options.duoComparison);
-    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}), ...(options.htmlRender ? { htmlRender: { ...options.htmlRender } } : {}) };
+    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}), ...(options.htmlRender ? { htmlRender: { ...options.htmlRender } } : {}), ...(options.secretRequest ? { secretRequest: { ...options.secretRequest } } : {}) };
     if (options.privateConnectDeviceId !== undefined) message.privateConnectDeviceId = options.privateConnectDeviceId;
     if (watcherNote) message.watcherNote = watcherNote;
     if (duoComparison) message.duoComparison = duoComparison;
@@ -191,7 +193,7 @@ export class TranscriptRepository {
     if (customAgentCall) message.customAgentCall = customAgentCall;
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, custom_agent_call_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @customAgentCallJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null, customAgentCallJson: customAgentCall ? JSON.stringify(customAgentCall) : null });
+      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, custom_agent_call_json, secret_request_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @customAgentCallJson, @secretRequestJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null, customAgentCallJson: customAgentCall ? JSON.stringify(customAgentCall) : null, secretRequestJson: message.secretRequest ? JSON.stringify(message.secretRequest) : null });
       this.context.database.prepare(`
         UPDATE conversations
         SET updated_at = ?, settled_at = NULL,

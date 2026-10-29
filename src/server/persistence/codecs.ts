@@ -4,6 +4,7 @@ import { snapshotSourceSchema } from "../../shared/snapshots";
 import { parseProjectPreferences } from "../../shared/project-preferences";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
+import { isSecretRequestReference } from "../../shared/agent-secrets";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
 import { duoComparisonBriefFromJson } from "../../shared/duo-comparison-brief";
@@ -798,6 +799,8 @@ export function messageFromRow(row: MessageRow): ChatMessage {
   try { compaction = row.compaction_json ? JSON.parse(row.compaction_json) : undefined; } catch { /* Older or malformed optional metadata stays unprojected. */ }
   let htmlRender: unknown;
   try { htmlRender = row.role === "system" && row.html_render_json ? JSON.parse(row.html_render_json) : undefined; } catch { /* Malformed optional metadata stays unprojected. */ }
+  let secretRequest: unknown;
+  try { secretRequest = row.role === "system" && row.secret_request_json ? JSON.parse(row.secret_request_json) : undefined; } catch { secretRequest = undefined; }
   return {
     ...(row.role === "user" && isMessageOriginDeviceId(row.private_connect_device_id)
       ? { privateConnectDeviceId: row.private_connect_device_id } : {}),
@@ -806,6 +809,7 @@ export function messageFromRow(row: MessageRow): ChatMessage {
     ...(customAgentCall ? { customAgentCall } : {}),
     ...(row.role === "system" && row.turn_id === null && isContextCompaction(compaction) ? { compaction } : {}),
     ...(row.role === "system" && row.turn_id !== null && isHtmlRenderReference(htmlRender) ? { htmlRender } : {}),
+    ...(row.role === "system" && row.turn_id !== null && isSecretRequestReference(secretRequest) ? { secretRequest } : {}),
     id: row.id,
     conversationId: row.conversation_id,
     turnId: row.turn_id,

@@ -153,6 +153,10 @@ function resources(): DetachedChatRuntimePolicyResources {
       conversationId === CONVERSATION && requestId === REQUEST
       ? ({ conversationId: CONVERSATION } as AgentInputRequest)
       : null,
+    secretRequestConversationId: (requestId) => ({
+      [REQUEST]: CONVERSATION,
+      [OTHER_RUN]: OTHER_CONVERSATION,
+    })[requestId] ?? null,
   };
 }
 
@@ -588,6 +592,7 @@ describe("detached chat runtime authority", () => {
         checkpoint: () => { throw new Error("Not found."); },
         agentTurn: () => { throw new Error("Not found."); },
         findPairedLaunch: () => null,
+        agentSecretRequests: () => ({ find: () => null }),
       },
       snapshot,
       pendingApprovals: new Map(),
@@ -665,6 +670,33 @@ describe("detached chat runtime authority", () => {
       type: "activity.mark-seen",
       requestId: REQUEST,
       payload: { runId: "22222222-2222-4222-8222-222222222222" },
+    })).not.toBeNull();
+  });
+
+  it("lets a detached chat decline and revoke only its own secret requests and never list them", () => {
+    const decline = (conversationId: string, requestId: string) => ({
+      type: "secret-request.decline", requestId: REQUEST, payload: { conversationId, requestId },
+    }) as ClientCommand;
+    const revoke = (requestId: string) => ({
+      type: "secret-request.revoke", requestId: REQUEST, payload: { requestId },
+    }) as ClientCommand;
+    const list = { type: "secret-request.list", requestId: REQUEST, payload: {} } as ClientCommand;
+    const unknown = "99999999-9999-4999-8999-999999999999";
+    expect(rejection(decline(CONVERSATION, REQUEST))).toBeNull();
+    expect(rejection(decline(CONVERSATION, OTHER_RUN))).not.toBeNull();
+    expect(rejection(decline(OTHER_CONVERSATION, OTHER_RUN))).not.toBeNull();
+    expect(rejection(decline(OTHER_CONVERSATION, REQUEST))).not.toBeNull();
+    expect(rejection(decline(CONVERSATION, unknown))).not.toBeNull();
+    expect(rejection(revoke(REQUEST))).toBeNull();
+    expect(rejection(revoke(OTHER_RUN))).not.toBeNull();
+    expect(rejection(revoke(unknown))).not.toBeNull();
+    expect(rejection(list)).toBe("That request is unavailable in a detached chat.");
+    for (const command of [decline(OTHER_CONVERSATION, OTHER_RUN), revoke(OTHER_RUN), list]) {
+      expect(mainRejection(command)).toBeNull();
+    }
+    expect(detachedChatCommandRejection(authority, decline(CONVERSATION, REQUEST), {
+      ...resources(),
+      snapshot: () => ({ ...snapshot(), conversations: [] }),
     })).not.toBeNull();
   });
 

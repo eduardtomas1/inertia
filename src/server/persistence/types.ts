@@ -172,6 +172,7 @@ export interface CreateMessageOptions {
   compaction?: import("../../shared/context-compaction").ContextCompaction;
   /** Turn-scoped system messages only; written with its html_renders row. */
   htmlRender?: import("../../shared/html-render").HtmlRenderReference;
+  secretRequest?: import("../../shared/agent-secrets").SecretRequestReference;
   activateConversation?: boolean;
 }
 

@@ -17,7 +17,7 @@ import { backendSecretReferenceForProfile } from "../node/backend-secret-referen
 import { FILE_OPEN_NO_FOLLOW } from
   "../node/platform-file-open-flags.js";
 
-import { agentSecretReference, isAgentSecretValue } from "../node/agent-secrets.js";
+import { AGENT_SECRET_REFERENCE_PREFIX, agentSecretReference, isAgentSecretValue } from "../node/agent-secrets.js";
 import {
   BACKEND_CREDENTIAL_MASK,
   type BackendCredentialStatus,
@@ -883,6 +883,13 @@ export class CredentialVault {
 
   async deleteAgentSecret(requestId: string): Promise<boolean> {
     return await this.forget(agentSecretVaultReference(requestId));
+  }
+
+  async agentSecretRequestIds(): Promise<string[]> {
+    return Object.keys((await this.load()).entries)
+      .filter((reference) => reference.startsWith(AGENT_SECRET_REFERENCE_PREFIX))
+      .map((reference) => reference.slice(AGENT_SECRET_REFERENCE_PREFIX.length))
+      .filter((requestId) => AGENT_SECRET_REQUEST_ID.test(requestId));
   }
 
   private async write(secretReference: string, secret: string): Promise<void> {

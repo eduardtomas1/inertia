@@ -46,6 +46,8 @@ async function openHarness(options: {
   vault?: Record<string, string>;
   start?: boolean;
   resolve?: (reference: string) => Promise<string | null>;
+  forget?: (reference: string) => Promise<boolean>;
+  writeFile?: typeof writeAgentSecretFile;
   sweepIntervalMs?: number;
 } = {}): Promise<Harness> {
   const directory = options.directory ?? await mkdtemp(join(tmpdir(), "inertia-secret-service-"));
@@ -77,12 +79,13 @@ async function openHarness(options: {
       removeAgentSecretDirectory(root, token);
     },
     ...(options.sweepIntervalMs ? { sweepIntervalMs: options.sweepIntervalMs } : {}),
+    ...(options.writeFile ? { writeFile: options.writeFile } : {}),
     broadcast: (event) => events.push(event),
     credentials: {
       resolve: resolveVault,
       forget: async (reference) => {
         forgotten.push(reference);
-        return true;
+        return await (options.forget?.(reference) ?? true);
       },
     },
     clock: () => clock.now,
@@ -794,3 +797,160 @@ describe("agent secret service: lifecycle hardening", () => {
 function basenameOf(path: string): string {
   return path.split(/[\\/]/u).at(-1)!;
 }
+
+describe("agent secret service: in-flight saves and keychain reconciliation", () => {
+  function gatedWriter(onWrite: (token: string) => void = () => undefined) {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tokens: string[] = [];
+    const writeFile: typeof writeAgentSecretFile = async (root, token, fileName, value) => {
+      tokens.push(token);
+      onWrite(token);
+      const file = await writeAgentSecretFile(root, token, fileName, value);
+      await gate;
+      return file;
+    };
+    return { writeFile, release: () => release(), tokens };
+  }
+
+  async function settle(): Promise<void> {
+    for (let index = 0; index < 20; index += 1) await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it("redacts a new value before its file can be read and keeps the directory being written through a sweep", async () => {
+    let harness!: Harness;
+    let redactedBeforeWrite = false;
+    const writer = gatedWriter(() => {
+      redactedBeforeWrite = harness.service.output.text(`cat → ${SECRET}`) === "cat → [redacted]";
+    });
+    harness = await openHarness({ writeFile: writer.writeFile });
+    const source = chat(harness.store);
+    const result = harness.service.invoke(source, call(VALID));
+    const requestId = pendingId(harness.store);
+    const delivery = harness.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true });
+    await settle();
+    expect(redactedBeforeWrite).toBe(true);
+    const directory = join(agentSecretRoot(harness.directory), writer.tokens[0]!);
+    expect(existsSync(directory)).toBe(true);
+    harness.service.sweep();
+    expect(existsSync(directory)).toBe(true);
+    expect(harness.service.output.text(SECRET)).toBe("[redacted]");
+    writer.release();
+    await expect(delivery).resolves.toMatchObject({ status: "delivered" });
+    const file = parsed(await result).file as string;
+    expect(dirname(file)).toBe(directory);
+    expect(readFileSync(file, "utf8")).toBe(SECRET);
+    harness.service.sweep();
+    expect(readFileSync(file, "utf8")).toBe(SECRET);
+  });
+
+  it("keeps redacting a value whose failed write left a locked directory, until a sweep deletes it", async () => {
+    let harness!: Harness;
+    const writeFile: typeof writeAgentSecretFile = async (root, token, fileName, value) => {
+      await writeAgentSecretFile(root, token, fileName, value);
+      harness.locked.add(token);
+      throw new Error("ENOSPC: no space left on device");
+    };
+    harness = await openHarness({ writeFile });
+    const source = chat(harness.store);
+    void harness.service.invoke(source, call(VALID));
+    const requestId = pendingId(harness.store);
+    await expect(harness.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true }))
+      .resolves.toEqual({ status: "rejected", reason: "file-failed" });
+    expect(harness.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("pending");
+    expect(harness.service.output.text(SECRET)).toBe("[redacted]");
+    harness.service.sweep();
+    expect(harness.service.output.text(SECRET)).toBe("[redacted]");
+    harness.locked.clear();
+    harness.service.sweep();
+    expect(harness.service.output.values()).toEqual([]);
+    expect(readdirSync(agentSecretRoot(harness.directory))).toEqual([]);
+  });
+
+  it("drops redaction for a failed write once its directory is gone", async () => {
+    const writeFile: typeof writeAgentSecretFile = async () => {
+      throw new Error("EACCES: permission denied");
+    };
+    const harness = await openHarness({ writeFile });
+    const source = chat(harness.store);
+    void harness.service.invoke(source, call(VALID));
+    const requestId = pendingId(harness.store);
+    await expect(harness.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: false }))
+      .resolves.toEqual({ status: "rejected", reason: "file-failed" });
+    expect(harness.service.output.values()).toEqual([]);
+  });
+
+  it("reports only requests that can no longer use their keychain copy as orphaned", async () => {
+    const harness = await openHarness();
+    const savedChat = chat(harness.store, "Saved");
+    const savedResult = harness.service.invoke(savedChat, call(VALID));
+    const saved = pendingId(harness.store);
+    await harness.service.deliver({ conversationId: savedChat.conversation.id, requestId: saved, secret: SECRET, vaulted: true });
+    await savedResult;
+    const declinedChat = chat(harness.store, "Declined");
+    const declinedResult = harness.service.invoke(declinedChat, call(VALID));
+    const declined = pendingId(harness.store);
+    await harness.service.decline(declinedChat.conversation.id, declined);
+    await declinedResult;
+    const pendingChat = chat(harness.store, "Pending");
+    void harness.service.invoke(pendingChat, call(VALID));
+    const pending = pendingId(harness.store);
+    const unknown = randomUUID();
+    expect(harness.service.orphanedVaultRequests([saved, declined, pending, unknown])).toEqual([declined, unknown]);
+    vi.spyOn(harness.store.transcriptRepository.secretRequests, "find").mockImplementation(() => {
+      throw new Error("database is locked");
+    });
+    expect(harness.service.orphanedVaultRequests([declined, unknown])).toEqual([]);
+  });
+
+  it("forgets the copy of a save still in flight at shutdown, and the next start reports it orphaned", async () => {
+    const writer = gatedWriter();
+    const first = await openHarness({ writeFile: writer.writeFile });
+    const source = chat(first.store);
+    const result = first.service.invoke(source, call(VALID));
+    const requestId = pendingId(first.store);
+    const delivery = first.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true });
+    await settle();
+    first.service.shutdown();
+    expect(first.forgotten).toEqual([agentSecretReference(requestId)]);
+    expect(first.service.orphanedVaultRequests([requestId])).toEqual([]);
+    writer.release();
+    await expect(delivery).resolves.toEqual({ status: "rejected", reason: "ended" });
+    expect(parsed(await result)).toMatchObject({ status: "ended" });
+    expect(readdirSync(agentSecretRoot(first.directory))).toEqual([]);
+    expect(first.service.output.values()).toEqual([]);
+    services.splice(services.indexOf(first.service), 1);
+    const second = await openHarness({ directory: first.directory });
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("ended");
+    expect(second.service.orphanedVaultRequests([requestId])).toEqual([requestId]);
+  });
+
+  it("retries a rejected or timed-out keychain forget on the next sweep until it succeeds", async () => {
+    let failures = 2;
+    const harness = await openHarness({
+      forget: async () => {
+        if (failures-- > 0) throw new Error("Secure credential storage did not respond in time.");
+        return true;
+      },
+    });
+    const source = chat(harness.store);
+    const result = harness.service.invoke(source, call(VALID));
+    const requestId = pendingId(harness.store);
+    await harness.service.decline(source.conversation.id, requestId);
+    await result;
+    const reference = agentSecretReference(requestId);
+    await settle();
+    expect(harness.forgotten).toEqual([reference]);
+    harness.service.sweep();
+    await settle();
+    expect(harness.forgotten).toEqual([reference, reference]);
+    harness.service.sweep();
+    await settle();
+    expect(harness.forgotten).toEqual([reference, reference, reference]);
+    harness.service.sweep();
+    await settle();
+    expect(harness.forgotten).toEqual([reference, reference, reference]);
+  });
+});

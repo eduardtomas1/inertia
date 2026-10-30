@@ -105,4 +105,23 @@ describe("CredentialVault agent secrets", () => {
     await expect(store.status(agentSecretReference(brokered))).resolves.toEqual({ hasSecret: false, credentialGeneration: null });
     await expect(store.setAgentSecret(direct, SECRET)).resolves.toBe("stored");
   });
+
+  it("enumerates only agent secret request ids for the runtime broker, never values or backend credentials", async () => {
+    const { vault: store, persistence } = vault();
+    const requestId = randomUUID();
+    await store.setForProfile("profile-1", "backend-credential-value");
+    await store.setAgentSecret(requestId, SECRET);
+    await store.resolveOrCreate("secret:agent-secret:not-a-request");
+    const broker = runtimeCredentialBroker(() => store).agentSecrets!;
+    const ids = await broker.requestIds();
+    expect(ids).toEqual([requestId]);
+    expect(JSON.stringify(ids)).not.toContain(SECRET);
+    await expect(broker.forget(requestId)).resolves.toBe(true);
+    await expect(broker.requestIds()).resolves.toEqual([]);
+    await expect(store.stateForProfile("profile-1")).resolves.toMatchObject({ hasSecret: true });
+    await expect(store.has("secret:agent-secret:not-a-request")).resolves.toBe(true);
+    expect(persistence.value).not.toContain(SECRET);
+    await invalidInput(broker.forget("secret:backend:profile-1"));
+  });
 });
+

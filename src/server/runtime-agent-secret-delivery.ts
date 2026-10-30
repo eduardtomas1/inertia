@@ -1,6 +1,7 @@
 import type {
   RuntimeAgentSecretDeliverCommand,
   RuntimeAgentSecretEvent,
+  RuntimeAgentSecretReconcileCommand,
 } from "../node/runtime-agent-secret-protocol.js";
 import type {
   AgentSecretDelivery,
@@ -9,10 +10,25 @@ import type {
 
 export interface RuntimeAgentSecretDeliverer {
   deliverAgentSecret(delivery: AgentSecretDelivery): Promise<AgentSecretDeliveryOutcome>;
+  orphanedAgentSecrets(requestIds: readonly string[]): string[];
+}
+
+export function answerRuntimeAgentSecretReconcile(
+  runtime: Pick<RuntimeAgentSecretDeliverer, "orphanedAgentSecrets"> | null,
+  command: RuntimeAgentSecretReconcileCommand,
+): Extract<RuntimeAgentSecretEvent, { type: "runtime.agent-secret-reconciled" }> {
+  let orphaned: string[] = [];
+  try {
+    const requested = new Set(command.requestIds);
+    orphaned = [...new Set(runtime?.orphanedAgentSecrets(command.requestIds) ?? [])].filter((requestId) => requested.has(requestId));
+  } catch {
+    orphaned = [];
+  }
+  return { type: "runtime.agent-secret-reconciled", transportId: command.transportId, orphaned };
 }
 
 export async function answerRuntimeAgentSecretDelivery(
-  runtime: RuntimeAgentSecretDeliverer | null,
+  runtime: Pick<RuntimeAgentSecretDeliverer, "deliverAgentSecret"> | null,
   command: RuntimeAgentSecretDeliverCommand,
 ): Promise<RuntimeAgentSecretEvent> {
   const { transportId } = command;

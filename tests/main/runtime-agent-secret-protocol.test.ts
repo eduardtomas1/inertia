@@ -51,4 +51,28 @@ describe("agent secret process protocol", () => {
     expect(parseRuntimeWorkerEvent({ ...delivered, secret: "tskey-auth-123" })).toBeNull();
     expect(parseRuntimeWorkerEvent({ type: "runtime.agent-secret-rejected", transportId, reason: "Value tskey-auth-123 failed" })).toBeNull();
   });
+
+  it("accepts bounded reconcile commands and events that carry only request ids", () => {
+    const requestIds = [randomUUID(), randomUUID()];
+    const reconcile = { type: "runtime.agent-secret-reconcile", transportId, requestIds };
+    expect(parseRuntimeWorkerCommand(reconcile)).toEqual(reconcile);
+    const reconciled = { type: "runtime.agent-secret-reconciled", transportId, orphaned: [requestIds[0]] };
+    expect(parseRuntimeWorkerEvent(reconciled)).toEqual(reconciled);
+    expect(parseRuntimeWorkerEvent({ ...reconciled, orphaned: [] })).toEqual({ ...reconciled, orphaned: [] });
+    const tooMany = Array.from({ length: 257 }, () => randomUUID());
+    for (const invalid of [
+      { ...reconcile, requestIds: [] },
+      { ...reconcile, requestIds: tooMany },
+      { ...reconcile, requestIds: [requestIds[0], requestIds[0]] },
+      { ...reconcile, requestIds: ["secret:agent-secret:x"] },
+      { ...reconcile, secret: "tskey-auth-123" },
+    ]) expect(parseRuntimeWorkerCommand(invalid)).toBeNull();
+    for (const invalid of [
+      { ...reconciled, orphaned: tooMany },
+      { ...reconciled, orphaned: ["tskey-auth-123"] },
+      { ...reconciled, orphaned: [requestIds[0], requestIds[0]] },
+      { ...reconciled, kept: requestIds },
+    ]) expect(parseRuntimeWorkerEvent(invalid)).toBeNull();
+  });
 });
+

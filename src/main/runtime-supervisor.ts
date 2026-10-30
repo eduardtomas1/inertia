@@ -822,6 +822,7 @@ export class RuntimeSupervisor {
       this.emitState();
     }, this.stableUptimeMs);
     this.testRecycle.succeed(record);
+    this.agentSecrets.ready(record);
     this.emitState();
   }
   private handleExit(record: RuntimeProcessRecord, code: number): void {

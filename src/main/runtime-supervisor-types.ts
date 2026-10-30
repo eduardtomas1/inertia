@@ -105,6 +105,12 @@ export interface RuntimeCredentialBroker {
   status(secretReference: string, signal?: AbortSignal): Promise<BackendCredentialStatus>;
   clear(secretReference: string, signal?: AbortSignal): Promise<boolean>;
   forget(secretReference: string, signal?: AbortSignal): Promise<boolean>;
+  agentSecrets?: RuntimeAgentSecretVault;
+}
+
+export interface RuntimeAgentSecretVault {
+  requestIds(): Promise<readonly string[]>;
+  forget(requestId: string): Promise<boolean>;
 }
 
 export interface RuntimeSecureFileBroker {

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { answerRuntimeAgentSecretDelivery } from "../../src/server/runtime-agent-secret-delivery";
+import { answerRuntimeAgentSecretDelivery, answerRuntimeAgentSecretReconcile } from "../../src/server/runtime-agent-secret-delivery";
 import {
   createSecretRequestCommandHandler,
   SECRET_REQUEST_IN_USE_MESSAGE,
@@ -101,4 +101,18 @@ describe("runtime worker secret delivery answer", () => {
     expect(stopped).toEqual({ type: "runtime.agent-secret-rejected", transportId: command.transportId, reason: "ended" });
     expect(JSON.stringify([delivered, rejected, thrown, stopped])).not.toContain(SECRET);
   });
+
+  it("answers a reconcile with only requested ids the service reports orphaned, and none when it cannot tell", () => {
+    const requestIds = [randomUUID(), randomUUID()];
+    const reconcile = { type: "runtime.agent-secret-reconcile" as const, transportId: command.transportId, requestIds };
+    const answer = (orphanedAgentSecrets: (ids: readonly string[]) => string[]) =>
+      answerRuntimeAgentSecretReconcile({ orphanedAgentSecrets }, reconcile);
+    expect(answer(() => [requestIds[1]!, randomUUID(), requestIds[1]!]))
+      .toEqual({ type: "runtime.agent-secret-reconciled", transportId: command.transportId, orphaned: [requestIds[1]] });
+    expect(answer(() => {
+      throw new Error("database is locked");
+    }).orphaned).toEqual([]);
+    expect(answerRuntimeAgentSecretReconcile(null, reconcile).orphaned).toEqual([]);
+  });
 });
+

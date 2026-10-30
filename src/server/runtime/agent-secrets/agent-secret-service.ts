@@ -46,6 +46,7 @@ import {
 const HOUR_MS = 60 * 60_000;
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60_000;
 const MAX_TIMER_MS = 2_147_483_647;
+const MAX_FORGET_RETRIES = 256;
 
 export interface AgentSecretVault {
   resolve(secretReference: string): Promise<string | null>;
@@ -64,6 +65,7 @@ export interface AgentSecretServiceDependencies {
   waitMs?: (providerId: ProviderId) => number;
   sweepIntervalMs?: number;
   removeDirectory?: (root: string, token: string) => void;
+  writeFile?: typeof writeAgentSecretFile;
 }
 
 export interface AgentSecretHostToolSource {
@@ -117,6 +119,8 @@ export class AgentSecretService {
   private readonly pending = new Map<string, PendingRequest>();
   private readonly active = new Map<string, ActiveSecret>();
   private readonly lingering = new Map<string, readonly string[]>();
+  private readonly writing = new Map<string, string>();
+  private readonly failedForgets = new Set<string>();
   private restoring: AgentSecretRequestRecord[] = [];
   private expiryTimer: NodeJS.Timeout | null = null;
   private sweepTimer: NodeJS.Timeout | null = null;
@@ -197,7 +201,7 @@ export class AgentSecretService {
       this.active.set(record.id, { conversationId: current.conversationId, token, expiresAtMs, value });
       this.refreshActive();
       try {
-        await writeAgentSecretFile(this.root, token, current.fileName, value);
+        await this.writeFile(token, current.fileName, value);
       } catch {
         this.retire(record.id, "expired");
         continue;
@@ -291,12 +295,15 @@ export class AgentSecretService {
     if (this.activeCount() >= SECRET_REQUEST_MAX_ACTIVE) return rejected("limit");
     entry.delivering = true;
     const token = newAgentSecretFileToken();
+    this.writing.set(token, input.secret);
+    this.refreshActive();
     let file: string;
     try {
-      file = await writeAgentSecretFile(this.root, token, entry.fileName, input.secret);
+      file = await this.writeFile(token, entry.fileName, input.secret);
     } catch {
+      this.abandonWrite(token, input.secret);
       entry.delivering = false;
-      return rejected("file-failed");
+      return rejected(this.closed ? "ended" : "file-failed");
     }
     const now = this.clock();
     const expiresAtMs = now + entry.ttlHours * HOUR_MS;
@@ -310,12 +317,12 @@ export class AgentSecretService {
         answeredAt: new Date(now).toISOString(),
       });
     } catch (error) {
-      this.discardFile(token, input.secret);
+      this.abandonWrite(token, input.secret);
       entry.delivering = false;
       return rejected(error instanceof AgentSecretRequestError ? "limit" : "file-failed");
     }
     if (!change || this.closed) {
-      this.discardFile(token, input.secret);
+      this.abandonWrite(token, input.secret);
       return rejected("ended");
     }
     this.active.set(input.requestId, {
@@ -324,6 +331,7 @@ export class AgentSecretService {
       expiresAtMs,
       value: input.secret,
     });
+    this.writing.delete(token);
     this.refreshActive();
     this.publish(change.message);
     entry.finish({ kind: "saved", file, expiresAt });
@@ -393,8 +401,24 @@ export class AgentSecretService {
     return secret && record ? agentSecretFilePath(this.root, secret.token, record.fileName) : null;
   }
 
+  orphanedVaultRequests(requestIds: readonly string[]): string[] {
+    if (this.closed) return [];
+    try {
+      return requestIds.filter((requestId) => {
+        if (this.pending.has(requestId) || this.active.has(requestId)) return false;
+        const status = this.repository.find(requestId)?.status;
+        return status !== "pending" && status !== "saved";
+      });
+    } catch {
+      return [];
+    }
+  }
+
   sweep(): void {
     if (this.closed) return;
+    const retries = Array.from(this.failedForgets);
+    this.failedForgets.clear();
+    for (const requestId of retries) this.forgetVault(requestId);
     try {
       this.expireDue();
       for (const requestId of this.active.keys()) {
@@ -404,7 +428,7 @@ export class AgentSecretService {
       }
     } catch {
     }
-    const kept = [...this.active.values()].map(({ token }) => token);
+    const kept = [...[...this.active.values()].map(({ token }) => token), ...this.writing.keys()];
     for (const token of this.lingering.keys()) {
       if (kept.includes(token) || this.removeFile(token)) this.lingering.delete(token);
     }
@@ -426,9 +450,11 @@ export class AgentSecretService {
       } catch {
       }
       entry.finish({ kind: "ended", reason: "stopped" });
+      this.forgetVault(requestId);
     }
     this.active.clear();
     this.lingering.clear();
+    this.writing.clear();
     this.output.setValues([]);
     clearAgentSecretRoot(this.root);
   }
@@ -478,6 +504,12 @@ export class AgentSecretService {
     this.discardFile(secret.token, secret.value);
   }
 
+  private abandonWrite(token: string, value: string): void {
+    this.writing.delete(token);
+    this.discardFile(token, value);
+    this.refreshActive();
+  }
+
   private discardFile(token: string, value: string): void {
     if (!this.removeFile(token)) this.lingering.set(token, [value]);
   }
@@ -495,7 +527,11 @@ export class AgentSecretService {
   }
 
   private refreshActive(): void {
-    this.output.setValues([...[...this.active.values()].map(({ value }) => value), ...[...this.lingering.values()].flat()]);
+    this.output.setValues([
+      ...[...this.active.values()].map(({ value }) => value),
+      ...this.writing.values(),
+      ...[...this.lingering.values()].flat(),
+    ]);
     this.scheduleExpiry();
   }
 
@@ -537,6 +573,10 @@ export class AgentSecretService {
     return new Date(Number.isFinite(notBefore) ? Math.max(this.clock(), notBefore) : this.clock()).toISOString();
   }
 
+  private writeFile(token: string, fileName: string, value: string): Promise<string> {
+    return (this.dependencies.writeFile ?? writeAgentSecretFile)(this.root, token, fileName, value);
+  }
+
   private removeFile(token: string): boolean {
     try {
       (this.dependencies.removeDirectory ?? removeAgentSecretDirectory)(this.root, token);
@@ -549,7 +589,15 @@ export class AgentSecretService {
   private forgetVault(requestId: string): void {
     const credentials = this.dependencies.credentials;
     if (!credentials) return;
-    void credentials.forget(agentSecretReference(requestId)).catch(() => undefined);
+    this.failedForgets.delete(requestId);
+    const retry = (): void => {
+      if (this.failedForgets.size < MAX_FORGET_RETRIES) this.failedForgets.add(requestId);
+    };
+    try {
+      void credentials.forget(agentSecretReference(requestId)).catch(retry);
+    } catch {
+      retry();
+    }
   }
 
   private conversationTitle(conversationId: string): string {

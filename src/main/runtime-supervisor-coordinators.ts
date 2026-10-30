@@ -94,6 +94,7 @@ export function createRuntimeSupervisorCoordinators(
     }),
     agentSecrets: new RuntimeAgentSecretCoordinator({
       timeoutMs: AGENT_SECRET_DELIVERY_TIMEOUT_MS,
+      vault: options.credentialBroker?.agentSecrets,
       ...timers,
       readyRecord: () => host.readyRecord(),
       post,

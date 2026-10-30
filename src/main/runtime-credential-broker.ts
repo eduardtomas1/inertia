@@ -10,5 +10,9 @@ export function runtimeCredentialBroker(vault: () => CredentialVault): RuntimeCr
     status: (secretReference) => vault().status(secretReference),
     clear: (secretReference) => vault().clear(secretReference),
     forget: (secretReference) => vault().forget(secretReference),
+    agentSecrets: {
+      requestIds: () => vault().agentSecretRequestIds(),
+      forget: (requestId) => vault().deleteAgentSecret(requestId),
+    },
   };
 }

@@ -27,7 +27,7 @@ import {
 } from "../../src/node/agent-secrets";
 import { BACKEND_CREDENTIAL_MASK, isBackendSecretReference } from "../../src/shared/backend-credentials";
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
-import { secretRequestResultValidators } from "../../src/shared/contracts/client-command/secret-requests";
+import { secretRequestResultValidators } from "../../src/shared/contracts/secret-request-results";
 import { PROVIDER_IDS } from "../../src/server/runtime/backends/backend-profile-model";
 
 const pending: SecretRequestReference = {

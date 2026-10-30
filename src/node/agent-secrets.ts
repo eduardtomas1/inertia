@@ -18,6 +18,7 @@ import { AGENT_SECRET_VALUE_ISSUES } from "../shared/agent-secret-save-errors.js
 import type { ProviderId } from "../shared/provider.js";
 
 export const SECRET_REQUEST_TOOL_NAME = "inertia_request_secret";
+export const SECRET_VALUE_EXPOSURE_MESSAGE = "An active secret cannot be copied into stored content. Pass its private file path, not the value.";
 
 export const SECRET_REQUEST_MAX_FILE_NAME_LENGTH = 64;
 export const SECRET_REQUEST_DEFAULT_TTL_HOURS = 24;

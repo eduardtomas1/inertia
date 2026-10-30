@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, linkSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { existsSync, linkSync, readdirSync, readFileSync, statSync, symlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,7 +11,7 @@ import { ProviderTerminalResumeRegistry } from "../../src/server/provider/termin
 import { createConversationCommandHandler } from "../../src/server/runtime/commands/conversation-commands";
 import type { ProviderHostToolCall, ProviderHostToolResult } from "../../src/server/provider/contracts";
 import { AgentSecretService } from "../../src/server/runtime/agent-secrets/agent-secret-service";
-import { agentSecretRoot } from "../../src/server/runtime/agent-secrets/secret-files";
+import { agentSecretRoot, removeAgentSecretDirectory, writeAgentSecretFile } from "../../src/server/runtime/agent-secrets/secret-files";
 import { agentSecretReference, SECRET_REQUEST_TOOL_NAME } from "../../src/node/agent-secrets";
 import type { RuntimeMutationEvent } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
@@ -74,7 +74,7 @@ async function openHarness(options: {
     },
     removeDirectory: (root, token) => {
       if (locked.has(token)) throw Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" });
-      rmSync(join(root, token), { recursive: true, force: true });
+      removeAgentSecretDirectory(root, token);
     },
     ...(options.sweepIntervalMs ? { sweepIntervalMs: options.sweepIntervalMs } : {}),
     broadcast: (event) => events.push(event),
@@ -148,6 +148,37 @@ function mode(path: string): number {
 }
 
 describe("agent secret service: pending request, private file and turn wait", () => {
+  it.skipIf(!POSIX)("refuses a linked root without deleting or changing the target during start, sweep, shutdown or save", async () => {
+    const harness = await openHarness({ start: false });
+    const outside = join(harness.directory, "outside");
+    const token = "a".repeat(32);
+    await mkdir(join(outside, token), { recursive: true, mode: 0o755 });
+    const sourceFile = join(outside, "source.ts");
+    const secretFile = join(outside, token, "secret");
+    await writeFile(sourceFile, "valuable project source");
+    await writeFile(secretFile, "valuable token-directory file");
+    const originalMode = mode(outside);
+    const root = agentSecretRoot(harness.directory);
+    symlinkSync(outside, root, "dir");
+    harness.service.start();
+    harness.service.sweep();
+    await expect(writeAgentSecretFile(root, token, "secret", SECRET)).rejects.toThrow("real directory");
+    harness.service.shutdown();
+    expect(readFileSync(sourceFile, "utf8")).toBe("valuable project source");
+    expect(readFileSync(secretFile, "utf8")).toBe("valuable token-directory file");
+    expect(mode(outside)).toBe(originalMode);
+  });
+
+  it("refuses an active secret in request metadata before storing or broadcasting a new card", async () => {
+    const harness = await openHarness();
+    const source = chat(harness.store);
+    harness.service.output.setValues([SECRET]);
+    const result = await harness.service.invoke(source, call({ ...VALID, description: `Use ${SECRET}` }));
+    expect(parsed(result)).toMatchObject({ error: { code: "secret_value_not_allowed" } });
+    expect(harness.store.transcriptRepository.secretRequests.pendingAll()).toEqual([]);
+    expect(harness.events).toEqual([]);
+  });
+
   it("writes the delivered value to an owner-only file in a fresh token directory and returns its path and expiry", async () => {
     const harness = await openHarness();
     const { conversation, turn } = chat(harness.store);

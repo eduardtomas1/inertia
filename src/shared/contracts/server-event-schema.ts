@@ -30,6 +30,7 @@ import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics
 import { subagentTrace } from "./subagent-trace-schema";
 import { watcherMutationEvent, watcherRequestResultValidators, watcherWakeSummariesCoherent } from "./watcher-schema";
 import { compactOnReturnResultValidators, isConversationCompactionState, isPromptCacheFacts, validCompactOnReturnSetting } from "./compact-on-return-schema";
+import { syncCursor } from "./server-event-discriminants";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
@@ -91,12 +92,6 @@ function optionalContinuationReasonCode(value: UnknownRecord): boolean {
   const recovery = value.sessionRecovery;
   return (reason === undefined || reason === null || isContinuationReasonCode(reason)) && (recovery === undefined || recovery === null || isTurnSessionRecovery(recovery));
 }
-function syncCursor(value: unknown): boolean {
-  return recordWithStrings(value, "runtimeGeneration")
-    && (value.runtimeGeneration as string).length > 0
-    && integerFieldAtLeast(value, "latestSequence");
-}
-
 function providerMaintenanceStatus(value: unknown): boolean {
   return recordWithStrings(
     value,
@@ -1102,7 +1097,8 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
 }
 import { issueReportResult } from "../issue-report";
 import { messageQueueResultSchema } from "../queued-messages";
-import { updatesRunResultSchema } from "../updates"; import { secretRequestResultValidators } from "./client-command/secret-requests";
+import { updatesRunResultSchema } from "../updates";
+import { secretRequestResultValidators } from "./secret-request-results";
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];

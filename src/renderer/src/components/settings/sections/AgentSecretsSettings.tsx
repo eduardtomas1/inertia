@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AGENT_SECRET_REVOKE_ERRORS } from "@shared/agent-secret-revoke-errors";
 import type { ServerEvent } from "@shared/contracts";
-import type { SecretRequestListEntry } from "@shared/contracts/client-command/secret-requests";
+import type { SecretRequestListEntry } from "@shared/contracts/secret-request-results";
 import type { CommandWithoutId } from "../../../lib/runtimeCommands";
 import {
   secretRequestExpiry,

@@ -3,7 +3,7 @@ import type WebSocket from "ws";
 import { AGENT_SECRET_SAVE_ERRORS } from "../../../shared/agent-secret-save-errors";
 import { AGENT_SECRET_REVOKE_ERRORS } from "../../../shared/agent-secret-revoke-errors";
 import type { ServerEvent } from "../../../shared/contracts";
-import type { SecretRequestListEntry } from "../../../shared/contracts/client-command/secret-requests";
+import type { SecretRequestListEntry } from "../../../shared/contracts/secret-request-results";
 import { RuntimeRequestError } from "../../runtime-errors";
 import { defineRuntimeCommandHandler, type RuntimeCommandHandler } from "./command-router";
 

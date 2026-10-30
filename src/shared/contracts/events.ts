@@ -282,7 +282,7 @@ export type ServerEvent =
         | { kind: "external.url"; url: string; label: string }
         | ConversationDetailResult
         | MessageSearchResult
-        | import("./client-command/secret-requests").SecretRequestCommandResult;
+        | import("./secret-request-results").SecretRequestCommandResult;
     }
   | RuntimeMutationEvent
   | ({

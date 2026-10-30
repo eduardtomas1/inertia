@@ -36,7 +36,16 @@ export function agentSecretFilePath(root: string, token: string, fileName: strin
 
 export function ensureAgentSecretRoot(root: string): void {
   mkdirSync(root, { recursive: true, mode: 0o700 });
+  if (!realRoot(root)) throw new Error("The agent secret root must be a real directory.");
   chmodSync(root, 0o700);
+}
+
+function realRoot(root: string): boolean {
+  try {
+    return lstatSync(root).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function syncDirectory(directory: string): Promise<void> {
@@ -82,10 +91,12 @@ export async function writeAgentSecretFile(
 
 export function removeAgentSecretDirectory(root: string, token: string): void {
   if (!isAgentSecretFileToken(token)) return;
+  if (!realRoot(root)) throw new Error("The agent secret root must be a real directory.");
   rmSync(join(root, token), { recursive: true, force: true });
 }
 
 export function clearAgentSecretRoot(root: string, keep: ReadonlySet<string> = new Set()): void {
+  if (!realRoot(root)) return;
   let entries: string[];
   try {
     entries = readdirSync(root);
@@ -102,6 +113,7 @@ export function clearAgentSecretRoot(root: string, keep: ReadonlySet<string> = n
 }
 
 export function retainedAgentSecretTokens(root: string): string[] {
+  if (!realRoot(root)) return [];
   try {
     return readdirSync(root).filter(isAgentSecretFileToken).slice(0, MAX_RETAINED_TOKENS);
   } catch {

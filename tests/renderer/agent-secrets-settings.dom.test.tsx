@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ServerEvent } from "../../src/shared/contracts";
-import type { SecretRequestListEntry } from "../../src/shared/contracts/client-command/secret-requests";
+import type { SecretRequestListEntry } from "../../src/shared/contracts/secret-request-results";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import {
   AGENT_SECRETS_INTRO,

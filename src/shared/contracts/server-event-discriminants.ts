@@ -121,6 +121,13 @@ export const SERVER_EVENT_OPTIONS = Object.freeze({
 
 type IdentityRecord = Record<string, unknown>;
 
+export function syncCursor(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as IdentityRecord;
+  return typeof candidate.runtimeGeneration === "string" && candidate.runtimeGeneration.length > 0
+    && Number.isSafeInteger(candidate.latestSequence) && (candidate.latestSequence as number) >= 0;
+}
+
 function uniqueIdentity(entries: IdentityRecord[], key = "id"): boolean {
   return new Set(entries.map((entry) => entry[key])).size === entries.length;
 }

@@ -7,9 +7,10 @@ import {
   agentSecretReference,
   isAgentSecretValue,
   secretRequestWaitMs,
+  SECRET_VALUE_EXPOSURE_MESSAGE,
 } from "../../../node/agent-secrets";
 import type { AgentTurn, ChatMessage, Conversation, RuntimeMutationEvent } from "../../../shared/contracts";
-import type { SecretRequestListEntry } from "../../../shared/contracts/client-command/secret-requests";
+import type { SecretRequestListEntry } from "../../../shared/contracts/secret-request-results";
 import type { ProviderId } from "../../../shared/provider";
 import type { RuntimeAgentSecretRejectionReason } from "../../../node/runtime-agent-secret-protocol";
 import type { RuntimeStore } from "../../database";
@@ -214,7 +215,12 @@ export class AgentSecretService {
     }
   }
 
+  containsSecret(value: unknown): boolean {
+    return this.output.payload(value) !== value;
+  }
+
   async invoke(source: AgentSecretHostToolSource, call: ProviderHostToolCall): Promise<ProviderHostToolResult> {
+    if (this.containsSecret(call.arguments)) return secretRequestFailure("secret_value_not_allowed", SECRET_VALUE_EXPOSURE_MESSAGE);
     const parsed = parseSecretRequestArguments(call.arguments);
     if (!parsed.ok) return parsed.failure;
     if (this.closed) return secretRequestEndedResult("stopped");

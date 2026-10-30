@@ -39,4 +39,4 @@ export type {
   SecretRequestListEntry,
   SecretRequestListResult,
   SecretRequestRevokeResult,
-} from "./secret-requests";
+} from "../secret-request-results";

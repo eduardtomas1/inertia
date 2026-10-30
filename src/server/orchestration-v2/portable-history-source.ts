@@ -10,6 +10,7 @@ import { sentReferenceBlocks, type ContinuationHistoryBlock } from "../persisten
 import { RESTORED_CHAT_HISTORY_LABEL } from "../persistence/conversation-context-transport";
 import { providerHandoffBlockBytes, providerHandoffFilesBlock } from "../persistence/provider-handoff-files";
 import { lastTurnCommands, providerHandoffReason } from "../persistence/turn-context-facts";
+import { boundedHistoryCandidates, portableForkHistory } from "./portable-fork-history";
 import {
   MAX_PORTABLE_HISTORY_BUDGET, MAX_PORTABLE_HISTORY_CANDIDATES,
   portableHistoryBudget, selectPortableHistory, type PortableHistoryItem,
@@ -57,7 +58,7 @@ export function portableHistorySource(database: Database.Database, input: {
       .get(...parameters, role) as SourceRow | undefined;
     if (row && !rows.some(({ id }) => id === row.id)) rows.push(row);
   }
-  rows.sort((left, right) => left.created_at.localeCompare(right.created_at) || left.position - right.position);
+  rows.sort((left, right) => left.created_at.localeCompare(right.created_at, "en") || left.position - right.position);
   const prefix = database.prepare("SELECT substr(CAST(content AS BLOB), 1, ?) AS content FROM messages WHERE id = ?");
   const chunks = database.prepare(`SELECT substr(CAST(content AS BLOB), 1, ?) AS content
     FROM message_content_chunks WHERE message_id = ? ORDER BY sequence LIMIT ?`);
@@ -77,7 +78,11 @@ export function portableHistorySource(database: Database.Database, input: {
       providerBackingId: null, role: row.role, kind: row.role === "user" ? "user-message" : "assistant-message",
       status, text: cleaned });
   }
-  return { items, omittedCount: eligible - items.length, withheldCount: total - routedCount };
+  const inherited = portableForkHistory(database, input.threadId, input.excludedItemIds ?? []);
+  const combined = [...inherited.items, ...items];
+  const bounded = boundedHistoryCandidates(combined);
+  return { items: bounded, omittedCount: eligible - items.length + inherited.omittedCount + combined.length - bounded.length,
+    withheldCount: total - routedCount };
 }
 
 export function readPortableContinuationHistory(database: Database.Database, input:

@@ -42,6 +42,7 @@ export function menuId(menu: ComposerMenu): string {
 }
 
 export function composerHarnessLabel(harnessId: string): string {
+  if (harnessId === "pi-rpc") return "Pi";
   return harnessId.startsWith("claude")
     ? "Claude harness"
     : harnessId.startsWith("codex")

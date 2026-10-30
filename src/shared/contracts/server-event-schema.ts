@@ -15,6 +15,7 @@ import { isContinuationReasonCode, isTurnSessionRecovery } from "../continuation
 import { backendDefault, backendProfile, backendProfileResultValidators, optionalProviderAccountKind, optionalTurnFailureKind } from "./backend-profile-result-schema";
 import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
+import { agentSkill, workflowSkillsCapability } from "./agent-skill-schema";
 import { DUO_COMPARISON_STATES, DUO_DISPATCH_STATES, DUO_LAUNCH_STATES } from "./duo";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 import { providerFastModeField } from "./provider-fast-mode-schema";
@@ -29,8 +30,9 @@ import { validAppearanceSettings } from "./appearance-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 import { subagentTrace } from "./subagent-trace-schema";
 import { watcherMutationEvent, watcherRequestResultValidators, watcherWakeSummariesCoherent } from "./watcher-schema";
+import { forkHistoryResultSchema } from "../orchestration-forks";
 import { compactOnReturnResultValidators, isConversationCompactionState, isPromptCacheFacts, validCompactOnReturnSetting } from "./compact-on-return-schema";
-type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
+type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "pi"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -526,22 +528,6 @@ function agentGoal(value: unknown): boolean {
     && nullableStringField(value, "synchronizedAt");
 }
 
-function agentSkill(value: unknown): boolean {
-  return recordWithStrings(
-    value,
-    "id",
-    "conversationId",
-    "name",
-    "description",
-    "scope",
-    "source",
-  )
-    && nullableStringField(value, "shortDescription")
-    && booleanField(value, "enabled")
-    && oneOf(value, "scope", ["user", "repo", "system", "admin", "provider"])
-    && oneOf(value, "source", ["codex-native", "claude-native"]);
-}
-
 function workflowGoalCapability(value: unknown): boolean {
   if (!recordWithStrings(value, "kind", "label")) return false;
   if (value.kind === "unavailable") {
@@ -549,16 +535,6 @@ function workflowGoalCapability(value: unknown): boolean {
   }
   return value.available === true && (value.kind === "codex-native"
     || (value.kind === "inertia-local" && stringField(value, "reason")));
-}
-
-function workflowSkillsCapability(value: unknown): boolean {
-  if (!recordWithStrings(value, "kind", "label")
-    || typeof value.available !== "boolean") return false;
-  if (value.kind === "unavailable") {
-    return value.available === false && stringField(value, "reason");
-  }
-  return value.available === true
-    && (value.kind === "codex-native" || value.kind === "claude-native");
 }
 
 function skillDiscovery(value: unknown): boolean {
@@ -1124,6 +1100,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "updates.run": (value) => updatesRunResultSchema.safeParse(value).success,
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
+  "conversation.fork.history": (value) => forkHistoryResultSchema.safeParse(value).success,
   "todo.started": (value) => stringField(value, "conversationId"),
   "conversation.cli.scan": (value) => cliConversationScanSchema.safeParse(value.scan).success, "conversation.cli.preview": (value) => cliConversationPreviewSchema.safeParse(value.preview).success, "conversation.cli.imported": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) =>
@@ -1218,7 +1195,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
                 "sessionId",
               )
               && oneOf(value.providerResume, "providerId", [
-                "codex", "claude", "cursor", "kimi", "opencode", "antigravity",
+                "codex", "claude", "cursor", "kimi", "opencode", "antigravity", "pi",
               ])
               && nonemptyStringField(value.providerResume, "providerLabel")
               && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(

@@ -120,6 +120,7 @@ function fixture(options: FixtureOptions = {}) {
     ...(options.accountKind ? { accountKind: options.accountKind } : {}),
   } as unknown as ProviderInfo;
   const store = {
+    orchestration: { acceptedRequest: vi.fn(() => null) },
     conversation: vi.fn(() => conversation),
     conversationPath: vi.fn(() => tmpdir()),
     cliConversationImport: vi.fn(() => null),

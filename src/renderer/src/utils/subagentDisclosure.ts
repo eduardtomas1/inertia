@@ -67,6 +67,7 @@ const PROVIDER_LABELS: Partial<Record<SubagentTrace["providerId"], string>> = {
   kimi: "Kimi Code",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  pi: "Pi",
 };
 
 export function subagentProviderLabel(trace: SubagentTrace): string {

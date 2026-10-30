@@ -155,6 +155,7 @@ export class RuntimeStore {
     databasePath: string,
     _defaultWorkspacePath: string,
     options: {
+      runtimeGenerationId?: string; systemBootId?: string;
       onDatabaseBackupCreated?: (result: DatabaseBackupResult) => void;
       canStartDatabaseBackup?: () => boolean;
       databaseBackupQuietGraceMs?: number; databaseBackupInitialDelayMs?: number;
@@ -277,7 +278,7 @@ export class RuntimeStore {
         this.contextPackets.materialize(conversationId, packetIds).deliveries,
     });
     this.systemSuspends = new SystemSuspendRepository(this.database);
-    this.orchestration = new OrchestratedTurnRepository(this.database, this);
+    this.orchestration = new OrchestratedTurnRepository(this.database, this, options.runtimeGenerationId, options.systemBootId);
     this.transcriptRepository = new TranscriptRepository({
       assertAgentTurnIdentity: (conversationId, runId, turnId) =>
         this.assertAgentTurnIdentity(conversationId, runId, turnId),

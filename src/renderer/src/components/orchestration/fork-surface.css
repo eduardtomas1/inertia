@@ -1,0 +1,7 @@
+.fork-turn-action { display: inline-flex; align-items: center; gap: 0.5rem; }
+.fork-turn-action [role="alert"] { max-width: 28rem; }
+.fork-history-panel { margin: 1rem 0; padding: 0.75rem; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
+.fork-history-panel > summary { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+.fork-history-item { margin: 0.75rem 0; }
+.fork-history-item summary { cursor: pointer; }
+.fork-history-item pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; max-height: 30rem; overflow: auto; }

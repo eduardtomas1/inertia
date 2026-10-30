@@ -52,10 +52,14 @@ tests, not just interfaces, documentation, or a disconnected prototype.
 
 ## Ownership and current package
 
+**Paused by the user on 2026-10-30 after requesting commit and push of both
+chats' current work. V2 is incomplete; no merge is authorized.**
+
 The primary chat owns the event/command/effect core, schema, runtime integration,
 client integration and overall validation. The requested second Astra/XHigh
 chat has completed the Codex/Claude native fork and rollback adapter package
-and is implementing Pi next. Its APIs and validation notes are in
+and subsequently implemented Pi and OpenCode 2. Cursor SDK and ACP work remains
+unfinished at the user-requested pause. Its APIs and validation notes are in
 `provider-implementation-progress.md`. Both chats use persistent goals.
 
 Current code and check results are recorded in `implementation-progress.md`.

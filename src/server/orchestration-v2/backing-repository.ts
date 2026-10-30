@@ -8,6 +8,7 @@ import {
 import { orchestrationAttemptSchema, orchestrationRunSchema } from "../../shared/orchestration-v2";
 import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { versionedContinuationIdentitySchema } from "../../shared/model-routing";
+import { nativeControlSchema } from "../../shared/orchestration-native-control";
 import type { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint, durableJson } from "./json";
 import { providerInstanceId } from "./provider-instance";
@@ -81,13 +82,26 @@ export class ProviderBackingRepository {
     if (previous?.status === "retired") return;
     const timestamp = new Date().toISOString();
     const handoff = this.handoff(run.id);
+    const inherited = previous ? null : this.nativeForkCoverage(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
     this.record({ id, threadId: run.threadId, projectId: run.projectId, providerId: run.providerId,
       providerInstanceId: run.providerInstanceId, workspaceKey: run.workspaceKey, nativeSessionId,
       continuationIdentity: versionedContinuationIdentitySchema.parse(turn.continuationIdentity), selection: run.selection,
       lastRunId: run.id, lastTurnId: run.turnId,
       status: previous?.lastRunId === run.id ? previous.status : handoff?.state === "dispatching" ? "uncertain" : "ready",
-      coveredItemIds: previous?.coveredItemIds ?? [], coverageComplete: previous?.coverageComplete ?? true,
+      coveredItemIds: previous?.coveredItemIds ?? inherited?.ids ?? [], coverageComplete: previous?.coverageComplete ?? inherited?.complete ?? true,
       createdAt: previous?.createdAt ?? timestamp, updatedAt: timestamp }, run.id, run.attemptId);
+  }
+
+  private nativeForkCoverage(threadId: string, instanceId: string, workspaceKey: string, nativeSessionId: string) {
+    const row = this.events.projection("fork-native-backing", threadId);
+    if (!row) return null;
+    const fork = nativeControlSchema.parse(row.value);
+    if (fork.state !== "completed" || fork.request.source.identity.providerInstanceId !== instanceId
+      || fork.targetWorkspaceKey !== workspaceKey || fork.backing?.nativeConversationId !== nativeSessionId) return null;
+    const items = this.database.prepare(`SELECT id FROM orchestration_v2_entities WHERE kind = 'fork-history'
+      AND thread_id = ? AND json_extract(payload_json, '$.part') = 0 ORDER BY revision LIMIT ?`)
+      .all(threadId, MAX_BACKING_COVERAGE_ITEMS + 1) as { id: string }[];
+    return { ids: items.slice(0, MAX_BACKING_COVERAGE_ITEMS).map(({ id }) => id), complete: items.length <= MAX_BACKING_COVERAGE_ITEMS };
   }
 
   /** Provider output is evidence that a request reached the native session. */

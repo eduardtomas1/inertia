@@ -114,6 +114,10 @@ export async function initializeRuntimePersistence(
       ? { recoveredTurns: [], recoveredAttachmentIds: [] }
       : recoverInterruptedTurns(store);
     if (!runtimeSafetyLock) {
+      store.orchestration.nativeControls.reconcileCleanup({
+        confirmedRuntimeGenerationIds: new Set([...confirmedGenerations, ...manuallyRetiredGenerations, ...authorizedModernGenerationIds]),
+        currentSystemBootId: options.systemBootId, priorBootCleanupConfirmed: priorBootLeasesCleared,
+      });
       for (const generationId of manuallyRetiredGenerations) {
         if (!runtimeGenerationLeases.clearUnavailableRuntimeGeneration(
           generationId,

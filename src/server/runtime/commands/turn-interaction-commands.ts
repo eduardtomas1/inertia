@@ -152,6 +152,7 @@ export interface TurnInteractionCommandDependencies {
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   providerInfo(): readonly ProviderInfo[];
   verifyProviderInstallation?(providerId: ProviderInfo["id"]): Promise<void>;
+  prepareForkSession?(conversationId: string, signal: AbortSignal): Promise<void>;
   broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -499,6 +500,13 @@ export function createTurnInteractionCommandHandler(
           );
         }
         try {
+        if (dependencies.prepareForkSession) {
+          messageSendStage = "provider-transition";
+          const preparation = new AbortController();
+          await awaitMessageSendPreparation(dependencies.prepareForkSession(conversation.id, preparation.signal),
+            preparationDeadlineAt, () => preparation.abort());
+          conversation = dependencies.store.conversation(conversation.id);
+        }
         messageSendStage = "attachments";
         let resolvedAttachments: Awaited<
           ReturnType<TrustedAttachmentResolver["resolvePayloads"]>

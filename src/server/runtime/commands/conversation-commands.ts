@@ -139,6 +139,8 @@ export function createConversationCommandHandler(
   return defineRuntimeCommandHandler([
     "project.ensure-scratch",
     "conversation.create",
+    "conversation.fork",
+    "conversation.fork.history",
     "conversation.select",
     "conversation.detail.load",
     "conversation.detail.subscription",
@@ -158,6 +160,22 @@ export function createConversationCommandHandler(
     "conversation.regenerate-title",
   ], async (socket, command) => {
     switch (command.type) {
+      case "conversation.fork": {
+        const fork = dependencies.store.orchestration.forks.create(command.payload,
+          { actorId: "human", commandId: command.requestId, command: JSON.parse(JSON.stringify(command)) });
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId,
+          result: { kind: "conversation.created", conversationId: fork.id } });
+        return "handled";
+      }
+      case "conversation.fork.history": {
+        const { conversationId, afterRevision, limit } = command.payload;
+        const history = dependencies.store.orchestration.forks.history(conversationId, afterRevision, limit);
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId,
+          result: { kind: "conversation.fork.history", conversationId,
+            lineage: dependencies.store.orchestration.forks.get(conversationId), ...history } });
+        return "handled";
+      }
       case "project.ensure-scratch": {
         const project = await creation.ensureScratchProject();
         dependencies.broadcastSnapshot();

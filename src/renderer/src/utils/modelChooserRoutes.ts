@@ -57,6 +57,7 @@ const harnessLabels: Readonly<Record<ProviderId, string>> = {
   kimi: "Kimi Code",
   opencode: "OpenCode",
   antigravity: "Antigravity CLI",
+  pi: "Pi",
 };
 
 const refreshModelsReason = "Refresh models to select this route.";

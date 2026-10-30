@@ -8,6 +8,9 @@ import { canTransitionAgentTurnStatus, isAgentTurnTerminalStatus } from "../../s
 import { agentTurnStatusForRunState } from "../../shared/run-state";
 import { durableJson } from "./json";
 import { projectBackingEvent } from "./backing-projector";
+import { projectNativeBoundary } from "./native-boundary-projector";
+import { projectForkEvent } from "./fork-projector";
+import { projectNativeControl } from "./native-control-projector";
 import { OrchestrationConflict, type ProjectEvent, type ProjectionWrite } from "./types";
 
 export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
@@ -22,6 +25,13 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   }
   if (!existingThread || existingThread.projectId !== envelope.projectId) throw new OrchestrationConflict("scope-conflict");
   const thread = orchestrationThreadSchema.parse(existingThread.value);
+  if (event.type === "native.control-started" || event.type === "native.control-settled" || event.type === "fork.portable-selected") {
+    return projectNativeControl(event, envelope, read);
+  }
+  if (event.type === "provider.native-boundary") return projectNativeBoundary(event, envelope, read);
+  if (event.type === "thread.forked" || event.type === "fork.history-part" || event.type === "fork.history-sealed") {
+    return projectForkEvent(event, envelope, read);
+  }
   if (event.type === "provider.backing-recorded" || event.type === "provider.backing-invalidated" || event.type === "provider.session-cleared"
     || event.type === "context.handoff-prepared" || event.type === "context.handoff-state-changed") {
     return projectBackingEvent(event, envelope, read);

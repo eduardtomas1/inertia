@@ -81,6 +81,7 @@ export interface CodexAppServerOptions {
     detail?: Pick<ProviderActivityEvent, "activityId" | "detail" | "outputDelta">,
   ) => void;
   onSession?: (sessionId: string) => void;
+  onNativeBoundary?: (threadId: string, turnId: string, phase: "started" | "settled") => void;
   onStatus?: (
     status: "running" | "delegated" | "retrying",
     providerState?: string,

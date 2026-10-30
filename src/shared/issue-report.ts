@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const REPORT_PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const;
+export const REPORT_PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "pi"] as const;
 const providerIdSchema = z.enum(REPORT_PROVIDER_IDS);
 
 export const ISSUE_REPOSITORY = "eduardtomas1/inertia";

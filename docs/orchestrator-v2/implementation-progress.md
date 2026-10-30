@@ -91,3 +91,57 @@ Node TypeScript and focused lint passed. The upgrade test opens a representative
 released database and admits a real V2 Pi turn after upgrading. Provider runtime
 integration remains in progress in the second chat.
 
+
+## Paused checkpoint — 2026-10-30
+
+The user explicitly requested that both chats commit and push their current
+work and stop. Implementation is paused at this checkpoint; **ORCHESTRATOR V2
+is incomplete** and PR #686 must remain unmerged. The full T3 system remains the
+agreed target in `implementation-plan.md`.
+
+The primary chat added lazy fork creation at selected terminal runs, immutable
+inherited history with paged retrieval, a desktop fork action/history panel,
+provider-native boundary projections, and native fork preparation before the
+first desktop or agent send. Native operations persist their intent before
+execution and fence both source and target against conflicting work. Unknown
+outcomes retain durable locks; only exact cleanup evidence releases them.
+Unsupported or cross-provider forks use portable history. Confirmed native
+forks attach the returned target session and seed inherited context coverage to
+avoid duplicate delivery. Source deletion and projection rebuild preserve the
+copied history.
+
+The native-control recovery path uses runtime-generation and system-boot
+identity; process-bound effects are retired, not replayed after restart.
+Conversation/project mutations and direct turn admission observe the control
+fences. Private Connect currently falls back to portable first-send transfer;
+it does not yet run the asynchronous native preparation path.
+
+Focused validation recorded before the stop:
+
+- Fork history, native forks and agent-thread integration: 40 tests passed
+  across three suites (`.cache/orchestrator-v2/fork-final-focused.log`).
+- Earlier fork UI checks: three DOM tests passed. The later quiet-footer
+  compatibility adjustment has not yet been rerun.
+- Node and web TypeScript plus focused lint passed before the last integration
+  fixture edits. A subsequent quality run reached unit-test TypeScript and
+  found a cursor type annotation; that annotation was fixed, but the complete
+  gate was not rerun before the stop.
+- The second chat's last full check failed with 130 test failures and two mock
+  errors. Its portable run reported 3,687 passing, four failing and nine skipped
+  tests. These are historical results, not a claim that this checkpoint passes.
+- The last integration edits corrected historical backup fixtures that retained
+  V2 tables under an older migration label, stale migration-version assertions,
+  projector/admission mocks and explicit locale collation. These edits remain
+  unverified at this stop point. `git diff --check` passed.
+
+Resume with the unresolved full-gate failures: production command-lane wiring,
+agent-surface budget accounting, old continuity/context expectations versus the
+new durable backings, Duo cleanup fencing, renderer compatibility and bundle
+budget. Do not relax cleanup or identity boundaries merely to satisfy old
+expectations. Native rollback/merge-back, managed delegation and durable parent
+wakes, native child threads, general configuration/message queues, scheduling,
+agent tools, client/reconnect/mobile parity, Cursor SDK and ACP remain unfinished.
+The checklist deliberately remains open. See the provider progress and seam
+notes for that chat's exact implementation and validation status. No live
+provider-account, Windows/Linux desktop or packaged release validation is
+claimed for this checkpoint.

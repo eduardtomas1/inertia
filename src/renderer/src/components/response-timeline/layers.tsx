@@ -3,6 +3,8 @@ import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
+import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
+import { useForkActionsAvailable } from "../orchestration/fork-surface";
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
@@ -507,6 +509,7 @@ export function SupportingLedgerLayer({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
+  const canFork = useForkActionsAvailable();
   const consolidatesSettledWork = !turn.isActive
     && shouldConsolidateSettledWorkIntoRunDetails(turn);
   const settledWorkStream = useMemo(
@@ -535,8 +538,8 @@ export function SupportingLedgerLayer({
   const showChangedFiles = props.showChangedFileSummaries
     && turn.gitArtifact !== null
     && shouldShowChangedFilesSummary(turn.gitArtifact);
-  const showsFooter = turn.terminalAssistantMessage !== null
-    || turn.agentTurn.status !== "completed";
+  const showsFooter = turn.terminalAssistantMessage !== null || turn.agentTurn.status !== "completed"
+    || canFork && isAgentTurnTerminalStatus(turn.agentTurn.status);
   if (!showsFooter && !showChangedFiles) return null;
 
   return (

@@ -84,6 +84,12 @@ export class TurnProviderEventProjector {
       this.options.store.orchestration.backings.acknowledge(active.turn.runId);
     }
     switch (event.type) {
+      case "native-boundary":
+        this.options.store.orchestration.nativeBoundaries.observe(active.turn, {
+          nativeConversationId: event.nativeConversationId, nativeSessionId: event.nativeSessionId,
+          nativeTurnId: event.nativeTurnId, persistedHeadId: event.persistedHeadId, phase: event.phase,
+        });
+        break;
       case "text":
         this.options.streams.appendAssistant(active, event.text);
         break;

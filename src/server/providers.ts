@@ -66,6 +66,9 @@ import {
   type ProviderMetadata,
 } from "./provider/metadata";
 import { readClaudeAgentSdkSkills } from "./provider/claude-agent-sdk-harness";
+import { readPiSkills } from "./provider/pi-skills";
+import { executeNativeConversation, type NativeConversationExecutionContext } from "./provider/native-conversation-service";
+import type { NativeConversationRequest, NativeConversationResult } from "./provider/native-conversation-operations";
 import {
   canonicalProviderExecutable,
   ProviderInstallationAdmissionError,
@@ -823,6 +826,7 @@ export class ProviderManager {
       this.processEnvironment = environment.env;
       return await prepareProviderAuthLaunch({
         providerId, executable, cwd, environment: environment.env,
+        installationVersion: this.metadataCache.nativeScope(providerId).version,
         signal: this.lifetimeSignal, installationAuthority: this.installationAuthority,
         ...(method ? { method } : {}),
       });
@@ -1015,6 +1019,37 @@ export class ProviderManager {
       this.installationAuthority, (env) => { this.processEnvironment = env; });
   }
 
+  nativeConversation(request: NativeConversationRequest, selection: ModelSelection, context: NativeConversationExecutionContext): Promise<NativeConversationResult> {
+    return this.trackAuxiliary(async () => {
+      const route = this.resolveModelRoute(selection);
+      const executable = this.resolvedCommands.get(route.providerId) ?? (await this.detect(route.providerId, { cwd: context.sourceCwd ?? context.cwd, signal: context.signal })).executable;
+      if (!executable) throw new ProviderRuntimeError("invalid_input", "The native provider executable is unavailable.");
+      return await executeNativeConversation(request, selection, context, { route, executable, registry: this.harnessRegistry,
+        installationVersion: this.metadataCache.nativeScope(route.providerId).version,
+        resolveRoute: () => this.resolveModelRoute(selection),
+        installation: this.installationAuthority, lifetimeSignal: this.lifetimeSignal, isRunning: (id) => this.isRunning(id),
+        gate: this.conversationProviderGate, resolveLaunch: this.resolveBackendLaunchOptions });
+    });
+  }
+
+  async piSkills(cwd: string): Promise<Awaited<ReturnType<typeof readPiSkills>>> {
+    this.installationAuthority.assertRecoveryComplete("pi");
+    const executable = this.resolvedCommands.get("pi") ?? (await this.detect("pi", { cwd })).executable;
+    if (!executable) throw new ProviderRuntimeError("invalid_input", "Pi is not installed.");
+    const environment = await providerEnvironment();
+    const admission = this.installationAuthority.acquire("pi", executable, providerNativeBackendProfile("pi"),
+      "metadata-discovery", this.installationAuthority.operationIdentity("metadata-discovery"));
+    try {
+      const skills = await this.trackAuxiliary(() => readPiSkills(executable, providerChildEnvironment("pi", environment.env), cwd, this.lifetimeSignal));
+      if (!this.installationAuthority.release(admission)) throw new ProviderRuntimeError("lifecycle_corruption", "Pi skill discovery lost its installation authority.");
+      return skills;
+    } catch (error) {
+      if (isProcessTreeTerminationUnconfirmed(error)) this.installationAuthority.quarantineUnconfirmedCleanup(admission, "pi-skill-discovery-cleanup-unconfirmed");
+      else this.installationAuthority.release(admission);
+      throw error;
+    }
+  }
+
   async claudeSkills(
     cwd: string,
     forceReload: boolean,
@@ -1190,6 +1225,8 @@ export class ProviderManager {
     if (resolved) return resolved;
     const configured = this.commands[providerId]?.trim();
     if (configured && !configured.includes("\0")) return configured;
+    const piExecutable = providerId === "pi" ? this.processEnvironment?.INERTIA_PI_EXECUTABLE?.trim() : undefined;
+    if (piExecutable && !/[\u0000\r\n]/u.test(piExecutable)) return piExecutable;
     return PROVIDER_INFO[providerId].command;
   }
 
@@ -1197,6 +1234,7 @@ export class ProviderManager {
     const configured = this.commands[providerId]?.trim();
     return configured && !configured.includes("\0")
       ? configured
-      : PROVIDER_INFO[providerId].command;
+      : providerId === "pi" ? this.processEnvironment?.INERTIA_PI_EXECUTABLE?.trim() || PROVIDER_INFO.pi.command
+        : PROVIDER_INFO[providerId].command;
   }
 }

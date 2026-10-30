@@ -10,6 +10,7 @@ export const MAX_PORTABLE_HISTORY_CANDIDATES = 256;
 export const portableHistoryItemSchema = z.object({
   id: orchestrationIdSchema,
   threadId: orchestrationIdSchema,
+  sourceThreadId: orchestrationIdSchema.optional(),
   runId: orchestrationIdSchema.nullable(),
   turnId: orchestrationIdSchema.nullable(),
   providerBackingId: orchestrationIdSchema.nullable(),

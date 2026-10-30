@@ -76,6 +76,8 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
   let followUps = 0;
   let followUpAdmission = true;
   const turns = {
+    acquireTurnAdmission: async (conversationId: string) => active.has(conversationId) ? null
+      : { conversationId, token: Symbol("test-admission"), release: () => undefined },
     isActive: (conversationId: string) => active.has(conversationId),
     activeConversationIds: () => [...active.keys()],
     activeIdentity: (conversationId: string) => active.get(conversationId) ?? null,
@@ -1168,7 +1170,7 @@ describe("AgentThreadManager", () => {
           "Fix it and call inertia_create_conversation again.",
         ].join("\n")],
         ["inertia_create_conversation", { title: "x", prompt: "y", route: { providerId: "anthropic" } }, [
-          "route.providerId: expected one of codex, claude, cursor, kimi, opencode, antigravity",
+          "route.providerId: expected one of codex, claude, cursor, kimi, opencode, antigravity, pi",
           "Fix it and call inertia_create_conversation again.",
         ].join("\n")],
         ["inertia_send_message", { conversationId: "55555555-5555-4555-8555-555555555555", message: "hi" }, [

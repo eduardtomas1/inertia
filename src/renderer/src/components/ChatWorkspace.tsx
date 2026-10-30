@@ -5,7 +5,6 @@ import {
   lazy,
   Suspense,
   useCallback,
-  type ComponentType,
   useEffect,
   useId,
   useLayoutEffect,
@@ -65,7 +64,6 @@ import { useReaderScrollIntent } from "../hooks/useReaderScrollIntent";
 import { readerScrollReachesLatest, shouldFollowTimeline } from "../utils/responseTimeline";
 import {
   EMPTY_STREAMING_AGENT_SOURCE,
-  useStreamingAgentState,
   type StreamingAgentSource,
 } from "../hooks/useStreamingAgentState";
 import {
@@ -82,9 +80,6 @@ import {
   transcriptNavigationFollowsContent,
   transcriptNavigationReducer,
 } from "../utils/transcriptNavigation";
-import {
-  markTestStreamingReaderActivityReceipt,
-} from "../utils/testStreamingTrace";
 import { Composer } from "./Composer";
 import type { QueueCommandRunner } from "./composer/runtimeQueueClient";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
@@ -100,7 +95,6 @@ import type {
 } from "./conversation-context/types";
 import type {
   FinalAnswerAutoScrollEvent,
-  ResponseTimelineProps,
 } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
 import { TimelineJumpToLatest } from "./TimelineJumpToLatest";
@@ -110,37 +104,10 @@ import type { WatcherWakeSummary } from "@shared/watcher";
 import { loadResponseTimeline } from "./chatSurfaceLoaders";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import { composerFocusRestorer } from "../utils/composerFocusRestore";
+import { StreamingResponseTimeline } from "./response-timeline/streaming-timeline";
+import { ForkSurfaceProvider, ForkHistoryPanel, type ForkCommandRunner } from "./orchestration/fork-surface";
 import "./ChatWorkspace.css";
 
-function StreamingResponseTimeline({
-  ResponseTimeline,
-  streaming,
-  onStreamingContent,
-  ...props
-}: Omit<
-  ResponseTimelineProps,
-  "streamingText" | "streamingReasoning" | "streamingChannel"
-> & {
-  ResponseTimeline: ComponentType<ResponseTimelineProps>;
-  streaming: StreamingAgentSource;
-  onStreamingContent: () => (() => void) | undefined;
-}): React.JSX.Element {
-  const [streamingText, streamingReasoning, streamingChannel] =
-    useStreamingAgentState(streaming);
-  useEffect(() => {
-    if (!streamingText && !streamingReasoning) return;
-    markTestStreamingReaderActivityReceipt(streamingText);
-    return onStreamingContent();
-  }, [onStreamingContent, streamingReasoning, streamingText]);
-  return (
-    <ResponseTimeline
-      {...props}
-      streamingText={streamingText}
-      streamingReasoning={streamingReasoning}
-      streamingChannel={streamingChannel}
-    />
-  );
-}
 const ProviderMaintenanceNotice = lazy(async () => ({
   default: (await import("./ProviderMaintenanceNotice")).ProviderMaintenanceNotice,
 }));
@@ -210,6 +177,7 @@ type ChatWorkspaceProps = {
   watcherWakes?: readonly WatcherWakeSummary[];
   onConversationContextCommand?: ConversationContextCommandRunner;
   onQueueCommand?: QueueCommandRunner;
+  onForkCommand?: ForkCommandRunner;
   onLimitResetCommand?: LimitResetCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
@@ -329,6 +297,7 @@ export function ChatWorkspace({
   watcherWakes,
   onConversationContextCommand,
   onQueueCommand,
+  onForkCommand,
   onLimitResetCommand,
   previewContextUrl,
   providerIdentityLabels,
@@ -1009,6 +978,7 @@ export function ChatWorkspace({
     && ownedTurns.length === 0;
 
   return (
+    <ForkSurfaceProvider projectId={project.id} conversationId={conversation.id} run={onForkCommand}>
     <Root
       className={clsx(
         "chat-workspace",
@@ -1039,6 +1009,7 @@ export function ChatWorkspace({
           Alt plus End for the final answer, and Alt plus G for the turn artifact.
         </span>
         <div ref={timelineRef} className="response-timeline">
+          <ForkHistoryPanel />
           {history && (history.hasOlder || history.error) && (
             <div className="conversation-history-controls">
               {history.hasOlder && <button ref={keepHistoryFocus} type="button" className="subtle-button"
@@ -1245,5 +1216,6 @@ export function ChatWorkspace({
         />
       </div>
     </Root>
+    </ForkSurfaceProvider>
   );
 }

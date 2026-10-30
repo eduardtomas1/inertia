@@ -113,8 +113,14 @@ describe("turn stop settlement", () => {
       expect(runtime.scheduler.callbacks.size).toBe(0);
       expect(() => runtime.controller.queue({
         conversationId: runtime.conversationId,
-        content: "The chat is usable again.",
-      })).not.toThrow();
+        content: "Keep uncertain cleanup fenced.",
+      })).toThrow("cleanup-pending");
+      runtime.store.providerRunOwnership.clear(turn.id, "wrong-run");
+      expect(runtime.store.orchestration.hasPendingCleanup(runtime.conversationId)).toBe(true);
+      runtime.store.providerRunOwnership.clear(turn.id, turn.runId);
+      expect(runtime.store.orchestration.hasPendingCleanup(runtime.conversationId)).toBe(false);
+      expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
+        content: "Cleanup is confirmed now." })).not.toThrow();
     } finally {
       vi.restoreAllMocks();
       runtime.store.close();

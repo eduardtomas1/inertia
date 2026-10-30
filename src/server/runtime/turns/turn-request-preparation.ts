@@ -458,7 +458,8 @@ export function resolveTurnRequest(
     ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
     : null;
   const startsFreshInEstablishedChat = !canResume
-    && continuation.reasonCode !== "first-turn"
+    && (continuation.reasonCode !== "first-turn"
+      || (dependencies.store.orchestration.forks.get(conversation.id)?.inheritedItems ?? 0) > 0)
     && request.goalStart === undefined;
   const assembled = startsFreshInEstablishedChat
     ? assembleOnFreshSession()

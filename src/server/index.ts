@@ -1,4 +1,5 @@
 import { usageLimitsRuntime } from "./usage/runtime";
+import { prepareForkSession } from "./runtime/fork-session-service";
 import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
 import { createCliConversationCommandHandler } from "./runtime/commands/cli-conversation-commands";
 import { githubIssuePublisher } from "./git/github-issue-report";
@@ -116,9 +117,7 @@ import { privateConnectStoreReads } from "./private-connect/store-detail";
 import { queuePrivateConnectPrompt } from "./private-connect/prompt-admission";
 import { createPrivateConnectInputResponder } from "./private-connect/input-response-admission";
 import { PrivateConnectTranscriptCache } from "./private-connect/transcript-cache";
-import {
-  privateConnectPromptSafetyForHarness,
-} from "../shared/private-connect/prompt-safety";
+import { privateConnectPromptSafetyForHarness } from "../shared/private-connect/prompt-safety";
 import {
   writeDatabaseRecoveryExportFile,
 } from "./persistence/database-export-file";
@@ -247,7 +246,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     databasePath,
     options.defaultWorkspacePath,
     {
-      recoverInterruptedRuns: false,
+      recoverInterruptedRuns: false, runtimeGenerationId: options.runtimeGenerationId, systemBootId: options.systemBootId,
       canStartDatabaseBackup: () =>
         !closed
         && !recoveryImportAdmission.isActive()
@@ -733,6 +732,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     workflows: agentWorkflows, providerTerminalResumes,
     providerInfo: () => providerInfo,
     verifyProviderInstallation: providerInstallationVerifier(providers, refreshProviderInfo),
+    prepareForkSession: enableProviders ? (id, signal) => prepareForkSession({ store, providers, turns, providerTerminalResumes }, id, AbortSignal.any([signal, runtimeLifetimeAbort.signal])) : undefined,
     broadcast, broadcastSnapshot, send,
   };
   queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {

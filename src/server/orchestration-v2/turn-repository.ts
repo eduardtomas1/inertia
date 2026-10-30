@@ -6,13 +6,16 @@ import type { AgentTurn, ChatMessage, Conversation } from "../../shared/contract
 import { modelSelectionSchema } from "../../shared/model-routing";
 import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { orchestrationAttemptSchema, orchestrationRunSchema, type OrchestrationDomainEvent } from "../../shared/orchestration-v2";
-import type { BeginAgentTurnInput } from "../persistence/types";
+import type { BeginAgentTurnInput, NewConversationOptions } from "../persistence/types";
 import { OrchestrationEffectOutbox } from "./effect-outbox";
 import { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint, durableJson } from "./json";
 import { projectOrchestrationEvent } from "./projector";
 import { readPortableContinuationHistory } from "./portable-history-source";
 import { ProviderBackingRepository } from "./backing-repository";
+import { NativeBoundaryRepository } from "./native-boundary-repository";
+import { NativeControlRepository } from "./native-control-repository";
+import { ForkRepository } from "./fork-repository";
 import { providerInstanceId } from "./provider-instance";
 import { OrchestrationConflict, type CommandSource, type JsonValue, type OrchestrationEffect } from "./types";
 
@@ -21,6 +24,7 @@ interface TurnProjectionAccess {
   conversationPath(id: string): string;
   agentTurn(id: string): AgentTurn;
   message(id: string): ChatMessage;
+  createConversation(projectId: string, title: string, options: NewConversationOptions): Conversation;
 }
 
 /** Bridges existing transcript/execution projections into the V2 transaction. */
@@ -28,15 +32,22 @@ export class OrchestratedTurnRepository {
   readonly events: OrchestrationEventStore;
   readonly effects: OrchestrationEffectOutbox;
   readonly backings: ProviderBackingRepository;
+  readonly nativeBoundaries: NativeBoundaryRepository;
+  readonly nativeControls: NativeControlRepository;
+  readonly forks: ForkRepository;
 
   constructor(
     private readonly database: Database.Database,
     private readonly access: TurnProjectionAccess,
-    readonly runtimeId = randomUUID(),
+    readonly runtimeId: string = randomUUID(),
+    systemBootId: string | null = null,
   ) {
     this.events = new OrchestrationEventStore(database, projectOrchestrationEvent, runtimeId);
     this.effects = new OrchestrationEffectOutbox(database, runtimeId);
     this.backings = new ProviderBackingRepository(database, this.events);
+    this.nativeBoundaries = new NativeBoundaryRepository(database, this.events);
+    this.nativeControls = new NativeControlRepository(database, this.events, this.effects, runtimeId, systemBootId);
+    this.forks = new ForkRepository(database, this.events, this.nativeBoundaries, access);
   }
 
   admit(
@@ -57,6 +68,9 @@ export class OrchestratedTurnRepository {
         return { turn: this.access.agentTurn(result.turnId), message: this.access.message(result.messageId) };
       }
       if (this.hasPendingCleanup(conversation.id)) throw new OrchestrationConflict("cleanup-pending");
+      if (this.forks.get(conversation.id)?.transfer === "pending") {
+        this.nativeControls.selectPortable(conversation.id, conversation.projectId, "portable-first-send");
+      }
       if (input.providerSessionBefore && input.continuationIdentity) {
         const backing = this.backings.find({ threadId: conversation.id, providerId: input.providerId,
           workspaceKey: this.access.conversationPath(conversation.id), identity: input.continuationIdentity,
@@ -122,6 +136,7 @@ export class OrchestratedTurnRepository {
   }
 
   hasPendingCleanup(threadId: string): boolean {
+    if (this.nativeControls.locked(threadId)) return true;
     return this.database.prepare(`SELECT 1 FROM orchestration_v2_entities
       WHERE thread_id = ? AND kind = 'attempt'
         AND json_extract(payload_json, '$.cleanup') IN ('pending','unconfirmed') LIMIT 1`)
@@ -242,6 +257,7 @@ export class OrchestratedTurnRepository {
   recover(reconcileCompatibilityProjection: () => void): void {
     this.database.transaction(() => {
       this.effects.recover();
+      this.nativeControls.recover();
       reconcileCompatibilityProjection();
       this.reconcile();
     })();

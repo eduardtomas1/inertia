@@ -22,7 +22,7 @@ import type {
 
 const HOST_TOOL_APPROVAL_ID_PREFIX = "inertia-host-tool:";
 const HOST_TOOL_APPROVAL_TIMEOUT_MS = 5 * 60_000;
-const MAX_HOST_TOOL_CALLS = 128;
+const MAX_HOST_TOOL_CALLS = 1_024;
 const MAX_PENDING_HOST_TOOL_CALLS = 8;
 
 interface PendingApproval {
@@ -73,10 +73,13 @@ function boundedUtf8(value: string, maximumBytes: number): string {
   return "";
 }
 
-function failure(message: string): ProviderHostToolResult {
+function failure(
+  message: string,
+  code: "host_tool_rejected" | "host_tool_budget_exhausted" = "host_tool_rejected",
+): ProviderHostToolResult {
   return {
     success: false,
-    text: boundedUtf8(JSON.stringify({ error: { code: "host_tool_rejected", message } }), MAX_PROVIDER_HOST_TOOL_RESULT_BYTES),
+    text: boundedUtf8(JSON.stringify({ error: { code, message } }), MAX_PROVIDER_HOST_TOOL_RESULT_BYTES),
   };
 }
 
@@ -149,7 +152,8 @@ export class ProviderHostToolRuntime {
     }
     if (this.seenCallIds.size >= MAX_HOST_TOOL_CALLS) {
       return Promise.resolve(failure(
-        `This turn already made ${MAX_HOST_TOOL_CALLS} Inertia tool calls, which is the limit for one turn. Finish the turn; the next turn starts a new allowance.`,
+        `This turn already made ${MAX_HOST_TOOL_CALLS} Inertia tool calls, which is the limit for one turn. Retrying in this turn will not restore the allowance. Finish the turn; the next turn starts a new allowance.`,
+        "host_tool_budget_exhausted",
       ));
     }
     if (this.pendingCalls.size >= MAX_PENDING_HOST_TOOL_CALLS) {

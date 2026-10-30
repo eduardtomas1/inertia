@@ -47,8 +47,8 @@ export function resolveWindowBackground(theme: WindowThemePreference, systemDark
   return WINDOW_BACKGROUND[resolveWindowTheme(theme, systemDark)];
 }
 
-export function windowTitleBarOverlay(theme: ResolvedWindowTheme): TitleBarOverlayOptions {
-  return { color: "#00000000", symbolColor: WINDOW_TITLE_BAR_SYMBOL[theme], height: WINDOW_HEADER_HEIGHT };
+export function windowTitleBarOverlay(theme: ResolvedWindowTheme, platform: NodeJS.Platform): TitleBarOverlayOptions {
+  return { color: platform === "linux" ? "#01000000" : "#00000000", symbolColor: WINDOW_TITLE_BAR_SYMBOL[theme], height: WINDOW_HEADER_HEIGHT };
 }
 
 export function windowChromeOptions(
@@ -59,8 +59,8 @@ export function windowChromeOptions(
   if (platform === "darwin") {
     return { backgroundColor, titleBarStyle: "hiddenInset", trafficLightPosition: MAC_TRAFFIC_LIGHT_POSITION };
   }
-  if (platform === "win32") {
-    return { backgroundColor, titleBarStyle: "hidden", titleBarOverlay: windowTitleBarOverlay(theme) };
+  if (platform === "win32" || platform === "linux") {
+    return { backgroundColor, titleBarStyle: "hidden", titleBarOverlay: windowTitleBarOverlay(theme, platform) };
   }
   return { backgroundColor };
 }
@@ -72,5 +72,5 @@ export interface ThemedWindow {
 
 export function applyWindowTheme(window: ThemedWindow, platform: NodeJS.Platform, theme: ResolvedWindowTheme): void {
   window.setBackgroundColor(WINDOW_BACKGROUND[theme]);
-  if (platform === "win32") window.setTitleBarOverlay(windowTitleBarOverlay(theme));
+  if (platform === "win32" || platform === "linux") window.setTitleBarOverlay(windowTitleBarOverlay(theme, platform));
 }

@@ -35,6 +35,12 @@ const contextPacketTriggers = [
 ];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < 107) database.exec(`
+    DROP TABLE orchestration_v2_effects;
+    DROP TABLE orchestration_v2_receipts;
+    DROP TABLE orchestration_v2_entities;
+    DROP TABLE orchestration_v2_events;
+  `);
   if (version < DUO_COMPARISON_BRIEFS_SCHEMA_VERSION) database.exec("ALTER TABLE messages DROP COLUMN duo_comparison_json");
   if (version < TURN_SCOPED_INDEXES_SCHEMA_VERSION) {
     database.exec(`

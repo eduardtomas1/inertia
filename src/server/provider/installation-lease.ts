@@ -29,6 +29,7 @@ const PROVIDER_INSTALLATION_PACKAGES: Readonly<
   kimi: "@moonshot-ai/kimi-code",
   opencode: "opencode-ai",
   antigravity: null,
+  pi: "@earendil-works/pi-coding-agent",
 };
 
 export function providerInstallationPackageIdentity(

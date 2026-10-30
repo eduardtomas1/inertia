@@ -11,6 +11,7 @@ const PROVIDER_IDS: readonly string[] = Object.keys({
   kimi: true,
   opencode: true,
   antigravity: true,
+  pi: true,
 } satisfies Record<ProviderId, true>);
 
 const SUBAGENT_STATUSES: readonly string[] = SERVER_EVENT_OPTIONS.subagentStatuses;

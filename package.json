@@ -117,7 +117,13 @@
       "node_modules/better-sqlite3/**/*",
       "node_modules/@crowecawcaw/xa11y*/**/*",
       "node_modules/ffi-rs/**/*",
-      "node_modules/@yuuang/ffi-rs*/**/*"
+      "node_modules/@yuuang/ffi-rs*/**/*",
+      "out/main/**",
+      "node_modules/@cursor/**",
+      "node_modules/@bufbuild/**",
+      "node_modules/@connectrpc/**",
+      "node_modules/@statsig/**",
+      "node_modules/zod/**"
     ],
     "electronFuses": {
       "runAsNode": false,
@@ -267,6 +273,7 @@
     "@anthropic-ai/claude-agent-sdk": "0.3.309",
     "@anthropic-ai/sdk": "0.135.0",
     "@crowecawcaw/xa11y": "0.15.3",
+    "@cursor/sdk": "1.0.38",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@napi-rs/canvas": "1.0.11",
     "@opencode-ai/sdk": "1.19.4",

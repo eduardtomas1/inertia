@@ -80,6 +80,10 @@ import {
   type OpenCodeInteractionReplies,
 } from "./opencode-interaction-replies";
 import { OpenCodeRunOwnership } from "./opencode-run-ownership";
+import { trackNativeConversationRun } from "./native-conversation-run-tracking";
+import { startOpenCode2Run } from "./opencode2-harness";
+import { createOpenCode2NativeConversationOperations } from "./opencode2-native-conversation";
+import { openOwnedOpenCode2Server } from "./opencode2-server";
 import { OpenCodeSubagentProjection } from "./opencode-subagent-projection";
 import { openCodeRequestRejected, openCodeSessionUnavailable } from "./session-unavailable";
 import { openCodeModels } from "./opencode-sdk-metadata";
@@ -184,17 +188,26 @@ export function createOpenCodeSdkHarness(
   const deadlines = openCodeRunDeadlines(options);
   const terminateOwnedProcessTree = options.terminateProcessTree ?? terminateProcessTreeAndWait;
   const compactionTimestampNow = options.compactionTimestampNow ?? Date.now;
+  const active = new Set<string>();
+  const native = createOpenCode2NativeConversationOperations(active);
   return {
     id: "opencode-sdk",
     providerId: "opencode",
     capabilities: OPENCODE_SDK_CAPABILITIES,
+    nativeConversation: { capabilities: native.capabilities, execute: (request, launch) => {
+      if (!(launch.installationVersion ?? "").startsWith("2.")) return Promise.resolve({ status: "unsupported", reason: "opencode-native-history-requires-v2",
+        operationId: request.operationId, identity: request.source.identity, ...(request.kind === "fork" ? { targetConversationId: request.targetConversationId } : {}) });
+      return native.execute(request, launch);
+    } },
     supports: (input) => input.providerId === "opencode",
-    start: (startOptions) => startOpenCodeRun(
-      startOptions,
+    start: (startOptions) => trackNativeConversationRun(active, startOptions, (launch) => (launch.installationVersion ?? "").startsWith("2.")
+      ? startOpenCode2Run(launch, { runTimeoutMs: deadlines.runDeadlineMs, openServer: (settings) => openOwnedOpenCode2Server({ ...settings, terminateProcessTree: terminateOwnedProcessTree }) })
+      : startOpenCodeRun(
+      launch,
       deadlines,
       terminateOwnedProcessTree,
       compactionTimestampNow,
-    ),
+    )),
   };
 }
 

@@ -6,6 +6,7 @@ import type {
   Conversation,
 } from "../../src/shared/contracts";
 import type { RuntimeStore } from "../../src/server/database";
+import { OrchestrationCommandLanes } from "../../src/server/orchestration-v2/command-lanes";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import {
   createConversationCommandHandler,
@@ -142,6 +143,7 @@ function projectDependencies(
     dataDirectory: "/data",
     store: {
       hasRecordedActiveWorkspaceRunForProject: vi.fn(() => false),
+      orchestration: { lanes: new OrchestrationCommandLanes() },
       project: vi.fn(() => ({ id: projectId, path: "/workspace" }) as never),
       providerRunOwnership: { forConversation: vi.fn(() => []) },
       conversationWork,

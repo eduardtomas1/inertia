@@ -87,6 +87,7 @@ export async function startOwnedOpenCodeServer(
   });
   child.stdin.end();
   let startupOutput = "";
+  let startupBytes = 0;
   let resolveReady!: (url: string) => void;
   let rejectReady!: (error: Error) => void;
   let startupSettled = false;
@@ -105,17 +106,25 @@ export async function startOwnedOpenCodeServer(
   if (signal?.aborted) cancelStartup();
   else signal?.addEventListener("abort", cancelStartup, { once: true });
   child.stdout.on("data", (chunk: Buffer) => {
+    if (!startupSettled && (startupBytes += chunk.byteLength) > 1024 * 1024) {
+      settleStartup(() => rejectReady(new Error("OpenCode startup output exceeded its safety limit."))); return;
+    }
     const value = chunk.toString("utf8");
     output.append(value);
     startupOutput = `${startupOutput}${value}`.slice(-4_096);
     const match =
-      /opencode server listening on http:\/\/127\.0\.0\.1:(\d{1,5})/u.exec(startupOutput);
+      /(?:opencode )?server listening on http:\/\/127\.0\.0\.1:(\d{1,5})(?=[\r\n\s])/u.exec(startupOutput);
     const port = Number(match?.[1]);
     if (match && Number.isSafeInteger(port) && port > 0 && port <= 65_535) {
       settleStartup(() => resolveReady(`http://127.0.0.1:${port}`));
     }
   });
-  child.stderr.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
+  child.stderr.on("data", (chunk: Buffer) => {
+    if (!startupSettled && (startupBytes += chunk.byteLength) > 1024 * 1024) {
+      settleStartup(() => rejectReady(new Error("OpenCode startup output exceeded its safety limit."))); return;
+    }
+    output.append(chunk.toString("utf8"));
+  });
   let startupTimer: NodeJS.Timeout | undefined;
   try {
     startupTimer = setTimeout(() => {

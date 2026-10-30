@@ -109,6 +109,7 @@ export interface PersistedTurnExecutionContext {
 }
 
 export interface AssembledTurnRequest {
+  contextHandoff?: import("../../../shared/orchestration-backings").PreparedContextHandoff;
   visibleContent: string;
   executionPrompt: string;
   imagePaths: string[];
@@ -147,7 +148,7 @@ export interface AssembleTurnRequestInput {
   internalInstructions?: readonly HiddenProviderInstruction[];
   sessionInstructionDigest?: string;
   promptWithheld?: true;
-  restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
+  restoredHistory?: (capacityBytes: number, currentPromptBytes: number) => RestoredChatHistory | null;
 }
 
 interface MaterializedContext {
@@ -813,7 +814,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
       MAX_EXECUTION_PAYLOAD_BYTES - assembledPayloadBytes
         - (providerContexts.length === 0 ? EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES : 0)
         - MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET * CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES,
-    ));
+    ), assembledPayloadBytes);
     if (history) {
       const fitRestored = (blocks: RestoredChatHistory["blocks"]) => {
         const restored = blocks.map((block) => providerContext({

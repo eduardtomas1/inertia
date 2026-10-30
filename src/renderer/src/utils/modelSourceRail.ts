@@ -8,6 +8,7 @@ export const MODEL_SOURCE_PROVIDER_ORDER = [
   "claude",
   "cursor",
   "antigravity",
+  "pi",
   "kimi",
   "opencode",
 ] as const satisfies readonly ProviderId[];
@@ -19,6 +20,7 @@ export const MODEL_SOURCE_PROVIDER_LABELS: Readonly<Record<ProviderId, string>> 
   kimi: "Kimi Code",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  pi: "Pi",
 };
 
 export type ModelSourceFilter =

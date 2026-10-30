@@ -59,6 +59,8 @@ import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
 import { HtmlRenderHostTool } from "./html-render-host-tool";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
 import { ManagedMutationQueue } from "./managed-mutation-queue";
+import { FORK_HISTORY_TOOL, readForkHistoryTool } from "./fork-history-tool";
+import { prepareForkSession } from "./fork-session-service";
 import type { HiddenProviderInstruction } from "./turns/request-context";
 import {
   boundedUntrustedAgentText,
@@ -95,7 +97,7 @@ const tokenSchema = (maximum: number) => z.string()
   .max(maximum)
   .regex(new RegExp(tokenPattern(maximum), "u"), "must be one word without spaces or control characters");
 const routeSchema = z.object({
-  providerId: z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity"])
+  providerId: z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "pi"])
     .optional(),
   backendProfileId: tokenSchema(200).optional(),
   modelId: safeSingleLineSchema(300).optional(),
@@ -128,6 +130,7 @@ const archiveSchema = z.object({
 }).strict();
 
 const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
+  FORK_HISTORY_TOOL,
   {
     name: "inertia_list_conversations",
     description: "List this project's top-level chats, most recently updated first, with their settings and status. No transcripts; read turns with inertia_request_context.",
@@ -169,7 +172,7 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
           additionalProperties: false,
           properties: {
             providerId: {
-              enum: ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"],
+              enum: ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "pi"],
             },
             backendProfileId: { type: "string", pattern: tokenPattern(200) },
             modelId: { type: "string", maxLength: 300, pattern: SINGLE_LINE_PATTERN },
@@ -422,6 +425,8 @@ export class AgentThreadManager {
         }, imagesAccepted(source.turn, this.dependencies.providerInfo()));
       }
       switch (call.tool) {
+        case "inertia_fork_history":
+          return readForkHistoryTool(this.dependencies.store, current, call.arguments);
         case "inertia_list_conversations":
           return this.list(current, call.arguments);
         case "inertia_inspect_conversation":
@@ -1039,7 +1044,12 @@ export class AgentThreadManager {
         "End the resumed provider terminal for the target chat before sending another message.",
       );
     }
+    let admission: Awaited<ReturnType<TurnController["acquireTurnAdmission"]>> = null;
     try {
+      if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
+      admission = await this.dependencies.turns.acquireTurnAdmission(target.id, 30_000);
+      if (!admission) throw new Error("The target chat cannot accept a message right now.");
+      await prepareForkSession(this.dependencies, target.id, signal);
       if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
       this.dependencies.store.agentThreadManagement.transition(
         operationId,
@@ -1052,7 +1062,7 @@ export class AgentThreadManager {
         conversationId: target.id,
         content: input.content,
         activateConversation: false,
-      });
+      }, undefined, admission);
       recordQueuedManagedTurn(this.dependencies.store, this.dependencies.turns, operationId, queued.turn, this.now());
       if (!this.dependencies.turns.start(queued.turn.id)) {
         this.dependencies.turns.failBeforeStart(target.id, "The managed follow-up could not start.");
@@ -1066,6 +1076,7 @@ export class AgentThreadManager {
         accepted: true,
       });
     } finally {
+      admission?.release();
       this.dependencies.providerTerminalResumes.release(target.id);
     }
   }

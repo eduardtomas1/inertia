@@ -294,3 +294,17 @@ test("selects new-chat defaults with pointer and keyboard and preserves them aft
   await expect(select("Where new chats run")).toHaveValue("worktree");
   expect(app.rendererErrors).toEqual([]);
 });
+
+test("shows the explicit Cursor SDK account entry", async ({ browserName: _browserName }, testInfo) => {
+  await app.resizeWindow(1440, 920);
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.getByRole("button", { name: "Configure Cursor", exact: true }).click();
+  const entry = page.getByRole("region", { name: "Cursor SDK account" });
+  await entry.getByRole("button", { name: "Cursor SDK", exact: true }).click();
+  await expect(entry.getByText("Check availability before signing in.")).toBeVisible();
+  await expect(entry.getByRole("button", { name: "Sign in with Cursor SDK" })).toBeDisabled();
+  await capture(testInfo, "cursor-sdk-account-entry");
+  await entry.getByRole("button", { name: "Close SDK settings" }).click();
+  await expect(entry.getByRole("button", { name: "Cursor SDK", exact: true })).toBeFocused();
+});

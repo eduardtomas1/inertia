@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Every coding agent, one calm desktop.</strong><br />
-  Run Codex, Claude, Cursor, Kimi Code, OpenCode and Antigravity side by side,<br />
+  Run Codex, Claude, Cursor, Kimi Code, OpenCode, Antigravity and Pi side by side,<br />
   next to your projects, Git review and terminals, in a workspace that stays on your computer.
 </p>
 

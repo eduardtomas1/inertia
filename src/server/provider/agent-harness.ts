@@ -18,6 +18,7 @@ import type {
   ProviderHostToolBridge,
   ProviderSteerInput,
   ProviderSessionEvent,
+  ProviderNativeBoundaryEvent,
   ProviderSessionTitleEvent,
   ProviderStatusEvent,
   ProviderSubagentEvent,
@@ -31,6 +32,7 @@ import type {
 import type { ProviderCapabilityId } from "./capability-manifest";
 import { sanitizeProviderActivityDetail } from "./activity-detail";
 import { contractActivityPhase } from "./activity-lifecycle";
+import type { NativeConversationContinuation, NativeConversationOperations } from "./native-conversation-operations";
 
 /** @deprecated Prefer the shared harness identity contract. */
 export type AgentHarnessId = KnownHarnessId;
@@ -204,7 +206,29 @@ export interface AntigravityCliHarnessCapabilities extends AgentHarnessCoreCapab
   };
 }
 
+export interface PiRpcHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: {
+    kind: "pi-rpc";
+    protocol: "pi-jsonl-rpc-v1";
+    approvals: "managed-extension";
+    questions: "extension-ui";
+    plans: "unavailable";
+    reasoning: "native";
+    usage: "native";
+    images: "structured-base64-input";
+    authentication: "pi-native";
+    modelMetadata: "rpc";
+  };
+}
+
+export interface CursorSdkHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: { kind: "cursor-sdk"; protocol: "owned-sdk-worker"; approvals: "host-only"; questions: "unavailable";
+    plans: "unavailable"; reasoning: "native"; usage: "unavailable"; images: "unavailable"; authentication: "vault"; modelMetadata: "sdk" };
+}
+
 export type AgentHarnessCapabilities =
+  | CursorSdkHarnessCapabilities
+  | PiRpcHarnessCapabilities
   | CodexAppServerHarnessCapabilities
   | CodexCliHarnessCapabilities
   | ClaudeCliHarnessCapabilities
@@ -223,6 +247,7 @@ export type AgentHarnessCoreEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
+  | ProviderNativeBoundaryEvent
   | ProviderSessionTitleEvent
   | ProviderGoalUpdatedEvent
   | ProviderGoalClearedEvent
@@ -274,10 +299,11 @@ interface ProviderInteractiveHarnessExtensionEventBase {
 
 export type ProviderInteractiveHarnessExtensionEvent =
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "claude"; extension: "claude-agent-sdk" })
-  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "cursor"; extension: "cursor-acp" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "cursor"; extension: "cursor-acp" | "cursor-sdk" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "kimi"; extension: "kimi-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "opencode"; extension: "opencode-sdk" })
-  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "antigravity"; extension: "antigravity-cli" });
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "antigravity"; extension: "antigravity-cli" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "pi"; extension: "pi-rpc" });
 
 export type AgentHarnessEvent =
   | AgentHarnessCoreEvent
@@ -290,7 +316,9 @@ export interface AgentHarnessCallbacks {
 }
 
 export interface AgentHarnessStartOptions {
+  cursorSdk?: import("./cursor-sdk-service").CursorSdkConfiguration;
   input: ProviderRunInput;
+  nativeContinuation?: NativeConversationContinuation;
   executable: string;
   environment: NodeJS.ProcessEnv;
   /**
@@ -320,7 +348,7 @@ export interface CodexAppServerRunExtension {
 }
 
 export interface ProviderInteractiveRunExtension {
-  kind: "claude-agent-sdk" | "cursor-acp" | "kimi-acp" | "opencode-sdk" | "antigravity-cli";
+  kind: "claude-agent-sdk" | "cursor-sdk" | "cursor-acp" | "kimi-acp" | "opencode-sdk" | "antigravity-cli" | "pi-rpc";
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Present only for transports with a persistent parent-session input stream. */
@@ -351,6 +379,7 @@ export interface AgentHarness {
   id: AgentHarnessId;
   providerId: ProviderId;
   capabilities: AgentHarnessCapabilities;
+  nativeConversation?: NativeConversationOperations;
   supports: (input: ProviderRunInput) => boolean;
   start: (options: AgentHarnessStartOptions) => AgentHarnessRun;
 }
@@ -375,6 +404,7 @@ export interface AgentHarnessEmitter {
     providerState?: string,
   ) => void;
   session: (sessionId: string) => void;
+  nativeBoundary: (boundary: Omit<ProviderNativeBoundaryEvent, keyof ProviderEventBase | "type">) => void;
   sessionTitle: (sessionId: string, title: string) => void;
   goalUpdated: (sessionId: string, goal: ProviderGoalSnapshot) => void;
   goalCleared: (sessionId: string) => void;
@@ -390,6 +420,7 @@ export function createAgentHarnessEmitter(
   runId: string,
   turnId: string,
   workspaceRoot?: string,
+  cursorExtension: "cursor-acp" | "cursor-sdk" = "cursor-acp",
 ): AgentHarnessEmitter {
   const emit = (event: AgentHarnessEvent): void => {
     try {
@@ -457,6 +488,11 @@ export function createAgentHarnessEmitter(
       ...(providerState ? { providerState } : {}),
     }),
     session: (sessionId) => emit({ ...base, type: "session", sessionId }),
+    nativeBoundary: (boundary) => {
+      const valid = (id: unknown): id is string => typeof id === "string" && id.length > 0 && id.length <= 512 && !/[\u0000-\u0020\u007f]/u.test(id);
+      if (!valid(boundary.nativeConversationId) || ![boundary.nativeSessionId, boundary.nativeTurnId, boundary.persistedHeadId].every((id) => id === null || valid(id))) return;
+      emit({ ...boundary, ...base, type: "native-boundary" });
+    },
     sessionTitle: (sessionId, title) => emit({
       ...base,
       type: "session-title",
@@ -489,10 +525,11 @@ export function createAgentHarnessEmitter(
     },
     rich: (event) => {
       if (providerId === "claude") emit({ ...base, providerId, type: "extension", extension: "claude-agent-sdk", event });
-      else if (providerId === "cursor") emit({ ...base, providerId, type: "extension", extension: "cursor-acp", event });
+      else if (providerId === "cursor") emit({ ...base, providerId, type: "extension", extension: cursorExtension, event });
       else if (providerId === "kimi") emit({ ...base, providerId, type: "extension", extension: "kimi-acp", event });
       else if (providerId === "opencode") emit({ ...base, providerId, type: "extension", extension: "opencode-sdk", event });
       else if (providerId === "antigravity") emit({ ...base, providerId, type: "extension", extension: "antigravity-cli", event });
+      else if (providerId === "pi") emit({ ...base, providerId, type: "extension", extension: "pi-rpc", event });
     },
   };
 }

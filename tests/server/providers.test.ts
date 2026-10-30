@@ -977,7 +977,7 @@ setInterval(() => {}, 1000);
   it.each([
     "serve --hostname --port --cors --service --stdio",
     "serve --pure --hostname --port",
-  ])("rejects OpenCode 2 with an explicit unsupported-version message when serve help is %s", async (serveHelp) => {
+  ])("admits verified OpenCode 2 without a background auth probe when serve help is %s", async (serveHelp) => {
     const executable = join(temporaryRoot(), "opencode");
     const probes: string[][] = [];
     const detection = detectProvider("opencode", { command: executable }, {
@@ -997,14 +997,14 @@ setInterval(() => {}, 1000);
         };
       },
     });
-    await expect(detection).resolves.not.toHaveProperty("executable");
     await expect(detection).resolves.toMatchObject({
+      executable,
       available: true,
       installState: "installed",
       authState: "unknown",
-      canRun: false,
+      canRun: true,
       cleanupConfirmed: true,
-      statusMessage: "OpenCode 2 is not supported yet; use OpenCode 1.x (opencode-ai).",
+      statusMessage: "Installed; OpenCode verifies authentication when a request starts",
     });
     expect(probes).toEqual([
       ["--version"],
@@ -1012,7 +1012,7 @@ setInterval(() => {}, 1000);
     ]);
   });
 
-  it("selects an OpenCode 1.x CLI over an OpenCode 2 CLI", async () => {
+  it("falls back to OpenCode 1.x when the OpenCode 2 serve flags are unverified", async () => {
     const root = temporaryRoot();
     const legacy = join(root, "legacy", "opencode");
     const next = join(root, "next", "opencode");

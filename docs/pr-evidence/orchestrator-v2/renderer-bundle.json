@@ -1,0 +1,85 @@
+{
+  "date": "2026-10-30",
+  "checkpoint": "Uncommitted Phase 3 and Cursor SDK integration after e6189b9b7be91b0aad4f917c81f38c425985e8e5",
+  "platform": "Linux x64, Node 22.23.2",
+  "measurement": "Existing integrated electron-vite renderer output after history replay and rollbackRevision fixes; final full build recheck pending.",
+  "accounting": "All existing route closures and core inclusions/exclusions retained. Overlapping route closures are not additive unique-byte totals.",
+  "review": "Independent Astra High review accepted measured allocation transfers and explicit integrated core allowance; no missed concrete reduction identified. No budgets edited by reviewer.",
+  "routes": {
+    "mainWorkbenchFirstLoadJavaScript": {
+      "bytes": 902353,
+      "previousLimit": 947062.8,
+      "limit": 902865,
+      "headroom": 512
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "bytes": 796117,
+      "previousLimit": 841026.2,
+      "limit": 796629,
+      "headroom": 512
+    },
+    "filesFirstLoadJavaScript": {
+      "bytes": 145998,
+      "previousLimit": 117760,
+      "limit": 153087,
+      "headroom": 7089
+    },
+    "transcriptJavaScript": {
+      "bytes": 621863,
+      "previousLimit": 614400,
+      "limit": 649783,
+      "headroom": 27920
+    },
+    "deferredComposerQueueJavaScript": {
+      "bytes": 13302,
+      "previousLimit": 13276,
+      "limit": 13302,
+      "headroom": 0
+    },
+    "coreJavaScript": {
+      "bytes": 2478063,
+      "previousLimit": 2448860,
+      "limit": 2478319,
+      "headroom": 256
+    }
+  },
+  "coreAllowance": {
+    "previousLimit": 2448860,
+    "excessAtSavedHead": 6432,
+    "matchedChooserSplitOverhead": 2495,
+    "remainingIntegratedGrowth": 20276,
+    "totalResidual": 29203,
+    "additionalHeadroom": 256,
+    "attribution": "Remaining integrated growth is not independently isolated SDK cost; counterfactual comparisons are not additive."
+  },
+  "transferredRouteCosts": {
+    "filesFirstLoadJavaScript": 35327,
+    "transcriptJavaScript": 35383,
+    "reason": "Shared virtualization dependencies become first-load dependencies of these deferred routes after the chooser is lazy. They remain included in total core accounting."
+  },
+  "startupDecision": "Final measured first-load closures plus 512 bytes on each route; narrows the previous caps and preserves the demonstrated lazy-chooser improvement.",
+  "queueDecision": "Measured 26-byte increase; precise cause unproven, no claim of an independently measured feature cost.",
+  "priorControlledMeasurements": {
+    "savedHead": {
+      "main": 953211,
+      "detached": 847194,
+      "core": 2455292
+    },
+    "matchedBeforeLazyChooser": {
+      "main": 951726,
+      "detached": 845509,
+      "core": 2475349,
+      "files": 110671,
+      "transcript": 586480
+    },
+    "matchedAfterLazyChooser": {
+      "main": 902267,
+      "detached": 796031,
+      "core": 2477844,
+      "files": 145998,
+      "transcript": 621863
+    }
+  },
+  "relatedEvidence": "docs/orchestrator-v2/cursor-sdk-ui-progress.md",
+  "packaging": "Separate hard blocker: missing authoritative Cursor SDK platform-package licenses. No notice or packaging gate waived."
+}

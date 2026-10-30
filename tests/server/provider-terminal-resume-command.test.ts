@@ -11,6 +11,7 @@ import {
 import type { RuntimeStore } from "../../src/server/database";
 import type { ProviderManager } from "../../src/server/providers";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
+import { OrchestrationCommandLanes } from "../../src/server/orchestration-v2/command-lanes";
 import { ConversationWorkAuthority } from "../../src/server/runtime/conversation-work-authority";
 import {
   createProjectWorkspaceCommandHandler,
@@ -121,6 +122,7 @@ function dependencies(input: {
       hasActiveWorkspaceRunForConversation: vi.fn(() => input.workspaceRunActive ?? false),
       hasRecordedActiveWorkspaceRunForConversation: vi.fn(() =>
         workspaceRunChecks.shift() ?? input.workspaceRunActive ?? false),
+      orchestration: { lanes: new OrchestrationCommandLanes() },
     } as unknown as RuntimeStore,
     conversationAttachments: {} as never,
     workspaceRuns: {} as never,

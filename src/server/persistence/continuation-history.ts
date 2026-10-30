@@ -69,7 +69,7 @@ function markWatcherNotes(
   });
 }
 
-function sentReferenceBlocks(
+export function sentReferenceBlocks(
   references: readonly SentConversationContextReference[],
   keptMessageIds: ReadonlySet<string>,
   roomBytes: number,

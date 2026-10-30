@@ -39,6 +39,10 @@ export function releaseUnavailableProviderSession(
   active: ActiveTurn,
 ): void {
   if (importedSession(store, active.conversation.id, active.providerInput.sessionId)) return;
+  const backing = store.orchestration.backings.find({ threadId: active.conversation.id,
+    providerId: active.turn.providerId, workspaceKey: store.conversationPath(active.conversation.id),
+    identity: active.turn.continuationIdentity, nativeSessionId: active.providerInput.sessionId });
+  if (backing) store.orchestration.backings.invalidate(backing, "native-resume-failed");
   active.sessionAfter = null;
   store.updateConversation(active.conversation.id, {
     providerSessionId: null,
@@ -71,16 +75,18 @@ export function applyFreshSessionFallback(
     )
   ) return null;
   const request = active.freshSessionRequest(active.turn.userMessageId);
-  active.turn = store.turnLedgerRepository.restartOnFreshSession(active.turn.id, {
+  active.turn = store.orchestration.backings.restart(active.turn, expectedSessionId, request.contextHandoff,
+    () => store.turnLedgerRepository.restartOnFreshSession(active.turn.id, {
     expectedSessionId,
     executionContext: request.persistence,
     sessionRecovery: request.sessionRecovery,
     restartedAt,
-  });
+    }));
   const {
     sessionId: _sessionId,
     performanceModeTransition: _performanceModeTransition,
     goalContinuationExpected: _goalContinuationExpected,
+    nativeContinuation: _nativeContinuation,
     ...providerInput
   } = active.providerInput;
   active.providerInput = {

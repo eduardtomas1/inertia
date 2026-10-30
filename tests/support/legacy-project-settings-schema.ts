@@ -32,6 +32,10 @@ export function removeProjectSettingsFromLegacyFixture(database: Database.Databa
 
 export function removeWatcherLinksFromLegacyFixture(database: Database.Database): void {
   database.exec(`
+    DROP TABLE IF EXISTS orchestration_v2_effects;
+    DROP TABLE IF EXISTS orchestration_v2_receipts;
+    DROP TABLE IF EXISTS orchestration_v2_entities;
+    DROP TABLE IF EXISTS orchestration_v2_events;
     DROP TRIGGER IF EXISTS watcher_links_watched_delete;
     DROP TABLE IF EXISTS watcher_wakes;
     DROP TABLE IF EXISTS watcher_links;

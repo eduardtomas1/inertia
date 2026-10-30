@@ -155,6 +155,10 @@ export function runtimeProviderCapabilityAttestation(
       negotiated["endpoint-selection"] = true;
     }
   }
+  if (input.harnessId === "opencode-sdk" && input.installation.version.startsWith("2.")) {
+    const excluded = new Set<ProviderCapabilityId>(["plans", "subagent-create", "subagent-stop", "auth-state-discovery"]);
+    observed = (observed ?? manifest.capabilities.filter(({ support }) => support !== "unavailable").map(({ id }) => id)).filter((id) => !excluded.has(id));
+  }
   try {
     return attestProviderCapabilities(manifest, {
       installationIdentity: input.installationFingerprint,

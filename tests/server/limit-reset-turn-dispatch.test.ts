@@ -15,7 +15,7 @@ describe("reset dispatch through ordinary turn admission", () => {
     const acquireFollowUpAdmission = vi.fn(() => ({ supportsImages: false, release: vi.fn() }));
     const steer = vi.fn();
     const dependencies = {
-      store: { conversation: () => ({ id: conversationId, archivedAt: null }) },
+      store: { orchestration: { acceptedRequest: vi.fn(() => null) }, conversation: () => ({ id: conversationId, archivedAt: null }) },
       turns: { isActive: () => true, acquireFollowUpAdmission, steer },
       providerTerminalResumes: { isActive: () => false },
       send: vi.fn(), broadcast: vi.fn(), broadcastSnapshot: vi.fn(),

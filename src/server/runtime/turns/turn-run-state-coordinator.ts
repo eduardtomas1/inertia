@@ -329,6 +329,7 @@ export class TurnRunStateCoordinator {
         this.options.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
       } else {
         this.unconfirmedProviderStops.add(active);
+        this.options.store.orchestration.cleanup({ turnId: active.turn.id, runId: active.turn.runId }, "unconfirmed");
       }
       this.finalizeDeferredSettlement(
         active,

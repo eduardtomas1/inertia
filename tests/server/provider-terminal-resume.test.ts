@@ -22,6 +22,7 @@ import {
 import { ProviderManager } from "../../src/server/providers";
 
 const sessionIds: Readonly<Record<ProviderId, string>> = {
+  pi: "pi-session-1",
   codex: "019fe0c1-c6fc-79a1-bff4-92311f314da8",
   claude: "11111111-1111-4111-8111-111111111111",
   cursor: "22222222-2222-4222-8222-222222222222",

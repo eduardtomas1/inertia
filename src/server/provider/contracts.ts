@@ -37,6 +37,7 @@ export const PROVIDER_IDS = [
   "kimi",
   "opencode",
   "antigravity",
+  "pi",
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -101,6 +102,7 @@ interface ProviderRunRequest {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
+  nativeContinuation?: import("./native-conversation-operations").NativeConversationContinuation;
   /**
    * Exact native Fast value advertised for the selected model. Presence means
    * both Fast and Standard can be requested explicitly and must be attested by
@@ -275,6 +277,16 @@ export interface ProviderSessionEvent extends ProviderEventBase {
   sessionId: string;
 }
 
+/** Provider-authored inclusive history anchor; null means unproved, never an inferred application ID. */
+export interface ProviderNativeBoundaryEvent extends ProviderEventBase {
+  type: "native-boundary";
+  nativeConversationId: string;
+  nativeSessionId: string | null;
+  nativeTurnId: string | null;
+  persistedHeadId: string | null;
+  phase: "started" | "settled";
+}
+
 export interface ProviderSessionTitleEvent extends ProviderEventBase {
   type: "session-title";
   sessionId: string;
@@ -398,6 +410,7 @@ export type ProviderEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
+  | ProviderNativeBoundaryEvent
   | ProviderSessionTitleEvent
   | ProviderApprovalEvent
   | ProviderApprovalResolvedEvent
@@ -709,6 +722,7 @@ export function isProviderRunRefusal(
 }
 
 export interface ProviderManagerOptions {
+  cursorSdk?: import("./cursor-sdk-service").CursorSdkConfiguration;
   /** Durable maintenance recovery blocks every launch for this provider. */
   providerRecoveryPending?: (providerId: ProviderId) => boolean;
   commands?: Partial<Record<ProviderId, string>>;

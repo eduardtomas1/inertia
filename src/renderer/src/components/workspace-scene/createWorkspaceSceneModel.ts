@@ -187,6 +187,7 @@ export function visibleChatProjection(
       ? projection.usage
       : null,
     contextPackets: detailOwned ? projection.detail?.contextPackets ?? [] : [],
+    rolledBackTurnIds: detailOwned ? projection.detail?.rolledBackTurnIds : undefined,
     watcherWakes: detailOwned ? projection.detail?.watcherWakes : undefined,
     history: projectionOwned ? projection.history : undefined,
   };
@@ -686,8 +687,10 @@ export function createWorkspaceSceneModel({
       promptContext: workspaceTools.pendingDiffContext,
       contextSources: workspaceOptions.contextSources,
       contextPackets: chatProjection.contextPackets,
+      rolledBackTurnIds: chatProjection.rolledBackTurnIds,
       watcherWakes: chatProjection.watcherWakes,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
+      onForkCommand: actions.run,
       onQueueCommand: chatQueueRunner(
         actions.runQueueCommand,
         draftConversation,

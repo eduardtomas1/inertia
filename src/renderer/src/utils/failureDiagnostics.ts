@@ -74,6 +74,7 @@ function providerLabel(providerId: AgentTurn["providerId"]): string {
     case "kimi": return "Kimi Code";
     case "opencode": return "OpenCode";
     case "antigravity": return "Antigravity";
+    case "pi": return "Pi";
     case "codex": return "Codex";
   }
 }

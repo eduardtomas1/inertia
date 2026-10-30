@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { CURSOR_SDK_SECRET_REFERENCE } from "../../../node/runtime-credential-protocol.js";
 
 import type {
   RuntimeCredentialOperation,
@@ -7,6 +8,7 @@ import type {
 } from "../../../node/runtime-process-protocol.js";
 import {
   isBackendSecretReference,
+  isBackendCredentialSecret,
   type BackendCredentialStatus,
 } from "../../../shared/backend-credentials.js";
 
@@ -74,6 +76,13 @@ export class RuntimeCredentialBrokerClient {
       );
     }
     return result.operation === "resolve" ? result.secret : null;
+  }
+
+  async saveCursorSdk(secret: string, signal?: AbortSignal): Promise<BackendCredentialStatus> {
+    if (!isBackendCredentialSecret(secret)) throw new RuntimeCredentialBrokerError("invalid-reference", "The SDK credential is invalid.");
+    const result = await this.request("save", CURSOR_SDK_SECRET_REFERENCE, signal, secret);
+    if (!result.ok || result.operation !== "save") throw new RuntimeCredentialBrokerError("unavailable", "Secure credential storage is unavailable.");
+    return { hasSecret: result.hasSecret, credentialGeneration: result.credentialGeneration };
   }
 
   async has(secretReference: string, signal?: AbortSignal): Promise<boolean> {
@@ -156,6 +165,7 @@ export class RuntimeCredentialBrokerClient {
     operation: RuntimeCredentialOperation,
     secretReference: string,
     signal?: AbortSignal,
+    secret?: string,
   ): Promise<RuntimeCredentialResult> {
     if (!isBackendSecretReference(secretReference)) {
       return Promise.reject(new RuntimeCredentialBrokerError(
@@ -211,12 +221,12 @@ export class RuntimeCredentialBrokerClient {
       }
       this.pending.set(requestId, pending);
       try {
-        this.postEvent({
+        const request = {
           type: "runtime.credential-request",
           requestId,
-          operation,
           secretReference,
-        });
+        } as const;
+        this.postEvent(operation === "save" ? { ...request, operation, secret: secret! } : { ...request, operation });
       } catch {
         this.pending.delete(requestId);
         this.cleanup(pending);

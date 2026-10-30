@@ -1,4 +1,6 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
+import { OrchestratedTurnRepository } from "./orchestration-v2/turn-repository";
+import type { CommandSource } from "./orchestration-v2/types";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository";
 import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
@@ -145,6 +147,7 @@ export class RuntimeStore {
   readonly htmlRenders: HtmlRenderRepository;
   readonly watcherLinks: WatcherLinkRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
+  readonly orchestration: OrchestratedTurnRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
   readonly conversationWork = new ConversationWorkAuthority(storedConversationWorkspaceResolver(this));
@@ -152,6 +155,7 @@ export class RuntimeStore {
     databasePath: string,
     _defaultWorkspacePath: string,
     options: {
+      runtimeGenerationId?: string; systemBootId?: string;
       onDatabaseBackupCreated?: (result: DatabaseBackupResult) => void;
       canStartDatabaseBackup?: () => boolean;
       databaseBackupQuietGraceMs?: number; databaseBackupInitialDelayMs?: number;
@@ -189,7 +193,9 @@ export class RuntimeStore {
         this.requireConversation(conversationId),
     });
     this.agentThreadManagement = new AgentThreadManagementRepository(this.database);
-    this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
+    this.providerMetadataRepository = new ProviderMetadataRepository(this.database);
+    this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database,
+      (identity, cleanup) => this.orchestration.cleanup(identity, cleanup));
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
     this.limitResets = new LimitResetRepository(this.database);
@@ -272,6 +278,7 @@ export class RuntimeStore {
         this.contextPackets.materialize(conversationId, packetIds).deliveries,
     });
     this.systemSuspends = new SystemSuspendRepository(this.database);
+    this.orchestration = new OrchestratedTurnRepository(this.database, this, options.runtimeGenerationId, options.systemBootId);
     this.transcriptRepository = new TranscriptRepository({
       assertAgentTurnIdentity: (conversationId, runId, turnId) =>
         this.assertAgentTurnIdentity(conversationId, runId, turnId),
@@ -478,26 +485,18 @@ export class RuntimeStore {
     return this.turnLedgerRepository.begin(input);
   }
 
+  beginOrchestratedAgentTurn(input: BeginAgentTurnInput, source?: CommandSource): { message: ChatMessage; turn: AgentTurn } {
+    return this.orchestration.admit(input, () => this.turnLedgerRepository.begin(input), source);
+  }
+
   beginPairedAgentTurns(
     launchId: string,
     inputs: readonly [BeginAgentTurnInput, BeginAgentTurnInput],
     now = new Date().toISOString(),
-  ): [
-    { message: ChatMessage; turn: AgentTurn },
-    { message: ChatMessage; turn: AgentTurn },
-  ] {
-    return this.database.transaction(() => {
-      const queued = inputs.map((input) => this.turnLedgerRepository.begin(input)) as [
-        { message: ChatMessage; turn: AgentTurn },
-        { message: ChatMessage; turn: AgentTurn },
-      ];
-      this.pairedLaunchRepository.attachTurns(
-        launchId,
-        [queued[0].turn.id, queued[1].turn.id],
-        now,
-      );
-      return queued;
-    })();
+  ): [{ message: ChatMessage; turn: AgentTurn }, { message: ChatMessage; turn: AgentTurn }] {
+    return this.orchestration.admitPair(() => [
+      this.beginOrchestratedAgentTurn(inputs[0]), this.beginOrchestratedAgentTurn(inputs[1]),
+    ], (queued) => this.pairedLaunchRepository.attachTurns(launchId, [queued[0].turn.id, queued[1].turn.id], now));
   }
 
   createPairedLaunch(
@@ -830,14 +829,15 @@ export class RuntimeStore {
   }
 
   updateAgentTurnLifecycle(turnId: string, update: AgentTurnLifecycleUpdate): AgentTurn {
-    return this.turnLedgerRepository.updateLifecycle(turnId, update);
+    return this.orchestration.lifecycle(turnId, () => this.turnLedgerRepository.updateLifecycle(turnId, update));
   }
 
   settleAgentTurn(
     turnId: string,
     update: AgentTurnSettlementUpdate,
   ): AgentTurnSettlementResult {
-    return settleProjectedAgentTurn(this.database, this, update.projection, () => this.turnLedgerRepository.settle(turnId, update));
+    return this.orchestration.lifecycle(turnId, () =>
+      settleProjectedAgentTurn(this.database, this, update.projection, () => this.turnLedgerRepository.settle(turnId, update)));
   }
 
   settleConversation(conversationId: string, settled: boolean): Conversation {
@@ -1243,6 +1243,6 @@ export class RuntimeStore {
   private requireAgentTurn(turnId: string): AgentTurnRow { return requireRow(this.database, "agent_turns", turnId, "Agent turn not found."); }
 
   recoverInterruptedRuns(): void {
-    this.recoveryRepository.recoverInterruptedRuns();
+    this.orchestration.recover(() => this.recoveryRepository.recoverInterruptedRuns());
   }
 }

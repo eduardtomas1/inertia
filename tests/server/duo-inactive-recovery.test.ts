@@ -843,7 +843,7 @@ describe("inactive Duo turn recovery", () => {
       .not.toThrow();
   });
 
-  it("reconciles a Duo turn whose chat keeps an earlier finished turn's recovery record", async () => {
+  it("blocks Duo admission until an earlier force-detached turn has confirmed cleanup", async () => {
     const runtime = await createRuntime();
     const launchId = randomUUID();
     const sideIds = [randomUUID(), randomUUID()] as const;
@@ -881,10 +881,24 @@ describe("inactive Duo turn recovery", () => {
     await runtime.controller.waitForProviderCleanup([sideIds[0]]);
     await runtime.controller.drainSettlementTasks();
     runtime.provider.forceDetachStops = false;
-    runtime.provider.active.delete(sideIds[0]);
     expect(runtime.store.agentTurn(prior.turn.id).status).toBe("cancelled");
     expect(runtime.store.providerRunOwnership.forConversation(sideIds[0]))
       .toEqual([expect.objectContaining({ turnId: prior.turn.id })]);
+    expect(() => runtime.controller.queuePair(launchId, [
+      { conversationId: sideIds[0], content: "Compare safely." },
+      { conversationId: sideIds[1], content: "Compare safely." },
+    ])).toThrow("A Duo conversation already has an active turn.");
+    await expect(runtime.provider.stopOwned(sideIds[0], {
+      runId: prior.turn.runId, turnId: prior.turn.id,
+    })).resolves.toBe("settled");
+    expect(runtime.provider.isRunning(sideIds[0])).toBe(false);
+    expect(() => runtime.controller.queuePair(launchId, [
+      { conversationId: sideIds[0], content: "Compare safely." },
+      { conversationId: sideIds[1], content: "Compare safely." },
+    ])).toThrow("cleanup-pending");
+    expect(runtime.store.providerRunOwnership.forConversation(sideIds[0]))
+      .toEqual([expect.objectContaining({ turnId: prior.turn.id })]);
+    runtime.store.providerRunOwnership.clear(prior.turn.id, prior.turn.runId);
     const queued = runtime.controller.queuePair(launchId, [
       { conversationId: sideIds[0], content: "Compare safely." },
       { conversationId: sideIds[1], content: "Compare safely." },
@@ -896,8 +910,9 @@ describe("inactive Duo turn recovery", () => {
       queued[0].turn.id,
     )).resolves.toBe(true);
     expect(runtime.store.agentTurn(queued[0].turn.id).status).toBe("cancelled");
-    expect(runtime.store.providerRunOwnership.forConversation(sideIds[0]))
-      .toEqual([expect.objectContaining({ turnId: prior.turn.id })]);
+    expect(runtime.store.providerRunOwnership.forConversation(sideIds[0])).toEqual([]);
+    expect(runtime.store.agentTurn(prior.turn.id).status).toBe("cancelled");
+    expect(runtime.store.agentTurn(queued[1].turn.id).status).toBe("queued");
   });
 
   it("keeps an active Duo blocked across retries when provider termination is force-detached", async () => {

@@ -109,7 +109,13 @@ describe("TurnController cancellation persistence and cleanup", () => {
         expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
         expect(runtime.events.filter(({ type }) => type === "agent.failed" || type === "agent.completed")).toHaveLength(1);
         expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
-          content: "The chat is released." })).not.toThrow();
+          content: "Keep uncertain cleanup fenced." })).toThrow("cleanup-pending");
+        runtime.store.providerRunOwnership.clear(queued.turn.id, "wrong-run");
+        expect(runtime.store.orchestration.hasPendingCleanup(runtime.conversationId)).toBe(true);
+        runtime.store.providerRunOwnership.clear(queued.turn.id, queued.turn.runId);
+        expect(runtime.store.orchestration.hasPendingCleanup(runtime.conversationId)).toBe(false);
+        expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
+          content: "Cleanup is confirmed now." })).not.toThrow();
       } finally {
         vi.restoreAllMocks();
         runtime.store.close();

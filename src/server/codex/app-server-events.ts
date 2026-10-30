@@ -687,6 +687,7 @@ export class CodexAppServerEvents {
         this.subagentContinuation.discard();
       }
       this.host.setActiveTurnId(notificationTurnId);
+      this.host.options.onNativeBoundary?.(notificationThreadId!, notificationTurnId, "started");
       this.host.setPhase("running");
       this.host.options.onStatus?.("running");
       this.emitActivity("turn", "started", "Turn started", {
@@ -863,6 +864,7 @@ export class CodexAppServerEvents {
     }
     if (method === "turn/completed") {
       if (!notificationTurnId) return;
+      this.host.options.onNativeBoundary?.(notificationThreadId!, notificationTurnId, "settled");
       this.completedTurnIds.add(notificationTurnId);
       this.hostTools.retireTurn(notificationTurnId);
       this.latestDiffs.delete(notificationTurnId);

@@ -477,43 +477,43 @@ export function createProjectWorkspaceCommandHandler(
         return "handled";
       }
       case "checkpoint.revert": {
-        const checkpoint = dependencies.store.checkpoint(
-          command.payload.checkpointId,
-        );
-        if (checkpoint.conversationId !== command.payload.conversationId) {
-          throw new RuntimeRequestError(
-            "The checkpoint does not belong to this thread.",
+        const revert = async (): Promise<void> => {
+          const checkpoint = dependencies.store.checkpoint(
+            command.payload.checkpointId,
           );
-        }
-        if (
-          dependencies.store.hasActiveWorkspaceRunForConversation(
-            command.payload.conversationId,
-          )
-          || !dependencies.providerTerminalResumes.acquire(
-            command.payload.conversationId,
-          )
-        ) {
-          throw new RuntimeRequestError(
-            "Stop active work, reviews, or resumed terminals before restoring a checkpoint.",
-          );
-        }
-        try {
-          await restoreConversationCheckpoint(
-            dependencies.store,
-            checkpoint,
-            () => dependencies.broadcastSnapshot(),
-          );
-          dependencies.send(socket, {
-            type: "request.ok",
-            requestId: command.requestId,
-          });
-          dependencies.broadcastSnapshot();
-          return "handled";
-        } finally {
-          dependencies.providerTerminalResumes.release(
-            command.payload.conversationId,
-          );
-        }
+          if (checkpoint.conversationId !== command.payload.conversationId) {
+            throw new RuntimeRequestError(
+              "The checkpoint does not belong to this thread.",
+            );
+          }
+          if (
+            dependencies.store.hasActiveWorkspaceRunForConversation(
+              command.payload.conversationId,
+            )
+            || !dependencies.providerTerminalResumes.acquire(
+              command.payload.conversationId,
+            )
+          ) {
+            throw new RuntimeRequestError(
+              "Stop active work, reviews, or resumed terminals before restoring a checkpoint.",
+            );
+          }
+          try {
+            await restoreConversationCheckpoint(
+              dependencies.store,
+              checkpoint,
+              () => dependencies.broadcastSnapshot(),
+            );
+          } finally {
+            dependencies.providerTerminalResumes.release(
+              command.payload.conversationId,
+            );
+          }
+        };
+        await dependencies.store.orchestration.lanes.run(command.payload.conversationId, revert);
+        dependencies.send(socket, { type: "request.ok", requestId: command.requestId });
+        dependencies.broadcastSnapshot();
+        return "handled";
       }
       case "terminal.create": {
         const cwd = dependencies.workspacePath(

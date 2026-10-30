@@ -1,3 +1,4 @@
+import { CursorSdkEntry } from "./cursor-sdk/CursorSdkEntry";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 
@@ -112,6 +113,7 @@ function ProviderAccessCard({
         onConnect={onConnect}
         onRefresh={onRefresh}
       />
+      {providerId === "cursor" && <CursorSdkEntry />}
       {providerId === "antigravity" && (
         <p className="backend-provider-policy">{ANTIGRAVITY_POLICY_NOTE}</p>
       )}

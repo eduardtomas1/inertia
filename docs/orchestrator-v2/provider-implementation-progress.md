@@ -1,5 +1,299 @@
 # Provider native operations implementation
 
+## Cursor P2 store containment correction — 2026-10-30
+
+This review correction supersedes the SQLite store description in the original
+runtime checkpoint below. Development SDK availability is now **Linux only**;
+packaged availability remains independently blocked by the unchanged
+[license evidence](cursor-sdk-license-evidence.md). No dependency, notice,
+capability-manifest, migration, default-route or existing ACP identity change was
+made for this correction.
+
+### Pinned contract and structural fix
+
+The exact SDK 1.0.38 declarations at
+`dist/esm/agent/store/{sqlite-local-agent-store,local-agent-store}.d.ts` expose a
+path-only SQLite opener and a supported custom `LocalAgentStore` interface.
+Installed `dist/cjs/856.js` opens `index.db` with WAL; `730.js` lazily opens
+`agents/agent-<sha256>/store.db` for checkpoints. Database sidecars are therefore
+not confined by checking only the root realpath. The SDK has no public
+fd/no-follow/VFS injection seam. Repeating preflight checks around SQLite would
+still leave a check/open race.
+
+`cursor-sdk-store.ts` now opens an Inertia-owned journal instead of invoking SDK
+SQLite. `cursor-sdk-store-records.ts` implements the pinned agents, runs,
+checkpoints and runEvents interfaces, including opaque metadata/extra run
+fields, binary checkpoint bytes, filtering, id-based pagination, event offsets,
+idempotent append and deletion. Each acknowledged mutation is appended and
+fsync'd before changing the in-memory projection or resolving the API promise.
+Replay checks format, workspace identity, sequence and record shape. Native
+checkpoints are preserved as bytes rather than interpreted or rewritten.
+
+Every ancestor is opened individually as a no-follow directory from a pinned
+parent descriptor. Linux `/proc/self/fd` provides descriptor-relative traversal;
+there is no reopening of the user-supplied descendant path for live writes.
+The final directory must be owned by the current uid with mode 0700. The single
+journal must be a mode 0600, owned, single-link regular file, opened no-follow
+and retained for the store lifetime. Each operation checks directory identity,
+file identity/link count/size/timestamps and unexpected entries. Writes use the
+retained journal descriptor; replacing a name after validation cannot redirect
+those writes to a symlink target. Failed post-write verification poisons the
+store and produces failure, not a success acknowledgement.
+
+The already installed/packaged `ffi-rs@1.3.7` is loaded lazily only when opening
+the worker store. Its documented process-symbol handle (`open` with empty path)
+resolves Linux `flock(int,int)`; synchronous `LOCK_EX|LOCK_NB` on the pinned
+journal fd gives one writer per workspace/provider-instance namespace. A second
+worker fails before touching data. Kernel close/exit semantics release the lock,
+including SIGKILL; there are no lock files, stale-PID guesses or recovery unlink
+operations. This does not claim full concurrent SDK-run parity: simultaneous
+runs sharing that namespace are refused, while separate namespaces remain
+independent.
+
+The worker now creates this store explicitly and inspection reports
+`storeKind:'inertia-journal-v1'`. The parent service requires that exact identity
+and rejects non-Linux before creating provider state or launching account
+workers. Historical SQLite probe results below remain historical; current
+inspection proves the custom durable store plus SDK/native parser loading,
+not SDK SQLite certification.
+
+### Integrity, credentials and limits
+
+Any `index.db`, SQLite sidecar, `agents` checkpoint directory or other unexpected
+entry causes explicit legacy/unrecognized-data rejection. The implementation
+neither follows nor removes those entries and does not silently migrate or
+replace existing native sessions. A separately authorized migration would be
+needed for a namespace created by the superseded development SQLite path.
+
+The journal is bounded to 128 MiB, each serialized mutation to 8 MiB, checkpoint
+input to 6 MiB, deletion keys to 100,000 per mutation, page size to 1000 and ancestor depth to 64. It is append-only, with
+no automatic compaction. A full journal, malformed record or incomplete trailing
+record fails closed and requires explicit recovery. A crash after a mutation was
+fsync'd preserves it; an unacknowledged mutation may also be present after a
+crash. No claim is made that an interrupted active native turn automatically
+becomes resumable or that every truncated-tail case is repaired.
+
+Pinned source maps `sdkMetadata` to store metadata and passes `apiKey` separately
+in runtime platform options. The worker supplies its key only as a private,
+nonpersisted store rejection guard. Native records reject credential field names
+and direct key matches; checkpoint inputs and replay reject matching raw key
+bytes. Tests prove synthetic keys are not written. Opaque arbitrary hostile
+encodings cannot be exhaustively classified by these guards; they do not replace
+the privileged credential boundary or permit keys in prompts/tool output.
+
+This is filesystem containment for the store's own operations, not an OS sandbox
+against a malicious process with the same uid or root. Advisory flock coordinates
+cooperating Inertia writers. A hostile same-uid process can directly mutate files
+or create transient hardlinks; before/after identity checks detect observed
+changes but cannot revoke that actor's filesystem permissions. Other operating
+systems lack a verified equivalent opening boundary here and fail closed.
+
+### Validation
+
+- The independent replacement-store review found one write/replay mismatch:
+  deleting more than 100,000 keys could persist a mutation that replay rejected.
+  Parent correction validates outgoing mutations through the same schema before
+  persistence. A new real-journal test proves rejection leaves the file and live
+  records unchanged, reopening still works, and a 100,000-key deletion reopens
+  successfully with the unselected record intact. The store suite passes 22
+  tests in `/tmp/cursor-sdk-bulk-delete-regression.log`. The review found no
+  additional concrete containment, flock, cleanup-quarantine or host-deadline
+  defect. This supplements, and overlaps, the earlier focused evidence below.
+
+- `npx vitest run tests/server/cursor-sdk-store.test.ts tests/server/cursor-sdk-process.test.ts tests/server/cursor-sdk-session.test.ts tests/server/cursor-sdk-harness.test.ts --maxWorkers=1`:
+  **4 files / 40 passed**, `/tmp/cursor-sdk-containment-final.log`.
+- Store regressions cover existing database/sidecar/checkpoint symlinks and
+  hardlinks, live journal/ancestor replacement, a replacement injected between
+  validation and write, new hardlinks, unknown data preservation, replay,
+  updates/deletes/pagination, bounds/corruption and credential rejection.
+- Real process tests bundle current worker source with esbuild into a temporary
+  fixture, verify guardian-owned SDK/custom-store inspection and cleanup, then
+  prove two-process flock exclusion and SIGKILL release with durable reread.
+  No full application build, account login or paid call was used for these tests.
+- Scoped standard and type-aware oxlint: **EXIT0**;
+  `/tmp/cursor-sdk-containment-{lint-final,type-lint}.log`.
+- `npx tsc --noEmit -p tsconfig.node.json`: **EXIT0** under the shared heavy lock,
+  `/tmp/cursor-sdk-containment-node.log`.
+- `npx tsc --noEmit -p tsconfig.test.unit.json`: **EXIT1**, only concurrent
+  parent/core tests: cursor-sdk-host-tools.test.ts54-55, history-backing-limit
+  test40/50 and orchestration-merge-back test48. No store/worker/process-test
+  diagnostic. Exact diagnostics were sent to the parent; no other owner's tests
+  were changed. `/tmp/cursor-sdk-containment-unit.log`.
+- Architecture: **1837 files / 7630 edges passed**,
+  `/tmp/cursor-sdk-containment-architecture.log`. No exemptions added.
+
+The parent separately reported 59 tests/7 files for account cleanup quarantine,
+host deadlines and exact custom-store status/platform validation. These overlap
+other suites and are not added to this correction's 40 tests. Parent owns final
+main build and integrated gates after source freeze. Full portable/build results
+below predate this correction and do not validate it.
+
+## Cursor production route checkpoint before store review — 2026-10-30
+
+The user resume supersedes the historical pause below. The coherent Cursor SDK
+route is now wired for development execution. **Packaged SDK distribution and
+availability remain blocked**, and this checkpoint does not complete V2 or the
+separate generic ACP requirement. No commit, push, branch change, dependency
+update or real-account call was made by this provider implementation track.
+
+### Runtime and authority
+
+The distinct `cursor-sdk` harness is registered with provider `cursor`, backend
+`builtin:cursor` and protocol `cursor-managed`. Migration 109 admits the new
+harness without changing existing `cursor-acp` histories or the default route.
+Its pinned lineage entry and representative upgrade fixture preserve old rows,
+indexes, triggers and foreign keys. Migration 110 remains core-owned.
+
+`cursor-sdk-process.ts` launches a verified external Node 22.13+ executable
+through the existing owned native guardian. Ownership enrollment precedes SDK
+loading or private credential delivery; Electron's disabled runAsNode fuse is
+unchanged. Private bounded JSONL IPC carries exact conversation, turn, run,
+provider-instance and canonical workspace authority. Startup, channel failure,
+cancellation and normal completion join descendant cleanup; uncertain cleanup
+retains ownership and prevents replacement admission. Native tool processes
+inherit the credential-free environment, never a vault key in environment/argv.
+
+`cursor-sdk-loader.ts` verifies exact SDK/platform version 1.0.38 with literal
+package loading boundaries for the five declared platforms. The worker loads
+lazy SDK/sqlite modules after admission. Discovery probes the native SQLite
+store and tree-sitter bindings inside that owned worker. Node and worker/SDK
+asset fingerprints bind capability evidence and installation leases to the
+verified installation. No ACP CLI installation evidence substitutes for SDK
+availability. Windows arm64 is not advertised.
+
+`cursor-sdk-session.ts` implements create/resume/send/stream/wait/cancel/steer.
+Resume requires an existing idle session with the exact canonical workspace;
+no implicit replacement session is created. Explicit Inertia store directories
+retain native checkpoints, with no ambient SDK store. Completion requires both
+a terminal result and the matching persisted native run. Events are correlated
+to exact native agent/run IDs before application projection. Active steering
+accepts `complete_delivered`; `revert_to_followup` remains a follow-up disposition,
+and uncertain delivery fails with cleanup rather than inventing success.
+
+Native tools use explicit read/full allowlists, empty setting sources, disabled
+SDK retries and no Task executor. Host tools use exact parent-native-session
+callbacks, private replay-checked native call IDs and fresh application IDs;
+`ProviderHostToolRuntime` owns application approvals, bounds and cancellation.
+Child sessions cannot borrow the parent's host authority. Native fork/revert,
+interactive native approvals, images, plans, subagents, skills, usage and model
+option discovery remain unavailable. No global unhandled-rejection suppression
+was added.
+
+### Vault, discovery and model contracts
+
+Login uses `Cursor.auth.login({store:null,openBrowser:false})` inside the owned
+worker. The key travels only through private privileged IPC and the existing
+main vault-save broker; successful login returns validated millisecond expiry
+only after save. Browser URLs are restricted to `https://cursor.com`, with no
+userinfo; the shared public schema also rejects control characters. Cancellation
+prevents saving a late result. Tests use only clearly synthetic tokens.
+
+The parent supplied runtime configuration
+`cursorSdk:{stateRoot:join(dataDirectory,'providers'),credentials:options.backendCredentials}`
+and the socket-owned status/login/cancel/models command handlers. Login emits
+safe targeted progress, has a ten-minute deadline, cancels on disconnect/shutdown,
+and retains its exclusive slot until actual cleanup settles. Status/models
+share serialized, deduplicated probes with a 35-second abort deadline. These are
+parent-owned seams, not independent provider-test claims.
+
+Status returns only `available`, `hasCredential`, `sdkVersion`; credential
+presence is not proof of remote authentication. Models are fetched explicitly
+from authenticated `Cursor.models.list`, parsed to bounded unique concrete
+`{id,displayName}` records, stripped of upstream metadata and checked for secret
+echoes. The parent moved the shared model schema to
+`src/shared/cursor-sdk-models.ts`; the node module reexports its parser/type.
+Published nested model objects are strict. Status invalidates cached model and
+installation evidence; refresh order is status, then models. Admission requires
+an exact advertised model. Model selection uses `harnessId:'cursor-sdk'`,
+`backendProfileId:'builtin:cursor'`, exact `modelId`, null alias/reasoning/context overrides,
+empty provider options and no fabricated per-model capability flags. The renderer
+track owns the explicit account/model UI and its separate evidence document.
+
+### Packaging boundary
+
+The worker build entry and asar-unpacked worker/lazy chunks, SDK/platform assets
+and runtime dependency paths are configured. The saved checkpoint already pins
+1.0.38 in package and lockfile; no dependency graph change required an install or
+lockfile rewrite. The notice generator remains strict and fails on the missing
+`@cursor/sdk-linux-x64@1.0.38/LICENSE.md`. No generated notice fallback, asset
+exclusion or check bypass was introduced. Runtime SDK discovery rejects packaged
+asar locations, so development evidence cannot advertise packaged support.
+
+The completed [license investigation](cursor-sdk-license-evidence.md) verifies
+all five exact platform tarballs and the matching Python 1.0.38 omission. Only
+Linux x64 ripgrep has a byte-identical official archive with license artifacts;
+tree-sitter native bindings, cursorsandbox, complete dependency notices and other
+platform scope remain unresolved. Release packaging and packaged smoke remain
+blocked pending authoritative artifacts. A direct electron-vite development
+build is not a passing `npm run build`/packaged release gate.
+
+### Pinned T3 comparison
+
+Read-only comparison used `/home/etomas/Documentos/TMP1/visual-refs/t3code` at
+`32ecd71726fee16f335484c1f95cbce126d461f6` against prior pin
+`dd148481531a0a090780a2ade20588566db099a2`. `git diff <old> <new> -- packages/provider-cursor`
+is empty. The latest `adapter.ts` and `CursorSdk.ts` still pin SDK 1.0.38; no
+Cursor package compatibility change was inferred from unrelated T3 changes.
+
+| Surface | Pinned T3 | This Inertia route |
+| --- | --- | --- |
+| Native fork/revert/interactive approval | Unavailable | Unavailable |
+| Active steering | Disabled; interruption/restart supported | Pinned Run.steer dispositions verified in deterministic tests |
+| SDK execution | In-process; selected global rejection suppression | External Node, pre-enrolled guardian, bounded private IPC, no global suppression |
+| Ambient settings/retries | project/user/team/mdm/plugins; retries enabled | Empty settings; retries disabled; restrictions reapplied on resume |
+| Native tools/children | Broader platform sandbox/auto-review and child surfaces | Explicit read/full allowlists; Task disabled; exact host authority |
+| Models and richer events | Richer variants/options, plan/image/subagent/usage surfaces | Authenticated concrete IDs/names only; unsupported surfaces unavailable |
+
+### Local validation and integration limits
+
+Heavy work used the shared advisory lock and `nice -n 10`; focused Vitest runs
+used `--maxWorkers=1`. Results overlap and must not be summed.
+
+- Final explicit provider suite: `npx vitest run tests/server/cursor-sdk-{process,channel,session,store,harness,host-tools,models,migration,packaging}.test.ts tests/main/cursor-sdk-login.test.ts --maxWorkers=1`: **10 files / 38 passed**, `/tmp/cursor-sdk-owned-final.log`. Includes the actual enrolled external Node worker loading exact SDK 1.0.38, SQLite and native tree-sitter bindings after the finite literal loader fix, then confirmed guardian cleanup.
+- `npx vitest run tests/server/provider-conformance.test.ts --maxWorkers=1`:
+  **95 passed**, final SDK-specific discovery/capability fixtures;
+  `/tmp/cursor-sdk-conformance2.log`.
+- `npx vitest run tests/server/cursor-sdk-*.test.ts tests/main/cursor-sdk-login.test.ts tests/server/provider-capability-manifest.test.ts tests/server/database-migration-lineage.test.ts --maxWorkers=1`:
+  **12 files / 72 passed**, includes parent login-command tests;
+  `/tmp/cursor-sdk-focused-final.log`.
+- `npx vitest run tests/main/linux-packaging.test.ts tests/main/runtime-assets.test.ts tests/server/cursor-sdk-packaging.test.ts --maxWorkers=1`:
+  **3 files / 15 passed**, `/tmp/cursor-sdk-packaging-checks.log`.
+- `npm run test:portable`: **224 files passed, 1 failed, 1 skipped;
+  3739 tests passed, 10 failed, 3 skipped** (3752 total),
+  `/tmp/cursor-sdk-portable.log`. All ten failures were in
+  `tests/server/provider-conformance.test.ts`, loaded before its SDK fixture
+  fixes. The final-source 95-test rerun above passes. This mixed-snapshot full
+  run is not final integrated clearance.
+- `npx tsc --noEmit -p tsconfig.node.json`, `tsconfig.web.json` and
+  `tsconfig.test.unit.json`: all **EXIT0** in the completed provider validation
+  pass (`/tmp/cursor-sdk-{node,web,unit}-final.log`). This supersedes the earlier
+  concurrent core diagnostics and old harness delta diagnostic, not later
+  concurrent-source validation.
+- Standard and type-aware focused lint passed. After the finite literal loader
+  correction, standard focused lint passed again and
+  `node scripts/check-architecture.mjs` passed: **1834 source files / 7614 edges**,
+  `/tmp/cursor-sdk-architecture-literal.log`. No exemptions were added.
+- Development `npx electron-vite build` passed; after the final loader edit,
+  the main-only build using `electron-vite.resolveConfig` and `vite.build`
+  passed (`/tmp/cursor-sdk-main-literal-build.log`). Renderer owns the subsequent
+  integrated build and screenshots; no duplicate full final gate is queued here.
+- `npm run notices:generate`: **failed**, exact platform-license blocker above,
+  `/tmp/cursor-sdk-notices.log`. Packaging readiness is not claimed.
+
+Parent-reported validation is separate: the earlier auth/schema/policy/provider-
+refresh group passed **274 tests**, with unit TypeScript EXIT0 and focused lint.
+The later account+models group passed **5 files / 274 tests**
+(cursor-sdk-login-commands/auth-contracts/models/runtime-command-policy/server-event-schema),
+including 35-second abort, held cleanup slots, dedupe/exclusion, bounded unique
+IDs and strict published fields. Those groups overlap; neither is additive to
+provider counts. Renderer reported **5 files / 40 tests** before its final visual
+repair; final UI/build evidence belongs in `cursor-sdk-ui-progress.md`.
+
+Parent owns the final integrated `npm run check` after source freeze. No live
+accounts, paid calls, Windows/macOS worker execution or packaged end-to-end run
+were performed. Generic ACP remains separately unfinished; no next phase starts
+in this checkpoint.
+
 ## Stopped checkpoint — 2026-10-30
 
 The human requested both chats to commit, push and stop. Implementation stopped
@@ -30,7 +324,7 @@ credential, package and provider-document paths. Shared renderer/contracts,
 orchestration/fork/queue/test-repair files are left for the primary's consolidated
 checkpoint. The persistent Cursor/ACP goal will be paused after commit/push.
 
-## Cursor SDK / generic ACP assignment — active, 2026-10-30
+## Historical Cursor SDK / generic ACP assignment — 2026-10-30
 
 The primary chat resumed and explicitly assigned the previously deferred worker,
 vault/login, dependency/packaging and append-only migration seams to this partner.
@@ -52,9 +346,9 @@ save broker; no default SDK credential file is used.
 
 Dependency work will add exact `@cursor/sdk@1.0.38` with install scripts disabled,
 review its platform assets and regenerate notices. No `npm ci` or full check is
-currently running in this partner. Planned next migration reservations: 109 for
-the distinct `cursor-sdk` harness, followed by 110 for generic ACP identities and
-instance configuration; existing `cursor-acp` histories remain separate.
+currently running in this partner. The historical migration reservation below is superseded: migration 109 now
+admits `cursor-sdk`; 110 is core-owned. Generic ACP is deferred beyond this
+checkpoint. Existing `cursor-acp` histories remain separate.
 
 ## Pi goal completion audit — 2026-10-30
 

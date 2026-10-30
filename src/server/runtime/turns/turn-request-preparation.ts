@@ -1,4 +1,5 @@
 import type { AgentActivity, Conversation, ProviderInfo } from "../../../shared/contracts";
+import { providerInstanceId } from "../../orchestration-v2/provider-instance";
 import {
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
@@ -325,6 +326,9 @@ export function resolveTurnRequest(
   const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
     && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
   const canResume = continuation.action === "resume-session";
+  const nativeContinuation = canResume ? dependencies.store.orchestration.history.continuationFor({ threadId: conversation.id,
+    providerInstanceId: providerInstanceId(route.providerId, route.continuationIdentity),
+    workspaceKey: dependencies.store.conversationPath(conversation.id), nativeSessionId: resumeSessionId! }) : null;
   const instructionDelivery = resolveHiddenInstructionDelivery({
     store: dependencies.store,
     deliveries: dependencies.instructionDeliveries,
@@ -506,6 +510,7 @@ export function resolveTurnRequest(
     interactionMode: conversation.interactionMode,
     access: conversation.accessMode,
     sessionId: canResume ? resumeSessionId! : undefined,
+    ...(nativeContinuation ? { nativeContinuation: nativeContinuation.continuation } : {}),
     ...(supportedFastMode ? { supportedFastMode } : {}),
     ...(canResume
       && previousContinuationIdentity
@@ -573,6 +578,7 @@ export function resolveTurnRequest(
     continuationReasonCode: continuation.reasonCode,
     sessionRecovery: assembled.sessionRecovery,
     ...(contextHandoff ? { contextHandoff } : {}),
+    ...(nativeContinuation ? { nativeContinuation } : {}),
     harnessId,
     backendProfileId: modelSelection.backendProfileId,
     model: modelSelection.modelId,

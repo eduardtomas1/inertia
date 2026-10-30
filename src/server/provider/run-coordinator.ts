@@ -94,6 +94,7 @@ export type OwnedProviderStopResult =
   | "force-detached";
 
 export interface ProviderRunCoordinatorOptions {
+  cursorSdk?: ProviderManagerOptions["cursorSdk"];
   cancelGraceMs: number;
   harnessRegistry: AgentHarnessRegistry;
   metadataCache: ProviderMetadataCache;
@@ -101,6 +102,7 @@ export interface ProviderRunCoordinatorOptions {
     | ProviderManagerOptions["resolveBackendLaunchOptions"];
   conversationProviderGate?: ProviderManagerOptions["conversationProviderGate"];
   commandFor(providerId: ProviderId): string;
+  commandForRun?(input: ProviderRunInput): string;
   resolvedCommandFor(providerId: ProviderId): string | undefined;
   rememberResolvedCommand(providerId: ProviderId, executable: string): void;
   processEnvironment(): NodeJS.ProcessEnv | undefined;
@@ -374,9 +376,9 @@ export class ProviderRunCoordinator {
           negotiated,
         );
     };
-    const executable = this.options.commandFor(providerId);
+    const executable = this.options.commandForRun?.(input) ?? this.options.commandFor(providerId);
     const nativeProfile = providerNativeBackendProfile(providerId);
-    const ownsLegacyProviderMetadata = input.backendProfile.id === nativeProfile.id
+    const ownsLegacyProviderMetadata = input.harnessId !== "cursor-sdk" && input.backendProfile.id === nativeProfile.id
       && input.backendProfile.configurationRevision === nativeProfile.configurationRevision;
     const runMetadataScope = this.options.metadataCache.scopeForSelection(
       input.modelSelection,
@@ -608,6 +610,8 @@ export class ProviderRunCoordinator {
         active.harnessStartInvoked = true;
         harnessRun = startHarnessWithFreshSessionFallback(harness, {
           input: launchInput,
+          cursorSdk: this.options.cursorSdk,
+          ...(input.nativeContinuation ? { nativeContinuation: input.nativeContinuation } : {}),
           executable,
           // The harness owns this copy for the lifetime of its child process.
           // The resolver-owned source is scrubbed immediately below.

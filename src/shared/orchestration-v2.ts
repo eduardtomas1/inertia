@@ -8,6 +8,8 @@ import { orchestrationBackingEventSchema } from "./orchestration-backings";
 import { nativeBoundaryEventSchema } from "./orchestration-native-boundary";
 import { orchestrationForkEventSchema } from "./orchestration-forks";
 import { nativeControlEventSchema } from "./orchestration-native-control";
+import { historyEventSchema } from "./orchestration-history";
+import { mergeBackEventSchema } from "./orchestration-merge-back";
 
 export { orchestrationIdSchema } from "./orchestration-identities";
 const timestamp = z.iso.datetime();
@@ -65,6 +67,8 @@ export const orchestrationAttemptSchema = z.object({
 
 export const orchestrationDomainEventSchema = z.discriminatedUnion("type", [
   ...nativeControlEventSchema.options,
+  ...historyEventSchema.options,
+  ...mergeBackEventSchema.options,
   nativeBoundaryEventSchema,
   ...orchestrationForkEventSchema.options,
   ...orchestrationBackingEventSchema.options,

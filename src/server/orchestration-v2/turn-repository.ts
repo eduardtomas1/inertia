@@ -16,10 +16,13 @@ import { ProviderBackingRepository } from "./backing-repository";
 import { NativeBoundaryRepository } from "./native-boundary-repository";
 import { NativeControlRepository } from "./native-control-repository";
 import { ForkRepository } from "./fork-repository";
+import { HistoryRollbackRepository } from "./history-rollback-repository";
+import { MergeBackRepository, type MergeBackAccess } from "./merge-back-repository";
+import { OrchestrationCommandLanes } from "./command-lanes";
 import { providerInstanceId } from "./provider-instance";
 import { OrchestrationConflict, type CommandSource, type JsonValue, type OrchestrationEffect } from "./types";
 
-interface TurnProjectionAccess {
+interface TurnProjectionAccess extends MergeBackAccess {
   conversation(id: string): Conversation;
   conversationPath(id: string): string;
   agentTurn(id: string): AgentTurn;
@@ -35,6 +38,9 @@ export class OrchestratedTurnRepository {
   readonly nativeBoundaries: NativeBoundaryRepository;
   readonly nativeControls: NativeControlRepository;
   readonly forks: ForkRepository;
+  readonly history: HistoryRollbackRepository;
+  readonly mergeBacks: MergeBackRepository;
+  readonly lanes = new OrchestrationCommandLanes();
 
   constructor(
     private readonly database: Database.Database,
@@ -46,8 +52,10 @@ export class OrchestratedTurnRepository {
     this.effects = new OrchestrationEffectOutbox(database, runtimeId);
     this.backings = new ProviderBackingRepository(database, this.events);
     this.nativeBoundaries = new NativeBoundaryRepository(database, this.events);
-    this.nativeControls = new NativeControlRepository(database, this.events, this.effects, runtimeId, systemBootId);
-    this.forks = new ForkRepository(database, this.events, this.nativeBoundaries, access);
+    this.history = new HistoryRollbackRepository(database, this.events);
+    this.nativeControls = new NativeControlRepository(database, this.events, this.effects, this.history, runtimeId, systemBootId);
+    this.forks = new ForkRepository(database, this.events, this.nativeBoundaries, this.history, access);
+    this.mergeBacks = new MergeBackRepository(database, this.events, this.forks, this.history, access);
   }
 
   admit(
@@ -60,7 +68,7 @@ export class OrchestratedTurnRepository {
       const identity = { actorId: source?.actorId ?? "runtime", commandId: source?.commandId ?? input.id ?? input.runId,
         projectId: conversation.projectId, threadId: conversation.id };
       // Preparation creates incidental identities. They are not part of caller intent.
-      const { id: _turnId, runId: _runId, requestedAt: _requestedAt, ...intent } = input;
+      const { id: _turnId, runId: _runId, requestedAt: _requestedAt, nativeContinuation, ...intent } = input;
       const command = source?.command ?? JSON.parse(JSON.stringify({ type: "run.start", ...intent })) as JsonValue;
       const previous = this.events.receipt(identity, command);
       if (previous) {
@@ -119,6 +127,16 @@ export class OrchestratedTurnRepository {
           payload: { runId: turn.runId, turnId: turn.id, attemptId } }],
         result: { turnId: turn.id, runId: turn.runId, messageId: queued.message.id, attemptId },
       });
+      if (nativeContinuation) {
+        const pending = turn.providerSessionBefore ? this.history.continuationFor({ threadId: conversation.id,
+          providerInstanceId: instanceId, workspaceKey, nativeSessionId: turn.providerSessionBefore }) : null;
+        if (pending?.rollbackId !== nativeContinuation.rollbackId
+          || durableJson(pending.continuation) !== durableJson(nativeContinuation.continuation)) {
+          throw new OrchestrationConflict("revision-conflict");
+        }
+        this.history.attach(conversation.id, conversation.projectId, pending.rollbackId, turn.runId);
+      }
+      this.mergeBacks.attach(conversation.id, input.conversationContextPacketIds ?? [], turn.runId, queued.message.id);
       return queued;
     }).immediate();
   }
@@ -133,6 +151,12 @@ export class OrchestratedTurnRepository {
       throw new Error("The orchestration receipt does not match its transcript projection.");
     }
     return { turn, message: this.access.message(result.messageId) };
+  }
+
+  acknowledge(runId: string): void {
+    this.backings.acknowledge(runId);
+    this.history.acknowledge(runId);
+    this.mergeBacks.acknowledge(runId);
   }
 
   hasPendingCleanup(threadId: string): boolean {
@@ -188,6 +212,8 @@ export class OrchestratedTurnRepository {
       expectedRevision: this.events.revision(run.threadId), events: [event], result: null });
     if (isAgentTurnTerminalStatus(turn.status)) this.effects.retirePending(this.startEffectId(turn.runId), "run-settled");
     this.backings.settle(turn);
+    this.history.settleRun(turn, (backing) => this.backings.invalidate(backing, "uncertain-delivery"));
+    this.mergeBacks.settleRun(turn);
     if (turn.runState?.state === "cancelling" && attempt.interruptRequestedAt === null) {
       const interrupted: OrchestrationDomainEvent = { type: "attempt.interrupt-requested",
         payload: { runId: run.id, attemptId: attempt.id } };
@@ -243,7 +269,11 @@ export class OrchestratedTurnRepository {
     const claim = intent ? this.claimStart(runId) : null;
     if (intent && !claim) return false;
     try {
-      if (intent) this.backings.dispatch(runId);
+      if (intent) {
+        this.backings.dispatch(runId);
+        this.history.dispatched(runId);
+        this.mergeBacks.dispatched(runId);
+      }
       const accepted = dispatch();
       if (claim) this.effects.settle(claim, accepted
         ? { kind: "succeeded" } : { kind: "failed", code: "start-refused" });

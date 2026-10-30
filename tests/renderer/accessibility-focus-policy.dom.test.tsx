@@ -77,7 +77,7 @@ describe("outside-pointer focus policy", () => {
     renderChooser();
     const trigger = screen.getByRole("button", { name: /Choose model/u });
     fireEvent.click(trigger);
-    const search = screen.getByRole("combobox", { name: "Search models" });
+    const search = await screen.findByRole("combobox", { name: "Search models" });
     await waitFor(() => expect(search).toHaveFocus());
 
     fireEvent.pointerDown(screen.getByTestId("blank-surface"));
@@ -138,7 +138,7 @@ describe("model search active descendant", () => {
   it("keeps active-descendant ownership on the focused search and favorites on each row", async () => {
     renderChooser();
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    const search = screen.getByRole("combobox", { name: "Search models" });
+    const search = await screen.findByRole("combobox", { name: "Search models" });
     await waitFor(() => expect(search).toHaveFocus());
     const results = screen.getByRole("grid", { name: "Model results" });
     fireEvent.keyDown(search, { key: "Home" });

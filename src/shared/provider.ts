@@ -27,6 +27,7 @@ export const ANTIGRAVITY_IMAGE_INPUT_UNAVAILABLE_REASON =
   "Antigravity can't read images in Inertia.";
 
 export function harnessImageInputUnavailableReason(harnessId: string): string | null {
+  if (harnessId === "cursor-sdk") return "Cursor SDK image input is unavailable.";
   return harnessId === "antigravity-cli" ? ANTIGRAVITY_IMAGE_INPUT_UNAVAILABLE_REASON : null;
 }
 

@@ -52,6 +52,8 @@ export interface ConversationDetail {
   /** Chats an agent read through the context tool, per turn; absent from legacy projections. */
   contextReads?: AgentContextReadSummary[];
   watcherWakes?: WatcherWakeSummary[];
+  rolledBackTurnIds?: string[];
+  rollbackRevision?: number;
 }
 
 export type ConversationDetailResult =

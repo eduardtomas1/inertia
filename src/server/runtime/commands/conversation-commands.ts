@@ -44,6 +44,9 @@ import { ConversationContextService } from "../conversation-context-service";
 import type {
   ConversationContextRequestCoordinator,
 } from "../conversation-context-request-coordinator";
+import type { ConversationRollbackResult } from "../../../shared/orchestration-history";
+import { MergeBackError } from "../../orchestration-v2/merge-back-repository";
+import type { CommandSource } from "../../orchestration-v2/types";
 
 type ConversationUpdatePayload = Extract<
   Parameters<RuntimeCommandHandler>[1],
@@ -118,6 +121,7 @@ export interface ConversationCommandDependencies {
   };
   deletedConversationIds: Set<string>;
   dataDirectory: string;
+  rollbackHistory?(input: { conversationId: string; turnId: string | null; source: CommandSource }): Promise<ConversationRollbackResult>;
   rememberDeletedConversation(conversationId: string): void;
   forgetRemoteTranscript(conversationId: string): void;
   broadcastSnapshot(): void;
@@ -141,6 +145,8 @@ export function createConversationCommandHandler(
     "conversation.create",
     "conversation.fork",
     "conversation.fork.history",
+    "conversation.rollback",
+    "conversation.merge-back",
     "conversation.select",
     "conversation.detail.load",
     "conversation.detail.subscription",
@@ -161,11 +167,36 @@ export function createConversationCommandHandler(
   ], async (socket, command) => {
     switch (command.type) {
       case "conversation.fork": {
-        const fork = dependencies.store.orchestration.forks.create(command.payload,
+        const create = () => dependencies.store.orchestration.forks.create(command.payload,
           { actorId: "human", commandId: command.requestId, command: JSON.parse(JSON.stringify(command)) });
+        const fork = await dependencies.store.orchestration.lanes.run(command.payload.sourceConversationId, create);
         dependencies.broadcastSnapshot();
         dependencies.send(socket, { type: "request.result", requestId: command.requestId,
           result: { kind: "conversation.created", conversationId: fork.id } });
+        return "handled";
+      }
+      case "conversation.rollback": {
+        const rollback = dependencies.rollbackHistory;
+        if (!rollback) throw new RuntimeRequestError("Rolling back chat history requires the provider runtime.");
+        const source = { actorId: "human", commandId: command.requestId, command: JSON.parse(JSON.stringify(command)) };
+        const run = () => rollback({ ...command.payload, source });
+        const result = await dependencies.store.orchestration.lanes.run(command.payload.conversationId, run);
+        dependencies.broadcastSnapshot();
+        dependencies.runtimeSync.broadcast({ type: "conversation.detail.invalidated", conversationId: result.conversationId });
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId, result });
+        return "handled";
+      }
+      case "conversation.merge-back": {
+        const lineage = dependencies.store.orchestration.forks.get(command.payload.forkConversationId);
+        if (!lineage) throw new RuntimeRequestError("Only a fork can merge its findings back into its source chat.");
+        const source = { actorId: "human", commandId: command.requestId, command: JSON.parse(JSON.stringify(command)) };
+        const result = await dependencies.store.orchestration.lanes.run(lineage.parentThreadId, () => {
+          try { return dependencies.store.orchestration.mergeBacks.prepare(command.payload.forkConversationId, source); }
+          catch (error) { if (error instanceof MergeBackError) throw new RuntimeRequestError(error.message); throw error; }
+        });
+        dependencies.broadcastSnapshot();
+        dependencies.runtimeSync.broadcast({ type: "conversation.detail.invalidated", conversationId: result.parentConversationId });
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId, result });
         return "handled";
       }
       case "conversation.fork.history": {

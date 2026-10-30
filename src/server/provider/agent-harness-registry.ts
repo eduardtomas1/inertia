@@ -1,3 +1,4 @@
+import { createCursorSdkHarness } from "./cursor-sdk-harness";
 import { createPiRpcHarness } from "./pi-rpc-harness";
 import { createAntigravityCliHarness } from "./antigravity-cli-harness";
 import { createClaudeAgentSdkHarness } from "./claude-agent-sdk-harness";
@@ -26,6 +27,7 @@ const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "opencode-cli": "opencode",
   "claude-agent-sdk": "claude",
   "cursor-acp": "cursor",
+  "cursor-sdk": "cursor",
   "kimi-acp": "kimi",
   "opencode-sdk": "opencode",
   "antigravity-cli": "antigravity",
@@ -144,6 +146,7 @@ export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
     createCodexAppServerHarness(),
     createClaudeAgentSdkHarness(),
     createCursorAcpHarness(),
+    createCursorSdkHarness(),
     createKimiAcpHarness(),
     createOpenCodeSdkHarness(),
     createAntigravityCliHarness(),

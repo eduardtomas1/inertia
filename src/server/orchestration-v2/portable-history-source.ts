@@ -34,8 +34,10 @@ export function portableHistorySource(database: Database.Database, input: {
   route?: ContinuationRouteFilter;
 }) {
   const route = continuationRouteSql(input.route);
+  const retained = `(messages.turn_id IS NULL OR messages.turn_id NOT IN (SELECT id FROM orchestration_v2_entities
+    WHERE kind = 'rolled-back-turn' AND thread_id = messages.conversation_id))`;
   const eligibleWhere = `messages.conversation_id = ? AND messages.role IN ('user','assistant')
-    AND messages.id <> ? ${route.sql}`;
+    AND messages.id <> ? ${route.sql} AND ${retained}`;
   if ((input.excludedItemIds?.length ?? 0) > 2_048) throw new Error("Too many covered history items.");
   const eligibleParameters = [input.threadId, input.excludedMessageId ?? "", ...route.parameters];
   const where = `${eligibleWhere} AND messages.id NOT IN (SELECT value FROM json_each(?))`;
@@ -44,7 +46,8 @@ export function portableHistorySource(database: Database.Database, input: {
     (database.prepare(`SELECT count(*) AS count FROM messages WHERE ${clause}`).get(...values) as { count: number }).count;
   const eligible = count(where, parameters);
   const routedCount = count(eligibleWhere, eligibleParameters);
-  const total = count("conversation_id = ? AND role IN ('user','assistant') AND id <> ?", parameters.slice(0, 2));
+  const total = count(`messages.conversation_id = ? AND messages.role IN ('user','assistant') AND messages.id <> ? AND ${retained}`,
+    parameters.slice(0, 2));
   const select = `SELECT messages.id, messages.turn_id, messages.role, messages.created_at,
     messages.rowid AS position, turns.status, turns.run_id
     FROM messages LEFT JOIN agent_turns turns ON turns.id = messages.turn_id

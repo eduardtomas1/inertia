@@ -20,6 +20,12 @@ interface ForkSessionDependencies {
 /** First-send resolution. The target admission lease is already held by the caller. */
 export async function prepareForkSession(dependencies: ForkSessionDependencies, conversationId: string,
   signal: AbortSignal): Promise<void> {
+  await dependencies.store.orchestration.lanes.run(conversationId,
+    () => prepareOrderedForkSession(dependencies, conversationId, signal));
+}
+
+async function prepareOrderedForkSession(dependencies: ForkSessionDependencies, conversationId: string,
+  signal: AbortSignal): Promise<void> {
   const { store, providers, turns, providerTerminalResumes } = dependencies;
   const fork = store.orchestration.forks.get(conversationId);
   if (!fork || fork.transfer !== "pending") return;
@@ -61,12 +67,10 @@ export async function prepareForkSession(dependencies: ForkSessionDependencies, 
       || store.conversationPath(source.id) !== fork.sourceWorkspaceKey) {
       portable("native-route-changed"); return;
     }
-    const latest = store.orchestration.nativeBoundaries.latest({ threadId: source.id,
+    const expectedHeadId = store.orchestration.history.physicalHead({ threadId: source.id,
       providerInstanceId: boundary.providerInstanceId, workspaceKey: fork.sourceWorkspaceKey,
       nativeConversationId: boundary.nativeConversationId });
-    if (!latest || latest.phase !== "settled" || latest.persistedHeadId === null) {
-      portable("native-head-unavailable"); return;
-    }
+    if (expectedHeadId === null) { portable("native-head-unavailable"); return; }
     const workspaceKey = store.conversationPath(conversationId);
     const operationId = randomUUID();
     const request = { kind: "fork" as const, operationId, targetConversationId: conversationId,
@@ -74,7 +78,7 @@ export async function prepareForkSession(dependencies: ForkSessionDependencies, 
         workspaceId: commandFingerprint({ projectId: fork.projectId, workspaceKey: fork.sourceWorkspaceKey }),
         repositoryId: store.project(fork.projectId).repositoryIdentity,
         providerInstanceId: boundary.providerInstanceId }, nativeConversationId: boundary.nativeConversationId,
-        ...(boundary.nativeSessionId === null ? {} : { nativeSessionId: boundary.nativeSessionId }), expectedHeadId: latest.persistedHeadId },
+        ...(boundary.nativeSessionId === null ? {} : { nativeSessionId: boundary.nativeSessionId }), expectedHeadId },
       boundary: { kind: "turn" as const, nativeTurnId: boundary.nativeTurnId } };
     const effect = store.orchestration.nativeControls.start({ id: operationId, threadId: conversationId,
       projectId: fork.projectId, request, sourceWorkspaceKey: fork.sourceWorkspaceKey,

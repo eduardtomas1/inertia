@@ -809,6 +809,21 @@
           "digest": "fe4a81aa38ad781d74b81f888a37110c5aa1570355c92509be8856589a84e203"
         }
       ]
+    },
+    {
+      "version": 109,
+      "name": "SupportCursorSdkHarness",
+      "digest": "2fcdcaad8e6ff35b5249554b6bff8c40b88d70cc37b1f5952afaffb429080a86",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/cursor-sdk-provider.ts",
+          "symbols": [
+            "cursorSdkIdentifier",
+            "rebuildCursorSdkTable"
+          ],
+          "digest": "a4b2b915273b9dcbee7d5c3124517ac2a711f37bf2042d9a27cb9adc5efbb15b"
+        }
+      ]
     }
   ]
 }

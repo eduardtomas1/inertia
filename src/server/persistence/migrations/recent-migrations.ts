@@ -1,3 +1,4 @@
+import { cursorSdkProviderMigration } from "./cursor-sdk-provider";
 import { limitResetMigration } from "./limit-reset";
 import { orchestrationV2Migration } from "./orchestration-v2";
 import { nativePiProviderMigration } from "./native-pi-provider";
@@ -67,4 +68,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   duoComparisonBriefsMigration,
   orchestrationV2Migration,
   nativePiProviderMigration,
+  cursorSdkProviderMigration,
 ];

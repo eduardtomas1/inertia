@@ -82,7 +82,18 @@ type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewS
 type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | "attachmentGallery" | keyof ConversationRecords>;
 const EMPTY_CONVERSATION_RECORDS: ConversationRecords = { usage: [], goals: [], reviewSummaries: [], reviewStates: [], reviewNotes: [] };
 const EMPTY_HISTORY_RECORDS: HistoryPageRecords = { agentTurns: [], turnGitArtifacts: [], messages: [], activities: [],
-  subagents: [], reasonings: [], plans: [], checkpoints: [], contextPackets: [], contextReads: [] };
+  subagents: [], reasonings: [], plans: [], checkpoints: [], contextPackets: [], contextReads: [], rolledBackTurnIds: [] };
+
+function rollbackRevision(database: PersistenceContext["database"], conversationId: string): number {
+  return (database.prepare(`SELECT count(*) AS count FROM orchestration_v2_entities
+    WHERE kind = 'rolled-back-turn' AND thread_id = ?`).get(conversationId) as { count: number }).count;
+}
+
+function rolledBackTurnIds(database: PersistenceContext["database"], conversationId: string, turnIds: readonly string[]): string[] {
+  return (database.prepare(`SELECT id FROM orchestration_v2_entities WHERE kind = 'rolled-back-turn' AND thread_id = ?
+    AND id IN (SELECT value FROM json_each(?)) ORDER BY id`).all(conversationId, JSON.stringify(turnIds)) as { id: string }[])
+    .map(({ id }) => id);
+}
 
 function watcherWakeField(
   database: PersistenceContext["database"],
@@ -240,6 +251,7 @@ export class SnapshotRepository {
     const shared = {
       conversation: conversationDetailFromRow(conversationRow),
       attachmentGallery: conversationAttachmentGallery(this.context.database, conversationId),
+      rollbackRevision: rollbackRevision(this.context.database, conversationId),
       ...(latest ? this.conversationRecords(conversationId) : EMPTY_CONVERSATION_RECORDS),
     };
     const page = (records: HistoryPageRecords, omittedTurnIds: string[] = []): ConversationDetail | null => {
@@ -276,6 +288,7 @@ export class SnapshotRepository {
     if (!conversationRow) return null;
     return {
       conversation: conversationDetailFromRow(conversationRow),
+      rollbackRevision: rollbackRevision(this.context.database, conversationId),
       ...this.historyRecords(conversationId),
       ...this.conversationRecords(conversationId),
     };
@@ -333,6 +346,7 @@ export class SnapshotRepository {
       checkpoints: query<CheckpointRow>("checkpoints", "*", "created_at ASC, id ASC").map(checkpointFromRow),
       contextPackets: this.context.contextPackets(conversationId, scope ? messages.map(({ id }) => id) : undefined),
       contextReads: agentContextReadSummaries(this.context.database, conversationId, scope ? messages.map(({ id }) => id) : undefined),
+      rolledBackTurnIds: rolledBackTurnIds(this.context.database, conversationId, turns.map(({ id }) => id)),
       ...watcherWakeField(this.context.database, conversationId, scope ? turns.map(({ id }) => id) : undefined),
     };
   }
@@ -346,6 +360,7 @@ export class SnapshotRepository {
     return { ...EMPTY_HISTORY_RECORDS, agentTurns: [agentTurnFromRow(turn)], messages,
       contextPackets: this.context.contextPackets(conversationId, messages.map(({ id }) => id)),
       contextReads: agentContextReadSummaries(this.context.database, conversationId, messages.map(({ id }) => id)),
+      rolledBackTurnIds: rolledBackTurnIds(this.context.database, conversationId, [turnId]),
       ...watcherWakeField(this.context.database, conversationId, [turnId]) };
   }
 

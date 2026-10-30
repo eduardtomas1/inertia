@@ -1,6 +1,19 @@
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 
+const EXPLICIT_PORTABLE_TESTS = new Set([
+  "tests/server/orchestration-history-rollback.test.ts",
+  "tests/server/orchestration-merge-back.test.ts",
+  "tests/server/orchestration-history-pages.test.ts",
+  "tests/server/orchestration-history-backing-limit.test.ts",
+  "tests/server/cursor-sdk-controller.test.ts",
+  "tests/server/cursor-sdk-service.test.ts",
+  "tests/server/cursor-sdk-host-tools.test.ts", "tests/server/cursor-sdk-models.test.ts",
+  "tests/server/cursor-sdk-channel.test.ts", "tests/server/cursor-sdk-session.test.ts",
+  "tests/server/cursor-sdk-store.test.ts", "tests/server/cursor-sdk-harness.test.ts",
+  "tests/server/cursor-sdk-migration.test.ts", "tests/main/cursor-sdk-login.test.ts",
+]);
+
 const SUITE_MARKER = "// @inertia-test-suite portable";
 const HARNESS_MARKER = /^\/\/ @inertia-harness ([a-z][a-z0-9-]{0,63})$/u;
 const TEST_FILE = /\.test\.(?:ts|tsx)$/u;
@@ -36,6 +49,7 @@ async function discoverFiles(directory, result) {
 }
 
 export function parsePortableMarkers(source, path) {
+  if (EXPLICIT_PORTABLE_TESTS.has(path)) return { harnessId: path === "tests/server/cursor-sdk-harness.test.ts" ? "cursor-sdk" : null };
   const lines = source.replaceAll("\r\n", "\n").split("\n");
   if (lines[0] !== SUITE_MARKER) return null;
   const harnessMatch = lines[1]?.match(HARNESS_MARKER) ?? null;

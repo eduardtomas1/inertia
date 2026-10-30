@@ -13,6 +13,8 @@ import type { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint, durableJson } from "./json";
 import { providerInstanceId } from "./provider-instance";
 
+const UNCLEAN_RECOVERY_REASONS = new Set(["runtime-restart", "runtime-crash"]);
+
 export class ProviderBackingRepository {
   constructor(private readonly database: Database.Database, private readonly events: OrchestrationEventStore) {}
 
@@ -131,6 +133,10 @@ export class ProviderBackingRepository {
     const handoff = this.handoff(run.id);
     if (handoff?.state === "prepared") this.changeHandoff(handoff, "abandoned");
     else if (handoff?.state === "dispatching") this.changeHandoff(handoff, "uncertain", backing);
+    if (backing?.lastRunId === run.id && UNCLEAN_RECOVERY_REASONS.has(turn.terminalReason ?? "")) {
+      this.invalidate(backing, "uncertain-delivery");
+      return;
+    }
     if (!backing || backing.lastRunId !== run.id || backing.status !== "ready") return;
     const rows = this.database.prepare(`SELECT id FROM messages WHERE conversation_id = ? AND turn_id = ?
       AND role IN ('user','assistant') ORDER BY created_at, rowid LIMIT ?`)

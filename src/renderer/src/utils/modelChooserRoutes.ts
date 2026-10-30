@@ -82,6 +82,7 @@ export function readyModelChooserRoutes<Route extends { providerReady: boolean }
 }
 
 export function modelChooserHarnessLabel(harnessId: string): string {
+  if (harnessId === "cursor-sdk") return "Cursor SDK";
   const providerId = providerIdForHarness(harnessId);
   if (providerId) return harnessLabels[providerId];
   return harnessId;

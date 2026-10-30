@@ -16,6 +16,7 @@ export const KNOWN_HARNESS_IDS = [
 
 export const CURRENT_KNOWN_HARNESS_IDS = [
   ...KNOWN_HARNESS_IDS,
+  "cursor-sdk",
   "antigravity-cli",
   "pi-rpc",
 ] as const;
@@ -514,6 +515,7 @@ const EXPECTED_PROTOCOL: Readonly<Partial<Record<KnownHarnessId, ModelBackendPro
   "opencode-cli": "opencode-native",
   "antigravity-cli": "antigravity-managed",
   "pi-rpc": "pi-native",
+  "cursor-sdk": "cursor-managed",
 };
 
 export function nativeHarnessId(providerId: ProviderId): KnownHarnessId {
@@ -588,6 +590,7 @@ export function providerNativeBackendProfile(
 }
 
 export function providerIdForHarness(harnessId: HarnessId): ProviderId | null {
+  if (harnessId === "cursor-sdk") return "cursor";
   if (harnessId === "pi-rpc") return "pi";
   if (harnessId === "antigravity-cli") return "antigravity";
   return legacyProviderIdForHarness(harnessId);
@@ -654,7 +657,7 @@ export function resolveHarnessBackendCompatibility(
     };
   }
   if (native && profile.id === native.id && profile.protocol === native.protocol) {
-    const cursorManaged = harnessId === "cursor-acp" || harnessId === "cursor-cli";
+    const cursorManaged = harnessId === "cursor-sdk" || harnessId === "cursor-acp" || harnessId === "cursor-cli";
     const kimiManaged = harnessId === "kimi-acp";
     const antigravityManaged = harnessId === "antigravity-cli";
     const openCodeNative = harnessId === "opencode-sdk" || harnessId === "opencode-cli";
@@ -706,6 +709,7 @@ export function resolveHarnessBackendCompatibility(
 
   if (
     harnessId === "pi-rpc"
+    || harnessId === "cursor-sdk"
     || harnessId === "cursor-acp"
     || harnessId === "cursor-cli"
     || harnessId === "kimi-acp"

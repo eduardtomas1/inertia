@@ -31,6 +31,9 @@ import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics
 import { subagentTrace } from "./subagent-trace-schema";
 import { watcherMutationEvent, watcherRequestResultValidators, watcherWakeSummariesCoherent } from "./watcher-schema";
 import { forkHistoryResultSchema } from "../orchestration-forks";
+import { conversationRollbackResultSchema, rolledBackTurnIdsCoherent } from "../orchestration-history";
+import { mergeBackResultSchema } from "../orchestration-merge-back";
+import { cursorSdkLoginEventSchema, cursorSdkStatusResultSchema, cursorSdkModelsResultSchema } from "./cursor-sdk-auth-schema";
 import { compactOnReturnResultValidators, isConversationCompactionState, isPromptCacheFacts, validCompactOnReturnSetting } from "./compact-on-return-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "pi"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
@@ -992,6 +995,9 @@ function conversationDetail(
     && (value.contextPackets === undefined
       || arrayOf(value.contextPackets, conversationContextPacketSummary))
     && (value.contextReads === undefined || arrayOf(value.contextReads, agentContextReadSummary))
+    && rolledBackTurnIdsCoherent(value.rolledBackTurnIds, value.agentTurns)
+    && (value.rollbackRevision === undefined
+      || (typeof value.rollbackRevision === "number" && Number.isSafeInteger(value.rollbackRevision) && value.rollbackRevision >= 0))
     && watcherWakeSummariesCoherent(value.watcherWakes, value.agentTurns)
     && conversationDetailCollectionsCoherent(value, conversationId);
 }
@@ -1101,6 +1107,10 @@ const REQUEST_RESULT_VALIDATORS = {
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "conversation.fork.history": (value) => forkHistoryResultSchema.safeParse(value).success,
+  "conversation.rollback": (value) => conversationRollbackResultSchema.safeParse(value).success,
+  "conversation.merge-back": (value) => mergeBackResultSchema.safeParse(value).success,
+  "provider.cursor-sdk.status": (value) => cursorSdkStatusResultSchema.safeParse(value).success,
+  "provider.cursor-sdk.models": (value) => cursorSdkModelsResultSchema.safeParse(value).success,
   "todo.started": (value) => stringField(value, "conversationId"),
   "conversation.cli.scan": (value) => cliConversationScanSchema.safeParse(value.scan).success, "conversation.cli.preview": (value) => cliConversationPreviewSchema.safeParse(value.preview).success, "conversation.cli.imported": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) =>
@@ -1158,6 +1168,8 @@ function isServerEvent(value: unknown): value is ServerEvent {
   if (!record(value) || typeof value.type !== "string") return false;
   const type = value.type as Exclude<ServerEvent["type"], RuntimeMutationEvent["type"]>;
   switch (type) {
+    case "provider.cursor-sdk.login.updated":
+      return cursorSdkLoginEventSchema.safeParse(value).success;
     case "conversation.message.focus":
       return messageSearchTargetSchema.safeParse(value.target).success;
     case "server.welcome":

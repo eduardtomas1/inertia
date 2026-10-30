@@ -160,7 +160,7 @@ describe("lazy native fork admission", () => {
     const child = fork(runtime, first.id, "crash-fork");
     const effect = runtime.store.orchestration.nativeControls.start({
       id: "crashed-operation", threadId: child.id, projectId: child.projectId,
-      request: { ...previous.request, operationId: "crashed-operation", targetConversationId: child.id },
+      request: { ...previous.request, kind: "fork", operationId: "crashed-operation", targetConversationId: child.id },
       sourceWorkspaceKey: previous.sourceWorkspaceKey, targetWorkspaceKey: previous.targetWorkspaceKey,
       selection: previous.selection, continuationIdentity: previous.continuationIdentity,
     });

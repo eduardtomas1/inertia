@@ -86,6 +86,7 @@ export function applyFreshSessionFallback(
     sessionId: _sessionId,
     performanceModeTransition: _performanceModeTransition,
     goalContinuationExpected: _goalContinuationExpected,
+    nativeContinuation: _nativeContinuation,
     ...providerInput
   } = active.providerInput;
   active.providerInput = {

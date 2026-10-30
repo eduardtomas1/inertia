@@ -5,14 +5,15 @@ import type { NativeConversationResult } from "../provider/native-conversation-o
 import type { OrchestrationEventStore } from "./event-store";
 import type { OrchestrationEffectOutbox } from "./effect-outbox";
 import { commandFingerprint, durableJson } from "./json";
-import { OrchestrationConflict, type OrchestrationEffect } from "./types";
+import { OrchestrationConflict, type CommandSource, type JsonValue, type OrchestrationEffect } from "./types";
 import { nativeControlLockResources } from "./native-control-projector";
+import type { HistoryRollbackRepository } from "./history-rollback-repository";
 
 /** Durable fences cover both application conversations and the exact native source. */
 export class NativeControlRepository {
   constructor(private readonly database: Database.Database, private readonly events: OrchestrationEventStore,
-    private readonly effects: OrchestrationEffectOutbox, private readonly runtimeId: string,
-    private readonly systemBootId: string | null = null) {}
+    private readonly effects: OrchestrationEffectOutbox, private readonly history: HistoryRollbackRepository,
+    private readonly runtimeId: string, private readonly systemBootId: string | null = null) {}
 
   locked(threadId: string): boolean {
     return this.database.prepare(`SELECT 1 FROM orchestration_v2_entities WHERE kind = 'native-control-lock'
@@ -35,7 +36,8 @@ export class NativeControlRepository {
     this.commit(threadId, projectId, event);
   }
 
-  start(input: Omit<NativeControl, "runtimeId" | "systemBootId" | "state" | "backing" | "reason" | "createdAt" | "updatedAt">): OrchestrationEffect {
+  start(input: Omit<NativeControl, "runtimeId" | "systemBootId" | "state" | "backing" | "reason" | "createdAt" | "updatedAt">,
+    source?: CommandSource, result: JsonValue = null): OrchestrationEffect {
     return this.database.transaction(() => {
       for (const threadId of [input.threadId, input.request.source.identity.conversationId]) {
         const active = this.database.prepare(`SELECT 1 FROM orchestration_v2_entities WHERE thread_id = ? AND
@@ -49,10 +51,10 @@ export class NativeControlRepository {
       if (nativeControlLockResources(control).some((id) => this.locked(id))) throw new OrchestrationConflict("cleanup-pending");
       const event = { type: "native.control-started", payload: control } as const;
       const effectId = `native-control:${control.id}`;
-      this.events.commit({ actorId: "runtime", commandId: effectId, projectId: control.projectId,
-        threadId: control.threadId, command: event, expectedRevision: this.events.revision(control.threadId),
-        events: [event], effects: [{ id: effectId, eventIndex: 0, kind: "native.fork", replayPolicy: "process-bound",
-          payload: { operationId: control.id } }], result: { operationId: control.id } });
+      this.events.commit({ actorId: source?.actorId ?? "runtime", commandId: source?.commandId ?? effectId, projectId: control.projectId,
+        threadId: control.threadId, command: source?.command ?? event, expectedRevision: this.events.revision(control.threadId),
+        events: [event], effects: [{ id: effectId, eventIndex: 0, kind: `native.${control.request.kind}`, replayPolicy: "process-bound",
+          payload: { operationId: control.id } }], result: source ? result : { operationId: control.id } });
       const effect = this.effects.claim(effectId);
       if (!effect) throw new OrchestrationConflict("revision-conflict");
       return effect;
@@ -62,13 +64,14 @@ export class NativeControlRepository {
   settle(effect: OrchestrationEffect, result: NativeConversationResult): NativeControl {
     return this.database.transaction(() => {
       const control = this.claimed(effect);
-      if (result.operationId !== control.id || result.targetConversationId !== control.threadId
+      const rollback = control.request.kind === "rollback";
+      if (result.operationId !== control.id || result.targetConversationId !== (rollback ? undefined : control.threadId)
         || durableJson({ ...result.identity }) !== durableJson(control.request.source.identity)) {
         throw new OrchestrationConflict("scope-conflict");
       }
       // A fork only creates a new native branch. Once cleanup is confirmed,
       // failed/unsupported branches can use the immutable portable snapshot.
-      const state = result.status === "completed" && result.effect === "native-fork" ? "completed"
+      const state = result.status === "completed" && (rollback || result.effect === "native-fork") ? "completed"
         : result.status === "failed" && result.reason === "cleanup-unconfirmed" ? "uncertain" : "portable";
       const backing = state === "completed" && result.status === "completed" ? result.backing : null;
       const event: NativeControlEvent = { type: "native.control-settled", payload: {
@@ -76,7 +79,8 @@ export class NativeControlRepository {
           : result.status === "failed" ? result.reason : result.status,
       } };
       this.commit(control.threadId, control.projectId, event);
-      if (backing) {
+      if (rollback && state !== "uncertain") this.history.applySettled(control, state);
+      if (!rollback && backing) {
         const changed = this.database.prepare(`UPDATE conversations SET provider_session_id = ?, continuation_identity_json = ?
           WHERE id = ? AND project_id = ? AND NOT EXISTS (SELECT 1 FROM agent_turns WHERE conversation_id = ?)`)
           .run(backing.nativeConversationId, JSON.stringify(control.continuationIdentity), control.threadId,
@@ -127,10 +131,13 @@ export class NativeControlRepository {
   }
 
   confirmCleanup(id: string, runtimeId: string): void {
-    const control = this.get(id);
-    if (!control || control.runtimeId !== runtimeId || control.state !== "uncertain") throw new OrchestrationConflict("scope-conflict");
-    this.commit(control.threadId, control.projectId, { type: "native.control-settled",
-      payload: { id, state: "portable", backing: null, reason: "cleanup-confirmed" } });
+    this.database.transaction(() => {
+      const control = this.get(id);
+      if (!control || control.runtimeId !== runtimeId || control.state !== "uncertain") throw new OrchestrationConflict("scope-conflict");
+      this.commit(control.threadId, control.projectId, { type: "native.control-settled",
+        payload: { id, state: "portable", backing: null, reason: "cleanup-confirmed" } });
+      if (control.request.kind === "rollback") this.history.applySettled(control, "portable");
+    }).immediate();
   }
 
   private claimed(effect: OrchestrationEffect): NativeControl {

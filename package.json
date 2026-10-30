@@ -117,7 +117,13 @@
       "node_modules/better-sqlite3/**/*",
       "node_modules/@crowecawcaw/xa11y*/**/*",
       "node_modules/ffi-rs/**/*",
-      "node_modules/@yuuang/ffi-rs*/**/*"
+      "node_modules/@yuuang/ffi-rs*/**/*",
+      "out/main/**",
+      "node_modules/@cursor/**",
+      "node_modules/@bufbuild/**",
+      "node_modules/@connectrpc/**",
+      "node_modules/@statsig/**",
+      "node_modules/zod/**"
     ],
     "electronFuses": {
       "runAsNode": false,

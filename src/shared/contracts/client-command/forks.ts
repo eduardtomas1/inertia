@@ -10,4 +10,10 @@ export const forkCommandSchemas = [
     conversationId: z.string().uuid(), afterRevision: z.number().int().nonnegative().optional(),
     limit: z.number().int().min(1).max(100).optional(),
   }).strict() }).strict(),
+  z.object({ ...requestBase, type: z.literal("conversation.merge-back"), payload: z.object({
+    forkConversationId: z.string().uuid(),
+  }).strict() }).strict(),
+  z.object({ ...requestBase, type: z.literal("conversation.rollback"), payload: z.object({
+    conversationId: z.string().uuid(), turnId: z.string().uuid().nullable(),
+  }).strict() }).strict(),
 ] as const;

@@ -36,7 +36,8 @@ export function captureForkHistory(database: Database.Database, targetThreadId: 
     .get(boundary.id, boundary.conversationId) as { requested_at: string; position: number } | undefined;
   if (!boundaryRow) throw new Error("The fork source turn is unavailable.");
   const eligible = `SELECT id FROM agent_turns WHERE conversation_id = @thread
-    AND (requested_at, rowid) <= (@requested, @position)`;
+    AND (requested_at, rowid) <= (@requested, @position)
+    AND id NOT IN (SELECT id FROM orchestration_v2_entities WHERE kind = 'rolled-back-turn' AND thread_id = @thread)`;
   const parameters = { thread: boundary.conversationId, requested: boundaryRow.requested_at,
     position: boundaryRow.position, completed: boundary.completedAt ?? boundaryRow.requested_at };
   const index = `SELECT 'message' AS source, messages.id, messages.created_at AS at, messages.rowid AS position

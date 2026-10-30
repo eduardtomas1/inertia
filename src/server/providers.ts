@@ -1,3 +1,6 @@
+import { acquireProviderRunInstallation } from "./provider/provider-run-installation";
+import { CursorSdkController } from "./provider/cursor-sdk-controller";
+import type { CursorSdkStatus } from "./provider/cursor-sdk-service";
 import { codexUsageContext, readManagedClaudeUsage, readManagedOpenCodeAccount, type CodexControlContext } from "./provider/usage-context";
 export type { CodexControlContext } from "./provider/usage-context";
 import { randomUUID } from "node:crypto";
@@ -137,6 +140,7 @@ export class ProviderManager {
   private readonly commands: Partial<Record<ProviderId, string>>;
   private readonly resolvedCommands = new Map<ProviderId, string>();
   private readonly cancelGraceMs: number;
+  private readonly cursorSdkController: CursorSdkController;
   private readonly harnessRegistry: AgentHarnessRegistry;
   private readonly metadataCache: ProviderMetadataCache;
   private readonly detectProviderImplementation: typeof detectProvider;
@@ -217,6 +221,7 @@ export class ProviderManager {
         "Production ProviderManager construction requires installation authority.",
       );
     }
+    this.cursorSdkController = new CursorSdkController(options.cursorSdk, () => this.processEnvironment ?? process.env);
     this.commands = { ...options.commands };
     this.cancelGraceMs = Math.max(100, Math.min(options.cancelGraceMs ?? DEFAULT_PROVIDER_CANCEL_GRACE_MS, 30_000));
     this.harnessRegistry = harnessRegistry;
@@ -238,6 +243,7 @@ export class ProviderManager {
         this.installationRecovery.report(providerId, "probe-cleanup-unconfirmed"),
     });
     this.capabilityAuthority = new ProviderCapabilityAuthority({
+      cursorSdkEvidence: () => this.cursorSdkController.currentInstallation()?.evidence,
       metadataCache: this.metadataCache,
       resolvedExecutable: (providerId) =>
         this.resolvedCommands.get(providerId),
@@ -273,10 +279,12 @@ export class ProviderManager {
       cancelGraceMs: this.cancelGraceMs,
       forceStopBudgetMs: options.forceStopBudgetMs,
       harnessRegistry: this.harnessRegistry,
+      cursorSdk: options.cursorSdk,
       metadataCache: this.metadataCache,
       resolveBackendLaunchOptions: this.resolveBackendLaunchOptions,
       conversationProviderGate: this.conversationProviderGate,
       commandFor: (providerId) => this.commandFor(providerId),
+      commandForRun: (input) => input.harnessId === "cursor-sdk" ? this.cursorSdkController.requireInstallation().node : this.commandFor(input.providerId),
       resolvedCommandFor: (providerId) => this.resolvedCommands.get(providerId),
       rememberResolvedCommand: (providerId, executable) => {
         this.resolvedCommands.set(providerId, executable);
@@ -304,30 +312,10 @@ export class ProviderManager {
               configured,
             )
           : this.testManagerCapabilityAvailable(input, capabilityId),
-      acquireInstallationUse: (input, executable) => {
-        const admission = this.installationAuthority.acquire(
-          input.providerId,
-          executable,
-          input.backendProfile,
-          "provider-run",
-          input.runId,
-        );
-        const finished = this.installationRecovery.trackRun(input.providerId);
-        return {
-          release: () => {
-            const released = this.installationAuthority.release(admission);
-            if (released) finished();
-            return released;
-          },
-          quarantine: (reason) => {
-            this.installationAuthority.quarantine(admission, reason);
-          },
-          liftQuarantine: () => {
-            finished();
-            if (admission) this.installationLeases?.liftQuarantine(admission.identity, admission.owner.operationId);
-          },
-        };
-      },
+      acquireInstallationUse: (input, executable) => acquireProviderRunInstallation(input, executable, {
+        leases: this.installationLeases, authority: this.installationAuthority,
+        recovery: this.installationRecovery, cursorSdk: this.cursorSdkController,
+      }),
       onCleanupUnconfirmed: (identity, cleanupReason) => {
         options.onRunCleanupUnconfirmed?.(identity, cleanupReason);
         this.installationRecovery.report(identity.providerId, "run-cleanup-unconfirmed");
@@ -370,6 +358,15 @@ export class ProviderManager {
 
   activeConversationIds(): string[] {
     return this.runCoordinator.activeConversationIds();
+  }
+
+  cursorSdkStatus(signal: AbortSignal): Promise<CursorSdkStatus> { return this.cursorSdkController.status(signal); }
+
+  cursorSdkModels(signal: AbortSignal) { return this.cursorSdkController.discoverModels(signal); }
+
+  loginCursorSdk(onUrl: (url: string) => void, signal: AbortSignal): Promise<{ expiresAt: number }> {
+    this.assertProviderConfigurationMutable("cursor");
+    return this.cursorSdkController.login(onUrl, signal);
   }
 
   harnessCapabilities(providerId?: ProviderId): readonly AgentHarnessCapabilities[] {
@@ -536,6 +533,7 @@ export class ProviderManager {
   }
 
   resolveModelRoute(selectionInput: ModelSelection): ResolvedModelRoute {
+    if (selectionInput.harnessId === "cursor-sdk") this.cursorSdkController.requireModel(selectionInput.modelId);
     return resolveModelRoute({
       backendProfiles: this.backendProfiles,
       backendCompatibilities: this.backendCompatibilities,
@@ -559,6 +557,7 @@ export class ProviderManager {
   }
 
   invalidateInstallationEvidence(providerId: ProviderId): void {
+    if (providerId === "cursor") this.cursorSdkController.invalidate();
     this.capabilityAuthority.invalidate(providerId);
     this.resolvedCommands.delete(providerId);
     this.metadataCache.correlate(providerId, {

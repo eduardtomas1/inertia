@@ -123,6 +123,7 @@ type ProductionHarnessId =
   | "codex-app-server"
   | "claude-agent-sdk"
   | "cursor-acp"
+  | "cursor-sdk"
   | "kimi-acp"
   | "opencode-sdk"
   | "antigravity-cli"
@@ -235,6 +236,7 @@ const CONTRACT_TESTS: Readonly<Record<ProductionHarnessId, string>> = {
   "codex-app-server": "tests/server/codex-app-server.test.ts",
   "claude-agent-sdk": "tests/server/claude-agent-sdk-harness.test.ts",
   "cursor-acp": "tests/server/cursor-acp-harness.test.ts",
+  "cursor-sdk": "tests/server/cursor-sdk-harness.test.ts",
   "kimi-acp": "tests/server/kimi-acp-harness.test.ts",
   "opencode-sdk": "tests/server/opencode-sdk-harness.test.ts",
   "antigravity-cli": "tests/server/antigravity-cli-harness.test.ts",
@@ -319,6 +321,14 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       "model-discovery": "negotiated",
       "subagent-create": "negotiated",
     },
+  },
+  {
+    providerId: "cursor", harnessId: "cursor-sdk", implementationRevision: 1,
+    protocolRevision: "cursor-sdk/1.0.38/owned-worker-v1", bundledSdkVersion: "1.0.38",
+    support: { "text-streaming": "native", reasoning: "native", "tool-activity": "native",
+      "session-resume": "native", "native-session-id": "native", cancellation: "native",
+      "follow-up-steer": "native", "provider-native-tools": "native", "host-tool-bridge": "host-exact-turn",
+      "process-cleanup": "host-exact-turn", approvals: "host-exact-turn" },
   },
   {
     providerId: "kimi",

@@ -69,6 +69,7 @@ const IMPLEMENTATION_SOURCES = new Map<
   number,
   readonly ImplementationSourceDefinition[]
 >([
+  [109, [implementation("src/server/persistence/migrations/cursor-sdk-provider.ts", "cursorSdkIdentifier", "rebuildCursorSdkTable")]],
   [108, [implementation("src/server/persistence/migrations/native-pi-provider.ts",
     "PI_TABLES", "quotePiIdentifier", "piTableDefinition", "rebuildPiTable")]],
   [17, [

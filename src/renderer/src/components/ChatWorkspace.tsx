@@ -174,6 +174,7 @@ type ChatWorkspaceProps = {
   promptContext?: string | null;
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];
+  rolledBackTurnIds?: readonly string[];
   watcherWakes?: readonly WatcherWakeSummary[];
   onConversationContextCommand?: ConversationContextCommandRunner;
   onQueueCommand?: QueueCommandRunner;
@@ -294,6 +295,7 @@ export function ChatWorkspace({
   promptContext,
   contextSources = EMPTY_CONTEXT_SOURCES,
   contextPackets = EMPTY_CONTEXT_PACKETS,
+  rolledBackTurnIds,
   watcherWakes,
   onConversationContextCommand,
   onQueueCommand,
@@ -978,7 +980,8 @@ export function ChatWorkspace({
     && ownedTurns.length === 0;
 
   return (
-    <ForkSurfaceProvider projectId={project.id} conversationId={conversation.id} run={onForkCommand}>
+    <ForkSurfaceProvider projectId={project.id} conversationId={conversation.id} run={onForkCommand}
+      rolledBackTurnIds={rolledBackTurnIds}>
     <Root
       className={clsx(
         "chat-workspace",

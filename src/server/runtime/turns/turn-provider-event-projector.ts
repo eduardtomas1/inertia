@@ -81,7 +81,7 @@ export class TurnProviderEventProjector {
   project(active: ActiveTurn, event: ProviderEvent): void {
     if (event.type === "text" || event.type === "text-snapshot" || event.type === "approval"
       || event.type === "input" || event.type === "plan") {
-      this.options.store.orchestration.backings.acknowledge(active.turn.runId);
+      this.options.store.orchestration.acknowledge(active.turn.runId);
     }
     switch (event.type) {
       case "native-boundary":

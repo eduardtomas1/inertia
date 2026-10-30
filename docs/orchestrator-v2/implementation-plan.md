@@ -52,8 +52,11 @@ tests, not just interfaces, documentation, or a disconnected prototype.
 
 ## Ownership and current package
 
-**Paused by the user on 2026-10-30 after requesting commit and push of both
-chats' current work. V2 is incomplete; no merge is authorized.**
+**Resumed on 2026-10-30 to finish the current phase-3 checkpoint and the
+already-started Cursor SDK integration. The user requests commit and push of
+this checkpoint, then a stop. V2 remains incomplete and the PR stays draft;
+no merge or CI monitoring is authorized. Final verification is recorded in
+[phase3-verification.md](phase3-verification.md).**
 
 The primary chat owns the event/command/effect core, schema, runtime integration,
 client integration and overall validation. The requested second Astra/XHigh
@@ -61,6 +64,16 @@ chat has completed the Codex/Claude native fork and rollback adapter package
 and subsequently implemented Pi and OpenCode 2. Cursor SDK and ACP work remains
 unfinished at the user-requested pause. Its APIs and validation notes are in
 `provider-implementation-progress.md`. Both chats use persistent goals.
+
+**Resumed by the user on 2026-10-30.** PR #686 stays a long-lived draft. The
+primary chat resumed with production command ordering and deferred native
+rollback (context only, separate from Git reversal); a parallel agent owns the
+official Cursor SDK package. Migration 109 is reserved for Cursor SDK.
+
+The user then bounded the current stop point to phase 3 (forks, history
+rollback and context merge-back with their in-flight integration), followed by
+a comparison against T3 Code `32ecd71726fee16f335484c1f95cbce126d461f6`. Later
+phases were deliberately not started; the checklist above stays open.
 
 Current code and check results are recorded in `implementation-progress.md`.
 

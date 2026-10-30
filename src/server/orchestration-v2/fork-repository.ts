@@ -7,6 +7,7 @@ import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import type { NewConversationOptions } from "../persistence/types";
 import type { NativeBoundaryRepository } from "./native-boundary-repository";
 import type { OrchestrationEventStore } from "./event-store";
+import type { HistoryRollbackRepository } from "./history-rollback-repository";
 import { captureForkHistory } from "./fork-history";
 import { commandFingerprint } from "./json";
 import { OrchestrationConflict, type CommandSource } from "./types";
@@ -34,7 +35,8 @@ function targetId(source: CommandSource): string {
 /** Creates only the application fork; native work is resolved lazily on its first send. */
 export class ForkRepository {
   constructor(private readonly database: Database.Database, private readonly events: OrchestrationEventStore,
-    private readonly boundaries: NativeBoundaryRepository, private readonly access: ForkAccess) {}
+    private readonly boundaries: NativeBoundaryRepository, private readonly rollbacks: HistoryRollbackRepository,
+    private readonly access: ForkAccess) {}
 
   get(threadId: string) {
     const row = this.events.projection("fork", threadId);
@@ -66,6 +68,7 @@ export class ForkRepository {
         throw new OrchestrationConflict("scope-conflict");
       }
       if (!isAgentTurnTerminalStatus(turn.status)) throw new Error("Choose a finished run to fork.");
+      if (this.rollbacks.rolledBack(turn.id)) throw new Error("This run was rolled back and cannot be forked.");
       const workspaceKey = this.access.conversationPath(parent.id);
       const title = input.title?.trim() || `${parent.title} fork`.slice(0, 120);
       if (title.length > 120) throw new Error("A fork title must be 120 characters or fewer.");

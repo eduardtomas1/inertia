@@ -27,6 +27,7 @@ import {
 } from "./layers";
 import { HtmlRenderTurnScopeProvider, TurnHtmlRenders } from "./html-render";
 import { turnCompletionAnnouncement } from "./metadata";
+import { useTurnRolledBack } from "../orchestration/fork-surface";
 import type { ResponseTimelineProps } from "./types";
 
 const TURN_SETTLEMENT_TRANSITION_MS = 160;
@@ -193,6 +194,7 @@ function TurnTimelineComponent({
     return () => window.clearTimeout(timer);
   }, [isSettling]);
 
+  const rolledBack = useTurnRolledBack(turn.agentTurn.id);
   return (
     <section
       className={clsx(
@@ -200,6 +202,7 @@ function TurnTimelineComponent({
         turn.isActive && "is-active",
         isSettling && "is-settling",
         isRevealingSettledAnswer && "is-revealing-settled-answer",
+        rolledBack && "is-rolled-back",
       )}
       aria-label={`Turn ${turn.index}`}
       data-completion-transition={isSettling ? "active-to-settled" : undefined}

@@ -11,6 +11,8 @@ import { projectBackingEvent } from "./backing-projector";
 import { projectNativeBoundary } from "./native-boundary-projector";
 import { projectForkEvent } from "./fork-projector";
 import { projectNativeControl } from "./native-control-projector";
+import { projectHistoryEvent } from "./history-projector";
+import { projectMergeBackEvent } from "./merge-back-projector";
 import { OrchestrationConflict, type ProjectEvent, type ProjectionWrite } from "./types";
 
 export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
@@ -28,11 +30,16 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   if (event.type === "native.control-started" || event.type === "native.control-settled" || event.type === "fork.portable-selected") {
     return projectNativeControl(event, envelope, read);
   }
+  if (event.type === "history.rolled-back" || event.type === "history.continuation-changed") {
+    return projectHistoryEvent(event, envelope, read);
+  }
+  if (event.type === "merge-back.prepared" || event.type === "merge-back.changed") return projectMergeBackEvent(event, envelope, read);
   if (event.type === "provider.native-boundary") return projectNativeBoundary(event, envelope, read);
   if (event.type === "thread.forked" || event.type === "fork.history-part" || event.type === "fork.history-sealed") {
     return projectForkEvent(event, envelope, read);
   }
   if (event.type === "provider.backing-recorded" || event.type === "provider.backing-invalidated" || event.type === "provider.session-cleared"
+    || event.type === "provider.backing-rewound"
     || event.type === "context.handoff-prepared" || event.type === "context.handoff-state-changed") {
     return projectBackingEvent(event, envelope, read);
   }

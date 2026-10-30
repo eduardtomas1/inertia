@@ -482,7 +482,7 @@ export class ProviderMaintenanceController {
     const target = this.options.target(providerId);
     const capabilities = await this.capabilities(target);
     const registryPackage: ProviderRegistryPackage | null = capabilities.packageName
-      ? { name: capabilities.packageName, range: providerInstallPackageRange(providerId) }
+      ? { name: capabilities.packageName, range: providerInstallPackageRange(providerId, target.installedVersion) }
       : null;
     const latest = capabilities.homebrew && target.installed
       ? await this.latestVersions.homebrew(capabilities.homebrew, force)

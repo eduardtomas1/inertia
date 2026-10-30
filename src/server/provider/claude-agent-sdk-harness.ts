@@ -83,6 +83,8 @@ import {
 import { createClaudeHostTools } from "./claude-host-tools";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
+import { createClaudeNativeConversationOperations, claudeNativeContinuationOptions, readClaudePersistedNativeHead } from "./claude-native-conversation";
+import { trackNativeConversationRun } from "./native-conversation-run-tracking";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -175,20 +177,22 @@ export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOption
     options.terminalSubagentDrainTimeoutMs,
   );
   const checklistSessions = new ClaudeChecklistSessions();
+  const activeNativeConversations = new Set<string>();
   return {
     id: "claude-agent-sdk",
     providerId: "claude",
     capabilities: CLAUDE_AGENT_SDK_CAPABILITIES,
+    nativeConversation: createClaudeNativeConversationOperations(activeNativeConversations),
     supports: (input) => input.providerId === "claude",
-    start: (startOptions) => startClaudeRun(
-      startOptions,
+    start: (startOptions) => trackNativeConversationRun(activeNativeConversations, startOptions, (tracked) => startClaudeRun(
+      tracked,
       options.createQuery ?? claudeQuery,
       options,
       stopTaskTimeoutMs,
       terminalSubagentDrainTimeoutMs,
       options.skillFilesystem,
       checklistSessions,
-    ),
+    )),
   };
 }
 
@@ -230,8 +234,8 @@ function startClaudeRun(
   let acceptingFollowUps = false;
   let acceptedFollowUp = false;
   const pendingFollowUpIds = new Set<string>();
-  let sessionId = options.input.sessionId;
-  let authoritativeSessionId = options.input.sessionId;
+  let sessionId = options.nativeContinuation?.nativeConversationId ?? options.input.sessionId;
+  let authoritativeSessionId = sessionId;
   let checklistTasks = checklistSessions.tasks(sessionId, true);
   let pendingSessionReset: { outgoingId: string; candidateId?: string } | undefined;
   let contextUsageGeneration = 0;
@@ -319,7 +323,7 @@ function startClaudeRun(
     emitter,
     text,
     usesNativeAnthropic,
-    usage: new ClaudeUsageLedger(Boolean(options.input.sessionId)),
+    usage: new ClaudeUsageLedger(Boolean(options.input.sessionId) && options.nativeContinuation?.kind !== "new-session"),
     selectedModelId: options.input.modelSelection.modelId,
     contextWindowOverride:
       options.input.modelSelection.contextWindowOverride,
@@ -334,6 +338,10 @@ function startClaudeRun(
   const providerResult = (async (): Promise<ProviderRunResult> => {
     let providerThrew = false;
     try {
+      const continuationOptions = claudeNativeContinuationOptions(options.input.sessionId, options.nativeContinuation);
+      if (options.nativeContinuation && options.input.operation) {
+        throw new Error("A Claude continuation must be applied to a normal turn.");
+      }
       const compactInstruction = options.input.operation?.instruction;
       const promptText = options.input.operation?.kind === "compact"
         ? `/compact${compactInstruction ? ` ${compactInstruction}` : ""}`
@@ -411,7 +419,7 @@ function startClaudeRun(
           ...(claudeHostTools
             ? { mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config } }
             : {}),
-          ...(options.input.sessionId ? { resume: options.input.sessionId } : {}),
+          ...continuationOptions,
           ...(options.input.model ? { model: options.input.model } : {}),
           // Custom backends map effort through CLAUDE_CODE_EFFORT_LEVEL instead.
           ...(usesNativeAnthropic && claudeEffort(options.input.reasoningEffort)
@@ -495,6 +503,8 @@ function startClaudeRun(
           && messageSessionId === authoritativeSessionId;
         if (message.type === "system" && message.subtype === "init"
           && initAttestsRequestedSession) {
+          emitter.nativeBoundary({ nativeConversationId: messageSessionId, nativeSessionId: messageSessionId,
+            nativeTurnId: null, persistedHeadId: null, phase: "started" });
           if (requestedFastModeState === "on"
             && record.fast_mode_state !== requestedFastModeState
             && !(fastModeVerified && record.fast_mode_state === "cooldown")) {
@@ -846,6 +856,11 @@ function startClaudeRun(
       signal: child?.signalCode ?? null,
       ...(sessionUnavailable && terminal.failure ? { failure: { ...terminal.failure, sessionUnavailable: true as const } } : {}),
     };
+    if (terminal.cleanupConfirmed && authoritativeSessionId && terminal.sessionId === authoritativeSessionId) {
+      const head = await readClaudePersistedNativeHead(authoritativeSessionId, options.input.cwd, options.environment);
+      emitter.nativeBoundary({ nativeConversationId: authoritativeSessionId, nativeSessionId: authoritativeSessionId,
+        nativeTurnId: head, persistedHeadId: head, phase: "settled" });
+    }
     emitter.status(terminal.status, terminal.error);
     const unconfirmedCleanup = !terminal.cleanupConfirmed && !hostToolsCleanupFailed && child
       ? providerUnconfirmedCleanup(child)

@@ -111,7 +111,7 @@ describe("provider.refresh recovery", () => {
       payload: {},
     });
     expect(events).toEqual([
-      "recover:claude", "recover:cursor", "recover:kimi", "recover:opencode", "recover:antigravity", "refresh:all",
+      "recover:claude", "recover:cursor", "recover:kimi", "recover:opencode", "recover:antigravity", "recover:pi", "refresh:all",
     ]);
   });
 

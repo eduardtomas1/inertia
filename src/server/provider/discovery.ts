@@ -26,6 +26,7 @@ import {
 import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
 import type { ProviderAccountKind } from "../../shared/provider";
 import { providerAuthStatusArgs } from "./auth";
+import { probePiProtocol, type PiProtocolProbe } from "./pi-discovery";
 import { PROVIDER_INFO } from "./catalog";
 import {
   PROVIDER_IDS,
@@ -133,6 +134,7 @@ function scheduleProviderProbeDeadline(
 }
 
 interface ProviderDiscoveryDependencies {
+  probePiProtocol?: PiProtocolProbe;
   executableCandidates?: typeof executableCandidates;
   probeOpenCodePureIsolation?: OpenCodePureIsolationProbe;
   probeProcess?: ProviderProbeProcess;
@@ -311,7 +313,7 @@ function antigravityVersionSupportsHeadless(version: string | undefined): boolea
 }
 
 function openCodeVersionIsSupported(version: string | undefined): boolean {
-  return versionParts(version)[0]! < 2;
+  return versionParts(version)[0]! < 3;
 }
 
 function nativeExecutablePreference(executable: string): number {
@@ -505,12 +507,15 @@ async function detectProviderRecordingCleanup(
   const runOpenCodeIsolationProbe = dependencies.probeOpenCodePureIsolation
     ?? probeOpenCodePureIsolation;
   const provider = PROVIDER_INFO[providerId];
-  const command = options.command?.trim() || provider.command;
+  let command = options.command?.trim() || provider.command;
   const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, MAX_PROBE_DEADLINE_MS));
   const cwd = options.cwd ?? process.cwd();
   const discoveredEnvironment = await providerEnvironment(
     options.refreshEnvironment === true,
   );
+  if (providerId === "pi" && !options.command?.trim()) {
+    command = environmentValue(discoveredEnvironment.env, "INERTIA_PI_EXECUTABLE", process.platform)?.trim() || command;
+  }
   requireActive();
   const probeAuthentication = options.probeAuthentication !== false;
   const probeEnvironment: ProviderEnvironment = {
@@ -608,7 +613,9 @@ async function detectProviderRecordingCleanup(
       serveProbe.started
       && !serveProbe.timedOut
       && serveProbe.exitCode === 0
-      && /(?:^|\s)--pure(?:\s|,|$)/mu.test(serveProbe.output)
+      && ((version ?? "").startsWith("2.")
+        ? /--hostname\b/u.test(serveProbe.output) && /--port\b/u.test(serveProbe.output)
+        : /(?:^|\s)--pure(?:\s|,|$)/mu.test(serveProbe.output))
     );
     const versionResponded = probe.started && !probe.timedOut && probe.exitCode === 0;
     return {
@@ -627,7 +634,7 @@ async function detectProviderRecordingCleanup(
                 ? openCodeVersionIsSupported(version)
                 : true
       ),
-      versionReady: providerId === "antigravity"
+      versionReady: providerId === "pi" ? (version ?? "").startsWith("1.") : providerId === "antigravity"
         ? antigravityCandidateIsIdentified(executable)
           && antigravityVersionSupportsHeadless(version)
         : providerId === "opencode"
@@ -739,7 +746,7 @@ async function detectProviderRecordingCleanup(
         : providerWithoutAcp
           ? `${providerShortName(provider.name)} CLI found, but ACP is unavailable`
           : openCodeTwoOnly
-            ? "OpenCode 2 is not supported yet; use OpenCode 1.x (opencode-ai)."
+            ? "This OpenCode major version is not supported; use OpenCode 1.x or 2.x."
           : providerWithoutPureServe
             ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
             : providerId === "codex"
@@ -806,6 +813,20 @@ async function detectProviderRecordingCleanup(
     };
   }
 
+  if (providerId === "pi") {
+    const protocol = versionProbeCleanupConfirmed && (selected.version ?? "").startsWith("1.")
+      ? await (dependencies.probePiProtocol ?? probePiProtocol)({ executable: selected.executable,
+          environment: probeEnvironment.env, cwd, signal: options.signal, timeoutMs, terminateProcessTree: dependencies.terminateProcessTree })
+      : { ready: false, cleanupConfirmed: versionProbeCleanupConfirmed };
+    requireActive(protocol.cleanupConfirmed);
+    return { provider, available: true, executable: selected.executable, ...(selected.version ? { version: selected.version } : {}),
+      installState: "installed", authState: "unknown", canRun: probeAuthentication && protocol.ready && protocol.cleanupConfirmed,
+      protocolVerified: protocol.ready && protocol.cleanupConfirmed, cleanupConfirmed: protocol.cleanupConfirmed,
+      statusMessage: !protocol.cleanupConfirmed ? "Pi discovery process cleanup could not be confirmed"
+        : !protocol.ready ? "Pi 1.x RPC is required; update the selected executable"
+        : "Installed; Pi verifies native authentication when a request starts" };
+  }
+
   if (!probeAuthentication) {
     const cleanupConfirmed = openCodeIsolation.cleanupConfirmed
       && versionProbeCleanupConfirmed;
@@ -844,7 +865,9 @@ async function detectProviderRecordingCleanup(
     };
   }
 
-  const providerAuthArgs = providerAuthStatusArgs(providerId);
+  // V2 auth list can launch the shared background service. The owned run's
+  // model catalog is the authentication authority instead of a passive probe.
+  const providerAuthArgs = providerId === "opencode" && (selected.version ?? "").startsWith("2.") ? null : providerAuthStatusArgs(providerId);
   if (providerAuthArgs === null) {
     return {
       provider,
@@ -857,6 +880,7 @@ async function detectProviderRecordingCleanup(
       cleanupConfirmed: true,
       statusMessage: providerId === "antigravity"
         ? "Installed; Antigravity checks your sign-in when a turn starts"
+        : providerId === "opencode" ? "Installed; OpenCode verifies authentication when a request starts"
         : `Installed; ${providerShortName(provider.name)} ACP will verify authentication when a session starts`,
     };
   }

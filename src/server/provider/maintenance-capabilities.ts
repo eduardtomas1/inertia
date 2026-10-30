@@ -52,6 +52,7 @@ const INSTRUCTIONS_URLS: Readonly<
   kimi: "https://moonshotai.github.io/kimi-code/en/guides/getting-started.html",
   opencode: "https://opencode.ai/docs/cli/#upgrade",
   antigravity: "https://antigravity.google/docs/cli/install/",
+  pi: "https://pi.dev/docs/latest/quickstart",
 };
 
 export async function resolveProviderMaintenanceCapabilities(
@@ -60,8 +61,8 @@ export async function resolveProviderMaintenanceCapabilities(
 ): Promise<ProviderMaintenanceCapabilities> {
   const base = {
     providerId: target.providerId,
-    packageName: providerInstallPackageName(target.providerId),
-    instructionsUrl: INSTRUCTIONS_URLS[target.providerId],
+    packageName: providerInstallPackageName(target.providerId, target.installedVersion),
+    instructionsUrl: target.providerId === "opencode" && target.installedVersion?.startsWith("2.") ? "https://opencode.ai/v2/docs/cli" : INSTRUCTIONS_URLS[target.providerId],
   };
   if (!target.installed || !target.executable) {
     return {
@@ -79,6 +80,7 @@ export async function resolveProviderMaintenanceCapabilities(
     providerId: target.providerId,
     executable: target.executable,
     environment,
+    installedVersion: target.installedVersion,
   }, dependencies);
   return {
     ...base,

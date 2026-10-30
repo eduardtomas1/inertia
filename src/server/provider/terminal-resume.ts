@@ -116,6 +116,8 @@ export function providerTerminalResumeArguments(
     case "kimi":
     case "opencode":
       return ["--session", sessionId];
+    case "pi":
+      throw new Error("Open this Pi session through Inertia so its exact session directory remains scoped.");
     case "antigravity":
       return ["--conversation", sessionId];
   }

@@ -114,6 +114,7 @@ function inactiveExtension(
     || harnessId === "cursor-acp"
     || harnessId === "kimi-acp"
     || harnessId === "opencode-sdk"
+    || harnessId === "pi-rpc"
   ) {
     return {
       kind: harnessId,
@@ -265,6 +266,7 @@ describe("production provider lifecycle conformance", () => {
       "kimi-acp",
       "opencode-sdk",
       "antigravity-cli",
+      "pi-rpc",
     ]);
     expect(PRODUCTION_HARNESSES.some(({ harnessId }) =>
       ["codex-cli", "claude-cli", "cursor-cli", "opencode-cli"].includes(harnessId)))
@@ -873,6 +875,7 @@ describe("production provider lifecycle conformance", () => {
         "codex-app-server",
         "claude-agent-sdk",
         "opencode-sdk",
+        "pi-rpc",
       ].includes(route.harnessId);
 
       await expect(controlled.manager.steer(
@@ -1557,7 +1560,7 @@ describe("production provider lifecycle conformance", () => {
         expect(controlled.manager.respondToInput(
           input.conversationId, "input-1", { answer: ["yes"] }, exact,
         )).toBe(true);
-        const canSteer = ["codex", "claude", "opencode"].includes(input.providerId);
+        const canSteer = ["codex", "claude", "opencode", "pi"].includes(input.providerId);
         await expect(controlled.manager.steer(
           input.conversationId, { content: "Continue this run.", imagePaths: [] }, exact,
         )).resolves.toBe(canSteer);

@@ -172,6 +172,7 @@ function capabilitiesForEvent(
     case "subagent":
       return ["subagent-create"];
     case "session":
+    case "native-boundary":
       return ["native-session-id"];
     case "metadata":
       return [

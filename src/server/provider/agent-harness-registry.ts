@@ -1,3 +1,4 @@
+import { createPiRpcHarness } from "./pi-rpc-harness";
 import { createAntigravityCliHarness } from "./antigravity-cli-harness";
 import { createClaudeAgentSdkHarness } from "./claude-agent-sdk-harness";
 import { createCodexAppServerHarness } from "./codex-app-server-harness";
@@ -28,6 +29,7 @@ const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "kimi-acp": "kimi",
   "opencode-sdk": "opencode",
   "antigravity-cli": "antigravity",
+  "pi-rpc": "pi",
 };
 
 export class AgentHarnessRegistry {
@@ -76,14 +78,17 @@ export class AgentHarnessRegistry {
     }
     if (input.backendProfile.source === "custom") {
       if (
-        input.providerId === "cursor"
+        input.providerId === "pi"
+        || input.providerId === "cursor"
         || input.providerId === "kimi"
         || input.providerId === "antigravity"
         || input.providerId === "opencode"
       ) {
         throw new ProviderRuntimeError(
           "invalid_input",
-          input.providerId === "cursor"
+          input.providerId === "pi"
+            ? "Pi backends must come from Pi’s native model catalog."
+            : input.providerId === "cursor"
             ? "Cursor controls its backend; external backend profiles cannot be injected."
             : input.providerId === "kimi"
               ? "Kimi Code controls its backend; external backend profiles cannot be injected."
@@ -142,6 +147,7 @@ export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
     createKimiAcpHarness(),
     createOpenCodeSdkHarness(),
     createAntigravityCliHarness(),
+    createPiRpcHarness(),
   ]);
   const registered = registry.list().map((harness) =>
     `${harness.providerId}\0${harness.id}`);

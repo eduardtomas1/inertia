@@ -37,6 +37,7 @@ export const PROVIDER_IDS = [
   "kimi",
   "opencode",
   "antigravity",
+  "pi",
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -275,6 +276,16 @@ export interface ProviderSessionEvent extends ProviderEventBase {
   sessionId: string;
 }
 
+/** Provider-authored inclusive history anchor; null means unproved, never an inferred application ID. */
+export interface ProviderNativeBoundaryEvent extends ProviderEventBase {
+  type: "native-boundary";
+  nativeConversationId: string;
+  nativeSessionId: string | null;
+  nativeTurnId: string | null;
+  persistedHeadId: string | null;
+  phase: "started" | "settled";
+}
+
 export interface ProviderSessionTitleEvent extends ProviderEventBase {
   type: "session-title";
   sessionId: string;
@@ -398,6 +409,7 @@ export type ProviderEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
+  | ProviderNativeBoundaryEvent
   | ProviderSessionTitleEvent
   | ProviderApprovalEvent
   | ProviderApprovalResolvedEvent

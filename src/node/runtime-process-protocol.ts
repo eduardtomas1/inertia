@@ -11,11 +11,9 @@ import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../sha
 import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
 import { parseRuntimeIssueEvidenceRequest, parseRuntimeIssueEvidenceResult, type RuntimeIssueEvidenceRequest, type RuntimeIssueEvidenceResult } from "./runtime-issue-evidence-protocol";
 import { parseRuntimeHtmlRenderEvent, parseRuntimeHtmlRenderReadCommand, type RuntimeHtmlRenderEvent, type RuntimeHtmlRenderReadCommand } from "./runtime-html-render-protocol";
-import {
-  isBackendCredentialGeneration,
-  isBackendCredentialSecret,
-  isBackendSecretReference,
-} from "../shared/backend-credentials";
+import { parseRuntimeCredentialRequest, parseRuntimeCredentialResult,
+  type RuntimeCredentialRequest, type RuntimeCredentialResult } from "./runtime-credential-protocol";
+export type { RuntimeCredentialOperation, RuntimeCredentialFailureCode, RuntimeCredentialResult } from "./runtime-credential-protocol";
 import {
   claudeCompatibleBackendProfileSchema,
   type ClaudeCompatibleBackendProfile,
@@ -145,8 +143,6 @@ export type RuntimeWorkerCommand =
   | RuntimeDocumentPreparationResult
   | RuntimeSecureFileResult | RuntimeAgentBrowserResult | RuntimeIssueEvidenceResult;
 
-export type RuntimeCredentialOperation = "resolve" | "status" | "clear" | "forget";
-export type RuntimeCredentialFailureCode = "not-found" | "unavailable" | "invalid";
 export type RuntimeAttachmentFailureCode = "not-found" | "unavailable" | "invalid";
 
 export type RuntimeAttachmentResult =
@@ -191,38 +187,6 @@ export type RuntimeAttachmentRelinquishResult =
       requestId: string;
       ok: false;
       code: RuntimeAttachmentFailureCode;
-      message: string;
-    };
-
-export type RuntimeCredentialResult =
-  | {
-      type: "runtime.credential-result";
-      requestId: string;
-      operation: "resolve";
-      ok: true;
-      secret: string;
-    }
-  | {
-      type: "runtime.credential-result";
-      requestId: string;
-      operation: "status";
-      ok: true;
-      hasSecret: boolean;
-      credentialGeneration: string | null;
-    }
-  | {
-      type: "runtime.credential-result";
-      requestId: string;
-      operation: "clear" | "forget";
-      ok: true;
-      removed: boolean;
-    }
-  | {
-      type: "runtime.credential-result";
-      requestId: string;
-      operation: RuntimeCredentialOperation;
-      ok: false;
-      code: RuntimeCredentialFailureCode;
       message: string;
     };
 
@@ -309,12 +273,7 @@ export type RuntimeWorkerEvent =
     }
   | RuntimeConversationAttachmentStoreEvent
   | RuntimeDocumentPreparationEvent
-  | {
-      type: "runtime.credential-request";
-      requestId: string;
-      operation: RuntimeCredentialOperation;
-      secretReference: string;
-    }
+  | RuntimeCredentialRequest
   | ({
       type: "runtime.secure-file-request";
       requestId: string;
@@ -822,26 +781,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       attachmentId: value.attachmentId,
     };
   }
-  if (
-    value.type === "runtime.credential-request"
-    && Object.keys(value).length === 4
-    && typeof value.requestId === "string"
-    && UUID_PATTERN.test(value.requestId)
-    && (
-      value.operation === "resolve"
-      || value.operation === "status"
-      || value.operation === "clear"
-      || value.operation === "forget"
-    )
-    && isBackendSecretReference(value.secretReference)
-  ) {
-    return {
-      type: "runtime.credential-request",
-      requestId: value.requestId,
-      operation: value.operation,
-      secretReference: value.secretReference,
-    };
-  }
+  if (value.type === "runtime.credential-request") return parseRuntimeCredentialRequest(value);
   if (
     value.type === "runtime.secure-file-request"
     && typeof value.requestId === "string"
@@ -1143,89 +1083,6 @@ function parseRuntimeAttachmentResult(
       ...(attachment.snapshot ? { snapshot: snapshotSourceSchema.parse(attachment.snapshot) } : {}),
     },
   };
-}
-
-function parseRuntimeCredentialResult(
-  value: Record<string, unknown>,
-): RuntimeCredentialResult | null {
-  if (
-    typeof value.requestId !== "string"
-    || !UUID_PATTERN.test(value.requestId)
-    || (
-      value.operation !== "resolve"
-      && value.operation !== "status"
-      && value.operation !== "clear"
-      && value.operation !== "forget"
-    )
-    || typeof value.ok !== "boolean"
-  ) return null;
-  if (!value.ok) {
-    if (
-      Object.keys(value).length !== 6
-      || (
-        value.code !== "not-found"
-        && value.code !== "unavailable"
-        && value.code !== "invalid"
-      )
-      || typeof value.message !== "string"
-    ) return null;
-    const message = value.message.trim();
-    return message.length > 0 && message.length <= 300
-      ? {
-          type: "runtime.credential-result",
-          requestId: value.requestId,
-          operation: value.operation,
-          ok: false,
-          code: value.code,
-          message,
-        }
-      : null;
-  }
-  if (
-    value.operation === "resolve"
-    && Object.keys(value).length === 5
-    && isBackendCredentialSecret(value.secret)
-  ) {
-    return {
-      type: "runtime.credential-result",
-      requestId: value.requestId,
-      operation: "resolve",
-      ok: true,
-      secret: value.secret,
-    };
-  }
-  if (
-    value.operation === "status"
-    && Object.keys(value).length === 6
-    && typeof value.hasSecret === "boolean"
-    && (
-      value.credentialGeneration === null
-      || isBackendCredentialGeneration(value.credentialGeneration)
-    )
-  ) {
-    return {
-      type: "runtime.credential-result",
-      requestId: value.requestId,
-      operation: "status",
-      ok: true,
-      hasSecret: value.hasSecret,
-      credentialGeneration: value.credentialGeneration,
-    };
-  }
-  if (
-    (value.operation === "clear" || value.operation === "forget")
-    && Object.keys(value).length === 5
-    && typeof value.removed === "boolean"
-  ) {
-    return {
-      type: "runtime.credential-result",
-      requestId: value.requestId,
-      operation: value.operation,
-      ok: true,
-      removed: value.removed,
-    };
-  }
-  return null;
 }
 
 export function isRuntimeWebSocketUrl(value: unknown): value is string {

@@ -27,6 +27,7 @@ const productionMappings = [
   ["kimi", "kimi-acp"],
   ["opencode", "opencode-sdk"],
   ["antigravity", "antigravity-cli"],
+  ["pi", "pi-rpc"],
 ] as const;
 
 function manifest(harnessId: (typeof productionMappings)[number][1]) {
@@ -89,12 +90,12 @@ describe("provider capability manifests", () => {
     }
   });
 
-  it("publishes exactly six complete canonical provider-harness mappings", () => {
+  it("publishes exactly seven complete canonical provider-harness mappings", () => {
     const manifests = productionProviderCapabilityManifests();
     expect(manifests.map(({ providerId, harnessId }) =>
       [providerId, harnessId])).toEqual(productionMappings);
-    expect(new Set(manifests.map(({ providerId }) => providerId)).size).toBe(6);
-    expect(new Set(manifests.map(({ harnessId }) => harnessId)).size).toBe(6);
+    expect(new Set(manifests.map(({ providerId }) => providerId)).size).toBe(7);
+    expect(new Set(manifests.map(({ harnessId }) => harnessId)).size).toBe(7);
 
     for (const value of manifests) {
       expect(value.schemaVersion).toBe(1);

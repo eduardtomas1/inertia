@@ -43,5 +43,6 @@ describe("Windows and Linux title bar overlay clearance", () => {
     expect(css).not.toContain(":root[data-platform=\"win32\"] .database-recovery-notice");
     expect(css).not.toMatch(/\.database-recovery-notice \{[^}]*position: fixed/u);
     expect(css).toMatch(/:root:is\(\[data-platform="win32"\], \[data-platform="linux"\]\) \.dialog-backdrop \{\n  padding-top: calc\(env\(titlebar-area-height, 48px\) \+ 8px\);\n  grid-template-rows: minmax\(0, 1fr\);\n\}\n\n:root:is\(\[data-platform="win32"\], \[data-platform="linux"\]\) \.dialog-backdrop > \* \{\n  max-height: 100%;\n\}/u);
+    expect(read("components/MultiSpawnDialog.css")).toMatch(/:root:is\(\[data-platform="win32"\], \[data-platform="linux"\]\) \.multi-spawn-dialog \{\n  margin-top: 0;\n\}/u);
   });
 });

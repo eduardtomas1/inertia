@@ -17,7 +17,7 @@ import {
   turnControllerTestIdentity,
 } from "../support/turn-controller-runtime";
 
-const SECRET = "tskey-auth-kQ9xZ2mB7vN4pL1sR8tW";
+const SECRET = "fake-token-kQ9xZ2mB7vN4pL1sR8tW";
 
 afterEach(cleanupTurnControllerTestDirectories);
 
@@ -114,7 +114,7 @@ describe("agent secret requests inside a live turn", () => {
       await service.deliver({ conversationId: conversation.id, requestId: pending!.id, secret: SECRET, vaulted: false });
       await result;
       const identity = turnControllerTestIdentity(runtime);
-      runtime.provider.emit({ ...identity, type: "text", text: "The key is tskey-auth-kQ9x", itemId: "a" });
+      runtime.provider.emit({ ...identity, type: "text", text: "The key is fake-token-kQ9x", itemId: "a" });
       runtime.provider.emit({ ...identity, type: "text", text: "Z2mB7vN4pL1sR8tW, logging in.", itemId: "a" });
       runtime.provider.emit({
         ...identity, type: "activity", kind: "command", phase: "started", activityId: "cmd-1",
@@ -168,15 +168,15 @@ describe("agent secret requests inside a live turn", () => {
         expect(JSON.stringify(runtime.events)).not.toContain(SECRET);
       };
       runtime.provider.emit({ ...identity, type: "activity", kind: "command", phase: "started", activityId: "cat", label: "cat key", detail: "cat key" });
-      for (const delta of ["tskey-au", "th-kQ9xZ2", "mB7vN4pL1sR8tW", "\nok\n"]) {
+      for (const delta of [SECRET.slice(0, 8), SECRET.slice(8, 16), SECRET.slice(16), "\nok\n"]) {
         runtime.provider.emit({ ...identity, type: "activity", kind: "command", phase: "started", activityId: "cat", label: "cat key", outputDelta: delta });
         assertClean();
       }
       runtime.provider.emit({ ...identity, type: "activity", kind: "command", phase: "completed", activityId: "cat", label: "cat key" });
       assertClean();
       runtime.provider.emit({ ...identity, type: "activity", kind: "command", phase: "started", activityId: "tail", label: "tail log", detail: "tail log" });
-      runtime.provider.emit({ ...identity, type: "activity", kind: "command", phase: "started", activityId: "tail", label: "tail log", outputDelta: "last: tskey-auth-kQ9xZ" });
-      runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "The key tskey-auth-kQ9" });
+      runtime.provider.emit({ ...identity, type: "activity", kind: "command", phase: "started", activityId: "tail", label: "tail log", outputDelta: "last: fake-token-kQ9xZ" });
+      runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "The key fake-token-kQ9" });
       runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "xZ2mB7vN4pL1sR8tW works." });
       assertClean();
       runtime.provider.resolve({ status: "completed", text: "" });
@@ -209,7 +209,7 @@ describe("agent secret requests inside a live turn", () => {
       await service.deliver({ conversationId: conversation.id, requestId: runtime.store.transcriptRepository.secretRequests.pendingAll()[0]!.id, secret: SECRET, vaulted: false });
       await result;
       const identity = turnControllerTestIdentity(runtime);
-      runtime.provider.emit({ ...identity, type: "text", text: "Pasting tskey-auth-kQ9xZ2mB" });
+      runtime.provider.emit({ ...identity, type: "text", text: "Pasting fake-token-kQ9xZ2mB" });
       flushStreams(runtime.scheduler);
       expect(runtime.controller.cancel(conversation.id)).toBe(true);
       await flushTurnControllerTestPromises();
@@ -217,7 +217,7 @@ describe("agent secret requests inside a live turn", () => {
       expect(service.output.result({ ...identity, status: "completed", text: "" } as never).events).toEqual([]);
       runtime.provider.emit({ ...identity, type: "text", text: "7vN4pL1sR8tW" });
       runtime.scheduler.runAll();
-      expect(JSON.stringify(runtime.store.conversationDetail(conversation.id))).not.toContain("tskey-auth-kQ9xZ2mB7vN4");
+      expect(JSON.stringify(runtime.store.conversationDetail(conversation.id))).not.toContain("fake-token-kQ9xZ2mB7vN4");
       expect(JSON.stringify(runtime.events)).not.toContain(SECRET);
     } finally {
       service.shutdown();
@@ -232,7 +232,7 @@ describe("agent secret requests inside a live turn", () => {
       const first = service.invoke({ conversation, turn }, call());
       await service.deliver({ conversationId: conversation.id, requestId: runtime.store.transcriptRepository.secretRequests.pendingAll()[0]!.id, secret: SECRET, vaulted: false });
       await first;
-      runtime.provider.emit({ ...identity, type: "text", text: "That key worked. The old one was tskey-auth-kQ9x" });
+      runtime.provider.emit({ ...identity, type: "text", text: "That key worked. The old one was fake-token-kQ9x" });
       const second = service.invoke({ conversation, turn }, call());
       const card = runtime.store.transcriptRepository.secretRequests.pendingAll()[0]!;
       const messages = runtime.store.conversationDetail(conversation.id)!.messages

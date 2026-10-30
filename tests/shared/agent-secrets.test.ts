@@ -61,7 +61,7 @@ describe("secret request references", () => {
   });
 
   it.each([
-    ["an extra value", { ...pending, secret: "tskey-abc" }],
+    ["an extra value", { ...pending, secret: "fixture-abc" }],
     ["a non-uuid id", { ...pending, requestId: "request-1" }],
     ["an empty title", { ...pending, title: "" }],
     ["an untrimmed title", { ...pending, title: " Key" }],
@@ -146,7 +146,7 @@ describe("secret request tool input", () => {
 
   it.each([
     ["a missing description", { title: "Key" }],
-    ["an extra field", { ...valid, value: "tskey" }],
+    ["an extra field", { ...valid, value: "fixture" }],
     ["a 48 hour lifetime", { ...valid, ttlHours: 48 }],
     ["a fractional lifetime", { ...valid, ttlHours: 2.5 }],
     ["a path in the file name", { ...valid, fileName: "../x" }],
@@ -196,7 +196,7 @@ describe("agent secret values", () => {
     ["x".repeat(AGENT_SECRET_MAX_LENGTH + 1), "The secret is longer than 16,384 characters."],
     [" \n ", "Paste the secret. Only spaces or line breaks were entered."],
     [BACKEND_CREDENTIAL_MASK, "Paste the secret itself. The masked placeholder cannot be saved."],
-    ["tskey\nabc", "The secret must be on a single line."],
+    ["fixture\nabc", "The secret must be on a single line."],
     ["tsk\0ey", "The secret must be on a single line."],
     [" abc ", "The secret must be at least 4 characters long."],
   ])("rejects %j", (value, issue) => {
@@ -207,20 +207,20 @@ describe("agent secret values", () => {
   it("accepts single-line values from 4 characters and trims them", () => {
     expect(agentSecretValueIssue("abcd")).toBeNull();
     expect(agentSecretValueIssue("x".repeat(AGENT_SECRET_MAX_LENGTH))).toBeNull();
-    expect(normalizeAgentSecretValue("  tskey-auth-123  ")).toBe("tskey-auth-123");
-    expect(isAgentSecretValue("tskey-auth-123")).toBe(true);
-    expect(isAgentSecretValue(" tskey-auth-123")).toBe(false);
+    expect(normalizeAgentSecretValue("  fake-token-123  ")).toBe("fake-token-123");
+    expect(isAgentSecretValue("fake-token-123")).toBe(true);
+    expect(isAgentSecretValue(" fake-token-123")).toBe(false);
     expect(() => normalizeAgentSecretValue("ab")).toThrow("The secret must be at least 4 characters long.");
   });
 
   it("parses only an exact save request", () => {
     const conversationId = randomUUID();
     const requestId = randomUUID();
-    expect(parseSaveAgentSecretRequest({ conversationId, requestId, secret: " tskey-1 " }))
-      .toEqual({ conversationId, requestId, secret: "tskey-1" });
+    expect(parseSaveAgentSecretRequest({ conversationId, requestId, secret: " fixture-1 " }))
+      .toEqual({ conversationId, requestId, secret: "fixture-1" });
     expect(parseSaveAgentSecretRequest({ conversationId, requestId, secret: "abc" })).toBeNull();
-    expect(parseSaveAgentSecretRequest({ conversationId, requestId: "request", secret: "tskey-1" })).toBeNull();
-    expect(parseSaveAgentSecretRequest({ conversationId, requestId, secret: "tskey-1", extra: true })).toBeNull();
+    expect(parseSaveAgentSecretRequest({ conversationId, requestId: "request", secret: "fixture-1" })).toBeNull();
+    expect(parseSaveAgentSecretRequest({ conversationId, requestId, secret: "fixture-1", extra: true })).toBeNull();
     expect(parseSaveAgentSecretRequest(null)).toBeNull();
   });
 });

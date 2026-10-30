@@ -11,7 +11,7 @@ import {
 import { runtimeCredentialBroker } from "../../src/main/runtime-credential-broker";
 import { agentSecretReference } from "../../src/node/agent-secrets";
 
-const SECRET = "tskey-auth-kQ7xZ9pL2mN4";
+const SECRET = "fake-token-kQ7xZ9pL2mN4";
 
 class MemoryPersistence implements CredentialVaultPersistence {
   value: string | null = null;

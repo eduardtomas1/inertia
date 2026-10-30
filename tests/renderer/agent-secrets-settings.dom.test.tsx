@@ -65,7 +65,7 @@ describe("Settings → Data → Agent secrets", () => {
     expect(rows[1]).toHaveTextContent("Untitled chat");
     expect(rows[1]).toHaveTextContent("Until Inertia quits");
     expect(request).toHaveBeenCalledWith({ type: "secret-request.list", payload: {} });
-    expect(group.textContent).not.toMatch(/\/|tskey|agent-secrets\//u);
+    expect(group.textContent).not.toMatch(/\/|fixture|agent-secrets\//u);
     fireEvent.click(within(rows[0]!).getByRole("button", { name: "Open chat CI tailnet 1" }));
     expect(open).toHaveBeenCalledWith(entry(1).conversationId);
   });

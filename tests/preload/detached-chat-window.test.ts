@@ -143,7 +143,7 @@ describe("detached chat preload", () => {
       role: "user" as const, hasSelection: false, anchor: { x: 1, y: 2 },
     };
     await bridge.showContextMenu(menu);
-    const secret = { conversationId, requestId: handoff.requestId, secret: "tskey-detached" };
+    const secret = { conversationId, requestId: handoff.requestId, secret: "fixture-detached" };
     await bridge.saveAgentSecret(secret);
 
     expect(electron.invoke.mock.calls).toEqual([

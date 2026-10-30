@@ -234,7 +234,7 @@ describe("CLI import while a secret is active", () => {
     await mkdir(workspace);
     await mkdir(sessions);
     const sessionId = randomUUID();
-    const secret = "tskey-auth-kQ9xZ2mB7vN4pL1sR8tW";
+    const secret = "fake-token-kQ9xZ2mB7vN4pL1sR8tW";
     await writeFile(join(sessions, `rollout-${sessionId}.jsonl`), [
       { type: "session_meta", payload: { id: sessionId, cwd: workspace, model_provider: "openai" } },
       { type: "response_item", timestamp: "2026-10-29T10:00:00.000Z", payload: { type: "message", role: "user", content: [{ type: "input_text", text: `Log in with ${secret} please` }] } },

@@ -11,7 +11,7 @@ import {
 } from "../../src/server/runtime/commands/secret-request-commands";
 import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
 
-const SECRET = "tskey-auth-kQ9xZ2mB7vN4pL1sR8tW";
+const SECRET = "fake-token-kQ9xZ2mB7vN4pL1sR8tW";
 
 function handlerWith(service: Parameters<typeof createSecretRequestCommandHandler>[0]["service"]) {
   const sent: ServerEvent[] = [];

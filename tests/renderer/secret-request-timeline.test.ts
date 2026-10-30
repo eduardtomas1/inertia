@@ -224,8 +224,8 @@ describe("secret request copy", () => {
 
   it("passes only known fixed failure messages through", () => {
     expect(secretSaveFailureMessage(new Error("Error invoking remote method: Error: The secret must be on a single line."))).toBe("The secret must be on a single line.");
-    expect(secretSaveFailureMessage(new Error("boom tskey-123"))).toBe("The secret could not be saved. Try again.");
-    expect(secretSaveFailureMessage("tskey-123")).toBe("The secret could not be saved. Try again.");
+    expect(secretSaveFailureMessage(new Error("boom fixture-123"))).toBe("The secret could not be saved. Try again.");
+    expect(secretSaveFailureMessage("fixture-123")).toBe("The secret could not be saved. Try again.");
   });
 
   it("shows every fixed main-process save error on the card", () => {
@@ -243,7 +243,7 @@ describe("secret request copy", () => {
     expect(secretRevokeFailure(new Error(AGENT_SECRET_REVOKE_ERRORS.notActive))).toBe("That secret is no longer active.");
     expect(secretRevokeFailure(new Error("EBUSY: resource busy or locked, unlink '/home/me/.inertia/agent-secrets/x/key'")))
       .toBe("Couldn't revoke. Try again.");
-    expect(secretRevokeFailure("tskey-123", "The secret could not be revoked.")).toBe("The secret could not be revoked.");
+    expect(secretRevokeFailure("fixture-123", "The secret could not be revoked.")).toBe("The secret could not be revoked.");
   });
 
   it("announces each settled transition", () => {

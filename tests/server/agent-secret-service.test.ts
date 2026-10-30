@@ -16,7 +16,7 @@ import { agentSecretReference, SECRET_REQUEST_TOOL_NAME } from "../../src/node/a
 import type { RuntimeMutationEvent } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
-const SECRET = "tskey-auth-kQ9xZ2mB7vN4pL1sR8tW";
+const SECRET = "fake-token-kQ9xZ2mB7vN4pL1sR8tW";
 const POSIX = process.platform !== "win32";
 const directories: string[] = [];
 const stores: RuntimeStore[] = [];

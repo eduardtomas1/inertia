@@ -215,7 +215,7 @@ function workspaceProps(
   };
 }
 
-const SECRET = "tskey-auth-workspace-VALUE";
+const SECRET = "fake-token-workspace-VALUE";
 const REQUEST_ID = "0d9c8d7e-6f5a-4b3c-9d2e-1f0a9b8c7d6e";
 
 function secretMessage(agentTurn: AgentTurn, update: Partial<SecretRequestReference> = {}): ChatMessage {
@@ -388,14 +388,14 @@ describe("secret requests in the chat workspace", () => {
     expect(before.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     field.focus();
-    fireEvent.change(field, { target: { value: "tskey-par" } });
+    fireEvent.change(field, { target: { value: "fixture-par" } });
     act(() => streaming.update([later, "", "text"]));
     const after = await screen.findByText(later);
     expect(card.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(document.getElementById(`secret-request-${REQUEST_ID}`)).toBe(card);
     expect(screen.getByLabelText("Tailscale auth key", { selector: "input" })).toBe(field);
-    expect(field).toHaveValue("tskey-par");
+    expect(field).toHaveValue("fixture-par");
     expect(field).toHaveFocus();
   });
 });

@@ -12,7 +12,7 @@ describe("agent secret process protocol", () => {
     transportId,
     conversationId: randomUUID(),
     requestId: randomUUID(),
-    secret: "tskey-auth-123",
+    secret: "fake-token-123",
     vaulted: true,
   };
 
@@ -21,9 +21,9 @@ describe("agent secret process protocol", () => {
   });
 
   it.each([
-    ["an untrimmed secret", { ...deliver, secret: " tskey-auth-123" }],
+    ["an untrimmed secret", { ...deliver, secret: " fake-token-123" }],
     ["a short secret", { ...deliver, secret: "abc" }],
-    ["a multi-line secret", { ...deliver, secret: "tskey\nauth" }],
+    ["a multi-line secret", { ...deliver, secret: "fixture\nauth" }],
     ["a non-uuid request", { ...deliver, requestId: "request" }],
   ])("passes a delivery with %s through to the runtime, which rejects it instead of stopping", (_label, command) => {
     expect(parseRuntimeWorkerCommand(command)).toEqual(command);
@@ -48,8 +48,8 @@ describe("agent secret process protocol", () => {
     }
     expect(parseRuntimeWorkerEvent({ ...delivered, storage: "disk" })).toBeNull();
     expect(parseRuntimeWorkerEvent({ ...delivered, expiresAt: "tomorrow" })).toBeNull();
-    expect(parseRuntimeWorkerEvent({ ...delivered, secret: "tskey-auth-123" })).toBeNull();
-    expect(parseRuntimeWorkerEvent({ type: "runtime.agent-secret-rejected", transportId, reason: "Value tskey-auth-123 failed" })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ ...delivered, secret: "fake-token-123" })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.agent-secret-rejected", transportId, reason: "Value fake-token-123 failed" })).toBeNull();
   });
 
   it("accepts bounded reconcile commands and events that carry only request ids", () => {
@@ -65,11 +65,11 @@ describe("agent secret process protocol", () => {
       { ...reconcile, requestIds: tooMany },
       { ...reconcile, requestIds: [requestIds[0], requestIds[0]] },
       { ...reconcile, requestIds: ["secret:agent-secret:x"] },
-      { ...reconcile, secret: "tskey-auth-123" },
+      { ...reconcile, secret: "fake-token-123" },
     ]) expect(parseRuntimeWorkerCommand(invalid)).toBeNull();
     for (const invalid of [
       { ...reconciled, orphaned: tooMany },
-      { ...reconciled, orphaned: ["tskey-auth-123"] },
+      { ...reconciled, orphaned: ["fake-token-123"] },
       { ...reconciled, orphaned: [requestIds[0], requestIds[0]] },
       { ...reconciled, kept: requestIds },
     ]) expect(parseRuntimeWorkerEvent(invalid)).toBeNull();

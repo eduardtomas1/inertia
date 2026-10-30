@@ -20,3 +20,9 @@ No real provider calls, full five/ten-minute provider waits, macOS desktop runs 
 The screenshots were captured at `d73d41bb`; subsequent changes affect runtime behavior, schema loading, tests and measured budget accounting, with no product pixel changes. Screenshot binaries live on a separate assets branch and are embedded in the PR.
 
 Bundle measurements and rejected optimization experiments are recorded in [renderer-bundle.json](renderer-bundle.json). The shared matcher measurement can be reproduced with `npm run benchmark:secret-redaction`; it uses structural assertions rather than timing thresholds.
+
+## Synthetic fixture follow-up
+
+GitHub secret scanning flagged two hard-coded renderer test constants introduced in `27c700be`. Both values were invented test data; their provider-shaped prefix caused the alerts. The secret tests now use neutral `fake-token-` and `fixture-` values, with split fragments kept consistent with the fixture constants. Production code and screenshot pixels are unchanged.
+
+After this replacement, all 297 affected unit/DOM tests and all six Electron scenarios passed. The repository scan found no remaining Tailscale token prefix in tracked content. The two historical alerts can be resolved as false positives; the published history is preserved.

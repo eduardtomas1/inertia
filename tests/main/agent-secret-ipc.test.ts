@@ -24,7 +24,7 @@ import { agentSecretReference } from "../../src/node/agent-secrets";
 import { BACKEND_CREDENTIAL_MASK } from "../../src/shared/backend-credentials";
 import { DESKTOP_IPC } from "../../src/shared/desktop-ipc";
 
-const SECRET = "tskey-auth-kQ7xZ9pL2mN4";
+const SECRET = "fake-token-kQ7xZ9pL2mN4";
 const CONVERSATION_ID = randomUUID();
 const OTHER_CONVERSATION_ID = randomUUID();
 const EXPIRES_AT = "2026-10-30T10:00:00.000Z";
@@ -191,7 +191,7 @@ describe("agent secret save IPC values", () => {
     ["a non-string value", 42, "Paste the secret as text."],
     ["only whitespace", "   \n ", "Paste the secret. Only spaces or line breaks were entered."],
     ["the mask", BACKEND_CREDENTIAL_MASK, "Paste the secret itself. The masked placeholder cannot be saved."],
-    ["a multi-line value", "tskey\nauth-key", "The secret must be on a single line."],
+    ["a multi-line value", "fixture\nauth-key", "The secret must be on a single line."],
     ["a short value", "abc", "The secret must be at least 4 characters long."],
     ["an oversized value", "a".repeat(16_385), "The secret is longer than 16,384 characters."],
   ])("rejects %s with the card's fixed message", async (_label, secret, message) => {

@@ -11,7 +11,7 @@ import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
 import { parseRuntimeWorkerCommand, type RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 
 const readyUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
-const SECRET = "tskey-auth-kQ7xZ9pL2mN4";
+const SECRET = "fake-token-kQ7xZ9pL2mN4";
 const EXPIRES_AT = "2026-10-30T10:00:00.000Z";
 let dataDirectory: string;
 

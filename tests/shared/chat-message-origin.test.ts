@@ -130,7 +130,7 @@ it("accepts a secret request only on a turn-scoped system message", () => {
 it.each([
   null,
   {},
-  { ...secretRequest, secret: "tskey-abc" },
+  { ...secretRequest, secret: "fixture-abc" },
   { ...secretRequest, status: "saved" },
   { ...secretRequest, title: "" },
   { ...secretRequest, ttlHours: 48 },

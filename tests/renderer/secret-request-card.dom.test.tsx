@@ -14,7 +14,7 @@ import { SecretRequestContext } from "../../src/renderer/src/components/response
 import type { SecretRequestCommandRunner, SecretRequestMessage } from "../../src/renderer/src/utils/response-timeline/secretRequests";
 
 const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
-const SECRET = "tskey-auth-k7Qx9-SECRET-VALUE";
+const SECRET = "fake-token-k7Qx9-SECRET-VALUE";
 const NOW = Date.parse("2026-10-29T12:00:00.000Z");
 let requestCounter = 0;
 

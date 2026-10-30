@@ -4,7 +4,7 @@ import { SecretMatcher } from "../../src/server/provider/acp-redaction";
 import type { ProviderEvent, ProviderRunResult } from "../../src/server/provider/contracts";
 import { SecretOutputRedactor } from "../../src/server/runtime/agent-secrets/secret-output-redactor";
 
-const SECRET = "tskey-auth-kQ9xZ2mB7vN4pL1sR8tW";
+const SECRET = "fake-token-kQ9xZ2mB7vN4pL1sR8tW";
 const BASE = { providerId: "codex", conversationId: "c", runId: "r", turnId: "t" } as const;
 
 function text(value: string, turnId = "t"): ProviderEvent {
@@ -37,7 +37,7 @@ describe("secret output redactor: active values never leave the turn controller 
   it("redacts a value split across streamed text chunks and flushes the held tail on the next event", () => {
     const value = redactor();
     const output = [
-      ...value.events(text("Your key is tskey-auth-")),
+      ...value.events(text("Your key is fake-token-")),
       ...value.events(text("kQ9xZ2mB7vN4")),
       ...value.events(text("pL1sR8tW and it works. tsk")),
       ...value.events({ ...BASE, type: "text-boundary" }),
@@ -52,7 +52,7 @@ describe("secret output redactor: active values never leave the turn controller 
   it("keeps per-turn stream state apart", () => {
     const value = redactor();
     const output = [
-      ...value.events(text("a tskey-auth-kQ9", "t")),
+      ...value.events(text("a fake-token-kQ9", "t")),
       ...value.events(text("other turn text.", "u")),
       ...value.events(text("xZ2mB7vN4pL1sR8tW b", "t")),
     ];
@@ -90,7 +90,7 @@ describe("secret output redactor: active values never leave the turn controller 
 
   it("redacts the final result text and failure detail, keeps the cleanup promise, and flushes held text first", () => {
     const value = redactor();
-    expect(streamed(value.events(text("Done with tskey-auth-kQ9xZ2")))).toBe("Done with ");
+    expect(streamed(value.events(text("Done with fake-token-kQ9xZ2")))).toBe("Done with ");
     const cleanupConfirmation = Promise.resolve(true);
     const result = {
       ...BASE, status: "failed", text: `Done with ${SECRET}`, textTruncated: false, exitCode: 1, signal: null,
@@ -120,7 +120,7 @@ describe("secret output redactor: active values never leave the turn controller 
       ...BASE, type: "activity", kind: "command", phase, label: "cat key", activityId: "cmd-1", outputDelta: delta,
     });
     const emitted = [
-      ...value.events(output("key=tskey-auth-kQ")),
+      ...value.events(output("key=fake-token-kQ")),
       ...value.events(output("9xZ2mB7vN4")),
       ...value.events({ ...BASE, type: "usage", usage: {} as never }),
       ...value.events(output("pL1sR8tW\nok\n", "completed")),
@@ -134,7 +134,7 @@ describe("secret output redactor: active values never leave the turn controller 
   it("keeps two commands' output streams apart and flushes an unfinished one at the turn result", () => {
     const value = redactor();
     const emitted = [
-      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "a", activityId: "a", outputDelta: "A tskey-auth-" }),
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "a", activityId: "a", outputDelta: "A fake-token-" }),
       ...value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "b", activityId: "b", outputDelta: "B kQ9xZ2mB7vN4pL1sR8tW" }),
       ...value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "a", activityId: "a", outputDelta: "kQ9xZ2mB7vN4pL1sR8tW done" }),
     ];
@@ -143,18 +143,19 @@ describe("secret output redactor: active values never leave the turn controller 
       .map((event) => (event.type === "activity" && event.activityId === id ? event.outputDelta ?? "" : "")).join("");
     expect(byActivity("a")).toBe("A [redacted] done");
     expect(byActivity("b")).toBe("B kQ9xZ2mB7vN4pL1sR8tW");
-    const tail = value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "c", activityId: "c", outputDelta: "C tskey" });
+    const prefix = SECRET.slice(0, 5);
+    const tail = value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "c", activityId: "c", outputDelta: `C ${prefix}` });
     const flushed = value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult).events;
     expect(tail).toEqual([expect.objectContaining({ activityId: "c" })]);
-    expect(tail[0]).not.toHaveProperty("outputDelta", "C tskey");
-    expect(flushed).toEqual([expect.objectContaining({ type: "activity", phase: "started", activityId: "c", outputDelta: "tskey" })]);
+    expect(tail[0]).not.toHaveProperty("outputDelta", `C ${prefix}`);
+    expect(flushed).toEqual([expect.objectContaining({ type: "activity", phase: "started", activityId: "c", outputDelta: prefix })]);
   });
 
   it("redacts reasoning split across deltas even when other events interleave", () => {
     const value = redactor();
     const reasoning = (text: string): ProviderEvent => ({ ...BASE, type: "reasoning-summary", text });
     const emitted = [
-      ...value.events(reasoning("Using tskey-auth-kQ9x")),
+      ...value.events(reasoning("Using fake-token-kQ9x")),
       ...value.events({ ...BASE, type: "activity", kind: "tool", phase: "started", label: "tool" }),
       ...value.events(reasoning("Z2mB7vN4pL1sR8tW now.")),
     ];
@@ -166,10 +167,10 @@ describe("secret output redactor: active values never leave the turn controller 
   it("does not release a held assistant prefix on events that leave the segment open", () => {
     const value = redactor();
     const emitted = [
-      ...value.events(text("key tsk")),
+      ...value.events(text(`key ${SECRET.slice(0, 3)}`)),
       ...value.events({ ...BASE, type: "usage", usage: {} as never }),
       ...value.events({ ...BASE, type: "status", status: "running" }),
-      ...value.events(text("ey-auth-kQ9xZ2mB7vN4pL1sR8tW end")),
+      ...value.events(text(`${SECRET.slice(3)} end`)),
       ...value.events({ ...BASE, type: "text-boundary" }),
     ];
     expect(streamed(emitted)).toBe("key [redacted] end");
@@ -217,10 +218,10 @@ describe("secret output redactor: one matcher per active value set", () => {
     const value = redactor();
     const roots = trackRoots();
     const emitted = [
-      ...value.events(text("a tskey-auth-", "t")),
-      ...value.events(text("b tskey-auth-", "u")),
-      ...value.events({ ...BASE, type: "reasoning-summary", text: "r tskey-auth-" }),
-      ...Array.from({ length: 12 }, (_, index) => value.events(command(`cmd-${index}`, "tskey-auth-kQ9", "v"))).flat(),
+      ...value.events(text("a fake-token-", "t")),
+      ...value.events(text("b fake-token-", "u")),
+      ...value.events({ ...BASE, type: "reasoning-summary", text: "r fake-token-" }),
+      ...Array.from({ length: 12 }, (_, index) => value.events(command(`cmd-${index}`, "fake-token-kQ9", "v"))).flat(),
     ];
     expect(roots.size).toBe(1);
     value.setValues([SECRET]);
@@ -243,21 +244,21 @@ describe("secret output redactor: one matcher per active value set", () => {
 
   it("re-evaluates a held split prefix against the new values when a value is removed or added mid-stream", () => {
     const value = redactor();
-    expect(streamed(value.events(text("start tskey-auth-kQ9")))).toBe("start ");
+    expect(streamed(value.events(text("start fake-token-kQ9")))).toBe("start ");
     value.setValues([]);
-    expect(streamed(value.events(text("xZ2 end")))).toBe("tskey-auth-kQ9xZ2 end");
+    expect(streamed(value.events(text("xZ2 end")))).toBe("fake-token-kQ9xZ2 end");
     value.setValues([SECRET]);
-    expect(streamed(value.events(text(" again tskey-")))).toBe(" again ");
-    expect(streamed(value.events(text("auth-kQ9xZ2mB7vN4pL1sR8tW")))).toBe("");
+    expect(streamed(value.events(text(` again ${SECRET.slice(0, 6)}`)))).toBe(" again ");
+    expect(streamed(value.events(text(SECRET.slice(6))))).toBe("");
     expect(streamed(value.events({ ...BASE, type: "text-boundary" }))).toBe("[redacted]");
   });
 
   it("finishes and discards streams independently while they share a matcher", () => {
     const value = redactor();
-    const first = value.events(command("a", "A tskey-auth-kQ9"));
-    const second = value.events(command("b", "B tskey-auth-kQ9"));
+    const first = value.events(command("a", "A fake-token-kQ9"));
+    const second = value.events(command("b", "B fake-token-kQ9"));
     value.discard("t");
-    const third = value.events(command("c", "C tskey-auth-kQ9xZ2mB7vN4pL1sR8tW"));
+    const third = value.events(command("c", "C fake-token-kQ9xZ2mB7vN4pL1sR8tW"));
     const finished = value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult).events;
     const output = [...first, ...second, ...third, ...finished]
       .map((event) => (event.type === "activity" ? event.outputDelta ?? "" : "")).join("|");

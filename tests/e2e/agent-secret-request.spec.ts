@@ -25,7 +25,7 @@ const WIDTH = 1512;
 const HEIGHT = 868;
 const CAPTURE_DIRECTORY = process.env.INERTIA_CAPTURE_DIR?.trim() || null;
 const CHAT_TITLE = "Tailscale test VMs";
-const SECRET = "tskey-auth-kQ7rN2fixtureVb9mW4zPx3";
+const SECRET = "fake-token-kQ7rN2fixtureVb9mW4zPx3";
 const FOOTNOTE = "Kept out of chat, in a private file this agent's commands can read for 24 hours";
 
 let app!: AppFixture;

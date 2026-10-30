@@ -686,6 +686,21 @@ button:disabled,
   --titlebar-overlay-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
 }
 
+.platform-linux .sidebar-brand {
+  margin-top: min(48px, calc(env(titlebar-area-x, 0px) * 48));
+}
+
+.app-shell.platform-linux.is-sidebar-collapsed .workspace-header,
+.detached-chat-shell.platform-linux .workspace-header {
+  padding-left: calc(12px + env(titlebar-area-x, 0px));
+}
+
+@media (max-width: 760px) {
+  .app-shell.platform-linux .workspace-header {
+    padding-left: calc(12px + env(titlebar-area-x, 0px));
+  }
+}
+
 :is(.platform-win32, .platform-linux) .workspace-frame:not(.has-right-panel) > .workspace-header {
   padding-right: calc(14px + var(--workspace-corner-controls-width, 0px) + var(--titlebar-overlay-inset));
 }

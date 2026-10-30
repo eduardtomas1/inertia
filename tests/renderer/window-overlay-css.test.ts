@@ -17,6 +17,12 @@ describe("Windows and Linux title bar overlay clearance", () => {
     expect(detachedCss).toMatch(/\.detached-chat-shell:is\(\.platform-win32, \.platform-linux\) \{\n  --titlebar-overlay-inset: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u);
   });
 
+  it("clears left-side Linux controls without squeezing the sidebar brand", () => {
+    expect(css).toMatch(/\.platform-linux \.sidebar-brand \{\n  margin-top: min\(48px, calc\(env\(titlebar-area-x, 0px\) \* 48\)\);/u);
+    expect(css).toMatch(/\.app-shell\.platform-linux\.is-sidebar-collapsed \.workspace-header,\n\.detached-chat-shell\.platform-linux \.workspace-header \{\n  padding-left: calc\(12px \+ env\(titlebar-area-x, 0px\)\);/u);
+    expect(css).toMatch(/@media \(max-width: 760px\) \{\n  \.app-shell\.platform-linux \.workspace-header \{\n    padding-left: calc\(12px \+ env\(titlebar-area-x, 0px\)\);/u);
+  });
+
   it("pads the header, panel tabs and corner controls of both windows by the overlay inset", () => {
     expect(css).toMatch(/:is\(\.platform-win32, \.platform-linux\) \.workspace-frame:not\(\.has-right-panel\) > \.workspace-header \{\n  padding-right: calc\(14px \+ var\(--workspace-corner-controls-width, 0px\) \+ var\(--titlebar-overlay-inset\)\);/u);
     expect(css).toMatch(/:is\(\.platform-win32, \.platform-linux\) \.workspace-panel:not\(\.is-stacked\) > \.workspace-panel-tabs \{\n  padding-right: calc\(var\(--workspace-corner-controls-width, 0px\) \+ 16px \+ var\(--titlebar-overlay-inset\)\);/u);

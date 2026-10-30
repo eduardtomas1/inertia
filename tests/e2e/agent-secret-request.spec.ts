@@ -1,5 +1,6 @@
 // @inertia-e2e-resource isolated
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { readdir, readFile, stat, writeFile, mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
@@ -31,9 +32,30 @@ let app!: AppFixture;
 let secretService: LinuxSecretService | undefined;
 let keyringUnavailable: string | null = null;
 let restoredFile: string | null = null;
+let plantedOrphan: string | null = null;
 
 function page(): Page {
   return app.page;
+}
+
+function vaultFile(): string {
+  return join(app.testDirectory, "electron-profile", "backend-credentials.vault.json");
+}
+
+async function vaultEntries(): Promise<Record<string, unknown>> {
+  const raw = await readFile(vaultFile(), "utf8").catch(() => null);
+  return raw ? (JSON.parse(raw) as { entries: Record<string, unknown> }).entries : {};
+}
+
+async function plantOrphanedVaultCopy(): Promise<void> {
+  const raw = await readFile(vaultFile(), "utf8").catch(() => null);
+  if (!raw) return;
+  const vault = JSON.parse(raw) as { entries: Record<string, unknown> };
+  const copy = Object.entries(vault.entries).find(([reference]) => reference.startsWith("secret:agent-secret:"));
+  if (!copy) return;
+  plantedOrphan = `secret:agent-secret:${randomUUID()}`;
+  vault.entries[plantedOrphan] = copy[1];
+  await writeFile(vaultFile(), JSON.stringify(vault), { mode: 0o600 });
 }
 
 function agentSecretsDirectory(): string {
@@ -459,6 +481,7 @@ test("quitting removes every secret file", async () => {
   await app.restart({
     afterQuit: async () => {
       afterQuit = await readdir(agentSecretsDirectory()).catch(() => []);
+      await plantOrphanedVaultCopy();
     },
   });
   expect(afterQuit).toEqual([]);
@@ -480,5 +503,10 @@ test("relaunching restores a keychain-backed secret at the same path", async () 
   const group = await openAgentSecrets(target);
   await expect(group.getByRole("list", { name: "Active agent secrets" }).getByRole("listitem")).toHaveCount(1);
   await backToWorkspace(target);
+  if (!plantedOrphan) throw new Error("No orphaned keychain copy was planted before the relaunch.");
+  const orphan = plantedOrphan;
+  await expect.poll(async () => Object.hasOwn(await vaultEntries(), orphan), { timeout: 30_000 }).toBe(false);
+  expect(Object.keys(await vaultEntries()).filter((reference) => reference.startsWith("secret:agent-secret:"))).toHaveLength(1);
+  expect(await readFile(file, "utf8")).toBe(SECRET);
   expect(app.rendererErrors).toEqual([]);
 });

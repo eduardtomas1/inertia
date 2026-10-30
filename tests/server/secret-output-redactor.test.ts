@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { SecretMatcher } from "../../src/server/provider/acp-redaction";
 import type { ProviderEvent, ProviderRunResult } from "../../src/server/provider/contracts";
 import { SecretOutputRedactor } from "../../src/server/runtime/agent-secrets/secret-output-redactor";
 
@@ -189,5 +190,78 @@ describe("secret output redactor: active values never leave the turn controller 
     value.discard("t");
     expect(value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult).events).toEqual([]);
     expect(streamed(value.events(text("plain")))).toBe("plain");
+  });
+});
+
+describe("secret output redactor: one matcher per active value set", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function trackRoots(): Set<unknown> {
+    const roots = new Set<unknown>();
+    const getter = Object.getOwnPropertyDescriptor(SecretMatcher.prototype, "root")!.get!;
+    vi.spyOn(SecretMatcher.prototype, "root", "get").mockImplementation(function (this: SecretMatcher) {
+      const root: SecretMatcher["root"] = getter.call(this);
+      roots.add(root);
+      return root;
+    });
+    return roots;
+  }
+
+  function command(activityId: string, outputDelta: string, turnId = "t"): ProviderEvent {
+    return { ...BASE, turnId, type: "activity", kind: "command", phase: "started", label: activityId, activityId, outputDelta };
+  }
+
+  it("shares one trie across every stream and turn until the active values change", () => {
+    const value = redactor();
+    const roots = trackRoots();
+    const emitted = [
+      ...value.events(text("a tskey-auth-", "t")),
+      ...value.events(text("b tskey-auth-", "u")),
+      ...value.events({ ...BASE, type: "reasoning-summary", text: "r tskey-auth-" }),
+      ...Array.from({ length: 12 }, (_, index) => value.events(command(`cmd-${index}`, "tskey-auth-kQ9", "v"))).flat(),
+    ];
+    expect(roots.size).toBe(1);
+    value.setValues([SECRET]);
+    value.setValues([SECRET, SECRET]);
+    emitted.push(...value.events(text("kQ9xZ2mB7vN4pL1sR8tW!", "t")));
+    expect(roots.size).toBe(1);
+    expect(streamed(emitted.filter(({ turnId }) => turnId === "t"))).toBe("a [redacted]!");
+    value.setValues([SECRET, "second-secret-value-42"]);
+    emitted.push(...value.events(text("kQ9xZ2mB7vN4pL1sR8tW second-secret-value-42.", "u")));
+    expect(roots.size).toBe(2);
+    expect(streamed(emitted.filter(({ turnId }) => turnId === "u"))).toBe("b [redacted] [redacted].");
+  });
+
+  it("keeps the same matcher when the active values arrive in another order", () => {
+    const value = redactor([SECRET, "second-secret-value-42"]);
+    const before = value.values();
+    value.setValues(["second-secret-value-42", SECRET]);
+    expect(value.values()).toBe(before);
+  });
+
+  it("re-evaluates a held split prefix against the new values when a value is removed or added mid-stream", () => {
+    const value = redactor();
+    expect(streamed(value.events(text("start tskey-auth-kQ9")))).toBe("start ");
+    value.setValues([]);
+    expect(streamed(value.events(text("xZ2 end")))).toBe("tskey-auth-kQ9xZ2 end");
+    value.setValues([SECRET]);
+    expect(streamed(value.events(text(" again tskey-")))).toBe(" again ");
+    expect(streamed(value.events(text("auth-kQ9xZ2mB7vN4pL1sR8tW")))).toBe("");
+    expect(streamed(value.events({ ...BASE, type: "text-boundary" }))).toBe("[redacted]");
+  });
+
+  it("finishes and discards streams independently while they share a matcher", () => {
+    const value = redactor();
+    const first = value.events(command("a", "A tskey-auth-kQ9"));
+    const second = value.events(command("b", "B tskey-auth-kQ9"));
+    value.discard("t");
+    const third = value.events(command("c", "C tskey-auth-kQ9xZ2mB7vN4pL1sR8tW"));
+    const finished = value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult).events;
+    const output = [...first, ...second, ...third, ...finished]
+      .map((event) => (event.type === "activity" ? event.outputDelta ?? "" : "")).join("|");
+    expect(output).toBe("A |B |C |[redacted]");
+    expect(JSON.stringify(finished)).not.toContain("kQ9");
   });
 });

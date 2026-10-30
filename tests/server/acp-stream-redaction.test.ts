@@ -1,8 +1,8 @@
 // @inertia-test-suite portable
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentHarness, AgentHarnessEvent } from "../../src/server/provider/agent-harness";
-import { AcpSecretRedactor } from "../../src/server/provider/acp-redaction";
+import { AcpSecretRedactor, SecretMatcher } from "../../src/server/provider/acp-redaction";
 import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
 import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
 import {
@@ -211,5 +211,29 @@ describe("ACP final flush rule", () => {
     expect(redactor.assistantChunk("value a") + redactor.finishAssistant()).toBe("value a");
     const second = new AcpSecretRedactor({ SHORT_TOKEN: "ab12" });
     expect(second.assistantChunk("value ab") + second.finishAssistant()).toBe("value [redacted]");
+  });
+
+  it("shares one matcher across its streams and keeps it when added secrets are already known", () => {
+    const roots = new Set<unknown>();
+    const getter = Object.getOwnPropertyDescriptor(SecretMatcher.prototype, "root")!.get!;
+    const spy = vi.spyOn(SecretMatcher.prototype, "root", "get").mockImplementation(function (this: SecretMatcher) {
+      const root: SecretMatcher["root"] = getter.call(this);
+      roots.add(root);
+      return root;
+    });
+    try {
+      const redactor = new AcpSecretRedactor({ CURSOR_API_KEY: SECRET });
+      const held = redactor.assistantChunk(`a ${SECRET.slice(0, SPLIT)}`);
+      expect(redactor.reasoningChunk("thinking")).toBe("thinking");
+      expect(redactor.stderrChunk("warn")).toBe("warn");
+      redactor.addSecrets([SECRET]);
+      expect(held + redactor.assistantChunk(`${SECRET.slice(SPLIT)} b`)).toBe("a [redacted] b");
+      expect(roots.size).toBe(1);
+      redactor.addSecrets(["Late-session-secret-77"]);
+      expect(redactor.stderrChunk(" Late-session-secret-77 ") + redactor.finishStderr()).toBe(" [redacted] ");
+      expect(roots.size).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

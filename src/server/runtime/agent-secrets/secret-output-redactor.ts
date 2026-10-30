@@ -1,4 +1,4 @@
-import { BoundarySecretRedactor } from "../../provider/acp-redaction";
+import { BoundarySecretRedactor, SecretMatcher } from "../../provider/acp-redaction";
 import {
   credentialEncodings,
   redactExactCredentials,
@@ -61,37 +61,36 @@ function outputTemplate(event: ProviderActivityEvent): ProviderActivityEvent {
 }
 
 export class SecretOutputRedactor {
-  private encodings: string[] = [];
+  private sources: ReadonlySet<string> = new Set();
+  private matcher = SecretMatcher.empty;
   private readonly turns = new Map<string, TurnStreams>();
 
   setValues(values: readonly string[]): void {
-    this.encodings = credentialEncodings([...new Set(values)]);
-    for (const turn of this.turns.values()) {
-      turn.text?.boundary.invalidate();
-      turn.reasoning?.boundary.invalidate();
-      for (const output of turn.outputs.values()) output.boundary.invalidate();
-    }
+    const sources = new Set(values);
+    if (sources.size === this.sources.size && [...sources].every((value) => this.sources.has(value))) return;
+    this.sources = sources;
+    this.matcher = new SecretMatcher(credentialEncodings([...sources]));
   }
 
   values(): readonly string[] {
-    return this.encodings;
+    return this.matcher.secrets;
   }
 
   active(): boolean {
-    return this.encodings.length > 0;
+    return this.matcher.secrets.length > 0;
   }
 
   text(value: string): string {
-    if (this.encodings.length === 0) return value;
-    const direct = redactExactCredentials(value, this.encodings);
+    if (!this.active()) return value;
+    const direct = redactExactCredentials(value, this.matcher.secrets);
     const stripped = stripTerminalControlSequences(direct);
     if (stripped === direct) return direct;
-    const redacted = redactExactCredentials(stripped, this.encodings);
+    const redacted = redactExactCredentials(stripped, this.matcher.secrets);
     return redacted === stripped ? direct : redacted;
   }
 
   payload<T>(value: T): T {
-    if (this.encodings.length === 0) return value;
+    if (!this.active()) return value;
     const visit = (current: unknown, depth: number): unknown => {
       if (typeof current === "string") return this.text(current);
       if (Array.isArray(current)) {
@@ -119,7 +118,7 @@ export class SecretOutputRedactor {
 
   events(event: ProviderEvent): readonly ProviderEvent[] {
     const turn = this.turns.get(event.turnId);
-    if (!turn && this.encodings.length === 0) return [event];
+    if (!turn && !this.active()) return [event];
     if (event.type === "text") return this.streamText(event);
     if (event.type === "reasoning-summary") return this.streamReasoning(event);
     const closed = ASSISTANT_SEGMENT_CLOSERS.has(event.type) ? this.closeText(event.turnId) : [];
@@ -139,7 +138,7 @@ export class SecretOutputRedactor {
 
   result(result: ProviderRunResult): SecretOutputResult {
     const events = this.finishTurn(result.turnId);
-    if (this.encodings.length === 0) return { events, result };
+    if (!this.active()) return { events, result };
     const { cleanupConfirmation, ...rest } = result;
     const redacted = this.payload(rest);
     const next = redacted === rest ? result : {
@@ -238,6 +237,6 @@ export class SecretOutputRedactor {
   }
 
   private open<T extends ProviderEvent>(template: T): Stream<T> {
-    return { boundary: new BoundarySecretRedactor(() => this.encodings), template };
+    return { boundary: new BoundarySecretRedactor(() => this.matcher), template };
   }
 }

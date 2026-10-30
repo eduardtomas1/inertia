@@ -1,0 +1,34 @@
+{
+  "callingBaseline": "cc9259fa",
+  "secretBranchStart": "15814ad5",
+  "previousFinal": "d73d41bb",
+  "schemaCut": "9a37f2ce",
+  "runtime": "Node 22.23.2, Linux x64",
+  "method": "Same package-lock and installed dependency graph on every revision; renderer built with electron-vite and measured with the scripts/check-renderer-bundle.mjs accounting, read through a temporary copy that prints each measurement next to its budget.",
+  "measuredBytes": {
+    "mainWorkbenchFirstLoadJavaScript": { "callingBaseline": 952807, "secretBranchStart": 958669, "previousFinal": 956138, "final": 956138 },
+    "detachedChatFirstLoadJavaScript": { "callingBaseline": 846762, "secretBranchStart": 852624, "previousFinal": 850093, "final": 850093 },
+    "coreJavaScript": { "callingBaseline": 2478775, "secretBranchStart": 2495969, "previousFinal": 2495728, "final": 2495538 },
+    "settingsJavaScript": { "callingBaseline": 79415, "secretBranchStart": 83097, "previousFinal": 83118, "final": 83118 },
+    "deferredCustomAgentsSettingsJavaScript": { "callingBaseline": 40166, "secretBranchStart": 40166, "previousFinal": 40166, "final": 40166 }
+  },
+  "budgets": {
+    "mainWorkbenchFirstLoadJavaScript": { "before": 956750.8, "after": 956394.8, "change": "feature allowance 3,943 -> 3,587; 256.8 bytes of cross-platform headroom remain" },
+    "detachedChatFirstLoadJavaScript": { "before": 850705.2, "after": 850349.2, "change": "feature allowance 3,943 -> 3,587; 256.2 bytes of cross-platform headroom remain" },
+    "coreJavaScript": { "before": 2495106, "after": 2495538, "change": "feature term 16,331 -> 16,763, the exact measured residual (+432)" },
+    "settingsJavaScript": { "before": 82996, "after": 83118, "change": "feature term 1,485 -> 1,607, the exact measured residual (+122)" },
+    "deferredCustomAgentsSettingsJavaScript": { "before": 40161, "after": 40166, "change": "+5, inherited: the frozen calling baseline cc9259fa already measures 40,166 on the same dependencies, and this branch does not change that chunk" }
+  },
+  "notes": [
+    "Startup cut: moving agent secret server code out of the renderer (5b58c9d5) took both first-load routes from 1,919 bytes over budget to 612 under, saving 2,531 bytes on each route.",
+    "Schema cut: the secret request result and list schemas moved to shared/contracts/secret-request-results.ts (9a37f2ce), so the unused command schemas no longer reach the renderer. This saves 190 core bytes (2,495,728 -> 2,495,538). The result validators live in the server-event schema chunk, which the renderer loads with a dynamic import, so neither first-load closure changed. The review's estimate of about 287 bytes on both first-load routes did not hold.",
+    "The remaining core and Settings growth is real feature UI: the pending card and form, the saved and declined rows, the vetted revoke messages, the composer notice, the timeline model and the Settings section.",
+    "The custom-agents +5 duplicates the drift on the frozen calling branch. Expect a trivial overlap or conflict when that branch corrects its own budget.",
+    "The keychain reconciliation and shared redaction matcher changes are main-process and runtime code only. They do not change any renderer measurement."
+  ],
+  "rejectedExperiments": [
+    { "change": "Lazy-load the pending secret form", "measured": "+~1.3 KiB core for the loader and an extra chunk, no first-load saving (the transcript chunk is already outside both first-load closures)" },
+    { "change": "Reuse the shared useMinuteClock hook", "measured": "+~450 bytes core (Rollup split it into its own chunk)" },
+    { "change": "Isolate the display copy in its own chunk", "measured": "+22 bytes of side-effect import in each of ten Settings chunks" }
+  ]
+}

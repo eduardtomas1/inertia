@@ -1,5 +1,5 @@
 import { ChildProcess } from "node:child_process";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -14,6 +14,9 @@ const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((path) => rm(path, { force: true, recursive: true }))); });
 async function fixture(body?: (input: CursorSdkStart, handle: Parameters<typeof openCursorSdkWorker>[0]["handle"]) => Promise<unknown>) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "cursor-sdk-harness-"))); roots.push(root);
+  const store = join(root, "store");
+  const resolveStateRoot = vi.fn(async () => { await mkdir(store, { recursive: true }); return await realpath(store); });
+  const resolveSecret = vi.fn(async () => "synthetic-test-token");
   const events: AgentHarnessEvent[] = [];
   const close = vi.fn(async () => undefined);
   const request = vi.fn(async (_method: string, _params: unknown, _timeout?: number) => null as unknown);
@@ -30,16 +33,18 @@ async function fixture(body?: (input: CursorSdkStart, handle: Parameters<typeof 
   const input = nativeProviderRunInput({ providerId: "cursor", harnessId: "cursor-sdk", conversationId: "chat", cwd: root,
     prompt: "hello", model: "synthetic-model", interactionMode: "build", access: "supervised" });
   const options: AgentHarnessStartOptions = { input, executable: "unused-cli", environment: {}, providerNativeToolsAvailable: true,
-    cursorSdk: { stateRoot: join(root, "providers"), credentials: { resolve: async () => "synthetic-test-token", status: async () => ({ hasSecret: true, credentialGeneration: "generation" }) } },
+    cursorSdk: { stateRoot: join(root, "providers"), credentials: { resolve: resolveSecret, status: async () => ({ hasSecret: true, credentialGeneration: "generation" }) } },
     callbacks: { onEvent: (event: AgentHarnessEvent) => events.push(event) } };
-  return { start: () => startCursorSdkRun(options, { openWorker }), options, events, request, close, openWorker };
+  return { start: () => startCursorSdkRun(options, { openWorker, resolveStateRoot }), startWithDefaultStorage: () => startCursorSdkRun(options, { openWorker }),
+    options, events, request, close, openWorker, store, resolveStateRoot, resolveSecret };
 }
 
 describe("Cursor SDK production harness", () => {
   it("launches exact authority with explicit private credentials, read-only native tools and joined cleanup", async () => {
     const f = await fixture(); const result = await f.start().result;
     expect(result).toMatchObject({ status: "completed", sessionId: "native-session", text: "Done", cleanupConfirmed: true });
-    expect(f.request).toHaveBeenCalledWith("start", expect.objectContaining({ apiKey: "synthetic-test-token", nativeTools: "read",
+    expect(f.resolveStateRoot).toHaveBeenCalledWith(f.options.cursorSdk, f.options.input.cwd, expect.any(String));
+    expect(f.request).toHaveBeenCalledWith("start", expect.objectContaining({ apiKey: "synthetic-test-token", nativeTools: "read", stateRoot: f.store,
       authority: expect.objectContaining({ conversationId: f.options.input.conversationId, runId: f.options.input.runId, turnId: f.options.input.turnId, workspace: f.options.input.cwd }) }), 1800000);
     expect(f.close).toHaveBeenCalledOnce(); expect(JSON.stringify(f.events)).not.toContain("synthetic-test-token");
   });
@@ -96,6 +101,20 @@ describe("Cursor SDK production harness", () => {
     if (run.extension.kind !== "cursor-sdk") throw new Error("wrong route");
     await expect(run.extension.steer!({ content: "next", imagePaths: [] })).resolves.toBe(false);
     finish(); await expect(run.result).resolves.toMatchObject({ status: "completed" });
+  });
+
+  it("fails closed without opening a worker when durable storage is unavailable on this platform", async () => {
+    const f = await fixture();
+    const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+    if (process.platform === "linux") Object.defineProperty(process, "platform", { ...original, value: "win32" });
+    try {
+      const result = await f.startWithDefaultStorage().result;
+      expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true, error: expect.stringContaining("durable storage is unavailable on this platform") });
+      expect(f.events).toContainEqual(expect.objectContaining({ type: "status", status: "failed", message: result.error }));
+      expect(f.openWorker).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled();
+      expect(f.resolveSecret).not.toHaveBeenCalled(); expect(f.resolveStateRoot).not.toHaveBeenCalled();
+      expect(JSON.stringify([result, f.events])).not.toContain("synthetic-test-token");
+    } finally { Object.defineProperty(process, "platform", original); }
   });
 
 });

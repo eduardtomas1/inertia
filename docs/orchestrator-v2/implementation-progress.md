@@ -352,3 +352,16 @@ Remaining after phase 3: combined rollback-and-restore-files orchestration,
 explicit merge-back source point selection, command/file-change items in the
 merge delta, agent-initiated fork/merge-back tools, rollback-to-start UI, Duo
 and Private Connect parity, and all later-phase checklist items.
+
+## Phase 0 stabilization — 2026-10-31
+
+The "Linux interaction and lifecycle" CI build failed during third-party notice
+generation because `@cursor/sdk` was a production dependency and its platform
+packages ship no license file. `@cursor/sdk` 1.0.38 is now an exact-pinned
+development dependency. Packaged builds contain no SDK, SDK platform package or
+SDK-only transitive dependency, and the SDK-only asarUnpack globs are removed.
+Notice generation passes again with the generator unchanged and fail-closed.
+The Linux development runtime is unchanged: the SDK resolves from
+devDependencies in a development checkout, and packaged asar locations remain
+refused with the existing unavailable status. Packaged Linux smoke was not run
+on this Windows host.

@@ -211,13 +211,25 @@ track owns the explicit account/model UI and its separate evidence document.
 
 ### Packaging boundary
 
-The worker build entry and asar-unpacked worker/lazy chunks, SDK/platform assets
-and runtime dependency paths are configured. The saved checkpoint already pins
-1.0.38 in package and lockfile; no dependency graph change required an install or
-lockfile rewrite. The notice generator remains strict and fails on the missing
-`@cursor/sdk-linux-x64@1.0.38/LICENSE.md`. No generated notice fallback, asset
-exclusion or check bypass was introduced. Runtime SDK discovery rejects packaged
-asar locations, so development evidence cannot advertise packaged support.
+`@cursor/sdk` is pinned exactly to 1.0.38 as a development dependency. The
+lockfile marks the SDK, its five platform packages and its SDK-only transitive
+dependencies (`@bufbuild/*`, `@connectrpc/*`, `@statsig/*`) dev-only; `zod`
+remains a production dependency for other runtime code. The production npm tree
+therefore excludes the SDK, the notice generator no longer reaches the missing
+`@cursor/sdk-linux-x64@1.0.38/LICENSE.md`, and electron-builder does not copy
+the SDK into packaged builds. The generator itself is unchanged and still fails
+closed on missing license material.
+
+The main/worker electron-vite build lists every `@cursor/*` package in
+`externalizeDeps.include`, so `cursor-sdk-worker` and the runtime installation
+probe resolve the SDK with `createRequire` at runtime and no SDK code is inlined
+into `out/main`. The asarUnpack globs added only for the SDK
+(`node_modules/@cursor/**`, `@bufbuild/**`, `@connectrpc/**`, `@statsig/**`,
+`zod/**` and `out/main/**`) were removed; package smoke requires
+`out/main/index.js` to stay packed. Runtime SDK discovery still rejects packaged
+asar locations before resolving the module, and the status probe maps any
+inspection failure, including a missing module, to unavailable. Development
+evidence cannot advertise packaged support.
 
 The completed [license investigation](cursor-sdk-license-evidence.md) verifies
 all five exact platform tarballs and the matching Python 1.0.38 omission. Only

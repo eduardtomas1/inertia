@@ -6,7 +6,7 @@ import { createAgentHarnessEmitter, type AgentHarness, type AgentHarnessCapabili
 import { providerRunTerminal, ProviderSteerDeliveryUnknownError, type ProviderRunResult } from "./contracts";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { CursorSdkCleanupError, openCursorSdkWorker } from "./cursor-sdk-process";
-import { cursorSdkStateRoot } from "./cursor-sdk-service";
+import { cursorSdkStateRoot, type CursorSdkConfiguration } from "./cursor-sdk-service";
 import { cursorSdkStoreDirectory } from "./cursor-sdk-store";
 import { providerUnconfirmedCleanup } from "./provider-unconfirmed-cleanup";
 import { AcpSecretRedactor } from "./acp-redaction";
@@ -31,7 +31,17 @@ const eventSchema = z.object({ authority: cursorSdkAuthoritySchema, message: z.o
 const hostSchema = z.object({ authority: cursorSdkAuthoritySchema, callId: z.string().uuid(), tool: z.string().min(1).max(128), arguments: z.unknown() }).strict();
 const resultSchema = z.object({ agentId: z.string().min(1).max(512), id: z.string().min(1).max(512), status: z.enum(["finished", "cancelled", "error"]) }).passthrough();
 
-export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencies: { openWorker?: typeof openCursorSdkWorker } = {}): AgentHarnessRun {
+export type CursorSdkRunStateRootResolver = (configuration: CursorSdkConfiguration, workspace: string, providerInstanceId: string) => Promise<string>;
+
+const STORAGE_UNAVAILABLE = "Cursor SDK durable storage is unavailable on this platform or workspace.";
+
+async function resolveCursorSdkRunStateRoot(configuration: CursorSdkConfiguration, workspace: string, instance: string): Promise<string> {
+  return await cursorSdkStoreDirectory(await cursorSdkStateRoot(configuration), workspace, instance);
+}
+
+export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencies: {
+  openWorker?: typeof openCursorSdkWorker; resolveStateRoot?: CursorSdkRunStateRootResolver;
+} = {}): AgentHarnessRun {
   const { input } = options;
   const emit = createAgentHarnessEmitter("cursor", input.conversationId, options.callbacks, input.runId, input.turnId, input.cwd, "cursor-sdk");
   const controller = new AbortController();
@@ -61,14 +71,15 @@ export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencie
   const result = (async (): Promise<ProviderRunResult> => {
     let status: ProviderRunResult["status"] = "failed";
     let cleanupConfirmed = true;
+    let failure = "Cursor SDK execution failed.";
     const watchdog = setTimeout(() => { timedOut = true; cancel(true); }, CURSOR_SDK_RUN_TIMEOUT_MS); watchdog.unref();
     try {
       emit.status("starting");
       if (!options.cursorSdk?.credentials || input.imagePaths?.length || input.skills?.length || options.nativeContinuation
         || input.modelSelection.reasoningEffort || input.reasoningEffort || input.modelSelection.contextWindowOverride
         || !input.modelSelection.modelId || input.modelSelection.modelId === "provider-default") throw new Error("Cursor SDK launch options are unavailable.");
-      const root = await cursorSdkStateRoot(options.cursorSdk);
-      const stateRoot = await cursorSdkStoreDirectory(root, input.cwd, authority.providerInstanceId);
+      const stateRoot = await (dependencies.resolveStateRoot ?? resolveCursorSdkRunStateRoot)(options.cursorSdk, input.cwd, authority.providerInstanceId)
+        .catch((error: unknown) => { failure = STORAGE_UNAVAILABLE; throw error; });
       const apiKey = await options.cursorSdk.credentials.resolve(CURSOR_SDK_SECRET_REFERENCE, controller.signal);
       if (!apiKey) throw new Error("Cursor SDK login is required.");
       redact.addSecrets([apiKey]);
@@ -131,10 +142,10 @@ export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencie
       try { await worker?.close(); } catch { cleanupConfirmed = false; }
       finished = true;
     }
-    emit.status(status, status === "failed" ? "Cursor SDK execution failed." : undefined);
+    emit.status(status, status === "failed" ? failure : undefined);
     return { ...providerRunTerminal(input, status), sessionId, text, textTruncated: false, exitCode: null, signal: null,
       cleanupConfirmed, ...(!cleanupConfirmed && (worker?.child ?? uncertainChild) ? providerUnconfirmedCleanup((worker?.child ?? uncertainChild)!) : {}),
-      ...(status === "failed" ? { error: "Cursor SDK execution failed." } : {}) };
+      ...(status === "failed" ? { error: failure } : {}) };
   })();
   return { harnessId: "cursor-sdk", providerId: "cursor", result, cancel, extension: { kind: "cursor-sdk",
     respondToApproval: (id, decision) => host?.respondToApproval(id, decision) ?? false, respondToInput: () => false,

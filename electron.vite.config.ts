@@ -85,7 +85,16 @@ export default defineConfig({
       },
     ],
     build: {
-      externalizeDeps: true,
+      externalizeDeps: {
+        include: [
+          "@cursor/sdk",
+          "@cursor/sdk-darwin-arm64",
+          "@cursor/sdk-darwin-x64",
+          "@cursor/sdk-linux-arm64",
+          "@cursor/sdk-linux-x64",
+          "@cursor/sdk-win32-x64",
+        ],
+      },
       target: "node22",
       sourcemap: false,
       rollupOptions: {

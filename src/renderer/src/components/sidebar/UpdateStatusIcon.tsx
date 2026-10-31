@@ -11,6 +11,13 @@ const SPIN_CLASS: Record<SpinPhase, string> = {
   settle: " is-spin-settle",
 };
 
+const SPIN_ANIMATION: Record<SpinPhase, string | null> = {
+  rest: null,
+  start: "sidebar-update-wind-up",
+  run: "sidebar-update-spin",
+  settle: "sidebar-update-coast",
+};
+
 export function UpdateStatusIcon({ state, percent, reducedMotion }: {
   state: UpdateIconState; percent: number | null; reducedMotion: boolean;
 }): React.JSX.Element {
@@ -37,12 +44,13 @@ export function UpdateStatusIcon({ state, percent, reducedMotion }: {
   if (shown === "attention") return <TriangleAlert size={16} aria-hidden="true" />;
   return <span aria-hidden="true" className={`update-status-icon${SPIN_CLASS[phase]}`}
     onAnimationEnd={(event) => {
-      if (event.target !== event.currentTarget) return;
+      if (event.target !== event.currentTarget || event.animationName !== SPIN_ANIMATION[phase]) return;
       if (phase === "start") setPhase(wanted.current ? "run" : "settle");
       else if (phase === "settle") setPhase(wanted.current ? "start" : "rest");
     }}
     onAnimationIteration={(event) => {
-      if (event.target === event.currentTarget && phase === "run" && !wanted.current) setPhase("settle");
+      if (event.target !== event.currentTarget || event.animationName !== SPIN_ANIMATION[phase]) return;
+      if (phase === "run" && !wanted.current) setPhase("settle");
     }}>
     <RefreshCw size={16} />
   </span>;

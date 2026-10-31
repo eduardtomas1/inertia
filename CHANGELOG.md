@@ -2,6 +2,95 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Security
+
+- Chats no longer start on Claude Code older than 2.1.309 or OpenCode older
+  than 1.18.22. Older Claude Code ignores the restrictions Inertia sets and
+  can write outside the project; older OpenCode lets a website install
+  packages through its local server.
+  **Settings → Agents** shows *Update required* with the installed and
+  required versions, and the composer shows *Update needed* on every route
+  for that agent, API keys included, until you update it and refresh.
+  Inertia never starts the old version for sign-in, models, usage, skills or
+  terminal resume, and still offers its update.
+
+### Chats
+
+- **Compact and send** is offered only once the chat has a provider session
+  to compact. When the chat cannot be compacted, for example because its next
+  turn starts a new session after you changed the model backend, the draft
+  stays with **Send without compacting** instead of Enter failing every time.
+- **Send now** on a queued message waits while the chat compacts. One pressed
+  just as compacting started is sent when it ends, instead of being dropped.
+- After you press End, dragging the scrollbar, a search result, the minimap,
+  **Load earlier messages** or another chat no longer hides **Jump to latest**
+  or pulls the chat back to the bottom while you read.
+- Switching away right after sending no longer brings you back to an older
+  reading position instead of your new message.
+
+### Chat windows
+
+- Closing a chat's own window with its title-bar button, Alt+F4, the taskbar
+  or Ctrl+Shift+W (Cmd+Shift+W on macOS) hands its terminals back to the main
+  window, as **Return** and **Close** do, instead of stopping them about 30
+  seconds later, as long as the main window has room for them. The same
+  applies to a chat window whose page crashed.
+- The main window takes back a closed chat window's terminals before it
+  updates its window list, so no stale terminal tabs are left behind. When it
+  has room for them it keeps them running in the background until you open
+  that chat's terminal. If it is already at its terminal limit (four per
+  window) or the local service is offline, they stop after 30 seconds unless
+  you open that terminal, and Diagnostics records it.
+
+### Accounts and API keys
+
+- A project's spend limit now also caps Claude chats on an Anthropic API key.
+  Since 0.0.79 those chats ran without the limit.
+
+### Agent instructions
+
+- When reading Codex's configuration fails or takes over three seconds,
+  Inertia leaves your own Codex developer instructions in place and sends its
+  chat instructions with that message instead of replacing yours for the
+  session. Diagnostics notes when this happens.
+
+### Stop, restart and providers
+
+- A turn that ends on its own or fails while its agent process can't be
+  confirmed stopped now says in the chat that the process may still be
+  running, as a stopped turn already did.
+- When the local service has repeatedly stopped without its processes being
+  confirmed stopped, **Restart** retries that cleanup first and starts a new
+  one only once it succeeds, instead of starting another beside them.
+
+### Usage
+
+- A failed **Refresh usage** is reported once, in the Usage panel, instead of
+  also as an app-wide error. The usage clock stops while the window is hidden
+  and catches up when you come back.
+
+### Updates
+
+- A finished update in the sidebar strip, such as *Codex updated* or
+  *downloaded · Restart*, stays for its full five seconds with reduced motion
+  on or after the window was hidden, and waits while you point at it or focus
+  it.
+- The refresh icon no longer jumps when its wind-up turns into a spin or stops
+  abruptly when it coasts to rest.
+- Quitting while an update is being prepared no longer hangs. Inertia exits
+  when the shutdown deadline passes and records that cleanup wasn't confirmed.
+
+### Dependencies
+
+- Updated the Claude Agent SDK to 0.3.310 to match Claude Code 2.1.310. The
+  hook and skill-shell restrictions Inertia sets for every Claude turn are
+  honoured by Claude Code 2.1.309 or newer, which is now the minimum.
+- Private Connect saves its encrypted state with Electron's asynchronous
+  secure storage, ahead of Electron 46 removing the synchronous one. Existing
+  pairings keep working.
+
 ## 0.0.80 — 2026-10-28
 
 A chat's own window with the main window's tools, an agent Browser with its
@@ -81,7 +170,8 @@ mode, and a composer with room at the bottom.
   mode, images, file tools, skills, goals, **Compact and send**, and
   follow-ups that continue the same session, also after the agent updates.
   Account-only features such as quota windows and fast mode stay with your
-  subscription.
+  subscription. Inertia's own tools (the Browser, chat orchestration and HTML
+  pages) are not available on a key.
 - Third-party compatible backends keep the stricter rule: only what their
   model test confirmed.
 

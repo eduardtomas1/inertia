@@ -355,6 +355,41 @@ describe("application update install coordination", () => {
     expect(onUnconfirmedShutdown).not.toHaveBeenCalled();
   });
 
+  it.each(["abort", "install"] as const)(
+    "exits a normal quit with evidence when the pending update %s never settles",
+    async (stage) => {
+      const events: string[] = [];
+      const update = {
+        ...service(events),
+        abortInstall: vi.fn(() => stage === "abort" ? new Promise<void>(() => undefined) : Promise.resolve()),
+      };
+      const finishNormalShutdown = vi.fn(() => events.push("normal-exit"));
+      const recordUnconfirmedExit = vi.fn(() => events.push("unconfirmed-exit"));
+      const coordinator = new AppUpdateInstallCoordinator({
+        service: update,
+        runtime: () => ({
+          prepareForUpdate: () => stage === "install"
+            ? new Promise<{ ready: true }>(() => undefined)
+            : Promise.resolve({ ready: true as const }),
+          releaseUpdatePreparation: () => Promise.resolve(true),
+        }),
+        privateConnect: () => null,
+        cleanup: vi.fn(async () => true),
+        finishNormalShutdown,
+        normalShutdownDeadlineMs: 20,
+        recordUnconfirmedExit,
+        reportError: vi.fn(),
+      });
+
+      if (stage === "install") void coordinator.install();
+      expect(coordinator.allowBeforeQuit()).toBe(false);
+      await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
+      expect(recordUnconfirmedExit).toHaveBeenCalledOnce();
+      expect(events.slice(-2)).toEqual(["unconfirmed-exit", "normal-exit"]);
+      expect(coordinator.normalShutdownInProgress()).toBe(false);
+    },
+  );
+
   it("coalesces a retry after a failed update abort and exits once confirmed", async () => {
     const cleanup = vi.fn(async () => true);
     const finishNormalShutdown = vi.fn();

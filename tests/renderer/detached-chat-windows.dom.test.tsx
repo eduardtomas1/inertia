@@ -15,7 +15,7 @@ import {
   useDetachedChatWindows,
   useDockedTerminalOpen,
 } from "../../src/renderer/src/hooks/useDetachedChatWindows";
-import type { AppSnapshot } from "../../src/shared/contracts";
+import type { AppSnapshot, ClientCommand, ServerEvent } from "../../src/shared/contracts";
 import type {
   DetachedChatWindowSummary,
   DetachedChatDraftHandoff,
@@ -88,6 +88,7 @@ function installDetachedChatBridge({
       onDetachedChatTerminalHandoff: onTerminalHandoff,
       openDetachedChat: vi.fn(),
       focusDetachedChat: vi.fn(),
+      reportValidationDiagnostic: vi.fn(async () => null),
     },
   });
 }
@@ -397,6 +398,82 @@ describe("useDetachedChatWindows", () => {
     expect(hook.result.current.dockedTerminalConversationId).toBe(CONVERSATION_ID);
     act(() => hook.result.current.consumeDockedTerminal());
     expect(hook.result.current.dockedTerminalConversationId).toBeNull();
+    window.sessionStorage.clear();
+  });
+
+  it("takes ownership of terminals handed back without docking, and leaves docked ones to the panel", async () => {
+    const projectId = "33333333-3333-4333-8333-333333333333";
+    const terminalIds = [
+      "44444444-4444-4444-8444-444444444444",
+      "66666666-6666-4666-8666-666666666666",
+    ];
+    let publish: ((handoff: DetachedChatTerminalHandoff) => void) | undefined;
+    installDetachedChatBridge({
+      onTerminalHandoff: vi.fn((listener) => {
+        publish = listener;
+        return vi.fn();
+      }),
+    });
+    const sendCommand = vi.fn(async (command: ClientCommand): Promise<ServerEvent> => ({
+      type: "terminal.created",
+      requestId: command.requestId,
+      terminalId: (command as unknown as { payload: { terminalId: string } }).payload.terminalId,
+    } as ServerEvent));
+    const snapshot = {
+      conversations: [{ id: CONVERSATION_ID, projectId }],
+    } as unknown as AppSnapshot;
+    const hook = renderHook(() => useDetachedChatWindows(snapshot, sendCommand));
+    await waitFor(() => expect(hook.result.current.ready).toBe(true));
+
+    act(() => publish?.({ conversationId: CONVERSATION_ID, terminalIds, dock: true }));
+    expect(sendCommand).not.toHaveBeenCalled();
+
+    act(() => publish?.({ conversationId: CONVERSATION_ID, terminalIds, dock: false }));
+    expect(sendCommand.mock.calls.map(([command]) => command)).toEqual(terminalIds.map((terminalId) => ({
+      type: "terminal.attach",
+      requestId: expect.any(String),
+      payload: {
+        projectId,
+        conversationId: CONVERSATION_ID,
+        terminalId,
+        background: true,
+        cols: 80,
+        rows: 24,
+      },
+    })));
+    expect(window.inertia.reportValidationDiagnostic).not.toHaveBeenCalled();
+    window.sessionStorage.clear();
+  });
+
+  it("records a diagnostic once when the main window cannot take back a closed window's terminals", async () => {
+    const projectId = "33333333-3333-4333-8333-333333333333";
+    let publish: ((handoff: DetachedChatTerminalHandoff) => void) | undefined;
+    installDetachedChatBridge({
+      onTerminalHandoff: vi.fn((listener) => {
+        publish = listener;
+        return vi.fn();
+      }),
+    });
+    const sendCommand = vi.fn(async (): Promise<ServerEvent> => {
+      throw new Error("This window already has the maximum number of terminals.");
+    });
+    const snapshot = {
+      conversations: [{ id: CONVERSATION_ID, projectId }],
+    } as unknown as AppSnapshot;
+    const hook = renderHook(() => useDetachedChatWindows(snapshot, sendCommand));
+    await waitFor(() => expect(hook.result.current.ready).toBe(true));
+
+    act(() => publish?.({
+      conversationId: CONVERSATION_ID,
+      terminalIds: ["44444444-4444-4444-8444-444444444444", "66666666-6666-4666-8666-666666666666"],
+      dock: false,
+    }));
+    await waitFor(() => expect(window.inertia.reportValidationDiagnostic).toHaveBeenCalledOnce());
+    expect(window.inertia.reportValidationDiagnostic).toHaveBeenCalledWith({
+      code: "terminal.handoff-unowned",
+      correlationId: expect.any(String),
+      context: { projectId, conversationId: CONVERSATION_ID },
+    });
     window.sessionStorage.clear();
   });
 });

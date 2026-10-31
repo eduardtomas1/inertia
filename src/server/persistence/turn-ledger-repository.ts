@@ -504,6 +504,14 @@ export class TurnLedgerRepository {
     return { sessionInstructionDigest: isSessionInstructionDigest(digest?.digest) ? digest!.digest : null };
   }
 
+  forgetSessionInstruction(turnId: string): void {
+    this.context.database.prepare(`
+      UPDATE turn_execution_manifests
+      SET manifest_json = json_remove(manifest_json, '$.sessionInstructionDigest')
+      WHERE turn_id = ? AND json_valid(manifest_json)
+    `).run(turnId);
+  }
+
   promptWithheld(turnId: string): boolean {
     const row = this.context.database.prepare(`
       SELECT CASE WHEN json_valid(manifest_json)

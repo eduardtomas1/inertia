@@ -31,22 +31,33 @@ export function installRuntimeWorkerFaultHandlers(
     readonly started: () => boolean;
     readonly recordIncident: (code: RuntimeWorkerFaultIncidentCode) => void;
     readonly requestRestart: () => void;
+    readonly forceExit?: () => void;
+    readonly forceExitAfterMs?: number;
   },
 ): void {
+  let forcedExit: ReturnType<typeof setTimeout> | null = null;
   const record = (code: RuntimeWorkerFaultIncidentCode): void => {
     try { options.recordIncident(code); } catch {
       return;
     }
   };
+  const restart = (): void => {
+    const { forceExit, forceExitAfterMs } = options;
+    if (forceExit && forceExitAfterMs !== undefined && forcedExit === null) {
+      forcedExit = setTimeout(forceExit, forceExitAfterMs);
+      forcedExit.unref?.();
+    }
+    options.requestRestart();
+  };
   target.on("unhandledRejection", () => {
     if (!options.started()) {
-      options.requestRestart();
+      restart();
       return;
     }
     record("runtime.unhandled-rejection");
   });
   target.on("uncaughtException", () => {
     record("runtime.uncaught-exception");
-    options.requestRestart();
+    restart();
   });
 }

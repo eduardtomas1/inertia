@@ -27,11 +27,18 @@ function publish(overrides: Partial<AppUpdateStatus> = {}): void {
 function trigger(): HTMLButtonElement { return document.querySelector<HTMLButtonElement>(".sidebar-update-button")!; }
 function details(): HTMLElement { return screen.getByRole("dialog", { name: "Application update details" }); }
 function icon(): Element { return document.querySelector(".update-status-icon")!; }
+const SPIN_KEYFRAMES = { "is-spin-start": "sidebar-update-wind-up", "is-spinning": "sidebar-update-spin", "is-spin-settle": "sidebar-update-coast" } as const;
+function spinAnimation(): string {
+  const phase = (Object.keys(SPIN_KEYFRAMES) as Array<keyof typeof SPIN_KEYFRAMES>).find((name) => icon().classList.contains(name));
+  return phase ? SPIN_KEYFRAMES[phase] : "none";
+}
+function endSpinPhase(): void { fireEvent.animationEnd(icon(), { animationName: spinAnimation() }); }
+function iterateSpin(): void { fireEvent.animationIteration(icon(), { animationName: spinAnimation() }); }
 function finishSpin(): void {
   for (let step = 0; step < 4; step++) {
     const node = icon();
-    if (node.classList.contains("is-spinning")) fireEvent.animationIteration(node);
-    else if (node.classList.contains("is-spin-start") || node.classList.contains("is-spin-settle")) fireEvent.animationEnd(node);
+    if (node.classList.contains("is-spinning")) iterateSpin();
+    else if (node.classList.contains("is-spin-start") || node.classList.contains("is-spin-settle")) endSpinPhase();
     else return;
   }
 }
@@ -407,16 +414,16 @@ describe("refresh icon choreography", () => {
     render(<Harness />);
     fireEvent.click(trigger());
     expect(icon()).toHaveClass("is-spin-start");
-    fireEvent.animationEnd(icon());
+    endSpinPhase();
     expect(icon()).toHaveClass("is-spinning");
-    fireEvent.animationIteration(icon());
+    iterateSpin();
     expect(icon()).toHaveClass("is-spinning");
     await act(async () => request.resolve(updateStatus({ state: "current" })));
     expect(icon()).toHaveClass("is-spinning");
-    fireEvent.animationIteration(icon());
+    iterateSpin();
     expect(icon()).toHaveClass("is-spin-settle");
     expect(trigger()).toHaveAttribute("data-update-state", "idle");
-    fireEvent.animationEnd(icon());
+    endSpinPhase();
     expect(icon().className).toBe("update-status-icon");
     expect(trigger()).toHaveAttribute("data-update-state", "idle");
   });
@@ -425,9 +432,9 @@ describe("refresh icon choreography", () => {
     render(<Harness />);
     await act(async () => fireEvent.click(trigger()));
     expect(icon()).toHaveClass("is-spin-start");
-    fireEvent.animationEnd(icon());
+    endSpinPhase();
     expect(icon()).toHaveClass("is-spin-settle");
-    fireEvent.animationEnd(icon());
+    endSpinPhase();
     expect(trigger()).toHaveAttribute("data-update-state", "idle");
   });
   it("keeps the refresh glyph coasting while the label moves to a provider update that appeared mid-check", async () => {
@@ -435,19 +442,38 @@ describe("refresh icon choreography", () => {
     const { rerender } = render(<EverythingHarness everything={everythingController({}, [])} />);
     publish({ state: "current" });
     fireEvent.click(trigger());
-    fireEvent.animationEnd(icon());
+    endSpinPhase();
     rerender(<EverythingHarness everything={everythingController({}, [CODEX])} />);
     expect(trigger()).toHaveAttribute("data-update-state", "checking");
     await act(async () => request.resolve(updateStatus({ revision: ++sequence, state: "current" })));
     expect(trigger()).toHaveAccessibleName("Update Codex");
     expect(trigger()).toHaveAttribute("data-update-state", "available");
     expect(icon()).toHaveClass("is-spinning");
-    fireEvent.animationIteration(icon());
+    iterateSpin();
     expect(icon()).toHaveClass("is-spin-settle");
-    fireEvent.animationEnd(icon());
+    endSpinPhase();
     expect(icon().querySelector("svg")?.getAttribute("class")).toContain("download");
     expect(trigger()).toHaveAccessibleName("Update Codex");
     expect(trigger()).toHaveAttribute("data-update-state", "available");
+  });
+  it("starts each phase as its own animation so the glyph never jumps between them", async () => {
+    const css = readSourceText("src/renderer/src/components/sidebar/SidebarUpdateControl.css");
+    for (const [phase, keyframes] of Object.entries(SPIN_KEYFRAMES)) {
+      expect(css).toContain(`@keyframes ${keyframes} `);
+      expect(css).toContain(`.update-status-icon.${phase} { animation: ${keyframes} `);
+    }
+    expect(new Set(Object.values(SPIN_KEYFRAMES)).size).toBe(3);
+    const request = deferred<AppUpdateStatus>(); check.mockReturnValue(request.promise);
+    render(<Harness />);
+    fireEvent.click(trigger());
+    endSpinPhase();
+    expect(icon()).toHaveClass("is-spinning");
+    fireEvent.animationEnd(icon(), { animationName: SPIN_KEYFRAMES["is-spin-start"] });
+    await act(async () => request.resolve(updateStatus({ state: "current" })));
+    fireEvent.animationIteration(icon(), { animationName: SPIN_KEYFRAMES["is-spin-start"] });
+    expect(icon()).toHaveClass("is-spinning");
+    iterateSpin();
+    expect(icon()).toHaveClass("is-spin-settle");
   });
   it("never spins for a background check while a provider update is already offered", () => {
     render(<EverythingHarness everything={everythingController({}, [CODEX])} />);
@@ -473,9 +499,9 @@ describe("update state without animation frames", () => {
     fireEvent.pointerEnter(trigger().parentElement!);
     expect(details().querySelector("header strong")).toHaveTextContent("Up to date — check again");
     expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
-    fireEvent.animationEnd(icon());
+    endSpinPhase();
     expect(icon()).toHaveClass("is-spin-settle");
-    fireEvent.animationEnd(icon());
+    endSpinPhase();
     expect(icon().className).toBe("update-status-icon");
     expect(trigger()).toHaveAttribute("data-update-state", "idle");
     expect(trigger()).toHaveAccessibleName("Up to date — check again");
@@ -522,21 +548,78 @@ describe("update strip in the sidebar footer", () => {
       beforeVersion: "0.112.0", afterVersion: null, targetVersion: "0.113.0", message: "", output: null, outputTruncated: false, ...extra };
   }
   const strip = (): HTMLElement | null => document.querySelector(".sidebar-update-strip");
-  it("says what is updating, then drains a success away and hands focus back to the icon", () => {
+  it("says what is updating, then lets a success go after five seconds", () => {
     const { rerender } = render(<EverythingHarness everything={everythingController({ operations: new Map([["codex", op("running")]]) })} />);
     publish({ state: "current" });
     expect(screen.getByRole("button", { name: "Updating Codex…" })).toBeInTheDocument();
     expect(strip()).toHaveAttribute("data-tone", "loading");
     rerender(<EverythingHarness everything={everythingController({ operations: new Map([["codex",
       op("succeeded", { finishedAt: new Date(Date.now() + 1_000).toISOString(), afterVersion: "0.113.0" })]]) })} />);
-    const main = screen.getByRole("button", { name: "Codex updated to 0.113.0" });
+    expect(screen.getByRole("button", { name: "Codex updated to 0.113.0" })).toBeInTheDocument();
     expect(strip()).toHaveAttribute("data-tone", "success");
-    act(() => main.focus());
-    fireEvent.animationEnd(document.querySelector(".sidebar-update-strip-drain")!, { animationName: "sidebar-update-drain" });
+    act(() => { vi.advanceTimersByTime(5_000); });
     expect(document.querySelector(".sidebar-update-strip-slot")).not.toHaveClass("is-open");
-    expect(trigger()).toHaveFocus();
     act(() => { vi.advanceTimersByTime(250); });
     expect(strip()).toBeNull();
+  });
+  function showSuccess(): void {
+    const { rerender } = render(<EverythingHarness everything={everythingController({ operations: new Map([["codex", op("running")]]) })} />);
+    publish({ state: "current" });
+    rerender(<EverythingHarness everything={everythingController({ operations: new Map([["codex",
+      op("succeeded", { finishedAt: new Date(Date.now() + 1_000).toISOString(), afterVersion: "0.113.0" })]]) })} />);
+  }
+  const open = (): boolean => document.querySelector(".sidebar-update-strip-slot")?.classList.contains("is-open") === true;
+  it("keeps a success for its full five seconds, not for the length of its fade", () => {
+    showSuccess();
+    fireEvent.animationEnd(document.querySelector(".sidebar-update-strip-drain")!, { animationName: "sidebar-update-drain" });
+    act(() => { vi.advanceTimersByTime(4_999); });
+    expect(open()).toBe(true);
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(open()).toBe(false);
+  });
+  it("keeps the same five seconds under reduced motion", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduced-motion"), addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    showSuccess();
+    fireEvent.animationEnd(document.querySelector(".sidebar-update-strip-drain")!, { animationName: "sidebar-update-drain" });
+    act(() => { vi.advanceTimersByTime(4_000); });
+    expect(open()).toBe(true);
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(open()).toBe(false);
+  });
+  it("pauses a success while the pointer or focus is on it", () => {
+    showSuccess();
+    act(() => { vi.advanceTimersByTime(3_000); });
+    fireEvent.pointerEnter(strip()!);
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(open()).toBe(true);
+    fireEvent.pointerLeave(strip()!);
+    const main = screen.getByRole("button", { name: "Codex updated to 0.113.0" });
+    act(() => main.focus());
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(open()).toBe(true);
+    act(() => main.blur());
+    act(() => { vi.advanceTimersByTime(1_999); });
+    expect(open()).toBe(true);
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(open()).toBe(false);
+  });
+  it("suspends a success while the window is hidden", () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    try {
+      showSuccess();
+      act(() => { vi.advanceTimersByTime(2_000); });
+      visibility.mockReturnValue("hidden");
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+      fireEvent.animationEnd(document.querySelector(".sidebar-update-strip-drain")!, { animationName: "sidebar-update-drain" });
+      act(() => { vi.advanceTimersByTime(60_000); });
+      expect(open()).toBe(true);
+      visibility.mockReturnValue("visible");
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+      act(() => { vi.advanceTimersByTime(2_999); });
+      expect(open()).toBe(true);
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(open()).toBe(false);
+    } finally { visibility.mockRestore(); }
   });
   it("keeps a failure until it is dismissed and lists the reason in the details", () => {
     const onOpenAgentSettings = vi.fn();
@@ -548,8 +631,11 @@ describe("update strip in the sidebar footer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Agent settings" }));
     expect(onOpenAgentSettings).toHaveBeenCalledOnce();
     expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss update notice" }));
+    const dismiss = screen.getByRole("button", { name: "Dismiss update notice" });
+    act(() => dismiss.focus());
+    fireEvent.click(dismiss);
     expect(document.querySelector(".sidebar-update-strip-slot")).not.toHaveClass("is-open");
+    expect(trigger()).toHaveFocus();
   });
   it("does not open the details when the pointer only passes over the strip", () => {
     render(<EverythingHarness everything={everythingController({ operations: new Map([["codex", op("running")]]) })} />);

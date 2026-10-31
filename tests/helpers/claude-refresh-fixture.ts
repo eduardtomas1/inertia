@@ -88,7 +88,7 @@ const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
   await wait(plan.startupMs + slow);
   if (kind === "version") {
     await wait(plan.versionMs);
-    process.stdout.write("2.1.200 (Claude Code)\\n");
+    process.stdout.write("2.1.320 (Claude Code)\\n");
     finish(0);
     return;
   }

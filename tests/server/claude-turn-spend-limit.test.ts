@@ -13,6 +13,7 @@ import {
   resolveHarnessBackendCompatibility,
 } from "../../src/shared/model-routing";
 import { defaultProjectPreferences } from "../../src/shared/project-preferences";
+import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
 import { RuntimeStore } from "../../src/server/database";
 import { validateProviderRunInput } from "../../src/server/provider/adapters";
 import type { ProviderId, ProviderRunInput } from "../../src/server/provider/contracts";
@@ -181,6 +182,45 @@ describe("Claude per-turn spend limit", () => {
       modelSelection: providerNativeModelSelection({ providerId: "claude" }),
     });
     expect(resolveFor(store, claude.id)).not.toHaveProperty("maxBudgetUsd");
+  });
+
+  it("forwards the limit to an Anthropic API key route", async () => {
+    const { store, project } = await projectWithLimit(2.5);
+    const keyProfile = {
+      ...providerNativeBackendProfile("claude"),
+      id: "custom:anthropic-key",
+      displayName: "Anthropic API key",
+      authenticationMode: "api-key" as const,
+      source: "custom" as const,
+      configurationRevision: 1,
+      endpointIdentity: backendEndpointIdentity("https://api.anthropic.com"),
+    };
+    const selection = modelSelectionSchema.parse({
+      ...providerNativeModelSelection({ providerId: "claude", modelId: "claude-opus-5-5" }),
+      backendProfileId: keyProfile.id,
+      backendProfileDisplayName: keyProfile.displayName,
+      backendConfigurationRevision: 1,
+    });
+    const conversation = store.createConversation(project.id, "Key", {
+      modelSelection: selection,
+    });
+    const compatibility = resolveHarnessBackendCompatibility("claude-agent-sdk", keyProfile);
+    const input = resolveFor(store, conversation.id, {
+      validateModelSelection: () => selection,
+      resolveModelRoute: () => ({
+        providerId: "claude" as const,
+        harnessId: "claude-agent-sdk" as const,
+        backendProfile: keyProfile,
+        compatibility,
+        continuationIdentity: continuationIdentityForSelection(
+          selection,
+          keyProfile.endpointIdentity,
+          !compatibility.allowsModelSwitchWithinSession,
+        ),
+      }),
+    });
+    expect(input).toMatchObject({ backendProfile: { id: "custom:anthropic-key" }, maxBudgetUsd: 2.5 });
+    expect(validateProviderRunInput(input)).toBe(conversation.id);
   });
 
   it("does not forward the limit to a Claude-compatible custom backend", async () => {

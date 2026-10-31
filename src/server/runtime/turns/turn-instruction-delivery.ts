@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 
+import { diagnosticContextSchema } from "../../../shared/application-diagnostics";
 import type { AgentTurn, Conversation } from "../../../shared/contracts";
+import type { IncidentObservation } from "../../../node/application-incidents";
+import type { ProviderRunIdentity } from "../../provider/contracts";
 import type { RuntimeStore } from "../../database";
 import {
   MAX_SYSTEM_INSTRUCTION_BYTES,
@@ -43,6 +46,24 @@ export function sessionInstructionText(
     && Buffer.byteLength(text, "utf8") <= MAX_SYSTEM_INSTRUCTION_BYTES
     ? text
     : undefined;
+}
+
+export function recordDeferredSessionInstruction(
+  store: Pick<RuntimeStore, "turnLedgerRepository">,
+  identity: ProviderRunIdentity,
+  reportIncident?: (observation: IncidentObservation) => unknown,
+): void {
+  store.turnLedgerRepository.forgetSessionInstruction(identity.turnId);
+  const context = diagnosticContextSchema.safeParse({
+    providerId: identity.providerId,
+    conversationId: identity.conversationId,
+    turnId: identity.turnId,
+  });
+  reportIncident?.({
+    code: "provider.session-instructions-deferred",
+    outcome: "recovered",
+    context: context.success ? context.data : { providerId: identity.providerId },
+  });
 }
 
 export const MAX_TRACKED_PROMPT_DELIVERIES = 1_024;

@@ -23,7 +23,8 @@ import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useStableController } from "./hooks/useStableController";
 import { useTheme } from "./hooks/useTheme";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
-import { onComposerDraftPersisted, persistComposerDraft } from "./utils/composerDraftPersistence";
+import { onComposerDraftPersisted, persistComposerDraft, readComposerDraft } from "./utils/composerDraftPersistence";
+import { onTerminalTabsChanged, terminalStorageKey } from "./components/terminalTabStorage";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { cachedAppSettings } from "./utils/cachedSettings";
@@ -126,23 +127,44 @@ export default function DetachedChatApp({
   useTheme(settings);
 
   useEffect(() => {
-    return onComposerDraftPersisted((persistence) => {
-      if (persistence.conversationId === conversationId) {
-        window.inertia.mirrorDetachedChatDraft(persistence.draft);
-      }
-    });
-  }, [conversationId]);
-
-  useEffect(() => {
     applyInterfaceScale(settings.interfaceScale);
   }, [settings.interfaceScale]);
+
+  const snapshotConversation = connection.snapshot?.conversations.find(
+    ({ id }) => id === conversationId,
+  ) ?? null;
+  const projectId = snapshotConversation?.projectId ?? null;
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+
+  useEffect(() => {
+    const mirror = (draft: string): void => {
+      window.inertia.mirrorDetachedChatDraft(draft, detachedTerminalIds(projectIdRef.current, conversationId));
+    };
+    const stopDrafts = onComposerDraftPersisted((persistence) => {
+      if (persistence.conversationId === conversationId) mirror(persistence.draft);
+    });
+    const stopTerminals = onTerminalTabsChanged((storageKey) => {
+      const currentProjectId = projectIdRef.current;
+      if (currentProjectId && storageKey === terminalStorageKey(currentProjectId, conversationId)) {
+        mirror(readComposerDraft(conversationId));
+      }
+    });
+    return () => {
+      stopDrafts();
+      stopTerminals();
+    };
+  }, [conversationId]);
 
   useEffect(() => {
     const persistBeforeNativeClose = (event: BeforeUnloadEvent): void => {
       preserveDetachedDraftBeforeUnload(
         event,
         prepareComposerDetachment(conversationId),
-        (draft) => window.inertia.persistDetachedChatDraft(draft),
+        (draft) => window.inertia.persistDetachedChatDraft(
+          draft,
+          detachedTerminalIds(projectIdRef.current, conversationId),
+        ),
         setActionError,
       );
     };
@@ -153,11 +175,6 @@ export default function DetachedChatApp({
       true,
     );
   }, [conversationId]);
-
-  const snapshotConversation = connection.snapshot?.conversations.find(
-    ({ id }) => id === conversationId,
-  ) ?? null;
-  const projectId = snapshotConversation?.projectId ?? null;
   const conversationTitle = snapshotConversation?.title ?? null;
   useEffect(() => {
     const nativeTitle = detachedChatWindowTitle(conversationTitle ?? "");

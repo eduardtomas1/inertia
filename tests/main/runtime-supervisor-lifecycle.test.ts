@@ -866,6 +866,59 @@ describe("RuntimeSupervisor restart reconciliation", () => {
     });
   });
 
+  it("does not start another generation from the app beside repeatedly unconfirmed cleanup", async () => {
+    let recovered = false;
+    const recoverOwnedProcesses = vi.fn(() => recovered);
+    const { children, supervisor } = createHarness({ platform: "linux", recoverOwnedProcesses });
+    supervisor.start();
+    for (let index = 0; index < 3; index += 1) {
+      children[index]!.spawn();
+      await vi.advanceTimersByTimeAsync(2_000);
+      children[index]!.exit(1);
+      await vi.advanceTimersByTimeAsync(8_000);
+    }
+    expect(children).toHaveLength(3);
+    expect(supervisor.snapshot().phase).toBe("stopped");
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      expect(supervisor.restartFromUser()).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(children).toHaveLength(3);
+      expect(supervisor.snapshot().phase).toBe("stopped");
+      expect(supervisor.canRestartFromUser()).toBe(true);
+    }
+
+    recovered = true;
+    expect(supervisor.restartFromUser()).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children).toHaveLength(4);
+  });
+
+  it("leaves a quit alone when it lands while an app restart is still reconciling cleanup", async () => {
+    let deferRecovery = false;
+    const pending: Array<(recovered: boolean) => void> = [];
+    const recoverOwnedProcesses = vi.fn((): boolean | Promise<boolean> => deferRecovery
+      ? new Promise<boolean>((resolve) => { pending.push(resolve); })
+      : false);
+    const { children, supervisor } = createHarness({ platform: "linux", recoverOwnedProcesses });
+    supervisor.start();
+    for (let index = 0; index < 3; index += 1) {
+      children[index]!.spawn();
+      await vi.advanceTimersByTimeAsync(2_000);
+      children[index]!.exit(1);
+      await vi.advanceTimersByTimeAsync(8_000);
+    }
+    deferRecovery = true;
+    expect(supervisor.restartFromUser()).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pending).toHaveLength(1);
+    void supervisor.stop();
+    for (const resolve of pending.splice(0)) resolve(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children).toHaveLength(3);
+    expect(supervisor.snapshot().lastError ?? "").not.toMatch(/Earlier runtime generations/u);
+  });
+
   it("restarts from the app after an unconfirmed exit and names the exited generation", async () => {
     const { children, supervisor } = createHarness({ platform: "linux", recoverOwnedProcesses: () => false });
     supervisor.start();

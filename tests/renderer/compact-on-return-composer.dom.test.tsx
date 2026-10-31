@@ -49,6 +49,7 @@ function chat(overrides: Partial<ConversationShell> = {}): ConversationShell {
       modelId: "provider-default",
       reasoningEffort: null,
     }),
+    providerSessionId: "provider-session",
     hasHistory: true,
     latestTurn: null,
     pendingApproval: false,
@@ -144,6 +145,7 @@ describe("compact on return composer offer", () => {
     ["the prompt cache is still warm", { usage: usage(2) }],
     ["the turn is still running", { running: true }],
     ["compact and send is unavailable for this chat", { onCompactAndSend: undefined }],
+    ["the chat has no provider session yet", { conversation: chat({ providerSessionId: null }) }],
     ["the provider is signed in with a Claude account", { providers: [{ ...claude, accountKind: "Claude account" as const }] }],
   ])("stays a plain send when %s", async (_reason, overrides) => {
     render(<Composer {...props(overrides)} />);
@@ -216,6 +218,21 @@ describe("compact on return composer offer", () => {
     fireEvent.click(within(queue).getByRole("button", { name: "Send queued message now" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("Queued before the break", [], undefined));
     expect(onCompactAndSend).not.toHaveBeenCalled();
+  });
+
+  it("holds Send now on a queued message while the chat compacts", async () => {
+    const current = chat({ compaction: { state: "compacting", trigger: "manual", startedAt: new Date().toISOString() } });
+    window.localStorage.setItem(
+      `inertia:queued-prompts:v2:${current.id}`,
+      JSON.stringify([{ id: "queued-1", content: "Queued during compaction", createdAt: "2026-10-25T09:30:00.000Z", attachments: [] }]),
+    );
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...props({ conversation: current, onSend })} />);
+    const queue = await screen.findByRole("list", { name: "Queued messages" }, { timeout: 5_000 });
+    const sendNow = within(queue).getByRole("button", { name: "Send queued message now" });
+    expect(sendNow).toBeDisabled();
+    fireEvent.click(sendNow);
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("does not offer while the draft cannot be sent or is a /compact command", async () => {
@@ -363,6 +380,23 @@ describe("compact on return composer offer", () => {
     await waitFor(() => expect(textbox()).toHaveValue(""));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps the draft and offers sending without compacting when the runtime refuses the request", async () => {
+    const onCompactAndSend = vi.fn<NonNullable<ComposerProps["onCompactAndSend"]>>()
+      .mockRejectedValue(new Error("The model backend changed."));
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...props({ onSend, onCompactAndSend })} />);
+    type("Keep this one too");
+    fireEvent.click(await primary("Compact and send"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The model backend changed.");
+    expect(textbox()).toHaveValue("Keep this one too");
+    fireEvent.click(within(alert).getByRole("button", { name: "Send without compacting" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Keep this one too", [], undefined));
+    expect(onCompactAndSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(textbox()).toHaveValue(""));
   });
 
   it("sends without compacting from the failure notice", async () => {

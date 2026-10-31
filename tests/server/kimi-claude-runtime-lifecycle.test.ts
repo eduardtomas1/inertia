@@ -177,7 +177,7 @@ function fakeClaudeExecutable(root: string): void {
   writeFileSync(executable, `#!${process.execPath}
 const args = process.argv.slice(2);
 if (args[0] === "--version") {
-  process.stdout.write("2.1.219\\n");
+  process.stdout.write("2.1.320\\n");
   process.exit(0);
 }
 if (args[0] === "auth" && args[1] === "status") {

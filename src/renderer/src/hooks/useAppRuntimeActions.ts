@@ -13,6 +13,7 @@ import type {
   ConversationCompactAndSendResult,
   ConversationCompactionResult,
   MessageSendAcceptance,
+  ProviderId,
   ServerEvent,
   TurnRequestContext,
 } from "@shared/contracts";
@@ -51,6 +52,7 @@ export interface AppRuntimeActions {
     conversationId: string,
     instruction?: string,
   ) => Promise<ConversationCompactionResult>;
+  refreshUsage: (providerId: ProviderId) => Promise<void>;
   compactAndSendToConversation: (
     conversationId: string,
     content: string,
@@ -318,6 +320,12 @@ export function useAppRuntimeActions(options: {
     }
     return event.result;
   }, [sendCommand]);
+  const refreshUsage = useCallback(async (providerId: ProviderId): Promise<void> => {
+    await run("provider.refresh", {
+      type: "provider.refresh",
+      payload: { providerId, scope: "usage" },
+    }, { reportError: false });
+  }, [run]);
 
   return {
     runQueueCommand,
@@ -328,6 +336,7 @@ export function useAppRuntimeActions(options: {
     openProjectPath,
     sendMessageToConversation,
     compactConversation,
+    refreshUsage,
     compactAndSendToConversation,
     updateConversationById,
   };

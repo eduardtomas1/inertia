@@ -558,6 +558,8 @@ export function createProjectWorkspaceCommandHandler(
           command.payload.cols,
           command.payload.rows,
           command.payload.replacementRequestId,
+          command.payload.background === true
+            && command.payload.replacementRequestId === undefined,
         );
         dependencies.send(socket, attachment.providerResume
           ? {

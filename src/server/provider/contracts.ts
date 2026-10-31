@@ -15,6 +15,7 @@ import type {
   ProviderModel,
   ProviderRateLimit,
   ProviderSkillInput,
+  ProviderUpdateRequirement,
   SubagentTaskUsage,
   SubagentTraceStatus,
   ThreadUsageSnapshot,
@@ -60,6 +61,7 @@ export interface ProviderDetection {
   authState: ProviderAuthState;
   accountKind?: ProviderAccountKind;
   canRun: boolean;
+  updateRequired?: ProviderUpdateRequirement;
   /** Exact executable/version protocol probes succeeded independently of auth. */
   protocolVerified?: boolean;
   /** Fixed probe owner completion; false poisons clean runtime shutdown. */
@@ -126,10 +128,10 @@ interface ProviderRunRequest {
   goalContinuationExpected?: boolean;
   /**
    * Optional user-configured spend ceiling for this run, in USD (finite,
-   * > 0, <= 10,000). Only the native Claude Agent SDK route on the built-in
-   * Anthropic backend honors it, as the SDK `maxBudgetUsd` query option, and
-   * subagent usage counts toward it. Every other harness ignores it. Absent
-   * means no limit.
+   * > 0, <= 10,000). Only Claude Agent SDK routes to Anthropic honor it (the
+   * built-in Anthropic backend and the official Anthropic API key endpoint),
+   * as the SDK `maxBudgetUsd` query option, and subagent usage counts toward
+   * it. Every other harness or backend ignores it. Absent means no limit.
    */
   maxBudgetUsd?: number;
   readOnlyProfile?: "watcher";
@@ -558,6 +560,7 @@ export interface ProviderRunResult extends ProviderRunIdentity {
   signal: NodeJS.Signals | null;
   error?: string;
   failure?: ProviderRunFailure;
+  sessionInstructionApplied?: false;
   /** True only after authoritative complete process-tree cleanup. */
   cleanupConfirmed: boolean;
   cleanupConfirmation?: Promise<boolean>;
@@ -658,6 +661,7 @@ export interface ProviderCompactionResult {
   instructionForwarded: boolean;
   message: string;
   error?: string;
+  sessionInstructionApplied?: false;
   cleanupConfirmed: boolean;
 }
 

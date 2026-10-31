@@ -134,6 +134,7 @@ export interface CodexAppServerResult {
   failure?: ProviderRunFailure;
   compatibilityError?: "full-access-unsupported" | "fast-mode-unsupported";
   continuationError?: "stale-provider-session" | "resume-rejected";
+  sessionInstructionApplied?: false;
   cleanupConfirmed: boolean;
   cleanupConfirmation?: Promise<boolean>;
   cleanupReason?: PosixCleanupFailureReason;

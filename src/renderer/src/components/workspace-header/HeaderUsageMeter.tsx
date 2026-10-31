@@ -20,7 +20,7 @@ export function HeaderUsageMeter({
 }): React.JSX.Element | null {
   const popoverId = useId();
   const [open, setOpen] = useState(false);
-  const [now, setNow] = useQuotaNow(usage?.quota.limits ?? []);
+  const [now, setNow] = useQuotaNow(usage?.quota.limits ?? [], usage?.quota.source === "selected-route");
   const model = headerUsageMeterModel(usage, now);
   useEffect(() => {
     if (!open) return;

@@ -121,8 +121,8 @@ describe("detached chat preload", () => {
     await bridge.dockDetachedChat("dock draft", terminalIds);
     await bridge.openInMainWindow(target);
     await bridge.closeDetachedChat("close draft", []);
-    expect(bridge.persistDetachedChatDraft("native-close draft")).toBe(true);
-    expect(bridge.mirrorDetachedChatDraft("live popup draft")).toBe(true);
+    expect(bridge.persistDetachedChatDraft("native-close draft", terminalIds)).toBe(true);
+    expect(bridge.mirrorDetachedChatDraft("live popup draft", terminalIds)).toBe(true);
     await bridge.getRuntimeConnection();
     await bridge.copyText("copy me");
     await bridge.selectAttachments("images");
@@ -168,10 +168,12 @@ describe("detached chat preload", () => {
     expect(electron.sendSync).toHaveBeenCalledWith(
       DETACHED_CHAT_IPC.persistDraft,
       "native-close draft",
+      terminalIds,
     );
     expect(electron.sendSync).toHaveBeenCalledWith(
       DETACHED_CHAT_IPC.mirrorDraft,
       "live popup draft",
+      terminalIds,
     );
     expect(bridge.getPlatform()).toBe(process.platform);
   });
@@ -179,7 +181,7 @@ describe("detached chat preload", () => {
   it("reports a rejected synchronous native-close handoff", () => {
     electron.sendSync.mockReturnValueOnce(false);
 
-    expect(bridge.persistDetachedChatDraft("unconfirmed draft")).toBe(false);
+    expect(bridge.persistDetachedChatDraft("unconfirmed draft", [])).toBe(false);
   });
 
   it("subscribes to runtime readiness and removes the exact listener", () => {

@@ -881,6 +881,7 @@ export class ProviderRunCoordinator {
         instructionForwarded,
         message,
         ...(error ? { error } : {}),
+        ...(result.sessionInstructionApplied === false ? { sessionInstructionApplied: false as const } : {}),
         cleanupConfirmed: result.cleanupConfirmed,
       };
     }).finally(() => clearTimeout(timer));

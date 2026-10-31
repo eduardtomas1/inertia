@@ -44,7 +44,8 @@ import {
 } from "./protocol";
 import { codexWatcherThreadConfig } from "./read-only-thread-config";
 import {
-  codexDeveloperInstructions,
+  codexPromptWithSessionInstruction,
+  codexSessionDeveloperInstructions,
   configuredDeveloperInstructions,
   readConfiguredDeveloperInstructions,
 } from "./developer-instructions";
@@ -131,6 +132,7 @@ export function startCodexAppServerRun(
   let decoder: JsonLineDecoder | undefined;
   let compatibilityError: CodexAppServerResult["compatibilityError"];
   let continuationError: CodexAppServerResult["continuationError"];
+  let sessionInstructionDeferred = false;
   let resolveResult!: (result: CodexAppServerResult) => void;
   let startupGateReleased = false;
   let startupFailure: Error | undefined;
@@ -363,6 +365,7 @@ export function startCodexAppServerRun(
         ...(finalFailure ? { failure: finalFailure } : {}),
         ...(compatibilityError ? { compatibilityError } : {}),
         ...(continuationError ? { continuationError } : {}),
+        ...(sessionInstructionDeferred ? { sessionInstructionApplied: false as const } : {}),
         cleanupConfirmed,
         ...(cleanupConfirmed ? {} : providerUnconfirmedCleanup(child)),
       });
@@ -745,6 +748,9 @@ export function startCodexAppServerRun(
       setCompatibilityError: (error) => {
         compatibilityError = error;
       },
+      deferSessionInstruction: () => {
+        sessionInstructionDeferred = true;
+      },
       setPhase: (nextPhase) => {
         phase = nextPhase;
       },
@@ -915,6 +921,7 @@ interface OpenCodexTurnOptions {
   setCompatibilityError?: (
     error: CodexAppServerResult["compatibilityError"],
   ) => void;
+  deferSessionInstruction?: () => void;
   setPhase: (phase: CodexRunPhase) => void;
   isSettled: () => boolean;
   isCancelRequested: () => boolean;
@@ -944,6 +951,7 @@ export async function openCodexTurn({
   projectGoalResponse,
   setContinuationError,
   setCompatibilityError,
+  deferSessionInstruction,
   setPhase,
   isSettled,
   isCancelRequested,
@@ -972,7 +980,7 @@ export async function openCodexTurn({
   const providerConfig = modelProvider
     ? codexModelProviderThreadConfig(modelProvider, effectiveConfig)
     : null;
-  const developerInstructions = codexDeveloperInstructions([
+  const { developerInstructions, sessionInstructionApplied } = codexSessionDeveloperInstructions(
     options.sessionDeveloperInstructions === undefined
       ? undefined
       : effectiveConfig
@@ -982,7 +990,8 @@ export async function openCodexTurn({
         ),
     options.sessionDeveloperInstructions,
     options.developerInstructions,
-  ]);
+  );
+  if (!sessionInstructionApplied) deferSessionInstruction?.();
   const threadConfig = {
     cwd: options.cwd,
     approvalPolicy: accessPolicy.approvalPolicy,
@@ -1121,7 +1130,9 @@ export async function openCodexTurn({
   }
   const input: JsonObject[] = [{
     type: "text",
-    text: options.prompt,
+    text: sessionInstructionApplied || options.sessionDeveloperInstructions === undefined
+      ? options.prompt
+      : codexPromptWithSessionInstruction(options.prompt, options.sessionDeveloperInstructions),
     text_elements: [],
   }];
   for (const skill of options.skills ?? []) {

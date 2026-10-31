@@ -430,7 +430,9 @@ async function compactUnderLock<T>(
       afterTokens,
       instructionForwarded: result.instructionForwarded,
       trigger: request.trigger,
-      sessionInstructionDigest: sessionInstruction === undefined ? null : sessionInstructionDigest(sessionInstruction),
+      sessionInstructionDigest: sessionInstruction === undefined || result.sessionInstructionApplied === false
+        ? null
+        : sessionInstructionDigest(sessionInstruction),
     };
     try {
       const message = dependencies.store.createMessage(

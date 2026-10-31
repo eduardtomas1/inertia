@@ -12,7 +12,10 @@ import type { ProviderRunFailure } from "../../provider/contracts";
 import { ownedProviderStopBudgetMs } from "../../provider/run-cleanup-settlement";
 import type { OwnedProviderStopResult } from "../../provider/run-coordinator";
 import { deletePendingInteraction } from "../pending-interaction-registry";
-import type { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
+import {
+  PROVIDER_STOP_UNCONFIRMED_NOTE,
+  type TurnSettlementCoordinator,
+} from "./turn-settlement-coordinator";
 import {
   broadcastConversationShellFor,
   broadcastTurnConversationShell,
@@ -46,20 +49,12 @@ interface ProviderRunOwner {
   turnId: string;
 }
 
-const PROVIDER_STOP_UNCONFIRMED_NOTE =
-  "The provider process could not be confirmed stopped; it may still be running.";
 const PROVIDER_STOP_LAST_RESORT_EXTRA_MS = 5_000;
-
-function withProviderStopNote(message: string | undefined): string {
-  if (!message) return PROVIDER_STOP_UNCONFIRMED_NOTE;
-  return /[.!?]$/u.test(message)
-    ? `${message} ${PROVIDER_STOP_UNCONFIRMED_NOTE}`
-    : `${message}. ${PROVIDER_STOP_UNCONFIRMED_NOTE}`;
-}
 
 /** Durable reducer/projection boundary for one exact active root run. */
 export class TurnRunStateCoordinator {
   private readonly unconfirmedProviderStops = new WeakSet<ActiveTurn>();
+  private readonly providerStopNotes = new WeakSet<ActiveTurn>();
 
   constructor(private readonly options: TurnRunStateCoordinatorOptions) {}
 
@@ -196,7 +191,10 @@ export class TurnRunStateCoordinator {
 
   retryTerminalPersistence(active: ActiveTurn): boolean {
     if (!active.runState.isTerminal() || active.providerRunStarted) return false;
-    return this.options.settlement.retryTerminalPersistence(active);
+    const stopUnconfirmed = this.providerStopNotes.has(active);
+    const settled = this.options.settlement.retryTerminalPersistence(active, stopUnconfirmed);
+    if (settled && stopUnconfirmed && active.turn.status === "completed") this.noteUnconfirmedStop(active);
+    return settled;
   }
 
   private projectLive(active: ActiveTurn, state: AgentRunState): void {
@@ -238,16 +236,34 @@ export class TurnRunStateCoordinator {
       active,
       pending.status,
       pending.cause,
-      stopUnconfirmed && pending.cause === "user-cancelled"
-        ? withProviderStopNote(pending.message)
-        : pending.message,
+      pending.message,
       pending.failure,
+      stopUnconfirmed,
     );
+    if (stopUnconfirmed) this.providerStopNotes.add(active);
+    if (settled && stopUnconfirmed && pending.status === "completed") this.noteUnconfirmedStop(active);
     if (settled) active.deferredSettlement = null;
     if (releaseMode === "tracked") {
       this.options.track(this.options.release(active));
     }
     return settled;
+  }
+
+  private noteUnconfirmedStop(active: ActiveTurn): void {
+    try {
+      const activity = this.options.store.addActivity({
+        conversationId: active.conversation.id,
+        runId: active.turn.runId,
+        turnId: active.turn.id,
+        kind: "status",
+        title: PROVIDER_STOP_UNCONFIRMED_NOTE,
+        detail: null,
+        status: "completed",
+      });
+      this.options.hooks.broadcast({ type: "agent.activity", activity });
+    } catch {
+      return;
+    }
   }
 
   private suspendForProviderStop(active: ActiveTurn): void {

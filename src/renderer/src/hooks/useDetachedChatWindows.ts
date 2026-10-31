@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AppSnapshot } from "@shared/contracts";
+import type { AppSnapshot, ClientCommand, ServerEvent } from "@shared/contracts";
 import type {
   DetachedChatTerminalHandoff,
   DetachedChatWindowOpenResult,
@@ -9,6 +9,7 @@ import type {
 import { DETACHED_CHAT_WINDOW_LIMIT } from "@shared/desktop";
 import { persistComposerDraft } from "../utils/composerDraftPersistence";
 import { seedTerminalTabs, terminalStorageKey } from "../components/terminalTabStorage";
+import { withRequestId } from "../lib/runtimeCommands";
 
 export interface DetachedChatWindowsController {
   ready: boolean;
@@ -33,6 +34,7 @@ export interface DockedTerminalRequest {
  */
 export function useDetachedChatWindows(
   snapshot: AppSnapshot | null = null,
+  sendCommand?: (command: ClientCommand) => Promise<ServerEvent>,
 ): DetachedChatWindowsController & DockedTerminalRequest {
   const [windows, setWindows] = useState<DetachedChatWindowSummary[]>([]);
   const [windowsReady, setWindowsReady] = useState(false);
@@ -41,6 +43,8 @@ export function useDetachedChatWindows(
     useState<string | null>(null);
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
+  const sendCommandRef = useRef(sendCommand);
+  sendCommandRef.current = sendCommand;
   const pendingTerminalHandoffs = useRef(new Map<string, DetachedChatTerminalHandoff>());
 
   const applyTerminalHandoff = useCallback((
@@ -57,7 +61,28 @@ export function useDetachedChatWindows(
     );
     if (handoff.dock && handoff.terminalIds.length > 0) {
       setDockedTerminalConversationId(handoff.conversationId);
+      return;
     }
+    const sendCommand = sendCommandRef.current;
+    if (handoff.dock || !sendCommand || handoff.terminalIds.length === 0) return;
+    void Promise.allSettled(handoff.terminalIds.map((terminalId) => sendCommand(withRequestId({
+      type: "terminal.attach",
+      payload: {
+        projectId,
+        conversationId: handoff.conversationId,
+        terminalId,
+        background: true,
+        cols: 80,
+        rows: 24,
+      },
+    })))).then(async (results) => {
+      if (!results.some(({ status }) => status === "rejected")) return;
+      await window.inertia.reportValidationDiagnostic({
+        code: "terminal.handoff-unowned",
+        correlationId: crypto.randomUUID(),
+        context: { projectId, conversationId: handoff.conversationId },
+      });
+    }).catch(() => undefined);
   }, []);
 
   useEffect(() => window.inertia.onDetachedChatTerminalHandoff((handoff) => {

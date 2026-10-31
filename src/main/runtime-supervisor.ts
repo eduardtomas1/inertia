@@ -234,7 +234,7 @@ export class RuntimeSupervisor {
     this.phase = "starting";
     this.emitState();
     if (this.priorGenerationsUnrecovered) this.recoverPriorGenerationsThenSpawn();
-    else this.spawnAfterReconciliation();
+    else this.spawnAfterReconciliation(true);
     return true;
   }
   private recoverPriorGenerationsThenSpawn(): void {
@@ -255,7 +255,6 @@ export class RuntimeSupervisor {
     this.lifecycle = "started";
     this.restartBlocked = false;
     this.liveModernDarwinRecoveryEligible = false;
-    this.unconfirmedRestarts = 0;
     this.restartAttempt = 0;
     this.lastError = null;
     this.startupBlockerCode = null;
@@ -282,6 +281,7 @@ export class RuntimeSupervisor {
     // admission may the supervisor forget its in-memory quarantine and let the
     // replacement worker retire the durable records transactionally.
     this.quarantined.clear();
+    this.unconfirmedRestarts = 0;
     this.resetForRestart();
     this.spawnNext();
     return this.current !== null;
@@ -1079,9 +1079,19 @@ export class RuntimeSupervisor {
     }, delay);
     this.emitState();
   }
-  private spawnAfterReconciliation(): void {
+  private spawnAfterReconciliation(userStarted = false): void {
     if (this.quarantined.size === 0) { this.spawnNext(); return; }
-    void this.quarantineReconciliation.reconcile().then(() => this.spawnNext());
+    void this.quarantineReconciliation.reconcile().then((reconciled) => {
+      if (!this.desiredRunning) return;
+      if (reconciled) this.unconfirmedRestarts = 0;
+      else if (userStarted && this.unconfirmedRestarts >= runtimeSupervisorDefaults.maxUnconfirmedRestarts) {
+        this.desiredRunning = false; this.restartBlocked = true; this.phase = "stopped";
+        this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
+          "Earlier runtime generations still have unconfirmed process cleanup.");
+        this.emitState(); return;
+      }
+      this.spawnNext();
+    });
   }
   private post(child: UtilityProcess, message: RuntimeWorkerCommand): boolean {
     const failure = postRuntimeWorkerCommand(child, message);

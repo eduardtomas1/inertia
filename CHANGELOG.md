@@ -24,6 +24,46 @@ The useful changes in each Inertia release, in plain language.
   stays with **Send without compacting** instead of Enter failing every time.
 - **Send now** on a queued message waits while the chat compacts. One pressed
   just as compacting started is sent when it ends, instead of being dropped.
+- After you press End, dragging the scrollbar, a search result, the minimap,
+  **Load earlier messages** or another chat no longer hides **Jump to latest**
+  or pulls the chat back to the bottom while you read.
+- Switching away right after sending no longer brings you back to an older
+  reading position instead of your new message.
+
+### Chat windows
+
+- Closing a chat's own window with its title-bar button, Alt+F4, the taskbar
+  or Ctrl+Shift+W (Cmd+Shift+W on macOS) hands its terminals back to the main
+  window, as **Return** and **Close** do, instead of stopping them about 30
+  seconds later, as long as the main window has room for them. The same
+  applies to a chat window whose page crashed.
+- The main window takes back a closed chat window's terminals before it
+  updates its window list, so no stale terminal tabs are left behind. When it
+  has room for them it keeps them running in the background until you open
+  that chat's terminal. If it is already at its terminal limit (four per
+  window) or the local service is offline, they stop after 30 seconds unless
+  you open that terminal, and Diagnostics records it.
+
+### Accounts and API keys
+
+- A project's spend limit now also caps Claude chats on an Anthropic API key.
+  Since 0.0.79 those chats ran without the limit.
+
+### Agent instructions
+
+- When reading Codex's configuration fails or takes over three seconds,
+  Inertia leaves your own Codex developer instructions in place and sends its
+  chat instructions with that message instead of replacing yours for the
+  session. Diagnostics notes when this happens.
+
+### Stop, restart and providers
+
+- A turn that ends on its own or fails while its agent process can't be
+  confirmed stopped now says in the chat that the process may still be
+  running, as a stopped turn already did.
+- When the local service has repeatedly stopped without its processes being
+  confirmed stopped, **Restart** retries that cleanup first and starts a new
+  one only once it succeeds, instead of starting another beside them.
 
 ### Usage
 
@@ -39,6 +79,8 @@ The useful changes in each Inertia release, in plain language.
   it.
 - The refresh icon no longer jumps when its wind-up turns into a spin or stops
   abruptly when it coasts to rest.
+- Quitting while an update is being prepared no longer hangs. Inertia exits
+  when the shutdown deadline passes and records that cleanup wasn't confirmed.
 
 ### Dependencies
 
@@ -128,7 +170,8 @@ mode, and a composer with room at the bottom.
   mode, images, file tools, skills, goals, **Compact and send**, and
   follow-ups that continue the same session, also after the agent updates.
   Account-only features such as quota windows and fast mode stay with your
-  subscription.
+  subscription. Inertia's own tools (the Browser, chat orchestration and HTML
+  pages) are not available on a key.
 - Third-party compatible backends keep the stricter rule: only what their
   model test confirmed.
 

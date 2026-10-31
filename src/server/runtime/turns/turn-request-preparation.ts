@@ -11,8 +11,10 @@ import {
   providerNativeBackendProfile,
   providerNativeModelSelection,
   routeSupportsNativeFastModeIdentity,
+  type ModelBackendProfile,
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
+import { officialPresetEndpoint } from "../backends/backend-profile-presets";
 import { importedFollowUpNote, importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
@@ -183,6 +185,19 @@ export function compactionSessionInstruction(
     route.harnessId,
     instructionPack(conversation.id, dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []),
   );
+}
+
+export function claudeSpendLimitApplies(route: {
+  providerId: string;
+  harnessId: string;
+  backendProfile: Pick<ModelBackendProfile, "id" | "protocol" | "source" | "endpointIdentity">;
+}): boolean {
+  return route.providerId === "claude"
+    && route.harnessId === "claude-agent-sdk"
+    && (
+      route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
+      || officialPresetEndpoint(route.backendProfile)
+    );
 }
 
 export function resolveTurnRequest(
@@ -456,9 +471,7 @@ export function resolveTurnRequest(
       goal.source === "codex-native"
       && goal.providerSessionId === conversation.providerSessionId
       && goal.status === "active"));
-  const maxBudgetUsd = route.providerId === "claude"
-    && route.harnessId === "claude-agent-sdk"
-    && route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
+  const maxBudgetUsd = claudeSpendLimitApplies(route)
     ? dependencies.store.project(conversation.projectId).preferences
       ?.claudeMaxBudgetUsd ?? null
     : null;

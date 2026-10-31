@@ -110,7 +110,7 @@ export function commandMayChangeWorkspaceAuthority(
 const AddProjectDialog = lazy(async () => ({ default: (await import("./components/AddProjectDialog")).AddProjectDialog }));
 export default function App(): React.JSX.Element {
   const connection = useStableController(useInertiaConnection());
-  const detachedChats = useDetachedChatWindows(connection.snapshot);
+  const detachedChats = useDetachedChatWindows(connection.snapshot, connection.sendCommand);
   const sendCommand = connection.sendCommand;
   const appUpdate = useStableController(useAppUpdate());
   const providerQuotaNotices = useStableController(

@@ -113,11 +113,11 @@ describe("accepted turn viewport anchoring", () => {
     onTurnAnchorSettled: (turnId: string) => void,
     onTurnAnchorCancelled: (turnId: string) => void,
     count = 2,
-    turnAnchorId = `turn-${count}`,
+    turnAnchorId: string | null = `turn-${count}`,
   ) {
     const scrollElementRef = createRef<HTMLDivElement>();
     const timelineElementRef = createRef<HTMLDivElement>();
-    const view = (followsLatest: boolean): React.JSX.Element => (
+    const view = (followsLatest: boolean, anchorId = turnAnchorId): React.JSX.Element => (
       <div ref={scrollElementRef} className="anchor-test-scroll">
         <div ref={timelineElementRef}>
           <ResponseTimeline
@@ -140,7 +140,7 @@ describe("accepted turn viewport anchoring", () => {
             autoCollapseWorkLog
             showChangedFileSummaries={false}
             checkpointRestoreDisabled={false}
-            turnAnchorId={turnAnchorId}
+            turnAnchorId={anchorId}
             followsLatest={followsLatest}
             scrollElementRef={scrollElementRef}
             timelineElementRef={timelineElementRef}
@@ -162,6 +162,7 @@ describe("accepted turn viewport anchoring", () => {
       scrollElementRef,
       timelineElementRef,
       followLatest: () => rerender(view(true)),
+      followArrivedTurn: () => rerender(view(true, null)),
     };
   }
 
@@ -190,9 +191,17 @@ describe("accepted turn viewport anchoring", () => {
   });
 
   it("refreshes the remembered position when the reader returns to following without another scroll", () => {
-    const view = renderTimeline(vi.fn(), vi.fn(), 2, "turn-none");
+    const view = renderTimeline(vi.fn(), vi.fn(), 2, null);
     rememberTranscriptPosition(conversationId, { rowId: null, viewportOffset: 0, scrollTop: 420, wasFollowing: false });
     view.followLatest();
+    expect(readTranscriptPosition(conversationId)).toMatchObject({ wasFollowing: true });
+  });
+
+  it("does not remember a reading position while an accepted turn is still arriving", () => {
+    const view = renderTimeline(vi.fn(), vi.fn(), 2, "turn-3");
+    fireEvent.scroll(view.scrollElementRef.current!);
+    expect(readTranscriptPosition(conversationId)).toBeUndefined();
+    view.followArrivedTurn();
     expect(readTranscriptPosition(conversationId)).toMatchObject({ wasFollowing: true });
   });
 

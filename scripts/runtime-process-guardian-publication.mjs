@@ -396,18 +396,22 @@ function claimMalformedLock(
     const authority = lstatSync(claimant.authorityPath, {
       throwIfNoEntry: false,
     });
-    const current = lstatSync(lockPath, { throwIfNoEntry: false });
-    const proof = lstatSync(claimant.proofPath, { throwIfNoEntry: false });
+    const current = lstatSync(lockPath, {
+      bigint: true,
+      throwIfNoEntry: false,
+    });
+    const proof = lstatSync(claimant.proofPath, {
+      bigint: true,
+      throwIfNoEntry: false,
+    });
     if (
       finalActive.length !== 1 ||
       finalActive[0] !== claimant.generation ||
       !authority ||
       !current ||
       !proof ||
-      current.dev !== metadata.dev ||
-      current.ino !== metadata.ino ||
-      proof.dev !== metadata.dev ||
-      proof.ino !== metadata.ino
+      current.dev !== proof.dev ||
+      current.ino !== proof.ino
     ) {
       return false;
     }
@@ -813,8 +817,14 @@ export function acquireGuardianBuildLock(
 export function releaseGuardianBuildLock(lock) {
   if (lock.heartbeat) clearInterval(lock.heartbeat);
   try {
-    const fixed = lstatSync(lock.lockPath, { throwIfNoEntry: false });
-    const owner = lstatSync(lock.ownerPath, { throwIfNoEntry: false });
+    const fixed = lstatSync(lock.lockPath, {
+      bigint: true,
+      throwIfNoEntry: false,
+    });
+    const owner = lstatSync(lock.ownerPath, {
+      bigint: true,
+      throwIfNoEntry: false,
+    });
     const record = fixed?.isFile()
       ? JSON.parse(readFileSync(lock.lockPath, "utf8"))
       : null;
@@ -844,8 +854,14 @@ export function releaseGuardianBuildLock(lock) {
 }
 
 function assertGuardianBuildLock(lock) {
-  const fixed = lstatSync(lock.lockPath, { throwIfNoEntry: false });
-  const owner = lstatSync(lock.ownerPath, { throwIfNoEntry: false });
+  const fixed = lstatSync(lock.lockPath, {
+    bigint: true,
+    throwIfNoEntry: false,
+  });
+  const owner = lstatSync(lock.ownerPath, {
+    bigint: true,
+    throwIfNoEntry: false,
+  });
   if (
     !fixed ||
     !owner ||

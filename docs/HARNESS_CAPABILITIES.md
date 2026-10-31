@@ -914,10 +914,7 @@ three layers that the account route does not need:
 - **Redaction.** Every SDK message of the turn passes through a redactor before
   the projector, the transcript or the failure path sees it. It masks the
   exact key and these forms of it: URL and JSON escaping, base64 and base64url
-  of the key alone and followed by `
-` or `
-
-` (what `echo $KEY | base64`
+  of the key alone and followed by `\n` or `\r\n` (what `echo $KEY | base64`
   prints), and lower- and upper-case hex. Spaces, tabs and line breaks
   between characters are ignored, so wrapped base64 (`base64` wraps at 76
   columns), `xxd -p` output and a key split across lines each become one

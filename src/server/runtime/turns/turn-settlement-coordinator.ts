@@ -26,6 +26,16 @@ type CommittedSettlement = ReturnType<RuntimeStore["settleAgentTurn"]> & {
   receiptLost?: true;
 };
 
+export const PROVIDER_STOP_UNCONFIRMED_NOTE =
+  "The provider process could not be confirmed stopped; it may still be running.";
+
+export function withProviderStopNote(message: string | undefined): string {
+  if (!message) return PROVIDER_STOP_UNCONFIRMED_NOTE;
+  return /[.!?]$/u.test(message)
+    ? `${message} ${PROVIDER_STOP_UNCONFIRMED_NOTE}`
+    : `${message}. ${PROVIDER_STOP_UNCONFIRMED_NOTE}`;
+}
+
 export interface TurnSettlementCoordinatorOptions {
   store: RuntimeStore;
   hooks: TurnControllerHooks;
@@ -45,13 +55,14 @@ export interface TurnSettlementCoordinatorOptions {
 export class TurnSettlementCoordinator {
   constructor(private readonly options: TurnSettlementCoordinatorOptions) {}
 
-  retryTerminalPersistence(active: ActiveTurn): boolean {
+  retryTerminalPersistence(active: ActiveTurn, stopUnconfirmed = false): boolean {
     const status = active.runState.snapshot().state;
     if ((status !== "completed" && status !== "failed" && status !== "cancelled" && status !== "interrupted")
       || active.providerRunStarted) return false;
     return this.finalizeGuarded(
       active, status, "stream-persistence-failed",
       "The turn could not be finalized cleanly.",
+      undefined, false, stopUnconfirmed,
     );
   }
 
@@ -61,7 +72,9 @@ export class TurnSettlementCoordinator {
     cause: TurnTerminalCause,
     message?: string,
     failure?: ProviderRunFailure,
+    stopUnconfirmed = false,
   ): boolean {
+    const noted = (text: string): string => stopUnconfirmed ? withProviderStopNote(text) : text;
     const authoritativeStatus = active.runState.settle(status);
     if (!authoritativeStatus) return false;
     status = authoritativeStatus;
@@ -109,11 +122,11 @@ export class TurnSettlementCoordinator {
         completed ? "completed" : "failed",
         completed
           ? undefined
-          : status === "cancelled"
+          : noted(status === "cancelled"
             ? message ?? "The turn was stopped."
             : failure && failure.reason !== "codex-error"
               ? failure.message
-              : message ?? "The turn did not complete.",
+              : message ?? "The turn did not complete."),
         status === "cancelled" ? "cancelled" : undefined,
       );
     } catch (error) {
@@ -160,6 +173,7 @@ export class TurnSettlementCoordinator {
       message,
       failure,
       streamPublicationFailed,
+      stopUnconfirmed,
     );
   }
 
@@ -170,6 +184,7 @@ export class TurnSettlementCoordinator {
     message?: string,
     failure?: ProviderRunFailure,
     streamPublicationFailed = false,
+    stopUnconfirmed = false,
   ): boolean {
     let settlement: CommittedSettlement;
     try {
@@ -177,7 +192,7 @@ export class TurnSettlementCoordinator {
         active,
         status,
         terminalReason,
-        message,
+        stopUnconfirmed ? withProviderStopNote(message) : message,
         status === "failed" && failure?.usageLimited === true,
         status === "failed" ? turnFailureKind(failure) : undefined,
       );
@@ -203,7 +218,7 @@ export class TurnSettlementCoordinator {
     effects.run("publication", () => this.options.hooks.testOnlyStreamingTrace
       ?.mark("terminal-persistence-completed"));
     const cleaned = effects.run("lifecycle-cleanup", () => this.options.cleanup(active));
-    this.finalize(active, effects, settlement.settled, cleaned, message, failure);
+    this.finalize(active, effects, settlement.settled, cleaned, message, failure, stopUnconfirmed);
     return settlement.settled;
   }
 
@@ -262,6 +277,7 @@ export class TurnSettlementCoordinator {
     cleaned: boolean,
     message?: string,
     failure?: ProviderRunFailure,
+    stopUnconfirmed = false,
   ): void {
     const status = active.turn.status as AgentTurnTerminalStatus;
     const terminalReason = active.turn.terminalReason ?? "provider-completed";
@@ -289,11 +305,12 @@ export class TurnSettlementCoordinator {
           },
         });
       } catch { /* Diagnostics cannot break settlement or trigger a retry. */ }
-      const failureMessage = message ?? (
+      const defaultedMessage = message ?? (
         status === "interrupted"
           ? "The agent turn was interrupted."
           : "The provider could not complete the request."
       );
+      const failureMessage = stopUnconfirmed ? withProviderStopNote(defaultedMessage) : defaultedMessage;
       effects.run("projection", () => {
         const activity = this.options.store.addActivity({
           conversationId: active.conversation.id,

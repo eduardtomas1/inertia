@@ -13,6 +13,7 @@ import { providerRunTerminal } from "../../src/server/provider/contracts";
 import { ProviderInstallationLeaseCoordinator } from "../../src/server/provider/installation-lease";
 import { providerCapabilityManifest } from "../../src/server/provider/capability-manifest";
 import { officialEndpointObservedCapabilities } from "../../src/server/provider/runtime-capability-attestation";
+import { claudeSpendLimitApplies } from "../../src/server/runtime/turns/turn-request-preparation";
 import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
 import { backendCompatibilityProbeResultSchema } from "../../src/shared/backend-probe";
 import {
@@ -379,6 +380,25 @@ describe("official API key routes keep the provider's own capabilities", () => {
       expect(manager.providerCapabilityAdmissible(input, capability), capability).toBe(false);
     }
     expect(input.continuationIdentity?.providerCompatibilityToken ?? null).toBeNull();
+  });
+});
+
+describe("Claude spend limit on official Anthropic routes", () => {
+  it.each(CASES)("caps Claude on Anthropic only: $label", (route) => {
+    expect(claudeSpendLimitApplies({
+      providerId: route.providerId,
+      harnessId: route.harnessId,
+      backendProfile: route.profile,
+    })).toBe(route.providerId === "claude" && route.expectedState === "verified");
+  });
+
+  it("does not cap an Anthropic-address profile driven by another harness", () => {
+    const official = CASES.find(({ profile }) => profile.id === "custom:anthropic-key")!;
+    expect(claudeSpendLimitApplies({
+      providerId: "claude",
+      harnessId: "claude-cli",
+      backendProfile: official.profile,
+    })).toBe(false);
   });
 });
 

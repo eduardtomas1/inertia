@@ -500,3 +500,39 @@ the Pi cleared-queue notice (afb8619e1d) (queue phase); usage-limit refinements
 e496db3a5e, 63b0e3d82e and d7d5d7c79b (recovery phase); launch runtime-mode
 step-down (65965f7ab8), MCP read semantics and agent-initiated fork and
 merge-back tools (agent-tools phase).
+
+### Stop ladder release — 2026-10-31
+
+The durable core rule "unconfirmed cleanup blocks replacement work" also
+blocked the next turn after a Stop whose provider tree could not be confirmed
+stopped within the platform budget, so `tests/e2e/stop-ladder.spec.ts` failed on
+the macOS lifecycle sentinel and queued messages waited until restart. Stop must
+always complete (T3 Code 6b1245cc): the stop ladder's terminal release is now
+authoritative evidence that the runtime handed the unconfirmed tree to the
+process guardian and no longer owns it. The attempt records
+`attempt.cleanup-released` with cleanup `unconfirmed-released` and the handoff
+evidence (stop outcome, the ownership row's runtime generation and boot
+identity, stop budget, release time); it is never recorded as `confirmed`, and
+the durable provider ownership row is kept for guardian and restart recovery.
+Admission (`hasPendingCleanup`) accepts a released attempt, so the next turn and
+queued messages run. Decisions that need real cleanup proof keep refusing it
+through `awaitsCleanupProof` or the attempt state: a fork of the chat falls
+back to portable history, and history rollback, native-control operations and
+attempt replacement are refused. A late exact
+confirmation or a restart that confirms the guardian generation moves the
+attempt to `confirmed`; otherwise the uncertainty survives restart and
+projection rebuild. Without a durable ownership claim the ladder still records
+`unconfirmed`, which keeps admission fenced.
+
+### Detached chat windows — 2026-10-31
+
+Detached chat windows no longer request fork history and offer no fork,
+rollback or merge-back actions, because the detached runtime policy does not
+permit those commands. Rolled-back turns stay dimmed and labelled "Rolled back ·
+not in context" there. Enabling these actions in detached windows needs
+explicit additions to the detached permission check.
+
+The Linux e2e failures were fixed by splitting the history footer action class
+from the shared run-details toggle and by counting the Pi provider card in the
+settings matrix; the Windows reproduction passed 23/23 scenarios across five
+specs.

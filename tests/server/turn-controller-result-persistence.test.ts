@@ -112,15 +112,14 @@ describe("TurnController terminal result persistence", () => {
         expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId))
           .toHaveLength(1);
         expect(runtime.events.some((event) => event.type === "agent.completed")).toBe(false);
+        expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(true);
         expect(() => runtime.controller.queue({
-          conversationId: runtime.conversationId, content: "Keep uncertain cleanup fenced.",
-        })).toThrow("cleanup-pending");
+          conversationId: runtime.conversationId, content: "The chat is released.",
+        })).not.toThrow();
         runtime.store.providerRunOwnership.clear(queued.turn.id, "wrong-run");
-        expect(runtime.store.orchestration.hasPendingCleanup(runtime.conversationId)).toBe(true);
+        expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(true);
         runtime.store.providerRunOwnership.clear(queued.turn.id, queued.turn.runId);
-        expect(runtime.store.orchestration.hasPendingCleanup(runtime.conversationId)).toBe(false);
-        expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
-          content: "Cleanup is confirmed now." })).not.toThrow();
+        expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(false);
       } finally {
         runtime.store.close();
       }

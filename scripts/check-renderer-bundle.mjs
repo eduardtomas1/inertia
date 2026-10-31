@@ -80,13 +80,13 @@ const budgets = {
   // The review fixes and the collapsed dock handle add 863 workbench bytes;
   // removing the composer chip saves 873 detached bytes.
   // See docs/pr-evidence/watcher/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 902_353 + 512,
+  mainWorkbenchFirstLoadJavaScript: 902_835 + 512,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 796_117 + 512,
+  detachedChatFirstLoadJavaScript: 796_620 + 512,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -162,7 +162,7 @@ const budgets = {
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte + 245 + 50,
   deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850 + 32,
-  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184,
+  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184 + 21 + 256,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte + 205,
   deferredIconRegionJavaScript: 12_995,

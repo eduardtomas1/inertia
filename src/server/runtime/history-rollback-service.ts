@@ -66,7 +66,7 @@ export async function rollbackConversationHistory(dependencies: HistoryRollbackD
   if (store.orchestration.forks.get(conversationId)?.transfer === "pending") {
     throw new RuntimeRequestError("This fork has no turns of its own to roll back.");
   }
-  const busy = () => store.orchestration.hasPendingCleanup(conversationId) || providers.isRunning(conversationId);
+  const busy = () => store.orchestration.awaitsCleanupProof(conversationId) || providers.isRunning(conversationId);
   if (busy() || store.hasActiveWorkspaceRunForConversation(conversationId)) throw new RuntimeRequestError("Stop active work and wait for cleanup before rolling back this chat.");
   const admission = await turns.acquireTurnAdmission(conversationId, 1_000);
   if (!admission) throw new RuntimeRequestError("This chat is busy. Try rolling back again in a moment.");

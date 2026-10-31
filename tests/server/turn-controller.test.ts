@@ -1014,7 +1014,7 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it.each(["cancel", "timeout"] as const)(
-    "holds %s through unconfirmed stop and admits replacement work only after exact cleanup confirmation",
+    "holds %s through an unconfirmed stop, then admits the next turn while the released attempt still awaits cleanup proof",
     async (scenario) => {
       const runtime = await testRuntime();
       runtime.provider.deferOwnedStop();
@@ -1081,22 +1081,24 @@ describe("TurnController authoritative lifecycle", () => {
       runtime.provider.resolve({ status: "cancelled", text: "" });
       await flushPromises();
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
-      expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
-        content: "Do not overlap a detached process." })).toThrow("cleanup-pending");
+      expect(runtime.store.orchestration.hasPendingCleanup(runtime.conversationId)).toBe(false);
+      expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(true);
       expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId))
         .toEqual([expect.objectContaining({ turnId: first.turn.id })]);
-      runtime.controller.providerCleanupConfirmedLate({ conversationId: runtime.conversationId,
-        runId: first.turn.runId, turnId: first.turn.id });
       const retry = runtime.controller.queue({ conversationId: runtime.conversationId,
-        content: `Retry after confirmed ${scenario} cleanup.` });
+        content: `Retry after the released ${scenario} stop.` });
       expect(runtime.controller.start(retry.turn.id)).toBe(true);
       expect(runtime.provider.runCount).toBe(2);
       runtime.provider.resolve({ status: "completed", text: "Retry completed." });
       await flushPromises();
       expect(runtime.store.agentTurn(retry.turn.id).status).toBe("completed");
       expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId))
-        .toEqual([]);
+        .toEqual([expect.objectContaining({ turnId: first.turn.id })]);
       expect(runtime.controller.hasActiveCheckout(runtime.workspace)).toBe(false);
+      runtime.controller.providerCleanupConfirmedLate({ conversationId: runtime.conversationId,
+        runId: first.turn.runId, turnId: first.turn.id });
+      expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId)).toEqual([]);
+      expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(false);
       runtime.store.close();
     },
   );
@@ -1181,7 +1183,7 @@ describe("TurnController authoritative lifecycle", () => {
     reopened.close();
   });
 
-  it("gates retries until exact cleanup is confirmed when a synchronous provider event settles during start", async () => {
+  it("gates retries until the provider stop is released when a synchronous provider event settles during start", async () => {
     const runtime = await testRuntime();
     runtime.provider.deferOwnedStop();
     const attachment = await testAttachment(
@@ -1239,12 +1241,9 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.provider.resolve({ status: "cancelled", text: "" });
     await flushPromises();
     expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
-    expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
-      content: "Do not overlap the detached provider." })).toThrow("cleanup-pending");
-    runtime.controller.providerCleanupConfirmedLate({ conversationId: runtime.conversationId,
-      runId: first.turn.runId, turnId: first.turn.id });
+    expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(true);
     const retry = runtime.controller.queue({ conversationId: runtime.conversationId,
-      content: "Retry after exact-run cleanup." });
+      content: "Retry after the released stop." });
     expect(runtime.controller.start(retry.turn.id)).toBe(true);
     expect(runtime.provider.runCount).toBe(2);
     runtime.provider.resolve({ status: "completed", text: "Retry completed." });

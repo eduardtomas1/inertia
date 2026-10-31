@@ -5,7 +5,14 @@ import type Database from "better-sqlite3";
 import type { AgentTurn, ChatMessage, Conversation } from "../../shared/contracts";
 import { modelSelectionSchema } from "../../shared/model-routing";
 import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
-import { orchestrationAttemptSchema, orchestrationRunSchema, type OrchestrationDomainEvent } from "../../shared/orchestration-v2";
+import {
+  orchestrationAttemptSchema,
+  orchestrationCleanupReleaseSchema,
+  orchestrationRunSchema,
+  type OrchestrationAttempt,
+  type OrchestrationCleanupRelease,
+  type OrchestrationDomainEvent,
+} from "../../shared/orchestration-v2";
 import type { BeginAgentTurnInput, NewConversationOptions } from "../persistence/types";
 import { OrchestrationEffectOutbox } from "./effect-outbox";
 import { OrchestrationEventStore } from "./event-store";
@@ -28,6 +35,10 @@ interface TurnProjectionAccess extends MergeBackAccess {
   agentTurn(id: string): AgentTurn;
   message(id: string): ChatMessage;
   createConversation(projectId: string, title: string, options: NewConversationOptions): Conversation;
+}
+
+function withoutCleanupRelease({ cleanupRelease: _release, ...attempt }: OrchestrationAttempt): OrchestrationAttempt {
+  return attempt;
 }
 
 /** Bridges existing transcript/execution projections into the V2 transaction. */
@@ -160,11 +171,19 @@ export class OrchestratedTurnRepository {
   }
 
   hasPendingCleanup(threadId: string): boolean {
+    return this.attemptCleanupIn(threadId, ["pending", "unconfirmed"]);
+  }
+
+  awaitsCleanupProof(threadId: string): boolean {
+    return this.attemptCleanupIn(threadId, ["pending", "unconfirmed", "unconfirmed-released"]);
+  }
+
+  private attemptCleanupIn(threadId: string, states: readonly string[]): boolean {
     if (this.nativeControls.locked(threadId)) return true;
     return this.database.prepare(`SELECT 1 FROM orchestration_v2_entities
       WHERE thread_id = ? AND kind = 'attempt'
-        AND json_extract(payload_json, '$.cleanup') IN ('pending','unconfirmed') LIMIT 1`)
-      .get(threadId) !== undefined;
+        AND json_extract(payload_json, '$.cleanup') IN (${states.map(() => "?").join(",")}) LIMIT 1`)
+      .get(threadId, ...states) !== undefined;
   }
 
   portableHistory(input: Parameters<typeof readPortableContinuationHistory>[1]) {
@@ -232,13 +251,29 @@ export class OrchestratedTurnRepository {
     if (attempt.cleanup === cleanup) return;
     const event: OrchestrationDomainEvent = cleanup === "pending" && attempt.cleanup === "confirmed"
       ? { type: "run.attempt-replaced", payload: { runId: run.id, attemptId: attempt.id,
-          replacement: { ...attempt, id: randomUUID(), status: run.status, cleanup: "pending",
+          replacement: { ...withoutCleanupRelease(attempt), id: randomUUID(), status: run.status, cleanup: "pending",
             nativeSessionId: null, nativeThreadId: null, nativeTurnId: null,
             interruptRequestedAt: null, runtimeId: this.runtimeId } } }
       : { type: "attempt.cleanup-changed", payload: { runId: run.id, attemptId: attempt.id, cleanup } };
     this.events.commit({ actorId: "runtime", commandId: `cleanup:${commandFingerprint({ attemptId: attempt.id, cleanup, type: event.type })}`,
       projectId: run.projectId, threadId: run.threadId, command: event,
       expectedRevision: this.events.revision(run.threadId), events: [event], result: null });
+  }
+
+  releaseCleanup(identity: { turnId: string; runId: string }, release: OrchestrationCleanupRelease): boolean {
+    const row = this.events.projection("run", identity.runId);
+    if (!row) return false;
+    const run = orchestrationRunSchema.parse(row.value);
+    if (run.turnId !== identity.turnId) throw new Error("Orchestration cleanup identity conflicts.");
+    const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", run.attemptId)?.value);
+    if (attempt.cleanup === "unconfirmed-released") return true;
+    if (attempt.cleanup !== "pending" && attempt.cleanup !== "unconfirmed") return false;
+    const event: OrchestrationDomainEvent = { type: "attempt.cleanup-released",
+      payload: { runId: run.id, attemptId: attempt.id, release: orchestrationCleanupReleaseSchema.parse(release) } };
+    this.events.commit({ actorId: "runtime", commandId: `cleanup-release:${commandFingerprint(attempt.id)}`,
+      projectId: run.projectId, threadId: run.threadId, command: event,
+      expectedRevision: this.events.revision(run.threadId), events: [event], result: null });
+    return true;
   }
 
   reconcile(): void {

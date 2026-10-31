@@ -94,6 +94,7 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
         || replacement.runId !== run.id || replacement.threadId !== run.threadId
         || replacement.turnId !== run.turnId || replacement.providerInstanceId !== run.providerInstanceId
         || replacement.status !== run.status || replacement.cleanup !== "pending"
+        || replacement.cleanupRelease !== undefined
         || replacement.interruptRequestedAt !== null) throw new OrchestrationConflict("scope-conflict");
       return [
         { kind: "run", id: run.id, value: { ...run, attemptId: replacement.id } },
@@ -134,5 +135,11 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
         throw new OrchestrationConflict("revision-conflict");
       }
       return [{ kind: "attempt", id: attempt.id, value: { ...attempt, cleanup: event.payload.cleanup } }];
+    case "attempt.cleanup-released":
+      if (attempt.cleanup !== "pending" && attempt.cleanup !== "unconfirmed") {
+        throw new OrchestrationConflict("revision-conflict");
+      }
+      return [{ kind: "attempt", id: attempt.id, value: { ...attempt,
+        cleanup: "unconfirmed-released", cleanupRelease: event.payload.release } }];
   }
 };

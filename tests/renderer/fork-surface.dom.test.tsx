@@ -90,6 +90,16 @@ describe("fork controls", () => {
     expect(run).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps rolled-back turns marked without offering history actions when the chat has no fork runner", () => {
+    const laterTurnId = "55555555-5555-4555-8555-555555555555";
+    render(<ForkSurfaceProvider projectId={projectId} conversationId={conversationId} rolledBackTurnIds={[laterTurnId]}>
+      <ForkHistoryPanel /><ForkTurnAction turnId={turnId} /><ForkTurnAction turnId={laterTurnId} />
+    </ForkSurfaceProvider>);
+    expect(screen.getByText("Rolled back · not in context")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("does not show a late history response after changing chats", async () => {
     let complete!: (event: ServerEvent) => void;
     const run = vi.fn<ForkCommandRunner>().mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }))

@@ -136,11 +136,11 @@ function RollbackConfirmation({ start, confirm, busy, onConfirm, onCancel }: {
       <input type="checkbox" checked={restore} disabled={busy} onChange={(event) => setRestore(event.currentTarget.checked)} />
       <span>Also restore files to this point</span>
     </label>
-    <button ref={confirm} type="button" className="turn-run-details-toggle" aria-describedby={describedBy} disabled={busy}
+    <button ref={confirm} type="button" className="history-turn-action" aria-describedby={describedBy} disabled={busy}
       onClick={() => onConfirm(restore)}>
       {busy ? "Rolling back…" : restore ? "Roll back context and files" : "Roll back context"}
     </button>
-    <button type="button" className="turn-run-details-toggle" disabled={busy} onClick={onCancel}>Cancel</button>
+    <button type="button" className="history-turn-action" disabled={busy} onClick={onCancel}>Cancel</button>
   </span>;
 }
 
@@ -159,7 +159,7 @@ function HistoryRollbackAction({ surface, turnId }: { surface: ForkSurface; turn
       onConfirm={(restoreFiles) => { void rollback(restoreFiles); }} onCancel={settle} />;
   }
   return <>
-    <button ref={trigger} type="button" className="turn-run-details-toggle" disabled={phase === "busy"}
+    <button ref={trigger} type="button" className="history-turn-action" disabled={phase === "busy"}
       onClick={() => { setError(null); setOutcome(null); setPhase("confirming"); }}>
       <Undo2 size={14} aria-hidden="true" /><span>{phase === "busy" ? "Rolling back…" : "Roll back to here"}</span>
     </button>
@@ -181,12 +181,12 @@ function MergeThroughAction({ surface, turnId }: { surface: ForkSurface; turnId:
   if (phase === "confirming") {
     return <span className="history-rollback-confirm" role="group" aria-label="Confirm merge" onKeyDown={escapeCancels(settle)}>
       <span>Findings from this fork up to this turn are attached to the source chat's next message.</span>
-      <button ref={confirm} type="button" className="turn-run-details-toggle" onClick={() => { void merge(); }}>Merge findings</button>
-      <button type="button" className="turn-run-details-toggle" onClick={settle}>Cancel</button>
+      <button ref={confirm} type="button" className="history-turn-action" onClick={() => { void merge(); }}>Merge findings</button>
+      <button type="button" className="history-turn-action" onClick={settle}>Cancel</button>
     </span>;
   }
   return <>
-    <button ref={trigger} type="button" className="turn-run-details-toggle" disabled={phase === "busy"}
+    <button ref={trigger} type="button" className="history-turn-action" disabled={phase === "busy"}
       onClick={() => { setError(null); setStatus(null); setPhase("confirming"); }}>
       <GitMerge size={14} aria-hidden="true" /><span>{phase === "busy" ? "Merging…" : "Merge findings up to here"}</span>
     </button>

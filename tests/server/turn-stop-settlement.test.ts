@@ -111,16 +111,14 @@ describe("turn stop settlement", () => {
       expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId))
         .toEqual([expect.objectContaining({ turnId: turn.id, runId: turn.runId })]);
       expect(runtime.scheduler.callbacks.size).toBe(0);
-      expect(() => runtime.controller.queue({
-        conversationId: runtime.conversationId,
-        content: "Keep uncertain cleanup fenced.",
-      })).toThrow("cleanup-pending");
-      runtime.store.providerRunOwnership.clear(turn.id, "wrong-run");
-      expect(runtime.store.orchestration.hasPendingCleanup(runtime.conversationId)).toBe(true);
-      runtime.store.providerRunOwnership.clear(turn.id, turn.runId);
       expect(runtime.store.orchestration.hasPendingCleanup(runtime.conversationId)).toBe(false);
+      expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(true);
       expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
-        content: "Cleanup is confirmed now." })).not.toThrow();
+        content: "The released chat is usable again." })).not.toThrow();
+      runtime.store.providerRunOwnership.clear(turn.id, "wrong-run");
+      expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(true);
+      runtime.store.providerRunOwnership.clear(turn.id, turn.runId);
+      expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(false);
     } finally {
       vi.restoreAllMocks();
       runtime.store.close();

@@ -50,6 +50,14 @@ export const orchestrationRunSchema = z.object({
   terminalMessageId: orchestrationIdSchema.nullable(),
 }).strict();
 
+export const orchestrationCleanupReleaseSchema = z.object({
+  stopOutcome: z.enum(["force-detached", "expired", "failed", "missing", "identity-mismatch"]),
+  runtimeGenerationId: orchestrationIdSchema,
+  systemBootId: orchestrationIdSchema,
+  stopBudgetMs: z.number().int().nonnegative(),
+  releasedAt: timestamp,
+}).strict();
+
 export const orchestrationAttemptSchema = z.object({
   id: orchestrationIdSchema,
   runId: orchestrationIdSchema,
@@ -61,7 +69,8 @@ export const orchestrationAttemptSchema = z.object({
   nativeThreadId: nativeId.nullable(),
   nativeTurnId: nativeId.nullable(),
   interruptRequestedAt: timestamp.nullable(),
-  cleanup: z.enum(["not-started", "pending", "confirmed", "unconfirmed"]),
+  cleanup: z.enum(["not-started", "pending", "confirmed", "unconfirmed", "unconfirmed-released"]),
+  cleanupRelease: orchestrationCleanupReleaseSchema.optional(),
   runtimeId: orchestrationIdSchema,
 }).strict();
 
@@ -109,9 +118,15 @@ export const orchestrationDomainEventSchema = z.discriminatedUnion("type", [
     attemptId: orchestrationIdSchema,
     cleanup: z.enum(["pending", "confirmed", "unconfirmed"]),
   }).strict() }).strict(),
+  z.object({ type: z.literal("attempt.cleanup-released"), payload: z.object({
+    runId: orchestrationIdSchema,
+    attemptId: orchestrationIdSchema,
+    release: orchestrationCleanupReleaseSchema,
+  }).strict() }).strict(),
 ]);
 
 export type OrchestrationThread = z.infer<typeof orchestrationThreadSchema>;
 export type OrchestrationRun = z.infer<typeof orchestrationRunSchema>;
 export type OrchestrationAttempt = z.infer<typeof orchestrationAttemptSchema>;
+export type OrchestrationCleanupRelease = z.infer<typeof orchestrationCleanupReleaseSchema>;
 export type OrchestrationDomainEvent = z.infer<typeof orchestrationDomainEventSchema>;

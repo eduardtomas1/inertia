@@ -42,7 +42,7 @@ export class NativeControlRepository {
       for (const threadId of [input.threadId, input.request.source.identity.conversationId]) {
         const active = this.database.prepare(`SELECT 1 FROM orchestration_v2_entities WHERE thread_id = ? AND
           ((kind = 'thread' AND json_extract(payload_json, '$.activeRunId') IS NOT NULL)
-            OR (kind = 'attempt' AND json_extract(payload_json, '$.cleanup') IN ('pending','unconfirmed'))) LIMIT 1`).get(threadId);
+            OR (kind = 'attempt' AND json_extract(payload_json, '$.cleanup') IN ('pending','unconfirmed','unconfirmed-released'))) LIMIT 1`).get(threadId);
         if (active || this.locked(threadId)) throw new OrchestrationConflict("cleanup-pending");
       }
       const timestamp = new Date().toISOString();

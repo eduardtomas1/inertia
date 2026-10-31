@@ -298,6 +298,30 @@ export class TurnRunStateCoordinator {
     active.inputIds.clear();
   }
 
+  private releaseUnconfirmedCleanup(
+    active: ActiveTurn,
+    stopOutcome: Exclude<OwnedProviderStopResult, "settled"> | "expired" | "failed",
+  ): void {
+    const { store } = this.options;
+    const identity = { turnId: active.turn.id, runId: active.turn.runId };
+    try {
+      const owner = store.providerRunOwnership.forTurn(identity.turnId);
+      if (owner?.runId !== identity.runId || owner.conversationId !== active.conversation.id) {
+        store.orchestration.cleanup(identity, "unconfirmed");
+        return;
+      }
+      store.orchestration.releaseCleanup(identity, {
+        stopOutcome,
+        runtimeGenerationId: owner.runtimeGenerationId,
+        systemBootId: owner.systemBootId,
+        stopBudgetMs: ownedProviderStopBudgetMs(),
+        releasedAt: this.options.now(),
+      });
+    } catch {
+      return;
+    }
+  }
+
   private stopOwnedProviderAndRelease(active: ActiveTurn): void {
     if (active.providerStopStarted) return;
     active.providerStopStarted = true;
@@ -329,7 +353,7 @@ export class TurnRunStateCoordinator {
         this.options.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
       } else {
         this.unconfirmedProviderStops.add(active);
-        this.options.store.orchestration.cleanup({ turnId: active.turn.id, runId: active.turn.runId }, "unconfirmed");
+        this.releaseUnconfirmedCleanup(active, outcome);
       }
       this.finalizeDeferredSettlement(
         active,

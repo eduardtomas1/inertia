@@ -10,7 +10,7 @@ export function projectNativeBoundary(event: Extract<OrchestrationDomainEvent, {
   const boundary = event.payload.boundary;
   if (run.threadId !== envelope.threadId || run.projectId !== envelope.projectId
     || run.attemptId !== attempt.id || attempt.runId !== run.id || attempt.threadId !== run.threadId
-    || isAgentTurnTerminalStatus(run.status) || attempt.cleanup === "confirmed"
+    || isAgentTurnTerminalStatus(run.status) || attempt.cleanup === "confirmed" || attempt.cleanup === "unconfirmed-released"
     || (attempt.nativeSessionId !== null && attempt.nativeSessionId !== boundary.nativeConversationId)) {
     throw new OrchestrationConflict("scope-conflict");
   }

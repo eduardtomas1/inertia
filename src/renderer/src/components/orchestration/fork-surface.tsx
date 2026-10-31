@@ -10,13 +10,14 @@ const ForkHistoryView = lazy(async () => ({ default: (await import("./fork-histo
 export type { ForkCommandRunner } from "./fork-surface-model";
 const Context = createContext<ForkSurface | null>(null);
 const NO_ROLLED_BACK_TURNS: ReadonlySet<string> = new Set();
+const RolledBackContext = createContext<ReadonlySet<string>>(NO_ROLLED_BACK_TURNS);
 
 export function useForkActionsAvailable(): boolean {
   return useContext(Context) !== null;
 }
 
 export function useTurnRolledBack(turnId: string): boolean {
-  return useContext(Context)?.rolledBack.has(turnId) ?? false;
+  return useContext(RolledBackContext).has(turnId);
 }
 
 export function ForkSurfaceProvider({ projectId, conversationId, run, rolledBackTurnIds, canRollBackToStart = false, children }: {
@@ -26,17 +27,18 @@ export function ForkSurfaceProvider({ projectId, conversationId, run, rolledBack
   const rolledBack = useMemo(() => rolledBackTurnIds?.length ? new Set(rolledBackTurnIds) : NO_ROLLED_BACK_TURNS, [rolledBackTurnIds]);
   const value = useMemo(() => run ? { projectId, conversationId, run, rolledBack, canRollBackToStart } : null,
     [projectId, conversationId, run, rolledBack, canRollBackToStart]);
-  return <Context.Provider value={value}>{children}</Context.Provider>;
+  return <RolledBackContext.Provider value={rolledBack}>
+    <Context.Provider value={value}>{children}</Context.Provider>
+  </RolledBackContext.Provider>;
 }
 
 export function ForkTurnAction({ turnId }: { turnId: string }) {
   const surface = useContext(Context);
+  const rolledBack = useTurnRolledBack(turnId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  if (rolledBack) return <span className="fork-turn-action fork-turn-rolled-back">Rolled back · not in context</span>;
   if (!surface) return null;
-  if (surface.rolledBack.has(turnId)) {
-    return <span className="fork-turn-action fork-turn-rolled-back">Rolled back · not in context</span>;
-  }
   const fork = async () => {
     setBusy(true); setError(null);
     try {
@@ -50,7 +52,7 @@ export function ForkTurnAction({ turnId }: { turnId: string }) {
     finally { setBusy(false); }
   };
   return <span className="fork-turn-action">
-    <button type="button" className="turn-run-details-toggle" disabled={busy} onClick={() => { void fork(); }}>
+    <button type="button" className="history-turn-action" disabled={busy} onClick={() => { void fork(); }}>
       <GitFork size={14} aria-hidden="true" /><span>{busy ? "Forking…" : "Fork from here"}</span>
     </button>
     {error && <span role="alert">{error}</span>}

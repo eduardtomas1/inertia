@@ -47,7 +47,7 @@ async function prepareOrderedForkSession(dependencies: ForkSessionDependencies, 
   catch (error) { if (!(error instanceof RecordNotFoundError)) throw error; portable("source-removed"); return; }
   if (source.projectId !== target.projectId || source.providerId !== route.providerId
     || store.conversationPath(source.id) !== fork.sourceWorkspaceKey
-    || store.orchestration.hasPendingCleanup(source.id) || providers.isRunning(source.id)) {
+    || store.orchestration.awaitsCleanupProof(source.id) || providers.isRunning(source.id)) {
     portable("native-source-unavailable");
     return;
   }

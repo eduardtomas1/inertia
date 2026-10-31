@@ -1,5 +1,11 @@
 .fork-turn-action { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .fork-turn-action > button { white-space: nowrap; }
+.history-turn-action {
+  display: inline-flex; min-height: max(26px, calc(var(--ui-control-height) - 6px)); align-items: center; gap: 4px;
+  margin: 0; padding: 0 6px; border-radius: var(--radius-xs); color: var(--text-faint); background: transparent;
+  font-size: inherit; font-weight: 400;
+}
+.history-turn-action:hover { color: var(--text-muted); background: var(--fill); }
 .fork-turn-action > [role="status"], .fork-turn-action > [role="alert"] { flex-basis: 100%; }
 .fork-turn-action [role="alert"] { max-width: 28rem; }
 .fork-history-panel { margin: 1rem 0; padding: 0.75rem; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }

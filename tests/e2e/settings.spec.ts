@@ -169,7 +169,7 @@ test("manages accounts and API keys across the responsive theme and scale matrix
     });
     expect(containment.right).toBeLessThanOrEqual(containment.viewportRight + 1);
     expect(containment.cardsRight).toBeLessThanOrEqual(containment.right + 1);
-    expect(containment.cardCount).toBe(6);
+    expect(containment.cardCount).toBe(7);
     expect(containment.workspaceHeader).not.toBeNull();
     expect(containment.workspaceHeader?.top).toBeGreaterThanOrEqual(0);
     expect(containment.workspaceHeader?.bottom).toBeGreaterThan(20);
@@ -180,7 +180,7 @@ test("manages accounts and API keys across the responsive theme and scale matrix
   await resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await openBackends();
-  for (const name of ["Claude Code", "Codex", "OpenCode", "Cursor", "Kimi Code", "Antigravity"]) {
+  for (const name of ["Claude Code", "Codex", "OpenCode", "Cursor", "Kimi Code", "Antigravity", "Pi"]) {
     await expect(section.getByRole("region", { name, exact: true })).toBeVisible();
   }
   const kimi = section.getByRole("region", { name: "Kimi Code" }).getByRole("listitem", { name: "Kimi" });

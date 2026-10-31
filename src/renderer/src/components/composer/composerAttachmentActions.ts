@@ -6,7 +6,9 @@ import {
   chatAttachmentKind,
   safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
 } from "@shared/attachments";
+import type { ConversationAttachmentGalleryItem } from "@shared/conversation-attachment-gallery";
 import { mergeComposerAttachments, type ComposerAttachmentAdoptionResult, type ComposerAttachmentImportLease } from "../../utils/composerAttachments";
+import { reattachErrorMessage, type ComposerReattachOutcome } from "./composerAttachmentReattach";
 import type { ComposerProps } from "./types";
 
 interface ComposerAttachmentActionOptions {
@@ -33,6 +35,8 @@ interface ComposerAttachmentActionOptions {
   setAttachmentError: Dispatch<SetStateAction<string | null>>;
   setPendingAttachmentIds: Dispatch<SetStateAction<ReadonlySet<string>>>;
   submittingRef: MutableRefObject<boolean>;
+  /** Draft attachment id -> the stored attachment id it was re-attached from. */
+  reattachedSourcesRef?: MutableRefObject<Map<string, string>>;
 }
 
 const MAX_NAMED_UNSUPPORTED_FILES = 3;
@@ -47,6 +51,29 @@ export interface ComposerAttachmentActions {
   chooseAttachments(): Promise<void>;
   importAttachments(files: File[]): Promise<boolean>;
   removeAttachment(attachment: ChatAttachment): void;
+  /** Adds a fresh draft copy of a stored attachment; `open` asks main for the copy. */
+  reattachAttachment(
+    item: ConversationAttachmentGalleryItem,
+    open: () => Promise<ComposerAttachmentImportLease>,
+  ): Promise<ComposerReattachOutcome>;
+}
+
+export const REATTACH_ALREADY_IN_DRAFT = "This file is already in the message.";
+export const REATTACH_BUSY = "Wait for the current attachment or message to finish, then try again.";
+
+/**
+ * Forgets which stored file a draft copy came from once that copy has left
+ * the draft, so the map never outgrows the draft itself.
+ */
+export function pruneReattachedSources(
+  sources: Map<string, string>,
+  attachments: readonly Pick<ChatAttachment, "id">[],
+): void {
+  if (sources.size === 0) return;
+  const present = new Set(attachments.map(({ id }) => id));
+  for (const draftId of sources.keys()) {
+    if (!present.has(draftId)) sources.delete(draftId);
+  }
 }
 
 export function composerAttachmentActions({
@@ -70,10 +97,10 @@ export function composerAttachmentActions({
   setAttachmentError,
   setPendingAttachmentIds,
   submittingRef,
+  reattachedSourcesRef,
 }: ComposerAttachmentActionOptions): ComposerAttachmentActions {
-  const reportAttachmentLimit = (): void => setAttachmentError(
-    `Some files were not attached. A message supports up to ${MAX_ATTACHMENT_COUNT} files (50 MiB each), with 80 MiB of images (10 MiB each after resizing).`,
-  );
+  const attachmentLimitMessage = `Some files were not attached. A message supports up to ${MAX_ATTACHMENT_COUNT} files (50 MiB each), with 80 MiB of images (10 MiB each after resizing).`;
+  const reportAttachmentLimit = (): void => setAttachmentError(attachmentLimitMessage);
   const permitsKind = (mimeType: Parameters<typeof chatAttachmentKind>[0] | null): boolean => {
     const image = mimeType !== null && chatAttachmentKind(mimeType) === "image";
     return image ? !imageInputUnavailableReason : !running;
@@ -270,6 +297,55 @@ export function composerAttachmentActions({
         finishImport(importSequence);
       }
     },
+    async reattachAttachment(item, open) {
+      const reject = (message: string): ComposerReattachOutcome => {
+        setAttachmentError(message);
+        return { status: "rejected", message };
+      };
+      if (actionBlocked()) return { status: "rejected", message: REATTACH_BUSY };
+      // Gate before main copies any bytes: the same kind, provider and
+      // message limits as a fresh attachment, checked again on adoption.
+      if (!permitsKind(item.mimeType)) {
+        return reject(chatAttachmentKind(item.mimeType) === "image"
+          ? `${imageInputUnavailableReason ?? "This model does not accept images."} Images were not attached.`
+          : DOCUMENT_FOLLOW_UP_UNSUPPORTED);
+      }
+      const current = attachmentsRef.current;
+      const sources = reattachedSourcesRef?.current;
+      if (sources) pruneReattachedSources(sources, current);
+      if (current.some(({ id }) => id === item.id || sources?.get(id) === item.id)) {
+        return reject(REATTACH_ALREADY_IN_DRAFT);
+      }
+      const probe: ChatAttachment = { ...item, path: item.id };
+      if (mergeComposerAttachments(current, [probe]).rejected.length > 0) {
+        return reject(attachmentLimitMessage);
+      }
+      const sequence = beginImport();
+      const authority = attachmentAuthorityKey;
+      try {
+        let lease: ComposerAttachmentImportLease;
+        try {
+          lease = await open();
+        } catch (error) {
+          const message = reattachErrorMessage(error);
+          if (selectionOwnsVisibleComposer()) setAttachmentError(message);
+          return { status: "rejected", message };
+        }
+        const result = await adoptPrivilegedLease(lease, authority);
+        if (result === "adopted") {
+          for (const { id } of lease.attachments) sources?.set(id, item.id);
+          return { status: "attached" };
+        }
+        return {
+          status: "rejected",
+          message: result === "cancelled"
+            ? "The chat changed before the file was added. Re-attach it again."
+            : "This file could not be added to the message.",
+        };
+      } finally {
+        finishImport(sequence);
+      }
+    },
     removeAttachment(attachment) {
       if (attachmentImportingRef.current) return;
       if (!attachmentsRef.current.some(({ id }) => id === attachment.id)) return;
@@ -277,6 +353,7 @@ export function composerAttachmentActions({
       setAttachmentError(null);
       const next = attachmentsRef.current.filter(({ id }) => id !== attachment.id);
       attachmentsRef.current = next;
+      if (reattachedSourcesRef) pruneReattachedSources(reattachedSourcesRef.current, next);
       setAttachments(() => next);
       void releaseAttachmentRef.current(attachment.id);
     },

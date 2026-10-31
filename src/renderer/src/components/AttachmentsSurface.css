@@ -1,0 +1,115 @@
+/* Attachments surface: filters, re-attach actions and the item menu. */
+.attachments-surface-gallery .environment-attachments-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+
+.attachments-surface-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.attachments-surface-filter {
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--text-sm);
+}
+
+.attachments-surface-filter:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.attachments-surface-filter[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--fill);
+  font-weight: 500;
+}
+
+.attachments-surface-status {
+  min-height: 0;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.attachments-surface-status:not(:empty) {
+  margin-bottom: 8px;
+}
+
+.attachments-surface-status[data-tone="error"] {
+  color: var(--danger);
+}
+
+/* Gallery tiles are narrow grid cells: the action sits beneath the preview
+   tile so the thumbnail, name and size keep the full tile width. */
+.attachments-surface .environment-attachments[data-expanded="true"] .sent-attachments {
+  width: 100%;
+  grid-template-columns: repeat(auto-fill, minmax(min(128px, 100%), 1fr));
+}
+
+.attachments-surface .sent-attachment[data-attachment-actions] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: start;
+  gap: 2px;
+}
+
+/* The wider surface tile has room for the type and size line that the
+   compact gallery hides visually. */
+.attachments-surface .environment-attachments[data-expanded="true"] .sent-attachment-copy small {
+  position: static;
+  overflow: hidden;
+  width: auto;
+  height: auto;
+  margin: 0;
+  clip: auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachments-surface-reattach {
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.attachments-surface-reattach:hover:not(:disabled, [aria-disabled="true"]) {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.attachments-surface-reattach:disabled,
+.attachments-surface-reattach[aria-disabled="true"] {
+  opacity: 0.55;
+}
+
+.conversation-menu.attachments-surface-menu {
+  position: fixed;
+  z-index: 500;
+  top: 0;
+  right: auto;
+  left: 0;
+  width: max-content;
+  min-width: 180px;
+  max-width: calc(100vw - 16px);
+}

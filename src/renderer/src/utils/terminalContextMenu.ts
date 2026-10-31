@@ -18,20 +18,49 @@ export function terminalPasteKeyHandler(
     && isPasteLetter(event));
 }
 
+const F_KEY_CODE = 70;
+
+/**
+ * ⌘F on macOS. Elsewhere Ctrl+F belongs to the shell (forward one character,
+ * or a program's own search), so the terminal find bar uses Ctrl+Shift+F.
+ * Only read while the terminal has focus.
+ */
+export function isTerminalFindShortcut(event: KeyboardEvent, mac: boolean): boolean {
+  if (event.type !== "keydown" || event.altKey) return false;
+  if (mac) {
+    if (!event.metaKey || event.ctrlKey || event.shiftKey) return false;
+  } else if (!event.ctrlKey || !event.shiftKey || event.metaKey) {
+    return false;
+  }
+  const key = event.key.toLowerCase();
+  return key === "f" || (!/^[a-z]$/u.test(key) && event.keyCode === F_KEY_CODE);
+}
+
+export function terminalFindShortcutLabel(mac: boolean): string {
+  return mac ? "⌘F" : "Ctrl+Shift+F";
+}
+
+/**
+ * `addSelectionToPrompt` is offered only for chat terminals; the menu reports
+ * whether a selection exists, never the selected text itself.
+ */
 export function terminalContextMenu(
   terminal: () => Terminal | null,
   clearable: boolean,
   conversationId?: string,
+  addSelectionToPrompt?: (selection: string) => void,
 ): (event: MouseEvent<HTMLElement>) => void {
   const handlers = contextMenuHandlers<HTMLElement>(
     () => {
       const current = terminal();
-      return current ? {
+      if (!current) return null;
+      return {
         kind: "terminal",
         ...(conversationId ? { conversationId } : {}),
         hasSelection: current.hasSelection(),
         clearable,
-      } : null;
+        ...(addSelectionToPrompt ? { promptable: true } : {}),
+      };
     },
     (action) => {
       const current = terminal();
@@ -39,6 +68,9 @@ export function terminalContextMenu(
       if (action === "terminal-copy") void copyFromMenu(current.getSelection());
       else if (action === "terminal-select-all") current.selectAll();
       else if (action === "terminal-clear" && clearable) current.clear();
+      else if (action === "terminal-add-to-prompt" && addSelectionToPrompt && current.hasSelection()) {
+        addSelectionToPrompt(current.getSelection());
+      }
     },
   );
   return (event) => {

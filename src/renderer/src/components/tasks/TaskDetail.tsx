@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CalendarDays, Ellipsis, Flag, FolderOpen, X } from "lucide-react";
+import { CalendarDays, Ellipsis, Flag, FolderOpen, MessageSquare, X } from "lucide-react";
 import clsx from "clsx";
 import {
   MAX_TODO_NOTE_CHARS,
@@ -32,6 +32,9 @@ export interface TaskDetailProps {
   leaving: boolean;
   offline: boolean;
   projectName: string | null;
+  /** Title of the chat the task was written from, when that chat still exists. */
+  sourceChatTitle?: string | null;
+  onOpenSourceChat?: () => void;
   focusTarget: TaskFocusTarget | null;
   openMenu: TaskDetailMenu | null;
   agent: ReactNode;
@@ -59,6 +62,8 @@ export function TaskDetail({
   leaving,
   offline,
   projectName,
+  sourceChatTitle = null,
+  onOpenSourceChat,
   focusTarget,
   openMenu,
   agent,
@@ -312,6 +317,17 @@ export function TaskDetail({
           <FolderOpen size={14} aria-hidden="true" />
           <span className="task-chip-text">{projectName ?? "Project"}</span>
         </button>
+        {sourceChatTitle !== null && onOpenSourceChat && (
+          <button
+            type="button"
+            className="task-chip task-source-chip is-set"
+            title="Open this chat"
+            onClick={onOpenSourceChat}
+          >
+            <MessageSquare size={14} aria-hidden="true" />
+            <span className="task-chip-text">From chat {sourceChatTitle}</span>
+          </button>
+        )}
       </div>
       <div className="task-detail-agent" ref={agentRef}>
         {agent}

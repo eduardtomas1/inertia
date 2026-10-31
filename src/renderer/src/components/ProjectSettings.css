@@ -257,3 +257,166 @@
     border: 1px solid CanvasText;
   }
 }
+
+/* Settings → Projects → Worktrees */
+.project-worktrees {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.project-worktrees-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.project-worktrees-help {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.project-worktrees-notice,
+.project-worktrees-warning {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+  overflow-wrap: anywhere;
+}
+
+.project-worktrees-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--warning);
+}
+
+.project-worktrees-warning > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.project-worktrees-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.worktree-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.worktree-list-item {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.worktree-list-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 4px;
+}
+
+.worktree-list-path {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.worktree-list-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.worktree-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.worktree-badge[data-state="dirty"] {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.worktree-badge[data-state="unknown"] {
+  border-style: dashed;
+}
+
+.worktree-chat-link {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  color: var(--accent, var(--text));
+  background: transparent;
+  font-size: var(--text-xs);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.worktree-chat-link:hover {
+  text-decoration: underline;
+}
+
+.worktree-list-reason {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.worktree-list-item > .secondary-button[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (forced-colors: active) {
+  .worktree-badge {
+    border-color: CanvasText;
+  }
+}
+
+.worktree-list-title {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.worktree-list-title strong {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.worktree-list-folder {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}

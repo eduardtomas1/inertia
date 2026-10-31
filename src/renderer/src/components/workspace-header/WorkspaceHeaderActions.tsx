@@ -36,6 +36,7 @@ export interface WorkspaceHeaderActionsProps {
   onOpenPullRequest: () => void;
   onPushAndCreatePullRequest: () => void;
   onOpenBranches: () => void;
+  onOpenGitHistory?: () => void;
   onRefreshGitStatus?: () => void;
   onRequestMenuClose: () => void;
 }
@@ -64,6 +65,7 @@ export function WorkspaceHeaderActions({
   onOpenPullRequest,
   onPushAndCreatePullRequest,
   onOpenBranches,
+  onOpenGitHistory,
   onRefreshGitStatus,
   onRequestMenuClose,
 }: WorkspaceHeaderActionsProps): React.JSX.Element {
@@ -105,6 +107,7 @@ export function WorkspaceHeaderActions({
           onOpenPullRequest={onOpenPullRequest}
           onPushAndCreatePullRequest={onPushAndCreatePullRequest}
           onOpenBranches={onOpenBranches}
+          {...(onOpenGitHistory ? { onOpenHistory: onOpenGitHistory } : {})}
           {...(onRefreshGitStatus ? { onRefreshStatus: onRefreshGitStatus } : {})}
           onRequestMenuClose={onRequestMenuClose}
         />

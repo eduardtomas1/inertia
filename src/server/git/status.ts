@@ -67,6 +67,19 @@ function changedFile(
   };
 }
 
+export function porcelainBranchHead(
+  head: string,
+): { branch: string | null; detached: boolean } {
+  if (head === "(unknown)") {
+    throw new GitError(
+      "operation-failed",
+      "Git could not resolve the current branch.",
+    );
+  }
+  const detached = head === "(detached)";
+  return { branch: detached ? null : head, detached };
+}
+
 function parsePorcelain(buffer: Buffer): ParsedStatus {
   const fields = buffer.toString("utf8").split("\0");
   const files: GitChangedFile[] = [];
@@ -83,9 +96,7 @@ function parsePorcelain(buffer: Buffer): ParsedStatus {
     if (record.startsWith("# branch.oid ")) {
       oid = record.slice(13);
     } else if (record.startsWith("# branch.head ")) {
-      const head = record.slice(14);
-      detached = head === "(detached)";
-      branch = detached || head === "(unknown)" ? null : head;
+      ({ branch, detached } = porcelainBranchHead(record.slice(14)));
     } else if (record.startsWith("# branch.upstream ")) {
       upstream = record.slice(18) || null;
     } else if (record.startsWith("# branch.ab ")) {

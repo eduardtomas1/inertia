@@ -14,6 +14,7 @@ import type {
   CheckpointSummary,
   Conversation,
   ConversationLatestTurnSummary,
+  GitStatusSnapshot,
   Project,
   ProviderId,
   ProviderMaintenanceProviderId,
@@ -148,6 +149,12 @@ export function chatQueueRunner(
 ): QueueCommandRunner | undefined {
   if (!run || !draft || conversations?.some(({ id }) => id === draft.id)) return run;
   return unsavedChatQueueRunner(run);
+}
+
+export function chatCheckoutBranch(
+  gitStatus: Pick<GitStatusSnapshot, "isRepository" | "branch"> | null,
+): string | null | undefined {
+  return gitStatus?.isRepository ? gitStatus.branch : undefined;
 }
 
 export function visibleChatConversation(
@@ -636,7 +643,7 @@ export function createWorkspaceSceneModel({
           onChange: actions.selectGlobalChatProject,
         },
       } : {}),
-      checkoutBranch: workspaceTools.gitStatus?.branch ?? null,
+      checkoutBranch: chatCheckoutBranch(workspaceTools.gitStatus),
       latestTurnSummary: visibleConversationLatestTurnSummary(
         persistedConversation,
         conversation,

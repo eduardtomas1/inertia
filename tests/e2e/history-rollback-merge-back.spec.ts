@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
+import { expectComposerBranch } from "./support/composer-tools";
 import { focusAppWindow } from "./support/window-focus";
 
 const TITLE = "Release parser plan";
@@ -237,6 +238,9 @@ test("rolls back chat context from a retained turn and merges a fork's findings 
   await capture(info, "merge-back-source-draft", async () => {
     await expect(page.getByRole("heading", { name: TITLE, level: 1 })).toBeVisible();
     await expect(composer.getByText(`${TITLE} fork`, { exact: false })).toBeVisible();
+    await expect(page.locator(".workspace-header").getByRole("group", { name: "Git actions", exact: true })).toBeVisible();
+    await expectComposerBranch(page);
+    await expect(composer.getByText("Detached HEAD", { exact: false })).toHaveCount(0);
     await assertRetainedHistory();
   });
 

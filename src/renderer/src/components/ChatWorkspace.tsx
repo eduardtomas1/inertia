@@ -252,7 +252,7 @@ export function ChatWorkspace({
   project,
   conversation,
   newChatProjectPicker,
-  checkoutBranch = null,
+  checkoutBranch,
   showCheckoutContext = true,
   latestTurnSummary,
   turns,

@@ -134,16 +134,19 @@ export default function DetachedChatApp({
     ({ id }) => id === conversationId,
   ) ?? null;
   const projectId = snapshotConversation?.projectId ?? null;
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
 
   useEffect(() => {
     const mirror = (draft: string): void => {
-      window.inertia.mirrorDetachedChatDraft(draft, detachedTerminalIds(projectId, conversationId));
+      window.inertia.mirrorDetachedChatDraft(draft, detachedTerminalIds(projectIdRef.current, conversationId));
     };
     const stopDrafts = onComposerDraftPersisted((persistence) => {
       if (persistence.conversationId === conversationId) mirror(persistence.draft);
     });
     const stopTerminals = onTerminalTabsChanged((storageKey) => {
-      if (projectId && storageKey === terminalStorageKey(projectId, conversationId)) {
+      const currentProjectId = projectIdRef.current;
+      if (currentProjectId && storageKey === terminalStorageKey(currentProjectId, conversationId)) {
         mirror(readComposerDraft(conversationId));
       }
     });
@@ -151,7 +154,7 @@ export default function DetachedChatApp({
       stopDrafts();
       stopTerminals();
     };
-  }, [conversationId, projectId]);
+  }, [conversationId]);
 
   useEffect(() => {
     const persistBeforeNativeClose = (event: BeforeUnloadEvent): void => {
@@ -160,7 +163,7 @@ export default function DetachedChatApp({
         prepareComposerDetachment(conversationId),
         (draft) => window.inertia.persistDetachedChatDraft(
           draft,
-          detachedTerminalIds(projectId, conversationId),
+          detachedTerminalIds(projectIdRef.current, conversationId),
         ),
         setActionError,
       );
@@ -171,7 +174,7 @@ export default function DetachedChatApp({
       persistBeforeNativeClose,
       true,
     );
-  }, [conversationId, projectId]);
+  }, [conversationId]);
   const conversationTitle = snapshotConversation?.title ?? null;
   useEffect(() => {
     const nativeTitle = detachedChatWindowTitle(conversationTitle ?? "");

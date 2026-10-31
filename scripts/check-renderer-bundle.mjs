@@ -86,7 +86,7 @@ const budgets = {
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -162,7 +162,7 @@ const budgets = {
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte + 245 + 50,
   deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850 + 32,
-  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184 + 34,
+  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184 + 34 + 56,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte + 205,
   deferredIconRegionJavaScript: 12_995,

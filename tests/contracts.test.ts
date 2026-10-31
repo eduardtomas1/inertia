@@ -466,11 +466,17 @@ describe("client command contract", () => {
       },
     };
     expect(clientCommandSchema.safeParse(command).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      ...command,
+      payload: { ...command.payload, background: true },
+    }).success).toBe(true);
     for (const injected of [
       { cwd: "/tmp" },
       { replayBytes: 10_000_000 },
       { owner: "renderer" },
       { cols: 10_000 },
+      { background: false },
+      { background: "true" },
     ]) {
       expect(clientCommandSchema.safeParse({
         ...command,

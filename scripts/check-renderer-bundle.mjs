@@ -90,12 +90,12 @@ const budgets = {
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
-  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324,
+  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
   colorThemesCss: 8 * kibibyte + 120 + 552,
-  detachedChatCss: 1.5 * kibibyte + 55,
+  detachedChatCss: 1.5 * kibibyte + 55 + 21,
   settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.

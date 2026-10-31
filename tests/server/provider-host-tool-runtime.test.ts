@@ -157,6 +157,72 @@ describe("provider host-tool call admission", () => {
     return { runtime, resolved };
   }
 
+  it("admits 1024 calls across tools and rejects further calls without dispatching", async () => {
+    const dispatch = vi.fn(async () => ({ success: true, text: "ok" }));
+    const { runtime } = owner(dispatch);
+    for (let index = 0; index < 1_024; index += 1) {
+      expect(await runtime.invoke({
+        callId: `call-${index}`,
+        tool: index % 2 === 0 ? "inertia_list_conversations" : "inertia_create_conversation",
+        arguments: {},
+      })).toEqual({ success: true, text: "ok" });
+    }
+    for (const callId of ["over-budget", "retry-over-budget"]) {
+      const result = await runtime.invoke({
+        callId, tool: "inertia_list_conversations", arguments: {},
+      });
+      expect(result.success).toBe(false);
+      expect(JSON.parse(result.text)).toEqual({
+        error: {
+          code: "host_tool_budget_exhausted",
+          message: expect.stringContaining("1024 Inertia tool calls"),
+        },
+      });
+      expect(result.text).toContain("Retrying in this turn will not restore the allowance");
+    }
+    expect(dispatch).toHaveBeenCalledTimes(1_024);
+    expect(await runtime.invoke({
+      callId: "call-0", tool: "inertia_create_conversation", arguments: {},
+    })).toMatchObject({ success: false, text: expect.stringContaining("reused") });
+    runtime.settle();
+    expect(await runtime.invoke({
+      callId: "after-settlement", tool: "inertia_list_conversations", arguments: {},
+    })).toMatchObject({ success: false, text: expect.stringContaining("no longer owns") });
+    const nextTurn = owner(dispatch);
+    expect(await nextTurn.runtime.invoke({
+      callId: "call-0", tool: "inertia_list_conversations", arguments: {},
+    })).toEqual({ success: true, text: "ok" });
+    expect(dispatch).toHaveBeenCalledTimes(1_025);
+  });
+
+  it("does not charge concurrency refusals against the turn allowance", async () => {
+    const pending = deferred();
+    const dispatch = vi.fn(async () => {
+      await pending.promise;
+      return { success: true, text: "ok" };
+    });
+    const { runtime } = owner(dispatch);
+    const invoke = (callId: string) => runtime.invoke({
+      callId, tool: "inertia_list_conversations", arguments: {},
+    });
+    const calls = Array.from({ length: 8 }, (_, index) => invoke(`pending-${index}`));
+    try {
+      for (let index = 0; index < 1_024; index += 1) {
+        expect(await invoke(`refused-${index}`)).toMatchObject({
+          success: false, text: expect.stringContaining("8 Inertia tool calls are already running"),
+        });
+      }
+      expect(dispatch).toHaveBeenCalledTimes(8);
+      pending.resolve();
+      expect((await Promise.all(calls)).every(({ success }) => success)).toBe(true);
+      expect(await invoke("refused-0")).toEqual({ success: true, text: "ok" });
+      expect(dispatch).toHaveBeenCalledTimes(9);
+    } finally {
+      pending.resolve();
+      await Promise.all(calls);
+    }
+  });
+
   it("names the available tools and the closest one when a provider calls an unknown tool", async () => {
     const { runtime } = owner(async () => ({ success: true, text: "ok" }));
     const cases: Array<[string, string]> = [

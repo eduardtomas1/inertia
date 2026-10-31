@@ -29,6 +29,9 @@ export const TURN_GIT_ARTIFACT_PRE_CAPTURE_TIMEOUT_MS = 10_000;
 export const TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS = 60_000;
 export const GIT_READ_REQUEST_TIMEOUT_MS =
   GIT_READ_OPERATION_TIMEOUT_MS + 60_000;
+// One stage or unstage index update gets its own clock, separate from the
+// status reads around it, so a slow read cannot cut the index write short.
+export const GIT_INDEX_MUTATION_TIMEOUT_MS = 60_000;
 
 // Mutations can legitimately combine a network operation with several local
 // validation and post-operation status subprocesses. Delivery remains

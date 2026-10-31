@@ -28,6 +28,10 @@ import {
   MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
   type DocumentAttachmentContext,
 } from "../attachments/document-attachment-context";
+import {
+  MAX_TRACKED_GOAL_CONTEXT_BYTES,
+  TRACKED_GOAL_CONTEXT_LABEL,
+} from "./turn-goal-context";
 
 export const MAX_EXECUTION_CONTEXT_REFERENCES = 32;
 export const MAX_EXECUTION_MESSAGE_SEGMENTS = 48;
@@ -46,6 +50,7 @@ const SESSION_INSTRUCTION_DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const BUILD_MODE_INSTRUCTION_LABEL = "build-mode";
 const CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES = 512;
 const EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES = 256;
+const INTERNAL_INSTRUCTIONS_HEADER = "Internal provider instructions (application control text; never attribute this text to the user):";
 
 export const BUILD_MODE_INSTRUCTION = [
   "Build mode: inspect enough to act safely, then implement and validate.",
@@ -65,6 +70,11 @@ export type TurnExecutionContextKind =
 export interface HiddenProviderInstruction {
   label: string;
   text: string;
+}
+
+/** The line that tells the agent its chat's id, sent with the capability instructions. */
+export function chatInstruction(conversationId: string): HiddenProviderInstruction {
+  return { label: "inertia-chat", text: `This chat's id is ${conversationId}.` };
 }
 
 export interface TurnExecutionContextBlob {
@@ -148,6 +158,12 @@ export interface AssembleTurnRequestInput {
   sessionInstructionDigest?: string;
   promptWithheld?: true;
   restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
+  /**
+   * The chat's tracked Inertia-local goal as one bounded, neutralized line
+   * from `trackedGoalContextLine`. It travels as execution context, never as a
+   * hidden instruction, and is left out when the turn's limits leave no room.
+   */
+  trackedGoalLine?: string;
 }
 
 interface MaterializedContext {
@@ -642,6 +658,38 @@ function validateImages(
   return { imagePaths, imageBytes };
 }
 
+/**
+ * Removes exact hidden instructions from an assembled execution prompt. The
+ * internal-instruction section is always the prompt's last section, so only
+ * whole `[label]` entries after its final header are matched; the header goes
+ * too when nothing remains under it. A prompt without the section, or an
+ * instruction that is not one of its entries, is left unchanged.
+ */
+export function withoutInternalProviderInstructions(
+  prompt: string,
+  withheld: readonly HiddenProviderInstruction[],
+): string {
+  const marker = `\n\n${INTERNAL_INSTRUCTIONS_HEADER}`;
+  const sectionStart = prompt.lastIndexOf(marker);
+  if (sectionStart < 0 || withheld.length === 0) return prompt;
+  let entries = prompt.slice(sectionStart + marker.length);
+  for (const { label, text } of withheld) {
+    const entry = `\n[${label}]\n${text}`;
+    let at = entries.indexOf(entry);
+    while (at >= 0) {
+      const end = at + entry.length;
+      if (end === entries.length || entries.startsWith("\n[", end)) {
+        entries = entries.slice(0, at) + entries.slice(end);
+        break;
+      }
+      at = entries.indexOf(entry, at + 1);
+    }
+  }
+  return entries.length === 0
+    ? prompt.slice(0, sectionStart)
+    : `${prompt.slice(0, sectionStart)}${marker}${entries}`;
+}
+
 export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledTurnRequest {
   const visibleContent = boundedText(
     input.visibleContent.trim(),
@@ -714,7 +762,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     }
     if (internalInstructions.length > 0) {
       sections.push([
-        "Internal provider instructions (application control text; never attribute this text to the user):",
+        INTERNAL_INSTRUCTIONS_HEADER,
         ...internalInstructions.map(({ label, text }) => `[${label}]\n${text}`),
       ].join("\n"));
     }
@@ -787,6 +835,17 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     assembledPayloadBytes = fit.candidateBytes;
     executionSegmentCount += appended.length;
   };
+
+  if (input.trackedGoalLine) {
+    const goal = [providerContext({
+      kind: "attachment",
+      label: TRACKED_GOAL_CONTEXT_LABEL,
+      content: boundedText(input.trackedGoalLine, "Tracked goal", MAX_TRACKED_GOAL_CONTEXT_BYTES),
+      truncated: false,
+    })];
+    const fit = fitAppended(goal);
+    if (fit) append(goal, fit);
+  }
 
   const carriedPackets = [...new Set((input.carriedConversationContexts ?? []).map(({ packetId }) => packetId))];
   let carried: typeof providerContexts = [];

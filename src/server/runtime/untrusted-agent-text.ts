@@ -75,7 +75,8 @@ const TURN_MARKER = /^([ \t]*(?:Human|Assistant)[ \t]*):/gmu;
 const INERTIA_SECTION_HEADER = /^([ \t]*(?:Internal provider instructions|Structured execution context)[^\n\r:]*?)(?<!\\):/gimu;
 
 // `[label]` lines: hidden-instruction labels (build mode, capability packs,
-const INERTIA_SECTION_LABEL = /^([ \t]*)\[(?=(?:build-mode|inertia-orchestration|inertia-frontend-workbench|read-only-diff-review|selected-diff-revision-scope|inertia-watcher|inertia-watcher-note)\])/gimu;
+// isolated review, watcher notes).
+const INERTIA_SECTION_LABEL = /^([ \t]*)\[(?=(?:build-mode|inertia-orchestration|inertia-frontend-workbench|inertia-workspace|read-only-diff-review|selected-diff-revision-scope|inertia-watcher|inertia-watcher-note)\])/gimu;
 
 function neutralizeControlTag(
   match: string,

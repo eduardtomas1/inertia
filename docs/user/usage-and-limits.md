@@ -30,6 +30,6 @@ Inertia shows a short notice when a 5-hour or weekly window drops below 25%, 15%
 
 The composer's usage indicator shows the context window. Its popover adds the selected account's quota in the same colours, says when another account of the same provider has more room, using the last Limits reading, and offers **All provider limits**, which opens the same information without sending a message.
 
-The **Usage** section of the Environment panel opens by default in every chat. If you collapse it, it stays collapsed until you open it again.
+The **Usage** surface in the right panel shows this chat's context window, with **All accounts** for every account's limits and **Usage history** for recorded usage. Open it from the usage meter beside the panel controls, or press U in the surface chooser (⌘G, Ctrl+G elsewhere). Each chat remembers whether it is open.
 
 For accounts, averages, optional CLIProxyAPI hubs and reset credits, see [Provider usage limits](../USAGE_LIMITS.md).

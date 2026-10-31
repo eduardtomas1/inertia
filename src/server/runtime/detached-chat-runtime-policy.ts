@@ -215,6 +215,11 @@ export function detachedChatCommandRejection(
     case "git.fetch":
     case "git.pull":
     case "git.commit":
+    case "git.stage":
+    case "git.unstage":
+    case "git.log":
+    case "git.commit.show":
+    case "git.blame":
     case "git.push":
     case "git.pr.open":
     case "git.pr.confidence":
@@ -225,6 +230,8 @@ export function detachedChatCommandRejection(
     case "workspace.entries":
     case "workspace.file.read":
     case "workspace.file.write":
+    case "workspace.search.content":
+    case "workspace.path.resolve":
     case "project.actions":
     case "project.action.run":
     case "terminal.create":

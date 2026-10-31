@@ -16,6 +16,7 @@ import type {
   AgentTurn,
   TurnGitArtifact,
   TurnGitArtifactAbsenceReason,
+  TurnGitArtifactFile,
   TurnGitDiffSnapshot,
 } from "../shared/contracts";
 import {
@@ -65,6 +66,80 @@ export interface TurnGitArtifactManagerOptions {
 export interface TurnGitArtifactOperationOptions {
   deadlineAt?: number;
   signal?: AbortSignal;
+}
+
+/**
+ * Git work that answers an agent's host-tool call. OpenCode gives such a call
+ * 30 seconds, so the Git work stops well before that.
+ */
+export const HOST_TOOL_GIT_READ_TIMEOUT_MS = 20_000;
+/** A live turn diff is one such host-tool read. */
+export const LIVE_TURN_DIFF_TIMEOUT_MS = HOST_TOOL_GIT_READ_TIMEOUT_MS;
+/**
+ * Live reads of one turn within this long of each other share one comparison,
+ * so paging through a diff or asking again does not write a fresh snapshot of
+ * the worktree each time.
+ */
+export const LIVE_TURN_DIFF_REUSE_MS = 5_000;
+
+export interface LiveTurnDiff {
+  turnId: string;
+  patch: string;
+  truncated: boolean;
+  patchTruncated: boolean;
+  files: TurnGitArtifactFile[];
+}
+
+interface LiveComparison {
+  beforeRef: string;
+  controller: AbortController;
+  promise: Promise<LiveTurnDiff>;
+  /** Clock time the comparison finished; null while it runs. */
+  finishedAt: number | null;
+  waiters: number;
+}
+
+type BoundedWait<T> =
+  | { state: "done"; value: T }
+  | { state: "aborted" }
+  | { state: "timed-out" };
+
+/** Waits for `promise` until `signal` aborts or `timeoutMs` passes, whichever is first. */
+function boundedWait<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  timeoutMs = Number.POSITIVE_INFINITY,
+): Promise<BoundedWait<T>> {
+  if (signal?.aborted) return Promise.resolve({ state: "aborted" });
+  return new Promise<BoundedWait<T>>((resolveWait, rejectWait) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (): void => {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", aborted);
+    };
+    const aborted = (): void => {
+      finish();
+      resolveWait({ state: "aborted" });
+    };
+    signal?.addEventListener("abort", aborted, { once: true });
+    if (Number.isFinite(timeoutMs)) {
+      timer = setTimeout(() => {
+        finish();
+        resolveWait({ state: "timed-out" });
+      }, Math.max(0, timeoutMs));
+      timer.unref?.();
+    }
+    promise.then(
+      (value) => {
+        finish();
+        resolveWait({ state: "done", value });
+      },
+      (error: unknown) => {
+        finish();
+        rejectWait(error);
+      },
+    );
+  });
 }
 
 export class TurnGitArtifactError extends Error {
@@ -139,6 +214,7 @@ export class TurnGitArtifactManager {
   readonly #preCaptureTimeoutMs: number;
   readonly #finalizationTimeoutMs: number;
   readonly #finalizations = new Map<string, Promise<void>>();
+  readonly #liveComparisons = new Map<string, LiveComparison>();
   readonly #lifetime = new AbortController();
   #shutdownDeadlineAt: number | null = null;
   #cleanupFailure: GitError | null = null;
@@ -571,6 +647,154 @@ export class TurnGitArtifactManager {
   async settledTurnDiff(turnId: string): Promise<TurnGitDiffSnapshot> {
     await this.#finalizations.get(turnId)?.catch(() => undefined);
     return this.turnDiff(turnId);
+  }
+
+  /**
+   * `settledTurnDiff` for a caller that cannot wait out the whole
+   * finalization: waits at most `timeoutMs` for the turn's capture to finish,
+   * and returns null when it is still running, `signal` aborts, or the turn's
+   * artifact is still pending with no finalization under way.
+   */
+  async settledTurnDiffWithin(
+    turnId: string,
+    options: { signal?: AbortSignal; timeoutMs: number },
+  ): Promise<TurnGitDiffSnapshot | null> {
+    const finalization = this.#finalizations.get(turnId);
+    if (finalization) {
+      const waited = await boundedWait(
+        finalization.catch(() => undefined),
+        options.signal,
+        options.timeoutMs,
+      );
+      if (waited.state !== "done") return null;
+    }
+    if (options.signal?.aborted) return null;
+    const artifact = this.store.turnGitArtifact(turnId);
+    if (!artifact || artifact.status === "pending") return null;
+    return this.turnDiff(turnId);
+  }
+
+  /**
+   * The changes an unfinished turn has made so far: its pre-turn snapshot
+   * against a short-lived snapshot of the current worktree. The temporary
+   * checkpoint uses a private index and Inertia's own ref namespace, and its
+   * ref is removed before this returns; the user's index and files are never
+   * written.
+   *
+   * Callers within `LIVE_TURN_DIFF_REUSE_MS` share one comparison. Each
+   * caller's signal ends only its own wait; the shared Git work stops when
+   * every caller has gone, or after `LIVE_TURN_DIFF_TIMEOUT_MS`.
+   */
+  async liveTurnDiff(
+    turnId: string,
+    options: TurnGitArtifactOperationOptions = {},
+  ): Promise<LiveTurnDiff> {
+    const artifact = this.store.turnGitArtifact(turnId)
+      ? this.store.turnGitArtifactStorage(turnId)
+      : null;
+    if (!artifact) {
+      throw new TurnGitArtifactError("This turn's starting repository snapshot has not been captured yet.");
+    }
+    if (artifact.status !== "pending" || !artifact.beforeRef) {
+      this.#liveComparisons.delete(turnId);
+      throw new TurnGitArtifactError(
+        artifact.failureReason ?? "This turn has no starting repository snapshot to compare against.",
+      );
+    }
+    const beforeRef = artifact.beforeRef;
+    let comparison = this.#liveComparisons.get(turnId);
+    if (
+      comparison
+      && (comparison.beforeRef !== beforeRef
+        || (comparison.finishedAt !== null
+          && this.#clockMs() - comparison.finishedAt >= LIVE_TURN_DIFF_REUSE_MS))
+    ) {
+      this.#liveComparisons.delete(turnId);
+      comparison = undefined;
+    }
+    if (!comparison) {
+      const controller = new AbortController();
+      const operation = this.#operationOptions(LIVE_TURN_DIFF_TIMEOUT_MS, {
+        deadlineAt: options.deadlineAt,
+        signal: controller.signal,
+      });
+      const created: LiveComparison = {
+        beforeRef,
+        controller,
+        promise: this.#compareLive(artifact.conversationId, artifact.turnId, beforeRef, operation),
+        finishedAt: null,
+        waiters: 0,
+      };
+      created.promise.then(
+        () => {
+          created.finishedAt = this.#clockMs();
+          const expiry = setTimeout(() => {
+            if (this.#liveComparisons.get(turnId) === created) this.#liveComparisons.delete(turnId);
+          }, LIVE_TURN_DIFF_REUSE_MS);
+          expiry.unref?.();
+        },
+        () => {
+          if (this.#liveComparisons.get(turnId) === created) this.#liveComparisons.delete(turnId);
+        },
+      );
+      this.#liveComparisons.set(turnId, created);
+      comparison = created;
+    }
+    const shared = comparison;
+    shared.waiters += 1;
+    let waited: BoundedWait<LiveTurnDiff>;
+    try {
+      waited = await boundedWait(shared.promise, options.signal);
+    } finally {
+      shared.waiters -= 1;
+    }
+    if (waited.state !== "done") {
+      if (shared.waiters === 0 && shared.finishedAt === null) {
+        shared.controller.abort(new TurnGitArtifactError("The live diff was cancelled."));
+        if (this.#liveComparisons.get(turnId) === shared) this.#liveComparisons.delete(turnId);
+      }
+      throw new TurnGitArtifactError("The live diff was cancelled.");
+    }
+    return { ...waited.value, files: [...waited.value.files] };
+  }
+
+  async #compareLive(
+    conversationId: string,
+    turnId: string,
+    beforeRef: string,
+    operation: { deadlineAt: number; signal: AbortSignal },
+  ): Promise<LiveTurnDiff> {
+    const repositoryPath = this.store.conversationPath(conversationId);
+    let afterRef: string | null = null;
+    try {
+      afterRef = (await createCheckpoint(
+        repositoryPath,
+        this.#checkpointDirectory,
+        conversationId,
+        operation,
+      )).ref;
+      const comparison = await compareGitSnapshots(
+        repositoryPath,
+        beforeRef,
+        afterRef,
+        { ...operation, maxBytes: MAX_PATCH_BYTES },
+      );
+      return {
+        turnId,
+        patch: comparison.patch,
+        truncated: comparison.truncated,
+        patchTruncated: comparison.patchTruncated,
+        files: comparison.files,
+      };
+    } catch (error) {
+      this.#recordCleanupFailure(error);
+      throw error;
+    } finally {
+      if (afterRef) {
+        await deleteCheckpoint(repositoryPath, afterRef, conversationId)
+          .catch(() => undefined);
+      }
+    }
   }
 
   async compare(

@@ -14,6 +14,7 @@ import {
 } from "./conversation-creation-service";
 import type { TurnController } from "./turns/turn-controller";
 import type { WorkspaceRunController } from "./workspace-run-controller";
+import type { TurnGitArtifactManager } from "../turn-git-artifacts";
 import {
   ConversationContextRequestCoordinator,
 } from "./conversation-context-request-coordinator";
@@ -26,7 +27,8 @@ interface AgentThreadRuntimeDependencies {
   store: RuntimeStore;
   providers: ProviderManager;
   backendProfileController: BackendProfileController;
-  workspaceRuns: Pick<WorkspaceRunController<never>, "trackSourceControl">;
+  workspaceRuns: Pick<WorkspaceRunController<never>, "trackSourceControl" | "listActions">;
+  turnGitArtifacts?: Pick<TurnGitArtifactManager, "turnDiff" | "liveTurnDiff" | "settledTurnDiffWithin">;
   dataDirectory: string;
   turns: TurnController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;

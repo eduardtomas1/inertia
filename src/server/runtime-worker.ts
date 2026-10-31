@@ -35,6 +35,7 @@ import {
 } from "./runtime-worker-startup-preflight.js";
 import { observeRuntimeStartup } from "./runtime-worker-startup-failure.js";
 import { answerRuntimeHtmlRenderRead } from "./runtime-html-render-reads.js";
+import { answerRuntimeAttachmentConversations } from "./runtime-attachment-conversation-reads.js";
 import {
   installRuntimeWorkerFaultHandlers,
   runtimeOwnedProcessFaultIncidentCode,
@@ -388,6 +389,10 @@ parentPort.on("message", (messageEvent) => {
   }
   if (command.type === "runtime.read-html-render") {
     post(answerRuntimeHtmlRenderRead(stopping ? null : runtime, command));
+    return;
+  }
+  if (command.type === "runtime.attachment-conversations") {
+    post(answerRuntimeAttachmentConversations(stopping ? null : runtime, command));
     return;
   }
   if (command.type === "runtime.database-recovery-cancel") {

@@ -17,7 +17,7 @@ export interface WatcherTurnPolicy extends AgentContextWatcherPolicy {
   isWatcherConversation(conversationId: string): boolean;
   privateConnectWatcher(conversation: Conversation): PrivateConnectWatcherAccess | null;
   hostToolsForTurn(source: WatcherTurnSource): ProviderHostToolBridge | null;
-  harnessInstructionsFor(input: { conversation: Conversation }): readonly HiddenProviderInstruction[] | null;
+  capabilityOfferFor<T extends { instructions: readonly HiddenProviderInstruction[] }>(conversation: Conversation, offer: T): T;
   watcherInstructionsFor(input: { conversation: Conversation; hostTools: boolean }): readonly HiddenProviderInstruction[];
   forgetTurn(turnId: string): void;
 }
@@ -64,8 +64,8 @@ export function createWatcherTurnPolicy(
       if (!isWatcherConversation(source.conversation.id)) return null;
       return contextBridge(source) ?? EMPTY_BRIDGE;
     },
-    harnessInstructionsFor({ conversation }) {
-      return isWatcherConversation(conversation.id) ? [] : null;
+    capabilityOfferFor(conversation, offer) {
+      return isWatcherConversation(conversation.id) ? { ...offer, instructions: [] } : offer;
     },
     watcherInstructionsFor({ conversation, hostTools }) {
       const link = store.watcherLinks.findByWatcher(conversation.id);

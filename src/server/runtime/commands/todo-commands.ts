@@ -4,9 +4,12 @@ import type { ClientCommand, ProviderInfo, RuntimeMutationEvent, ServerEvent } f
 import { todoPromptContent, type Todo } from "../../../shared/todos";
 import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import type { RuntimeStore } from "../../database";
+import { RecordNotFoundError } from "../../persistence/errors";
 import {
   assertTodoCanHandOff,
   TODO_MISSING_MESSAGE,
+  TODO_SOURCE_CHAT_MISSING_MESSAGE,
+  TODO_SOURCE_CHAT_PROJECT_MESSAGE,
   TodoRepositoryError,
 } from "../../persistence/todo-repository";
 import { RuntimeRequestError, USER_CORRECTABLE_REQUEST } from "../../runtime-errors";
@@ -25,6 +28,7 @@ import {
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
 
 type TodoStartCommand = Extract<ClientCommand, { type: "todo.start" }>;
+type TodoCreateCommand = Extract<ClientCommand, { type: "todo.create" }>;
 
 export interface TodoCommandDependencies {
   store: RuntimeStore;
@@ -81,6 +85,36 @@ async function assertRouteReady(
       provider?.statusMessage ?? "This agent is not ready. Open Settings to finish setup.",
     );
   }
+}
+
+/**
+ * A task written from a chat remembers that chat as its source; it is not
+ * handed to the chat. The chat must still exist and belong to the task's
+ * project.
+ */
+function assertSourceConversation(
+  store: RuntimeStore,
+  conversationId: string,
+  projectId: string | null | undefined,
+): void {
+  let conversation: ReturnType<RuntimeStore["conversation"]>;
+  try {
+    conversation = store.conversation(conversationId);
+  } catch (error) {
+    if (error instanceof RecordNotFoundError) throw userError(TODO_SOURCE_CHAT_MISSING_MESSAGE);
+    throw error;
+  }
+  if (conversation.projectId !== projectId) {
+    throw userError(TODO_SOURCE_CHAT_PROJECT_MESSAGE);
+  }
+}
+
+function createTodo(store: RuntimeStore, command: TodoCreateCommand): void {
+  const draft = command.payload;
+  if (draft.sourceConversationId) {
+    assertSourceConversation(store, draft.sourceConversationId, draft.projectId);
+  }
+  store.todos.create(draft);
 }
 
 export function createTodoCommandHandler(
@@ -175,7 +209,7 @@ export function createTodoCommandHandler(
   ], async (socket, command) => {
     switch (command.type) {
       case "todo.create":
-        dependencies.store.todos.create(command.payload);
+        createTodo(dependencies.store, command);
         return settleTodos(socket, command.requestId);
       case "todo.update":
         dependencies.store.todos.update(command.payload.id, command.payload.patch);

@@ -1,6 +1,12 @@
 import { z } from "zod";
 
 import {
+  GIT_COMMIT_SHA_PATTERN,
+  GIT_HISTORY_LIMITS,
+  GIT_LOG_CURSOR_PATTERN,
+} from "../git-history";
+
+import {
   diffReviewSelectionSchema,
   requestBase,
 } from "./common";
@@ -26,6 +32,36 @@ function requireRepositoryAuthority(
     message: "A nested repository path and its authority must be provided together.",
   });
 }
+
+/** Upper bound for one `git.stage` / `git.unstage` request. */
+export const GIT_STAGING_MAX_PATHS = 200;
+
+/**
+ * Repository-relative path in the Git form shown by status: forward slashes,
+ * no absolute, drive-qualified, magic-pathspec, traversal, or control forms.
+ * The runtime still enforces realpath containment against the repository.
+ */
+const gitStagingPathSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((path) =>
+    !path.startsWith("/")
+    && !path.startsWith(":")
+    && !path.includes("\\")
+    && !/^[A-Za-z]:/u.test(path)
+    && !/[\0\r\n]/u.test(path)
+    && !path.split("/").some((segment) => segment === ".." || segment === "."), {
+    message: "A selected file path is invalid.",
+  });
+
+const gitStagingPayload = z
+  .object({
+    ...projectWithOptionalConversationAndRepository,
+    paths: z.array(gitStagingPathSchema).min(1).max(GIT_STAGING_MAX_PATHS),
+  })
+  .strict()
+  .superRefine(requireRepositoryAuthority);
 
 export const gitCommandSchemas = [
   z
@@ -315,6 +351,20 @@ export const gitCommandSchemas = [
   z
     .object({
       ...requestBase,
+      type: z.literal("git.stage"),
+      payload: gitStagingPayload,
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.unstage"),
+      payload: gitStagingPayload,
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("git.push"),
       payload: z.object(projectWithOptionalConversationAndRepository)
         .strict()
@@ -349,6 +399,57 @@ export const gitCommandSchemas = [
         body: z.string().max(64 * 1024),
         draft: z.boolean(),
       }).strict().superRefine(requireRepositoryAuthority),
+    })
+    .strict(),
+] as const;
+
+// ---------------------------------------------------------------------------
+// Read-only Git history and blame (git.log, git.commit.show, git.blame).
+// Kept as a separate block so unrelated Git command additions above do not
+// conflict with it. Root scope omits repositoryPath; a nested repository
+// supplies repositoryPath with its runtime-issued authorityRef, exactly as the
+// other repository-scoped Git commands do.
+// ---------------------------------------------------------------------------
+const gitHistoryPath = z.string().min(1).max(4096)
+  .refine((value) => !value.includes("\0"), "Paths cannot contain NUL.");
+
+export const gitHistoryCommandSchemas = [
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.log"),
+      payload: z.object({
+        ...projectWithOptionalConversationAndRepository,
+        cursor: z.string().regex(GIT_LOG_CURSOR_PATTERN).optional(),
+        limit: z.number().int().min(1).max(GIT_HISTORY_LIMITS.logPageMax).optional(),
+        path: gitHistoryPath.optional(),
+      }).strict().superRefine(requireRepositoryAuthority),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.commit.show"),
+      payload: z.object({
+        ...projectWithOptionalConversationAndRepository,
+        sha: z.string().regex(GIT_COMMIT_SHA_PATTERN),
+      }).strict().superRefine(requireRepositoryAuthority),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.blame"),
+      payload: z.object({
+        ...projectWithOptionalConversationAndRepository,
+        path: gitHistoryPath,
+        startLine: z.number().int().min(1).max(10_000_000).optional(),
+        endLine: z.number().int().min(1).max(10_000_000).optional(),
+      }).strict().superRefine(requireRepositoryAuthority)
+        .refine(
+          ({ startLine, endLine }) => endLine === undefined || endLine >= (startLine ?? 1),
+          "The blame range is invalid.",
+        ),
     })
     .strict(),
 ] as const;

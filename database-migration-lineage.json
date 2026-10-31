@@ -787,6 +787,21 @@
       "version": 106,
       "name": "PersistDuoComparisonBriefs",
       "digest": "5f178914d0fa96fece0a0ad3c5dab4c1362971ed3c93d02d0a923457f0aec920"
+    },
+    {
+      "version": 107,
+      "name": "RecordManagedAgentContextReads",
+      "digest": "e3c6b4e8064816561e03f3e6b65cc0358d9a4b4e0cbd9832975aa2d419efb36d"
+    },
+    {
+      "version": 108,
+      "name": "PersistTodoSourceConversation",
+      "digest": "c32d482906f968d0de84f1bfd618e73d93fa453d6caf0a9eea374e1bef6a7d20"
+    },
+    {
+      "version": 109,
+      "name": "PersistCodexThreadToolPacks",
+      "digest": "bb9335accd705562fc2ced44ac215889b1f2746a8f6d7a596acba73778bfe5eb"
     }
   ]
 }

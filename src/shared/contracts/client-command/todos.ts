@@ -21,7 +21,11 @@ export const todoCommandSchemas = [
     ...requestBase,
     type: z.literal("todo.create"),
     payload: todoDraftFieldsSchema.extend({ id: z.string().uuid() })
-      .refine(dueTimeRequiresDate, TODO_TIME_WITHOUT_DATE_MESSAGE),
+      .refine(dueTimeRequiresDate, TODO_TIME_WITHOUT_DATE_MESSAGE)
+      .refine(
+        ({ sourceConversationId, projectId }) => !sourceConversationId || typeof projectId === "string",
+        "A task written from a chat must name the chat's project.",
+      ),
   }).strict(),
   z.object({
     ...requestBase,

@@ -6,7 +6,9 @@ import {
   MAX_SYSTEM_INSTRUCTION_BYTES,
   watcherHarnessProfile,
 } from "../../provider/watcher-harness-profile";
-import type { HiddenProviderInstruction } from "./request-context";
+import { chatInstruction, type HiddenProviderInstruction } from "./request-context";
+
+export { chatInstruction };
 
 export function systemInstructionText(
   instructions: readonly HiddenProviderInstruction[],
@@ -18,10 +20,6 @@ export function systemInstructionText(
 
 export function sessionInstructionDigest(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
-}
-
-export function chatInstruction(conversationId: string): HiddenProviderInstruction {
-  return { label: "inertia-chat", text: `This chat's id is ${conversationId}.` };
 }
 
 export function instructionPack(
@@ -43,6 +41,36 @@ export function sessionInstructionText(
     && Buffer.byteLength(text, "utf8") <= MAX_SYSTEM_INSTRUCTION_BYTES
     ? text
     : undefined;
+}
+
+/**
+ * Removes exact `[label]\ntext` sections, as `systemInstructionText` joins
+ * them, from a session instruction block. A section must match whole and sit
+ * between block boundaries; anything else, including text from the person's
+ * own configuration, is left as it was.
+ */
+export function withoutSessionInstructions(
+  text: string | undefined,
+  withheld: readonly HiddenProviderInstruction[],
+): string | undefined {
+  if (text === undefined || withheld.length === 0) return text;
+  let remaining = text;
+  for (const { label, text: body } of withheld) {
+    const section = `[${label}]\n${body}`;
+    if (remaining === section) {
+      remaining = "";
+    } else if (remaining.startsWith(`${section}\n\n`)) {
+      remaining = remaining.slice(section.length + 2);
+    } else {
+      const middle = remaining.indexOf(`\n\n${section}\n\n`);
+      if (middle >= 0) {
+        remaining = remaining.slice(0, middle) + remaining.slice(middle + section.length + 2);
+      } else if (remaining.endsWith(`\n\n${section}`)) {
+        remaining = remaining.slice(0, remaining.length - section.length - 2);
+      }
+    }
+  }
+  return remaining.length === 0 ? undefined : remaining;
 }
 
 export const MAX_TRACKED_PROMPT_DELIVERIES = 1_024;

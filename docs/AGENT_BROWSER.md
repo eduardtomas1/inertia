@@ -36,8 +36,13 @@ local runtime receives only a narrow command broker.
   visible page.
 - Browser tools are injected automatically into the existing exact-turn host
   bridge for Codex, Claude, Cursor, Kimi Code, and OpenCode. No skill
-  install is required. Claude, Cursor, Kimi Code, and OpenCode advertise the
-  bridge again on native resumed turns. Codex App Server cannot
+  install is required. When a project turns Browser access off, its turns are
+  offered neither the Browser tools nor the Browser instructions, and any
+  Browser call returns `browser_disabled`; see
+  [What each turn is offered](HARNESS_CAPABILITIES.md#what-each-turn-is-offered).
+  Cursor and Kimi Code receive the bridge, and its instructions, only when
+  an MCP server can be attached. Claude, Cursor, Kimi Code, and OpenCode
+  advertise the bridge again on native resumed turns. Codex App Server cannot
   inject dynamic tools into an already-live native thread: a Codex thread
   keeps the tools it started with until a new thread starts. When the Browser
   tools were introduced, a one-time database capability epoch cleared the

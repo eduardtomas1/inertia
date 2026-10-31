@@ -1,4 +1,6 @@
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
+import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "./migrations/todo-source-conversation";
+import { CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION } from "./migrations/codex-thread-tool-packs";
 
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
@@ -133,6 +135,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "prompt_cache_source",
   ]],
   [106, "messages", ["duo_comparison_json"]],
+  [TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, "todos", ["source_conversation_id"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -179,6 +182,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [98, ["conversation_title_locks"]],
   [99, ["watcher_links", "watcher_wakes"]],
   [103, ["turn_failure_kinds"]],
+  [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, ["codex_thread_tool_packs"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -197,6 +201,8 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [99, "watcher_links_project_idx"],
     [99, "watcher_wakes_link_idx"],
     [100, "todos_project_idx"],
+    [TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, "todos_source_conversation_idx"],
+    [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, "codex_thread_tool_packs_registered_idx"],
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "activities_turn_idx"],
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "messages_turn_idx"],
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "agent_reasonings_turn_idx"],

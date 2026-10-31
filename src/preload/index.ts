@@ -307,6 +307,8 @@ const bridge: MainWindowBridge = Object.freeze({
   importAttachments: (batchId: string, files: Parameters<DesktopBridge["importAttachments"]>[1]) => ipcRenderer.invoke(IPC.importAttachments, batchId, files) as ReturnType<DesktopBridge["importAttachments"]>,
   commitAttachmentImport: (batchId: string, adoptedAttachmentIds: string[]) => ipcRenderer.invoke(IPC.commitAttachmentImport, batchId, adoptedAttachmentIds) as ReturnType<DesktopBridge["commitAttachmentImport"]>,
   cancelAttachmentImport: (batchId: string) => ipcRenderer.invoke(IPC.cancelAttachmentImport, batchId) as ReturnType<DesktopBridge["cancelAttachmentImport"]>,
+  reattachAttachment: (request: Parameters<DesktopBridge["reattachAttachment"]>[0]) =>
+    ipcRenderer.invoke(IPC.reattachAttachment, request) as ReturnType<DesktopBridge["reattachAttachment"]>,
   prepareAttachmentHandoff: (request: Parameters<DesktopBridge["prepareAttachmentHandoff"]>[0]) =>
     ipcRenderer.invoke(IPC.prepareAttachmentHandoff, request) as Promise<void>,
   finishAttachmentHandoff: (requestId: string) =>
@@ -363,6 +365,7 @@ const bridge: MainWindowBridge = Object.freeze({
     return () => ipcRenderer.removeListener(IPC.previewState, handler);
   },
   syncThemePreference: (preference: Parameters<DesktopBridge["syncThemePreference"]>[0]) => ipcRenderer.invoke(IPC.syncThemePreference, preference) as Promise<void>,
+  syncAppShortcutKeys: (keys: Parameters<DesktopBridge["syncAppShortcutKeys"]>[0]) => ipcRenderer.invoke(IPC.syncAppShortcutKeys, [...keys]) as Promise<void>,
   setBackendCredential: (request: Parameters<DesktopBridge["setBackendCredential"]>[0]) =>
     ipcRenderer.invoke(IPC.setBackendCredential, request) as ReturnType<DesktopBridge["setBackendCredential"]>,
   clearBackendCredential: (request: Parameters<DesktopBridge["clearBackendCredential"]>[0]) =>

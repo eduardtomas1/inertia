@@ -30,6 +30,9 @@ import { persistTurnFailureKindsMigration } from "./persist-turn-failure-kinds";
 import { persistCompactOnReturnMigration } from "./persist-compact-on-return";
 import { duoComparisonBriefsMigration } from "./duo-comparison-briefs";
 import { turnScopedIndexesMigration } from "./turn-scoped-indexes";
+import { agentContextReadManagedAccessMigration } from "./agent-context-read-managed-access";
+import { todoSourceConversationMigration } from "./todo-source-conversation";
+import { codexThreadToolPacksMigration } from "./codex-thread-tool-packs";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -63,4 +66,7 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   persistCompactOnReturnMigration,
   turnScopedIndexesMigration,
   duoComparisonBriefsMigration,
+  agentContextReadManagedAccessMigration,
+  todoSourceConversationMigration,
+  codexThreadToolPacksMigration,
 ];

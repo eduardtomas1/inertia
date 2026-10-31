@@ -1,5 +1,5 @@
 import { registerLinuxDesktopIcon } from "./linux-desktop-integration.js";
-import { registerAttachmentSelectionIpc } from "./attachment-selection-ipc.js";
+import { registerChatAttachmentIpc } from "./chat-attachment-ipc.js";
 import { openAuthorizedProjectPath } from "./project-path-open.js";
 import { MascotMain } from "./mascot-main.js";
 import { MascotFeedMemory } from "./mascot-feed-memory.js";
@@ -43,27 +43,19 @@ import { registerSnapshotIpc } from "./snapshot-ipc.js";
 import type { SnapshotService } from "./snapshot-service.js";
 import { cleanupWithSnapshots } from "./snapshot-shutdown.js";
 import { attachmentImportRunner } from "./attachment-import-desktop-runner.js";
-import {
-  registerRendererAttachmentImportIpc,
-  RendererAttachmentImportCoordinator,
-} from "./attachment-import-ipc.js";
-import {
-  privacySafeAttachmentImportError,
-} from "./attachment-selection-import.js";
+import { RendererAttachmentImportCoordinator } from "./attachment-import-ipc.js";
 import {
   AttachmentRegistry,
   createAttachmentStorageSession,
   removeAttachmentStorageSession,
   type AttachmentStorageReservation,
 } from "./attachment-registry.js";
-import { registerAttachmentLifecycleIpc } from "./attachment-ipc.js";
 import { conversationAttachmentStoreRunner } from "./conversation-attachment-store-desktop-runner.js";
 import { documentPreparationRunner } from "./document-preparation-desktop-runner.js";
 import {
   closeConversationAttachmentAccess,
   conversationAttachmentStoreAuthority,
   type ConversationAttachmentAccess,
-  openPdfAttachment,
   openConversationAttachments,
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
@@ -97,6 +89,7 @@ import { setDiagnosticsReportSource } from "./diagnostic-export.js";
 import { registerCompletionSoundIpc } from "./completion-sound-main.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
+import { parsePreviewAppShortcutKeys, setPreviewAppShortcutKeys } from "./preview-keyboard.js";
 import { confirmPreviewPageUnload } from "./preview-unload-confirm.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
@@ -222,7 +215,6 @@ const registerRendererProtocol = createAppProtocolRegistrar({
   runtimeSupervisor: () => runtimeSupervisor,
   mascotSprite: (id, name) => mascotMain?.sprite(id, name) ?? null,
 });
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 function windowStatePath(): string { return join(app.getPath("userData"), "window-state.json"); }
 function windowAppearancePath(): string { return join(app.getPath("userData"), WINDOW_APPEARANCE_FILENAME); }
 function attachmentStorageRoot(): string {
@@ -555,48 +547,13 @@ function registerIpcHandlers(): void {
     onFailure: (diagnostic) => runtimeDiagnostics?.record("snapshot.failure", { ...diagnostic }),
   });
 
-  registerAttachmentSelectionIpc({
+  registerChatAttachmentIpc({
     owner: (event, count) => {
       if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
       return detachedChatMain.windowForTrustedChatIpc(event, count, 1);
-    }, registry: attachmentRegistry, imports: rendererAttachmentImports,
-  });
-
-  registerRendererAttachmentImportIpc({
-    ipcMain,
-    channels: {
-      begin: IPC.beginAttachmentImport,
-      importOne: IPC.importAttachments,
-      commit: IPC.commitAttachmentImport,
-      cancel: IPC.cancelAttachmentImport,
     },
-    assertTrusted: assertTrustedChatIpc,
-    coordinator: rendererAttachmentImports,
-    sanitizeError: privacySafeAttachmentImportError,
-  });
-
-  registerAttachmentLifecycleIpc({
-    channels: {
-      prepare: IPC.prepareAttachmentHandoff,
-      finish: IPC.finishAttachmentHandoff,
-      release: IPC.releaseAttachment,
-    },
-    assertTrusted: assertTrustedChatIpc,
-    registry: attachmentRegistry,
-    supervisor: () => runtimeSupervisor,
-  });
-
-  ipcMain.handle(IPC.openAttachmentExternally, async (event, ...args) => {
-    assertTrustedChatIpc(event, args.length, 1);
-    const [value] = args;
-    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
-      throw new Error("Invalid attachment.");
-    }
-    await openPdfAttachment(
-      attachmentRegistry(),
-      conversationAttachments,
-      value,
-    );
+    assertTrusted: assertTrustedChatIpc, registry: attachmentRegistry, imports: rendererAttachmentImports,
+    conversationAttachments: () => conversationAttachments, supervisor: () => runtimeSupervisor,
   });
 
   ipcMain.handle(IPC.openProjectPath, async (event, ...args) => {
@@ -713,6 +670,13 @@ function registerIpcHandlers(): void {
       // Appearance persistence is best effort; the renderer still applies the
       // active preference immediately and will retry on the next snapshot.
     }
+  });
+
+  ipcMain.handle(IPC.syncAppShortcutKeys, (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const keys = parsePreviewAppShortcutKeys(args[0]);
+    if (!keys) throw new Error("Invalid app shortcut keys");
+    setPreviewAppShortcutKeys(keys);
   });
 
   registerCredentialVaultIpc(ipcMain, () => credentialVault, assertTrustedIpc,

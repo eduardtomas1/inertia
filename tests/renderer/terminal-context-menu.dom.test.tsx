@@ -35,6 +35,8 @@ vi.mock("@xterm/xterm", () => ({
     hasSelection(): boolean { return this.selection.length > 0; }
     getSelection(): string { return this.selection; }
     loadAddon(): void {}
+    registerLinkProvider(): { dispose: () => void } { return { dispose: () => undefined }; }
+    onSelectionChange(): { dispose: () => void } { return { dispose: () => undefined }; }
     open(): void {}
     onData(): { dispose: () => void } { return { dispose: () => undefined }; }
     writeln(): void {}
@@ -105,11 +107,11 @@ describe("workspace terminal context menu", () => {
     expect(terminal.focus).toHaveBeenCalled();
     expect(bridge.showContextMenu).toHaveBeenCalledExactlyOnceWith({
       kind: "terminal", conversationId: "22222222-2222-4222-8222-222222222222",
-      hasSelection: true, clearable: true, anchor: { x: 30, y: 50 },
+      hasSelection: true, clearable: true, promptable: true, anchor: { x: 30, y: 50 },
     });
   });
 
-  it("omits the conversation from a project terminal's menu request", async () => {
+  it("omits the conversation and the prompt action from a project terminal's menu request", async () => {
     const { mount } = renderTerminal(false);
     await waitFor(() => expect(document.querySelector(".terminal-panel")).toHaveAttribute("data-terminal-state", "ready"));
     fireEvent.contextMenu(mount, { clientX: 4, clientY: 8 });

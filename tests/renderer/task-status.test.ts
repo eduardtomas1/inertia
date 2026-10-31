@@ -143,3 +143,20 @@ describe("task ordering and summary", () => {
     expect(tasksSummary([], 0)).toBe("Add anything you need to do");
   });
 });
+
+describe("a task written from a chat", () => {
+  it("stays an ordinary task whatever its source chat is doing", () => {
+    const fromChat = todo("11111111-1111-4111-8111-111111111111", "From the chat", { sourceConversationId: chat });
+    for (const status of ["completed", "working", "failed", "approval"] as const) {
+      const result = deriveTaskStatus({
+        todo: fromChat,
+        status,
+        shell: { archivedAt: null, latestTurn: { status: "completed" } as ConversationLatestTurnSummary },
+        now,
+        starting: false,
+      });
+      expect(result).toMatchObject({ kind: "todo", bucket: "to-do", word: null });
+      expect(taskCanHandOffAgain(result.kind)).toBe(false);
+    }
+  });
+});

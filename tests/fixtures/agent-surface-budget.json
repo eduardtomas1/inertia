@@ -111,10 +111,10 @@
       "opencode": 410
     },
     "inertia_request_context": {
-      "claude": 997,
-      "codex": 853,
-      "cursorKimi": 959,
-      "opencode": 959
+      "claude": 971,
+      "codex": 827,
+      "cursorKimi": 933,
+      "opencode": 933
     },
     "inertia_create_conversation": {
       "claude": 1440,
@@ -133,6 +133,12 @@
       "codex": 314,
       "cursorKimi": 418,
       "opencode": 418
+    },
+    "inertia_wait_for_conversation": {
+      "claude": 722,
+      "codex": 580,
+      "cursorKimi": 684,
+      "opencode": 684
     },
     "inertia_get_latest_result": {
       "claude": 520,
@@ -157,30 +163,67 @@
       "codex": 1403,
       "cursorKimi": 1508,
       "opencode": 1508
+    },
+    "inertia_git_status": {
+      "claude": 529,
+      "codex": 387,
+      "cursorKimi": 491,
+      "opencode": 491
+    },
+    "inertia_turn_diff": {
+      "claude": 814,
+      "codex": 672,
+      "cursorKimi": 776,
+      "opencode": 776
+    },
+    "inertia_read_plan": {
+      "claude": 434,
+      "codex": 292,
+      "cursorKimi": 396,
+      "opencode": 396
+    },
+    "inertia_read_goal": {
+      "claude": 463,
+      "codex": 321,
+      "cursorKimi": 425,
+      "opencode": 425
+    },
+    "inertia_list_tasks": {
+      "claude": 601,
+      "codex": 459,
+      "cursorKimi": 563,
+      "opencode": 563
+    },
+    "inertia_project_actions": {
+      "claude": 507,
+      "codex": 365,
+      "cursorKimi": 469,
+      "opencode": 469
     }
   },
   "instructions": {
     "inertia-frontend-workbench": 541,
-    "inertia-orchestration": 331,
+    "inertia-orchestration": 468,
+    "inertia-workspace": 482,
     "mcp-initialize:claude": 0,
     "mcp-initialize:http": 0
   },
   "totals": {
     "claude": {
-      "withBrowser": 19840,
-      "withoutBrowser": 7811
+      "withBrowser": 24503,
+      "withoutBrowser": 12474
     },
     "codex": {
-      "withBrowser": 16124,
-      "withoutBrowser": 6380
+      "withBrowser": 19793,
+      "withoutBrowser": 10049
     },
     "cursorKimi": {
-      "withBrowser": 18861,
-      "withoutBrowser": 7431
+      "withBrowser": 23258,
+      "withoutBrowser": 11828
     },
     "opencode": {
-      "withBrowser": 18852,
-      "withoutBrowser": 7431
+      "withBrowser": 23249,
+      "withoutBrowser": 11828
     }
   }
 }

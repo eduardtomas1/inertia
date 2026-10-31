@@ -12,6 +12,7 @@ import {
   CLOSE_ACTIVE_PANEL_SURFACE_EVENT,
   closeRightPanelSurface,
   moveRightPanelSurface,
+  OPEN_PANEL_SURFACE_CHOOSER_EVENT,
   openRightPanelSurface,
   type RightPanelState,
 } from "../../src/renderer/src/utils/rightPanelSurfaces";
@@ -452,6 +453,48 @@ describe("workspace panel tab row", () => {
       panel.dispatchEvent(request);
     });
     expect(request.defaultPrevented).toBe(false);
+  });
+
+  it("opens the add menu on a surface chooser request and takes a surface letter there", async () => {
+    render(<Host initial={state("changes", "changes")} />);
+    screen.getByRole("button", { name: "Outside" }).focus();
+    const panel = screen.getByRole("complementary", { name: "Workspace tools" });
+    const request = new Event(OPEN_PANEL_SURFACE_CHOOSER_EVENT, { cancelable: true });
+    act(() => {
+      panel.dispatchEvent(request);
+    });
+    expect(request.defaultPrevented).toBe(true);
+    const menu = await screen.findByRole("menu", { name: "Add panel surface" });
+    await waitFor(() => expect(menu.contains(document.activeElement)).toBe(true));
+    fireEvent.keyDown(document.activeElement!, { key: "t" });
+    expect(tabNames()).toEqual(["changes", "terminal"]);
+    expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("focuses the launcher on a surface chooser request when no surface is active", async () => {
+    render(<Host initial={{ isOpen: true, surfaces: [], activeSurfaceId: null }} />);
+    const outside = screen.getByRole("button", { name: "Outside" });
+    outside.focus();
+    const launcher = await screen.findByRole("group", { name: "Open a surface" });
+    expect(outside).toHaveFocus();
+    const request = new Event(OPEN_PANEL_SURFACE_CHOOSER_EVENT, { cancelable: true });
+    act(() => {
+      screen.getByRole("complementary", { name: "Workspace tools" }).dispatchEvent(request);
+    });
+    expect(request.defaultPrevented).toBe(true);
+    expect(launcher).toHaveFocus();
+    fireEvent.keyDown(launcher, { key: "d" });
+    expect(tabNames()).toEqual(["changes"]);
+  });
+
+  it("leaves a surface chooser request unanswered while the panel is hidden", () => {
+    render(<Host initial={{ ...state("changes", "changes"), isOpen: false }} />);
+    const request = new Event(OPEN_PANEL_SURFACE_CHOOSER_EVENT, { cancelable: true });
+    act(() => {
+      document.querySelector(".workspace-panel")!.dispatchEvent(request);
+    });
+    expect(request.defaultPrevented).toBe(false);
+    expect(screen.queryByRole("menu", { name: "Add panel surface" })).toBeNull();
   });
 
   it("marks surfaces that are already open in the add menu", async () => {

@@ -48,7 +48,7 @@ describe("RuntimeStore tasks", () => {
         .toBe(CURRENT_DATABASE_SCHEMA_VERSION);
       expect((database.prepare("PRAGMA table_info(todos)").all() as Array<{ name: string }>).map(({ name }) => name)).toEqual([
         "id", "title", "note", "priority", "due_date", "completed_at", "conversation_id", "created_at", "updated_at",
-        "due_time", "project_id", "linked_at",
+        "due_time", "project_id", "linked_at", "source_conversation_id",
       ]);
       expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'todos_conversation_idx'").get())
         .toEqual({ name: "todos_conversation_idx" });
@@ -91,7 +91,7 @@ describe("RuntimeStore tasks", () => {
       expect(repository.get(openId)).toEqual({
         id: openId, title: "Open before the upgrade", note: "Keep me", priority: "high", dueDate: "2026-10-22",
         dueTime: null, projectId: null, completedAt: null, conversationId: null, linkedAt: null,
-        createdAt: at, updatedAt: at,
+        sourceConversationId: null, createdAt: at, updatedAt: at,
       });
       expect(repository.get(doneId)).toMatchObject({ dueTime: null, projectId: null, linkedAt: null, completedAt: "2026-10-20T10:00:00.000Z" });
       expect(todosCountLimitTriggerIsValid(raw)).toBe(true);

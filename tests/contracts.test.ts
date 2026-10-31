@@ -757,14 +757,18 @@ describe("client command contract", () => {
         "toggle-sidebar": "g",
         "toggle-terminal": "h",
         tasks: "t",
+        "open-surface": "b",
       } },
     }).success).toBe(true);
     for (const keybindings of [
       { search: "k" },
       { search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j" },
-      { search: "k", "new-chat": "k", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "t" },
-      { search: "x", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "t" },
-      { search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "n" },
+      { search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "t" },
+      { search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j", "open-surface": "g" },
+      { search: "k", "new-chat": "k", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "t", "open-surface": "g" },
+      { search: "x", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "t", "open-surface": "g" },
+      { search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "n", "open-surface": "g" },
+      { search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "t", "open-surface": "b" },
     ]) {
       expect(clientCommandSchema.safeParse({
         type: "settings.update",
@@ -880,5 +884,79 @@ describe("isolated review result contract", () => {
     });
     expect(event.result).not.toHaveProperty("answer.executionPrompt");
     expect(event.result).not.toHaveProperty("answer.providerSessionId");
+  });
+});
+
+describe("read-only Git history contracts", () => {
+  const projectId = "11111111-1111-4111-8111-111111111111";
+  const authorityRef = "33333333-3333-4333-8333-333333333333";
+  const requestId = "44444444-4444-4444-8444-444444444444";
+  const sha = "a".repeat(40);
+
+  it("accepts root and authority-bound nested history requests", () => {
+    for (const command of [
+      { type: "git.log", requestId, payload: { projectId } },
+      { type: "git.log", requestId, payload: { projectId, repositoryPath: "vendor/lib", authorityRef, limit: 100, cursor: "djE6YWJj", path: "src/a.ts" } },
+      { type: "git.commit.show", requestId, payload: { projectId, sha: "abc1234" } },
+      { type: "git.commit.show", requestId, payload: { projectId, repositoryPath: ".", authorityRef, sha } },
+      { type: "git.blame", requestId, payload: { projectId, path: "src/a.ts", startLine: 1, endLine: 2_000 } },
+    ]) {
+      expect(clientCommandSchema.parse(command)).toEqual(command);
+    }
+  });
+
+  it("rejects unbounded pages, invalid identifiers and partial authority", () => {
+    for (const command of [
+      { type: "git.log", requestId, payload: { projectId, limit: 101 } },
+      { type: "git.log", requestId, payload: { projectId, limit: 0 } },
+      { type: "git.log", requestId, payload: { projectId, cursor: "../x" } },
+      { type: "git.log", requestId, payload: { projectId, repositoryPath: "vendor/lib" } },
+      { type: "git.log", requestId, payload: { projectId, path: "a\0b" } },
+      { type: "git.log", requestId, payload: { projectId, email: "x" } },
+      { type: "git.commit.show", requestId, payload: { projectId, sha: "HEAD" } },
+      { type: "git.commit.show", requestId, payload: { projectId, sha: "abc12" } },
+      { type: "git.commit.show", requestId, payload: { projectId, sha: "ABCDEF1" } },
+      { type: "git.commit.show", requestId, payload: { projectId, sha: "a".repeat(65) } },
+      { type: "git.blame", requestId, payload: { projectId } },
+      { type: "git.blame", requestId, payload: { projectId, path: "a", startLine: 0 } },
+      { type: "git.blame", requestId, payload: { projectId, path: "a", startLine: 5, endLine: 4 } },
+    ]) {
+      expect(clientCommandSchema.safeParse(command).success, JSON.stringify(command)).toBe(false);
+    }
+  });
+
+  it("validates history results at the renderer boundary without author emails", () => {
+    const commit = { sha, shortSha: "aaaaaaa", subject: "Subject", authorName: "Author", authorDate: "2026-01-02T03:04:05Z", parents: [], isMerge: false };
+    const results = [
+      { kind: "git.log", page: { head: sha, path: null, commits: [commit], nextCursor: null } },
+      {
+        kind: "git.commit.show",
+        commit: {
+          ...commit, body: "", bodyTruncated: false,
+          files: [{ path: "a.ts", previousPath: null, status: "added", additions: 1, deletions: 0 }],
+          filesTruncated: false, diff: "", diffTruncated: false,
+        },
+      },
+      {
+        kind: "git.blame",
+        blame: {
+          path: "a.ts", state: "ready", startLine: 1, endLine: 1, lineCount: 1, nextStartLine: null,
+          lines: [{ line: 1, sha, shortSha: "aaaaaaa", authorName: "Author", authorDate: "2026-01-02T03:04:05.000Z", summary: "S", uncommitted: false }],
+        },
+      },
+    ];
+    for (const result of results) {
+      expect(serverEventSchema.safeParse({ type: "request.result", requestId, result }).success).toBe(true);
+    }
+    expect(serverEventSchema.safeParse({
+      type: "request.result",
+      requestId,
+      result: { kind: "git.log", page: { head: sha, path: null, commits: [{ ...commit, authorEmail: "a@example.invalid" }], nextCursor: null } },
+    }).success).toBe(false);
+    expect(serverEventSchema.safeParse({
+      type: "request.result",
+      requestId,
+      result: { kind: "git.blame", blame: { ...results[2]!.blame, lines: Array.from({ length: 2_001 }, () => results[2]!.blame!.lines[0]) } },
+    }).success).toBe(false);
   });
 });

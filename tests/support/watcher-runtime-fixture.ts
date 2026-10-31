@@ -33,6 +33,7 @@ import {
   type ProviderSteerInput,
 } from "../../src/server/provider/contracts";
 import { AGENT_CONTEXT_TOOL_DEFINITION } from "../../src/server/runtime/agent-context-tool";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "../../src/server/runtime/harness-capabilities";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
@@ -233,10 +234,12 @@ export async function createWatcherFixture(options: WatcherFixtureOptions = {}) 
     },
     broadcastSnapshot: () => undefined,
     providerInfo: () => infos(),
-    harnessInstructionsForTurn: (input) => policy.harnessInstructionsFor(input)
-      ?? [{ label: "inertia-orchestration", text: "Capability pack." }],
+    capabilityOfferForTurn: ({ conversation }) => policy.capabilityOfferFor(conversation, {
+      instructions: [{ label: "inertia-orchestration", text: "Capability pack." }],
+      offer: FULL_HARNESS_CAPABILITY_OFFER,
+    }),
     watcherInstructionsForTurn: (input) => policy.watcherInstructionsFor(input),
-    hostToolsForTurn: (input) => policy.hostToolsForTurn(input) ?? {
+    hostToolsForTurn: ({ conversation, turn }) => policy.hostToolsForTurn({ conversation, turn }) ?? {
       definitions: [AGENT_CONTEXT_TOOL_DEFINITION, { ...AGENT_CONTEXT_TOOL_DEFINITION, name: "inertia_spawn_agent" }],
       invoke: async () => ({ success: true, text: "{}" }),
     },

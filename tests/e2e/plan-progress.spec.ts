@@ -146,7 +146,10 @@ test("the Plan tab keeps the plan and follows the provider's step progress", asy
   await capture(info, "plan-proposed-light-1440x1100");
 
   await implement.click();
-  await expect(page.locator(".message.is-user").last()).toContainText("Implement the plan above and validate the result.");
+  // Implement sends the plan itself, so the request carries its text.
+  const request = page.locator(".message.is-user").last();
+  await expect(request).toContainText("Implement this plan and validate the result.");
+  await expect(request).toContainText("Plan: Reflect provider progress");
   await expect.poll(turnModes).toEqual(["plan", "build"]);
   await selectWorkspaceTool(panel, "Plan");
   await expect(plan.getByText("2 of 3 complete", { exact: true })).toBeVisible({ timeout: 30_000 });

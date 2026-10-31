@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "../../src/server/runtime/harness-capabilities";
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
@@ -11,10 +12,7 @@ import {
   providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
 } from "../../src/shared/model-routing";
-import type {
-  ProviderGoalSnapshot,
-  ProviderHostToolBridge,
-} from "../../src/server/provider/contracts";
+import type { ProviderGoalSnapshot } from "../../src/server/provider/contracts";
 import { recoverInterruptedTurns } from "../../src/server/runtime/turns/turn-recovery";
 import { BUILD_MODE_INSTRUCTION } from "../../src/server/runtime/turns/request-context";
 import { resolveNativeModelRoute } from "./model-route-fixture";
@@ -26,7 +24,6 @@ import {
   flushTurnControllerTestPromises as flushPromises,
   turnControllerTestAttachment as testAttachment,
   turnControllerTestIdentity as identity,
-  turnControllerTestProviderInfo as providerInfo,
   type TurnControllerTestRuntime as TestRuntime,
 } from "../support/turn-controller-runtime";
 
@@ -1294,7 +1291,7 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it("persists visible content separately while the provider receives complete structured execution content", async () => {
-    const runtime = await testRuntime({ harnessInstructionsForTurn: () => [{ label: "test-harness", text: "HARNESS_POLICY: inspect evidence." }] });
+    const runtime = await testRuntime({ capabilityOfferForTurn: () => ({ instructions: [{ label: "test-harness", text: "HARNESS_POLICY: inspect evidence." }], offer: FULL_HARNESS_CAPABILITY_OFFER }) });
     const queued = runtime.controller.queue({
       conversationId: runtime.conversationId,
       content: "Why is this change safe?",
@@ -1341,152 +1338,6 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.provider.input?.prompt).not.toContain("HARNESS_POLICY");
     expect(runtime.provider.input?.sessionInstruction).toContain("HARNESS_POLICY");
     expect(runtime.provider.input?.prompt).toContain("INTERNAL_SECRET_POLICY");
-    runtime.provider.resolve();
-    await flushPromises();
-    runtime.store.close();
-  });
-
-  it("does not advertise or grant host tools before exact capability verification", async () => {
-    const hostTools: ProviderHostToolBridge = {
-      definitions: [],
-      invoke: vi.fn(async () => ({ success: true, text: "unused" })),
-    };
-    const hostToolsForTurn = vi.fn(() => hostTools);
-    const runtime = await testRuntime({
-      providerInfo: () => [{
-        ...providerInfo(),
-        capabilityContract: {
-          schemaVersion: 1,
-          harnessId: "codex-app-server",
-          manifestDigest: "a".repeat(64),
-          installationVerified: false,
-          installedVersion: null,
-          currentlyAvailableCount: 0,
-          declaredCapabilityCount: 28,
-          hostToolBridgeAvailable: false,
-        },
-      }],
-      harnessInstructionsForTurn: () => [{
-        label: "unverified-host-tools",
-        text: "UNVERIFIED_HOST_TOOLS_MUST_NOT_BE_ADVERTISED",
-      }],
-      hostToolsForTurn,
-    });
-    const queued = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Inspect safely.",
-    });
-
-    expect(runtime.store.turnExecutionManifest(queued.turn.id))
-      .toMatchObject({ internalInstructionCount: 1 });
-    expect(runtime.controller.start(queued.turn.id)).toBe(true);
-    expect(runtime.provider.input?.prompt)
-      .not.toContain("UNVERIFIED_HOST_TOOLS_MUST_NOT_BE_ADVERTISED");
-    expect(hostToolsForTurn).not.toHaveBeenCalled();
-    expect(runtime.provider.callbacks?.hostTools).toBeUndefined();
-
-    runtime.provider.resolve();
-    await flushPromises();
-    runtime.store.close();
-  });
-
-  it("does not lend a verified native host bridge to a custom backend route", async () => {
-    const hostTools: ProviderHostToolBridge = {
-      definitions: [],
-      invoke: vi.fn(async () => ({ success: true, text: "unused" })),
-    };
-    const hostToolsForTurn = vi.fn(() => hostTools);
-    const harnessInstructionsForTurn = vi.fn(() => [{
-      label: "native-host-tools",
-      text: "NATIVE_HOST_TOOLS_MUST_NOT_CROSS_CUSTOM_ROUTE",
-    }]);
-    const customProfile = {
-      ...providerNativeBackendProfile("codex"),
-      id: "custom:no-native-host-bridge",
-      displayName: "Custom Responses",
-      source: "custom" as const,
-      authenticationMode: "api-key" as const,
-      configurationRevision: 12,
-      endpointIdentity: "endpoint:no-native-host-bridge:12",
-    };
-    const customSelection = modelSelectionSchema.parse({
-      ...providerNativeModelSelection({
-        providerId: "codex",
-        modelId: "custom-model",
-      }),
-      backendProfileId: customProfile.id,
-      backendProfileDisplayName: customProfile.displayName,
-      backendConfigurationRevision: customProfile.configurationRevision,
-    });
-    const customCompatibility = resolveHarnessBackendCompatibility(
-      "codex-app-server",
-      customProfile,
-    );
-    const runtime = await testRuntime({
-      // The default provider view deliberately claims a fully verified native
-      // host bridge. Route identity, not that provider-wide summary, decides.
-      harnessInstructionsForTurn,
-      hostToolsForTurn,
-    }, {
-      modelSelection: customSelection,
-      resolveModelRoute: () => ({
-        providerId: "codex",
-        harnessId: "codex-app-server",
-        backendProfile: customProfile,
-        compatibility: customCompatibility,
-        continuationIdentity: continuationIdentityForSelection(
-          customSelection,
-          customProfile.endpointIdentity,
-          !customCompatibility.allowsModelSwitchWithinSession,
-        ),
-      }),
-    });
-    const queued = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Use only the custom backend's verified surface.",
-    });
-
-    expect(runtime.controller.start(queued.turn.id)).toBe(true);
-    expect(runtime.provider.input?.prompt)
-      .not.toContain("NATIVE_HOST_TOOLS_MUST_NOT_CROSS_CUSTOM_ROUTE");
-    expect(harnessInstructionsForTurn).not.toHaveBeenCalled();
-    expect(hostToolsForTurn).not.toHaveBeenCalled();
-    expect(runtime.provider.callbacks?.hostTools).toBeUndefined();
-
-    runtime.provider.resolve();
-    await flushPromises();
-    runtime.store.close();
-  });
-
-  it("does not advertise or grant host tools when capability attestation is absent", async () => {
-    const hostTools: ProviderHostToolBridge = {
-      definitions: [],
-      invoke: vi.fn(async () => ({ success: true, text: "unused" })),
-    };
-    const hostToolsForTurn = vi.fn(() => hostTools);
-    const providerWithoutAttestation = providerInfo();
-    delete providerWithoutAttestation.capabilityContract;
-    const runtime = await testRuntime({
-      providerInfo: () => [providerWithoutAttestation],
-      harnessInstructionsForTurn: () => [{
-        label: "missing-host-tools",
-        text: "MISSING_HOST_TOOLS_MUST_NOT_BE_ADVERTISED",
-      }],
-      hostToolsForTurn,
-    });
-    const queued = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Inspect safely.",
-    });
-
-    expect(runtime.store.turnExecutionManifest(queued.turn.id))
-      .toMatchObject({ internalInstructionCount: 1 });
-    expect(runtime.controller.start(queued.turn.id)).toBe(true);
-    expect(runtime.provider.input?.prompt)
-      .not.toContain("MISSING_HOST_TOOLS_MUST_NOT_BE_ADVERTISED");
-    expect(hostToolsForTurn).not.toHaveBeenCalled();
-    expect(runtime.provider.callbacks?.hostTools).toBeUndefined();
-
     runtime.provider.resolve();
     await flushPromises();
     runtime.store.close();

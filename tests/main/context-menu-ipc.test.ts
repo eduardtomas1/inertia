@@ -71,12 +71,12 @@ describe("surface context menu IPC", () => {
     [
       "an assistant message with a selection",
       { kind: "message", conversationId, role: "assistant", hasSelection: true, anchor },
-      ["role:copy:Copy", "-", "Copy message", "Copy as Markdown"],
+      ["role:copy:Copy", "-", "Copy message", "Copy as Markdown", "-", "Create task from message"],
     ],
     [
       "a user message",
       { kind: "message", conversationId, role: "user", hasSelection: false, anchor },
-      ["Copy message"],
+      ["Copy message", "-", "Create task from message"],
     ],
     ["a code block", { kind: "code", conversationId, hasSelection: false, anchor }, ["Copy code"]],
     [
@@ -103,6 +103,16 @@ describe("surface context menu IPC", () => {
       "a sign-in terminal with a selection",
       { kind: "terminal", hasSelection: true, clearable: false, anchor },
       ["Copy", "role:paste:Paste", "Select all"],
+    ],
+    [
+      "a chat terminal without a selection",
+      { kind: "terminal", hasSelection: false, clearable: true, promptable: true, anchor },
+      ["Copy (disabled)", "role:paste:Paste", "Select all", "-", "Add selection to prompt (disabled)", "-", "Clear"],
+    ],
+    [
+      "a chat terminal with a selection",
+      { kind: "terminal", hasSelection: true, clearable: true, promptable: true, anchor },
+      ["Copy", "role:paste:Paste", "Select all", "-", "Add selection to prompt", "-", "Clear"],
     ],
   ])("builds the fixed items for %s", async (_name, request, expected) => {
     const { show } = fixture();
@@ -215,8 +225,35 @@ describe("surface context menu IPC", () => {
     expect(electron.build).not.toHaveBeenCalled();
     const result = show({ kind: "message", conversationId, role: "user", hasSelection: false, anchor });
     await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
+    // Tasks are written only from the main window.
+    expect(shape()).toEqual(["Copy message"]);
     choose("Copy message");
     await expect(result).resolves.toBe("copy-message");
+  });
+
+  it("offers Stage and Unstage on a detached chat's own changed file", async () => {
+    const context = {
+      role: "detached-chat", conversationId, alwaysOnTop: false, draft: "",
+    } as DesktopWindowContext;
+    const { show } = fixture({ context });
+    const result = show({
+      kind: "diff-file", projectId, conversationId, relativePath: "a.ts", stageable: true, unstageable: true, anchor,
+    });
+    await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
+    expect(shape().slice(-3)).toEqual(["-", "Stage", "Unstage"]);
+    choose("Unstage");
+    await expect(result).resolves.toBe("git-unstage");
+    await expect(show({
+      kind: "diff-file", projectId, conversationId: otherConversationId, relativePath: "a.ts", stageable: true, anchor,
+    })).rejects.toThrow("owned conversation");
+  });
+
+  it("returns Create task from message only for a main-window message", async () => {
+    const { show } = fixture();
+    const result = show({ kind: "message", conversationId, role: "assistant", hasSelection: false, anchor });
+    await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
+    choose("Create task from message");
+    await expect(result).resolves.toBe("create-task");
   });
 
   it("lets a detached chat show the terminal menu for its own conversation's terminal", async () => {

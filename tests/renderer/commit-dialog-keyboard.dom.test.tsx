@@ -25,15 +25,17 @@ function renderDialog(onCommit = vi.fn(async () => undefined), onClose = vi.fn()
 }
 
 describe("commit dialog keyboard", () => {
-  it("keeps the Enter that confirms an input method composition from committing", async () => {
+  it("keeps plain Enter for new lines and an input method composition from committing", async () => {
     const { onCommit } = renderDialog();
     const message = screen.getByRole("textbox", { name: "Commit message" });
     fireEvent.change(message, { target: { value: "変更" } });
 
-    fireEvent.keyDown(message, { key: "Enter", isComposing: true });
+    expect(fireEvent.keyDown(message, { key: "Enter" })).toBe(true);
+    fireEvent.keyDown(message, { key: "Enter", ctrlKey: true, isComposing: true });
+    fireEvent.keyDown(message, { key: "Enter", metaKey: true, isComposing: true });
     expect(onCommit).not.toHaveBeenCalled();
 
-    fireEvent.keyDown(message, { key: "Enter" });
+    expect(fireEvent.keyDown(message, { key: "Enter", ctrlKey: true })).toBe(false);
     await waitFor(() => expect(onCommit).toHaveBeenCalledWith("変更", false, ["src/app.ts"]));
   });
 

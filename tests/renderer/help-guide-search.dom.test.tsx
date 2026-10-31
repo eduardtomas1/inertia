@@ -13,6 +13,7 @@ const LABELS: Record<AppShortcutAction, string> = {
   "toggle-sidebar": "⌘B",
   "toggle-terminal": "⌘J",
   tasks: "⌘T",
+  "open-surface": "⌘G",
 };
 
 function hostProps() {

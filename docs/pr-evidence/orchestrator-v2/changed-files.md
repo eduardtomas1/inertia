@@ -1,245 +1,137 @@
-# Phase 3 changed-files inventory
+# Phase 3 polish changed-files inventory
 
-Snapshot: 2026-10-30T12:34:08+01:00.
+Snapshot: 2026-10-31T19:25:28+01:00.
 
-Repository: `/home/etomas/Documentos/TMP1/inertia-orchestrator-v2`; branch
-`orchestrator-v2`; baseline HEAD `e6189b9b7be91b0aad4f917c81f38c425985e8e5`.
+Repository: `D:\MORELIFE\inertia-wt-orchestrator-v2-p3` (worktree); branch
+`orchestrator-v2-p3`; baseline HEAD `52315e95067439138dd516bcfe8283d4f8343551`
+(PR #686 with Phase 0 stabilization).
 
 Includes the union of `git diff --name-only HEAD` (index and working-tree
 changes) and `git ls-files --others --exclude-standard` (individual untracked
-files), including this inventory. Ignored artifacts and historical changes
-already committed at HEAD are excluded. The inventory was rechecked at the user-requested stop; the file set is unchanged.
+files), including this inventory. Ignored artifacts such as `out/` and
+`test-results/`, and changes already committed at HEAD, are excluded.
 
-**166 files: 85 tracked changes and 81 untracked additions.**
+**70 files: 57 tracked changes and 13 untracked additions.**
 
-Results, review disposition and remaining verification are recorded in
-[phase3-verification.md](../../orchestrator-v2/phase3-verification.md).
+Results and remaining limits are recorded in
+[implementation-progress.md](../../orchestrator-v2/implementation-progress.md#phase-3-polish--2026-10-31)
+and [phase3-verification.md](../../orchestrator-v2/phase3-verification.md#phase-3-polish-evidence).
 
 ## Documentation and evidence
 
-Checkpoint, scope/progress, license provenance, measured bundle accounting and nine desktop captures.
+Polish checkpoint and verification, T3 recomparison at `15fe2832`, bundle accounting, this inventory and fourteen desktop captures from the verified Electron run.
 
 | Status | Repository-relative path |
 | --- | --- |
-| Untracked addition | `docs/orchestrator-v2/cursor-sdk-license-evidence.md` |
-| Untracked addition | `docs/orchestrator-v2/cursor-sdk-ui-progress.md` |
+| Tracked change | `docs/orchestrator-v2/README.md` |
 | Tracked change | `docs/orchestrator-v2/implementation-plan.md` |
 | Tracked change | `docs/orchestrator-v2/implementation-progress.md` |
-| Untracked addition | `docs/orchestrator-v2/phase3-verification.md` |
-| Tracked change | `docs/orchestrator-v2/provider-implementation-progress.md` |
-| Tracked change | `docs/orchestrator-v2/provider-integration-seams.md` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/changed-files.md` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/renderer-bundle.json` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/cursor-sdk-account.png` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/merge-back-confirmation-dark.png` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/merge-back-confirmation-light.png` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/merge-back-source-draft-dark.png` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/merge-back-source-draft-light.png` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-confirmation-dark.png` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-confirmation-light.png` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-retained-turn-dark.png` |
-| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-retained-turn-light.png` |
+| Tracked change | `docs/orchestrator-v2/phase3-verification.md` |
+| Tracked change | `docs/orchestrator-v2/source-manifest.json` |
+| Untracked addition | `docs/orchestrator-v2/t3code-delta-2026-10-31.md` |
+| Tracked change | `docs/orchestrator-v2/t3code-evolution.md` |
+| Tracked change | `docs/orchestrator-v2/t3code-orchestration.md` |
+| Tracked change | `docs/pr-evidence/orchestrator-v2/changed-files.md` |
+| Tracked change | `docs/pr-evidence/orchestrator-v2/renderer-bundle.json` |
+| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/fork-merge-up-to-here-dark.png` |
+| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/fork-merge-up-to-here-light.png` |
+| Tracked change | `docs/pr-evidence/orchestrator-v2/screenshots/merge-back-confirmation-dark.png` |
+| Tracked change | `docs/pr-evidence/orchestrator-v2/screenshots/merge-back-confirmation-light.png` |
+| Tracked change | `docs/pr-evidence/orchestrator-v2/screenshots/merge-back-source-draft-dark.png` |
+| Tracked change | `docs/pr-evidence/orchestrator-v2/screenshots/merge-back-source-draft-light.png` |
+| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-chat-start-confirmation-dark.png` |
+| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-chat-start-confirmation-light.png` |
+| Tracked change | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-confirmation-dark.png` |
+| Tracked change | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-confirmation-light.png` |
+| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-files-confirmation-dark.png` |
+| Untracked addition | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-files-confirmation-light.png` |
+| Tracked change | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-retained-turn-dark.png` |
+| Tracked change | `docs/pr-evidence/orchestrator-v2/screenshots/rollback-retained-turn-light.png` |
 
-## Build, packaging, migration lineage and verification configuration
+## Build, migration lineage and generated resources
 
-SDK worker entry/unpacking, append-only migration lineage, explicit measured bundle allocations and portable test registration.
+Appended lineage entry for migration 110 and the two raised renderer budgets. `windows-runtime-job-integrity.json` was rewritten by the Windows `prebuild:bundle` step (the committed value is `null`); it is a local build output, not part of the package.
 
 | Status | Repository-relative path |
 | --- | --- |
 | Tracked change | `database-migration-lineage.json` |
-| Tracked change | `electron.vite.config.ts` |
-| Tracked change | `package.json` |
+| Tracked change | `resources/generated/windows-runtime-job-integrity.json` |
 | Tracked change | `scripts/check-renderer-bundle.mjs` |
-| Tracked change | `scripts/ci/portable-test-manifest.mjs` |
 
-## Node-only SDK boundaries
+## Renderer history controls and timeline
 
-Private worker channel, login, models and protocol contracts.
-
-| Status | Repository-relative path |
-| --- | --- |
-| Untracked addition | `src/node/cursor-sdk-channel.ts` |
-| Untracked addition | `src/node/cursor-sdk-login.ts` |
-| Untracked addition | `src/node/cursor-sdk-models.ts` |
-| Untracked addition | `src/node/cursor-sdk-protocol.ts` |
-
-## Renderer integration and history controls
-
-SDK account/catalogue routes, lazy chooser and history surfaces, rollback markers and runtime-command policy.
+Rollback with opt-in file restore, rollback to the chat start, merge-up-to-here, attributed recovery checkpoint actions and omitted-command lines in context previews.
 
 | Status | Repository-relative path |
 | --- | --- |
-| Tracked change | `src/renderer/src/App.tsx` |
 | Tracked change | `src/renderer/src/components/ChatWorkspace.tsx` |
-| Tracked change | `src/renderer/src/components/ModelBackendsSettings.tsx` |
-| Tracked change | `src/renderer/src/components/ModelChooser.tsx` |
-| Untracked addition | `src/renderer/src/components/ModelChooserLoaded.tsx` |
-| Untracked addition | `src/renderer/src/components/cursor-sdk/CursorSdkAccount.css` |
-| Untracked addition | `src/renderer/src/components/cursor-sdk/CursorSdkAccount.tsx` |
-| Untracked addition | `src/renderer/src/components/cursor-sdk/CursorSdkContext.ts` |
-| Untracked addition | `src/renderer/src/components/cursor-sdk/CursorSdkEntry.tsx` |
-| Untracked addition | `src/renderer/src/components/cursor-sdk/CursorSdkModels.tsx` |
-| Untracked addition | `src/renderer/src/components/cursor-sdk/cursorSdkModelRoute.ts` |
-| Untracked addition | `src/renderer/src/components/cursor-sdk/useCursorSdkAccount.ts` |
-| Untracked addition | `src/renderer/src/components/orchestration/fork-history-view.tsx` |
-| Untracked addition | `src/renderer/src/components/orchestration/fork-surface-model.ts` |
-| Tracked change | `src/renderer/src/components/orchestration/fork-surface.css` |
+| Tracked change | `src/renderer/src/components/ConversationActionsMenu.tsx` |
+| Tracked change | `src/renderer/src/components/composer/ComposerConversationContextCards.tsx` |
+| Tracked change | `src/renderer/src/components/orchestration/fork-history-view.tsx` |
+| Tracked change | `src/renderer/src/components/orchestration/fork-surface-model.ts` |
 | Tracked change | `src/renderer/src/components/orchestration/fork-surface.tsx` |
-| Untracked addition | `src/renderer/src/components/orchestration/history-actions.tsx` |
-| Tracked change | `src/renderer/src/components/response-timeline/turn.tsx` |
-| Tracked change | `src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts` |
-| Tracked change | `src/renderer/src/utils/conversationHistory.ts` |
-| Tracked change | `src/renderer/src/utils/modelChooserRoutes.ts` |
-| Tracked change | `src/renderer/src/utils/runtimeCommandPolicy.ts` |
+| Untracked addition | `src/renderer/src/components/orchestration/history-actions.css` |
+| Tracked change | `src/renderer/src/components/orchestration/history-actions.tsx` |
+| Untracked addition | `src/renderer/src/components/orchestration/history-session.ts` |
+| Tracked change | `src/renderer/src/components/response-timeline/layers.tsx` |
+| Tracked change | `src/renderer/src/utils/response-timeline/model.ts` |
+| Tracked change | `src/renderer/src/utils/response-timeline/virtualization.ts` |
 
 ## Durable orchestration and persistence
 
-History rollback, merge-back receipts/projections, backing/native-control state, thread registration and SDK provider migration.
+Cross-fork merge-back exclusivity, explicit source point, work summary in the packet supplement, migration 110, rollback file-restore outcomes and per-thread native-control command identities.
 
 | Status | Repository-relative path |
 | --- | --- |
-| Tracked change | `src/server/orchestration-v2/backing-projector.ts` |
-| Tracked change | `src/server/orchestration-v2/backing-repository.ts` |
-| Tracked change | `src/server/orchestration-v2/fork-history.ts` |
-| Tracked change | `src/server/orchestration-v2/fork-repository.ts` |
-| Untracked addition | `src/server/orchestration-v2/history-projector.ts` |
-| Untracked addition | `src/server/orchestration-v2/history-rollback-repository.ts` |
-| Untracked addition | `src/server/orchestration-v2/merge-back-projector.ts` |
-| Untracked addition | `src/server/orchestration-v2/merge-back-repository.ts` |
-| Tracked change | `src/server/orchestration-v2/native-control-projector.ts` |
+| Tracked change | `src/server/orchestration-v2/history-projector.ts` |
+| Tracked change | `src/server/orchestration-v2/history-rollback-repository.ts` |
+| Tracked change | `src/server/orchestration-v2/merge-back-repository.ts` |
 | Tracked change | `src/server/orchestration-v2/native-control-repository.ts` |
-| Tracked change | `src/server/orchestration-v2/portable-history-source.ts` |
 | Tracked change | `src/server/orchestration-v2/projector.ts` |
-| Untracked addition | `src/server/orchestration-v2/thread-registration.ts` |
-| Tracked change | `src/server/orchestration-v2/turn-repository.ts` |
+| Tracked change | `src/server/persistence/conversation-context-format.ts` |
+| Tracked change | `src/server/persistence/conversation-context-packet-codec.ts` |
+| Tracked change | `src/server/persistence/conversation-context-packet-repository.ts` |
 | Tracked change | `src/server/persistence/migrations/catalog.ts` |
-| Untracked addition | `src/server/persistence/migrations/cursor-sdk-provider.ts` |
+| Untracked addition | `src/server/persistence/migrations/conversation-context-supplement-bound.ts` |
 | Tracked change | `src/server/persistence/migrations/recent-migrations.ts` |
-| Tracked change | `src/server/persistence/snapshot-repository.ts` |
-| Tracked change | `src/server/persistence/types.ts` |
 
-## Provider runtime and SDK storage
+## Runtime commands and file restore
 
-SDK supervision, loader, host tools, admission/cleanup, journal store and harness/capability/continuation integration.
+Combined rollback and file restore orchestration, restore-safety refusals, attributed recovery checkpoints and the merge-back source point command.
 
 | Status | Repository-relative path |
 | --- | --- |
-| Tracked change | `src/server/provider/agent-harness-registry.ts` |
-| Tracked change | `src/server/provider/agent-harness.ts` |
-| Tracked change | `src/server/provider/capability-manifest.ts` |
-| Tracked change | `src/server/provider/contracts.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-controller.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-harness.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-host-tools.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-installation.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-loader.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-process.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-service.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-session.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-store-records.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-store.ts` |
-| Untracked addition | `src/server/provider/cursor-sdk-worker.ts` |
-| Tracked change | `src/server/provider/fresh-session-fallback.ts` |
-| Tracked change | `src/server/provider/provider-capability-authority.ts` |
-| Untracked addition | `src/server/provider/provider-run-installation.ts` |
-| Tracked change | `src/server/provider/run-coordinator.ts` |
-| Tracked change | `src/server/provider/watcher-harness-profile.ts` |
-| Tracked change | `src/server/providers.ts` |
-
-## Runtime command and turn wiring
-
-Command handler extraction, account/login operations, command lanes, rollback service and continuation transport.
-
-| Status | Repository-relative path |
-| --- | --- |
-| Tracked change | `src/server/index.ts` |
+| Tracked change | `src/server/runtime/checkpoint-restoration.ts` |
 | Tracked change | `src/server/runtime/commands/conversation-commands.ts` |
-| Untracked addition | `src/server/runtime/commands/cursor-sdk-account-probes.ts` |
-| Untracked addition | `src/server/runtime/commands/cursor-sdk-login-commands.ts` |
-| Tracked change | `src/server/runtime/commands/project-workspace-commands.ts` |
-| Untracked addition | `src/server/runtime/commands/runtime-command-handlers.ts` |
-| Tracked change | `src/server/runtime/conversation-context-service.ts` |
-| Tracked change | `src/server/runtime/fork-session-service.ts` |
-| Untracked addition | `src/server/runtime/history-rollback-service.ts` |
-| Tracked change | `src/server/runtime/turns/turn-fresh-session-fallback.ts` |
-| Tracked change | `src/server/runtime/turns/turn-provider-event-projector.ts` |
-| Tracked change | `src/server/runtime/turns/turn-request-preparation.ts` |
+| Tracked change | `src/server/runtime/history-rollback-service.ts` |
+| Untracked addition | `src/server/runtime/rollback-file-restore.ts` |
 
 ## Shared contracts
 
-Validated SDK authentication/models, history/merge-back and provider/backing/native-control contracts.
+Merge-back source point and summary, rollback file outcomes and the context supplement's omitted counts.
 
 | Status | Repository-relative path |
 | --- | --- |
-| Untracked addition | `src/shared/contracts/client-command/cursor-sdk.ts` |
 | Tracked change | `src/shared/contracts/client-command/forks.ts` |
-| Tracked change | `src/shared/contracts/client-command/index.ts` |
-| Tracked change | `src/shared/contracts/conversation-detail.ts` |
-| Untracked addition | `src/shared/contracts/cursor-sdk-auth-schema.ts` |
-| Tracked change | `src/shared/contracts/events.ts` |
-| Tracked change | `src/shared/contracts/server-event-schema.ts` |
-| Untracked addition | `src/shared/cursor-sdk-auth.ts` |
-| Untracked addition | `src/shared/cursor-sdk-models.ts` |
-| Tracked change | `src/shared/model-routing.ts` |
-| Tracked change | `src/shared/orchestration-backings.ts` |
-| Untracked addition | `src/shared/orchestration-history.ts` |
-| Untracked addition | `src/shared/orchestration-merge-back.ts` |
-| Tracked change | `src/shared/orchestration-native-control.ts` |
-| Tracked change | `src/shared/orchestration-v2.ts` |
-| Tracked change | `src/shared/provider.ts` |
+| Tracked change | `src/shared/conversation-context.ts` |
+| Tracked change | `src/shared/orchestration-history.ts` |
+| Tracked change | `src/shared/orchestration-merge-back.ts` |
 
-## Tests, fixtures and support
+## Tests
 
-Focused SDK/history/renderer coverage; continuity, migration, Duo, query-plan and tool-budget corrections; Electron resource policy.
+Server, migration, renderer DOM and Electron coverage for the package, plus the Windows store-closing fix in `orchestration-v2.test.ts`.
 
 | Status | Repository-relative path |
 | --- | --- |
-| Untracked addition | `tests/e2e/history-rollback-merge-back.spec.ts` |
-| Tracked change | `tests/e2e/provider-settings-visual.spec.ts` |
-| Tracked change | `tests/fixtures/agent-surface-budget.json` |
-| Untracked addition | `tests/main/cursor-sdk-login.test.ts` |
-| Tracked change | `tests/main/e2e-resource-policy.test.ts` |
-| Tracked change | `tests/renderer/accessibility-focus-policy.dom.test.tsx` |
-| Tracked change | `tests/renderer/composer-ownership.dom.test.tsx` |
-| Untracked addition | `tests/renderer/cursor-sdk-account.dom.test.tsx` |
-| Untracked addition | `tests/renderer/cursor-sdk-model-route.test.ts` |
-| Untracked addition | `tests/renderer/cursor-sdk-models.dom.test.tsx` |
-| Untracked addition | `tests/renderer/history-actions.dom.test.tsx` |
-| Untracked addition | `tests/renderer/model-chooser-lazy.dom.test.tsx` |
-| Tracked change | `tests/renderer/model-chooser.dom.test.tsx` |
-| Tracked change | `tests/renderer/model-chooser.test.ts` |
-| Tracked change | `tests/renderer/multi-spawn.dom.test.tsx` |
-| Tracked change | `tests/renderer/native-preview-suspension.dom.test.tsx` |
-| Tracked change | `tests/server/__snapshots__/runtime-query-plans.test.ts.snap` |
-| Tracked change | `tests/server/conversation-context-v3.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-channel.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-controller.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-harness.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-host-tools.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-login-commands.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-migration.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-models.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-packaging.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-process.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-service.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-session.test.ts` |
-| Untracked addition | `tests/server/cursor-sdk-store.test.ts` |
-| Tracked change | `tests/server/database-migration-lineage.test.ts` |
+| Tracked change | `tests/e2e/history-rollback-merge-back.spec.ts` |
+| Tracked change | `tests/renderer/checkpoint-notice.dom.test.tsx` |
+| Tracked change | `tests/renderer/composer-chat-references.dom.test.tsx` |
+| Tracked change | `tests/renderer/fork-surface.dom.test.tsx` |
+| Tracked change | `tests/renderer/history-actions.dom.test.tsx` |
+| Tracked change | `tests/renderer/response-timeline.test.ts` |
+| Untracked addition | `tests/server/conversation-context-supplement-migration.test.ts` |
 | Tracked change | `tests/server/database-migrations.test.ts` |
-| Tracked change | `tests/server/duo-deletion-commands.test.ts` |
-| Tracked change | `tests/server/duo-inactive-recovery.test.ts` |
-| Untracked addition | `tests/server/orchestration-history-backing-limit.test.ts` |
-| Untracked addition | `tests/server/orchestration-history-pages.test.ts` |
-| Untracked addition | `tests/server/orchestration-history-rollback.test.ts` |
-| Untracked addition | `tests/server/orchestration-merge-back.test.ts` |
+| Tracked change | `tests/server/orchestration-merge-back.test.ts` |
 | Tracked change | `tests/server/orchestration-native-forks.test.ts` |
-| Tracked change | `tests/server/provider-capability-manifest.test.ts` |
-| Tracked change | `tests/server/provider-conformance.test.ts` |
-| Tracked change | `tests/server/provider-session-fallback.test.ts` |
-| Tracked change | `tests/server/provider-terminal-resume-command.test.ts` |
-| Tracked change | `tests/server/session-continuity.test.ts` |
-| Tracked change | `tests/server/turn-provider-event-projector.test.ts` |
-| Untracked addition | `tests/shared/cursor-sdk-auth-contracts.test.ts` |
-| Tracked change | `tests/source-usage.test.ts` |
-| Tracked change | `tests/support/e2e-resource-policy.ts` |
-| Tracked change | `tests/support/turn-controller-runtime.ts` |
+| Untracked addition | `tests/server/orchestration-rollback-restore.test.ts` |
+| Tracked change | `tests/server/orchestration-v2.test.ts` |

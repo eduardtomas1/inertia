@@ -4,7 +4,7 @@ import { GitFork } from "lucide-react";
 import type { ForkCommandRunner, ForkSurface } from "./fork-surface-model";
 import "./fork-surface.css";
 
-const HistoryRollbackAction = lazy(async () => ({ default: (await import("./history-actions")).HistoryRollbackAction }));
+const HistoryTurnActions = lazy(async () => ({ default: (await import("./history-actions")).HistoryTurnActions }));
 const ForkHistoryView = lazy(async () => ({ default: (await import("./fork-history-view")).ForkHistoryView }));
 
 export type { ForkCommandRunner } from "./fork-surface-model";
@@ -19,12 +19,13 @@ export function useTurnRolledBack(turnId: string): boolean {
   return useContext(Context)?.rolledBack.has(turnId) ?? false;
 }
 
-export function ForkSurfaceProvider({ projectId, conversationId, run, rolledBackTurnIds, children }: {
-  projectId: string; conversationId: string; run?: ForkCommandRunner; rolledBackTurnIds?: readonly string[]; children: ReactNode;
+export function ForkSurfaceProvider({ projectId, conversationId, run, rolledBackTurnIds, canRollBackToStart = false, children }: {
+  projectId: string; conversationId: string; run?: ForkCommandRunner; rolledBackTurnIds?: readonly string[];
+  canRollBackToStart?: boolean; children: ReactNode;
 }) {
   const rolledBack = useMemo(() => rolledBackTurnIds?.length ? new Set(rolledBackTurnIds) : NO_ROLLED_BACK_TURNS, [rolledBackTurnIds]);
-  const value = useMemo(() => run ? { projectId, conversationId, run, rolledBack } : null,
-    [projectId, conversationId, run, rolledBack]);
+  const value = useMemo(() => run ? { projectId, conversationId, run, rolledBack, canRollBackToStart } : null,
+    [projectId, conversationId, run, rolledBack, canRollBackToStart]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
@@ -53,7 +54,7 @@ export function ForkTurnAction({ turnId }: { turnId: string }) {
       <GitFork size={14} aria-hidden="true" /><span>{busy ? "Forking…" : "Fork from here"}</span>
     </button>
     {error && <span role="alert">{error}</span>}
-    <Suspense fallback={null}><HistoryRollbackAction surface={surface} turnId={turnId} /></Suspense>
+    <Suspense fallback={null}><HistoryTurnActions surface={surface} turnId={turnId} /></Suspense>
   </span>;
 }
 

@@ -80,6 +80,7 @@ export function contextEnvelope(
     ...(supplement.files ? { filesChanged: supplement.files } : {}),
     ...(supplement.omittedFiles ? { filesOmitted: supplement.omittedFiles } : {}),
     ...(supplement.commands?.length ? { lastCommands: supplement.commands } : {}),
+    ...(supplement.omittedCommands ? { commandsOmitted: supplement.omittedCommands } : {}),
     ...(packet.sourceState === "deleted" ? {} : {
       more: `If the ${CONTEXT_TOOL} tool is available, call it with the source conversationId to read older turns of ${own ? "this chat" : "the referenced chat"} and their attached images.`,
     }),

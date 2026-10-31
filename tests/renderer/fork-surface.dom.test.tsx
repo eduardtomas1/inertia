@@ -64,6 +64,32 @@ describe("fork controls", () => {
     expect(screen.queryByRole("button", { name: "Load more inherited history" })).not.toBeInTheDocument();
   });
 
+  it("keeps footer actions keyboard reachable in a fork and drops merge-up-to-here after leaving it", async () => {
+    const run = vi.fn<ForkCommandRunner>().mockResolvedValueOnce(result(page("Fork history", null)))
+      .mockResolvedValue(result({ kind: "conversation.fork.history", conversationId: sourceId, lineage: null, parts: [], next: null }));
+    const view = render(<ForkSurfaceProvider projectId={projectId} conversationId={conversationId} run={run}>
+      <ForkHistoryPanel /><ForkTurnAction turnId={turnId} />
+    </ForkSurfaceProvider>);
+    const user = userEvent.setup();
+    await screen.findByRole("button", { name: "Merge findings up to here" });
+    screen.getByRole("button", { name: "Fork from here" }).focus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Roll back to here" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Merge findings up to here" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("group", { name: "Confirm merge" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Merge findings" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Merge findings up to here" })).toHaveFocus();
+    view.rerender(<ForkSurfaceProvider projectId={projectId} conversationId={sourceId} run={run}>
+      <ForkHistoryPanel /><ForkTurnAction turnId={turnId} />
+    </ForkSurfaceProvider>);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Merge findings up to here" })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Roll back to here" })).toBeInTheDocument();
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it("does not show a late history response after changing chats", async () => {
     let complete!: (event: ServerEvent) => void;
     const run = vi.fn<ForkCommandRunner>().mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }))

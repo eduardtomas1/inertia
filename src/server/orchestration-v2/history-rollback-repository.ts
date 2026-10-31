@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AgentTurn } from "../../shared/contracts";
 import {
   MAX_ROLLBACK_TURNS, historyCursorSchema, type ConversationRollbackResult, type HistoryCursor, type HistoryEvent, type HistoryRollbackPlan,
+  type RollbackFiles,
 } from "../../shared/orchestration-history";
 import { providerBackingSchema, type OrchestrationBackingEvent, type ProviderBacking } from "../../shared/orchestration-backings";
 import { nativeControlSchema, type NativeControl } from "../../shared/orchestration-native-control";
@@ -20,11 +21,18 @@ export class HistoryRollbackError extends Error {}
 const rollbackReceiptSchema = z.object({
   operationId: orchestrationIdSchema.nullable(), path: z.enum(["native", "portable", "unchanged"]),
   retainedTurnId: orchestrationIdSchema.nullable(), rolledBackTurns: z.number().int().nonnegative(),
-  reason: orchestrationIdSchema.nullable(),
+  reason: orchestrationIdSchema.nullable(), restoreFiles: z.boolean().optional(),
 }).strict();
 export type RollbackReceipt = z.infer<typeof rollbackReceiptSchema>;
 
-export interface RollbackCommand { threadId: string; projectId: string; source: CommandSource }
+const rollbackFilesStateSchema = z.object({
+  threadId: orchestrationIdSchema, state: z.enum(["restoring", "unchanged", "restored", "refused", "failed"]),
+  message: z.string().nullable(), recoveryCheckpointId: z.string().nullable(), updatedAt: z.string(),
+}).strict();
+type RollbackFilesState = z.infer<typeof rollbackFilesStateSchema>["state"];
+const terminalTurnStatuses = "('completed','failed','cancelled','interrupted')";
+
+export interface RollbackCommand { threadId: string; projectId: string; source: CommandSource; restoreFiles?: boolean }
 
 export class HistoryRollbackRepository {
   constructor(private readonly database: Database.Database, private readonly events: OrchestrationEventStore) {}
@@ -103,6 +111,27 @@ export class HistoryRollbackRepository {
     }
   }
 
+  recordFiles(threadId: string, projectId: string, rollbackId: string, state: RollbackFilesState, message: string | null,
+    recoveryCheckpointId: string | null = null): void {
+    this.commit(threadId, projectId, { type: "history.files-changed", payload: { rollbackId, state, message,
+      ...(recoveryCheckpointId ? { recoveryCheckpointId } : {}) } });
+  }
+
+  workspaceActivity(threadId: string, worktreeIdentity: string, since: string): { changed: boolean; unknown: string[]; more: boolean } {
+    const changed = this.database.prepare(`SELECT 1 FROM agent_turns AS turn JOIN turn_git_artifacts AS artifact
+      ON artifact.turn_id = turn.id WHERE turn.conversation_id <> ? AND artifact.worktree_identity = ?
+        AND (turn.completed_at IS NULL OR turn.completed_at >= ?)
+        AND (artifact.files_json <> '[]' OR artifact.status <> 'ready' OR turn.status NOT IN ${terminalTurnStatuses}) LIMIT 1`)
+      .get(threadId, worktreeIdentity, since) !== undefined;
+    const unknown = (this.database.prepare(`SELECT DISTINCT turn.conversation_id AS id FROM agent_turns AS turn
+      LEFT JOIN turn_git_artifacts AS artifact ON artifact.turn_id = turn.id
+      WHERE turn.conversation_id <> ? AND (turn.completed_at IS NULL OR turn.completed_at >= ?)
+        AND (turn.status NOT IN ${terminalTurnStatuses} OR (artifact.id IS NULL AND turn.started_at IS NOT NULL)
+          OR (artifact.id IS NOT NULL AND artifact.worktree_identity IS NULL AND artifact.absence_reason IS NULL))
+      ORDER BY turn.conversation_id LIMIT 65`).all(threadId, since) as { id: string }[]).map(({ id }) => id);
+    return { changed, unknown: unknown.slice(0, 64), more: unknown.length > 64 };
+  }
+
   replay(command: RollbackCommand): ConversationRollbackResult | null {
     const receipt = this.events.receipt(this.identity(command), command.source.command);
     if (!receipt) return null;
@@ -117,7 +146,8 @@ export class HistoryRollbackRepository {
   }
 
   recordUnchanged(command: RollbackCommand, retainedTurnId: string | null): ConversationRollbackResult {
-    const recorded: RollbackReceipt = { operationId: null, path: "unchanged", retainedTurnId, rolledBackTurns: 0, reason: null };
+    const recorded: RollbackReceipt = { operationId: null, path: "unchanged", retainedTurnId, rolledBackTurns: 0, reason: null,
+      ...(command.restoreFiles ? { restoreFiles: true } : {}) };
     this.events.commit({ ...this.identity(command), command: command.source.command,
       expectedRevision: this.events.revision(command.threadId), events: [], result: recorded });
     return this.result(command.threadId, recorded, "unchanged", null);
@@ -125,7 +155,7 @@ export class HistoryRollbackRepository {
 
   applyPortable(command: RollbackCommand, id: string, plan: HistoryRollbackPlan, reason: string): ConversationRollbackResult {
     const recorded: RollbackReceipt = { operationId: id, path: "portable", retainedTurnId: plan.retainedTurnId,
-      rolledBackTurns: plan.rolledBackTurnIds.length, reason };
+      rolledBackTurns: plan.rolledBackTurnIds.length, reason, ...(command.restoreFiles ? { restoreFiles: true } : {}) };
     this.database.transaction(() => {
       const event: HistoryEvent = { type: "history.rolled-back", payload: { id, plan, reason } };
       this.events.commit({ ...this.identity(command), command: command.source.command,
@@ -135,8 +165,9 @@ export class HistoryRollbackRepository {
     return this.result(command.threadId, recorded, "portable", reason);
   }
 
-  nativeReceipt(id: string, plan: HistoryRollbackPlan): RollbackReceipt {
-    return { operationId: id, path: "native", retainedTurnId: plan.retainedTurnId, rolledBackTurns: plan.rolledBackTurnIds.length, reason: null };
+  nativeReceipt(id: string, plan: HistoryRollbackPlan, restoreFiles = false): RollbackReceipt {
+    return { operationId: id, path: "native", retainedTurnId: plan.retainedTurnId, rolledBackTurns: plan.rolledBackTurnIds.length, reason: null,
+      ...(restoreFiles ? { restoreFiles: true } : {}) };
   }
 
   identity(command: RollbackCommand) {
@@ -146,7 +177,19 @@ export class HistoryRollbackRepository {
   private result(threadId: string, recorded: RollbackReceipt, transfer: ConversationRollbackResult["transfer"],
     reason: string | null): ConversationRollbackResult {
     return { kind: "conversation.rollback", conversationId: threadId, rollbackId: recorded.operationId,
-      retainedTurnId: recorded.retainedTurnId, rolledBackTurns: recorded.rolledBackTurns, transfer, reason };
+      retainedTurnId: recorded.retainedTurnId, rolledBackTurns: recorded.rolledBackTurns, transfer, reason, files: this.files(recorded) };
+  }
+
+  private files(recorded: RollbackReceipt): RollbackFiles {
+    if (!recorded.restoreFiles) return { outcome: "unchanged", message: null };
+    if (recorded.operationId === null) return { outcome: "unchanged", message: "No turns were rolled back, so files were left unchanged." };
+    const row = this.events.projection("rollback-files", recorded.operationId);
+    if (!row) return { outcome: "unchanged", message: "Files were not restored. The chat history was rolled back without them." };
+    const { state, message } = rollbackFilesStateSchema.parse(row.value);
+    if (state === "restoring") {
+      return { outcome: "failed", message: "The file restore was interrupted before Inertia confirmed it. Review the workspace and its recovery checkpoint." };
+    }
+    return { outcome: state, message };
   }
 
   applySettled(control: NativeControl, state: "completed" | "portable"): void {
@@ -212,7 +255,7 @@ export class HistoryRollbackRepository {
 
   private commit(threadId: string, projectId: string, event: HistoryEvent | OrchestrationBackingEvent): void {
     const revision = this.events.revision(threadId);
-    this.events.commit({ actorId: "runtime", commandId: `history:${commandFingerprint({ event, revision })}`,
+    this.events.commit({ actorId: "runtime", commandId: `history:${commandFingerprint({ threadId, projectId, event, revision })}`,
       threadId, projectId, command: event, expectedRevision: revision, events: [event], result: null });
   }
 }

@@ -81,5 +81,51 @@
     }
   },
   "relatedEvidence": "docs/orchestrator-v2/cursor-sdk-ui-progress.md",
-  "packaging": "Separate hard blocker: missing authoritative Cursor SDK platform-package licenses. No notice or packaging gate waived."
+  "packaging": "Separate hard blocker: missing authoritative Cursor SDK platform-package licenses. No notice or packaging gate waived.",
+  "phase3Polish": {
+    "date": "2026-10-31",
+    "checkpoint": "Uncommitted phase 3 polish after 52315e95",
+    "platform": "Windows 11 x64, Node 22.23.1",
+    "measurement": "Final electron-vite renderer output after the attributed recovery checkpoint and omitted-command renderer changes; npm run build:bundle passes.",
+    "accounting": "All route closures and core inclusions/exclusions unchanged. Only the two failing budgets were raised.",
+    "raised": {
+      "deferredThreadActionsJavaScript": {
+        "bytes": 9295,
+        "previousLimit": 9085,
+        "limit": 9551,
+        "headroom": 256
+      },
+      "coreJavaScript": {
+        "bytes": 2485123,
+        "previousBytes": 2478063,
+        "previousLimit": 2478319,
+        "limit": 2485379,
+        "headroom": 256
+      }
+    },
+    "unchangedLimitsMeasured": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 902804,
+        "limit": 902865
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 796568,
+        "limit": 796629
+      },
+      "filesFirstLoadJavaScript": {
+        "bytes": 145998,
+        "limit": 153087
+      },
+      "transcriptJavaScript": {
+        "bytes": 622271,
+        "limit": 649783
+      },
+      "deferredComposerQueueJavaScript": {
+        "bytes": 13302,
+        "limit": 13302
+      }
+    },
+    "attribution": "Thread actions chunk (lazily loaded conversation actions menu): the Roll back to chat start entry and its history-session wiring. Core: the eagerly wired parts of the lazily loaded history controls (history session, confirmation states), rollback with opt-in file restore and its outcome reporting, merge-up-to-here in the fork surface, attributed recovery checkpoint actions on turns, the omitted-command line in context previews, and growth of the server/shared orchestration history, merge-back and conversation context contracts that the renderer imports. Contributions were not isolated individually and are not additive.",
+    "headroomDecision": "Measured bytes plus 256 on the raised deferred route and on core, matching the branch's core convention; no other limit relaxed."
+  }
 }

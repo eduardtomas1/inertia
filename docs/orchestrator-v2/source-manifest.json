@@ -19,19 +19,60 @@
   "upstreamSnapshot": {
     "sha": "dd148481531a0a090780a2ade20588566db099a2",
     "committedAt": "2026-10-29T20:43:23Z",
-    "title": "perf(server): idle servers run 100x fewer background queries and 4.8M fewer spans a day (#27098)"
+    "title": "perf(server): idle servers run 100x fewer background queries and 4.8M fewer spans a day (#27098)",
+    "role": "Research snapshot; sourceGroups, landmarks and t3code-source-map.md line anchors refer to this revision."
   },
+  "upstreamCurrentSource": {
+    "sha": "15fe2832727893cbdd2214383f9f971474849695",
+    "committedAt": "2026-10-31T14:54:48Z",
+    "title": "fix(web): effort picker shows Default or the checkmark, flush right (#28162)",
+    "commitsAfterRelease": {
+      "tag": "v0.1.6",
+      "count": 6
+    },
+    "deltaDocument": "t3code-delta-2026-10-31.md",
+    "deltaFrom": "32ecd71726fee16f335484c1f95cbce126d461f6",
+    "firstParentCommitsInDelta": 393
+  },
+  "upstreamPinHistory": [
+    {
+      "sha": "dd148481531a0a090780a2ade20588566db099a2",
+      "committedAt": "2026-10-29T20:43:23Z",
+      "use": "Research snapshot"
+    },
+    {
+      "sha": "32ecd71726fee16f335484c1f95cbce126d461f6",
+      "committedAt": "2026-10-30T09:17:08Z",
+      "use": "Phase-3 comparison"
+    },
+    {
+      "sha": "15fe2832727893cbdd2214383f9f971474849695",
+      "committedAt": "2026-10-31T14:54:48Z",
+      "use": "Current source; phase-3 polish recomparison"
+    }
+  ],
   "sourceCache": ".cache/orchestrator-v2/t3code",
+  "sourceCacheClone": "blob:none partial clone; earlier file contents are fetched on demand",
   "releaseBoundaries": {
     "firstStableV2": {
       "tag": "v0.1.0",
       "publishedAt": "2026-10-15T23:18:08Z"
     },
     "latestStableObserved": {
+      "tag": "v0.1.6",
+      "publishedAt": "2026-10-31T10:52:24Z",
+      "targetCommit": "2359643cffa6ba9ee84d6f2694b935de54a8013e"
+    },
+    "latestNightlyObserved": {
+      "tag": "v0.1.7-nightly.20261031.3991",
+      "publishedAt": "2026-10-31T16:47:26Z",
+      "targetCommit": "15fe2832727893cbdd2214383f9f971474849695"
+    },
+    "researchStableObserved": {
       "tag": "v0.1.5",
       "publishedAt": "2026-10-29T13:08:50Z"
     },
-    "latestNightlyObserved": {
+    "researchNightlyObserved": {
       "tag": "v0.1.6-nightly.20261029.3892",
       "publishedAt": "2026-10-29T18:50:30Z"
     }

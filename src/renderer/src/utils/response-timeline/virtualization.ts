@@ -524,6 +524,7 @@ function estimateTurnRowSize(
   const requestActionsHeight = turn.userMessage.privateConnectDeviceId
     || turn.userMessage.watcherNote
     || turn.checkpoint
+    || turn.extraCheckpoints.length > 0
     || turn.checkpointUnavailableReason !== null
     ? 28
     : 0;

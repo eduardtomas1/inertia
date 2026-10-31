@@ -16,6 +16,17 @@ const continuationTransitions: Record<HistoryCursor["continuationState"], readon
   dispatched: ["consumed", "uncertain"], consumed: [], uncertain: [],
 };
 
+function filesWrites(payload: Extract<HistoryEvent, { type: "history.files-changed" }>["payload"], cursor: HistoryCursor,
+  envelope: OrchestrationEvent, read: ProjectionReader): ProjectionWrite[] {
+  const prior = read("rollback-files", payload.rollbackId);
+  const state = (prior?.value as { state?: string } | undefined)?.state;
+  if (cursor.rollbackId !== payload.rollbackId || (prior && (prior.threadId !== envelope.threadId || state !== "restoring"))
+    || (payload.state === "restoring") === (payload.message !== null)) throw new OrchestrationConflict("revision-conflict");
+  return [{ kind: "rollback-files", id: payload.rollbackId,
+    value: { threadId: envelope.threadId, state: payload.state, message: payload.message,
+      recoveryCheckpointId: payload.recoveryCheckpointId ?? null, updatedAt: envelope.createdAt } }];
+}
+
 export function projectHistoryEvent(event: HistoryEvent, envelope: OrchestrationEvent, read: ProjectionReader): ProjectionWrite[] {
   if (event.type === "history.rolled-back") {
     if (read("native-control", event.payload.id) || read("rolled-back", event.payload.id)) throw new OrchestrationConflict("scope-conflict");
@@ -29,6 +40,7 @@ export function projectHistoryEvent(event: HistoryEvent, envelope: Orchestration
   const row = read("history-cursor", envelope.threadId);
   if (!row) throw new OrchestrationConflict("scope-conflict");
   const cursor = historyCursorSchema.parse(row.value);
+  if (event.type === "history.files-changed") return filesWrites(event.payload, cursor, envelope, read);
   const { rollbackId, runId, state } = event.payload;
   const run = read("run", runId)?.value as { threadId?: string } | undefined;
   if (cursor.rollbackId !== rollbackId || cursor.continuation === null || run?.threadId !== envelope.threadId

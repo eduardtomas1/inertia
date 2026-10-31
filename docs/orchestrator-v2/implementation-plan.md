@@ -75,6 +75,12 @@ rollback and context merge-back with their in-flight integration), followed by
 a comparison against T3 Code `32ecd71726fee16f335484c1f95cbce126d461f6`. Later
 phases were deliberately not started; the checklist above stays open.
 
+**Resumed on 2026-10-31.** Phase 0 stabilization is done (see
+`implementation-progress.md`). The phase-3 polish package is in progress. T3
+Code was recompared at `15fe2832727893cbdd2214383f9f971474849695` (v0.1.6 plus
+six commits); the delta and decisions are in `t3code-delta-2026-10-31.md`.
+Later phases remain open. PR #686 stays draft; no merge.
+
 Current code and check results are recorded in `implementation-progress.md`.
 
 The first package establishes the transactional core and routes real runtime

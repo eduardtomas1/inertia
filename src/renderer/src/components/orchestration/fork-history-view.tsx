@@ -2,10 +2,15 @@ import { useEffect, useState } from "react";
 import { GitFork } from "lucide-react";
 import type { ForkHistoryResult } from "@shared/orchestration-forks";
 import { forkHistoryResultSchema } from "@shared/orchestration-forks";
-import { MergeBackAction } from "./history-actions";
+import { HistoryStartRollback, MergeBackAction } from "./history-actions";
+import { noteForkLineage } from "./history-session";
 import type { ForkSurface } from "./fork-surface-model";
 
 export function ForkHistoryView({ surface }: { surface: ForkSurface }) {
+  return <><ForkLineage surface={surface} /><HistoryStartRollback surface={surface} /></>;
+}
+
+function ForkLineage({ surface }: { surface: ForkSurface }) {
   const [page, setPage] = useState<ForkHistoryResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +21,9 @@ export function ForkHistoryView({ surface }: { surface: ForkSurface }) {
       .then((response) => {
         if (!current) return;
         if (response.type !== "request.result") throw new Error("The inherited history response is unavailable.");
-        setPage(forkHistoryResultSchema.parse(response.result));
+        const loaded = forkHistoryResultSchema.parse(response.result);
+        noteForkLineage(conversationId, loaded.lineage !== null);
+        setPage(loaded);
       }).catch(() => { if (current) setError("Inherited history could not be loaded."); });
     return () => { current = false; };
   }, [conversationId, run]);

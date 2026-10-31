@@ -113,6 +113,60 @@ describe("lazy native fork admission", () => {
     } finally { runtime.store.close(); }
   });
 
+  it.each([
+    { busy: "an active run", reason: "native-source-unavailable" },
+    { busy: "a held admission lease", reason: "native-source-busy" },
+    { busy: "a terminal-resume reservation", reason: "native-source-busy" },
+  ])("prepares a fork portably while its source has $busy", async ({ busy, reason }) => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await finish(runtime, "first");
+      const source = runtime.conversationId;
+      const child = fork(runtime, first.id);
+      const deps = dependencies(runtime, async (request) => completed(request));
+      let release = async () => {};
+      if (busy === "an active run") {
+        const later = runtime.controller.queue({ conversationId: source, content: "later request" });
+        runtime.controller.start(later.turn.id);
+        expect(runtime.provider.isRunning(source)).toBe(true);
+        release = async () => {
+          runtime.provider.resolve({ text: "later answer", sessionId: "source-native" });
+          await flushTurnControllerTestPromises();
+        };
+      } else if (busy === "a held admission lease") {
+        const lease = await runtime.controller.acquireTurnAdmission(source, 100);
+        expect(lease).not.toBeNull();
+        release = async () => { lease!.release(); };
+      } else {
+        expect(deps.providerTerminalResumes.acquire(source)).toBe(true);
+        release = async () => {
+          expect(deps.providerTerminalResumes.isActive(source)).toBe(true);
+          deps.providerTerminalResumes.release(source);
+        };
+      }
+      await prepareForkSession(deps, child.id, new AbortController().signal);
+      await release();
+      expect(deps.providers.nativeConversation).not.toHaveBeenCalled();
+      expect(runtime.store.orchestration.forks.get(child.id)?.transfer).toBe("portable");
+      const selected = runtime.store.orchestration.events.readEvents({ projectId: child.projectId, threadId: child.id, limit: 500 })
+        .filter((event) => event.type === "fork.portable-selected").map((event) => event.payload);
+      expect(selected).toEqual([{ reason }]);
+      expect(runtime.store.orchestration.nativeControls.locked(source)).toBe(false);
+      expect(runtime.store.orchestration.nativeControls.locked(child.id)).toBe(false);
+      const admission = await runtime.controller.acquireTurnAdmission(source, 100);
+      expect(admission).not.toBeNull();
+      admission!.release();
+      await prepareForkSession(deps, child.id, new AbortController().signal);
+      expect(deps.providers.nativeConversation).not.toHaveBeenCalled();
+      const send = runtime.controller.queue({ conversationId: child.id, content: "Continue" });
+      runtime.controller.start(send.turn.id);
+      expect(runtime.provider.input?.sessionId).toBeUndefined();
+      expect(runtime.provider.input?.prompt).toContain("first answer");
+      runtime.provider.resolve({ text: "Done" });
+      await flushTurnControllerTestPromises();
+    } finally { runtime.store.close(); }
+  });
+
   it("refuses a successful-looking native reply with the wrong target identity", async () => {
     const runtime = await createTurnControllerTestRuntime();
     try {

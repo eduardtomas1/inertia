@@ -152,7 +152,7 @@ export class NativeControlRepository {
 
   private commit(threadId: string, projectId: string, event: NativeControlEvent): void {
     const revision = this.events.revision(threadId);
-    this.events.commit({ actorId: "runtime", commandId: `native:${commandFingerprint({ event, revision })}`,
+    this.events.commit({ actorId: "runtime", commandId: `native:${commandFingerprint({ threadId, projectId, event, revision })}`,
       projectId, threadId, command: event, expectedRevision: revision, events: [event], result: null });
   }
 }

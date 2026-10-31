@@ -29,6 +29,11 @@ export const historyCursorSchema = z.object({
   updatedAt: z.iso.datetime(),
 }).strict();
 
+export const rollbackFilesSchema = z.object({
+  outcome: z.enum(["unchanged", "restored", "refused", "failed"]),
+  message: z.string().min(1).max(1_000).nullable(),
+}).strict();
+
 export const historyEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("history.rolled-back"), payload: z.object({
     id, plan: historyRollbackPlanSchema, reason: id,
@@ -37,12 +42,17 @@ export const historyEventSchema = z.discriminatedUnion("type", [
     rollbackId: id, runId: id,
     state: z.enum(["pending", "attached", "dispatched", "consumed", "uncertain"]),
   }).strict() }).strict(),
+  z.object({ type: z.literal("history.files-changed"), payload: z.object({
+    rollbackId: id, state: z.enum(["restoring", "unchanged", "restored", "refused", "failed"]),
+    message: rollbackFilesSchema.shape.message, recoveryCheckpointId: id.nullable().optional(),
+  }).strict() }).strict(),
 ]);
 
 export const conversationRollbackResultSchema = z.object({
   kind: z.literal("conversation.rollback"), conversationId: id, rollbackId: id.nullable(),
   retainedTurnId: id.nullable(), rolledBackTurns: z.number().int().nonnegative(),
   transfer: z.enum(["native", "portable", "unchanged"]), reason: id.nullable(),
+  files: rollbackFilesSchema,
 }).strict();
 
 export function rolledBackTurnIdsCoherent(value: unknown, agentTurns: unknown): boolean {
@@ -56,3 +66,4 @@ export type HistoryRollbackPlan = z.infer<typeof historyRollbackPlanSchema>;
 export type HistoryCursor = z.infer<typeof historyCursorSchema>;
 export type HistoryEvent = z.infer<typeof historyEventSchema>;
 export type ConversationRollbackResult = z.infer<typeof conversationRollbackResultSchema>;
+export type RollbackFiles = z.infer<typeof rollbackFilesSchema>;

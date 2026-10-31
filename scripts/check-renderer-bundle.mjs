@@ -122,7 +122,7 @@ const budgets = {
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
-  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43,
+  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43 + 210 + 256,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
@@ -202,7 +202,7 @@ const budgets = {
   // (foundation) and 5,734 bytes of eager renderer wiring, after subtracting
   // the separately capped deferred dock and attach dialog closures. The review
   // fixes add 1,078 core bytes.
-  coreJavaScript: 2_448_860 + 29_203 + 256,
+  coreJavaScript: 2_448_860 + 29_203 + 7_060 + 256,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

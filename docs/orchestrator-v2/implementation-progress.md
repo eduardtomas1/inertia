@@ -303,9 +303,13 @@ Production changes since the resumed checkpoint above:
 
 ### Comparison with T3 Code at `32ecd71726fee16f335484c1f95cbce126d461f6`
 
-`ThreadForkService.ts`, `CheckpointRollbackService.ts`, `CheckpointRestoreSafety.ts`
-and `docs/orchestration-v2/thread-lineage-and-context-transfer.md` are byte-identical
-to the earlier pin `dd148481531a0a090780a2ade20588566db099a2`. Merge-back exists
+At `32ecd717`, `ThreadForkService.ts`, `CheckpointRollbackService.ts`,
+`CheckpointRestoreSafety.ts` and `docs/orchestration-v2/thread-lineage-and-context-transfer.md`
+were byte-identical to the earlier pin `dd148481531a0a090780a2ade20588566db099a2`.
+At `15fe2832727893cbdd2214383f9f971474849695` only `CheckpointRollbackService.ts`
+still is: `ThreadForkService.ts` changed in 7f005d4d8d (#24014) and 50c1c5dc53
+(#26901), `CheckpointRestoreSafety.ts` and the lineage document in 50c1c5dc53.
+See [t3code-delta-2026-10-31.md](t3code-delta-2026-10-31.md). Merge-back exists
 upstream as `thread.merge_back` (`Orchestrator.ts` dispatchThreadMergeBack,
 `ContextHandoffService.ts` fork delta summary, MCP `t3_thread_transfer`).
 
@@ -313,9 +317,9 @@ upstream as `thread.merge_back` (`Orchestrator.ts` dispatchThreadMergeBack,
 | --- | --- | --- |
 | Merge-back target | Exact parent of a fork | Same |
 | Source point | Explicit or latest stable run; completed/waiting only | Latest stable retained point; any terminal fork turn included |
-| Base point | Always the fork point; pending transfers superseded | Last delivered merge-back (or fork point); undelivered drafts superseded |
+| Base point | Always the fork point; pending transfers of the same pair superseded. At `15fe2832` also refused while another fork's transfer to the same target is pending, or while the target has an active or queued run | Last delivered merge-back (or fork point); undelivered drafts superseded |
 | Delivery | Pending transfer consumed automatically at the target's next dispatch | Visible draft packet delivered with the user's next message; removable |
-| Delta content | Compact summary lines incl. commands and file changes | Bounded message excerpts via packets; commands/file changes not included |
+| Delta content | Compact summary lines incl. commands and file changes; at `15fe2832` rolled-back runs and cancelled queued messages excluded | Bounded message excerpts via packets; rolled-back turns excluded; commands/file changes not included |
 | Initiator | User or agent (MCP tool) | User only; agent tool deferred with the agent-tool phase |
 | Rollback | Checkpoint rollback coordinates native rollback and optional file restore; rolled-back runs kept as audit | Context rollback separate from Git `checkpoint.revert`; native or portable, audit history kept; no combined file restore |
 
@@ -348,10 +352,19 @@ integration checks in [phase3-verification.md](phase3-verification.md).
   fixture Codex app-server that rejects native history methods, so it exercises
   the portable rollback path only; real provider rollback is not claimed.
 
-Remaining after phase 3: combined rollback-and-restore-files orchestration,
-explicit merge-back source point selection, command/file-change items in the
-merge delta, agent-initiated fork/merge-back tools, rollback-to-start UI, Duo
-and Private Connect parity, and all later-phase checklist items.
+Remaining after phase 3, as updated by the phase 3 polish below:
+
+- Agent-initiated fork and merge-back tools: agent-tools phase, together with
+  the launch runtime-mode step-down (65965f7ab8) and MCP read semantics.
+- Private Connect parity and side chats: client-parity phase.
+- Codex earlier-run turn rejection (54d0a161bb) and the Pi cleared-queue
+  notice (afb8619e1d): queue phase.
+- Usage-limit refinements e496db3a5e, 63b0e3d82e and d7d5d7c79b: recovery phase.
+- All later-phase checklist items.
+
+Combined rollback with file restore, explicit merge-back source points, the
+merge-delta work summary, rollback to the chat start and Duo refusals landed in
+the phase 3 polish.
 
 ## Phase 0 stabilization — 2026-10-31
 
@@ -365,3 +378,125 @@ The Linux development runtime is unchanged: the SDK resolves from
 devDependencies in a development checkout, and packaged asar locations remain
 refused with the existing unavailable status. Packaged Linux smoke was not run
 on this Windows host.
+
+## Phase 3 polish — 2026-10-31
+
+Status: implemented and verified on Windows 11 x64 with Node 22.23.1 against
+the uncommitted working tree on top of `52315e95`. Evidence is in
+[phase3-verification.md](phase3-verification.md#phase-3-polish-evidence).
+
+T3 Code was recompared at `15fe2832727893cbdd2214383f9f971474849695`
+(393 first-parent commits after `32ecd717`, including stable v0.1.6). At
+`15fe2832`, `CheckpointRollbackService.ts` is byte-identical to the earlier
+pins; `ThreadForkService.ts`, `CheckpointRestoreSafety.ts` and the lineage
+document changed in 7f005d4d8d and 50c1c5dc53. The anchored delta, Inertia
+status and decisions are in [t3code-delta-2026-10-31.md](t3code-delta-2026-10-31.md).
+
+What landed:
+
+- **Merge-back cross-fork exclusivity.** One pending merge-back per target
+  chat across all forks, following upstream 50c1c5dc53. A second fork's
+  merge-back is refused until the first is delivered or removed. Refusal of a
+  busy target remains a deliberate difference: the merge-back stays a visible
+  draft delivered with the next explicit send.
+- **Explicit merge-back source point.** `conversation.merge-back` accepts an
+  optional `throughTurnId`; the latest stable retained point remains the
+  default. A point outside the fork, rolled back, unfinished, already merged
+  back, or preceded by unfinished fork turns is refused. Fork turn footers offer *Merge findings up to
+  here* with a two-step keyboard confirmation.
+- **Work summary in the merge delta.** Command and file-change items of the
+  merged fork turns are summarised in order in the packet supplement, without
+  secrets, command output or reasoning, bounded by line count and serialized
+  size, with omitted files and commands counted. The composer context preview
+  lists them after the messages, including "N more files" and "N more
+  commands". Migration 110 `RaiseConversationContextSupplementBound` rebuilds
+  `conversation_context_packets` to raise the supplement bound from 4,096 to
+  12,288 bytes, preserving rows, indexes, triggers and foreign keys, and rolls
+  back completely if the rebuild fails. Merge-back records written before the
+  source point and work summary existed still replay.
+- **Combined context rollback with opt-in file restore.** The rollback
+  confirmation offers *Also restore files to this point* (off by default). The
+  context rollback is applied first; files are restored only after a completed
+  native or portable rollback, never for an uncertain native rollback. Outcomes
+  are `restored`, `unchanged`, `refused` or `failed`, stored durably and
+  replayed after a rebuild or restart. A restore saves a recovery checkpoint
+  first, restores files the rolled-back turns changed, removes files they
+  created while those files are unchanged, and reports files kept because they
+  changed afterwards or were not created by those turns.
+- **Restore-safety refusals.** The file restore is refused, keeping the
+  context rollback, when the turns' file changes are not completely recorded,
+  workspace ownership cannot be confirmed, another chat worked in the same
+  checkout after the restore point, files outside the rolled-back turns
+  changed, or too many files changed.
+- **Attributed recovery checkpoints.** The rollback's "Before file restore"
+  checkpoint is attached to the retained turn, and `checkpoint.revert`'s
+  "Before checkpoint restore" checkpoint to the chat's latest checkpointed turn.
+  This also fixes `checkpoint.revert`, whose recovery checkpoint previously had
+  no turn. The timeline shows each attributed checkpoint as a labelled,
+  keyboard-reachable action next to *Revert*, with the same disabled rules, and
+  no longer drops them from the history.
+- **Rollback to the chat start.** The chat actions menu offers *Roll back to
+  chat start…* when no work is active, with the same inline confirmation and
+  files toggle; rolling back to the start restores every file change after the
+  chat start when the files option is chosen.
+- **Duo refusals.** Rollback and merge-back are refused while a Duo that
+  includes the affected chats is unsettled or needs attention; the paired chat
+  is left untouched.
+- **Native-control command identities per thread.** Native-control commands
+  now fingerprint the thread and project, so identical events in different
+  threads no longer collide.
+- **Busy-source fork test.** `tests/server/orchestration-native-forks.test.ts`
+  covers a native fork prepared portably while the source has an active run
+  (`native-source-unavailable`), a held admission lease or a terminal-resume
+  reservation (`native-source-busy`), and two forks of one busy source in the
+  same runtime.
+- **Windows EBUSY test fix.** Two `tests/server/orchestration-v2.test.ts`
+  cases now close their runtime store, so the temporary database can be
+  removed on Windows.
+
+Verification:
+
+- `npm run check:quality` passed: workflow concurrency, 110 migration lineage
+  entries, architecture (1,839 source files, 7,650 internal edges), color
+  themes, both linters and all five TypeScript projects.
+- Focused Vitest run, 16 files, 207 tests passed: `orchestration-merge-back`
+  15, `orchestration-history-rollback` 8, `orchestration-rollback-restore` 11,
+  `orchestration-native-forks` 8, `orchestration-forks` 4, `orchestration-v2`
+  14, `conversation-context-supplement-migration` 2, `database-migrations` 30,
+  `checkpoint-rollback` 1, `turn-restart-continuation` 8, DOM
+  `history-actions` 13, `fork-surface` 4, `conversation-history` 22,
+  `checkpoint-notice` 3, `composer-chat-references` 30 and
+  `response-timeline` 34.
+- `npm run build:bundle` passed after raising the two failing budgets:
+  `deferredThreadActionsJavaScript` 9,295 bytes (limit 9,085 → 9,551) and
+  `coreJavaScript` 2,485,123 bytes (previously measured 2,478,063; limit
+  2,478,319 → 2,485,379). Each new limit is the measurement plus 256 bytes; no
+  other limit or accounting exclusion changed. Accounting is recorded in
+  [renderer-bundle.json](../pr-evidence/orchestrator-v2/renderer-bundle.json).
+- Electron `tests/e2e/history-rollback-merge-back.spec.ts`: three runs after
+  the build. Runs 1 (1.0 minute) and 3 (35.6 seconds) passed. Run 2 failed in
+  the first capture stage, before any step changed by this package: the hovered
+  second turn's footer opacity fell back to 0 within the 30-second wait. The scenario covers
+  rollback with file restore, the retained turn's "Before file restore" action,
+  absence of the recovered legacy history section, merge-up-to-here,
+  merge-back and the chat-start confirmation. All fourteen captures come from
+  run 3.
+
+Known limits:
+
+- Directories created by the rolled-back turns are not removed; only
+  unchanged files they created are.
+- The file restore is refused when another chat, including a read-only
+  watcher, had a turn in the same checkout after the restore point.
+- Refused and failed restore outcomes are covered by renderer and server tests
+  only; the Electron scenario exercises the restored outcome.
+- The Electron scenario uses a fixture Codex app-server that rejects native
+  history methods, so it exercises portable rollback only. macOS and Linux were
+  not run for this package.
+
+Deferred with tracked upstream anchors: side chats and Private Connect parity
+(client-parity phase); the Codex earlier-run turn rejection (54d0a161bb) and
+the Pi cleared-queue notice (afb8619e1d) (queue phase); usage-limit refinements
+e496db3a5e, 63b0e3d82e and d7d5d7c79b (recovery phase); launch runtime-mode
+step-down (65965f7ab8), MCP read semantics and agent-initiated fork and
+merge-back tools (agent-tools phase).

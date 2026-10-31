@@ -703,6 +703,7 @@ describe("composer chat references", () => {
             files: ["M src/export.ts +14 -6", "A src/bom.ts +22 -0"],
             omittedFiles: 3,
             commands: ["npm run build (ok)", "npm test (exit 1)"],
+            omittedCommands: 2,
           },
         },
       },
@@ -721,6 +722,7 @@ describe("composer chat references", () => {
       "3 more files",
       "npm run build (ok)",
       "npm test (exit 1)",
+      "2 more commands",
     ]);
     expect(screen.getAllByRole("list")).toHaveLength(2);
   });

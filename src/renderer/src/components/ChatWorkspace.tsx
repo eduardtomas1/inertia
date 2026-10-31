@@ -978,10 +978,12 @@ export function ChatWorkspace({
   const isEmptyThread = !detailLoading
     && ownedMessages.length === 0
     && ownedTurns.length === 0;
+  const canRollBackToStart = (!stopTurnStatus || isAgentTurnTerminalStatus(stopTurnStatus))
+    && ownedTurns.some(({ id, status }) => isAgentTurnTerminalStatus(status) && !rolledBackTurnIds?.includes(id));
 
   return (
     <ForkSurfaceProvider projectId={project.id} conversationId={conversation.id} run={onForkCommand}
-      rolledBackTurnIds={rolledBackTurnIds}>
+      rolledBackTurnIds={rolledBackTurnIds} canRollBackToStart={canRollBackToStart}>
     <Root
       className={clsx(
         "chat-workspace",

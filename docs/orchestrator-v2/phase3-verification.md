@@ -289,6 +289,60 @@ are not evidence that the later Node correction ran inside the built app.
 | Merge-back confirmation | [Capture](../pr-evidence/orchestrator-v2/screenshots/merge-back-confirmation-dark.png) | [Capture](../pr-evidence/orchestrator-v2/screenshots/merge-back-confirmation-light.png) |
 | Source chat with merge-back draft | [Capture](../pr-evidence/orchestrator-v2/screenshots/merge-back-source-draft-dark.png) | [Capture](../pr-evidence/orchestrator-v2/screenshots/merge-back-source-draft-light.png) |
 
+The files linked above have since been replaced by the phase 3 polish
+captures described in the next section.
+
+## Phase 3 polish evidence
+
+Recorded 2026-10-31 on Windows 11 x64 with Node 22.23.1, against the
+uncommitted phase 3 polish working tree on top of `52315e95`. Results and
+scope are summarised in
+[implementation-progress.md](implementation-progress.md#phase-3-polish--2026-10-31).
+
+| Check | Result |
+| --- | --- |
+| `npm run check:quality` | Passed: workflow concurrency, 110 migration lineage entries, architecture (1,839 source files, 7,650 internal edges), color themes, both linters, all five TypeScript projects. |
+| Focused Vitest (16 files) | 207 passed, 0 failed. |
+| `npm run build:bundle` | Passed after raising `deferredThreadActionsJavaScript` (9,295 bytes; limit 9,085 → 9,551) and `coreJavaScript` (2,485,123 bytes; limit 2,478,319 → 2,485,379). See [renderer-bundle.json](../pr-evidence/orchestrator-v2/renderer-bundle.json). |
+| `tests/e2e/history-rollback-merge-back.spec.ts` | Runs 1 and 3 passed (1.0 minute, 35.6 seconds); run 2 failed on a hover-opacity assertion in the first capture stage, before any step this package changed. |
+
+The Electron scenario uses the fixture Codex app-server, which rejects native
+history methods, so it exercises portable rollback and the restored file
+outcome only. Refused and failed restore outcomes are covered by server and
+renderer tests.
+
+### Migration note
+
+Migration 110 `RaiseConversationContextSupplementBound` rebuilds
+`conversation_context_packets` with the `supplement_json` size bound raised from
+4,096 to 12,288 bytes so the merge-back work summary fits. It copies every row,
+recreates the table's indexes and triggers, runs with foreign keys off, verifies
+the copied row count and is a no-op on a database already at 12,288 bytes. Any
+other schema shape is refused. A failed rebuild rolls back completely, including
+dropped triggers (`tests/server/conversation-context-supplement-migration.test.ts`).
+The lineage entry is appended to `database-migration-lineage.json`; no released
+migration was changed.
+
+### Captures
+
+All fourteen captures come from run 3 of the Electron scenario above, at
+1440 × 920, with natural hover and focus. They replace the earlier phase 3
+captures, whose source-chat views still showed the recovery checkpoint under
+"Recovered legacy history".
+
+| Settled state | Dark | Light |
+| --- | --- | --- |
+| Rollback confirmation | [Capture](../pr-evidence/orchestrator-v2/screenshots/rollback-confirmation-dark.png) | [Capture](../pr-evidence/orchestrator-v2/screenshots/rollback-confirmation-light.png) |
+| Rollback confirmation with file restore | [Capture](../pr-evidence/orchestrator-v2/screenshots/rollback-files-confirmation-dark.png) | [Capture](../pr-evidence/orchestrator-v2/screenshots/rollback-files-confirmation-light.png) |
+| Retained turn after rollback with file restore | [Capture](../pr-evidence/orchestrator-v2/screenshots/rollback-retained-turn-dark.png) | [Capture](../pr-evidence/orchestrator-v2/screenshots/rollback-retained-turn-light.png) |
+| Fork merge-up-to-here confirmation | [Capture](../pr-evidence/orchestrator-v2/screenshots/fork-merge-up-to-here-dark.png) | [Capture](../pr-evidence/orchestrator-v2/screenshots/fork-merge-up-to-here-light.png) |
+| Merge-back confirmation | [Capture](../pr-evidence/orchestrator-v2/screenshots/merge-back-confirmation-dark.png) | [Capture](../pr-evidence/orchestrator-v2/screenshots/merge-back-confirmation-light.png) |
+| Source chat with merge-back draft | [Capture](../pr-evidence/orchestrator-v2/screenshots/merge-back-source-draft-dark.png) | [Capture](../pr-evidence/orchestrator-v2/screenshots/merge-back-source-draft-light.png) |
+| Rollback to chat start confirmation | [Capture](../pr-evidence/orchestrator-v2/screenshots/rollback-chat-start-confirmation-dark.png) | [Capture](../pr-evidence/orchestrator-v2/screenshots/rollback-chat-start-confirmation-light.png) |
+
+`cursor-sdk-account.png` in the same directory is the single SDK account
+capture described below; it was not re-captured.
+
 ## Existing SDK account capture
 
 The existing account screenshot remains valid.

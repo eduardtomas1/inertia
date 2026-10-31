@@ -1389,6 +1389,36 @@ describe("authoritative response timeline", () => {
     expect(timeline[0]?.kind).toBe("compatibility");
   });
 
+  it("keeps recovery checkpoints attributed to a turn on that turn, oldest first", () => {
+    const own: CheckpointSummary = {
+      id: "own",
+      conversationId,
+      turnId: "turn",
+      ref: "refs/own",
+      label: "Turn 1",
+      turnIndex: 1,
+      filesChanged: 1,
+      insertions: 1,
+      deletions: 0,
+      createdAt: "2026-07-23T10:00:00.000Z",
+    };
+    const later = { ...own, id: "later", ref: "refs/later", label: "Before checkpoint restore", createdAt: "2026-07-23T10:05:00.000Z" };
+    const earlier = { ...own, id: "earlier", ref: "refs/earlier", label: "Before file restore", createdAt: "2026-07-23T10:02:00.000Z" };
+    const foreign = { ...own, id: "foreign", conversationId: "22222222-2222-4222-8222-222222222222" };
+    const turn = agentTurn("turn", "user", { checkpointId: own.id });
+    const timeline = buildResponseTimeline({
+      turns: [turn],
+      messages: [message("user", turn.id, "user", "Try it", turn.requestedAt)],
+      activities: [],
+      reasonings: [],
+      checkpoints: [later, own, earlier, foreign],
+    });
+    const response = timelineTurn(timeline, turn.id);
+    expect(response.checkpoint).toBe(own);
+    expect(response.extraCheckpoints).toEqual([earlier, later]);
+    expect(timeline.some(({ kind }) => kind === "compatibility")).toBe(false);
+  });
+
   it("reuses settled row objects while allowing the active turn to advance", () => {
     const settled = agentTurn("settled", "settled-user", {
       requestedAt: "2026-07-23T09:00:00.000Z",

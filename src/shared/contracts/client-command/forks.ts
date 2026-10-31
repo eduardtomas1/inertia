@@ -11,9 +11,9 @@ export const forkCommandSchemas = [
     limit: z.number().int().min(1).max(100).optional(),
   }).strict() }).strict(),
   z.object({ ...requestBase, type: z.literal("conversation.merge-back"), payload: z.object({
-    forkConversationId: z.string().uuid(),
+    forkConversationId: z.string().uuid(), throughTurnId: z.string().uuid().optional(),
   }).strict() }).strict(),
   z.object({ ...requestBase, type: z.literal("conversation.rollback"), payload: z.object({
-    conversationId: z.string().uuid(), turnId: z.string().uuid().nullable(),
+    conversationId: z.string().uuid(), turnId: z.string().uuid().nullable(), restoreFiles: z.boolean().optional(),
   }).strict() }).strict(),
 ] as const;

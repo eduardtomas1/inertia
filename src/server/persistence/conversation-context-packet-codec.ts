@@ -1,6 +1,8 @@
 import {
   MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE,
   MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
+  MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES,
+  MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS,
   MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
   type ConversationContextExcerpt,
   type ConversationContextSupplement,
@@ -17,11 +19,16 @@ export interface StoredPacketExcerpts {
 }
 
 const UNFINISHED_TURN_STATES = new Set(["failed", "cancelled", "running"]);
-const MAX_SUPPLEMENT_COMMANDS = 3;
+const SUPPLEMENT_KEYS = new Set(["files", "omittedFiles", "commands", "omittedCommands"]);
 const MAX_SUPPLEMENT_LINE_LENGTH = 4_200;
 
 function boundedString(value: unknown, maximumLength: number): value is string {
   return typeof value === "string" && value.length >= 1 && value.length <= maximumLength;
+}
+
+function omittedCount(value: unknown): boolean {
+  return value === undefined
+    || (typeof value === "number" && Number.isSafeInteger(value) && value >= 1);
 }
 
 function boundedLines(value: unknown, maximumCount: number): boolean {
@@ -163,19 +170,14 @@ export function parseSupplement(row: {
     : [];
   if (
     row.transport_version !== 3
+    || byteLength(row.supplement_json) > MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES
     || keys.length === 0
-    || keys.some((key) => key !== "files" && key !== "omittedFiles" && key !== "commands")
+    || keys.some((key) => !SUPPLEMENT_KEYS.has(key))
     || (supplement.files !== undefined && !boundedLines(supplement.files, MAX_PROVIDER_HANDOFF_FILES))
-    || (supplement.commands !== undefined && !boundedLines(supplement.commands, MAX_SUPPLEMENT_COMMANDS))
-    || (
-      supplement.omittedFiles !== undefined
-      && (
-        supplement.files === undefined
-        || typeof supplement.omittedFiles !== "number"
-        || !Number.isSafeInteger(supplement.omittedFiles)
-        || supplement.omittedFiles < 1
-      )
-    )
+    || (supplement.commands !== undefined
+      && !boundedLines(supplement.commands, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS))
+    || !omittedCount(supplement.omittedFiles)
+    || !omittedCount(supplement.omittedCommands)
   ) {
     throw new Error("The saved chat context contains a malformed supplement.");
   }

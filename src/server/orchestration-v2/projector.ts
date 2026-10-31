@@ -30,7 +30,7 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   if (event.type === "native.control-started" || event.type === "native.control-settled" || event.type === "fork.portable-selected") {
     return projectNativeControl(event, envelope, read);
   }
-  if (event.type === "history.rolled-back" || event.type === "history.continuation-changed") {
+  if (event.type === "history.rolled-back" || event.type === "history.continuation-changed" || event.type === "history.files-changed") {
     return projectHistoryEvent(event, envelope, read);
   }
   if (event.type === "merge-back.prepared" || event.type === "merge-back.changed") return projectMergeBackEvent(event, envelope, read);

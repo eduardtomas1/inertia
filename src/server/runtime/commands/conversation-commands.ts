@@ -121,7 +121,7 @@ export interface ConversationCommandDependencies {
   };
   deletedConversationIds: Set<string>;
   dataDirectory: string;
-  rollbackHistory?(input: { conversationId: string; turnId: string | null; source: CommandSource }): Promise<ConversationRollbackResult>;
+  rollbackHistory?(input: { conversationId: string; turnId: string | null; restoreFiles?: boolean; source: CommandSource }): Promise<ConversationRollbackResult>;
   rememberDeletedConversation(conversationId: string): void;
   forgetRemoteTranscript(conversationId: string): void;
   broadcastSnapshot(): void;
@@ -191,7 +191,10 @@ export function createConversationCommandHandler(
         if (!lineage) throw new RuntimeRequestError("Only a fork can merge its findings back into its source chat.");
         const source = { actorId: "human", commandId: command.requestId, command: JSON.parse(JSON.stringify(command)) };
         const result = await dependencies.store.orchestration.lanes.run(lineage.parentThreadId, () => {
-          try { return dependencies.store.orchestration.mergeBacks.prepare(command.payload.forkConversationId, source); }
+          try {
+            return dependencies.store.orchestration.mergeBacks.prepare(command.payload.forkConversationId, source,
+              command.payload.throughTurnId ?? null);
+          }
           catch (error) { if (error instanceof MergeBackError) throw new RuntimeRequestError(error.message); throw error; }
         });
         dependencies.broadcastSnapshot();

@@ -1,4 +1,5 @@
 import { expect, test, type TestInfo } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -10,6 +11,7 @@ const TITLE = "Release parser plan";
 const FIRST = "Plan the dotted version parser fix.";
 const SECOND = "Try the risky tokenizer rewrite.";
 const FORK_REQUEST = "Explore the conservative split instead.";
+const REWRITE_PATH = ["src", "index.ts"];
 
 const appServer = `
 const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
@@ -37,6 +39,10 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
     const requests = ${JSON.stringify([FIRST, SECOND, FORK_REQUEST])};
     const request = requests.filter((candidate) => prompt.includes(candidate))
       .reduce((first, candidate) => prompt.indexOf(candidate) < prompt.indexOf(first) ? candidate : first);
+    if (request === ${JSON.stringify(SECOND)}) {
+      require("node:fs").writeFileSync(require("node:path").join(process.cwd(), ...${JSON.stringify(REWRITE_PATH)}),
+        "export const tokenizer = 'risky';\\n");
+    }
     const turn = { id: "history-turn-" + (++turnSequence), status: "inProgress", items: [], error: null };
     send({ id: message.id, result: { turn } });
     send({ method: "turn/started", params: { threadId, turn } });
@@ -103,7 +109,11 @@ test("rolls back chat context from a retained turn and merges a fork's findings 
   await focusAppWindow(app.electronApp, page);
   await expect(page.getByRole("heading", { name: TITLE, level: 1 })).toBeVisible();
   await send(FIRST);
+  const rewritten = join(app.workspaceDirectory, ...REWRITE_PATH);
+  const original = readFileSync(rewritten, "utf8");
   await send(SECOND);
+  expect(readFileSync(rewritten, "utf8")).not.toBe(original);
+  await expect(page.getByText("Capturing changes…", { exact: true })).toHaveCount(0);
 
   const firstTurn = page.getByRole("region", { name: "Turn 1" });
   const secondTurn = page.getByRole("region", { name: "Turn 2" });
@@ -111,28 +121,57 @@ test("rolls back chat context from a retained turn and merges a fork's findings 
   await trigger.focus();
   await page.keyboard.press("Enter");
   const confirmation = firstTurn.getByRole("group", { name: "Confirm rollback" });
+  const restoreFiles = confirmation.getByRole("checkbox", { name: "Also restore files to this point" });
   await expect(confirmation).toContainText("Workspace files are not changed.");
-  await expect(confirmation.getByRole("button", { name: "Roll back", exact: true })).toBeFocused();
+  await expect(restoreFiles).not.toBeChecked();
+  await expect(confirmation.getByRole("button", { name: "Roll back context", exact: true })).toBeFocused();
+  await capture(info, "rollback-confirmation", async () => {
+    await expect(confirmation).toContainText("Workspace files are not changed.");
+    await expect(restoreFiles).not.toBeChecked();
+    await expect(confirmation.getByRole("button", { name: "Roll back context", exact: true })).toBeFocused();
+    await secondTurn.hover();
+    await expect(secondTurn.getByRole("button", { name: "Roll back to here" })).toBeVisible();
+    await expect(secondTurn.locator(".turn-meta-primary")).toHaveCSS("opacity", "1");
+  });
   await page.keyboard.press("Escape");
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await page.keyboard.press("Enter");
-  await capture(info, "rollback-confirmation", async () => {
-    await expect(confirmation).toContainText("Workspace files are not changed.");
-    await expect(confirmation.getByRole("button", { name: "Roll back", exact: true })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(restoreFiles).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(restoreFiles).toBeChecked();
+  const confirmFiles = confirmation.getByRole("button", { name: "Roll back context and files", exact: true });
+  await expect(confirmation).toContainText("Files changed by later turns are restored when it is safe.");
+  await page.keyboard.press("Tab");
+  await expect(confirmFiles).toBeFocused();
+  await capture(info, "rollback-files-confirmation", async () => {
+    await expect(restoreFiles).toBeChecked();
+    await expect(confirmFiles).toBeFocused();
     await secondTurn.hover();
     await expect(secondTurn.getByRole("button", { name: "Roll back to here" })).toBeVisible();
     await expect(secondTurn.locator(".turn-meta-primary")).toHaveCSS("opacity", "1");
   });
   await page.keyboard.press("Enter");
 
+  const rollbackStatus = firstTurn.getByRole("status")
+    .filter({ hasText: /^Rolled back 1 later turn\. The next message starts a fresh provider session with the retained history\. Files restored\./u });
   await expect(firstTurn.getByRole("alert")).toHaveCount(0);
-  await expect(firstTurn.getByRole("status").filter({ hasText: /^Rolled back 1 later turn\./u })).toBeVisible();
+  await expect(rollbackStatus).toBeVisible();
+  await expect(rollbackStatus.locator(".history-notice")).toHaveCount(0);
+  await expect(firstTurn.getByText("Files restored", { exact: true })).toBeVisible();
+  await expect(rollbackStatus).toContainText("Restored 1 file changed by the rolled-back turns.");
+  await expect(rollbackStatus).not.toContainText("Kept");
+  await expect.poll(() => readFileSync(rewritten, "utf8")).toBe(original);
   await expect(trigger).toBeFocused();
   await expect(secondTurn.getByText("Rolled back · not in context", { exact: true })).toBeVisible();
   await expect(secondTurn.getByRole("button", { name: "Roll back to here" })).toHaveCount(0);
   await expect(secondTurn).toHaveClass(/is-rolled-back/u);
   await expect(page.getByText(SECOND, { exact: true })).toBeVisible();
+  const recoveryCheckpoint = firstTurn.getByRole("button", { name: "Restore checkpoint: Before file restore", exact: true });
+  await expect(recoveryCheckpoint).toBeVisible();
+  await expect(recoveryCheckpoint).toBeEnabled();
+  await expect(page.getByText("Recovered legacy history", { exact: true })).toHaveCount(0);
   const assertRetainedHistory = async (): Promise<void> => {
     await firstTurn.getByRole("button", { name: "Fork from here" }).focus();
     await secondTurn.hover();
@@ -143,15 +182,37 @@ test("rolls back chat context from a retained turn and merges a fork's findings 
     await expect(secondTurn).toHaveClass(/is-rolled-back/u);
     await expect(secondTurn.getByRole("button", { name: "Roll back to here" })).toHaveCount(0);
     await expect(page.getByText(SECOND, { exact: true })).toBeVisible();
+    await expect(recoveryCheckpoint).toBeVisible();
+    await expect(page.getByText("Recovered legacy history", { exact: true })).toHaveCount(0);
   };
   await capture(info, "rollback-retained-turn", async () => {
     await assertRetainedHistory();
-    await expect(firstTurn.getByRole("status").filter({ hasText: /^Rolled back 1 later turn\./u })).toBeVisible();
+    await expect(rollbackStatus).toBeVisible();
   });
 
   await firstTurn.getByRole("button", { name: "Fork from here" }).click();
   await expect(page.getByRole("heading", { name: `${TITLE} fork`, level: 1 })).toBeVisible();
   await send(FORK_REQUEST);
+  const forkTurn = page.getByRole("region", { name: "Turn 1" });
+  const mergeThrough = forkTurn.getByRole("button", { name: "Merge findings up to here" });
+  await mergeThrough.focus();
+  await page.keyboard.press("Enter");
+  const mergeConfirmation = forkTurn.getByRole("group", { name: "Confirm merge" });
+  await expect(mergeConfirmation.getByRole("button", { name: "Merge findings", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(mergeConfirmation).toHaveCount(0);
+  await expect(mergeThrough).toBeFocused();
+  await page.keyboard.press("Enter");
+  await capture(info, "fork-merge-up-to-here", async () => {
+    await expect(mergeConfirmation).toContainText("Findings from this fork up to this turn are attached to the source chat's next message.");
+    await expect(mergeConfirmation.getByRole("button", { name: "Merge findings", exact: true })).toBeFocused();
+  });
+  await page.keyboard.press("Enter");
+  await expect(forkTurn.getByRole("alert")).toHaveCount(0);
+  await expect(forkTurn.getByRole("status").filter({ hasText: "Attached 2 messages from 1 turn to the source chat's next message." }))
+    .toBeVisible();
+  await expect(mergeThrough).toBeFocused();
+
   const lineage = page.getByRole("region", { name: "Fork lineage" });
   const merge = lineage.getByRole("button", { name: "Merge findings into source chat" });
   await merge.focus();
@@ -178,6 +239,22 @@ test("rolls back chat context from a retained turn and merges a fork's findings 
     await expect(composer.getByText(`${TITLE} fork`, { exact: false })).toBeVisible();
     await assertRetainedHistory();
   });
+
+  const titleButton = page.locator(".header-title-button");
+  await titleButton.click();
+  await page.getByRole("menuitem", { name: "Roll back to chat start…" }).focus();
+  await page.keyboard.press("Enter");
+  const startConfirmation = page.getByRole("region", { name: "Chat start rollback" })
+    .getByRole("group", { name: "Confirm rollback to chat start" });
+  await expect(startConfirmation.getByRole("button", { name: "Roll back context", exact: true })).toBeFocused();
+  await capture(info, "rollback-chat-start-confirmation", async () => {
+    await expect(startConfirmation).toContainText("Every turn stays visible but leaves this chat's context.");
+    await expect(startConfirmation.getByRole("checkbox", { name: "Also restore files to this point" })).not.toBeChecked();
+    await expect(startConfirmation.getByRole("button", { name: "Roll back context", exact: true })).toBeFocused();
+  });
+  await page.keyboard.press("Escape");
+  await expect(startConfirmation).toHaveCount(0);
+  await expect(titleButton).toBeFocused();
 
   const store = openStore();
   try {

@@ -141,6 +141,9 @@ function ContextPreview({
           ? [`${supplement.omittedFiles} more ${supplement.omittedFiles === 1 ? "file" : "files"}`]
           : []),
         ...(supplement.commands ?? []),
+        ...(supplement.omittedCommands
+          ? [`${supplement.omittedCommands} more ${supplement.omittedCommands === 1 ? "command" : "commands"}`]
+          : []),
       ]
     : [];
   const gapAt = (index: number): React.JSX.Element | null => (

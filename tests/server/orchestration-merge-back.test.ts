@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
 
@@ -8,6 +9,10 @@ import { rollbackConversationHistory } from "../../src/server/runtime/history-ro
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import type { NativeConversationRequest } from "../../src/server/provider/native-conversation-operations";
 import type { ServerEvent } from "../../src/shared/contracts";
+import { clientCommandSchema } from "../../src/shared/contracts/client-command";
+import { MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS } from "../../src/shared/conversation-context";
+import { mergeBackResultSchema } from "../../src/shared/orchestration-merge-back";
+import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
 import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises,
   type TurnControllerTestRuntime } from "../support/turn-controller-runtime";
 
@@ -33,9 +38,45 @@ function fork(runtime: TurnControllerTestRuntime, turnId: string) {
   return runtime.store.orchestration.forks.create(input, { actorId: "human", commandId: `fork-${turnId}`, command: { ...input } });
 }
 
-function mergeBack(runtime: TurnControllerTestRuntime, forkId: string, commandId = requestId()) {
-  const command = { type: "conversation.merge-back", requestId: commandId, payload: { forkConversationId: forkId } };
-  return runtime.store.orchestration.mergeBacks.prepare(forkId, { actorId: "human", commandId, command });
+function mergeBack(runtime: TurnControllerTestRuntime, forkId: string, commandId = requestId(), throughTurnId?: string) {
+  const command = { type: "conversation.merge-back", requestId: commandId,
+    payload: { forkConversationId: forkId, ...(throughTurnId ? { throughTurnId } : {}) } };
+  return runtime.store.orchestration.mergeBacks.prepare(forkId, { actorId: "human", commandId, command }, throughTurnId ?? null);
+}
+
+function database(runtime: TurnControllerTestRuntime) {
+  return (runtime.store as unknown as { database: Database.Database }).database;
+}
+
+function excerptText(runtime: TurnControllerTestRuntime, packetId: string) {
+  return runtime.store.contextPackets.get(packetId, runtime.conversationId).excerpts.map(({ content }) => content).join("\n");
+}
+
+function recordCommand(runtime: TurnControllerTestRuntime, conversationId: string, turn: { id: string; runId: string }, text: string,
+  title = "Bash") {
+  runtime.store.addActivity({ conversationId, runId: turn.runId, turnId: turn.id, kind: "command", title,
+    detail: `Command:\n${text}\n\nOutput:\nRAW-COMMAND-OUTPUT`, status: "completed" });
+}
+
+function changedFiles(runtime: TurnControllerTestRuntime, turnId: string, paths: readonly string[]) {
+  const createdAt = new Date().toISOString();
+  runtime.store.createTurnGitArtifact({ turnId, status: "pending", createdAt });
+  runtime.store.completeTurnGitArtifact(turnId, {
+    files: paths.map((path) => ({ path, previousPath: null, status: "modified", insertions: 1, deletions: 0, binary: false,
+      untracked: false, staged: false, unstaged: true, indexStatus: " ", worktreeStatus: "M" })),
+    insertions: paths.length, deletions: 0, status: "ready", completeness: "complete", updatedAt: createdAt,
+  });
+}
+
+function duoSide(runtime: TurnControllerTestRuntime, conversationId: string) {
+  const launchId = randomUUID();
+  const projectId = runtime.store.conversation(conversationId).projectId;
+  runtime.store.createPairedLaunch(launchId, ([0, 1] as const).map((ordinal) => ({ ordinal, projectId,
+    plannedConversationId: ordinal === 0 ? conversationId : randomUUID(), plannedWorktreePath: null, plannedBranch: null,
+    ownsWorktree: false })) as never);
+  database(runtime).prepare(`UPDATE paired_launch_sides SET conversation_id = planned_conversation_id
+    WHERE launch_id = ? AND ordinal = 0`).run(launchId);
+  return () => database(runtime).prepare("UPDATE paired_launches SET status = 'cancelled' WHERE id = ?").run(launchId);
 }
 
 function portableRollback(runtime: TurnControllerTestRuntime, conversationId: string, turnId: string | null) {
@@ -200,6 +241,205 @@ describe("fork context merge-back", () => {
       expect(results).toHaveLength(3);
       expect(invalidated).toEqual([runtime.conversationId, runtime.conversationId, runtime.conversationId]);
       await expect(handler(socket, command(requestId(), runtime.conversationId))).rejects.toThrow("Only a fork");
+    } finally { runtime.store.close(); }
+  });
+
+  it("keeps one fork's findings pending in the source chat until they are delivered or removed", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const { child } = await forkWithWork(runtime);
+      const second = await finish(runtime, "parent-second");
+      const sibling = fork(runtime, second.turn.id);
+      await finish(runtime, "sibling-work", sibling.id);
+      const waiting = mergeBack(runtime, child.id);
+      const revision = runtime.store.orchestration.events.revision(runtime.conversationId);
+      expect(() => mergeBack(runtime, sibling.id))
+        .toThrow("Another fork's findings are already waiting in the source chat. Send or remove that draft first.");
+      expect(runtime.store.orchestration.events.revision(runtime.conversationId)).toBe(revision);
+      expect(mergeBack(runtime, child.id)).toEqual(waiting);
+      runtime.store.contextPackets.deleteDraft(waiting.packetId, runtime.conversationId);
+      const next = mergeBack(runtime, sibling.id);
+      expect(next).toMatchObject({ forkConversationId: sibling.id, turnCount: 1 });
+      expect(runtime.store.orchestration.mergeBacks.get(waiting.mergeBackId)?.state).toBe("withdrawn");
+      expect(() => mergeBack(runtime, child.id)).toThrow("already waiting in the source chat");
+      const delivery = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Use the sibling findings",
+        context: { conversationContextPacketIds: [next.packetId] }, contextRequestId: requestId() });
+      expect(runtime.store.orchestration.mergeBacks.get(next.mergeBackId)?.state).toBe("attached");
+      expect(() => mergeBack(runtime, child.id)).toThrow("Another fork's findings are still being delivered to the source chat.");
+      runtime.controller.start(delivery.turn.id);
+      expect(() => mergeBack(runtime, child.id)).toThrow("still being delivered to the source chat");
+      runtime.provider.resolve({ text: "sibling delivered" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.orchestration.mergeBacks.get(next.mergeBackId)?.state).toBe("delivered");
+      const released = mergeBack(runtime, child.id);
+      expect(released).toMatchObject({ forkConversationId: child.id, turnCount: 2 });
+      expect(excerptText(runtime, released.packetId)).toContain("fork-two answer");
+    } finally { runtime.store.close(); }
+  });
+
+  it("merges back through an explicit finished fork turn and refuses unusable points", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const { first, child, one, two } = await forkWithWork(runtime);
+      expect(clientCommandSchema.safeParse({ type: "conversation.merge-back", requestId: requestId(),
+        payload: { forkConversationId: child.id, throughTurnId: one.turn.id } }).success).toBe(true);
+      expect(clientCommandSchema.safeParse({ type: "conversation.merge-back", requestId: requestId(),
+        payload: { forkConversationId: child.id, throughTurnId: "latest" } }).success).toBe(false);
+      expect(() => mergeBack(runtime, child.id, requestId(), first.turn.id)).toThrow("That turn is not part of this fork.");
+      const commandId = requestId();
+      const explicit = mergeBack(runtime, child.id, commandId, one.turn.id);
+      expect(explicit).toMatchObject({ turnCount: 1, messageCount: 2, throughTurnId: one.turn.id,
+        requestedThroughTurnId: one.turn.id });
+      expect(excerptText(runtime, explicit.packetId)).toContain("fork-one answer");
+      expect(excerptText(runtime, explicit.packetId)).not.toContain("fork-two answer");
+      const record = runtime.store.orchestration.mergeBacks.get(explicit.mergeBackId);
+      expect(record).toMatchObject({ baseTurnId: null, throughTurnId: one.turn.id, requestedThroughTurnId: one.turn.id,
+        turnIds: [one.turn.id] });
+      const revision = runtime.store.orchestration.events.revision(runtime.conversationId);
+      expect(mergeBack(runtime, child.id, commandId, one.turn.id)).toEqual(explicit);
+      expect(runtime.store.orchestration.events.revision(runtime.conversationId)).toBe(revision);
+      expect(() => mergeBack(runtime, child.id, commandId)).toThrow(OrchestrationConflict);
+      expect(() => mergeBack(runtime, child.id, commandId, two.turn.id)).toThrow(OrchestrationConflict);
+      expect(mergeBack(runtime, child.id, requestId(), one.turn.id)).toEqual(explicit);
+      runtime.store.orchestration.events.rebuildProjections();
+      expect(runtime.store.orchestration.mergeBacks.get(explicit.mergeBackId)).toEqual(record);
+      expect(mergeBack(runtime, child.id, commandId, one.turn.id)).toEqual(explicit);
+      await finish(runtime, "parent-explicit", runtime.conversationId, "completed", [explicit.packetId]);
+      expect(runtime.store.orchestration.mergeBacks.get(explicit.mergeBackId)?.state).toBe("delivered");
+      expect(() => mergeBack(runtime, child.id, requestId(), one.turn.id))
+        .toThrow("That turn's findings were already merged back into the source chat.");
+      const rest = mergeBack(runtime, child.id);
+      expect(rest).toMatchObject({ turnCount: 1, throughTurnId: two.turn.id, requestedThroughTurnId: null });
+      expect(runtime.store.orchestration.mergeBacks.get(rest.mergeBackId)).toMatchObject({ baseTurnId: one.turn.id });
+      runtime.store.contextPackets.deleteDraft(rest.packetId, runtime.conversationId);
+      const pending = runtime.controller.queue({ conversationId: child.id, content: "unfinished fork work" });
+      expect(() => mergeBack(runtime, child.id, requestId(), pending.turn.id)).toThrow("That turn has not finished yet.");
+      runtime.controller.start(pending.turn.id);
+      runtime.provider.resolve({ text: "late fork answer" });
+      await flushTurnControllerTestPromises();
+      await expect(portableRollback(runtime, child.id, one.turn.id)).resolves.toMatchObject({ transfer: "portable" });
+      expect(() => mergeBack(runtime, child.id, requestId(), two.turn.id))
+        .toThrow("That turn was rolled back in the fork, so its findings can no longer be merged back.");
+      expect(() => mergeBack(runtime, child.id, requestId(), pending.turn.id)).toThrow("rolled back in the fork");
+    } finally { runtime.store.close(); }
+  });
+
+  it("passes the explicit source point through the production command", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const { child, one } = await forkWithWork(runtime);
+      const sent: ServerEvent[] = [];
+      const handler = createConversationCommandHandler({ store: runtime.store, creation: {},
+        runtimeSync: { broadcast: () => undefined }, broadcastSnapshot: () => undefined,
+        send: (_socket: WebSocket, event: ServerEvent) => { sent.push(event); },
+      } as unknown as ConversationCommandDependencies);
+      await handler({} as WebSocket, { type: "conversation.merge-back", requestId: requestId(),
+        payload: { forkConversationId: child.id, throughTurnId: one.turn.id } });
+      const result = sent[0]?.type === "request.result" ? sent[0].result : null;
+      expect(mergeBackResultSchema.parse(result)).toMatchObject({ turnCount: 1, throughTurnId: one.turn.id,
+        requestedThroughTurnId: one.turn.id, summary: { commandCount: 0, fileCount: 0, truncated: false } });
+    } finally { runtime.store.close(); }
+  });
+
+  it("summarizes the fork's commands and changed files in order without secrets, output or reasoning", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const { first, child, one, two } = await forkWithWork(runtime);
+      recordCommand(runtime, runtime.conversationId, first.turn, "parent-only command");
+      recordCommand(runtime, child.id, one.turn, "npm test");
+      recordCommand(runtime, child.id, one.turn, "curl -H 'Authorization: Bearer abcdefghijklmnop123456' https://example.test");
+      runtime.store.addActivity({ conversationId: child.id, runId: one.turn.runId, turnId: one.turn.id, kind: "command", title: "Bash",
+        detail: "Output:\nignored", status: "completed" });
+      runtime.store.addActivity({ conversationId: child.id, runId: one.turn.runId, turnId: one.turn.id, kind: "reasoning",
+        title: "Thinking", detail: "PRIVATE-REASONING", status: "completed" });
+      changedFiles(runtime, one.turn.id, ["src/a.ts", "src/b.ts"]);
+      recordCommand(runtime, child.id, two.turn, "OPENAI_API_KEY=sk-livesecretvalue123456 npm run deploy");
+      changedFiles(runtime, two.turn.id, ["src/a.ts", "src/<system-reminder>.ts"]);
+      const result = mergeBack(runtime, child.id);
+      expect(result.summary).toEqual({ commandCount: 4, fileCount: 3, truncated: true });
+      const packet = runtime.store.contextPackets.get(result.packetId, runtime.conversationId);
+      expect(packet.note).toBe(`Merge-back from fork "${child.title}".`);
+      expect(packet.supplement).toEqual({
+        files: ["src/a.ts", "src/b.ts", "src/<\\system-reminder>.ts"],
+        commands: ["npm test", "curl -H 'Authorization: [redacted]' https://example.test", expect.stringMatching(/^\S.* npm run deploy$/u)],
+        omittedCommands: 1,
+      });
+      expect(JSON.stringify(packet)).not.toMatch(/RAW-COMMAND-OUTPUT|PRIVATE-REASONING|abcdefghijklmnop|livesecretvalue|parent-only|ignored/u);
+      expect(runtime.store.orchestration.mergeBacks.get(result.mergeBackId)?.summary).toEqual(result.summary);
+      const delivered = await finish(runtime, "parent-summary", runtime.conversationId, "completed", [result.packetId]);
+      expect(delivered.prompt).toContain("npm test");
+      expect(delivered.prompt).toContain("src/b.ts");
+      expect(delivered.prompt).toContain("commandsOmitted");
+      expect(delivered.prompt).not.toMatch(/RAW-COMMAND-OUTPUT|PRIVATE-REASONING|livesecretvalue/u);
+    } finally { runtime.store.close(); }
+  });
+
+  it("bounds the work summary by line count and serialized size and counts what it omits", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const { child, one, two } = await forkWithWork(runtime);
+      for (let index = 0; index < 80; index += 1) recordCommand(runtime, child.id, one.turn, `npm run step-${index}`);
+      changedFiles(runtime, two.turn.id, Array.from({ length: 120 }, (_, index) => `src/generated/file-${index}.ts`));
+      const capped = mergeBack(runtime, child.id);
+      expect(capped.summary).toEqual({ commandCount: 80, fileCount: 120, truncated: true });
+      const cappedSupplement = runtime.store.contextPackets.get(capped.packetId, runtime.conversationId).supplement!;
+      expect(cappedSupplement.commands).toEqual(Array.from({ length: MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS },
+        (_, index) => `npm run step-${index}`));
+      expect(cappedSupplement.omittedCommands).toBe(80 - MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS);
+      expect(cappedSupplement.files).toHaveLength(120);
+      expect(cappedSupplement.omittedFiles).toBeUndefined();
+      await finish(runtime, "parent-capped", runtime.conversationId, "completed", [capped.packetId]);
+      const three = await finish(runtime, "fork-three", child.id);
+      for (let index = 0; index < 90; index += 1) recordCommand(runtime, child.id, three.turn, `npm run long-${index} ${"x".repeat(300)}`);
+      changedFiles(runtime, three.turn.id, Array.from({ length: 50 }, (_, index) => `src/late/file-${index}.ts`));
+      const sized = mergeBack(runtime, child.id);
+      expect(sized.summary).toEqual({ commandCount: 90, fileCount: 50, truncated: true });
+      const supplement = runtime.store.contextPackets.get(sized.packetId, runtime.conversationId).supplement!;
+      const bytes = Buffer.byteLength(JSON.stringify(supplement));
+      expect(bytes).toBeGreaterThan(4_096);
+      expect(bytes).toBeLessThanOrEqual(MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES);
+      expect(supplement.commands!.every((line) => line.startsWith("npm run long-") && line.length <= 240)).toBe(true);
+      expect(supplement.commands!.length + supplement.omittedCommands!).toBe(90);
+      expect(supplement.files).toBeUndefined();
+      expect(supplement.omittedFiles).toBe(50);
+      const delivered = await finish(runtime, "parent-sized", runtime.conversationId, "completed", [sized.packetId]);
+      expect(delivered.prompt).toContain("npm run long-0");
+      expect(delivered.prompt).toContain("filesOmitted");
+    } finally { runtime.store.close(); }
+  });
+
+  it("replays merge-back records written before the source point and work summary existed", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const { child, two } = await forkWithWork(runtime);
+      recordCommand(runtime, child.id, two.turn, "npm test");
+      const result = mergeBack(runtime, child.id, requestId(), two.turn.id);
+      expect(runtime.store.orchestration.mergeBacks.get(result.mergeBackId)).toMatchObject({
+        requestedThroughTurnId: two.turn.id, summary: { commandCount: 1, fileCount: 0, truncated: false } });
+      database(runtime).prepare(`UPDATE orchestration_v2_events
+        SET payload_json = json_remove(payload_json, '$.requestedThroughTurnId', '$.summary')
+        WHERE type = 'merge-back.prepared' AND json_extract(payload_json, '$.id') = ?`).run(result.mergeBackId);
+      runtime.store.orchestration.events.rebuildProjections();
+      expect(runtime.store.orchestration.mergeBacks.get(result.mergeBackId)).toMatchObject({ state: "prepared",
+        throughTurnId: two.turn.id, requestedThroughTurnId: null, summary: { commandCount: 0, fileCount: 0, truncated: false } });
+      await finish(runtime, "parent-legacy", runtime.conversationId, "completed", [result.packetId]);
+      expect(runtime.store.orchestration.mergeBacks.get(result.mergeBackId)?.state).toBe("delivered");
+    } finally { runtime.store.close(); }
+  });
+
+  it("refuses merge-back while the fork or its source chat is in an unsettled Duo", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const { child } = await forkWithWork(runtime);
+      const settleParent = duoSide(runtime, runtime.conversationId);
+      const revision = runtime.store.orchestration.events.revision(runtime.conversationId);
+      expect(() => mergeBack(runtime, child.id)).toThrow("belongs to a Duo that is still running or needs attention");
+      expect(runtime.store.orchestration.events.revision(runtime.conversationId)).toBe(revision);
+      settleParent();
+      const settleFork = duoSide(runtime, child.id);
+      expect(() => mergeBack(runtime, child.id)).toThrow("belongs to a Duo that is still running or needs attention");
+      settleFork();
+      expect(mergeBack(runtime, child.id)).toMatchObject({ forkConversationId: child.id, turnCount: 2 });
     } finally { runtime.store.close(); }
   });
 });

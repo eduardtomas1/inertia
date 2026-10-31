@@ -1,4 +1,5 @@
 import { cursorSdkProviderMigration } from "./cursor-sdk-provider";
+import { conversationContextSupplementBoundMigration } from "./conversation-context-supplement-bound";
 import { limitResetMigration } from "./limit-reset";
 import { orchestrationV2Migration } from "./orchestration-v2";
 import { nativePiProviderMigration } from "./native-pi-provider";
@@ -69,4 +70,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   orchestrationV2Migration,
   nativePiProviderMigration,
   cursorSdkProviderMigration,
+  conversationContextSupplementBoundMigration,
 ];

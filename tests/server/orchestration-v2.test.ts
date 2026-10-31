@@ -234,33 +234,37 @@ describe("Orchestrator V2 real turn integration", () => {
 
   it("admits a durable start intent and claims it only once before provider execution", async () => {
     const runtime = await createTurnControllerTestRuntime();
-    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Inspect the project" });
-    const { orchestration } = runtime.store;
-    expect(orchestration.startIntent(queued.turn.runId)?.state).toBe("pending");
-    expect(orchestration.events.projection("run", queued.turn.runId)?.value).toMatchObject({
-      turnId: queued.turn.id, status: "queued", messageId: queued.message.id,
-    });
-    expect(runtime.controller.start(queued.turn.id)).toBe(true);
-    expect(runtime.controller.start(queued.turn.id)).toBe(false);
-    await flushTurnControllerTestPromises();
-    expect(orchestration.startIntent(queued.turn.runId)?.state).toBe("succeeded");
-    expect(orchestration.events.projection("run", queued.turn.runId)?.value).toMatchObject({ status: "starting" });
+    try {
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Inspect the project" });
+      const { orchestration } = runtime.store;
+      expect(orchestration.startIntent(queued.turn.runId)?.state).toBe("pending");
+      expect(orchestration.events.projection("run", queued.turn.runId)?.value).toMatchObject({
+        turnId: queued.turn.id, status: "queued", messageId: queued.message.id,
+      });
+      expect(runtime.controller.start(queued.turn.id)).toBe(true);
+      expect(runtime.controller.start(queued.turn.id)).toBe(false);
+      await flushTurnControllerTestPromises();
+      expect(orchestration.startIntent(queued.turn.runId)?.state).toBe("succeeded");
+      expect(orchestration.events.projection("run", queued.turn.runId)?.value).toMatchObject({ status: "starting" });
+    } finally { runtime.store.close(); }
   });
 
   it("rolls back user-visible admission when the orchestration commit fails", async () => {
     const runtime = await createTurnControllerTestRuntime();
-    const before = runtime.store.snapshot().messages.length;
-    const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "First" });
-    const input = {
-      id: "conflicting-turn", runId: "conflicting-run", conversationId: runtime.conversationId,
-      content: "Must roll back", providerId: first.turn.providerId, modelSelection: first.turn.modelSelection,
-      reasoningEffort: first.turn.reasoningEffort, interactionMode: first.turn.interactionMode,
-      accessMode: first.turn.accessMode, configurationRevision: first.turn.configurationRevision,
-      association: "authoritative" as const,
-    };
-    expect(() => runtime.store.beginOrchestratedAgentTurn(input)).toThrow();
-    expect(runtime.store.snapshot().messages.length).toBe(before + 1);
-    expect(runtime.store.agentTurnForRun(input.runId)).toBeNull();
+    try {
+      const before = runtime.store.snapshot().messages.length;
+      const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "First" });
+      const input = {
+        id: "conflicting-turn", runId: "conflicting-run", conversationId: runtime.conversationId,
+        content: "Must roll back", providerId: first.turn.providerId, modelSelection: first.turn.modelSelection,
+        reasoningEffort: first.turn.reasoningEffort, interactionMode: first.turn.interactionMode,
+        accessMode: first.turn.accessMode, configurationRevision: first.turn.configurationRevision,
+        association: "authoritative" as const,
+      };
+      expect(() => runtime.store.beginOrchestratedAgentTurn(input)).toThrow();
+      expect(runtime.store.snapshot().messages.length).toBe(before + 1);
+      expect(runtime.store.agentTurnForRun(input.runId)).toBeNull();
+    } finally { runtime.store.close(); }
   });
 });
 

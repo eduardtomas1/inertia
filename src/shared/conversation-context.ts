@@ -11,6 +11,8 @@ export const MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET = 3;
 export const MAX_CONVERSATION_CONTEXT_TURN_BYTES =
   MAX_CONVERSATION_CONTEXT_BLOCK_BYTES * MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET;
 export const MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE = 8;
+export const MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES = 8 * 1024;
+export const MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS = 64;
 
 export type ConversationContextWorkspaceRelation =
   | "same-workspace"
@@ -42,6 +44,7 @@ export interface ConversationContextSupplement {
   files?: string[];
   omittedFiles?: number;
   commands?: string[];
+  omittedCommands?: number;
   moved?: string;
 }
 

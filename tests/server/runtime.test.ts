@@ -1979,7 +1979,7 @@ process.exit(child.status ?? 1);
     writeNodeFlagExecutable(ambientBin, "claude", `
 require("node:fs").appendFileSync(${JSON.stringify(attempted)}, process.argv.slice(2).join(" ") + "\\n");
 setTimeout(() => {
-  process.stdout.write(process.argv[2] === "--version" ? "Claude Code 2.1.263\\n" : '{"loggedIn":false}\\n');
+  process.stdout.write(process.argv[2] === "--version" ? "Claude Code 2.1.320\\n" : '{"loggedIn":false}\\n');
 }, 3500);
 `);
     // Reproduce an unrelated installed CLI without consulting any real user

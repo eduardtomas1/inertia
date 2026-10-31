@@ -15,6 +15,7 @@ import type {
   ProviderModel,
   ProviderRateLimit,
   ProviderSkillInput,
+  ProviderUpdateRequirement,
   SubagentTaskUsage,
   SubagentTraceStatus,
   ThreadUsageSnapshot,
@@ -60,6 +61,7 @@ export interface ProviderDetection {
   authState: ProviderAuthState;
   accountKind?: ProviderAccountKind;
   canRun: boolean;
+  updateRequired?: ProviderUpdateRequirement;
   /** Exact executable/version protocol probes succeeded independently of auth. */
   protocolVerified?: boolean;
   /** Fixed probe owner completion; false poisons clean runtime shutdown. */

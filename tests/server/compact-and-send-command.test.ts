@@ -245,6 +245,19 @@ function sentResult(send: ReturnType<typeof fixture>["send"]) {
   return send.mock.calls.map(([, event]) => event).find((event) => event.type === "request.result");
 }
 
+function compactionFailed(message: string) {
+  return {
+    type: "request.result",
+    requestId,
+    result: {
+      kind: "conversation.compact-and-send",
+      conversationId,
+      outcome: "compaction-failed",
+      message: expect.stringContaining(message),
+    },
+  };
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -467,20 +480,23 @@ describe("conversation.compact-and-send", () => {
   });
 
   it("does not claim attachments for a request refused by the cheap checks", async () => {
-    const { dependencies, attachmentResolver } = fixture({ preset: "kimi-code" });
+    const { dependencies, attachmentResolver, send } = fixture({ preset: "kimi-code" });
     await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, compactAndSend()))
-      .rejects.toThrow("Kimi manages its own context");
+      .resolves.toBe("handled");
+    expect(sentResult(send)).toEqual(compactionFailed("Kimi manages its own context"));
     expect(attachmentResolver.resolvePayloads).not.toHaveBeenCalled();
   });
 
   it("checks the Claude sign-in again before compacting a native route", async () => {
-    const { dependencies, compact, providerTerminalResumes, provider } = fixture({ preset: "native", routeKind: "account", accountKind: "Console API key" });
+    const { dependencies, compact, providerTerminalResumes, provider, send, queue } = fixture({ preset: "native", routeKind: "account", accountKind: "Console API key" });
     const refreshProviderAccount = vi.fn(async () => {
       Object.assign(provider, { accountKind: "Claude account" });
     });
     dependencies.refreshProviderAccount = refreshProviderAccount;
     await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, compactAndSend()))
-      .rejects.toThrow("Console API key");
+      .resolves.toBe("handled");
+    expect(sentResult(send)).toEqual(compactionFailed("Console API key"));
+    expect(queue).not.toHaveBeenCalled();
     expect(refreshProviderAccount).toHaveBeenCalledExactlyOnceWith("claude");
     expect(compact).not.toHaveBeenCalled();
     expect(providerTerminalResumes.acquire).not.toHaveBeenCalled();
@@ -518,12 +534,41 @@ describe("conversation.compact-and-send", () => {
     ["a custom gateway", { preset: "custom" }, "Custom gateways do not publish a prompt cache lifetime"],
     ["native Claude on a Claude account", { preset: "native", routeKind: "account" as const, accountKind: "Claude account" as const }, "Console API key"],
     ["native Codex", { providerId: "codex" as const, preset: "native", protocol: "openai-responses", routeKind: "account" as const, accountKind: "ChatGPT account" as const }, "Anthropic or OpenAI API key"],
-  ])("refuses %s before taking the chat lock", async (_label, options, message) => {
-    const { dependencies, compact, providerTerminalResumes } = fixture(options);
+  ])("offers sending without compacting for %s before taking the chat lock", async (_label, options, message) => {
+    const { dependencies, compact, providerTerminalResumes, send, queue } = fixture(options);
     await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, compactAndSend()))
-      .rejects.toThrow(message);
+      .resolves.toBe("handled");
+    expect(sentResult(send)).toEqual(compactionFailed(message));
     expect(compact).not.toHaveBeenCalled();
+    expect(queue).not.toHaveBeenCalled();
     expect(providerTerminalResumes.acquire).not.toHaveBeenCalled();
+  });
+
+  it("offers sending without compacting for a chat with no provider session", async () => {
+    const { dependencies, compact, providerTerminalResumes, send, queue, attachmentResolver } = fixture({ sessionId: null });
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, compactAndSend()))
+      .resolves.toBe("handled");
+    expect(sentResult(send)).toEqual(compactionFailed("This chat does not have a provider session to compact yet. Nothing was sent."));
+    expect(compact).not.toHaveBeenCalled();
+    expect(queue).not.toHaveBeenCalled();
+    expect(providerTerminalResumes.acquire).not.toHaveBeenCalled();
+    expect(attachmentResolver.resolvePayloads).not.toHaveBeenCalled();
+  });
+
+  it("offers sending without compacting when the next turn must start a new provider session", async () => {
+    const { dependencies, compact, providerTerminalResumes, send, queue, store, attachmentResolver } = fixture();
+    const previous = store.latestAgentTurnForConversation();
+    store.latestAgentTurnForConversation.mockReturnValue({
+      ...previous,
+      continuationIdentity: { ...previous.continuationIdentity, backendProfileId: "an-earlier-account-route" },
+    } as never);
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, compactAndSend()))
+      .resolves.toBe("handled");
+    expect(sentResult(send)).toEqual(compactionFailed("The model backend changed. The next turn will start a fresh provider session and preserve this chat's history. Nothing was sent."));
+    expect(compact).not.toHaveBeenCalled();
+    expect(queue).not.toHaveBeenCalled();
+    expect(providerTerminalResumes.acquire).not.toHaveBeenCalled();
+    expect(attachmentResolver.relinquishAll).toHaveBeenCalledExactlyOnceWith([attachment.id]);
   });
 
   it.each([
@@ -542,7 +587,6 @@ describe("conversation.compact-and-send", () => {
     ...(["billing", "authentication", "rate-limited"] as const).map((failureKind) =>
       [`a ${failureKind} failure`, { latestTurn: { status: "failed", failureKind } }, "The last turn stopped on a usage limit, billing, sign-in or rate-limit problem. Resolve it before compacting this chat."] as [string, FixtureOptions, string]),
     ["the setting turned off", { setting: "never" as const }, "Compacting on return is set to Never in Settings → Chats."],
-    ["a chat with no provider session", { sessionId: null }, "does not have a provider session"],
     ["an active turn", { turnActive: true }, "Wait for the current provider"],
   ])("refuses %s", async (_label, options, message) => {
     const { dependencies, compact, providerTerminalResumes, send } = fixture(options);

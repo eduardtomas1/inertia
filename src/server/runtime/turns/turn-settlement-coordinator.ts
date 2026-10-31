@@ -274,14 +274,15 @@ export class TurnSettlementCoordinator {
     if (wonSettlement && (status === "failed" || status === "interrupted")) {
       // Emit only after authoritative settlement, carrying identity captured by
       // this turn. Never persist the failure message or provider output here.
+      const failureCode = terminalReason === "turn-start-failed" ? "provider.start-failed"
+        : failure?.phase === "auth" ? "provider.auth-failed"
+        : failure?.reason === "transport-closed" || failure?.reason === "rpc-timeout"
+          ? "provider.connection-failed" : "turn.failed";
       const usageLimitedEnding = status === "failed" && failure?.usageLimited === true
-        && !active.diagnosticFailureCode;
+        && !active.diagnosticFailureCode && failureCode === "turn.failed";
       try {
         if (!usageLimitedEnding) this.options.hooks.reportIncident?.({ correlationId: active.turn.id,
-          code: active.diagnosticFailureCode ?? (terminalReason === "turn-start-failed" ? "provider.start-failed"
-            : failure?.phase === "auth" ? "provider.auth-failed"
-            : failure?.reason === "transport-closed" || failure?.reason === "rpc-timeout"
-              ? "provider.connection-failed" : "turn.failed"),
+          code: active.diagnosticFailureCode ?? failureCode,
           outcome: "failed", context: {
             providerId: active.turn.providerId, projectId: active.conversation.projectId,
             conversationId: active.conversation.id, turnId: active.turn.id,

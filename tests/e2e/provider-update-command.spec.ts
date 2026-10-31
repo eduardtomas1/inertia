@@ -76,7 +76,11 @@ test("shows the Homebrew command instead of a native updater for a Homebrew Clau
   await app.resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Agents", exact: true }).click();
-  await page.getByRole("button", { name: "Configure Claude" }).click();
+  const configure = page.getByRole("button", { name: "Configure Claude" });
+  await expect(configure).toHaveAccessibleDescription(/Update required/u);
+  await configure.click();
+  await expect(page.getByText("Claude Code 0.0.1 is installed. Inertia needs 2.1.309 or newer", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect" })).toHaveCount(0);
   const updates = page.getByRole("group", { name: "Provider updates" });
   await updates.getByRole("button", { name: "Check" }).click();
   await expect(updates.locator("code")).toHaveText("brew upgrade --cask claude-code");
@@ -107,6 +111,7 @@ test("offers Update with Homebrew once the keg's own brew is present and compare
   await page.getByRole("button", { name: "Configure Claude" }).click();
   const updates = page.getByRole("group", { name: "Provider updates" });
   await updates.getByRole("button", { name: "Check" }).click();
+  await expect(page.getByRole("button", { name: "Configure Claude" })).toHaveAccessibleDescription(/Update required/u);
   await expect(updates).toContainText("Latest 0.0.2");
   await expect(updates.getByRole("button", { name: "Update", exact: true })).toBeVisible();
   await expect(updates.locator("code")).toHaveCount(0);

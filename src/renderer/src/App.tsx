@@ -271,6 +271,7 @@ export default function App(): React.JSX.Element {
     sendMessageToConversation,
     compactConversation: compactConversationById,
     compactAndSendToConversation,
+    refreshUsage,
     runQueueCommand,
     runLimitResetCommand,
     loadBackgroundTasks,
@@ -742,12 +743,6 @@ export default function App(): React.JSX.Element {
       type: "provider.refresh",
       payload: providerId ? { providerId } : {},
     }).catch(() => undefined);
-  }, [run]);
-  const refreshUsage = useCallback(async (providerId: ProviderId): Promise<void> => {
-    await run("provider.refresh", {
-      type: "provider.refresh",
-      payload: { providerId, scope: "usage" },
-    });
   }, [run]);
   const connectProvider = useCallback((
     providerId: ProviderId,

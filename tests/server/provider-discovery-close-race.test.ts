@@ -41,7 +41,7 @@ async function startProbe(terminateProcessTree: ProcessTreeTerminator) {
       child.emit("spawn");
       if (child === auth) authStarted();
       else {
-        child.stdout.emit("data", Buffer.from("Claude Code 1.0.0\n"));
+        child.stdout.emit("data", Buffer.from("2.1.320 (Claude Code)\n"));
         child.emit("close", 0, null);
       }
     });

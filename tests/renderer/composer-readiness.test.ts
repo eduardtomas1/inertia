@@ -251,6 +251,44 @@ describe("composer route readiness", () => {
     });
   });
 
+  it.each([
+    ["claude", "Claude", "2.1.150", "2.1.309", "Claude Code 2.1.150 is installed. Inertia needs 2.1.309 or newer because older versions ignore the restrictions Inertia sets and can write outside the project. Update Claude Code and refresh."],
+    ["opencode", "OpenCode", "1.18.21", "1.18.22", "OpenCode 1.18.21 is installed. Inertia needs 1.18.22 or newer because older versions let a website install packages through OpenCode's local server. Update OpenCode and refresh."],
+  ] as const)("refuses every %s route below Inertia's minimum version with the discovery reason", (id, label, version, minimumVersion, statusMessage) => {
+    const outdated = provider({
+      id,
+      label,
+      command: id,
+      version,
+      executable: `/opt/bin/${id}`,
+      authState: "unknown",
+      canRun: false,
+      updateRequired: { installedVersion: version, minimumVersion },
+      statusMessage,
+    });
+    const refused = {
+      ready: false,
+      transient: false,
+      badge: "Update needed",
+      title: `${label} cannot run this route`,
+      detail: statusMessage,
+      action: "refresh",
+    };
+    expect(composerRouteReadiness({
+      provider: outdated,
+      profile: undefined,
+      selection: providerNativeModelSelection({ providerId: id }),
+    })).toEqual(refused);
+    expect(composerRouteReadiness({
+      provider: outdated,
+      profile: profile(),
+      selection: customSelection(),
+    })).toEqual(refused);
+    expect(composerProviderReady(outdated, profile(), "team-model")).toBe(false);
+    expect(composerProviderReady({ ...outdated, updateRequired: undefined }, profile(), "team-model")).toBe(true);
+    expect(composerProviderReady(outdated, undefined)).toBe(false);
+  });
+
   it("lets the runtime renew stale or missing evidence and offers a test only after a failed probe", () => {
     const claude = provider({
       id: "claude",

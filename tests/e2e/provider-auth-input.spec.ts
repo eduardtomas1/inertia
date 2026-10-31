@@ -143,7 +143,7 @@ const select = (label, options, searchable) => new Promise((resolve) => {
 
 function claudeFake(state: string): string {
   return `${fakePrelude("claude", state)}
-if (args[0] === "--version") { console.log("2.1.0 (Claude Code)"); process.exit(0); }
+if (args[0] === "--version") { console.log("2.1.320 (Claude Code)"); process.exit(0); }
 if (args.join(" ") === "auth status --json") {
   const ok = signedIn();
   console.log(JSON.stringify(ok
@@ -258,7 +258,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
 
 function openCodeFake(state: string): string {
   return `${fakePrelude("opencode", state)}
-const VERSION = "1.18.10";
+const VERSION = "1.18.26";
 if (args[0] === "--version") { console.log(VERSION); process.exit(0); }
 if (args[0] === "serve" && args[1] === "--help") {
   console.log("opencode serve\\n\\nstarts a headless opencode server\\n\\nOptions:\\n  --port      port to listen on\\n  --hostname  hostname to listen on\\n  --pure      run without external plugins");

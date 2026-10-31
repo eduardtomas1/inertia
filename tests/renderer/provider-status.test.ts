@@ -99,12 +99,42 @@ describe("provider compatibility status", () => {
       ...ready,
       version: "1.1.0",
       canRun: false,
-      statusMessage: "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer; run 'agy update'",
+      statusMessage: "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer. Run 'agy update' and refresh.",
     };
     expect(providerStateLabel(outdated)).toBe("Update required");
     expect(providerSetupAction(outdated)).toBe("refresh");
+    expect(providerStateDetail(outdated)).toBe(outdated.statusMessage);
     expect(providerStateDetail({ ...ready, installState: "not-installed", statusMessage: null, version: null }))
       .toBe("Antigravity CLI was not found on this device.");
+  });
+
+  it.each([
+    ["claude", "Claude", "2.1.150", "2.1.309", "Claude Code 2.1.150 is installed. Inertia needs 2.1.309 or newer because older versions ignore the restrictions Inertia sets and can write outside the project. Update Claude Code and refresh."],
+    ["opencode", "OpenCode", "1.18.21", "1.18.22", "OpenCode 1.18.21 is installed. Inertia needs 1.18.22 or newer because older versions let a website install packages through OpenCode's local server. Update OpenCode and refresh."],
+  ] as const)("shows that %s needs an update instead of a sign-in below Inertia's minimum version", (id, label, version, minimumVersion, statusMessage) => {
+    const metadataState: ProviderInfo["metadataState"] = {
+      models: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+      rateLimits: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+    };
+    const outdated: ProviderInfo = {
+      id,
+      label,
+      command: id,
+      available: true,
+      version,
+      executable: `/opt/bin/${id}`,
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      updateRequired: { installedVersion: version, minimumVersion },
+      statusMessage,
+      models: [],
+      rateLimits: [],
+      metadataState,
+    };
+    expect(providerStateLabel(outdated)).toBe("Update required");
+    expect(providerSetupAction(outdated)).toBe("refresh");
+    expect(providerStateDetail(outdated)).toBe(statusMessage);
   });
 
   it("prefixes exactly one v whether or not the CLI printed one", () => {

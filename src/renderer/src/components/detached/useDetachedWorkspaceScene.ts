@@ -260,12 +260,7 @@ export function useDetachedWorkspaceScene({
         payload: { providerId },
       }).catch(() => undefined);
     },
-    refreshUsage: async (providerId: ProviderId): Promise<void> => {
-      await run("provider.refresh", {
-        type: "provider.refresh",
-        payload: { providerId, scope: "usage" },
-      });
-    },
+    refreshUsage: runtimeActions.refreshUsage,
     connectProvider: (providerId: ProviderId) =>
       handoff.openInMain({ kind: "provider-setup", providerId }),
     openProviderSetup: () => handoff.openInMain({ kind: "settings", page: "agents" }),

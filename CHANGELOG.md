@@ -2,6 +2,53 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Security
+
+- Chats no longer start on Claude Code older than 2.1.309 or OpenCode older
+  than 1.18.22. Older Claude Code ignores the restrictions Inertia sets and
+  can write outside the project; older OpenCode lets a website install
+  packages through its local server.
+  **Settings → Agents** shows *Update required* with the installed and
+  required versions, and the composer shows *Update needed* on every route
+  for that agent, API keys included, until you update it and refresh.
+  Inertia never starts the old version for sign-in, models, usage, skills or
+  terminal resume, and still offers its update.
+
+### Chats
+
+- **Compact and send** is offered only once the chat has a provider session
+  to compact. When the chat cannot be compacted, for example because its next
+  turn starts a new session after you changed the model backend, the draft
+  stays with **Send without compacting** instead of Enter failing every time.
+- **Send now** on a queued message waits while the chat compacts. One pressed
+  just as compacting started is sent when it ends, instead of being dropped.
+
+### Usage
+
+- A failed **Refresh usage** is reported once, in the Usage panel, instead of
+  also as an app-wide error. The usage clock stops while the window is hidden
+  and catches up when you come back.
+
+### Updates
+
+- A finished update in the sidebar strip, such as *Codex updated* or
+  *downloaded · Restart*, stays for its full five seconds with reduced motion
+  on or after the window was hidden, and waits while you point at it or focus
+  it.
+- The refresh icon no longer jumps when its wind-up turns into a spin or stops
+  abruptly when it coasts to rest.
+
+### Dependencies
+
+- Updated the Claude Agent SDK to 0.3.310 to match Claude Code 2.1.310. The
+  hook and skill-shell restrictions Inertia sets for every Claude turn are
+  honoured by Claude Code 2.1.309 or newer, which is now the minimum.
+- Private Connect saves its encrypted state with Electron's asynchronous
+  secure storage, ahead of Electron 46 removing the synchronous one. Existing
+  pairings keep working.
+
 ## 0.0.80 — 2026-10-28
 
 A chat's own window with the main window's tools, an agent Browser with its

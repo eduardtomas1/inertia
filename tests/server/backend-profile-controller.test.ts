@@ -210,6 +210,22 @@ describe("model backend profile controller", () => {
       runtimeStore.close();
     }
   });
+  it("refuses an external backend whose harness is older than Inertia supports", async () => {
+    const runtimeStore = await store();
+    try {
+      const profile = runtimeStore.saveModelBackendProfile(persistedCredentialProfile()).profile;
+      const controller = BackendProfileController.open({ store: runtimeStore });
+      const message = "Claude Code 2.1.150 is installed. Inertia needs 2.1.309 or newer because older versions ignore the restrictions Inertia sets and can write outside the project. Update Claude Code and refresh.";
+      await expect(controller.readiness(modelSelectionForBackendProfile(profile, "credential-model"), {
+        ...nativeProvider(), id: "claude", installState: "installed", available: true,
+        executable: "/opt/bin/claude", version: "2.1.150", authState: "unknown", canRun: false,
+        updateRequired: { installedVersion: "2.1.150", minimumVersion: "2.1.309" },
+        statusMessage: message,
+      })).resolves.toEqual({ ready: false, message });
+    } finally {
+      runtimeStore.close();
+    }
+  });
   it("reads credential status without mutating a recovery-blocked harness", async () => {
     const runtimeStore = await store();
     try {

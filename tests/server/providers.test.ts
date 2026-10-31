@@ -902,7 +902,7 @@ setInterval(() => {}, 1000);
       probeProcess: async (_candidate, args) => ({
         exitCode: 0,
         output: args[0] === "--version"
-          ? "opencode 1.18.10"
+          ? "opencode 1.18.26"
           : args[0] === "serve"
             ? "--pure run without external plugins"
             : "Credentials\n0 credentials",
@@ -930,7 +930,7 @@ setInterval(() => {}, 1000);
       probeProcess: async (_candidate, args) => ({
         exitCode: 0,
         output: args[0] === "--version"
-          ? "opencode 1.18.10"
+          ? "opencode 1.18.26"
           : args[0] === "serve"
             ? "--pure run without external plugins"
           : "Credentials\n0 credentials\nEnvironment\n1 environment variable",
@@ -951,7 +951,7 @@ setInterval(() => {}, 1000);
         return {
           exitCode: 0,
           output: args[0] === "--version"
-            ? "opencode 1.17.0"
+            ? "opencode 1.18.26"
             : "serve --hostname --port",
           started: true,
           timedOut: false,
@@ -961,7 +961,7 @@ setInterval(() => {}, 1000);
     })).resolves.toMatchObject({
       available: true,
       executable,
-      version: "1.17.0",
+      version: "1.18.26",
       installState: "installed",
       authState: "unknown",
       canRun: false,
@@ -1234,7 +1234,7 @@ setInterval(() => {}, 1000);
       installState: "installed",
       canRun: false,
       statusMessage:
-        "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer; run 'agy update'",
+        "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer. Run 'agy update' and refresh.",
     });
   });
 

@@ -7,6 +7,7 @@ import {
 } from "../../src/shared/model-routing";
 import type { ProviderRunInput } from "../../src/server/provider/contracts";
 import { createInertiaHarnessCapabilities } from "../../src/server/runtime/inertia-harness-capabilities";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "../../src/server/runtime/harness-capabilities";
 import {
   BUILD_MODE_INSTRUCTION,
   type HiddenProviderInstruction,
@@ -64,7 +65,7 @@ async function chatRuntime(
         harnessId: providerNativeHarnessId(providerId),
       },
     }],
-    harnessInstructionsForTurn: () => pack(),
+    capabilityOfferForTurn: () => ({ instructions: pack(), offer: FULL_HARNESS_CAPABILITY_OFFER }),
     ...(reportIncident ? { reportIncident } : {}),
   };
   const runtime = await createTurnControllerTestRuntime(hooks, {

@@ -81,14 +81,14 @@ Status vocabulary: **satisfied** (an Inertia file or test proves it),
 
 | sha | PR | Semantics | Inertia phase | Inertia status |
 | --- | --- | --- | --- | --- |
-| 50c1c5dc53 | #26901 | Side chats (forks with `lineage.sideChat`; see B.8). Generic changes in the same commit: (1) native fork refused when a later source run is active, at dispatch and again at turn start; (2) portable forks carry inherited ancestor rows; (3) fork and merge-back items pass a visibility filter dropping rolled-back runs and cancelled queued messages; (4) one pending merge-back per target across all forks; (5) a ready handoff whose target run was cancelled carries forward; (6) `thread.delete` cascades to side chats and gains `onlyIfUnused` | Phase 3 and polish; side chats in client parity | (1) satisfied: `src/server/runtime/fork-session-service.ts:48-61`, test `tests/server/orchestration-native-forks.test.ts:116`. (2) satisfied: `src/server/orchestration-v2/fork-history.ts:20-33`. (3) satisfied: `src/server/orchestration-v2/fork-history.ts:38-40`, `src/server/orchestration-v2/merge-back-repository.ts:159-163`; cancelled queued text stays in `queued_messages` (`src/server/persistence/queued-message-repository.ts:74`). (4) adopted; per-pair only at `src/server/orchestration-v2/merge-back-repository.ts:57-74`. (5) satisfied in effect: `src/server/orchestration-v2/backing-repository.ts:134,164`. (6) side chats assigned (see section E) |
+| 50c1c5dc53 | #26901 | Side chats (forks with `lineage.sideChat`; see B.8). Generic changes in the same commit: (1) native fork refused when a later source run is active, at dispatch and again at turn start; (2) portable forks carry inherited ancestor rows; (3) fork and merge-back items pass a visibility filter dropping rolled-back runs and cancelled queued messages; (4) one pending merge-back per target across all forks; (5) a ready handoff whose target run was cancelled carries forward; (6) `thread.delete` cascades to side chats and gains `onlyIfUnused` | Phase 3 and polish; side chats in client parity | (1) satisfied: `src/server/runtime/fork-session-service.ts:48-61`, test `tests/server/orchestration-native-forks.test.ts:116`. (2) satisfied: `src/server/orchestration-v2/fork-history.ts:20-33`. (3) satisfied: `src/server/orchestration-v2/fork-history.ts:38-40`, `src/server/orchestration-v2/merge-back-repository.ts:160-166`; cancelled queued text stays in `queued_messages` (`src/server/persistence/queued-message-repository.ts:74`). (4) satisfied: one pending merge-back per target chat across all forks (`src/server/orchestration-v2/merge-back-repository.ts:209-222`). (5) satisfied in effect: `src/server/orchestration-v2/backing-repository.ts:134,164`. (6) side chats assigned (see section E) |
 | 0804c60a9c | #23554 | Merge-back refused when the target has a preparing, starting, running, waiting or queued run, checked under the target's command lock (`apps/server/src/orchestration-v2/Orchestrator.ts:4419-4428`; test `apps/server/src/orchestration-v2/runtimeLayer.test.ts:1943`) | Phase 3 | different: visible draft packet delivered with the next explicit send; queued messages keep their captured context (`src/server/orchestration-v2/merge-back-repository.ts:40-98`; `tests/server/orchestration-merge-back.test.ts:103,182`) |
 | 7f005d4d8d | #24014 | A fork starts with `titleRegeneration: null` (`apps/server/src/orchestration-v2/ThreadForkService.ts:112-113`; test `apps/server/src/orchestration-v2/ThreadForkService.test.ts:166`) | Phase 3 | satisfied by construction: new conversation with an explicit title and no title-job state (`src/server/orchestration-v2/fork-repository.ts:73-79`); no focused test |
 | 28c7d3e767 | #23669 | `prepared-run.release` and `prepared-run.retry` refused when the run's provider instance is disabled for the project (`apps/server/src/orchestration-v2/ThreadManagementService.ts:728-742`) | Delegation and launch | not started |
 | 7f2ff41bc8 | #26035 | Native and MCP subagent children start with `autoSettleDisabledAt`, `pinnedAt` and `pinOrderKey` null (`packages/provider-core/src/server/subagentProjection.ts:85-87`) | Native child threads | not started |
 | 54d0a161bb | #25224 | Codex: a `turn/start` response naming a turn owned by another attempt (settled or active) raises a protocol error | Queues | assigned to the queue phase. Today `src/server/codex/app-server-run.ts:1185-1187` rejects only a mismatch with the current active turn and does not consult `completedTurnIds` (`src/server/codex/app-server-events.ts:115`) at start; whether one app-server serves several runs is unverified |
 | afb8619e1d | #27514 | Pi: `clear_queue` precedes `abort` on Stop; cleared steer and follow-up texts surface as a system notice | Queues | assigned to the queue phase. Ordering satisfied (`src/server/provider/pi-rpc-harness.ts:77`; `tests/server/pi-rpc-harness.test.ts:110,197-198`); no cleared-queue notice |
-| 1820fbe6bc | #27831 | Run-update and delegated-task subscribers use `forkScoped` and stop before the database closes (`apps/server/src/orchestration-v2/Orchestrator.ts:13602,13644`) | Restart and shutdown | satisfied in principle: the store closes last (`src/server/runtime-shutdown.ts:164-182`); lanes close in `src/server/index.ts:1125` |
+| 1820fbe6bc | #27831 | Run-update and delegated-task subscribers use `forkScoped` and stop before the database closes (`apps/server/src/orchestration-v2/Orchestrator.ts:13602,13644`) | Restart and shutdown | n/a today: Inertia has no V2 run-update or delegated-task subscribers to stop, so there is no equivalent mechanism yet. The store closes last (`src/server/runtime-shutdown.ts:174-182`) and the command lanes close in `src/server/index.ts:1125`; the rule applies once V2 publication (client-parity phase) adds subscribers |
 | e496db3a5e | #24634 | `autoArmLimitRecovery` arms with `autoResume:false`, `snooze:false` when a Stop reached the run before its usage-limit failure landed (`apps/server/src/orchestration-v2/Orchestrator.ts:13805-13835`; test `apps/server/src/mcp/TaskCancelUsageLimit.integration.test.ts`) | Usage-limit recovery | assigned to the recovery phase; `src/server/usage/limit-reset-scheduler.ts` is the pre-V2 user-scheduled model |
 | 63b0e3d82e | #21735 | A recovery whose reset is more than 24 h overdue is not freshly armed; exactly 24 h still arms (`apps/server/src/orchestration-v2/UsageLimitRecoveryWorker.ts:15,43`; tests `apps/server/src/orchestration-v2/UsageLimitRecoveryWorker.test.ts:96-118`) | Usage-limit recovery | assigned to the recovery phase |
 | 9b1d351ba0 | #27711 | (a) Command reads omit settled subagents unless active or named in `except` (`apps/server/src/orchestration-v2/ProjectionStore.ts:345-349`); migration 075 indexes `completion_delivery_state`. (b) Completion notices count the whole cohort (`apps/server/src/orchestration-v2/Orchestrator.ts:1152-1153`). (c) Child ordinals come from the subagent count (`apps/server/src/orchestration-v2/Orchestrator.ts:9743`). (d) MCP task reads load only named tasks. (e) `DueHint` extracted to `apps/server/src/scheduling/DueHint.ts` and reused by the usage-limit sweep (`apps/server/src/orchestration-v2/UsageLimitRecoveryWorker.ts:81-146`) | Delegation, recovery, agent tools, scheduling | not started |
@@ -165,11 +165,18 @@ Inertia status is not assessed unless stated.
    (`apps/server/src/orchestration-v2/ProviderTurnStartService.ts:1122-1206`).
    Tests: `apps/server/src/orchestration-v2/CommandPolicy.test.ts:270`,
    `apps/server/src/orchestration-v2/ProviderTurnStartService.test.ts:1250`.
-   Inertia: satisfied. A running source, pending cleanup or changed workspace
+   Inertia: the busy-source rule is satisfied. A running source, pending cleanup or changed workspace
    selects portable with `native-source-unavailable`; a held admission lease
    or terminal-resume reservation selects portable with `native-source-busy`
    (`src/server/runtime/fork-session-service.ts:48-61`). Test:
-   `tests/server/orchestration-native-forks.test.ts:116`.
+   `tests/server/orchestration-native-forks.test.ts:116`. T3's second
+   native-fork condition, a source run that is `completed` or `waiting`
+   (`apps/server/src/orchestration-v2/CommandPolicy.ts:375`), is not
+   satisfied: Inertia accepts any finished source turn and forks natively
+   whenever its native boundary settled, so failed, interrupted and cancelled
+   turns qualify (`src/server/orchestration-v2/fork-repository.ts:70,82-87`;
+   `src/server/runtime/fork-session-service.ts:40-44`). Tracked as fork polish
+   (G12).
 2. **Portable fork history includes inherited rows.** Ancestors are walked
    oldest first, stopping at a missing ancestor or cycle and skipping side
    chats; then the source's own items through the source run. Every segment
@@ -213,15 +220,19 @@ Inertia status is not assessed unless stated.
    Assistant, Command input, File change name, Checkpoint file count,
    Handoff. That function is the reference format for command and file-change
    items. Inertia: rolled-back exclusion satisfied
-   (`src/server/orchestration-v2/merge-back-repository.ts:159-163`); the
-   command and file-change work summary is adopted (section E).
+   (`src/server/orchestration-v2/merge-back-repository.ts:160-166`); the
+   command and file-change work summary is adopted (section E,
+   `src/server/orchestration-v2/merge-back-repository.ts:245-279`) without
+   T3's `Checkpoint: N files` and `Handoff:` lines
+   (`apps/server/src/orchestration-v2/ContextHandoffService.ts:216-219`), which
+   are tracked as merge-back polish (G12).
 6. **Handoffs targeting a cancelled run carry forward.** `isPendingForRun`
    treats a `cancelled` target run like `failed` and `interrupted`
    (`apps/server/src/orchestration-v2/ProviderTurnStartService.ts:367-384`).
    Inertia: equivalent; prepared handoffs are abandoned without advancing
    coverage (`src/server/orchestration-v2/backing-repository.ts:134,164`) and
    merge-back drafts of a run settled before dispatch become `undelivered`
-   (`src/server/orchestration-v2/merge-back-repository.ts:124-130`).
+   (`settleRun`, `src/server/orchestration-v2/merge-back-repository.ts:183-189`).
 
 ### Rollback
 
@@ -392,7 +403,7 @@ The study documents were updated accordingly on 2026-10-31.
 | Busy-target refusal | `apps/server/src/orchestration-v2/Orchestrator.ts:4419-4428`; 0804c60a9c | Deliberate difference retained: the merge-back is a visible draft delivered with the next explicit send, so queued messages are never blocked by a pending transfer. |
 | Merge-back source point | `apps/server/src/orchestration-v2/Orchestrator.ts:4444-4458` | Adopted: an explicit source point can be chosen in addition to the latest stable point. |
 | Work summary in the merge delta | `apps/server/src/orchestration-v2/ContextHandoffService.ts:205-221` | Adopted: command and file-change items are summarised alongside message excerpts. |
-| Combined context rollback with file restore | `apps/server/src/orchestration-v2/CheckpointRollbackService.ts` (unchanged); `apps/server/src/orchestration-v2/CheckpointRestoreSafety.ts:51-63` | Adopted: context rollback with opt-in file restore under restore-safety rules, with partial outcomes reported. |
+| Combined context rollback with file restore | `apps/server/src/orchestration-v2/CheckpointRollbackService.ts` (unchanged); `apps/server/src/orchestration-v2/CheckpointRestoreSafety.ts:51-63` | Adopted: context rollback with opt-in file restore, with partial outcomes reported. The phase-3 polish shipped Inertia's time-bounded restore checks only, without T3's isolation rule. Since 2026-10-31 the restore also holds an exclusive checkout claim that fences provider-turn admission on overlapping checkouts, and refuses while another chat's live session or open terminal is nested in, contains or equals the checkout (`src/server/runtime/checkout-restore-fence.ts`). Unlike T3, a shared checkout is allowed when no other chat works in it, and a busy checkout refuses instead of waiting. |
 | Side chats | 50c1c5dc53; B.8 anchors | Deferred to the client-parity phase as a tracked item. |
 | Codex turn owned by an earlier run | 54d0a161bb | Assigned to the queue phase. |
 | Pi cleared-queue notice | afb8619e1d | Assigned to the queue phase. |

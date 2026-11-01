@@ -11,6 +11,7 @@ import {
   awaitMessageSendPreparation, MessageSendPreparationTimeoutError, messageSendPreparationDeadline,
 } from "./commands/message-send-preparation";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "./update-hold";
+import { CHECKOUT_RESTORE_IN_PROGRESS } from "./conversation-work-authority";
 import type { WatcherNoteAttribution } from "../../shared/watcher";
 import { watcherNoteDelivery, watcherSteerContent } from "./watcher/watcher-note-instruction";
 
@@ -99,6 +100,11 @@ export function createQueuedMessageRuntime(
       return;
     }
     if (isHeld()) {
+      retryAfterAdmission(conversationId);
+      return;
+    }
+    if (store.conversationWork.restoreBlocksConversation(conversationId)) {
+      if (manual) manualRetries.set(conversationId, manual);
       retryAfterAdmission(conversationId);
       return;
     }
@@ -370,6 +376,10 @@ export function createQueuedMessageRuntime(
     store.conversation(conversationId);
     if ((command.type === "message.queue.send" || command.type === "message.queue.stop-and-send") && isHeld()) {
       throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+    }
+    if ((command.type === "message.queue.send" || command.type === "message.queue.stop-and-send")
+      && store.conversationWork.restoreBlocksConversation(conversationId)) {
+      throw new RuntimeRequestError(CHECKOUT_RESTORE_IN_PROGRESS);
     }
     if (command.type === "message.queue.enqueue") {
       await enqueue(command.payload, command.requestId);

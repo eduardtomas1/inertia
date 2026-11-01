@@ -11,6 +11,7 @@ import { RESTORED_CHAT_HISTORY_LABEL } from "../persistence/conversation-context
 import { providerHandoffBlockBytes, providerHandoffFilesBlock } from "../persistence/provider-handoff-files";
 import { lastTurnCommands, providerHandoffReason } from "../persistence/turn-context-facts";
 import { boundedHistoryCandidates, portableForkHistory } from "./portable-fork-history";
+import { coveredHistoryOccupancy } from "./portable-history-occupancy";
 import {
   MAX_PORTABLE_HISTORY_BUDGET, MAX_PORTABLE_HISTORY_CANDIDATES,
   portableHistoryBudget, selectPortableHistory, type PortableHistoryItem,
@@ -93,14 +94,20 @@ export function readPortableContinuationHistory(database: Database.Database, inp
     capacityBytes: number;
     currentPromptBytes: number;
     imageCount: number;
+    otherAttachmentCount?: number;
     modelWindow?: number;
     configuredCap?: number;
     nativeUsedTokens?: number;
     reportedWindow?: number;
+    autoCompactThreshold?: number;
+    estimateNativeOccupancy?: true;
   }) {
   const source = portableHistorySource(database, input);
   if (source.items.length === 0 && source.omittedCount === 0 && source.withheldCount === 0) return null;
-  const budget = Math.min(Math.max(0, input.capacityBytes), portableHistoryBudget(input));
+  const nativeContextEstimate = input.estimateNativeOccupancy && input.nativeUsedTokens === undefined
+    ? coveredHistoryOccupancy(database, input.threadId, input.excludedItemIds ?? []) : undefined;
+  const budget = Math.min(Math.max(0, input.capacityBytes),
+    portableHistoryBudget({ ...input, ...(nativeContextEstimate === undefined ? {} : { nativeContextEstimate }) }));
   const references = sentConversationContextReferences(database, input.threadId,
     source.items.filter(({ role }) => role === "user").map(({ id }) => id));
   const notes = database.prepare("SELECT id, json_extract(watcher_note_json, '$.automatic') AS automatic FROM messages WHERE id IN (SELECT value FROM json_each(?)) AND watcher_note_json IS NOT NULL")
@@ -112,7 +119,7 @@ export function readPortableContinuationHistory(database: Database.Database, inp
       ...(note ? { origin: WATCHER_NOTE_HISTORY_LABELS[note.automatic === 1 ? "automatic" : "forwarded"] } : {}) };
   });
   const selected = selectPortableHistory({ threadId: input.threadId, items,
-    previouslyOmitted: source.omittedCount, budget });
+    previouslyOmitted: source.omittedCount, budget, purpose: input.excludedItemIds?.length ? "delta" : "restore" });
   const label = input.excludedItemIds?.length ? "Context added since this session last ran" : RESTORED_CHAT_HISTORY_LABEL;
   const blocks: ContinuationHistoryBlock[] = [{ label: `${label} · ${selected.items.length} messages`, content: selected.rendered }];
   let remaining = budget - selected.cost;

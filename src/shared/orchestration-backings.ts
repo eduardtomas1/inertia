@@ -38,7 +38,7 @@ export const orchestrationBackingEventSchema = z.discriminatedUnion("type", [
     backing: providerBackingSchema, runId: id, attemptId: id,
   }).strict() }).strict(),
   z.object({ type: z.literal("provider.backing-invalidated"), payload: z.object({
-    backingId: id, reason: z.enum(["uncertain-delivery", "native-resume-failed", "workspace-changed", "rolled-back"]),
+    backingId: id, reason: z.enum(["uncertain-delivery", "native-resume-failed", "workspace-changed", "rolled-back", "context-exhausted"]),
   }).strict() }).strict(),
   z.object({ type: z.literal("provider.backing-rewound"), payload: z.object({
     rollbackId: id, backingId: id, nativeSessionId: nativeId,

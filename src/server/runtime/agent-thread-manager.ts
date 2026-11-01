@@ -66,6 +66,7 @@ import {
   boundedUntrustedAgentText,
   neutralizeUntrustedAgentText,
 } from "./untrusted-agent-text";
+import { CHECKOUT_RESTORE_IN_PROGRESS } from "./conversation-work-authority";
 
 const MAX_LIST_LIMIT = 25;
 const MAX_PROMPT_CHARS = 32_768;
@@ -1038,6 +1039,9 @@ export class AgentThreadManager {
       } finally {
         lease.release();
       }
+    }
+    if (this.dependencies.store.conversationWork.restoreBlocksConversation(target.id)) {
+      throw new Error(CHECKOUT_RESTORE_IN_PROGRESS);
     }
     if (!this.dependencies.providerTerminalResumes.acquire(target.id)) {
       throw new Error(

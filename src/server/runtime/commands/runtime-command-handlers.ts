@@ -169,7 +169,7 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       contextRequests: services.agentThreads.contextRequests,
       reportIncident: services.reportIncident,
       rollbackHistory: enableProviders
-        ? (input) => rollbackConversationHistory({ store, providers, turns, providerTerminalResumes }, input, lifetimeSignal)
+        ? (input) => rollbackConversationHistory({ store, providers, turns, providerTerminalResumes, terminals: services.terminals }, input, lifetimeSignal)
         : undefined,
     }),
     services.queuedMessages.turnInteractionHandler,

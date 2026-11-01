@@ -216,6 +216,26 @@ export interface ProviderFreshSessionFallback {
   prompt: string;
 }
 
+export type ProviderBackgroundWork = "none" | "pending";
+
+export interface ProviderBackgroundWorkSession {
+  conversationId: string;
+  providerId: ProviderId;
+  harnessId: string;
+  nativeSessionId: string;
+}
+
+export interface ProviderBackgroundWorkProbe {
+  pendingBackgroundWork?(session: ProviderBackgroundWorkSession): ProviderBackgroundWork;
+}
+
+export function providerBackgroundWork(
+  probe: ProviderBackgroundWorkProbe,
+  session: ProviderBackgroundWorkSession,
+): ProviderBackgroundWork {
+  return probe.pendingBackgroundWork?.(session) ?? "none";
+}
+
 export interface ProviderEventBase {
   providerId: ProviderId;
   /** The caller's exact conversation identifier. */

@@ -4,7 +4,8 @@ import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
-import { useForkActionsAvailable } from "../orchestration/fork-surface";
+import { useForkActionsAvailable, useTurnRolledBack } from "../orchestration/fork-surface";
+import { revertsRolledBackTurn } from "../workspace-scene/createWorkspaceTurnActions";
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
@@ -106,6 +107,10 @@ export function UserRequestLayer({
   const [expanded, setExpanded] = useState(false);
   const [openPacketId, setOpenPacketId] = useState<string | null>(null);
   const fresh = useFreshRequest(turn.userMessage.conversationId, turn.userMessage.content);
+  const rolledBack = useTurnRolledBack(turn.agentTurn.id);
+  const turnCheckpoint = turn.checkpoint && !revertsRolledBackTurn(turn.checkpoint, turn.agentTurn, rolledBack)
+    ? turn.checkpoint
+    : null;
   const content = collapsible && !expanded
     ? collapsedUserRequestPreview(turn.userMessage.content)
     : turn.userMessage.content;
@@ -126,10 +131,10 @@ export function UserRequestLayer({
   const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
   if (turn.watcherWake) return <WatcherWakeRequest turn={turn} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
   const watcherNote = turn.userMessage.role === "user" ? turn.userMessage.watcherNote : undefined;
-  const requestMeta = (turn.userMessage.privateConnectDeviceId || watcherNote || turn.checkpoint || turn.extraCheckpoints.length > 0 || turn.checkpointUnavailableReason !== null) && (
+  const requestMeta = (turn.userMessage.privateConnectDeviceId || watcherNote || turnCheckpoint || turn.extraCheckpoints.length > 0 || turn.checkpointUnavailableReason !== null) && (
     <div className="message-meta">
       <MessageOrigin message={turn.userMessage} />
-      {turn.checkpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</TooltipButton>}
+      {turnCheckpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turnCheckpoint)}><RotateCcw size={14} />Revert</TooltipButton>}
       {turn.extraCheckpoints.map((checkpoint) => <TooltipButton key={checkpoint.id} className="message-revert" aria-label={`Restore checkpoint: ${checkpoint.label}`} tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to this checkpoint"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(checkpoint)}><RotateCcw size={14} aria-hidden="true" />{checkpoint.label}</TooltipButton>)}
       {turn.checkpointUnavailableReason !== null && <TooltipText className="message-checkpoint-missing" tooltip={turn.checkpointUnavailableReason || TURN_CHECKPOINT_UNAVAILABLE_TITLE}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</TooltipText>}
     </div>

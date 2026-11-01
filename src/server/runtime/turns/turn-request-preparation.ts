@@ -17,16 +17,28 @@ import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-prof
 import { importedFollowUpNote, importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
-import type { PreparedContextHandoff } from "../../../shared/orchestration-backings";
-import type {
-  ProviderActivityEvent,
+import type { ProviderBacking } from "../../../shared/orchestration-backings";
+import {
+  providerBackgroundWork,
+  type ProviderActivityEvent,
 } from "../../provider/contracts";
+import { PortableHistoryBudgetError } from "../../orchestration-v2/portable-history";
 import { AuthoritativeRunStateEngine } from "../run-state-engine";
 import {
   assembleTurnRequest,
   type AssembleTurnRequestInput,
   type ConversationContextMaterialization,
+  type RestoredChatHistory,
 } from "./request-context";
+import {
+  ContextHandoffBackgroundWorkError,
+  appendedContextHandoff,
+  exhaustedBackingSession,
+  portableHistoryBudgetInputs,
+  sameContextSelection,
+  type OfferedRestoredHistory,
+  type TurnContextProbes,
+} from "./turn-context-handoff";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -63,7 +75,7 @@ export type PreparedActiveTurn = Omit<
 
 export interface PrepareTurnRequestDependencies {
   store: RuntimeStore;
-  providers: TurnProviderRuntime;
+  providers: TurnProviderRuntime & TurnContextProbes;
   hooks: TurnControllerHooks;
   instructionDeliveries?: PromptInstructionDeliveries;
   id(): string;
@@ -187,9 +199,28 @@ export function compactionSessionInstruction(
   );
 }
 
+function replaceExhaustedSession(
+  dependencies: PrepareTurnRequestDependencies,
+  request: QueueTurnRequest,
+  backing: ProviderBacking,
+  exhaustion: PortableHistoryBudgetError,
+): ResolvedTurnRequest {
+  let replacement: ResolvedTurnRequest;
+  try {
+    replacement = resolveTurnRequest(dependencies, request, backing);
+  } catch (error) {
+    throw error instanceof PortableHistoryBudgetError ? exhaustion : error;
+  }
+  if (providerBackgroundWork(dependencies.providers, exhaustedBackingSession(backing)) === "pending") {
+    throw new ContextHandoffBackgroundWorkError();
+  }
+  return replacement;
+}
+
 export function resolveTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
+  exhaustedBacking?: ProviderBacking,
 ): ResolvedTurnRequest {
   const conversation = dependencies.store.conversation(request.conversationId);
   const attachments = [...(request.attachments ?? [])];
@@ -286,7 +317,7 @@ export function resolveTurnRequest(
     providerId: route.providerId, workspaceKey: dependencies.store.conversationPath(conversation.id),
     identity: route.continuationIdentity });
   const reusableBacking = candidateBacking?.status === "ready" && candidateBacking.coverageComplete
-    ? candidateBacking : null;
+    && candidateBacking.id !== exhaustedBacking?.id ? candidateBacking : null;
   const resumeSessionId = reusableBacking?.nativeSessionId ?? conversation.providerSessionId;
   const previousContinuationIdentity = reusableBacking?.continuationIdentity ?? (candidateBacking ? null : latestTurn
     ? latestTurnOwnsProviderSession
@@ -430,32 +461,44 @@ export function resolveTurnRequest(
       },
     );
   };
-  let contextHandoff: PreparedContextHandoff | undefined;
-  const prepareHistory = (capacityBytes: number, currentPromptBytes: number, excludedMessageId?: string,
-    target = canResume ? reusableBacking : null) => {
+  let offeredHistory: OfferedRestoredHistory | null = null;
+  const offer = (history: RestoredChatHistory | null, targetBackingId: string | null) => {
+    offeredHistory = history ? { history, targetBackingId } : null;
+    return history;
+  };
+  const prepareHistory = (capacityBytes: number, currentPromptBytes: number,
+    options: { excludedMessageId?: string; target: ProviderBacking | null; skipEmpty?: boolean }) => {
+    const { excludedMessageId, target } = options;
     const usage = target ? previousTurnBoundaryUsage(dependencies.store.agentTurn(target.lastTurnId), target.nativeSessionId) : null;
     const history = dependencies.store.orchestration.portableHistory({
       threadId: conversation.id, capacityBytes: restoredCapacity(capacityBytes), currentPromptBytes,
-      imageCount: request.imagePaths?.length ?? 0,
-      ...(routeSelection.contextWindowOverride === null ? {} : { modelWindow: routeSelection.contextWindowOverride }),
+      ...portableHistoryBudgetInputs({
+        attachments, imageCount: request.imagePaths?.length ?? 0,
+        configuredWindow: routeSelection.contextWindowOverride,
+        limits: dependencies.providers.modelContextLimits?.({ providerId: route.providerId, harnessId: route.harnessId,
+          selection: routeSelection, cwd: dependencies.store.conversationPath(conversation.id) }) ?? null,
+        target: target ? { usage, sameSelection: sameContextSelection(target.selection, routeSelection) } : null,
+      }),
       ...(excludedMessageId === undefined ? {} : { excludedMessageId }),
-      ...(usage?.usedTokens === null || usage?.usedTokens === undefined ? {} : { nativeUsedTokens: usage.usedTokens }),
-      ...(usage?.maxTokens === null || usage?.maxTokens === undefined ? {} : { reportedWindow: usage.maxTokens }),
       ...(target ? { excludedItemIds: target.coveredItemIds } : {}), route: restoredHistoryRoute(),
     });
-    if (history) contextHandoff = { itemIds: history.selection.items.map(({ id }) => id), targetBackingId: target?.id ?? null };
-    return history;
+    if (!history || (options.skipEmpty && history.messageCount === 0 && history.omittedMessageCount === 0)) {
+      return offer(null, null);
+    }
+    return offer({ ...history, itemIds: history.selection.items.map(({ id }) => id) }, target?.id ?? null);
   };
   const assembleOnFreshSession = (excludedMessageId?: string) => {
-    contextHandoff = undefined;
+    offeredHistory = null;
     const assembled = assembleTurnRequest({
     ...assemblyInput,
     interactionMode: conversation.interactionMode,
     internalInstructions: [...instructionDelivery.freshSessionPromptPack, ...turnInstructions],
     restoredHistory: ownChatPacketId === null
-      ? (capacityBytes: number, currentPromptBytes: number) => prepareHistory(capacityBytes, currentPromptBytes, excludedMessageId, null)
-      : referencedHistory,
+      ? (capacityBytes: number, currentPromptBytes: number) => prepareHistory(capacityBytes, currentPromptBytes,
+        { ...(excludedMessageId === undefined ? {} : { excludedMessageId }), target: null })
+      : (capacityBytes: number) => offer(referencedHistory(capacityBytes), null),
     });
+    const contextHandoff = appendedContextHandoff(assembled, offeredHistory);
     return { ...assembled, ...(contextHandoff ? { contextHandoff } : {}) };
   };
   const importNote = latestTurn?.origin === "cli-import"
@@ -465,16 +508,35 @@ export function resolveTurnRequest(
     && (continuation.reasonCode !== "first-turn"
       || (dependencies.store.orchestration.forks.get(conversation.id)?.inheritedItems ?? 0) > 0)
     && request.goalStart === undefined;
-  const assembled = startsFreshInEstablishedChat
-    ? assembleOnFreshSession()
-    : assembleTurnRequest({
-        ...assemblyInput,
-        ...(canResume && reusableBacking && latestTurn?.id !== reusableBacking.lastTurnId && request.goalStart === undefined
-          ? { restoredHistory: (capacity: number, promptBytes: number) => prepareHistory(capacity, promptBytes) } : {}),
-        carriedConversationContexts: dependencies.store.contextPackets
-          .unreachedReferences(conversation.id)
-          .flatMap((reference) => reference.sentBlocks() ?? []),
-      });
+  const deltaTarget = canResume && reusableBacking && request.goalStart === undefined ? reusableBacking : null;
+  const deferredDeltaOnly = deltaTarget !== null && latestTurn?.id === deltaTarget.lastTurnId;
+  const deliversDelta = deltaTarget !== null
+    && (!deferredDeltaOnly || dependencies.store.turnLedgerRepository.promptWithheld(deltaTarget.lastTurnId));
+  const assembleOnResumedSession = () => {
+    offeredHistory = null;
+    const assembled = assembleTurnRequest({
+      ...assemblyInput,
+      ...(deliversDelta
+        ? { restoredHistory: (capacity: number, promptBytes: number) => prepareHistory(capacity, promptBytes,
+          { target: deltaTarget, skipEmpty: deferredDeltaOnly }) } : {}),
+      carriedConversationContexts: dependencies.store.contextPackets
+        .unreachedReferences(conversation.id)
+        .flatMap((reference) => reference.sentBlocks() ?? []),
+    });
+    const contextHandoff = appendedContextHandoff(assembled, offeredHistory);
+    return { ...assembled, ...(contextHandoff ? { contextHandoff } : {}) };
+  };
+  let assembled: ReturnType<typeof assembleOnFreshSession>;
+  try {
+    assembled = startsFreshInEstablishedChat ? assembleOnFreshSession() : assembleOnResumedSession();
+  } catch (error) {
+    if (error instanceof PortableHistoryBudgetError && deliversDelta && !startsFreshInEstablishedChat
+      && exhaustedBacking === undefined) {
+      return replaceExhaustedSession(dependencies, request, deltaTarget!, error);
+    }
+    throw error;
+  }
+  const { contextHandoff } = assembled;
   const providerSessionInvalidation = !canResume && conversation.providerSessionId
     ? { expectedSessionId: conversation.providerSessionId }
     : undefined;
@@ -600,6 +662,8 @@ export function resolveTurnRequest(
     importNote,
     handoffFromTurnId: providerHandoff ? latestTurn.id : null,
     adopt: (queued) => {
+      const exhausted = exhaustedBacking ? dependencies.store.orchestration.backings.get(exhaustedBacking.id) : null;
+      if (exhausted) dependencies.store.orchestration.backings.invalidate(exhausted, "context-exhausted");
       instructionDelivery.recordPromptPack(queued.turn.id);
       const runningActivities =
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();

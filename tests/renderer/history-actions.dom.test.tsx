@@ -4,8 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConversationActionsMenu } from "../../src/renderer/src/components/ConversationActionsMenu";
 import { ForkHistoryPanel, ForkSurfaceProvider, ForkTurnAction, type ForkCommandRunner } from "../../src/renderer/src/components/orchestration/fork-surface";
+import { UserRequestLayer } from "../../src/renderer/src/components/response-timeline/layers";
+import type { ResponseTimelineProps } from "../../src/renderer/src/components/response-timeline/types";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
-import type { Conversation, ServerEvent, WorkspaceRun } from "../../src/shared/contracts";
+import type { ResponseTurn } from "../../src/renderer/src/utils/response-timeline/model";
+import type { CheckpointSummary, Conversation, ServerEvent, WorkspaceRun } from "../../src/shared/contracts";
 import { continuationIdentityForSelection, providerNativeModelSelection } from "../../src/shared/model-routing";
 import { forkHistoryResultSchema } from "../../src/shared/orchestration-forks";
 
@@ -307,5 +310,34 @@ describe("rollback to chat start", () => {
     const notice = await within(screen.getByRole("region", { name: "Chat start rollback" })).findByRole("alert");
     expect(notice.textContent).toBe(refusal);
     expect(view.container.querySelector(".message-scroll")).toHaveFocus();
+  });
+});
+
+describe("checkpoint revert for rolled-back turns", () => {
+  const checkpoint = (id: string, label: string): CheckpointSummary => ({ id, conversationId, turnId, ref: `refs/inertia/${id}`,
+    label, turnIndex: 1, filesChanged: 1, insertions: 1, deletions: 0, createdAt: "2026-10-30T10:00:00.000Z" });
+  const own = checkpoint("checkpoint-own", "Before turn");
+  const recovery = checkpoint("checkpoint-recovery", "Before file restore");
+  const turn = { id: turnId, checkpoint: own, extraCheckpoints: [recovery], checkpointUnavailableReason: null, providerChanged: false,
+    watcherWake: null, userMessage: { id: "message-1", conversationId, role: "user", content: "Change the parser", attachments: [] },
+    agentTurn: { id: turnId, checkpointId: own.id, sessionRecovery: null, continuationReasonCode: null } } as unknown as ResponseTurn;
+
+  function Layer({ rolledBackTurnIds, onRevertCheckpoint }: { rolledBackTurnIds: readonly string[];
+    onRevertCheckpoint: (checkpoint: CheckpointSummary) => void }) {
+    const props = { conversationId, contextPackets: [], checkpointRestoreDisabled: false, onRevertCheckpoint } as unknown as ResponseTimelineProps;
+    return <ForkSurfaceProvider projectId={projectId} conversationId={conversationId} rolledBackTurnIds={rolledBackTurnIds}>
+      <UserRequestLayer turn={turn} props={props} />
+    </ForkSurfaceProvider>;
+  }
+
+  it("hides the turn's own revert once the turn is rolled back and keeps its recovery checkpoint restorable", async () => {
+    const revert = vi.fn();
+    const view = render(<Layer rolledBackTurnIds={[]} onRevertCheckpoint={revert} />);
+    expect(screen.getByRole("button", { name: "Revert" })).toBeEnabled();
+    view.rerender(<Layer rolledBackTurnIds={[turnId]} onRevertCheckpoint={revert} />);
+    expect(screen.queryByRole("button", { name: "Revert" })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Restore checkpoint: Before file restore" }));
+    expect(revert).toHaveBeenCalledExactlyOnceWith(recovery);
   });
 });

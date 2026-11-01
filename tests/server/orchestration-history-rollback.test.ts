@@ -7,7 +7,9 @@ import { rollbackConversationHistory } from "../../src/server/runtime/history-ro
 import { createConversationCommandHandler, type ConversationCommandDependencies } from "../../src/server/runtime/commands/conversation-commands";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import type { NativeConversationRequest, NativeConversationResult } from "../../src/server/provider/native-conversation-operations";
-import type { ServerEvent } from "../../src/shared/contracts";
+import { PROVIDER_HANDOFF_FILES_LABEL } from "../../src/server/persistence/provider-handoff-files";
+import type { ServerEvent, TurnGitArtifactFile } from "../../src/shared/contracts";
+import { modelSelectionSchema, providerNativeModelSelection } from "../../src/shared/model-routing";
 import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises,
   turnControllerTestIdentity, type TurnControllerTestRuntime } from "../support/turn-controller-runtime";
 
@@ -56,6 +58,15 @@ function send(runtime: TurnControllerTestRuntime, content: string, conversationI
   const queued = runtime.controller.queue({ conversationId, content });
   runtime.controller.start(queued.turn.id);
   return queued.turn;
+}
+
+function recordChangedFile(runtime: TurnControllerTestRuntime, turnId: string, path: string) {
+  const file: TurnGitArtifactFile = { path, previousPath: null, status: "modified", insertions: 3, deletions: 1,
+    binary: false, untracked: false, staged: false, unstaged: true, indexStatus: ".", worktreeStatus: "M" };
+  const createdAt = new Date().toISOString();
+  runtime.store.createTurnGitArtifact({ turnId, status: "pending", createdAt });
+  runtime.store.completeTurnGitArtifact(turnId, { files: [file], insertions: 3, deletions: 1,
+    status: "ready", completeness: "complete", updatedAt: createdAt });
 }
 
 describe("deferred native history rollback", () => {
@@ -188,6 +199,39 @@ describe("deferred native history rollback", () => {
       runtime.provider.resolve({ text: "Child done" });
       await flushTurnControllerTestPromises();
       expect(deps.providers.nativeConversation).toHaveBeenCalledOnce();
+    } finally { runtime.store.close(); }
+  });
+
+  it("leaves rolled-back file changes out of fresh-session and provider-switch handoffs", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await finish(runtime, "first");
+      recordChangedFile(runtime, first.id, "src/retained.ts");
+      const second = await finish(runtime, "second");
+      recordChangedFile(runtime, second.id, "src/rolled-back.ts");
+      const deps = dependencies(runtime, async (request) => ({ operationId: request.operationId, identity: request.source.identity,
+        status: "unsupported", reason: "native-history-control-unavailable" }));
+      await expect(rollback(runtime, deps, first.id)).resolves.toMatchObject({ transfer: "portable", reason: "unsupported" });
+      send(runtime, "fresh request");
+      expect(runtime.provider.input?.sessionId).toBeUndefined();
+      expect(runtime.provider.input?.prompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
+      expect(runtime.provider.input?.prompt).toContain('"content":{"files":["M src/retained.ts +3 -1"]}');
+      expect(runtime.provider.input?.prompt).not.toContain("src/rolled-back.ts");
+      runtime.provider.resolve({ text: "fresh answer", sessionId: "renewed-native" });
+      await flushTurnControllerTestPromises();
+      await createConversationCommandHandler({ ...deps, backendProfileController: { isExternalSelection: () => false,
+        validateSelection: (selection: unknown) => selection, supportsNativeFastModeControl: () => false } } as unknown as ConversationCommandDependencies)({} as never, {
+        type: "conversation.update", requestId: "22222222-2222-4222-8222-222222222222",
+        payload: { conversationId: runtime.conversationId,
+          modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId: "claude" })) } });
+      send(runtime, "switched request");
+      expect(runtime.provider.input?.providerId).toBe("claude");
+      expect(runtime.provider.input?.sessionId).toBeUndefined();
+      expect(runtime.provider.input?.prompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
+      expect(runtime.provider.input?.prompt).toContain('"content":{"files":["M src/retained.ts +3 -1"]}');
+      expect(runtime.provider.input?.prompt).not.toContain("src/rolled-back.ts");
+      runtime.provider.resolve({ text: "switched answer", sessionId: "claude-native" });
+      await flushTurnControllerTestPromises();
     } finally { runtime.store.close(); }
   });
 

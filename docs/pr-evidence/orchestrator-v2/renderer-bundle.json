@@ -180,5 +180,57 @@
     },
     "attribution": "History footer action class split: fork, rollback and merge-back buttons use a dedicated history-turn-action class whose styles move to the fork stylesheet, and rolled-back turn labelling reads its own context so it renders without a fork runner. Detached scene: the detached workspace scene no longer passes the fork runner, so detached windows neither request fork history nor offer fork, rollback or merge-back actions. Pi provider card: the Pi entry in the provider settings matrix. Contributions were not isolated individually and are not additive.",
     "headroomDecision": "Measured bytes plus 512 on the two startup routes and plus 256 on the detached chat chunk, matching the branch convention; the previous near-zero headroom would fail on the few-byte Linux and macOS build differences. No other limit relaxed."
+  },
+  "fidelityAuditFixes": {
+    "date": "2026-11-01",
+    "checkpoint": "Uncommitted fidelity audit fixes (G1 rolled-back handoff files, G2 turn-preparation context, G3 restore fencing, isolated e2e renderer fixes) after b28d5a9f",
+    "platform": "Windows 11 x64, Node 22.23.1",
+    "measurement": "Final electron-vite renderer output; npm run build:bundle passed before the re-cap with coreJavaScript at 23 bytes of headroom.",
+    "accounting": "All route closures and core inclusions/exclusions unchanged. Only coreJavaScript was re-capped; it was the only budget changed by this checkpoint that sat under 64 bytes of headroom.",
+    "raised": {
+      "coreJavaScript": {
+        "bytes": 2485356,
+        "previousBytes": 2485130,
+        "previousLimit": 2485379,
+        "limit": 2485612,
+        "headroom": 256
+      }
+    },
+    "unchangedLimitsMeasured": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 902998,
+        "previousBytes": 902835,
+        "limit": 903347
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 796783,
+        "previousBytes": 796620,
+        "limit": 797132
+      },
+      "filesFirstLoadJavaScript": {
+        "bytes": 145998,
+        "limit": 153087
+      },
+      "transcriptJavaScript": {
+        "bytes": 622334,
+        "previousBytes": 622271,
+        "limit": 649783
+      },
+      "deferredComposerQueueJavaScript": {
+        "bytes": 13302,
+        "limit": 13302
+      },
+      "deferredThreadActionsJavaScript": {
+        "bytes": 9295,
+        "limit": 9551
+      },
+      "detachedChatJavaScript": {
+        "bytes": 21826,
+        "limit": 22082
+      }
+    },
+    "unchangedExactCaps": "deferredUsageLimitsJavaScript, entryCss, detachedChatCss, deferredIconRegionJavaScript, morphiconsJavaScript and deferredComposerQueueJavaScript measure exactly their limits and deferredWelcomeGuideJavaScript, deferredReviewNoteJavaScript and the mascot routes sit 10 to 56 bytes under them; none changed size in this checkpoint, so their pre-existing caps were left as they are.",
+    "attribution": "Rolled-back checkpoint revert hidden: the timeline's user request layer reads whether its turn is rolled back and drops the turn's own Revert action (revertsRolledBackTurn), keeping recovery checkpoints. Fork history gated to saved chats: the workspace scene passes the fork runner only once a new-chat draft is saved (savedChatRunner). Stable checkout label: the composer checkout label no longer reads a not-yet-known Git status as detached. Contributions were not isolated individually and are not additive.",
+    "headroomDecision": "Measured bytes plus 256 on core, matching the branch's core convention; startup routes keep 349 bytes of headroom and stay unchanged. No other limit relaxed."
   }
 }

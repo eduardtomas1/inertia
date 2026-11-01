@@ -5,6 +5,7 @@ import type { ConversationRollbackResult, HistoryRollbackPlan, RollbackFiles } f
 import type { RuntimeStore } from "../database";
 import type { ProviderManager } from "../providers";
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
+import type { TerminalManager } from "../terminal";
 import type { NativeConversationBoundary } from "../provider/native-conversation-operations";
 import type { TurnController } from "./turns/turn-controller";
 import { HistoryRollbackError } from "../orchestration-v2/history-rollback-repository";
@@ -18,8 +19,9 @@ import { restoreRolledBackFiles, type RestoreConversationCheckpoint, type Rollba
 export interface HistoryRollbackDependencies {
   store: RuntimeStore;
   providers: Pick<ProviderManager, "resolveModelRoute" | "nativeConversation" | "isRunning">;
-  turns: Pick<TurnController, "acquireTurnAdmission" | "forgetPromptDelivery">;
+  turns: Pick<TurnController, "acquireTurnAdmission" | "forgetPromptDelivery" | "checkoutActivityConversationIds">;
   providerTerminalResumes: Pick<ProviderTerminalResumeRegistry, "acquire" | "release">;
+  terminals?: Pick<TerminalManager, "liveSessionScopes">;
   restoreCheckpoint?: RestoreConversationCheckpoint;
 }
 
@@ -53,6 +55,7 @@ export async function rollbackConversationHistory(dependencies: HistoryRollbackD
     try {
       files = await restoreRolledBackFiles(store, { conversationId, rolledBackTurnIds: plan.rolledBackTurnIds,
         recoveryTurnId: plan.retainedTurnId ?? plan.rolledBackTurnIds[0]!, beginRestore: () => record("restoring", null),
+        activity: { turns, ...(dependencies.terminals ? { terminals: dependencies.terminals } : {}) },
         ...(dependencies.restoreCheckpoint ? { restoreCheckpoint: dependencies.restoreCheckpoint } : {}) });
     } catch {
       files = { outcome: "failed", message: "Inertia could not restore the files. Review the workspace.", recoveryCheckpointId: null };

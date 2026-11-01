@@ -11,6 +11,7 @@ import { MAX_DIFF_FILES } from "../git/constants";
 import { canonicalDirectoryPath, isContained, repositoryRoot, validatedEntryPaths } from "../git/paths";
 import { GitError } from "../git/types";
 import { restoreConversationCheckpoint } from "./checkpoint-restoration";
+import { claimCheckoutForRestore, type CheckoutRestoreActivity } from "./checkout-restore-fence";
 
 export type RestoreConversationCheckpoint = typeof restoreConversationCheckpoint;
 
@@ -19,6 +20,7 @@ export interface RollbackFileRestoreInput {
   rolledBackTurnIds: readonly string[];
   recoveryTurnId: string | null;
   beginRestore(): void;
+  activity: CheckoutRestoreActivity;
   restoreCheckpoint?: RestoreConversationCheckpoint;
 }
 
@@ -36,6 +38,7 @@ interface RecordedScope {
 const UNRECORDED = "Inertia could not establish every file the rolled-back turns changed, so files were left unchanged.";
 const UNOWNED = "Inertia could not confirm that this chat owns its workspace, so files were left unchanged.";
 const SHARED = "Another chat worked in this workspace after the rolled-back turns started, so files were left unchanged. Restore them from a checkpoint if needed.";
+const BUSY = "Another chat, terminal or task is working in this workspace or a folder that overlaps it, so files were left unchanged. Stop it, then restore them from a checkpoint if needed.";
 
 function outcome(value: RollbackFiles["outcome"], message: string, recoveryCheckpointId: string | null = null): RollbackFileRestoreResult {
   return { outcome: value, message: message.slice(0, 1_000), recoveryCheckpointId };
@@ -173,6 +176,16 @@ export async function restoreRolledBackFiles(store: RuntimeStore, input: Rollbac
   const scope = recordedScope(store, input.rolledBackTurnIds);
   if (scope === null) return outcome("unchanged", "The rolled-back turns recorded no file changes.");
   if ("outcome" in scope) return scope;
+  const release = claimCheckoutForRestore(store, input.conversationId, input.activity);
+  if (!release) return outcome("refused", BUSY);
+  try {
+    return await restoreClaimed(store, input, scope);
+  } finally {
+    release();
+  }
+}
+
+async function restoreClaimed(store: RuntimeStore, input: RollbackFileRestoreInput, scope: RecordedScope): Promise<RollbackFileRestoreResult> {
   if (!ownershipEstablished(store, input.conversationId)) return outcome("refused", UNOWNED);
   const repositoryPath = store.conversationPath(input.conversationId);
   if (sharedElsewhere(store, input.conversationId, scope, repositoryPath)) return outcome("refused", SHARED);

@@ -23,19 +23,42 @@ terminal work that never crossed that boundary retires its pending intent.
 Paired admission remains atomic across both conversations.
 
 Lifecycle updates, cancellation requests and provider cleanup ownership update
-the V2 projection transactionally. Unconfirmed cleanup blocks replacement work;
-queued messages remain waiting until exact cleanup is confirmed. Restart retires
-old process-bound effects and reconciles run projections before admission.
-Original human send requests can replay their accepted result after a lost
-acknowledgement, including after restart, without becoming a follow-up.
+the V2 projection transactionally. Pending or unconfirmed cleanup blocks
+replacement work, and queued messages wait while it lasts
+(`src/server/orchestration-v2/turn-repository.ts:173-175`, used by queue
+dispatch at `src/server/runtime/queued-message-runtime.ts:88`). Since the stop
+ladder release below, an attempt whose cleanup is `unconfirmed-released` no
+longer blocks admission or queue dispatch; decisions that need cleanup proof
+refuse it through `awaitsCleanupProof` (`turn-repository.ts:177-179`). Restart
+retires old process-bound effects and reconciles run projections before
+admission; persisted questions, expiring approvals and crash or shutdown
+continuation are not part of that reconciliation (recovery phase).
+A human `message.send` that creates a new turn replays its accepted result
+after a lost acknowledgement, including after restart, without becoming a
+follow-up (`turn-repository.ts:84-88`). Steer and follow-up dispositions carry
+no receipt (`src/server/runtime/commands/turn-interaction-commands.ts:349-411`),
+and the desktop renderer mints a fresh `requestId` for every command
+(`src/renderer/src/lib/runtimeCommands.ts:11-13`), so replay helps only a
+caller that resends the same request id.
 
-The event store also supports bounded reads, projection rebuild, optimistic
-revision checks and actor-scoped command collision detection. The outbox has
-ordered per-thread claims, fenced claim acknowledgements, explicit replay
-policy and bounded retries. Generic asynchronous command lanes and the effect
-dispatcher are implemented/tested infrastructure; the existing controller still
-executes the start effect directly. Other command families have not yet moved
-to V2. This checkpoint is not full event-sourced transcript/provider control.
+The event store also offers bounded reads (`readEvents`), projection rebuild
+(`rebuildProjections`), a revision check and actor-scoped command collision
+detection (`src/server/orchestration-v2/event-store.ts:114-121,158,173`).
+Only tests call `readEvents` and `rebuildProjections`. Every production commit
+reads its expected revision from `events.revision()` immediately before
+committing (for example `turn-repository.ts:135`), so the revision check cannot
+fail in-process, and production uses only the actors `human` and `runtime`,
+with no test of a cross-actor id. The outbox has ordered per-thread claims,
+fenced claim acknowledgements, an explicit replay policy and bounded retries
+for replay-safe effects; production enqueues only process-bound effects
+(`provider.start` at `turn-repository.ts:137`, `native.*` at
+`src/server/orchestration-v2/native-control-repository.ts:56`), so no retry
+runs in production. Generic asynchronous command lanes are implemented and
+tested. `OrchestrationEffectDispatcher`
+(`src/server/orchestration-v2/effect-outbox.ts:123`) has no production caller
+and no test; the existing controller still executes the start effect directly.
+Other command families have not yet moved to V2. This checkpoint is not full
+event-sourced transcript/provider control.
 
 Validation under Node 22.23.2:
 
@@ -54,21 +77,52 @@ has not yet run for V2. Provider tests are recorded separately in
 ## Portable history and provider backings checkpoint — 2026-10-29
 
 Turn preparation now uses deterministic, intact-entry history selection with
-T3's 16k default / 64k maximum budget, current-prompt reservation, known native
-occupancy, context-window and response reserves. Recent user/assistant and
+T3's budget formula: a 16k default and 64k maximum cap, reserves for the current
+prompt, images (8,192 bytes each) and other attachments (4,096 bytes each),
+native occupancy, and a response reserve of at least 16,000 bytes or a quarter
+of the window (`src/server/orchestration-v2/portable-history.ts:48-71`).
+Production passes no configured cap, so the 16k default always applies. Native
+occupancy is the target turn's reported usage or, when usage is absent, an
+estimate from the backing's covered items
+(`src/server/orchestration-v2/portable-history-occupancy.ts`). The window is
+the user's context-window override, else the last reported maximum, else
+128,000 tokens; the probe for a model's catalogue window and auto-compact
+threshold (`src/server/runtime/turns/turn-context-handoff.ts`) is not yet
+implemented by any provider. The occupancy estimate and the attachment reserve
+landed with the fidelity audit fixes on 2026-11-01. Recent user/assistant and
 opening messages receive priority; the final order remains chronological.
 Oversized entries are omitted whole. Provenance and omitted-history retrieval
 instructions accompany the handoff. Historical attachments, private reasoning
 and live tool state are not replayed. Existing endpoint containment, file-change
 metadata, authorized chat references and watcher attribution are preserved.
+Unlike T3, whose handoff history also carries normalized command outcomes,
+errors, interruption notices, file changes and proposed plans
+([t3code-orchestration.md](t3code-orchestration.md)), ordinary Inertia handoffs
+carry user and assistant messages plus the last turn's command list and the
+chat's changed filenames
+(`src/server/orchestration-v2/portable-history-source.ts:133-139`). Attributed
+item kinds are tracked work.
 
 Native provider backings now have durable instance/workspace/session identity
-and bounded item coverage. A tested Codex → Claude → Codex round trip resumes the
-original Codex session and delivers only intervening context. Uncertain handoff
+and bounded item coverage. The instance fingerprint covers the harness, backend
+profile, configuration revision, endpoint and compatibility token, but no
+account (`src/server/orchestration-v2/provider-instance.ts:4-8`). A tested
+Codex → Claude → Codex round trip resumes the original Codex session and
+delivers the intervening context. Items omitted from a delivered handoff are not
+counted as covered and are offered again on the next switch-back
+(`src/server/orchestration-v2/backing-repository.ts:141-147`). Uncertain handoff
 delivery prevents native reuse; an ordinary outage alone does not retire a
 valid session. Preparation, dispatch, delivery, abandonment and uncertainty are
-separate durable states. Rejected native resumes can persist a replacement
-handoff before fresh-session retry. Projection replay reproduces backing state.
+separate durable states; `delivered` means the first provider output was
+observed (`backing-repository.ts:109-122`), so a run that fails without output
+ends `uncertain`. In-run fresh-session replacement runs only for a
+`sessionUnavailable` failure with confirmed cleanup
+(`src/server/provider/fresh-session-fallback.ts:59-64`). A generic rejected
+resume fails the turn (`src/server/runtime/turns/turn-fresh-session-fallback.ts:15-26`),
+and a later turn starts fresh only after the two latest turns were both rejected
+resumes of the same session
+(`src/server/persistence/turn-ledger-repository.ts:378-431`). Projection replay
+reproduces backing state.
 
 Validation: 128 tests across eight focused core, backing, portable-history,
 provider-handoff, fallback, configuration and lifecycle suites passed. Node
@@ -187,10 +241,18 @@ Production changes:
   possible mutation) apply the same plan portably. `cleanup-unconfirmed`,
   thrown errors and crashes stay `uncertain`; restart retires the effect and
   only exact runtime-generation or prior-boot cleanup evidence resolves it,
-  then portably. No native operation is replayed.
+  then portably. No native operation is replayed. T3 differs on both points:
+  it refuses an unsupported rollback
+  (`apps/server/src/orchestration-v2/CommandPolicy.ts:313-331`) and requeues
+  `provider-thread.rollback` after process loss
+  (`apps/server/src/orchestration-v2/EffectOutbox.ts:125-128,501-512`). The
+  portable fallback and the process-bound `native.rollback` effect are
+  recorded differences awaiting a decision (see the fidelity audit entry).
 - **Retained history.** Rolled-back turns stay in the transcript as audit
   history but are excluded from portable history, fork capture and future
-  context handoffs; forking from a rolled-back turn is refused. Inherited fork
+  context handoffs; forking from a rolled-back turn is refused. Until
+  2026-11-01 their file changes still reached the handoff's changed-files list;
+  that list now skips them (`src/server/persistence/provider-handoff-files.ts:59-61`). Inherited fork
   history is preserved: a start rollback on a native fork uses the fork's
   inherited head, otherwise it resets portably to inherited history only.
 - **Backings and identities.** The active backing must match the current exact
@@ -289,6 +351,10 @@ Production changes since the resumed checkpoint above:
   unclean runtime restart now retires the native backing it last dispatched to,
   restoring the legacy rule that recovery cannot authorize native resume
   (`turn-restart-continuation` failed identically on clean HEAD before this).
+  T3 instead continues the native thread after a crash or shutdown
+  (`apps/server/src/orchestration-v2/RestartContinuation.ts:146-169`). Whether
+  Inertia adopts that continuation is decided in the recovery phase; until then
+  this is a tracked gap, not a deliberate difference.
 - **Client affordances.** Each finished, retained turn footer offers *Fork from
   here* and *Roll back to here* (two-step keyboard confirmation, Escape cancel,
   focus restored, live result stating native vs fresh-session continuation and
@@ -319,18 +385,22 @@ upstream as `thread.merge_back` (`Orchestrator.ts` dispatchThreadMergeBack,
 | Source point | Explicit or latest stable run; completed/waiting only | Latest stable retained point; any terminal fork turn included |
 | Base point | Always the fork point; pending transfers of the same pair superseded. At `15fe2832` also refused while another fork's transfer to the same target is pending, or while the target has an active or queued run | Last delivered merge-back (or fork point); undelivered drafts superseded |
 | Delivery | Pending transfer consumed automatically at the target's next dispatch | Visible draft packet delivered with the user's next message; removable |
-| Delta content | Compact summary lines incl. commands and file changes; at `15fe2832` rolled-back runs and cancelled queued messages excluded | Bounded message excerpts via packets; rolled-back turns excluded; commands/file changes not included |
+| Delta content | Compact summary lines incl. commands and file changes; at `15fe2832` rolled-back runs and cancelled queued messages excluded | Bounded message excerpts via packets; rolled-back turns excluded; since the phase 3 polish also a command and file-change work summary (`src/server/orchestration-v2/merge-back-repository.ts:245-279`), without T3's `Checkpoint:` and `Handoff:` lines |
 | Initiator | User or agent (MCP tool) | User only; agent tool deferred with the agent-tool phase |
-| Rollback | Checkpoint rollback coordinates native rollback and optional file restore; rolled-back runs kept as audit | Context rollback separate from Git `checkpoint.revert`; native or portable, audit history kept; no combined file restore |
+| Rollback | Checkpoint rollback coordinates native rollback and optional file restore; rolled-back runs kept as audit | Context rollback separate from Git `checkpoint.revert`; native or portable, audit history kept; opt-in combined file restore since the phase 3 polish |
 
 Upstream since the old pin (all 2026-10-29): `6b1245cc` (Stop always completes,
 force stop), `6d12bb1e` (Stop during restart), `36dac688` (restart continuation
 retries/parent stop) and `8ab098a4` (held queue release). Phase-3 impact: Inertia
 rollback/merge-back already refuse while a run is active, cleanup is pending or
 unconfirmed, or a native control is uncertain, and only exact cleanup evidence
-releases them; a deferred cursor survives a start that never dispatched. Force
-stop, held-queue release and parent-stop continuation semantics belong to the
-queue/delegation phases and were not implemented here.
+releases them; a deferred cursor survives a start that never dispatched. T3's
+explicit Force stop (superseded guard, shared-process check, "Force stopped by
+user" result), held-queue release and parent-stop continuation semantics were
+not implemented here. Inertia already escalates on a second Stop press
+(`src/server/runtime/turns/turn-run-state-coordinator.ts:183-195`), and the
+stop ladder release below adds an automatic release that T3 does not have; it
+is an Inertia decision, not T3's Stop semantics.
 
 ### Initial validation for this checkpoint
 
@@ -427,7 +497,11 @@ What landed:
   context rollback, when the turns' file changes are not completely recorded,
   workspace ownership cannot be confirmed, another chat worked in the same
   checkout after the restore point, files outside the rolled-back turns
-  changed, or too many files changed.
+  changed, or too many files changed. These are Inertia's time-bounded rules,
+  not T3's isolation rule (`CheckpointRestoreSafety.ts`); at this checkpoint
+  they ignored other chats' live sessions and terminals and did not fence other
+  chats' turns during the restore. The file restore model of 2026-10-31 below
+  adds both.
 - **Attributed recovery checkpoints.** The rollback's "Before file restore"
   checkpoint is attached to the retained turn, and `checkpoint.revert`'s
   "Before checkpoint restore" checkpoint to the chat's latest checkpointed turn.
@@ -506,10 +580,17 @@ merge-back tools (agent-tools phase).
 The durable core rule "unconfirmed cleanup blocks replacement work" also
 blocked the next turn after a Stop whose provider tree could not be confirmed
 stopped within the platform budget, so `tests/e2e/stop-ladder.spec.ts` failed on
-the macOS lifecycle sentinel and queued messages waited until restart. Stop must
-always complete (T3 Code 6b1245cc): the stop ladder's terminal release is now
-authoritative evidence that the runtime handed the unconfirmed tree to the
-process guardian and no longer owns it. The attempt records
+the macOS lifecycle sentinel and queued messages waited until restart. The
+release below is Inertia's own decision. T3 Code 6b1245cc does not release
+automatically: an unanswered Stop leaves the run `running` and flagged
+`unresponsiveAt` until the user's explicit Force stop
+(`apps/server/src/orchestration-v2/EffectWorker.ts:180-201`;
+`ThreadStop.test.ts:1556`). Inertia keeps its stop ladder (bounded automatic
+escalation after the platform budget, immediate force on a second Stop press)
+as a documented difference; flagging the attempt unresponsive while escalation
+runs is planned with the Stop command work (G5). The stop ladder's terminal
+release is authoritative evidence that the runtime handed the unconfirmed tree
+to the process guardian and no longer owns it. The attempt records
 `attempt.cleanup-released` with cleanup `unconfirmed-released` and the handoff
 evidence (stop outcome, the ownership row's runtime generation and boot
 identity, stop budget, release time); it is never recorded as `confirmed`, and
@@ -536,3 +617,186 @@ The Linux e2e failures were fixed by splitting the history footer action class
 from the shared run-details toggle and by counting the Pi provider card in the
 settings matrix; the Windows reproduction passed 23/23 scenarios across five
 specs.
+
+### File restore model — 2026-10-31
+
+File restore (rollback with "Also restore files" and `checkpoint.revert`) now
+follows T3's restore-safety rule (`CheckpointRestoreSafety.ts`) in addition to
+the time-bounded check. Before any safety check the restore upgrades the
+chat's checkout reservation to an exclusive restore claim, holds it through
+the restore and its verification, and releases it in `finally`. While a claim
+overlaps a chat's checkout (same, nested or containing folder, compared by
+real path), every provider-turn admission is refused with a short reason:
+`TurnController.queue` and `queuePair` refuse, and ordinary sends, queued
+dispatch, watcher wakes and agent-thread sends check first. The restore itself
+is refused when another chat has an active turn, a live provider run or
+cleanup barrier, a held admission lease, an overlapping checkout reservation or
+an open terminal whose folder is nested in, contains or equals the checkout. A
+sibling folder does not refuse. The existing time-bounded check (another
+chat's turns since the first rolled-back turn started) still applies, and a
+refused file restore keeps the context rollback. Reverting the own checkpoint
+of a rolled-back turn is refused by the server, and the timeline hides its
+Revert button; recovery checkpoints stay restorable. Unlike T3, a restore
+refuses instead of waiting for the checkout, and a shared project-root
+checkout is allowed when no other chat is working in it.
+
+## Fidelity audit fixes — 2026-11-01
+
+Status: uncommitted on top of `b28d5a9f` (PR #686), Windows 11 x64, Node
+22.23.1. A read-only audit of phases 1-3 against T3 Code `15fe2832` (recorded
+2026-10-31) found three blockers and a set of documentation statements that
+overstated the code. This entry records what landed, the coordinator's
+decisions and the remaining work.
+
+What landed:
+
+- **Rolled-back files excluded from handoffs (G1).** The changed-files list in
+  fresh-session and provider-switch handoffs skips turns with a
+  `rolled-back-turn` entity
+  (`src/server/persistence/provider-handoff-files.ts:59-61`); retained turns'
+  files still appear.
+- **Turn-preparation context correctness (G2).** Handoff coverage records only
+  the items the assembled prompt actually carries; a restored block the
+  assembler rejects fails with a typed, user-correctable error instead of
+  proceeding without history
+  (`src/server/runtime/turns/turn-context-handoff.ts`). When the delta for a
+  resumed native session exceeds its budget, preparation replaces the session
+  with a fresh one carrying the full history under one handoff record and
+  invalidates the old backing as `context-exhausted`; it refuses with a typed
+  error while the provider reports pending background work. History deferred
+  by a goal start is delivered with the next normal turn. The budget now
+  reserves non-image attachments, estimates native occupancy from covered items
+  when no usage was reported
+  (`src/server/orchestration-v2/portable-history-occupancy.ts`), and states
+  whether the block restores history or adds a delta. The model-window,
+  auto-compact and background-work probes are optional provider hooks; no
+  provider implements them yet, so the background-work check always sees none
+  and the window falls back to the override or reported maximum.
+- **Restore fencing and safety parity (G3).** See the file restore model entry
+  above: an exclusive checkout claim fences every provider-turn admission path
+  on an overlapping checkout during a restore, T3's isolation rule refuses a
+  restore while another chat's live session or open terminal overlaps the
+  checkout, and the server refuses to revert a rolled-back turn's own
+  checkpoint while the timeline hides that Revert button. Opening a terminal on
+  an overlapping checkout during a restore is refused with its own message
+  ("Files are being restored in this chat's checkout. Open the terminal again
+  when the restore finishes.",
+  `src/server/runtime/checkout-restore-fence.ts`), distinct from the automatic
+  Git update refusal.
+- **Isolated Electron fixes.** Fork history is requested only for saved chats,
+  so a new-chat draft no longer asks for inherited history before it exists
+  (`savedChatRunner`,
+  `src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts`),
+  and `tests/e2e/composer-project-picker.spec.ts` waits for the checkout label
+  to settle before measuring, so a not-yet-known Git status is never read as
+  "Detached HEAD".
+
+Decisions (coordinator, 2026-10-31):
+
+- **Stop.** Inertia keeps its stop ladder (bounded automatic escalation after
+  the platform budget, immediate force on a second Stop press) as a documented
+  difference from T3's explicit Force stop. The ladder's release resolves
+  admission as `unconfirmed-released` and never counts as cleanup proof. The
+  attempt will be flagged unresponsive while escalation runs, and Stop becomes
+  a receipted durable command with a process-bound interrupt effect, in G5.
+- **File restore.** T3's isolation rule is adopted in addition to the
+  time-bounded check (landed in G3).
+- **Crash and shutdown continuation.** Decided in the recovery phase; recorded
+  as a tracked gap, not a deliberate difference.
+
+Authoritative V2 commands today: new-turn `message.send`,
+`conversation.fork`, `conversation.rollback` and `conversation.merge-back` are
+receipted; `checkpoint.revert` and first-send fork preparation are ordered on
+the conversation lane without a receipt. Stop, steer and follow-up sends,
+configuration, queue edits and approvals bypass V2.
+
+Differences from T3 recorded here but not yet decided (each is either a
+deliberate difference or a gap once its owning package decides): actor-scoped,
+payload-fingerprinted receipts; no in-process `provider.start` retry (G7); a
+fresh session instead of refusing an unverified model switch; re-offered
+omitted history, the 2,048-item coverage cap and the 256-candidate bound
+(G11); handoff `uncertain` on dispatch without output and no handoff
+capability gate (G11); the two-strike rejected-resume rule (G9); the run
+status mapping (Stop is `cancelled`, restart is `interrupted`, no `waiting` or
+`rolled_back` run status) (G8); crash backing retirement versus T3's crash
+continuation (recovery phase); the eager fork history snapshot,
+explicit-turn-only fork source points, portable fallback where T3 fails a
+native fork, portable rollback where T3 refuses, and process-bound
+`native.rollback` where T3 replays it (G12); Git checkpoints not marked stale
+after rollback; anchoring by item kind rather than role; and the legacy
+own-chat reference history path.
+
+G4, the documentation truth pass, is this entry together with the corrections
+of 2026-11-01 earlier in this file and in
+[t3code-delta-2026-10-31.md](t3code-delta-2026-10-31.md). Each corrected
+statement cites a code anchor checked against this working tree.
+
+Remaining gap packages, tracked work in this order (G6 → G5, G8 → G9,
+G10 → G11, with G7 and G12 alongside):
+
+- **G5** command authority for send dispositions, Stop and configuration:
+  every `message.send` disposition, `agent.stop`, `conversation.update` and
+  queue edit on the conversation lane with receipts; receipted Stop with a
+  process-bound interrupt effect and the unresponsive flag; non-current
+  attempts cannot write lifecycle state.
+- **G6** receipt status and errors with rejected-receipt replay, projection
+  metadata and a boot-time projection verify.
+- **G7** production outbox dispatcher, replay-safe effects and pruning.
+- **G8** run and attempt ordinals, attempt reasons, `superseded` attempts and
+  native refs.
+- **G9** in-run fallback for a rejected resume, recorded as a V2 attempt.
+- **G10** attributed portable item kinds (commands, errors, file changes,
+  plans, interrupt results) and provenance.
+- **G11** coverage accounting for omitted items, then Codex native history
+  injection.
+- **G12** fork and merge-back polish: portable fork of unsuccessful source
+  turns, native Codex legacy-history forks, `Checkpoint:` and `Handoff:` lines.
+- Later phases keep L1 (per-item queue selection), L2 (account-aware
+  instances), L3 (recovery: continuation, persisted questions, background-work
+  notes) and L4 (V2 publication to clients).
+
+Verification:
+
+The machine was shared with other agents' builds and test runs throughout.
+
+- `npm run check:quality` passed: workflow concurrency, 110 migration lineage
+  entries, architecture (1,844 source files, 7,675 internal edges), color
+  themes, both linters and all five TypeScript projects.
+- `npm run build:bundle` passed. `coreJavaScript` measured 2,485,356 bytes
+  (previously 2,485,130) against its 2,485,379 limit, 23 bytes of headroom, so
+  its limit was re-baselined to 2,485,612 (measurement plus 256); a rerun of
+  `npm run check:renderer-bundle` passed. The startup routes measured 902,998
+  and 796,783 bytes and keep 349 bytes of headroom under their unchanged
+  limits; no other limit and no exclusion changed. Accounting is in
+  [renderer-bundle.json](../pr-evidence/orchestrator-v2/renderer-bundle.json)
+  (`fidelityAuditFixes`).
+- Focused Vitest, 16 files: `orchestration-history-rollback`,
+  `orchestration-backings`, `orchestration-context-exhaustion`,
+  `orchestration-rollback-restore`, `orchestration-portable-history`,
+  `provider-handoff-continuation`, `turn-controller`, `queued-message-runtime`,
+  `duo-deletion-commands`, `duo-launch`, `checkpoint-rollback`,
+  `runtime-query-plans` and DOM `history-actions`, `fork-surface`,
+  `composer-checkout-branch`, `checkpoint-notice`. The first run had 267 of
+  268 tests passing; `fork-surface` "pages immutable history without replacing
+  already loaded items" missed its 1-second `findByText` wait while 46% of the
+  run was spent transforming. That file passed alone (6/6) and the rerun of all
+  16 files passed 268/268. `duo-launch` "preserves an exact worktree
+  reattached after a legacy removal claim", reported earlier as timing out
+  under load, passed in both full runs and alone (4.4 s); it does not go
+  through `queuePair`.
+- The new terminal refusal test in `orchestration-rollback-restore` passed
+  alone and in the full runs.
+- Electron `--project isolated` with `composer-project-picker`,
+  `project-navigation`, `session-continuity` and
+  `history-rollback-merge-back` (five scenarios): run 1 failed three. Two
+  fixtures never became ready because their temporary profile and data
+  folders disappeared during startup (`ENOENT` on the fixture's `data`
+  folder); `project-navigation` did not show the attached file. Run 2 passed
+  four of five; `project-navigation` completed its steps but its fixture
+  folder was not removed within the close deadline. `project-navigation`
+  alone then passed (32.0 s).
+- Electron `--project display-sensitive` with `detached-chat-tools`: 8 of 8
+  passed.
+
+Not exercised: macOS and Linux, a packaged build, real provider accounts, and
+the full `npm run check` suite.

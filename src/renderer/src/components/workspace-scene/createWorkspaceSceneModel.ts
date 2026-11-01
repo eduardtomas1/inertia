@@ -142,13 +142,20 @@ function unsavedChatQueueRunner(run: QueueCommandRunner): QueueCommandRunner {
   return unsaved;
 }
 
+export function savedChatRunner<Runner>(
+  run: Runner | undefined,
+  draft: Pick<Conversation, "id"> | null,
+  conversations: readonly Pick<Conversation, "id">[] | undefined,
+): Runner | undefined {
+  return !draft || conversations?.some(({ id }) => id === draft.id) ? run : undefined;
+}
+
 export function chatQueueRunner(
   run: QueueCommandRunner | undefined,
   draft: Conversation | null,
   conversations: readonly Pick<Conversation, "id">[] | undefined,
 ): QueueCommandRunner | undefined {
-  if (!run || !draft || conversations?.some(({ id }) => id === draft.id)) return run;
-  return unsavedChatQueueRunner(run);
+  return savedChatRunner(run, draft, conversations) ?? (run && unsavedChatQueueRunner(run));
 }
 
 export function chatCheckoutBranch(
@@ -697,12 +704,8 @@ export function createWorkspaceSceneModel({
       rolledBackTurnIds: chatProjection.rolledBackTurnIds,
       watcherWakes: chatProjection.watcherWakes,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
-      onForkCommand: actions.run,
-      onQueueCommand: chatQueueRunner(
-        actions.runQueueCommand,
-        draftConversation,
-        connection.snapshot?.conversations,
-      ),
+      onForkCommand: savedChatRunner(actions.run, draftConversation, snapshotConversations),
+      onQueueCommand: chatQueueRunner(actions.runQueueCommand, draftConversation, snapshotConversations),
       onLimitResetCommand: actions.runLimitResetCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,

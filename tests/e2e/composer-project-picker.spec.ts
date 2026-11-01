@@ -40,6 +40,9 @@ for (const { projectName, truncated } of [
       await expect(picker).toBeEnabled();
 
       await expect(picker.locator("span")).toHaveText(projectName);
+      const checkout = composer.getByRole("group", { name: "Chat checkout context" });
+      await expect(checkout.locator(".composer-checkout-branch")).toBeVisible();
+      await expect(checkout).not.toContainText("Detached HEAD");
       for (const width of [760, 480, 360]) {
         // Constrain the real new-chat composer to the space a split pane gets.
         await composer.evaluate((element, maxWidth) => {

@@ -3,9 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ForkHistoryPanel, ForkSurfaceProvider, ForkTurnAction, type ForkCommandRunner } from "../../src/renderer/src/components/orchestration/fork-surface";
+import { savedChatRunner } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
 import type { ServerEvent } from "../../src/shared/contracts";
 import { continuationIdentityForSelection, providerNativeModelSelection } from "../../src/shared/model-routing";
 import { forkHistoryResultSchema, type ForkHistoryResult } from "../../src/shared/orchestration-forks";
+import { conversation } from "./composer-fixtures";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
@@ -110,5 +112,30 @@ describe("fork controls", () => {
     await act(async () => complete(result(page("Stale history", null))));
     expect(screen.queryByText("Stale history")).not.toBeInTheDocument();
     expect(screen.queryByText(/Inherited history/u)).not.toBeInTheDocument();
+  });
+
+  it("asks for inherited history only once a new-chat draft is saved", async () => {
+    const run = vi.fn<ForkCommandRunner>().mockResolvedValue(result({ kind: "conversation.fork.history", conversationId,
+      lineage: null, parts: [], next: null }));
+    const draft = conversation(conversationId);
+    const surface = (conversations: readonly { id: string }[] | undefined) => (
+      <ForkSurfaceProvider projectId={projectId} conversationId={conversationId} run={savedChatRunner(run, draft, conversations)}>
+        <ForkHistoryPanel /><ForkTurnAction turnId={turnId} />
+      </ForkSurfaceProvider>
+    );
+    expect(savedChatRunner(run, null, [])).toBe(run);
+    const view = render(surface(undefined));
+    view.rerender(surface([{ id: sourceId }]));
+    await act(async () => { await import("../../src/renderer/src/components/orchestration/fork-history-view"); });
+    expect(run).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    view.rerender(surface([{ id: sourceId }, { id: conversationId }]));
+    await waitFor(() => expect(run).toHaveBeenCalledExactlyOnceWith("conversation.fork.history", {
+      type: "conversation.fork.history", payload: { conversationId, limit: 1 } }));
+    expect(await screen.findByRole("button", { name: "Fork from here" })).toBeEnabled();
+    expect(screen.queryByText(/Inherited history/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

@@ -1,15 +1,21 @@
 // @inertia-test-suite portable
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import { CheckpointError, restoreCheckpoint } from "../../src/server/checkpoints";
 import { RuntimeStore } from "../../src/server/database";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import type { NativeConversationRequest, NativeConversationResult } from "../../src/server/provider/native-conversation-operations";
 import { restoreConversationCheckpoint } from "../../src/server/runtime/checkpoint-restoration";
+import { CHECKOUT_RESTORE_BUSY, CHECKOUT_RESTORE_TERMINAL_REFUSAL, ROLLED_BACK_CHECKPOINT } from "../../src/server/runtime/checkout-restore-fence";
+import { createProjectWorkspaceCommandHandler, type ProjectWorkspaceCommandDependencies } from "../../src/server/runtime/commands/project-workspace-commands";
+import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
+import { CHECKOUT_RESTORE_IN_PROGRESS } from "../../src/server/runtime/conversation-work-authority";
 import { prepareForkSession } from "../../src/server/runtime/fork-session-service";
 import { rollbackConversationHistory, type HistoryRollbackDependencies } from "../../src/server/runtime/history-rollback-service";
 import { TurnGitArtifactManager } from "../../src/server/turn-git-artifacts";
@@ -17,7 +23,7 @@ import { clientCommandSchema } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { conversationRollbackResultSchema } from "../../src/shared/orchestration-history";
 import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime,
-  turnControllerTestIdentity, type TurnControllerTestRuntime } from "../support/turn-controller-runtime";
+  turnControllerTestIdentity, turnControllerTestProviderInfo, type TurnControllerTestRuntime } from "../support/turn-controller-runtime";
 
 afterEach(() => { vi.restoreAllMocks(); return cleanupTurnControllerTestDirectories(); });
 
@@ -70,12 +76,78 @@ async function finish(runtime: TurnControllerTestRuntime, label: string, files: 
 
 type NativeExecute = (request: NativeConversationRequest) => Promise<NativeConversationResult>;
 
+type TerminalScopes = NonNullable<HistoryRollbackDependencies["terminals"]>;
+
 function dependencies(runtime: TurnControllerTestRuntime, execute: NativeExecute,
-  restoreCheckpoint?: HistoryRollbackDependencies["restoreCheckpoint"]) {
+  restoreCheckpoint?: HistoryRollbackDependencies["restoreCheckpoint"], terminals?: TerminalScopes) {
   return { store: runtime.store, turns: runtime.controller,
     providerTerminalResumes: new ProviderTerminalResumeRegistry(runtime.store.conversationWork),
     providers: { resolveModelRoute: runtime.provider.resolveModelRoute, isRunning: (id: string) => runtime.provider.isRunning(id),
-      nativeConversation: vi.fn(execute) }, ...(restoreCheckpoint ? { restoreCheckpoint } : {}) };
+      nativeConversation: vi.fn(execute) }, ...(restoreCheckpoint ? { restoreCheckpoint } : {}), ...(terminals ? { terminals } : {}) };
+}
+
+function gate() {
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => { open = resolve; });
+  return { open, opened };
+}
+
+function otherChat(runtime: TurnControllerTestRuntime, path?: string) {
+  const projectId = path ? runtime.store.createProject(`Project ${basename(path)}`, path).id
+    : runtime.store.conversation(runtime.conversationId).projectId;
+  return runtime.store.createConversation(projectId, "Other chat",
+    { providerId: "codex", model: "gpt-test", reasoningEffort: "high", interactionMode: "build", accessMode: "supervised" });
+}
+
+async function startTurn(runtime: TurnControllerTestRuntime, conversationId: string): Promise<() => Promise<void>> {
+  const runs = runtime.provider.runCount;
+  const queued = runtime.controller.queue({ conversationId, content: "other request", turnCheckpoint: false });
+  runtime.controller.start(queued.turn.id);
+  await vi.waitFor(() => expect(runtime.provider.runCount).toBe(runs + 1), wait);
+  return async () => {
+    runtime.provider.resolve({ text: "other answer", sessionId: `${conversationId}-native` });
+    await vi.waitFor(() => expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed"), wait);
+    await runtime.controller.drainSettlementTasks();
+  };
+}
+
+function ownerPath(runtime: TurnControllerTestRuntime, owner: "nested" | "ancestor" | "sibling"): string {
+  const path = owner === "ancestor" ? runtime.directory
+    : owner === "nested" ? join(runtime.workspace, "packages", "nested") : join(runtime.directory, "workspace2");
+  mkdirSync(path, { recursive: true });
+  return path;
+}
+
+function revertHandler(runtime: TurnControllerTestRuntime, terminals: TerminalScopes = { liveSessionScopes: () => [] },
+  onSnapshot: () => void = () => undefined) {
+  const handler = createProjectWorkspaceCommandHandler({ store: runtime.store, turns: runtime.controller,
+    providerTerminalResumes: new ProviderTerminalResumeRegistry(runtime.store.conversationWork), terminals,
+    send: () => undefined, broadcastSnapshot: onSnapshot } as unknown as ProjectWorkspaceCommandDependencies);
+  return (checkpointId: string) => handler({ readyState: 1 } as unknown as WebSocket, { type: "checkpoint.revert",
+    requestId: randomUUID(), payload: { conversationId: runtime.conversationId, checkpointId } });
+}
+
+async function messageSender(runtime: TurnControllerTestRuntime) {
+  const attachments = await ConversationAttachmentStore.open(runtime.directory);
+  const handler = createTurnInteractionCommandHandler({
+    store: runtime.store, turns: runtime.controller, conversationAttachments: attachments,
+    backendProfileController: { validateSelection: (selection: unknown) => selection, isExternalSelection: () => false,
+      readiness: async () => null } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
+    isolatedRuns: { has: () => false } as unknown as TurnInteractionCommandDependencies["isolatedRuns"],
+    workspaceRuns: {} as TurnInteractionCommandDependencies["workspaceRuns"],
+    pendingApprovals: new Map(), pendingInputs: new Map(), dataDirectory: runtime.directory, enableProviders: true,
+    attachmentResolver: { resolvePayloads: async () => [], releaseAll: async () => undefined,
+      relinquishAll: async () => undefined } as unknown as TurnInteractionCommandDependencies["attachmentResolver"],
+    generatedAttachments: { release: async () => undefined } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
+    workflows: { resolveTurnSkills: async () => ({ inputs: [], routeKey: null }),
+      assertTurnSkillsCurrent: () => undefined } as unknown as TurnInteractionCommandDependencies["workflows"],
+    providerTerminalResumes: { isActive: () => false, acquireWhenAvailable: async () => true,
+      release: () => undefined } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
+    providerInfo: () => [turnControllerTestProviderInfo()], broadcast: () => undefined,
+    broadcastSnapshot: () => undefined, send: () => undefined,
+  });
+  return { close: () => attachments.close(), send: (conversationId: string) => handler(null as unknown as WebSocket, {
+    type: "message.send", requestId: randomUUID(), payload: { conversationId, content: "Ordinary send", attachments: [] } }) };
 }
 
 const unsupported: NativeExecute = async (request) => ({ operationId: request.operationId, identity: request.source.identity,
@@ -332,6 +404,254 @@ describe("chat rollback with file restore", () => {
       expect(runtime.store.orchestration.history.cursor(paired.id)).toBeNull();
     } finally { runtime.store.close(); }
   }, 60_000);
+});
+
+describe("file restore fencing", () => {
+  it("fences every provider-turn admission path on an overlapping checkout while a file restore is in flight", async () => {
+    const runtime = await gitRuntime();
+    const sender = await messageSender(runtime);
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      await finish(runtime, "second", { "notes.txt": "rolled back\n" });
+      const other = otherChat(runtime);
+      const nested = otherChat(runtime, ownerPath(runtime, "nested"));
+      const sibling = otherChat(runtime, ownerPath(runtime, "sibling"));
+      const entered = gate();
+      const proceed = gate();
+      const restore: NonNullable<HistoryRollbackDependencies["restoreCheckpoint"]> = async (...args) => {
+        entered.open();
+        await proceed.opened;
+        return await restoreConversationCheckpoint(...args);
+      };
+      const pending = rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+      await entered.opened;
+      const work = runtime.store.conversationWork;
+      const request = (conversationId: string) => ({ conversationId, content: "blocked", turnCheckpoint: false });
+      expect(work.restoreBlocksConversation(other.id)).toBe(true);
+      expect(work.restoreBlocksConversation(nested.id)).toBe(true);
+      expect(work.restoreBlocksConversation(sibling.id)).toBe(false);
+      for (const id of [other.id, nested.id, runtime.conversationId]) {
+        expect(() => runtime.controller.queue(request(id))).toThrow(CHECKOUT_RESTORE_IN_PROGRESS);
+      }
+      const lease = await runtime.controller.acquireTurnAdmission(other.id, 100);
+      expect(lease).not.toBeNull();
+      try {
+        expect(() => runtime.controller.queue(request(other.id), undefined, lease!)).toThrow(CHECKOUT_RESTORE_IN_PROGRESS);
+      } finally { lease!.release(); }
+      expect(() => runtime.controller.queuePair(randomUUID(), [request(sibling.id), request(other.id)]))
+        .toThrow(CHECKOUT_RESTORE_IN_PROGRESS);
+      await expect(sender.send(other.id)).rejects.toThrow(CHECKOUT_RESTORE_IN_PROGRESS);
+      expect(new ProviderTerminalResumeRegistry(work).acquire(other.id)).toBe(false);
+      expect(work.reserveCheckout("nested-workspace-run", nested.projectId, ownerPath(runtime, "nested"))).toBe(false);
+      expect(runtime.controller.isActive(other.id)).toBe(false);
+      expect(runtime.store.hasConversationMessages(other.id)).toBe(false);
+      proceed.open();
+      const result = await pending;
+      expect(result.files).toMatchObject({ outcome: "restored" });
+      expect(read(runtime, "notes.txt")).toBe("retained\n");
+      expect(work.restoreBlocksConversation(other.id)).toBe(false);
+      await finish(runtime, "after", {}, other.id, false);
+      await runtime.controller.drainSettlementTasks();
+    } finally {
+      await sender.close();
+      runtime.store.close();
+    }
+  }, 120_000);
+
+  it("refuses opening a terminal on an overlapping checkout with the restore wording, distinct from an automatic Git update", async () => {
+    const runtime = await gitRuntime();
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      await finish(runtime, "second", { "notes.txt": "rolled back\n" });
+      const nested = otherChat(runtime, ownerPath(runtime, "nested"));
+      const sibling = otherChat(runtime, ownerPath(runtime, "sibling"));
+      const create = vi.fn(() => "terminal-id");
+      const handler = createProjectWorkspaceCommandHandler({ store: runtime.store,
+        workspacePath: (_projectId: string, conversationId?: string) => runtime.store.conversationPath(conversationId!),
+        terminals: { create }, send: () => undefined } as unknown as ProjectWorkspaceCommandDependencies);
+      const open = (conversationId: string) => handler({ readyState: 1 } as unknown as WebSocket, { type: "terminal.create",
+        requestId: randomUUID(), payload: { projectId: runtime.store.conversation(conversationId).projectId, conversationId, cols: 80, rows: 24 } });
+      const entered = gate();
+      const proceed = gate();
+      const restore: NonNullable<HistoryRollbackDependencies["restoreCheckpoint"]> = async (...args) => {
+        entered.open();
+        await proceed.opened;
+        return await restoreConversationCheckpoint(...args);
+      };
+      const pending = rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+      await entered.opened;
+      for (const id of [runtime.conversationId, nested.id]) {
+        await expect(open(id)).rejects.toThrow(CHECKOUT_RESTORE_TERMINAL_REFUSAL);
+      }
+      await open(sibling.id);
+      expect(create).toHaveBeenCalledTimes(1);
+      proceed.open();
+      await expect(pending).resolves.toMatchObject({ files: { outcome: "restored" } });
+      const work = runtime.store.conversationWork;
+      expect(work.reserveExclusiveCheckout("cleanup", runtime.store.conversation(runtime.conversationId).projectId, runtime.workspace)).toBe(true);
+      try {
+        for (const id of [runtime.conversationId, nested.id]) {
+          await expect(open(id)).rejects.toThrow("This checkout is finishing an automatic Git update. Try opening the terminal again shortly.");
+        }
+      } finally { work.release("cleanup"); }
+      await open(runtime.conversationId);
+      expect(create).toHaveBeenCalledTimes(2);
+    } finally { runtime.store.close(); }
+  }, 120_000);
+
+  it.each(["active turn", "admission reservation", "nested checkout reservation"] as const)(
+    "refuses the file restore while another chat holds the checkout (%s), keeping the files and the context rollback",
+    async (holder) => {
+      const runtime = await gitRuntime();
+      try {
+        const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+        const second = await finish(runtime, "second", { "notes.txt": "rolled back\n" });
+        const other = otherChat(runtime);
+        const work = runtime.store.conversationWork;
+        let releaseHolder: () => Promise<void> | void;
+        if (holder === "active turn") releaseHolder = await startTurn(runtime, other.id);
+        else if (holder === "admission reservation") {
+          const lease = await runtime.controller.acquireTurnAdmission(other.id, 100);
+          expect(lease).not.toBeNull();
+          releaseHolder = () => lease!.release();
+        } else {
+          expect(work.reserveCheckout("nested-holder", other.projectId, ownerPath(runtime, "nested"))).toBe(true);
+          releaseHolder = () => work.release("nested-holder");
+        }
+        const restore = vi.fn(restoreConversationCheckpoint);
+        try {
+          const result = await rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+          expect(result).toMatchObject({ transfer: "portable", rolledBackTurns: 1, files: { outcome: "refused" } });
+          expect(result.files.message).toContain("Another chat, terminal or task is working in this workspace");
+          expect(restore).not.toHaveBeenCalled();
+          expect(read(runtime, "notes.txt")).toBe("rolled back\n");
+          expect(runtime.store.orchestration.history.rolledBack(second.id)).toBe(true);
+          expect(work.restoreBlocksConversation(other.id)).toBe(false);
+        } finally { await releaseHolder(); }
+      } finally { runtime.store.close(); }
+    }, 120_000);
+
+  it.each(["nested", "ancestor", "sibling"] as const)(
+    "applies the isolation rule to live provider sessions and open terminals of other chats, owner=%s", async (owner) => {
+      const runtime = await gitRuntime();
+      try {
+        const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+        await finish(runtime, "second", { "notes.txt": "rolled back\n" });
+        const path = ownerPath(runtime, owner);
+        const other = otherChat(runtime, path);
+        const refused = owner !== "sibling";
+        const settleOther = await startTurn(runtime, other.id);
+        const restore = vi.fn(restoreConversationCheckpoint);
+        try {
+          const result = await rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+          expect(result.files.outcome).toBe(refused ? "refused" : "restored");
+          expect(restore).toHaveBeenCalledTimes(refused ? 0 : 1);
+          expect(read(runtime, "notes.txt")).toBe(refused ? "rolled back\n" : "retained\n");
+        } finally { await settleOther(); }
+        const before = read(runtime, "notes.txt");
+        const checkpointId = runtime.store.agentTurn(first.id).checkpointId!;
+        const scopes = [{ cwd: runtime.workspace, conversationId: runtime.conversationId }, { cwd: path, conversationId: other.id }];
+        const revert = revertHandler(runtime, { liveSessionScopes: () => scopes });
+        if (refused) {
+          await expect(revert(checkpointId)).rejects.toThrow(CHECKOUT_RESTORE_BUSY);
+          expect(read(runtime, "notes.txt")).toBe(before);
+        } else {
+          await revert(checkpointId);
+          expect(read(runtime, "notes.txt")).toBe("base notes\n");
+        }
+        expect(runtime.store.conversationWork.restoreBlocksConversation(other.id)).toBe(false);
+      } finally { runtime.store.close(); }
+    }, 120_000);
+
+  it.each(["cleanup-first", "rollback-first"] as const)("locks a file restore against an exclusive checkout mutation, %s", async (order) => {
+    const runtime = await gitRuntime();
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      await finish(runtime, "second", { "notes.txt": "rolled back\n" });
+      const work = runtime.store.conversationWork;
+      const projectId = runtime.store.conversation(runtime.conversationId).projectId;
+      const calls: string[] = [];
+      const entered = gate();
+      const proceed = gate();
+      const restore: NonNullable<HistoryRollbackDependencies["restoreCheckpoint"]> = async (...args) => {
+        calls.push("files");
+        entered.open();
+        if (order === "rollback-first") await proceed.opened;
+        return await restoreConversationCheckpoint(...args);
+      };
+      const deps = dependencies(runtime, unsupported, restore);
+      const cleanup = () => {
+        if (!work.reserveExclusiveCheckout("cleanup", projectId, runtime.workspace)) return false;
+        calls.push("cleanup");
+        return true;
+      };
+      if (order === "cleanup-first") {
+        expect(cleanup()).toBe(true);
+        await expect(rollback(deps, runtime.conversationId, first.id)).rejects.toThrow("Stop active work");
+        expect(calls).toEqual(["cleanup"]);
+        work.release("cleanup");
+        await expect(rollback(deps, runtime.conversationId, first.id)).resolves.toMatchObject({ files: { outcome: "restored" } });
+        expect(calls).toEqual(["cleanup", "files"]);
+      } else {
+        const pending = rollback(deps, runtime.conversationId, first.id);
+        await entered.opened;
+        expect(cleanup()).toBe(false);
+        const nested = ownerPath(runtime, "nested");
+        expect(work.reserveCheckout("nested-cleanup", projectId, nested)).toBe(false);
+        proceed.open();
+        await expect(pending).resolves.toMatchObject({ files: { outcome: "restored" } });
+        expect(work.reserveCheckout("nested-cleanup", projectId, nested)).toBe(true);
+        work.release("nested-cleanup");
+        expect(cleanup()).toBe(true);
+        work.release("cleanup");
+        expect(calls).toEqual(["files", "cleanup"]);
+      }
+      expect(read(runtime, "notes.txt")).toBe("retained\n");
+    } finally { runtime.store.close(); }
+  }, 120_000);
+});
+
+describe("checkpoint revert fencing", () => {
+  it("refuses a revert while another chat works in the checkout and fences admission while it runs", async () => {
+    const runtime = await gitRuntime();
+    try {
+      await finish(runtime, "first", { "notes.txt": "first\n" });
+      const second = await finish(runtime, "second", { "notes.txt": "second\n" });
+      const other = otherChat(runtime);
+      const checkpointId = runtime.store.agentTurn(second.id).checkpointId!;
+      const settleOther = await startTurn(runtime, other.id);
+      try {
+        await expect(revertHandler(runtime)(checkpointId)).rejects.toThrow(CHECKOUT_RESTORE_BUSY);
+        expect(read(runtime, "notes.txt")).toBe("second\n");
+      } finally { await settleOther(); }
+      const observed: unknown[] = [];
+      const revert = revertHandler(runtime, undefined, () => {
+        if (observed.length > 0) return;
+        observed.push(runtime.store.conversationWork.restoreBlocksConversation(other.id));
+        try { runtime.controller.queue({ conversationId: other.id, content: "blocked", turnCheckpoint: false }); }
+        catch (error) { observed.push((error as Error).message); }
+      });
+      await revert(checkpointId);
+      expect(observed).toEqual([true, CHECKOUT_RESTORE_IN_PROGRESS]);
+      expect(read(runtime, "notes.txt")).toBe("first\n");
+      expect(runtime.store.conversationWork.restoreBlocksConversation(other.id)).toBe(false);
+    } finally { runtime.store.close(); }
+  }, 120_000);
+
+  it("refuses to revert a rolled-back turn's checkpoint on the server and still reverts a retained turn's", async () => {
+    const runtime = await gitRuntime();
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "first\n" });
+      const second = await finish(runtime, "second", { "notes.txt": "second\n" });
+      await expect(rollback(dependencies(runtime, unsupported), runtime.conversationId, first.id,
+        source(runtime.conversationId, first.id, false))).resolves.toMatchObject({ rolledBackTurns: 1 });
+      const revert = revertHandler(runtime);
+      await expect(revert(runtime.store.agentTurn(second.id).checkpointId!)).rejects.toThrow(ROLLED_BACK_CHECKPOINT);
+      expect(read(runtime, "notes.txt")).toBe("second\n");
+      await revert(runtime.store.agentTurn(first.id).checkpointId!);
+      expect(read(runtime, "notes.txt")).toBe("base notes\n");
+    } finally { runtime.store.close(); }
+  }, 120_000);
 });
 
 describe("runtime command identities", () => {

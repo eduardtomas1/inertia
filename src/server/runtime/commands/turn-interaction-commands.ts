@@ -21,6 +21,7 @@ import {
   publicRuntimeError,
   RuntimeRequestError,
 } from "../../runtime-errors";
+import { CHECKOUT_RESTORE_IN_PROGRESS } from "../conversation-work-authority";
 import {
   prepareDocumentAttachments,
   type PreparedDocumentAttachments,
@@ -500,6 +501,9 @@ export function createTurnInteractionCommandHandler(
           );
         }
         try {
+        if (dependencies.store.conversationWork.restoreBlocksConversation(conversation.id)) {
+          throw new RuntimeRequestError(CHECKOUT_RESTORE_IN_PROGRESS, MESSAGE_ADMISSION_UNAVAILABLE);
+        }
         if (dependencies.prepareForkSession) {
           messageSendStage = "provider-transition";
           const preparation = new AbortController();

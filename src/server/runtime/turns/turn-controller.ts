@@ -17,6 +17,7 @@ import {
 } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
 import { RuntimeRequestError } from "../../runtime-errors";
+import { assertNoCheckoutRestore } from "./turn-checkout-restore-fence";
 import { clearPendingInteractionsForTurn } from "../pending-interaction-registry";
 import {
   isProviderRunRefusal,
@@ -67,7 +68,7 @@ import { stopActiveSubagent } from "./turn-subagent-stop";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
 import { quarantineActiveDuoTurn } from "../duo/duo-active-turn-quarantine";
-import { exitedProviderTurns, hasActiveTurnCheckout, hasLiveProviderRun, liveProviderRunConversationIds, providerConversationIds, turnOwnedProviderRuns } from "./turn-checkout-activity";
+import { checkoutActivityConversationIds, exitedProviderTurns, hasActiveTurnCheckout, hasLiveProviderRun, liveProviderRunConversationIds, providerConversationIds, turnOwnedProviderRuns } from "./turn-checkout-activity";
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
@@ -317,6 +318,7 @@ export class TurnController {
   async clearNativeGoal(conversationId: string): Promise<boolean | "superseded" | null> { return await this.nativeGoals.clear(conversationId); }
 
   isClosing(): boolean { return this.closing; }
+  checkoutActivityConversationIds(): string[] { return checkoutActivityConversationIds(this.store, this.providers, [...this.activeByConversation.keys(), ...this.providerRunOwnershipBarriers.keys(), ...this.admissions.conversationIds()]); }
 
   hasActiveCheckout(checkoutPath: string): boolean {
     const tracked = [
@@ -560,6 +562,7 @@ export class TurnController {
       throw new RuntimeRequestError("The local runtime is shutting down.");
     }
     if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+    assertNoCheckoutRestore(this.store, request.conversationId);
     this.admissions.assertQueueAuthority(request.conversationId, admission);
     if (
       !request.goalStart
@@ -614,6 +617,7 @@ export class TurnController {
     requests: readonly [QueueTurnRequest, QueueTurnRequest],
   ): [QueuedTurn, QueuedTurn] {
     if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+    for (const request of requests) assertNoCheckoutRestore(this.store, request.conversationId);
     return queuePairedTurns({
       store: this.store,
       providers: this.providers,

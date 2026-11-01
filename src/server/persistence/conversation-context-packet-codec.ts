@@ -2,7 +2,10 @@ import {
   MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE,
   MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
   MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES,
+  MAX_CONVERSATION_CONTEXT_SUPPLEMENT_CHECKPOINTS,
   MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS,
+  MAX_CONVERSATION_CONTEXT_SUPPLEMENT_HANDOFFS,
+  MAX_CONVERSATION_CONTEXT_SUPPLEMENT_LABEL_LENGTH,
   MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
   type ConversationContextExcerpt,
   type ConversationContextSupplement,
@@ -19,8 +22,37 @@ export interface StoredPacketExcerpts {
 }
 
 const UNFINISHED_TURN_STATES = new Set(["failed", "cancelled", "running"]);
-const SUPPLEMENT_KEYS = new Set(["files", "omittedFiles", "commands", "omittedCommands"]);
+const SUPPLEMENT_KEYS = new Set(["files", "omittedFiles", "commands", "omittedCommands",
+  "checkpoints", "omittedCheckpoints", "handoffs", "omittedHandoffs"]);
 const MAX_SUPPLEMENT_LINE_LENGTH = 4_200;
+const CHECKPOINT_KEYS = ["fileCount", "truncated", "turnId"].join("\0");
+const HANDOFF_KEYS = ["itemCount", "modelId", "providerId", "session", "turnId"].join("\0");
+
+function boundedRecords(value: unknown, maximumCount: number, keys: string,
+  valid: (record: Record<string, unknown>) => boolean): boolean {
+  return Array.isArray(value)
+    && value.length >= 1
+    && value.length <= maximumCount
+    && value.every((entry) => entry !== null && typeof entry === "object" && !Array.isArray(entry)
+      && Object.keys(entry).sort().join("\0") === keys && valid(entry as Record<string, unknown>));
+}
+
+function count(value: unknown): boolean {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function validCheckpoint(checkpoint: Record<string, unknown>): boolean {
+  return boundedString(checkpoint.turnId, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_LABEL_LENGTH)
+    && count(checkpoint.fileCount) && typeof checkpoint.truncated === "boolean";
+}
+
+function validHandoff(handoff: Record<string, unknown>): boolean {
+  return boundedString(handoff.turnId, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_LABEL_LENGTH)
+    && count(handoff.itemCount)
+    && boundedString(handoff.providerId, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_LABEL_LENGTH)
+    && boundedString(handoff.modelId, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_LABEL_LENGTH)
+    && (handoff.session === "new" || handoff.session === "resumed");
+}
 
 function boundedString(value: unknown, maximumLength: number): value is string {
   return typeof value === "string" && value.length >= 1 && value.length <= maximumLength;
@@ -176,8 +208,14 @@ export function parseSupplement(row: {
     || (supplement.files !== undefined && !boundedLines(supplement.files, MAX_PROVIDER_HANDOFF_FILES))
     || (supplement.commands !== undefined
       && !boundedLines(supplement.commands, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS))
+    || (supplement.checkpoints !== undefined && !boundedRecords(supplement.checkpoints,
+      MAX_CONVERSATION_CONTEXT_SUPPLEMENT_CHECKPOINTS, CHECKPOINT_KEYS, validCheckpoint))
+    || (supplement.handoffs !== undefined && !boundedRecords(supplement.handoffs,
+      MAX_CONVERSATION_CONTEXT_SUPPLEMENT_HANDOFFS, HANDOFF_KEYS, validHandoff))
     || !omittedCount(supplement.omittedFiles)
     || !omittedCount(supplement.omittedCommands)
+    || !omittedCount(supplement.omittedCheckpoints)
+    || !omittedCount(supplement.omittedHandoffs)
   ) {
     throw new Error("The saved chat context contains a malformed supplement.");
   }

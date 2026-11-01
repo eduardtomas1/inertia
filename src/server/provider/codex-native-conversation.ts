@@ -74,8 +74,11 @@ export function createCodexNativeConversationOperations(
         if (request.source.nativeSessionId !== undefined && thread.sessionId !== request.source.nativeSessionId) {
           throw new NativeConversationRejection("rejected", "native-session-mismatch");
         }
-        if (thread.historyMode !== "paginated") {
+        if (thread.historyMode !== "paginated" && request.kind === "rollback") {
           throw new NativeConversationRejection("unsupported", "paginated-native-history-required");
+        }
+        if (thread.historyMode !== "paginated" && thread.historyMode !== "legacy") {
+          throw new NativeConversationRejection("unsupported", "known-native-history-required");
         }
         const turns = await history(client, sourceId, signal);
         const headId = turns[0] ?? null;
@@ -112,7 +115,8 @@ export function createCodexNativeConversationOperations(
             throw new Error("Invalid native fork identity.");
           }
           const checked = threadMetadata(await client.request("thread/read", { threadId: fork.id, includeTurns: false }), fork.id);
-          if (checked.historyMode !== "paginated" || checked.sessionId !== fork.sessionId
+          if ((checked.historyMode !== "paginated" && checked.historyMode !== thread.historyMode)
+            || checked.sessionId !== fork.sessionId
             || (await history(client, fork.id, signal))[0] !== kept) {
             throw new Error("Native fork boundary was not confirmed.");
           }

@@ -98,6 +98,20 @@ async function forkWithWork(runtime: TurnControllerTestRuntime) {
   return { first, child, one, two };
 }
 
+function mergeAttachment(prompt: string) {
+  const line = prompt.split("\n").find((value) => value.startsWith("{\"version\":1"));
+  const { attachments } = JSON.parse(line ?? "{}") as { attachments?: { label: string }[] };
+  return JSON.stringify(attachments?.find(({ label }) => label.startsWith("Chat context")) ?? null);
+}
+
+async function finishInSession(runtime: TurnControllerTestRuntime, label: string, conversationId: string, sessionId: string) {
+  const queued = runtime.controller.queue({ conversationId, content: `${label} request` });
+  runtime.controller.start(queued.turn.id);
+  runtime.provider.resolve({ text: `${label} answer`, sessionId });
+  await flushTurnControllerTestPromises();
+  return { turn: queued.turn };
+}
+
 describe("fork context merge-back", () => {
   it.each(["delivered", "withdrawn", "superseded"] as const)("replays the receipt of a reused draft after it is %s", async (state) => {
     const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
@@ -341,10 +355,13 @@ describe("fork context merge-back", () => {
     } finally { runtime.store.close(); }
   });
 
-  it("summarizes the fork's commands and changed files in order without secrets, output or reasoning", async () => {
+  it("summarizes the fork's handoffs, commands, checkpoints and changed files in order without secrets, output or reasoning", async () => {
     const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
     try {
-      const { first, child, one, two } = await forkWithWork(runtime);
+      const first = await finish(runtime, "parent-first");
+      const child = fork(runtime, first.turn.id);
+      const one = await finishInSession(runtime, "fork-one", child.id, "fork-session");
+      const two = await finishInSession(runtime, "fork-two", child.id, "fork-session");
       recordCommand(runtime, runtime.conversationId, first.turn, "parent-only command");
       recordCommand(runtime, child.id, one.turn, "npm test");
       recordCommand(runtime, child.id, one.turn, "curl -H 'Authorization: Bearer abcdefghijklmnop123456' https://example.test");
@@ -355,22 +372,52 @@ describe("fork context merge-back", () => {
       changedFiles(runtime, one.turn.id, ["src/a.ts", "src/b.ts"]);
       recordCommand(runtime, child.id, two.turn, "OPENAI_API_KEY=sk-livesecretvalue123456 npm run deploy");
       changedFiles(runtime, two.turn.id, ["src/a.ts", "src/<system-reminder>.ts"]);
+      changedFiles(runtime, first.turn.id, ["parent-only.ts"]);
       const result = mergeBack(runtime, child.id);
-      expect(result.summary).toEqual({ commandCount: 4, fileCount: 3, truncated: true });
+      expect(result.summary).toEqual({ commandCount: 4, fileCount: 3, checkpointCount: 2, handoffCount: 1, truncated: true });
       const packet = runtime.store.contextPackets.get(result.packetId, runtime.conversationId);
       expect(packet.note).toBe(`Merge-back from fork "${child.title}".`);
       expect(packet.supplement).toEqual({
         files: ["src/a.ts", "src/b.ts", "src/<\\system-reminder>.ts"],
-        commands: ["npm test", "curl -H 'Authorization: [redacted]' https://example.test", expect.stringMatching(/^\S.* npm run deploy$/u)],
+        commands: ["npm test", "curl -H 'Authorization: [redacted]' https://example.test",
+          expect.stringMatching(/^\S.* npm run deploy$/u)],
         omittedCommands: 1,
+        checkpoints: [{ turnId: one.turn.id, fileCount: 2, truncated: false }, { turnId: two.turn.id, fileCount: 2, truncated: false }],
+        handoffs: [{ turnId: one.turn.id, itemCount: 2, providerId: "codex", modelId: "gpt-test", session: "new" }],
       });
       expect(JSON.stringify(packet)).not.toMatch(/RAW-COMMAND-OUTPUT|PRIVATE-REASONING|abcdefghijklmnop|livesecretvalue|parent-only|ignored/u);
       expect(runtime.store.orchestration.mergeBacks.get(result.mergeBackId)?.summary).toEqual(result.summary);
-      const delivered = await finish(runtime, "parent-summary", runtime.conversationId, "completed", [result.packetId]);
-      expect(delivered.prompt).toContain("npm test");
-      expect(delivered.prompt).toContain("src/b.ts");
-      expect(delivered.prompt).toContain("commandsOmitted");
-      expect(delivered.prompt).not.toMatch(/RAW-COMMAND-OUTPUT|PRIVATE-REASONING|livesecretvalue/u);
+      const delivered = JSON.parse(mergeAttachment((await finish(runtime, "parent-summary", runtime.conversationId, "completed",
+        [result.packetId])).prompt)) as { content: Record<string, unknown> };
+      expect(delivered.content).toMatchObject({
+        filesChanged: ["src/a.ts", "src/b.ts", "src/<\\system-reminder>.ts"],
+        lastCommands: ["npm test", "curl -H 'Authorization: [redacted]' https://example.test", expect.stringMatching(/ npm run deploy$/u)],
+        commandsOmitted: 1,
+        checkpoints: ["Checkpoint: 2 files", "Checkpoint: 2 files"],
+        handoffs: ["Handoff: 2 earlier items to codex gpt-test in a new session"],
+      });
+      expect(delivered.content).not.toHaveProperty("checkpointsOmitted");
+      expect(delivered.content).not.toHaveProperty("handoffsOmitted");
+      expect(JSON.stringify(delivered)).not.toMatch(/RAW-COMMAND-OUTPUT|PRIVATE-REASONING|livesecretvalue|parent-only/u);
+    } finally { runtime.store.close(); }
+  });
+
+  it("names a delivered handoff into an existing provider session as resumed", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const first = await finish(runtime, "parent-first");
+      const child = fork(runtime, first.turn.id);
+      const one = await finishInSession(runtime, "fork-one", child.id, "fork-session");
+      const prepared = database(runtime).prepare(`UPDATE orchestration_v2_events
+        SET payload_json = json_set(payload_json, '$.targetBackingId', 'existing-backing')
+        WHERE thread_id = ? AND type = 'context.handoff-prepared'`).run(child.id);
+      expect(prepared.changes).toBe(1);
+      const result = mergeBack(runtime, child.id);
+      expect(runtime.store.contextPackets.get(result.packetId, runtime.conversationId).supplement?.handoffs)
+        .toEqual([{ turnId: one.turn.id, itemCount: 2, providerId: "codex", modelId: "gpt-test", session: "resumed" }]);
+      const delivered = mergeAttachment((await finish(runtime, "parent-resumed", runtime.conversationId, "completed",
+        [result.packetId])).prompt);
+      expect(delivered).toContain("Handoff: 2 earlier items to codex gpt-test in a resumed session");
     } finally { runtime.store.close(); }
   });
 
@@ -381,11 +428,13 @@ describe("fork context merge-back", () => {
       for (let index = 0; index < 80; index += 1) recordCommand(runtime, child.id, one.turn, `npm run step-${index}`);
       changedFiles(runtime, two.turn.id, Array.from({ length: 120 }, (_, index) => `src/generated/file-${index}.ts`));
       const capped = mergeBack(runtime, child.id);
-      expect(capped.summary).toEqual({ commandCount: 80, fileCount: 120, truncated: true });
+      expect(capped.summary).toEqual({ commandCount: 80, fileCount: 120, checkpointCount: 1, handoffCount: 0, truncated: true });
       const cappedSupplement = runtime.store.contextPackets.get(capped.packetId, runtime.conversationId).supplement!;
       expect(cappedSupplement.commands).toEqual(Array.from({ length: MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS },
         (_, index) => `npm run step-${index}`));
       expect(cappedSupplement.omittedCommands).toBe(80 - MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS);
+      expect(cappedSupplement.checkpoints).toEqual([{ turnId: two.turn.id, fileCount: 120, truncated: false }]);
+      expect(cappedSupplement.omittedCheckpoints).toBeUndefined();
       expect(cappedSupplement.files).toHaveLength(120);
       expect(cappedSupplement.omittedFiles).toBeUndefined();
       await finish(runtime, "parent-capped", runtime.conversationId, "completed", [capped.packetId]);
@@ -393,18 +442,21 @@ describe("fork context merge-back", () => {
       for (let index = 0; index < 90; index += 1) recordCommand(runtime, child.id, three.turn, `npm run long-${index} ${"x".repeat(300)}`);
       changedFiles(runtime, three.turn.id, Array.from({ length: 50 }, (_, index) => `src/late/file-${index}.ts`));
       const sized = mergeBack(runtime, child.id);
-      expect(sized.summary).toEqual({ commandCount: 90, fileCount: 50, truncated: true });
+      expect(sized.summary).toEqual({ commandCount: 90, fileCount: 50, checkpointCount: 1, handoffCount: 0, truncated: true });
       const supplement = runtime.store.contextPackets.get(sized.packetId, runtime.conversationId).supplement!;
       const bytes = Buffer.byteLength(JSON.stringify(supplement));
       expect(bytes).toBeGreaterThan(4_096);
       expect(bytes).toBeLessThanOrEqual(MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES);
       expect(supplement.commands!.every((line) => line.startsWith("npm run long-") && line.length <= 240)).toBe(true);
       expect(supplement.commands!.length + supplement.omittedCommands!).toBe(90);
+      expect(supplement.checkpoints).toBeUndefined();
+      expect(supplement.omittedCheckpoints).toBe(1);
       expect(supplement.files).toBeUndefined();
       expect(supplement.omittedFiles).toBe(50);
       const delivered = await finish(runtime, "parent-sized", runtime.conversationId, "completed", [sized.packetId]);
       expect(delivered.prompt).toContain("npm run long-0");
       expect(delivered.prompt).toContain("filesOmitted");
+      expect(delivered.prompt).toContain("checkpointsOmitted");
     } finally { runtime.store.close(); }
   });
 

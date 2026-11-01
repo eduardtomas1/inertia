@@ -287,3 +287,44 @@ describe("portable history budget inputs", () => {
     }
   });
 });
+
+describe("activity items in a returning backing's delta", () => {
+  it("carries the other provider's commands but not the backing's own native activity", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Original Codex request" });
+      runtime.controller.start(first.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "codex-native" });
+      runtime.provider.resolve({ text: "Original Codex answer", sessionId: "codex-native" });
+      await flushTurnControllerTestPromises();
+      runtime.store.addActivity({ conversationId: runtime.conversationId, runId: first.turn.runId, turnId: first.turn.id,
+        kind: "command", title: "Bash", detail: "Command:\nnpm run codex-own-check\n\nOutput:\nok", status: "completed" });
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "claude",
+        modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "claude-test" }) });
+      const other = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Claude follow-up" });
+      runtime.controller.start(other.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "claude-native" });
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Claude new answer" });
+      runtime.provider.resolve({ sessionId: "claude-native" });
+      await flushTurnControllerTestPromises();
+      const claudeCommand = runtime.store.addActivity({ conversationId: runtime.conversationId, runId: other.turn.runId,
+        turnId: other.turn.id, kind: "command", title: "Bash", detail: "Command:\nnpm run claude-check\n\nOutput:\nCLAUDE-OUTPUT",
+        status: "failed" });
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "codex",
+        modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test", reasoningEffort: "high" }) });
+      const returned = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex" });
+      expect(returned.turn.providerSessionBefore).toBe("codex-native");
+      const handoff = runtime.store.orchestration.backings.handoff(returned.turn.runId)!;
+      expect(handoff.itemIds).toContain(`activity:${claudeCommand.id}`);
+      runtime.controller.start(returned.turn.id);
+      expect(runtime.provider.input?.prompt).toContain("npm run claude-check");
+      expect(runtime.provider.input?.prompt).toContain("CLAUDE-OUTPUT");
+      expect(runtime.provider.input?.prompt).not.toContain("codex-own-check");
+      runtime.provider.resolve({ sessionId: "codex-native", text: "Returned successfully" });
+      await flushTurnControllerTestPromises();
+      const backing = runtime.store.orchestration.backings.find({ threadId: runtime.conversationId, providerId: "codex",
+        workspaceKey: runtime.workspace, identity: first.turn.continuationIdentity })!;
+      expect(backing.coveredItemIds).toContain(`activity:${claudeCommand.id}`);
+    } finally { runtime.store.close(); }
+  });
+});

@@ -13,6 +13,9 @@ export const MAX_CONVERSATION_CONTEXT_TURN_BYTES =
 export const MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE = 8;
 export const MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES = 8 * 1024;
 export const MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS = 64;
+export const MAX_CONVERSATION_CONTEXT_SUPPLEMENT_CHECKPOINTS = 64;
+export const MAX_CONVERSATION_CONTEXT_SUPPLEMENT_HANDOFFS = 64;
+export const MAX_CONVERSATION_CONTEXT_SUPPLEMENT_LABEL_LENGTH = 200;
 
 export type ConversationContextWorkspaceRelation =
   | "same-workspace"
@@ -40,11 +43,29 @@ export interface ConversationContextExcerpt {
   turn?: UnfinishedTurnState;
 }
 
+export interface ConversationContextCheckpoint {
+  turnId: string;
+  fileCount: number;
+  truncated: boolean;
+}
+
+export interface ConversationContextHandoff {
+  turnId: string;
+  itemCount: number;
+  providerId: string;
+  modelId: string;
+  session: "new" | "resumed";
+}
+
 export interface ConversationContextSupplement {
   files?: string[];
   omittedFiles?: number;
   commands?: string[];
   omittedCommands?: number;
+  checkpoints?: ConversationContextCheckpoint[];
+  omittedCheckpoints?: number;
+  handoffs?: ConversationContextHandoff[];
+  omittedHandoffs?: number;
   moved?: string;
 }
 

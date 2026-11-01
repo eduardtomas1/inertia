@@ -106,8 +106,51 @@ describe("Codex native conversation control", () => {
 
   it.each(["legacy", "unknown"])("does not pretend unsupported %s history can revert", async (historyMode) => {
     const { control, rpc } = fixture({ historyMode });
-    expect(await createCodexNativeConversationOperations(new Set(), control).execute(request, launch))
+    expect(await createCodexNativeConversationOperations(new Set(), control).execute({ ...request, kind: "rollback" }, launch))
       .toMatchObject({ status: "unsupported", reason: "paginated-native-history-required" });
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("forks legacy history natively through the inclusive last turn after verifying both boundaries", async () => {
+    const { control, rpc, sessions } = fixture({ historyMode: "legacy" });
+    expect(await createCodexNativeConversationOperations(new Set(), control).execute(request, launch)).toMatchObject({
+      status: "completed", effect: "native-fork",
+      backing: { nativeConversationId: "fork-native-thread", nativeSessionId: "native-session-tree", headId: "turn-2", persistedHeadId: "turn-2" },
+    });
+    expect(rpc.mock.calls.map(([method, params]) => [method, params?.threadId])).toEqual([
+      ["thread/read", "source-native-thread"], ["thread/turns/list", "source-native-thread"],
+      ["thread/fork", "source-native-thread"], ["thread/read", "fork-native-thread"], ["thread/turns/list", "fork-native-thread"],
+    ]);
+    expect(rpc).toHaveBeenCalledWith("thread/fork", expect.objectContaining({ lastTurnId: "turn-2" }));
+    expect(sessions.get("fork-native-thread")).toEqual(["turn-2", "turn-1"]);
+    expect(sessions.get("source-native-thread")).toEqual(["turn-3", "turn-2", "turn-1"]);
+  });
+
+  it.each([
+    ["stale head", (value: NativeConversationRequest) => { value.source.expectedHeadId = "stale"; }, "native-head-changed"],
+    ["missing boundary", (value: NativeConversationRequest) => { value.boundary = { kind: "turn", nativeTurnId: "absent" }; }, "native-boundary-not-found"],
+  ] as const)("rejects a legacy-history fork with a %s before mutation", async (_name, mutate, reason) => {
+    const { control, rpc } = fixture({ historyMode: "legacy" }); mutate(request);
+    expect(await createCodexNativeConversationOperations(new Set(), control).execute(request, launch)).toMatchObject({ status: "rejected", reason });
+    expect(rpc.mock.calls.some(([method]) => method === "thread/fork")).toBe(false);
+  });
+
+  it("fails a legacy-history fork whose result does not end at the requested turn", async () => {
+    const { control } = fixture({ historyMode: "legacy", mutateResponse: (method, result) => method === "thread/turns/list"
+      && (result.data as JsonObject[]).length === 2 ? { data: [{ id: "turn-1", status: "completed" }], nextCursor: null } : result });
+    expect(await createCodexNativeConversationOperations(new Set(), control).execute(request, launch)).toMatchObject({
+      status: "failed", mutationMayHaveOccurred: true, createdNativeConversationId: "fork-native-thread",
+    });
+  });
+
+  it.each([undefined, "unknown"])("refuses a fork of %s history mode", async (historyMode) => {
+    const { control, rpc } = fixture({ mutateResponse: (method, result) => {
+      if (method !== "thread/read") return result;
+      const thread = Object.fromEntries(Object.entries(result.thread as JsonObject).filter(([key]) => key !== "historyMode"));
+      return { thread: historyMode === undefined ? thread : { ...thread, historyMode } };
+    } });
+    expect(await createCodexNativeConversationOperations(new Set(), control).execute(request, launch))
+      .toMatchObject({ status: "unsupported", reason: "known-native-history-required" });
     expect(rpc).toHaveBeenCalledTimes(1);
   });
 

@@ -1,9 +1,12 @@
 import type Database from "better-sqlite3";
 
+import { MAX_PORTABLE_COMMAND_INPUT_BYTES, MAX_PORTABLE_COMMAND_OUTPUT_BYTES } from "../persistence/turn-context-facts";
+
 const IMAGE_ALLOWANCE = 8_192;
 const ATTACHMENT_ALLOWANCE = 4_096;
+const ACTIVITY_ITEM_BYTES = MAX_PORTABLE_COMMAND_INPUT_BYTES + MAX_PORTABLE_COMMAND_OUTPUT_BYTES + 256;
 
-/** Bytes of covered transcript and inherited items, one byte per token, plus attachment allowances for user messages. */
+/** Bytes of covered transcript, activity and inherited items, one byte per token, plus attachment allowances for user messages. */
 export function coveredHistoryOccupancy(
   database: Database.Database,
   threadId: string,
@@ -28,5 +31,16 @@ export function coveredHistoryOccupancy(
         SELECT json_extract(first.payload_json, '$.ordinal') FROM orchestration_v2_entities first
         WHERE first.kind = 'fork-history' AND first.thread_id = ? AND first.id IN (SELECT value FROM json_each(?)))`)
     .get(threadId, threadId, covered) as { bytes: number };
-  return messages.bytes + inherited.bytes;
+  const activity = database.prepare(`SELECT COALESCE(SUM(min(length(CAST(title AS BLOB))
+      + COALESCE(length(CAST(detail AS BLOB)), 0), ${ACTIVITY_ITEM_BYTES})), 0) AS bytes
+    FROM activities WHERE conversation_id = ? AND ('activity:' || id) IN (SELECT value FROM json_each(?))`)
+    .get(threadId, covered) as { bytes: number };
+  const plans = database.prepare(`SELECT COALESCE(SUM(length(CAST(COALESCE(explanation, '') AS BLOB))
+      + length(CAST(steps_json AS BLOB))), 0) AS bytes
+    FROM agent_plans WHERE conversation_id = ? AND ('plan:' || run_id) IN (SELECT value FROM json_each(?))`)
+    .get(threadId, covered) as { bytes: number };
+  const files = database.prepare(`SELECT COALESCE(SUM(length(CAST(files_json AS BLOB))), 0) AS bytes
+    FROM turn_git_artifacts WHERE conversation_id = ? AND ('files:' || id) IN (SELECT value FROM json_each(?))`)
+    .get(threadId, covered) as { bytes: number };
+  return messages.bytes + inherited.bytes + activity.bytes + plans.bytes + files.bytes;
 }

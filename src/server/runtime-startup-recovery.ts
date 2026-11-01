@@ -20,6 +20,7 @@ import { reconcileInterruptedDuoLaunches } from
 import { recoverInterruptedTurns } from
   "./runtime/turns/turn-recovery.js";
 import { ProviderMaintenanceJournal } from "./provider/maintenance-journal.js";
+import { OrchestrationEffectRuntime } from "./orchestration-v2/effect-runtime.js";
 import { RuntimeStartupBlockerError } from "../shared/runtime-startup-diagnostics.js";
 import { createIncidentReporter } from "../node/application-incidents.js";
 
@@ -40,6 +41,7 @@ export interface InitializedRuntimePersistence {
   readonly conversationAttachments: ConversationAttachmentStore;
   readonly recovery: ReturnType<typeof recoverInterruptedTurns>;
   readonly providerMaintenanceJournal: ProviderMaintenanceJournal;
+  readonly orchestrationEffects: OrchestrationEffectRuntime;
 }
 
 export async function initializeRuntimePersistence(
@@ -59,6 +61,7 @@ export async function initializeRuntimePersistence(
     runtimeSafetyLock,
   } = startup;
   let conversationAttachments: ConversationAttachmentStore | null = null;
+  let orchestrationEffects: OrchestrationEffectRuntime | null = null;
   try {
     const providerMaintenanceJournal = new ProviderMaintenanceJournal(dataDirectory, {
       runtimeGenerationId: options.runtimeGenerationId,
@@ -170,10 +173,13 @@ export async function initializeRuntimePersistence(
         });
       }
     }
-    return { conversationAttachments, recovery, providerMaintenanceJournal };
+    orchestrationEffects = new OrchestrationEffectRuntime(store.orchestration.effects);
+    if (!runtimeSafetyLock) orchestrationEffects.start();
+    return { conversationAttachments, recovery, providerMaintenanceJournal, orchestrationEffects };
   } catch (error) {
     // Release every acquired persistent resource on startup failure. Windows
     // otherwise retains SQLite handles and a retry appears to require reboot.
+    await orchestrationEffects?.stop();
     await Promise.allSettled([
       conversationAttachments?.close(),
       Promise.resolve().then(() => store.backupAndClose()),

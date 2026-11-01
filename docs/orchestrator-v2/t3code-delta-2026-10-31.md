@@ -20,7 +20,9 @@ research snapshot.
   Where no line applies, the commit sha is given instead.
 - Inertia anchors are `path:line` at `52315e95`, relative to the Inertia
   repository root. Files changed by the phase-3 polish package can move these
-  lines; the cited symbols remain the reference.
+  lines; the cited symbols remain the reference. Rows updated on 2026-11-01
+  for the G10 and G12 gap packages (B.1, B.5) cite the working tree on top of
+  `7c27c05d` instead.
 - All 393 first-parent titles were reviewed. Server-side diffs (logic and new
   test names) were read for every commit touching
   `apps/server/src/orchestration-v2`, `docs/orchestration-v2`,
@@ -168,15 +170,16 @@ Inertia status is not assessed unless stated.
    Inertia: the busy-source rule is satisfied. A running source, pending cleanup or changed workspace
    selects portable with `native-source-unavailable`; a held admission lease
    or terminal-resume reservation selects portable with `native-source-busy`
-   (`src/server/runtime/fork-session-service.ts:48-61`). Test:
+   (`src/server/runtime/fork-session-service.ts:52-65`). Test:
    `tests/server/orchestration-native-forks.test.ts:116`. T3's second
    native-fork condition, a source run that is `completed` or `waiting`
-   (`apps/server/src/orchestration-v2/CommandPolicy.ts:375`), is not
-   satisfied: Inertia accepts any finished source turn and forks natively
-   whenever its native boundary settled, so failed, interrupted and cancelled
-   turns qualify (`src/server/orchestration-v2/fork-repository.ts:70,82-87`;
-   `src/server/runtime/fork-session-service.ts:40-44`). Tracked as fork polish
-   (G12).
+   (`apps/server/src/orchestration-v2/CommandPolicy.ts:375`), is satisfied
+   since G12 (2026-11-01): a failed, interrupted or cancelled source turn now
+   forks portably. It records `fork.portable-selected` with
+   `native-source-unsuccessful` before any provider call
+   (`src/server/runtime/fork-session-service.ts:48-51`). Inertia has no
+   `waiting` run status, so only `completed` qualifies. Test:
+   `tests/server/orchestration-native-forks.test.ts:170`.
 2. **Portable fork history includes inherited rows.** Ancestors are walked
    oldest first, stopping at a missing ancestor or cycle and skipping side
    chats; then the source's own items through the source run. Every segment
@@ -220,12 +223,25 @@ Inertia status is not assessed unless stated.
    Assistant, Command input, File change name, Checkpoint file count,
    Handoff. That function is the reference format for command and file-change
    items. Inertia: rolled-back exclusion satisfied
-   (`src/server/orchestration-v2/merge-back-repository.ts:160-166`); the
-   command and file-change work summary is adopted (section E,
-   `src/server/orchestration-v2/merge-back-repository.ts:245-279`) without
-   T3's `Checkpoint: N files` and `Handoff:` lines
-   (`apps/server/src/orchestration-v2/ContextHandoffService.ts:216-219`), which
-   are tracked as merge-back polish (G12).
+   (`src/server/orchestration-v2/merge-back-repository.ts:334-345`); the
+   command and file-change work summary is adopted (section E). Since G12
+   (2026-11-01) it also carries T3's `Checkpoint: N files` and `Handoff:`
+   lines (`apps/server/src/orchestration-v2/ContextHandoffService.ts:216-219`):
+   the merge-back supplement gains typed `checkpoints` and `handoffs`
+   entries (`workSummary`,
+   `src/server/orchestration-v2/merge-back-repository.ts:261-320`), rendered by
+   `conversationContextCheckpointLine` and `conversationContextHandoffLine`
+   (`src/shared/conversation-context-supplement.ts:11-18`) in the prompt
+   (`src/server/persistence/conversation-context-format.ts:85-89`) and on the
+   composer context chip
+   (`src/renderer/src/components/composer/ComposerConversationContextCards.tsx:137`).
+   Tests: `tests/server/orchestration-merge-back.test.ts:358,405`,
+   `tests/server/conversation-context-v3.test.ts:736`,
+   `tests/renderer/composer-chat-references.dom.test.tsx:693`. Portable
+   continuation history now also carries T3's command, error, plan,
+   file-change and interrupt-result items with run, turn and backing
+   provenance (G10, `portableHistorySource`,
+   `src/server/orchestration-v2/portable-history-source.ts:155`).
 6. **Handoffs targeting a cancelled run carry forward.** `isPendingForRun`
    treats a `cancelled` target run like `failed` and `interrupted`
    (`apps/server/src/orchestration-v2/ProviderTurnStartService.ts:367-384`).
@@ -402,7 +418,7 @@ The study documents were updated accordingly on 2026-10-31.
 | Cross-fork merge-back exclusivity | `apps/server/src/orchestration-v2/Orchestrator.ts:4429-4442`; `apps/server/src/orchestration-v2/ThreadFork.execution.test.ts:1116` | Adopted: one pending merge-back per target chat. A second fork's merge-back is refused until the first is delivered or removed. |
 | Busy-target refusal | `apps/server/src/orchestration-v2/Orchestrator.ts:4419-4428`; 0804c60a9c | Deliberate difference retained: the merge-back is a visible draft delivered with the next explicit send, so queued messages are never blocked by a pending transfer. |
 | Merge-back source point | `apps/server/src/orchestration-v2/Orchestrator.ts:4444-4458` | Adopted: an explicit source point can be chosen in addition to the latest stable point. |
-| Work summary in the merge delta | `apps/server/src/orchestration-v2/ContextHandoffService.ts:205-221` | Adopted: command and file-change items are summarised alongside message excerpts. |
+| Work summary in the merge delta | `apps/server/src/orchestration-v2/ContextHandoffService.ts:205-221` | Adopted: command and file-change items are summarised alongside message excerpts. `Checkpoint:` and `Handoff:` lines were added by G12 on 2026-11-01 (B.5). |
 | Combined context rollback with file restore | `apps/server/src/orchestration-v2/CheckpointRollbackService.ts` (unchanged); `apps/server/src/orchestration-v2/CheckpointRestoreSafety.ts:51-63` | Adopted: context rollback with opt-in file restore, with partial outcomes reported. The phase-3 polish shipped Inertia's time-bounded restore checks only, without T3's isolation rule. Since 2026-10-31 the restore also holds an exclusive checkout claim that fences provider-turn admission on overlapping checkouts, and refuses while another chat's live session or open terminal is nested in, contains or equals the checkout (`src/server/runtime/checkout-restore-fence.ts`). Unlike T3, a shared checkout is allowed when no other chat works in it, and a busy checkout refuses instead of waiting. |
 | Side chats | 50c1c5dc53; B.8 anchors | Deferred to the client-parity phase as a tracked item. |
 | Codex turn owned by an earlier run | 54d0a161bb | Assigned to the queue phase. |

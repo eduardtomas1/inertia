@@ -2,7 +2,10 @@ import type Database from "better-sqlite3";
 
 import type { AgentTurn, Conversation } from "../../shared/contracts";
 import { MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES,
-  MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS, type ConversationContextSupplement } from "../../shared/conversation-context";
+  MAX_CONVERSATION_CONTEXT_SUPPLEMENT_CHECKPOINTS, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS,
+  MAX_CONVERSATION_CONTEXT_SUPPLEMENT_HANDOFFS, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_LABEL_LENGTH,
+  type ConversationContextCheckpoint, type ConversationContextHandoff,
+  type ConversationContextSupplement } from "../../shared/conversation-context";
 import { MAX_ROLLBACK_TURNS } from "../../shared/orchestration-history";
 import { mergeBackSchema, type MergeBack, type MergeBackEvent, type MergeBackResult,
   type MergeBackSummary } from "../../shared/orchestration-merge-back";
@@ -34,9 +37,15 @@ export interface MergeBackAccess {
 }
 
 type Lifecycle = "attached" | "dispatched";
-type WorkEntry = { turn: number; kind: "commands" | "files"; line: string };
+type WorkValues = { files: string; commands: string; checkpoints: ConversationContextCheckpoint;
+  handoffs: ConversationContextHandoff };
+type WorkKind = keyof WorkValues;
+type WorkEntry = { [K in WorkKind]: { turn: number; phase: number; kind: K; value: WorkValues[K] } }[WorkKind];
 
 const PENDING_STATES = ["prepared", "attached", "dispatched"] as const;
+const WORK_LIMITS: Readonly<Record<WorkKind, number>> = { files: MAX_PROVIDER_HANDOFF_FILES,
+  commands: MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS, checkpoints: MAX_CONVERSATION_CONTEXT_SUPPLEMENT_CHECKPOINTS,
+  handoffs: MAX_CONVERSATION_CONTEXT_SUPPLEMENT_HANDOFFS };
 const SUMMARY_COMMAND_ROWS = 512;
 const SUMMARY_LINE_CHARS = 240;
 const FILE_POSITION_STRIDE = 1_048_576;
@@ -55,22 +64,29 @@ function commandLine(title: string, detail: string | null): string | null {
   return summaryLine(section ?? (GENERIC_COMMAND_TITLES.has(title) ? null : title), scrubCommandSecrets);
 }
 
-function workSupplement(entries: readonly WorkEntry[], commandCount: number, fileCount: number):
+function workSupplement(entries: readonly WorkEntry[], totals: Readonly<Record<WorkKind, number>>):
   ConversationContextSupplement | undefined {
-  const lines = { commands: [] as string[], files: [] as string[] };
-  const limits = { commands: MAX_CONVERSATION_CONTEXT_SUPPLEMENT_COMMANDS, files: MAX_PROVIDER_HANDOFF_FILES };
-  const build = (omittedCommands: number, omittedFiles: number): ConversationContextSupplement => ({
-    ...(lines.files.length ? { files: [...lines.files] } : {}), ...(omittedFiles > 0 ? { omittedFiles } : {}),
-    ...(lines.commands.length ? { commands: [...lines.commands] } : {}), ...(omittedCommands > 0 ? { omittedCommands } : {}),
+  const lists: { [K in WorkKind]: WorkValues[K][] } = { files: [], commands: [], checkpoints: [], handoffs: [] };
+  const omitted = (kind: WorkKind) => totals[kind] - lists[kind].length;
+  const build = (): ConversationContextSupplement => ({
+    ...(lists.files.length ? { files: [...lists.files] } : {}),
+    ...(omitted("files") > 0 ? { omittedFiles: omitted("files") } : {}),
+    ...(lists.commands.length ? { commands: [...lists.commands] } : {}),
+    ...(omitted("commands") > 0 ? { omittedCommands: omitted("commands") } : {}),
+    ...(lists.checkpoints.length ? { checkpoints: [...lists.checkpoints] } : {}),
+    ...(omitted("checkpoints") > 0 ? { omittedCheckpoints: omitted("checkpoints") } : {}),
+    ...(lists.handoffs.length ? { handoffs: [...lists.handoffs] } : {}),
+    ...(omitted("handoffs") > 0 ? { omittedHandoffs: omitted("handoffs") } : {}),
   });
-  for (const { kind, line } of entries) {
-    if (lines[kind].length >= limits[kind]) continue;
-    lines[kind].push(line);
-    if (byteLength(JSON.stringify(build(commandCount, fileCount))) <= MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES) continue;
-    lines[kind].pop();
+  for (const entry of entries) {
+    const list: unknown[] = lists[entry.kind];
+    if (list.length >= WORK_LIMITS[entry.kind]) continue;
+    list.push(entry.value);
+    if (byteLength(JSON.stringify(build())) <= MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES) continue;
+    list.pop();
     break;
   }
-  const supplement = build(commandCount - lines.commands.length, fileCount - lines.files.length);
+  const supplement = build();
   return Object.keys(supplement).length ? supplement : undefined;
 }
 
@@ -256,7 +272,7 @@ export class MergeBackRepository {
       .all(delta, forkThreadId, SUMMARY_COMMAND_ROWS) as { turn: number; title: string; detail: string | null }[])
       .flatMap(({ turn, title, detail }) => {
         const line = commandLine(title, detail);
-        return line ? [{ turn, kind: "commands" as const, line }] : [];
+        return line ? [{ turn, kind: "commands" as const, phase: 1, value: line }] : [];
       });
     const changed = `FROM turn_git_artifacts AS artifact JOIN json_each(?) AS delta ON delta.value = artifact.turn_id
       JOIN json_each(CASE WHEN json_valid(artifact.files_json) THEN artifact.files_json ELSE '[]' END) AS file
@@ -269,13 +285,38 @@ export class MergeBackRepository {
       GROUP BY changed_path ORDER BY position LIMIT ?`).all(delta, forkThreadId, MAX_PROVIDER_HANDOFF_FILES) as
       { changed_path: string; position: number }[]).flatMap(({ changed_path: path, position }) => {
       const line = summaryLine(path);
-      return line ? [{ turn: Math.floor(position / FILE_POSITION_STRIDE), kind: "files" as const, line }] : [];
+      return line ? [{ turn: Math.floor(position / FILE_POSITION_STRIDE), kind: "files" as const, phase: 3, value: line }] : [];
     });
-    const entries = [...commands, ...files].sort((left, right) => left.turn - right.turn
-      || Number(left.kind === "files") - Number(right.kind === "files"));
-    const supplement = workSupplement(entries, commandCount, fileCount);
-    return { supplement, summary: { commandCount, fileCount,
-      truncated: (supplement?.omittedCommands ?? 0) + (supplement?.omittedFiles ?? 0) > 0 } };
+    const checkpoints = (this.database.prepare(`SELECT delta.key AS turn, artifact.turn_id, artifact.completeness,
+      CASE WHEN json_valid(artifact.files_json) THEN json_array_length(artifact.files_json) ELSE 0 END AS files
+      FROM turn_git_artifacts AS artifact JOIN json_each(?) AS delta ON delta.value = artifact.turn_id
+      WHERE artifact.conversation_id = ? AND artifact.status IN ('ready', 'partial') ORDER BY delta.key`)
+      .all(delta, forkThreadId) as { turn: number; turn_id: string; completeness: string; files: number }[])
+      .map(({ turn, turn_id: turnId, completeness, files: fileCount }) => ({ turn, kind: "checkpoints" as const, phase: 2,
+        value: { turnId, fileCount, truncated: completeness !== "complete" } }));
+    const handoffs = (this.database.prepare(`SELECT delta.key AS turn, turn.id AS turn_id, turn.provider_id, turn.model,
+      json_array_length(json_extract(handoff.payload_json, '$.itemIds')) AS items,
+      json_type(prepared.payload_json, '$.targetBackingId') = 'null' AS fresh
+      FROM json_each(?) AS delta JOIN agent_turns AS turn ON turn.id = delta.value AND turn.conversation_id = ?
+      JOIN orchestration_v2_entities AS handoff ON handoff.kind = 'context-handoff' AND handoff.thread_id = turn.conversation_id
+        AND json_extract(handoff.payload_json, '$.runId') = turn.run_id
+        AND json_extract(handoff.payload_json, '$.state') = 'delivered'
+      JOIN orchestration_v2_events AS prepared ON prepared.thread_id = turn.conversation_id
+        AND prepared.type = 'context.handoff-prepared' AND json_extract(prepared.payload_json, '$.id') = handoff.id
+      ORDER BY delta.key, handoff.revision, handoff.id`).all(delta, forkThreadId) as
+      { turn: number; turn_id: string; provider_id: string; model: string; items: number; fresh: number }[])
+      .flatMap(({ turn, turn_id: turnId, provider_id: providerId, model, items: itemCount, fresh }) => {
+        const modelId = summaryLine(model)?.slice(0, MAX_CONVERSATION_CONTEXT_SUPPLEMENT_LABEL_LENGTH);
+        return modelId ? [{ turn, kind: "handoffs" as const, phase: 0,
+          value: { turnId, itemCount, providerId, modelId, session: fresh ? "new" as const : "resumed" as const } }] : [];
+      });
+    const entries: WorkEntry[] = [...handoffs, ...commands, ...checkpoints, ...files]
+      .sort((left, right) => left.turn - right.turn || left.phase - right.phase);
+    const supplement = workSupplement(entries, { files: fileCount, commands: commandCount,
+      checkpoints: checkpoints.length, handoffs: handoffs.length });
+    return { supplement, summary: { commandCount, fileCount, checkpointCount: checkpoints.length,
+      handoffCount: handoffs.length, truncated: [supplement?.omittedFiles, supplement?.omittedCommands,
+        supplement?.omittedCheckpoints, supplement?.omittedHandoffs].some((count) => (count ?? 0) > 0) } };
   }
 
   private lastDelivered(forkThreadId: string, parentThreadId: string): MergeBack | null {

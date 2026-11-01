@@ -12,6 +12,7 @@ import {
   allocateConversationContextBudgets,
   prepareConversationContextPacket,
 } from "../../src/server/persistence/conversation-context-transport";
+import { contextEnvelope } from "../../src/server/persistence/conversation-context-format";
 import { conversationContextDeliveriesMigration } from "../../src/server/persistence/migrations/conversation-context-deliveries";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { AGENT_CONTEXT_TOOL_NAME } from "../../src/server/runtime/agent-context-tool";
@@ -274,16 +275,19 @@ describe("conversation context transport version 3", () => {
     expect(prompt.endsWith(`\n\n${INTERNAL}`)).toBe(true);
     const section = handoffSection(prompt);
     expect(section.version).toBe(1);
-    expect(section.attachments).toHaveLength(1);
+    expect(section.attachments.map(({ label }) => label).slice(1))
+      .toEqual(["Files changed earlier in this chat", "Handoff outcome"]);
     const history = restoredHistory(section, source.id);
-    expect(history).toMatchObject({ count: 7, omitted: 3 });
-    expect(history.count + history.omitted).toBe(10);
+    expect(history).toMatchObject({ count: 13, omitted: 1 });
+    expect(history.count + history.omitted).toBe(14);
     const messages = w.store.conversationDetail(source.id)!.messages;
-    expectIntactChronologicalItems(history.items, messages);
+    expectIntactChronologicalItems(history.items.filter(({ id }) => messages.some((entry) => entry.id === id)), messages);
     const texts = history.items.map(({ text }) => text);
     expect(texts).toContain(exportMessages()[0]![1]);
     expect(texts).toContain("Now add a CSV header row and run the full test suite.");
-    expect(texts).toContain(migrationGuide());
+    expect(texts).toContain("Command: npm test\nExit code: 1\nOutcome: failed\nError:\nExit code 1\n2 failed");
+    expect(texts).toContain("File change (added): docs/export-migration.md");
+    expect(texts).not.toContain(migrationGuide());
     expect(prompt).not.toContain("Export duration by night");
   });
 
@@ -673,6 +677,26 @@ describe("conversation context transport version 3", () => {
       const withoutFacts = copy(2, plain, null);
       const current = copy(3, stored.excerpts_json, stored.supplement_json);
       const unknownKey = copy(3, stored.excerpts_json, JSON.stringify({ commands: ["ls (ok)"], notes: "x" }));
+      const checkpoint = { turnId: "fork-turn", fileCount: 3, truncated: false };
+      const handoff = { turnId: "fork-turn", itemCount: 2, providerId: "codex", modelId: "gpt-5", session: "new" };
+      const structured = { commands: ["ls (ok)"], checkpoints: [checkpoint], omittedCheckpoints: 2,
+        handoffs: [handoff], omittedHandoffs: 1 };
+      const withWork = copy(3, stored.excerpts_json, JSON.stringify(structured));
+      const malformedWork = [
+        { checkpoints: [{ ...checkpoint, path: "src/a.ts" }] },
+        { checkpoints: [{ ...checkpoint, fileCount: -1 }] },
+        { checkpoints: [] },
+        { checkpoints: Array.from({ length: 65 }, () => checkpoint) },
+        { handoffs: [{ ...handoff, session: "unknown" }] },
+        { handoffs: [{ ...handoff, modelId: "" }] },
+        { handoffs: [{ ...handoff, providerId: "x".repeat(201) }] },
+        { handoffs: [handoff], omittedHandoffs: 0 },
+        { checkpoints: [checkpoint], omittedCheckpoints: 1.5 },
+      ].map((supplement) => copy(3, stored.excerpts_json, JSON.stringify(supplement)));
+      expect(w.store.contextPackets.get(withWork, target.id).supplement).toEqual(structured);
+      for (const id of malformedWork) {
+        expect(() => w.store.contextPackets.get(id, target.id)).toThrow("The saved chat context contains a malformed supplement.");
+      }
       const userAgent = copy(3, JSON.stringify(packet.excerpts.map((excerpt) => ({ ...excerpt, agent: "Claude" }))), null);
       const badState = copy(3, JSON.stringify(packet.excerpts.map((excerpt) => ({ ...excerpt, turn: "completed" }))), null);
       expect(() => w.store.contextPackets.get(withFacts, target.id)).toThrow("The saved chat context contains a malformed excerpt.");
@@ -708,5 +732,25 @@ describe("conversation context transport version 3", () => {
       expect(inspected.prepare("SELECT transport_version AS version FROM conversation_context_packets").all()).toEqual([{ version: 3 }]);
       expect(inspected.pragma("foreign_key_check")).toEqual([]);
     } finally { inspected.close(); }
+  });
+  it("renders fork checkpoints and handoffs under their own labels, apart from commands", () => {
+    const packet = { id: "packet", sourceConversationId: "fork", targetConversationId: "parent", sourceProjectId: "project",
+      targetProjectId: "project", sourceConversationTitle: "Fork", sourceProjectName: "Billing", sourceWorkspaceLabel: "Checkout",
+      targetWorkspaceLabel: "Checkout", workspaceRelation: "same-workspace" as const, note: null, messageCount: 0,
+      characterCount: 0, droppedMessageCount: 0, createdAt: "2030-01-01T00:00:00.000Z", consumedMessageId: null, consumedAt: null,
+      sourceState: "available" as const, excerpts: [], supplement: {
+        commands: ["npm test (ok)"],
+        checkpoints: [{ turnId: "one", fileCount: 1, truncated: false }, { turnId: "two", fileCount: 40, truncated: true }],
+        omittedCheckpoints: 3,
+        handoffs: [{ turnId: "one", itemCount: 1, providerId: "codex", modelId: "gpt-5", session: "resumed" as const }],
+        omittedHandoffs: 1,
+      } };
+    expect(contextEnvelope(packet, false, { earlierMessages: 0, intermediateAgentUpdates: 0 }, null, [])).toMatchObject({
+      lastCommands: ["npm test (ok)"],
+      checkpoints: ["Checkpoint: 1 file", "Checkpoint: 40 files (list incomplete)"],
+      checkpointsOmitted: 3,
+      handoffs: ["Handoff: 1 earlier item to codex gpt-5 in a resumed session"],
+      handoffsOmitted: 1,
+    });
   });
 });

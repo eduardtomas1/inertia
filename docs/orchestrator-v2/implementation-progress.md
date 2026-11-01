@@ -800,3 +800,229 @@ The machine was shared with other agents' builds and test runs throughout.
 
 Not exercised: macOS and Linux, a packaged build, real provider accounts, and
 the full `npm run check` suite.
+
+## Fidelity gap packages G7, G10, G12 — 2026-11-01
+
+Status: uncommitted on top of `7c27c05d` (PR #686), Windows 11 x64, Node
+22.23.1. Three of the gap packages listed in the fidelity audit entry above
+landed together: G7 (effect outbox runtime), G10 (portable item kinds and
+provenance) and G12 (fork and merge-back polish). The T3 delta rows they
+satisfy (B.1 and B.5) are updated in
+[t3code-delta-2026-10-31.md](t3code-delta-2026-10-31.md).
+
+### G7: effect outbox runtime
+
+`OrchestrationEffectRuntime` (`src/server/orchestration-v2/effect-runtime.ts`)
+is the production dispatcher over the outbox. It claims only the kinds that
+have a registered executor (`claimNext`), so process-bound rows that callers
+claim inline (`provider.start`, `native.fork`, `native.rollback`) are never
+taken by it, and a thread's later effects still wait behind any earlier
+pending or running effect. Up to four effects run at once. Every claim stays
+fenced by runtime, claim id and attempt count. Work is picked up in three
+ways: a microtask-deferred `wake()` (safe to call inside a transaction,
+because the claim runs after the commit); outbox state changes (settle,
+retire, cancel, requeue and recovery wake it automatically); and a timer set
+to `nextClaimableAt`, so a retry becomes claimable without an outside pump.
+The timer falls back to a 30-second liveness poll. `cancelUnsettled`
+follows T3 Code's arm-before-recheck rule: the claim registers its abort
+signal before execution rereads the durable row. Cancellation therefore
+stops an effect at any point. A cancel that commits between claim and
+execution means the executor never starts. A cancel during execution aborts
+the executor's signal, and the fenced settle leaves the cancellation in
+place. Cancelled rows are stored as `retired`, with the cancellation reason
+as the failure code. Settled `succeeded` and `retired` replay-safe rows of a
+classified kind older than seven days are pruned at startup and then hourly,
+500 rows per statement. `failed` rows are kept, and process-bound intents are
+never pruned: `dispatchStart` and the native-control fences treat a missing
+intent as pre-V2 work. The runtime is created at the end of
+`initializeRuntimePersistence`, after startup recovery has retired
+process-bound effects and requeued replay-safe ones
+(`src/server/runtime-startup-recovery.ts:176-177`). It starts only when the
+runtime safety lock is clear, and it stops if startup fails or the database
+closes. The first replay-safe kind defined end to end is
+`checkpoint.capture-requested` (`checkpointCaptureEffect`). Its executor is
+injected through `register`, and it is not emitted in production yet.
+Retrying is a deliberate classification, recorded with a rationale in
+`ORCHESTRATION_EFFECT_KINDS`. Only replay-safe effects retry, with bounded
+backoff of at most five attempts. `provider.start` and the native operations
+never retry inside the process. A claimed start may already have reached the
+provider, so a failed launch settles `failed` once and the fresh-session
+fallback owns recovery. This differs from T3 Code, where every effect type
+retries. Tests: `tests/server/orchestration-v2-outbox.test.ts`.
+
+### G10: portable item kinds and provenance
+
+Portable history now carries T3's activity item kinds from retained,
+settled turns, not only user and assistant messages
+(`src/server/orchestration-v2/portable-history-source.ts`). A `command`
+activity becomes a `command` item with its input (at most 2 KiB), an
+`Exit code` line, its outcome and the last 4 KiB of its output, all passed
+through `scrubCommandSecrets` and `neutralizeUntrustedAgentText`. The exit
+code is known only where Inertia records it (failed Claude commands); it is
+`unknown` otherwise. An `error` activity becomes an `error` item with its
+failure message only. A turn's plan becomes a `plan` item with the
+explanation and a step checklist. A ready or partial git artifact becomes
+one `file-change` item per turn, listing each file with its change kind (up
+to 200 files). A started turn that ended `cancelled` or `interrupted`
+becomes an `interrupt-result` item. Reasoning, generic tool activity,
+running activities and any activity of an unsettled turn are never read.
+Rolled-back turns and turns outside the continuation route are excluded.
+So are turns whose messages the target backing already covers, so a
+returning session is not sent its own native commands again. Item ids are
+prefixed (`activity:`, `plan:`, `files:`, `interrupt:`). Every item records
+`turnId`, `runId`, `at` and `providerBackingId`; the backing comes from the
+last `provider.backing-recorded` event for the run. The budget algorithm is
+unchanged, and activity items compete with messages by recency, as in T3.
+In the realistic chat of `conversation-context-v3.test.ts`, the 11 KB
+migration guide is therefore omitted now, where three short messages were
+omitted before; that test's expectations were updated. The coverage text
+adds the covered chat-turn ordinals and the first and last source item ids.
+`selectPortableHistory` and `readPortableContinuationHistory` accept
+`hostToolBridgeAttested`. When it is `false`, the text says omitted history
+cannot be retrieved instead of naming `inertia_request_context`. The
+production call in `turn-request-preparation.ts` does not pass it yet, so
+production still names the tool on every route. The last-turn command list
+is gone from this path's "Handoff outcome" block (`moved` remains);
+`lastTurnCommands` still serves chat-reference packets. The aggregated
+"Files changed earlier in this chat" block is still appended after the
+selection when room remains, because the G1 rollback and provider-handoff
+tests require it. Session-recovery counts still count messages only.
+Covered-history occupancy now includes covered activity, plan and
+file-change items. Inherited fork items still carry a null
+`providerBackingId`.
+
+### G12: fork and merge-back polish
+
+A lazy native fork now requires a `completed` source turn. A failed,
+interrupted or cancelled source records `fork.portable-selected` with
+`native-source-unsuccessful` and never calls the provider, as T3's
+`decideForkExecution` does (`src/server/runtime/fork-session-service.ts`).
+Codex `thread/fork` with the inclusive `lastTurnId` is now allowed on
+legacy-history threads. The source head and boundary are still checked
+through `thread/turns/list` before the fork, and the fork's head is checked
+after it. Native revert still requires paginated history and returns
+`unsupported` otherwise. An unknown history mode refuses a fork with
+`known-native-history-required`. Whether a real legacy-history Codex thread
+answers `thread/turns/list` has not been tried; if it does not, the fork
+fails closed and the chat continues portably. The merge-back packet
+supplement gains typed `checkpoints` (`turnId`, `fileCount`, `truncated`)
+for each fork turn with a ready or partial checkpoint, and `handoffs`
+(`turnId`, `itemCount`, `providerId`, `modelId`, `session`) for each
+delivered context handoff. `session` is `new` or `resumed`, read from the
+handoff's `context.handoff-prepared` event: the stored handoff record's
+target backing is overwritten on delivery, so the event is the only place
+that still says whether a fresh session was started. Each list holds at most
+64 entries and counts the rest in `omittedCheckpoints` and
+`omittedHandoffs`, and the whole supplement stays within the existing
+8 KiB. The `commands` list holds commands only again. The packet codec
+accepts the new fields with strict per-entry keys, and existing packets stay
+valid. The prompt formatter renders them as `checkpoints` ("Checkpoint: N
+files", with "(list incomplete)" for a truncated file list) and `handoffs`
+("Handoff: N earlier items to <provider> <model> in a new session"), and
+the composer preview lists them as their own lines. The shared line
+formatters live in `src/shared/conversation-context-supplement.ts`, so the
+first-load renderer chunks are unchanged. The merge-back record's summary
+keeps the optional `checkpointCount` and `handoffCount`; older records
+replay without them. The chip's new lines cost core bytes; the re-cap is
+recorded under Verification below.
+
+### Tracked for the Phase 4 rebase
+
+- **Effect runtime post-commit wake hook.** Enqueuing an effect does not
+  notify the outbox's subscribers; only settle, retire, cancel, requeue and
+  recovery do (`notifyAvailable`,
+  `src/server/orchestration-v2/effect-outbox.ts:197`). A replay-safe effect
+  committed by a command is therefore claimed on the next state change,
+  `nextClaimableAt` timer or 30-second liveness poll. The command commit path
+  needs a post-commit hook that calls `wake()`.
+- **Effect runtime shutdown stop.** `initializeRuntimePersistence` returns
+  `orchestrationEffects`, but `src/server/index.ts:227-231` does not take it,
+  so no shutdown path calls its `stop()`; it stops only on a startup failure
+  or when the database closes. Shutdown must
+  stop it before the database closes, so running executors are aborted and
+  their claims are released deterministically.
+- **`checkpoint.capture-requested` emission.** The kind, payload schema and
+  replay policy exist, but nothing emits it and no executor is registered in
+  production. Emitting it raises the start-claim barrier question: a thread's
+  later effects wait behind any earlier pending or running effect, so a
+  capture queued behind a claimed process-bound `provider.start` waits for
+  that start to settle. Decide whether capture should wait behind the start
+  claim or be exempt from it.
+- **`hostToolBridgeAttested` pass-through.** `selectPortableHistory` and
+  `readPortableContinuationHistory` accept it, but the production call in
+  `src/server/runtime/turns/turn-request-preparation.ts:473` does not pass the
+  value it already computes at line 261, so every route still names
+  `inertia_request_context` for omitted history. This is a one-line change.
+- **Duplicated files information (decision to take).** Portable continuation
+  carries one `file-change` item per turn
+  (`src/server/orchestration-v2/portable-history-source.ts:88-93,126-130`) and
+  also appends the aggregated "Files changed earlier in this chat" block when
+  room remains (`portable-history-source.ts:274`;
+  `src/server/persistence/provider-handoff-files.ts:122`). The G1 rollback and
+  provider-handoff tests depend on the block. Decide whether to keep both,
+  drop the block on this path, or leave out per-item file changes that the
+  block already lists.
+
+### Verification
+
+All runs used the combined tree (G7, G10 and G12 together) on a machine shared
+with other agents' builds and test runs. The eight one-line doc comments the
+packages added in `portable-history-source.ts`, `portable-history.ts` and
+`turn-context-facts.ts` were removed while the portable run was in progress
+(an existing comment edited in `portable-history-occupancy.ts` stays). The
+quality gate and focused Vitest ran before the removal; `lint:standard`, the
+last rebuild and the Electron run ran after it.
+
+- `npm run build:bundle` first failed only on `coreJavaScript`: 2,485,775
+  bytes against the 2,485,612 cap, 419 bytes over the last recorded
+  measurement (2,485,356). G12 measured its own share as 369 bytes. The core
+  cap was raised to 2,486,031 (measurement plus 256) in
+  `scripts/check-renderer-bundle.mjs`, with the accounting in
+  [renderer-bundle.json](../pr-evidence/orchestrator-v2/renderer-bundle.json)
+  (`fidelityAuditFixes2`). The rebuild passed, and so did a later rebuild
+  before the Electron run. The startup routes did not change size: 902,998
+  bytes against 903,347 and 796,783 bytes against 797,132. No other limit
+  and no exclusion changed.
+- `npm run check:quality` passed: workflow concurrency, 110 migration lineage
+  entries, architecture (1,846 source files, 7,688 internal edges, 4 derived
+  compatibility facades), color themes, both linters and all five TypeScript
+  projects. `npm run lint:standard` passed again after the comment removal.
+- Focused Vitest, 17 files (`orchestration-v2-outbox`, `orchestration-v2`,
+  `orchestration-portable-history`, `orchestration-backings`,
+  `orchestration-context-exhaustion`, `orchestration-history-rollback`,
+  `provider-handoff-continuation`, `conversation-context-v3`,
+  `orchestration-merge-back`, `orchestration-native-forks`,
+  `native-conversation-operations`, `orchestration-forks`,
+  `turn-restart-continuation`, `runtime-query-plans`, `session-continuity*`
+  and DOM `composer-chat-references`, `fork-surface`). The first run passed
+  257 of 260. Three `fork-surface` tests missed their 1-second `findBy`
+  waits during a cold transform (42 s run). That file then passed alone three
+  times (6/6), and the rerun of all 17 files passed 260/260 in 30.6 s.
+- `npm run test:portable`: 228 of 235 files passed, 1 skipped; 3,782 tests
+  passed, 8 failed, 80 skipped, in 2,246 s. Each failing file was rerun
+  alone:
+  - `claude-agent-sdk-lifecycle` (5/5), `native-gemini-provider-migration`
+    (2/2), `opencode-interaction-reply-deadline` (10/10) and
+    `package-smoke-history` (15/15) passed alone. Under the full run they
+    failed on load: a "stalled" status read before settlement, 15-second
+    timeouts, a 2,016 ms stop against a 2,000 ms bound, unconfirmed provider
+    process cleanup, and `EBUSY` removing a temporary `inertia.sqlite`.
+  - `app-update-candidate-viability-worker` fails 2 of 21 alone as well, with
+    `EPERM` creating symlinks; this machine cannot create symlinks.
+  - `provider-harness-portable-registration` timed out at 15 s in the full
+    run and alone. Its portable-test discovery reads every file under
+    `tests/`, and single reads took 1-3 s on this disk during the session.
+    With `--testTimeout=400000` it passed (1/1, 33 s), so the manifest and
+    harness registration are correct.
+  None of the failing files touches code these packages changed.
+- Electron `--project isolated` with `session-continuity` and
+  `history-rollback-merge-back`: the first run failed both scenarios at
+  launch with "The Windows runtime Job Object assembly integrity check
+  failed". The portable run had rebuilt
+  `resources/generated/runtime-process-guardian/windows-runtime-job.exe`
+  after the main bundle was built, so the hash compiled into `out/main` no
+  longer matched the executable. After `npm run build:bundle` rebuilt both,
+  2 of 2 passed (1.4 min).
+
+Not exercised: macOS and Linux, a packaged build, real provider accounts, a
+real legacy-history Codex thread, and the full `npm run check` suite.

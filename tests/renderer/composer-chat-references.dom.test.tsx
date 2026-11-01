@@ -690,7 +690,7 @@ describe("composer chat references", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("unavailable");
   });
 
-  it("lists the changed files and last commands sent with the messages, after them", async () => {
+  it("lists the changed files, last commands, checkpoints and handoffs sent with the messages, after them", async () => {
     const onCommand = vi.fn(async () => ({
       type: "request.result",
       requestId: "preview",
@@ -704,6 +704,10 @@ describe("composer chat references", () => {
             omittedFiles: 3,
             commands: ["npm run build (ok)", "npm test (exit 1)"],
             omittedCommands: 2,
+            checkpoints: [{ turnId: "fork-one", fileCount: 2, truncated: false }, { turnId: "fork-two", fileCount: 1, truncated: true }],
+            omittedCheckpoints: 1,
+            handoffs: [{ turnId: "fork-one", itemCount: 4, providerId: "codex", modelId: "gpt-5", session: "new" }],
+            omittedHandoffs: 2,
           },
         },
       },
@@ -723,6 +727,11 @@ describe("composer chat references", () => {
       "npm run build (ok)",
       "npm test (exit 1)",
       "2 more commands",
+      "Checkpoint: 2 files",
+      "Checkpoint: 1 file (list incomplete)",
+      "1 more checkpoint",
+      "Handoff: 4 earlier items to codex gpt-5 in a new session",
+      "2 more handoffs",
     ]);
     expect(screen.getAllByRole("list")).toHaveLength(2);
   });

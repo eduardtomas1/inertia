@@ -9,7 +9,8 @@ export const MERGE_BACK_STATES = ["prepared", "attached", "dispatched", "deliver
 const count = z.number().int().nonnegative();
 
 export const mergeBackSummarySchema = z.object({
-  commandCount: count, fileCount: count, truncated: z.boolean(),
+  commandCount: count, fileCount: count, checkpointCount: count.optional(), handoffCount: count.optional(),
+  truncated: z.boolean(),
 }).strict();
 
 export const mergeBackSchema = z.object({

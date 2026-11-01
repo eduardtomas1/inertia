@@ -167,6 +167,47 @@ describe("lazy native fork admission", () => {
     } finally { runtime.store.close(); }
   });
 
+  it.each(["completed", "failed", "cancelled", "interrupted"] as const)("forks a %s source turn natively only when it completed", async (status) => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: `${status} request` });
+      runtime.controller.start(queued.turn.id);
+      for (const phase of ["started", "settled"] as const) runtime.provider.emit({ ...turnControllerTestIdentity(runtime),
+        type: "native-boundary", nativeConversationId: "source-native", nativeSessionId: "tree-root", nativeTurnId: status,
+        persistedHeadId: phase === "settled" ? status : null, phase });
+      if (status === "interrupted") {
+        await expect(runtime.controller.interruptForUpdate([runtime.conversationId], "Inertia")).resolves.toBe(true);
+      } else {
+        runtime.provider.resolve({ text: `${status} answer`, sessionId: "source-native",
+          ...(status === "completed" ? {} : { status }) });
+      }
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(queued.turn.id).status).toBe(status);
+      const child = fork(runtime, queued.turn.id);
+      expect(runtime.store.orchestration.forks.get(child.id)?.nativeBoundary).toMatchObject({ phase: "settled", nativeTurnId: status });
+      const deps = dependencies(runtime, async (request) => completed(request));
+      await prepareForkSession(deps, child.id, new AbortController().signal);
+      const selected = runtime.store.orchestration.events.readEvents({ projectId: child.projectId, threadId: child.id, limit: 500 })
+        .filter((event) => event.type === "fork.portable-selected").map((event) => event.payload);
+      if (status === "completed") {
+        expect(deps.providers.nativeConversation).toHaveBeenCalledOnce();
+        expect(selected).toEqual([]);
+        expect(runtime.store.orchestration.forks.get(child.id)?.transfer).toBe("native");
+        return;
+      }
+      expect(deps.providers.nativeConversation).not.toHaveBeenCalled();
+      expect(selected).toEqual([{ reason: "native-source-unsuccessful" }]);
+      expect(runtime.store.orchestration.forks.get(child.id)?.transfer).toBe("portable");
+      expect(runtime.store.orchestration.nativeControls.locked(child.id)).toBe(false);
+      const send = runtime.controller.queue({ conversationId: child.id, content: "Continue" });
+      runtime.controller.start(send.turn.id);
+      expect(runtime.provider.input?.sessionId).toBeUndefined();
+      expect(runtime.provider.input?.prompt).toContain(`${status} request`);
+      runtime.provider.resolve({ text: "Done" });
+      await flushTurnControllerTestPromises();
+    } finally { runtime.store.close(); }
+  });
+
   it("refuses a successful-looking native reply with the wrong target identity", async () => {
     const runtime = await createTurnControllerTestRuntime();
     try {

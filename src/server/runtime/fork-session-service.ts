@@ -42,9 +42,13 @@ async function prepareOrderedForkSession(dependencies: ForkSessionDependencies, 
     portable("native-boundary-unavailable");
     return;
   }
-  let source;
-  try { source = store.conversation(fork.parentThreadId); }
+  let source, sourceTurn;
+  try { source = store.conversation(fork.parentThreadId); sourceTurn = store.agentTurn(fork.sourceTurnId); }
   catch (error) { if (!(error instanceof RecordNotFoundError)) throw error; portable("source-removed"); return; }
+  if (sourceTurn.status !== "completed") {
+    portable("native-source-unsuccessful");
+    return;
+  }
   if (source.projectId !== target.projectId || source.providerId !== route.providerId
     || store.conversationPath(source.id) !== fork.sourceWorkspaceKey
     || store.orchestration.awaitsCleanupProof(source.id) || providers.isRunning(source.id)) {

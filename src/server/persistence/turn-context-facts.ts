@@ -8,7 +8,10 @@ import { scrubCommandSecrets } from "../provider/command-secrets";
 import { boundedSubagentText } from "../provider/subagent-trace";
 import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
 import { byteLength } from "./bounded-message-text";
+import { planFromRow } from "./codecs";
 import { recordedCommandExitCode } from "./command-exit-code";
+import { parseTurnGitArtifactFiles } from "./git-artifact-codecs";
+import type { AgentPlanRow } from "./rows";
 
 export const MAX_TURN_AGENT_LABEL_LENGTH = 120;
 export const MAX_TURN_COMMANDS_BYTES = 200;
@@ -133,4 +136,94 @@ export function finalTurnCommands(
 ): string[] {
   const finalTurnId = [...excerpts].reverse().find(({ sourceTurnId }) => sourceTurnId !== null)?.sourceTurnId;
   return finalTurnId ? lastTurnCommands(database, finalTurnId) : [];
+}
+
+export const MAX_PORTABLE_COMMAND_INPUT_BYTES = 2_048;
+export const MAX_PORTABLE_COMMAND_OUTPUT_BYTES = 4_096;
+export const MAX_PORTABLE_ERROR_BYTES = 2_048;
+export const MAX_PORTABLE_FILE_CHANGES = 200;
+
+const COMMAND_SECTION = "Command:\n";
+const DETAIL_SECTIONS = ["\n\nOutput:\n", "\n\nError:\n"];
+const PLAN_STEP_MARKS: Readonly<Record<string, string>> = {
+  completed: "[x]", inProgress: "[~]", pending: "[ ]", cancelled: "[-]",
+};
+
+function redacted(value: string): string {
+  return neutralizeUntrustedAgentText(scrubCommandSecrets(value.replace(/\0/gu, "")));
+}
+
+function headBytes(value: string, maximumBytes: number): string {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length <= maximumBytes) return value;
+  let end = maximumBytes - 3;
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end -= 1;
+  return `${bytes.subarray(0, end).toString("utf8")}…`;
+}
+
+function tailBytes(value: string, maximumBytes: number): string {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length <= maximumBytes) return value;
+  let start = bytes.length - maximumBytes;
+  while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start += 1;
+  return `[${start} earlier bytes of output omitted]\n${bytes.subarray(start).toString("utf8")}`;
+}
+
+function commandSections(title: string, detail: string | null): { input: string | null; output: string } {
+  const text = detail ?? "";
+  if (!text.startsWith(COMMAND_SECTION)) {
+    return { input: GENERIC_COMMAND_TITLES.has(title) ? null : title, output: text };
+  }
+  const ends = DETAIL_SECTIONS.map((section) => text.indexOf(section, COMMAND_SECTION.length)).filter((index) => index >= 0);
+  const end = ends.length ? Math.min(...ends) : text.length;
+  return { input: text.slice(COMMAND_SECTION.length, end), output: text.slice(end).replace(/^\n\n/u, "") };
+}
+
+export function portableCommandText(
+  providerId: ProviderId,
+  activity: { title: string; detail: string | null; status: string },
+): string {
+  const { input, output } = commandSections(activity.title, activity.detail);
+  const command = input?.trim() ? headBytes(redacted(input.trim()), MAX_PORTABLE_COMMAND_INPUT_BYTES) : "not recorded";
+  const exitCode = recordedCommandExitCode(providerId, activity.status, activity.detail);
+  const recordedOutput = output.trim() ? tailBytes(redacted(output.trim()), MAX_PORTABLE_COMMAND_OUTPUT_BYTES) : "";
+  return [`Command: ${command}`, `Exit code: ${exitCode ?? "unknown"}`,
+    `Outcome: ${activity.status === "completed" ? "completed" : "failed"}`,
+    ...(recordedOutput ? [recordedOutput] : [])].join("\n");
+}
+
+export function portableErrorText(title: string): string | null {
+  const message = title.trim();
+  return message ? headBytes(redacted(message), MAX_PORTABLE_ERROR_BYTES) : null;
+}
+
+export function portableFileChangeText(filesJson: string): string | null {
+  const files = parseTurnGitArtifactFiles(filesJson);
+  if (files.length === 0) return null;
+  const lines = files.slice(0, MAX_PORTABLE_FILE_CHANGES).map(({ path, previousPath, status }) => neutralizeUntrustedAgentText(
+    `File change (${status}): ${previousPath && previousPath !== path ? `${previousPath} -> ` : ""}${path}`));
+  const omitted = files.length - lines.length;
+  return [...lines, ...(omitted > 0 ? [`${omitted} more changed files not listed.`] : [])].join("\n");
+}
+
+export function portablePlanText(row: AgentPlanRow): string | null {
+  const plan = planFromRow(row);
+  const explanation = plan.explanation?.trim() ?? "";
+  const steps = plan.steps.map(({ step, status }) => `- ${PLAN_STEP_MARKS[status] ?? "[ ]"} ${step.replace(/\s+/gu, " ").trim()}`);
+  if (!explanation && steps.length === 0) return null;
+  return redacted(["Proposed plan:", ...(explanation ? [explanation] : []),
+    ...(steps.length ? ["", "Steps:", ...steps] : [])].join("\n"));
+}
+
+const INTERRUPTION_REASON = /^[a-z0-9][a-z0-9-]{0,79}$/u;
+
+export function portableInterruptText(status: "cancelled" | "interrupted", terminalReason: string | null): string {
+  if (status === "cancelled") {
+    return terminalReason === "user-cancelled"
+      ? "The user stopped this turn before it finished."
+      : "This turn was cancelled before it finished.";
+  }
+  return terminalReason && INTERRUPTION_REASON.test(terminalReason)
+    ? `This turn was interrupted before it finished (${terminalReason}).`
+    : "This turn was interrupted before it finished.";
 }

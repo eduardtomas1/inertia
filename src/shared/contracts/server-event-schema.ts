@@ -30,6 +30,8 @@ import { validAppearanceSettings } from "./appearance-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 import { subagentTrace } from "./subagent-trace-schema";
 import { watcherMutationEvent, watcherRequestResultValidators, watcherWakeSummariesCoherent } from "./watcher-schema";
+import { validProviderUpdateRequirement } from "./provider-update-requirement-schema";
+import { compactOnReturnResultValidators, isConversationCompactionState, isPromptCacheFacts, validCompactOnReturnSetting } from "./compact-on-return-schema";
 import { forkHistoryResultSchema } from "../orchestration-forks";
 import { conversationRollbackResultSchema, rolledBackTurnIdsCoherent } from "../orchestration-history";
 import { mergeBackResultSchema } from "../orchestration-merge-back";
@@ -37,7 +39,6 @@ import { conversationDelegationSchema } from "../orchestration-delegation";
 import { observedChildReadResultSchema } from "../observed-child-thread";
 import { delegationCancelResultSchema, delegationDeliveryResultSchema, delegationTaskResultSchema } from "./client-command/delegation";
 import { cursorSdkLoginEventSchema, cursorSdkStatusResultSchema, cursorSdkModelsResultSchema } from "./cursor-sdk-auth-schema";
-import { compactOnReturnResultValidators, isConversationCompactionState, isPromptCacheFacts, validCompactOnReturnSetting } from "./compact-on-return-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "pi"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
@@ -312,7 +313,7 @@ function providerInfo(value: unknown): boolean {
     && booleanField(value, "available")
     && nullableStringField(value, "version")
     && (value.executable === undefined || nullableStringField(value, "executable"))
-    && booleanField(value, "canRun")
+    && booleanField(value, "canRun") && validProviderUpdateRequirement(value)
     && nullableStringField(value, "statusMessage")
     && arrayOf(value.models, (model) => providerModel(model, expectedFastMode))
     && arrayOf(value.rateLimits, providerRateLimit)

@@ -57,6 +57,8 @@ const LOCKED_FOR_COMPACTION =
   "Wait for the current provider or workspace operation to finish before compacting this chat.";
 const BLOCKING_FAILURE_KINDS = new Set(["billing", "authentication", "rate-limited"]);
 
+class CompactionRefusedError extends RuntimeRequestError {}
+
 export interface ConversationCompactionCommandDependencies {
   store: RuntimeStore;
   providers: ProviderManager;
@@ -199,7 +201,7 @@ async function prepareCompaction(
   }
   const conversation = dependencies.store.conversation(conversationId);
   if (!conversation.providerSessionId) {
-    throw new RuntimeRequestError(
+    throw new CompactionRefusedError(
       "This chat does not have a provider session to compact yet.",
     );
   }
@@ -290,7 +292,7 @@ async function prepareCompaction(
       officiallyAllowsModelSwitchWithinSession(route.compatibility),
   });
   if (continuation.action !== "resume-session") {
-    throw new RuntimeRequestError(continuation.reason);
+    throw new CompactionRefusedError(continuation.reason);
   }
   return { conversation, selection, route, supportedFastMode };
 }
@@ -428,7 +430,9 @@ async function compactUnderLock<T>(
       afterTokens,
       instructionForwarded: result.instructionForwarded,
       trigger: request.trigger,
-      sessionInstructionDigest: sessionInstruction === undefined ? null : sessionInstructionDigest(sessionInstruction),
+      sessionInstructionDigest: sessionInstruction === undefined || result.sessionInstructionApplied === false
+        ? null
+        : sessionInstructionDigest(sessionInstruction),
     };
     try {
       const message = dependencies.store.createMessage(
@@ -503,7 +507,7 @@ function refuseUnlessCompactableOnReturn(
   const refuseIneligible = (): void => {
     const decision = eligibility();
     if (!decision.eligible) {
-      throw new RuntimeRequestError(
+      throw new CompactionRefusedError(
         decision.reason ?? "Compact on return is not available for this chat.",
       );
     }
@@ -649,7 +653,12 @@ export function createConversationCompactionCommandHandler(
       if (
         progress.compacted
         || dependencies.lifetimeSignal?.aborted
-        || (!progress.locked && !deadline.signal.aborted && !(error instanceof SignInUnconfirmedError))
+        || (
+          !progress.locked
+          && !deadline.signal.aborted
+          && !(error instanceof SignInUnconfirmedError)
+          && !(error instanceof CompactionRefusedError)
+        )
       ) throw error;
       result = {
         kind: "conversation.compact-and-send",

@@ -166,6 +166,22 @@ describe("terminal handoff between windows", () => {
     await waitFor(() => expect(bridge.docked).toEqual([["", terminalIds]]));
   });
 
+  it("hands the live terminals over when the window closes natively", async () => {
+    const live = attachingConnection();
+    await renderWindow(live, terminalIds);
+    await waitFor(() => expect(liveTerminalIdsForHandoff(projectId, conversationId)).toEqual(terminalIds));
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+    expect(bridge.persisted).toEqual([["", terminalIds]]);
+  });
+
+  it("reports its live terminals so a renderer crash can hand them back", async () => {
+    const live = attachingConnection();
+    await renderWindow(live, terminalIds);
+    await waitFor(() => expect(bridge.mirrored.at(-1)).toEqual(["", terminalIds]));
+  });
+
   it("neither re-seeds nor re-opens the terminal after a reload", async () => {
     const first = attachingConnection();
     await renderWindow(first, terminalIds);

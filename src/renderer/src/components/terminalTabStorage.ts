@@ -3,6 +3,7 @@ import { MAX_PERSISTED_TERMINAL_TABS } from "@shared/terminal-handoff";
 
 const MAX_TERMINAL_STORAGE_LENGTH = 4_096;
 const mountedTerminalPanels = new Set<string>();
+const terminalTabListeners = new Set<(storageKey: string) => void>();
 
 export type TerminalTab = {
   id: string;
@@ -60,11 +61,25 @@ export function persistTerminalTabs(
   } catch {
     // Session restoration is a convenience; terminal ownership stays server-side.
   }
+  notifyTerminalTabsChanged(storageKey);
+}
+
+export function onTerminalTabsChanged(listener: (storageKey: string) => void): () => void {
+  terminalTabListeners.add(listener);
+  return () => { terminalTabListeners.delete(listener); };
+}
+
+function notifyTerminalTabsChanged(storageKey: string): void {
+  for (const listener of terminalTabListeners) listener(storageKey);
 }
 
 export function markTerminalPanelMounted(storageKey: string): () => void {
   mountedTerminalPanels.add(storageKey);
-  return () => { mountedTerminalPanels.delete(storageKey); };
+  notifyTerminalTabsChanged(storageKey);
+  return () => {
+    mountedTerminalPanels.delete(storageKey);
+    notifyTerminalTabsChanged(storageKey);
+  };
 }
 
 export function liveTerminalIdsForHandoff(

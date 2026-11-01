@@ -78,6 +78,11 @@ interface Timer {
   unref?: () => unknown;
 }
 
+interface AdmissionWindow {
+  startedAt: number;
+  records: number;
+}
+
 export interface RuntimeStderrJournalOptions {
   record: (code: RuntimeStderrCode, count: number) => void;
   now?: () => number;
@@ -101,8 +106,8 @@ export class RuntimeStderrJournal {
   private pending = "";
   private overflowing = false;
   private readonly deferred = new Map<RuntimeStderrCode, number>();
-  private windowStartedAt = Number.NEGATIVE_INFINITY;
-  private recordsInWindow = 0;
+  private readonly lineWindow: AdmissionWindow = { startedAt: Number.NEGATIVE_INFINITY, records: 0 };
+  private readonly summaryWindow: AdmissionWindow = { startedAt: Number.NEGATIVE_INFINITY, records: 0 };
   private timer: Timer | null = null;
   private ended = false;
 
@@ -161,7 +166,7 @@ export class RuntimeStderrJournal {
     this.overflowing = false;
     if (!line && !overflowed) return;
     const code = overflowed ? null : classifyRuntimeStderrLine(line);
-    if (code && this.admit()) {
+    if (code && this.admit(this.lineWindow)) {
       this.options.record(code, 1);
       return;
     }
@@ -173,14 +178,14 @@ export class RuntimeStderrJournal {
     this.schedule(this.omittedDelayMs);
   }
 
-  private admit(): boolean {
+  private admit(window: AdmissionWindow): boolean {
     const now = this.now();
-    if (now - this.windowStartedAt >= this.windowMs) {
-      this.windowStartedAt = now;
-      this.recordsInWindow = 0;
+    if (now - window.startedAt >= this.windowMs) {
+      window.startedAt = now;
+      window.records = 0;
     }
-    if (this.recordsInWindow >= this.maxRecordsPerWindow) return false;
-    this.recordsInWindow += 1;
+    if (window.records >= this.maxRecordsPerWindow) return false;
+    window.records += 1;
     return true;
   }
 
@@ -192,14 +197,13 @@ export class RuntimeStderrJournal {
 
   private flushDeferred(): void {
     this.timer = null;
-    for (const [code, count] of this.deferred) {
-      if (!this.admit()) {
-        this.schedule(Math.max(1, this.windowStartedAt + this.windowMs - this.now()));
-        return;
-      }
-      this.options.record(code, Math.min(count, 1_000_000));
-      this.deferred.delete(code);
+    if (this.deferred.size === 0) return;
+    if (!this.admit(this.summaryWindow)) {
+      this.schedule(Math.max(1, this.summaryWindow.startedAt + this.windowMs - this.now()));
+      return;
     }
+    for (const [code, count] of this.deferred) this.options.record(code, Math.min(count, 1_000_000));
+    this.deferred.clear();
   }
 }
 

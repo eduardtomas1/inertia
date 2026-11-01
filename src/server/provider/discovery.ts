@@ -48,10 +48,16 @@ import {
   probeOpenCodePureIsolation,
   type OpenCodePureIsolationProbe,
 } from "./opencode-pure-isolation";
+import {
+  OPENCODE_VERSION_CEILING,
+  PROVIDER_VERSION_FLOORS,
+  providerVersionBelowFloor,
+  providerVersionFloorMessage,
+  type ProviderVersionFloor,
+} from "./provider-version-floors";
 
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
 const CANCELLED_PROBE_COMPLETION_DRAIN_MS = 250;
-export const ANTIGRAVITY_MINIMUM_HEADLESS_VERSION = "1.2.2";
 const CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS = new Set([
   "CODEX_HOME",
   "CODEX_INSTALL_DIR",
@@ -92,13 +98,20 @@ function antigravityCandidateIsIdentified(executable: string): boolean {
   return name === "agy" || name === "antigravity";
 }
 
-function versionFromOutput(output: string): string | undefined {
-  return output.match(/\bv?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?\b/u)?.[0];
+const ANCHORED_VERSION_LINES: Partial<Record<ProviderId, RegExp>> = {
+  claude: /^(v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?) \(Claude Code\)$/mu,
+  opencode: /^(?:opencode\s+)?(v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?)(?:\s.*)?$/mu,
+};
+
+function versionFromOutput(providerId: ProviderId, probe: Pick<ProbeResult, "output" | "stdout">): string | undefined {
+  const anchored = ANCHORED_VERSION_LINES[providerId]?.exec((probe.stdout ?? probe.output).replace(/\r/gu, ""))?.[1];
+  return anchored ?? probe.output.match(/\bv?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?\b/u)?.[0];
 }
 
 interface ProbeResult {
   exitCode: number | null;
   output: string;
+  stdout?: string;
   started: boolean;
   timedOut: boolean;
   cleanupConfirmed?: boolean;
@@ -156,6 +169,7 @@ async function probeProcess(
     return {
       exitCode: null,
       output: "",
+      stdout: "",
       started: false,
       timedOut: false,
       cleanupConfirmed: true,
@@ -164,6 +178,7 @@ async function probeProcess(
   }
   return await new Promise<ProbeResult>((resolveProbe) => {
     const output = new CappedProviderBuffer(16 * 1024);
+    const stdout = new CappedProviderBuffer(16 * 1024);
     let settled = false;
     let started = false;
     let timedOut = false;
@@ -182,6 +197,7 @@ async function probeProcess(
       resolveProbe({
         exitCode: cancellation ? null : exitCode,
         output: output.toString(),
+        stdout: stdout.toString(),
         started,
         timedOut,
         cleanupConfirmed,
@@ -227,7 +243,11 @@ async function probeProcess(
     }
 
     child.once("spawn", () => { started = true; });
-    child.stdout.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
+    child.stdout.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      output.append(text);
+      stdout.append(text);
+    });
     child.stderr.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
     const terminateAndFinish = (aborted = false): void => {
       if (settled) return;
@@ -244,6 +264,7 @@ async function probeProcess(
         () => resolveProbe({
           exitCode: null,
           output: output.toString(),
+          stdout: stdout.toString(),
           started,
           timedOut,
           cleanupConfirmed: true,
@@ -252,6 +273,7 @@ async function probeProcess(
         () => resolveProbe({
           exitCode: null,
           output: output.toString(),
+          stdout: stdout.toString(),
           started,
           timedOut,
           cleanupConfirmed: false,
@@ -307,11 +329,17 @@ function compareVersions(left: string | undefined, right: string | undefined): n
 
 function antigravityVersionSupportsHeadless(version: string | undefined): boolean {
   return Boolean(version)
-    && compareVersions(version, ANTIGRAVITY_MINIMUM_HEADLESS_VERSION) >= 0;
+    && compareVersions(version, PROVIDER_VERSION_FLOORS.antigravity.minimumVersion) >= 0;
 }
 
 function openCodeVersionIsSupported(version: string | undefined): boolean {
-  return versionParts(version)[0]! < 2;
+  return versionParts(version)[0]! < OPENCODE_VERSION_CEILING.firstUnsupportedMajor;
+}
+
+function securityVersionFloor(providerId: ProviderId): ProviderVersionFloor | null {
+  return providerId === "claude" || providerId === "opencode"
+    ? PROVIDER_VERSION_FLOORS[providerId]
+    : null;
 }
 
 function nativeExecutablePreference(executable: string): number {
@@ -505,6 +533,7 @@ async function detectProviderRecordingCleanup(
   const runOpenCodeIsolationProbe = dependencies.probeOpenCodePureIsolation
     ?? probeOpenCodePureIsolation;
   const provider = PROVIDER_INFO[providerId];
+  const versionFloor = securityVersionFloor(providerId);
   const command = options.command?.trim() || provider.command;
   const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, MAX_PROBE_DEADLINE_MS));
   const cwd = options.cwd ?? process.cwd();
@@ -569,7 +598,9 @@ async function detectProviderRecordingCleanup(
     const probe = await runProbe(executable, ["--version"], probeEnvironment, cwd, timeoutMs);
     const latencyMs = Math.round(now() - versionStartedAt);
     const followUpTimeoutMs = slowMachineProbeDeadline(timeoutMs, latencyMs);
-    const version = versionFromOutput(probe.output);
+    const version = versionFromOutput(providerId, probe);
+    const belowFloor = versionFloor !== null
+      && providerVersionBelowFloor(version, versionFloor.minimumVersion);
     const acpProbe = (providerId === "cursor" || providerId === "kimi")
       && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(
@@ -601,7 +632,7 @@ async function detectProviderRecordingCleanup(
       && appServerProbe.exitCode === 0
       && /(?:codex\s+app-server|run the app server|\bapp-server\b)/iu.test(appServerProbe.output)
     );
-    const serveProbe = providerId === "opencode" && probe.started && !probe.timedOut && probe.exitCode === 0
+    const serveProbe = providerId === "opencode" && !belowFloor && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(executable, ["serve", "--help"], probeEnvironment, cwd, followUpTimeoutMs)
       : undefined;
     const serveReady = !serveProbe || (
@@ -627,12 +658,13 @@ async function detectProviderRecordingCleanup(
                 ? openCodeVersionIsSupported(version)
                 : true
       ),
-      versionReady: providerId === "antigravity"
+      versionReady: (providerId === "antigravity"
         ? antigravityCandidateIsIdentified(executable)
           && antigravityVersionSupportsHeadless(version)
         : providerId === "opencode"
           ? openCodeVersionIsSupported(version)
-          : true,
+          : true)
+        && !belowFloor,
       acpReady,
       appServerReady,
       serveReady,
@@ -692,11 +724,6 @@ async function detectProviderRecordingCleanup(
       versionProbes.some(
         ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
       );
-    const antigravityInstall = providerId === "antigravity"
-      ? versionProbes.find(({ executable, probe }) =>
-          antigravityCandidateIsIdentified(executable)
-          && probe.started && !probe.timedOut && probe.exitCode === 0)
-      : undefined;
     const openCodeInstalls = providerId === "opencode"
       ? versionProbes.filter(
           ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
@@ -715,31 +742,55 @@ async function detectProviderRecordingCleanup(
               - cursorExecutablePreference(left.executable)
             : 0)
           || compareVersions(right.version, left.version))[0];
+    const antigravityInstall = providerId === "antigravity"
+      ? identifiedInstall ?? versionProbes.find(({ executable, probe }) =>
+          antigravityCandidateIsIdentified(executable)
+          && probe.started && !probe.timedOut && probe.exitCode === 0)
+      : undefined;
     const openCodeTwoOnly = providerWithoutPureServe
       && openCodeInstalls.every(({ version }) => !openCodeVersionIsSupported(version));
+    const belowFloorVersion = versionFloor
+      && identifiedInstall?.version
+      && providerVersionBelowFloor(identifiedInstall.version, versionFloor.minimumVersion)
+      ? identifiedInstall.version
+      : undefined;
+    const updateRequired = antigravityInstall?.version
+      ? {
+          installedVersion: antigravityInstall.version,
+          minimumVersion: PROVIDER_VERSION_FLOORS.antigravity.minimumVersion,
+        }
+      : versionFloor && belowFloorVersion
+        ? { installedVersion: belowFloorVersion, minimumVersion: versionFloor.minimumVersion }
+        : undefined;
     return {
       provider,
-      available: providerWithoutAcp || providerWithoutPureServe || Boolean(antigravityInstall),
+      available: providerWithoutAcp
+        || providerWithoutPureServe
+        || Boolean(antigravityInstall)
+        || Boolean(belowFloorVersion),
       ...(identifiedInstall?.version
         ? { executable: identifiedInstall.executable, version: identifiedInstall.version }
         : {}),
       installState:
-        providerWithoutAcp || providerWithoutPureServe || antigravityInstall
+        providerWithoutAcp || providerWithoutPureServe || antigravityInstall || belowFloorVersion
           ? "installed"
           : "error",
       authState: "unknown",
       canRun: false,
+      ...(updateRequired ? { updateRequired } : {}),
       cleanupConfirmed: !cleanupUnconfirmed,
       statusMessage: cleanupUnconfirmed
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
         : antigravityInstall
-          ? `Antigravity ${antigravityInstall.version ?? "with an unknown version"} is installed, but Inertia needs ${ANTIGRAVITY_MINIMUM_HEADLESS_VERSION} or newer; run 'agy update'`
+          ? `Antigravity ${antigravityInstall.version ?? "with an unknown version"} is installed, but Inertia needs ${PROVIDER_VERSION_FLOORS.antigravity.minimumVersion} or newer. ${PROVIDER_VERSION_FLOORS.antigravity.remedy}`
+        : versionFloor && belowFloorVersion
+          ? providerVersionFloorMessage(versionFloor, belowFloorVersion)
         : kimiLegacyCli
           ? `The old kimi-cli is no longer maintained; install Kimi Code with '${KIMI_CODE_INSTALL_COMMAND}'`
         : providerWithoutAcp
           ? `${providerShortName(provider.name)} CLI found, but ACP is unavailable`
           : openCodeTwoOnly
-            ? "OpenCode 2 is not supported yet; use OpenCode 1.x (opencode-ai)."
+            ? OPENCODE_VERSION_CEILING.message
           : providerWithoutPureServe
             ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
             : providerId === "codex"

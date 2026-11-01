@@ -31,6 +31,7 @@ export interface DetachedChatWindowManagerOptions {
   state: DetachedChatWindowStateStore;
   onWindowsChanged?(windows: DetachedChatWindowSummary[]): void;
   onRendererGone?(conversationId: string): void;
+  onWindowClosed?(conversationId: string): void;
   formatTitle?(title: string): string;
   saveDelayMs?: number;
 }
@@ -298,6 +299,7 @@ export class DetachedChatWindowManager {
           new Error("The detached chat window closed while loading."),
         );
       }
+      this.#notifyWindowClosed(record);
       this.#removeRecord(record);
     });
     record.contents.once("render-process-gone", () => {
@@ -391,6 +393,15 @@ export class DetachedChatWindowManager {
     const title = this.#options.formatTitle?.(record.request.title)
       ?? `${record.request.title} — Inertia`;
     record.window.setTitle(title);
+  }
+
+  #notifyWindowClosed(record: DetachedChatWindowRecord): void {
+    if (this.#byConversation.get(record.request.conversationId) !== record) return;
+    try {
+      this.#options.onWindowClosed?.(record.request.conversationId);
+    } catch {
+      return;
+    }
   }
 
   #removeRecord(record: DetachedChatWindowRecord): void {

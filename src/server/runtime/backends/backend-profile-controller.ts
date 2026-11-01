@@ -924,6 +924,13 @@ export class BackendProfileController {
           : "The selected agent harness is not installed or could not be started.",
       };
     }
+    if (provider.updateRequired) {
+      return {
+        ready: false,
+        message: provider.statusMessage
+          ?? `${provider.label} ${provider.updateRequired.installedVersion} is installed. Inertia needs ${provider.updateRequired.minimumVersion} or newer.`,
+      };
+    }
     if (backendProfileUsesCredential(record.profile)) {
       const status = await this.runtime.credentialStatus(
         record.profile.id,

@@ -28,6 +28,7 @@ import { validAppearanceSettings } from "./appearance-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 import { subagentTrace } from "./subagent-trace-schema";
 import { watcherMutationEvent, watcherRequestResultValidators, watcherWakeSummariesCoherent } from "./watcher-schema";
+import { validProviderUpdateRequirement } from "./provider-update-requirement-schema";
 import { compactOnReturnResultValidators, isConversationCompactionState, isPromptCacheFacts, validCompactOnReturnSetting } from "./compact-on-return-schema";
 import { workspaceToolResultValidators } from "./workspace-tool-results-schema";
 import { duoResultValidators } from "./duo-results-schema";
@@ -262,7 +263,7 @@ function providerInfo(value: unknown): boolean {
     && booleanField(value, "available")
     && nullableStringField(value, "version")
     && (value.executable === undefined || nullableStringField(value, "executable"))
-    && booleanField(value, "canRun")
+    && booleanField(value, "canRun") && validProviderUpdateRequirement(value)
     && nullableStringField(value, "statusMessage")
     && arrayOf(value.models, (model) => providerModel(model, expectedFastMode))
     && arrayOf(value.rateLimits, providerRateLimit)

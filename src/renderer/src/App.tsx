@@ -113,7 +113,7 @@ export function commandMayChangeWorkspaceAuthority(
 const AddProjectDialog = lazy(async () => ({ default: (await import("./components/AddProjectDialog")).AddProjectDialog }));
 export default function App(): React.JSX.Element {
   const connection = useStableController(useInertiaConnection());
-  const detachedChats = useDetachedChatWindows(connection.snapshot);
+  const detachedChats = useDetachedChatWindows(connection.snapshot, connection.sendCommand);
   const sendCommand = connection.sendCommand;
   const appUpdate = useStableController(useAppUpdate());
   const providerQuotaNotices = useStableController(
@@ -282,6 +282,7 @@ export default function App(): React.JSX.Element {
     sendMessageToConversation,
     compactConversation: compactConversationById,
     compactAndSendToConversation,
+    refreshUsage,
     runQueueCommand,
     runLimitResetCommand,
     loadBackgroundTasks,
@@ -776,12 +777,6 @@ export default function App(): React.JSX.Element {
       type: "provider.refresh",
       payload: providerId ? { providerId } : {},
     }).catch(() => undefined);
-  }, [run]);
-  const refreshUsage = useCallback(async (providerId: ProviderId): Promise<void> => {
-    await run("provider.refresh", {
-      type: "provider.refresh",
-      payload: { providerId, scope: "usage" },
-    });
   }, [run]);
   const connectProvider = useCallback((
     providerId: ProviderId,

@@ -620,8 +620,13 @@ export const Composer = memo(function Composer({
           setSubmitting(false);
         }
       }, COMPOSER_ACTION_STALE_FALLBACK_MS);
-    } catch {
-      restoreSubmission();
+    } catch (error) {
+      if (restoreSubmission() && compactAndSend) {
+        compactOnReturn.fail(
+          submittedConversationId,
+          error instanceof Error ? error.message : "Compaction did not start. Nothing was sent.",
+        );
+      }
     } finally {
       compactOnReturn.end(submittedConversationId);
     }
@@ -707,7 +712,7 @@ export const Composer = memo(function Composer({
     usage,
     compaction,
     setting: compactOnReturnSetting,
-    available: onCompactAndSend !== undefined,
+    available: onCompactAndSend !== undefined && Boolean(conversation.providerSessionId),
     providerHandoffPending: Boolean(latestKnownTurn && latestKnownTurn.providerId !== conversation.providerId),
     latestTurn: latestKnownTurn,
     message,
@@ -1221,7 +1226,7 @@ export const Composer = memo(function Composer({
           compactOnReturn={compactOnReturn.action}
           compacting={compactOnReturn.compactingOnReturn}
           promptCache={compactOnReturn.promptCache}
-          canSendQueuedNow={!disabled && !sending && !attachmentImporting
+          canSendQueuedNow={!disabled && !sending && !shellCompacting && !attachmentImporting
             && (!running || (!stopping && !submitting && supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)))}
           queuedTurnId={latestKnownTurn?.id ?? null}
           queuedTurnStatus={latestKnownTurn?.status ?? null}

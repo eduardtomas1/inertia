@@ -98,4 +98,81 @@ describe("TerminalManager detached scoped ownership", () => {
     expect(() => manager.input(owner, ids[0]!, "echo retained\n"))
       .not.toThrow();
   });
+
+  it("keeps a terminal handed back in the background past the reattach timeout without resizing it", async () => {
+    vi.useFakeTimers();
+    try {
+      const pty = fakeTerminal(5_000);
+      const socket = (): WebSocket => ({
+        readyState: 1,
+        bufferedAmount: 0,
+        send: vi.fn(),
+      } as unknown as WebSocket);
+      const popup = socket();
+      const main = socket();
+      const manager = new TerminalManager({
+        platform: "linux",
+        reattachTimeoutMs: 30_000,
+        spawnTerminal: vi.fn(() => pty),
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => true,
+          releaseIfGroupExited: vi.fn(),
+          requestGuardianStop: () => false,
+          waitForGuardianStop: async () => true,
+        }),
+      });
+      const scope = {
+        projectId: "11111111-1111-4111-8111-111111111111",
+        conversationId: "22222222-2222-4222-8222-222222222222",
+      };
+      const terminalId = manager.create(popup, process.cwd(), 120, 40, undefined, undefined, scope);
+      manager.disposeOwner(popup);
+      vi.mocked(pty.resize).mockClear();
+
+      expect(manager.attach(main, terminalId, process.cwd(), scope, 80, 24, undefined, true))
+        .toEqual({ terminalId });
+      expect(pty.resize).not.toHaveBeenCalled();
+      expect(vi.mocked(main.send)).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(() => manager.input(main, terminalId, "still here\n")).not.toThrow();
+
+      expect(manager.attach(main, terminalId, process.cwd(), scope, 100, 30)).toEqual({ terminalId });
+      expect(pty.resize).toHaveBeenCalledWith(100, 30);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still disposes a terminal nobody takes back after the reattach timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const pty = fakeTerminal(5_001);
+      const popup = { readyState: 1, bufferedAmount: 0, send: vi.fn() } as unknown as WebSocket;
+      const manager = new TerminalManager({
+        platform: "linux",
+        reattachTimeoutMs: 30_000,
+        spawnTerminal: vi.fn(() => pty),
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => true,
+          releaseIfGroupExited: vi.fn(),
+          requestGuardianStop: () => false,
+          waitForGuardianStop: async () => true,
+        }),
+      });
+      const scope = {
+        projectId: "11111111-1111-4111-8111-111111111111",
+        conversationId: "22222222-2222-4222-8222-222222222222",
+      };
+      const terminalId = manager.create(popup, process.cwd(), 120, 40, undefined, undefined, scope);
+      manager.disposeOwner(popup);
+      await vi.advanceTimersByTimeAsync(31_000);
+      const main = { readyState: 1, bufferedAmount: 0, send: vi.fn() } as unknown as WebSocket;
+      expect(() => manager.attach(main, terminalId, process.cwd(), scope, 80, 24, undefined, true))
+        .toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

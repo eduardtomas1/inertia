@@ -158,6 +158,11 @@ export interface ProviderCapabilityContractView {
   }>;
 }
 
+export interface ProviderUpdateRequirement {
+  installedVersion: string;
+  minimumVersion: string;
+}
+
 export interface ProviderInfo {
   id: ProviderId;
   label: string;
@@ -170,6 +175,7 @@ export interface ProviderInfo {
   authState: ProviderAuthState;
   accountKind?: import("../provider").ProviderAccountKind;
   canRun: boolean;
+  updateRequired?: ProviderUpdateRequirement;
   statusMessage: string | null;
   models: ProviderModel[];
   rateLimits: ProviderRateLimit[];

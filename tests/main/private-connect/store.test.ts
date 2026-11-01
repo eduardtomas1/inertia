@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createPrivateConnectStoreEncryption,
   PrivateConnectStore,
   type PersistedPrivateConnect,
   type PrivateConnectStoreEncryption,
@@ -14,8 +15,20 @@ import { MAX_CREDENTIAL_VAULT_BYTES } from "../../../src/main/credential-vault";
 function encryption(available = true): PrivateConnectStoreEncryption {
   return {
     available: () => available,
-    encrypt: (value) => new TextEncoder().encode(value),
-    decrypt: (value) => new TextDecoder().decode(value),
+    encrypt: async (value) => new TextEncoder().encode(value),
+    decrypt: async (value) => new TextDecoder().decode(value),
+  };
+}
+
+function asyncOnlySafeStorage() {
+  const removed = (): never => { throw new Error("The synchronous safeStorage API is unavailable."); };
+  return {
+    isAsyncEncryptionAvailable: vi.fn(async () => true),
+    getSelectedStorageBackend: vi.fn(() => "gnome_libsecret" as const),
+    encryptStringAsync: vi.fn(async (value: string) => Buffer.from(`sealed:${value}`, "utf8")),
+    decryptStringAsync: vi.fn(async (value: Buffer) => ({ result: value.toString("utf8").slice("sealed:".length), shouldReEncrypt: false })),
+    encryptString: vi.fn(removed),
+    decryptString: vi.fn(removed),
   };
 }
 
@@ -37,6 +50,23 @@ function value(): PersistedPrivateConnect {
 }
 
 describe("Private Connect encrypted store", () => {
+  it("seals and opens the store through the asynchronous safeStorage API only", async () => {
+    const storage = asyncOnlySafeStorage();
+    const sealed = await createPrivateConnectStoreEncryption(storage, "win32");
+    let encoded: string | null = null;
+    const store = new PrivateConnectStore("/tmp/private-connect-test.vault", sealed, {
+      read: async () => encoded,
+      write: async (next: string) => { encoded = next; },
+    });
+    await store.save(value());
+    expect(Buffer.from(encoded!, "base64").toString("utf8").startsWith("sealed:")).toBe(true);
+    expect(await store.load()).toEqual(value());
+    expect(storage.encryptStringAsync).toHaveBeenCalledOnce();
+    expect(storage.decryptStringAsync).toHaveBeenCalledOnce();
+    expect(storage.encryptString).not.toHaveBeenCalled();
+    expect(storage.decryptString).not.toHaveBeenCalled();
+  });
+
   it("round-trips only schema-valid encrypted state", async () => {
     let encoded: string | null = null;
     const persistence = {
@@ -97,8 +127,8 @@ describe("Private Connect encrypted store", () => {
     const write = vi.fn(async (next: string) => { encoded = next; });
     const atLimit = new PrivateConnectStore("/tmp/private-connect-test.vault", {
       available: () => true,
-      encrypt: () => new Uint8Array(ciphertextBytesAtLimit),
-      decrypt: () => JSON.stringify(value()),
+      encrypt: async () => new Uint8Array(ciphertextBytesAtLimit),
+      decrypt: async () => JSON.stringify(value()),
     }, { read: async () => encoded, write });
 
     await atLimit.save(value());
@@ -107,8 +137,8 @@ describe("Private Connect encrypted store", () => {
 
     const aboveLimit = new PrivateConnectStore("/tmp/private-connect-test.vault", {
       available: () => true,
-      encrypt: () => new Uint8Array(ciphertextBytesAtLimit + 1),
-      decrypt: () => JSON.stringify(value()),
+      encrypt: async () => new Uint8Array(ciphertextBytesAtLimit + 1),
+      decrypt: async () => JSON.stringify(value()),
     }, { read: async () => `${encoded}A`, write });
     await expect(aboveLimit.save(value())).rejects.toThrow("store is too large");
     await expect(aboveLimit.load()).rejects.toThrow("store is invalid");

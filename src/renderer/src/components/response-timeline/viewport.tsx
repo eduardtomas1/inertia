@@ -931,7 +931,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     const root = props.timelineElementRef?.current;
     if (!scroll || !root) return;
     const remember = (): void => {
-      if (layoutAnchorActive.current || turnAnchorActive.current) return;
+      if (layoutAnchorActive.current || turnAnchorActive.current || props.turnAnchorId) return;
       rememberTranscriptPosition(props.conversationId, captureTranscriptPosition(root, scroll, props.followsLatest));
     };
     const previous = rememberedFollowMode.current;
@@ -939,7 +939,15 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     if (previous?.conversationId === props.conversationId && previous.followsLatest !== props.followsLatest) remember();
     scroll.addEventListener("scroll", remember, { passive: true });
     return () => scroll.removeEventListener("scroll", remember);
-  }, [props.conversationId, props.detailLoading, props.followsLatest, props.scrollElementRef, props.timelineElementRef, timeline.length]);
+  }, [
+    props.conversationId,
+    props.detailLoading,
+    props.followsLatest,
+    props.scrollElementRef,
+    props.timelineElementRef,
+    props.turnAnchorId,
+    timeline.length,
+  ]);
 
   const beginReaderTimelineNavigation = useCallback((): void => {
     cancelLayoutAnchorRestoration.current?.();

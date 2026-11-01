@@ -18,6 +18,18 @@ OpenCode keeps admitted approval and question requests open while you decide. It
 
 Open **Settings → Agents**, choose the provider and open **Details** to see which features are ready, need setup, or are checked when a chat starts. The installation status above it shows the version Inertia verified. Some features depend on the selected model; Cursor only offers reasoning choices observed for that model.
 
+## An agent says it needs an update
+
+Inertia won't start a chat on an agent older than the version it supports. **Settings → Agents** shows *Update required* with the installed and required versions, and the composer shows *Update needed* for every route on that agent, API keys included. Update the CLI as described in [Update an agent's CLI](#update-an-agents-cli), then refresh it in **Settings → Agents**.
+
+| Agent | Needs | Why |
+|---|---|---|
+| Claude Code | 2.1.309 or newer | Older versions ignore the restrictions Inertia sets and can write outside the project. |
+| OpenCode | 1.18.22 or newer, on 1.x | Older versions let a website install packages through OpenCode's local server. |
+| Antigravity | 1.2.2 or newer | Older versions have no headless mode. Run `agy update`. |
+
+If Inertia can't read the version Claude Code or OpenCode prints, it doesn't hold that agent back for it.
+
 ## Update an agent's CLI
 
 **Settings → Agents** offers **Update** when Inertia can tell what installed the CLI and your account can write it: the provider's own installer, npm (also through nvm or fnm), pnpm, bun, Yarn, Volta or Homebrew. Otherwise it shows the command to run in a terminal, such as `sudo npm install -g --prefix /usr @openai/codex@1.2.3` for a system npm prefix or `sudo snap refresh <name>` for a snap. OpenCode updates stay on 1.x.

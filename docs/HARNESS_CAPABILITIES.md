@@ -478,6 +478,61 @@ Not verified against live providers: whether an older Codex that ignores
 `developerInstructions` on `thread/resume` keeps the start value after its
 own compaction.
 
+## Minimum provider versions
+
+Discovery refuses a Claude Code or OpenCode installation older than its
+security floor. The floors, the reason each one exists, Antigravity's headless
+floor and the OpenCode 2 ceiling are defined together in
+`src/server/provider/provider-version-floors.ts`.
+
+| Provider | Supported | Why |
+| --- | --- | --- |
+| Claude Code | 2.1.309 or newer | Inertia passes `managedSettings` with `disableAllHooks` and `disableSkillShellExecution`; Claude Code before 2.1.309 dropped host-supplied managed settings, so those hook and skill-shell restrictions silently did not apply. 2.1.309 also carries the fixes for GHSA-5j29-h97v-84ch (a symlink race lets writes escape the project; fixed in 2.1.129) and GHSA-pq7j-f95f-qfcv (a plugin pinned-commit bypass; fixed in 2.1.179). |
+| OpenCode | 1.18.22 or newer, below 2 | GHSA-632h-h47v-g4x4: a cross-site request to `/global/upgrade` on `opencode serve` installs arbitrary packages (fixed in 1.18.22). The random basic-auth password Inertia gives its owned server reduces this risk but does not remove it. OpenCode 2 is not supported yet. |
+| Antigravity | 1.2.2 or newer | First release with the headless stream-json contract below. |
+
+Below a security floor, discovery runs only the version probe. It never runs
+OpenCode's `serve --help` probe, never checks sign-in and never starts the
+OpenCode isolation-proof server. The detection reports the executable and
+version with `installState: "installed"`, `authState: "unknown"`,
+`canRun: false`, `updateRequired: { installedVersion, minimumVersion }` and a
+status message naming both versions, the reason and the fix, for example
+*Claude Code 2.1.150 is installed. Inertia needs 2.1.309 or newer because
+older versions ignore the restrictions Inertia sets and can write outside the
+project. Update Claude Code and refresh.*
+Antigravity below 1.2.2 reports `updateRequired` too when its version is
+known, for the newest identified `agy` install, the same one whose executable
+and version the detection reports, and its message ends *Run 'agy update' and
+refresh.*
+
+The provider manager refuses again at each later use of that installation,
+with the same message and before anything is spawned: sign-in launch, model
+and usage discovery (OpenCode's starts `opencode serve`), Claude skill
+discovery and terminal resume. Provider maintenance does not go through these
+paths, so it can still update the installation.
+
+`updateRequired` travels in the provider snapshot. Settings → Agents shows
+*Update required* and Refresh instead of a sign-in. The composer refuses every
+route on that harness, API-key and custom backends included, with *Update
+needed* and the discovery message. Backend readiness refuses external routes
+with the same message, so watcher routes and Private Connect prompts, which
+reuse native `canRun` and backend readiness, refuse with it as well.
+Maintenance still offers Update for the identified installation.
+
+Claude Code and OpenCode versions compare as semantic versions on the token
+read from the version line of `--version` stdout, such as `2.1.309` from
+`2.1.309 (Claude Code)`, `1.18.26` from `opencode 1.18.26` or `1.19.3` from
+`1.19.3 (abc123)`. A warning printed before that line, such as a Node
+deprecation naming `v22.1.0`, is ignored; only output with no such line falls
+back to the first dotted number. A missing
+patch counts as 0 and build metadata is ignored. A prerelease sorts below its
+release, so `2.1.309-beta.1` is below the Claude Code floor and
+`2.1.310-beta.1` is above it. A version Inertia cannot parse keeps today's
+behaviour and is not blocked by a floor: a development build that prints
+`local`, a pattern such as `2.1.x`, or a snapshot that reports `0.0.0-…`,
+such as an OpenCode snapshot build. Antigravity keeps its original comparison,
+which blocks an unknown version and `0.0.0` builds.
+
 ## Antigravity headless contract
 
 Antigravity is Inertia's only Google provider; the former Gemini CLI provider
@@ -1082,10 +1137,7 @@ three layers that the account route does not need:
 - **Redaction.** Every SDK message of the turn passes through a redactor before
   the projector, the transcript or the failure path sees it. It masks the
   exact key and these forms of it: URL and JSON escaping, base64 and base64url
-  of the key alone and followed by `
-` or `
-
-` (what `echo $KEY | base64`
+  of the key alone and followed by `\n` or `\r\n` (what `echo $KEY | base64`
   prints), and lower- and upper-case hex. Spaces, tabs and line breaks
   between characters are ignored, so wrapped base64 (`base64` wraps at 76
   columns), `xxd -p` output and a key split across lines each become one

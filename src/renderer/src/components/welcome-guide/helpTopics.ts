@@ -154,7 +154,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Background tasks",
-        detail: "Background tasks in the right panel lists the chat's delegated agents and the commands Inertia started, with what each is doing and the tokens it reports. A turn with agents shows one line, such as 2 agents working; choose it to open those tasks.",
+        detail: "Background tasks in the right panel lists the chat's delegated agents and the commands Inertia started, with what each is doing and the tokens it reports. A turn with agents shows one row, such as 3 subagents; expand it to open an agent's task.",
       },
       {
         name: "Daily work",

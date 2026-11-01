@@ -628,7 +628,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimateCompletedTurnSpacing("default").layer)
       .toBeLessThan(estimateCompletedTurnSpacing("comfortable").layer);
     expect(estimateTimelineRowSize(exceptional))
-      .toBeGreaterThan(estimateTimelineRowSize(clean) + 40);
+      .toBeGreaterThan(estimateTimelineRowSize(clean) + 24);
     expect(estimateTimelineRowSize(clean, { responseDensity: "compact" }))
       .toBeLessThan(estimateTimelineRowSize(clean));
     expect(estimateTimelineRowSize(clean, { responseDensity: "comfortable" }))
@@ -641,20 +641,21 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       activity(`activity-${index}`, turnId));
     const item = buildItem({ id: turnId, activities });
     const collapsed = estimateTimelineRowSize(item);
-    const expandedWork = estimateTimelineRowSize(item, { workDetailsExpanded: true });
+    const expandedWork = estimateTimelineRowSize(item, { turnFoldExpanded: true });
     const expandedGroups = estimateTimelineRowSize(item, {
-      workDetailsExpanded: true,
+      turnFoldExpanded: true,
       activityGroupsExpanded: true,
     });
     const expandedRun = estimateTimelineRowSize(item, { runDetailsExpanded: true });
 
     expect(collapsed).toBeLessThan(380);
+    expect(estimateTimelineRowSize(item, { workDetailsExpanded: true })).toBe(collapsed);
     expect(expandedWork).toBeGreaterThan(collapsed);
     expect(expandedWork).toBeLessThan(collapsed + 200);
     expect(expandedGroups).toBeGreaterThan(expandedWork + 2_000);
     const runDetailsCost = expandedRun - collapsed;
-    expect(runDetailsCost).toBeGreaterThan(expandedWork - collapsed + 30);
-    expect(runDetailsCost).toBeLessThan(expandedWork - collapsed + 40);
+    expect(runDetailsCost).toBeGreaterThan(30);
+    expect(runDetailsCost).toBeLessThan(40);
     for (const availableWidth of [600, 400]) {
       const narrowCost = estimateTimelineRowSize(item, { availableWidth, runDetailsExpanded: true })
         - estimateTimelineRowSize(item, { availableWidth });
@@ -731,7 +732,8 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       .toBeGreaterThan(estimateTimelineRowSize(collapsedBoundaries));
   });
 
-  it("does not reserve a virtualized rail for quiet success but keeps exceptional history measurable", () => {
+  it("reserves one fold row for settled success and no rail for a bare answer", () => {
+    const bare = buildItem({ id: "bare-settled-estimate" });
     const quiet = buildItem({
       id: "quiet-settled-estimate",
       activities: [activity("quiet-read", "quiet-settled-estimate")],
@@ -748,9 +750,28 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     });
 
     const quietEstimate = estimateTimelineRowSize(quiet);
-    expect(estimateTimelineRowSize(warning)).toBeGreaterThanOrEqual(quietEstimate + 50);
+    const foldCost = quietEstimate - estimateTimelineRowSize(bare);
+    expect(foldCost).toBeGreaterThanOrEqual(32);
+    expect(foldCost).toBeLessThan(56);
+    expect(estimateTimelineRowSize(warning)).toBeGreaterThanOrEqual(quietEstimate + 30);
     expect(estimateTimelineRowSize(quiet, { runDetailsExpanded: true }))
-      .toBeGreaterThan(quietEstimate + 50);
+      .toBeGreaterThan(quietEstimate + 30);
+    expect(estimateTimelineRowSize(quiet, { turnFoldExpanded: true }))
+      .toBeGreaterThan(quietEstimate + 20);
+  });
+
+  it("estimates a turn whose only folded work is its settled subagents with the fold row", () => {
+    const agentsOnly = buildItem({ id: "agents-only-estimate" });
+    const bareEstimate = estimateTimelineRowSize(agentsOnly);
+    const folded = estimateTimelineRowSize(agentsOnly, { settledSubagentsFoldable: true });
+    expect(folded - bareEstimate).toBeGreaterThanOrEqual(32);
+    expect(folded - bareEstimate).toBeLessThan(56);
+    const opened = estimateTimelineRowSize(agentsOnly, {
+      settledSubagentsFoldable: true,
+      turnFoldExpanded: true,
+    });
+    expect(opened - folded).toBeGreaterThanOrEqual(40);
+    expect(estimateTimelineRowSize(agentsOnly, { turnFoldExpanded: true })).toBe(bareEstimate);
   });
 
   it("models commentary growth without inflating collapsed settled history", () => {
@@ -776,7 +797,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimateTimelineRowSize(longActive))
       .toBeGreaterThan(estimateTimelineRowSize(shortActive) + 250);
     expect(estimateTimelineRowSize(settled)).toBeLessThan(380);
-    expect(estimateTimelineRowSize(settled, { workDetailsExpanded: true }))
+    expect(estimateTimelineRowSize(settled, { turnFoldExpanded: true }))
       .toBeGreaterThan(estimateTimelineRowSize(settled) + 500);
   });
 

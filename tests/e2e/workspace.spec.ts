@@ -214,11 +214,15 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
   })).toEqual({ left: 0, top: 0, width: 0, pointerEvents: "none", brandOnTop: true });
   const auroraTimes = () => aurora.evaluate((element) =>
     element.getAnimations({ subtree: true })
-      .filter((animation) => animation instanceof CSSAnimation && animation.animationName.startsWith("sidebar-aurora-"))
+      .filter((animation) => animation instanceof CSSAnimation && /^sidebar-(?:aurora|sky|star)-/u.test(animation.animationName))
       .map((animation) => Number(animation.currentTime)));
+  const visibleStars = await aurora.evaluate((element) =>
+    [...element.querySelectorAll(".sidebar-star")].filter((star) => getComputedStyle(star).display !== "none").length);
+  expect(visibleStars).toBeGreaterThan(0);
   const initialAuroraTimes = await auroraTimes();
-  expect(initialAuroraTimes).toHaveLength(3);
-  await expect.poll(async () => (await auroraTimes())[0]! - initialAuroraTimes[0]!).toBeGreaterThan(500);
+  expect(initialAuroraTimes).toHaveLength(5 + visibleStars);
+  await expect.poll(async () => Math.min(...(await auroraTimes()).map((time, index) => time - initialAuroraTimes[index]!)))
+    .toBeGreaterThan(500);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect.poll(async () => (await auroraTimes()).length).toBe(0);
   await page.emulateMedia({ reducedMotion: "no-preference" });

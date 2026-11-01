@@ -174,7 +174,7 @@ describe("quiet turn chrome", () => {
     const runDetails = within(footer).getByRole("button", { name: "Run details" });
 
     expect(footer).not.toHaveTextContent("Completed");
-    expect(footer).toHaveTextContent("Worked 42s");
+    expect(footer).toHaveTextContent("Worked for 42s");
     expect(getComputedStyle(primary).opacity).toBe("0");
     expect(getComputedStyle(primary).visibility).not.toBe("hidden");
     expect(getComputedStyle(primary).display).not.toBe("none");

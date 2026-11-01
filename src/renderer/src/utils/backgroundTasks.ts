@@ -7,8 +7,8 @@ import type {
 import { formatCompact } from "../lib/compactFormat";
 import {
   isLiveSubagentTrace,
-  subagentElapsedMs,
   subagentMissionSummary,
+  subagentReportedElapsedMs,
   subagentTraceLabel,
 } from "./subagentDisclosure";
 import { backgroundCommandIsLive } from "./backgroundTaskRuns";
@@ -108,7 +108,25 @@ export function backgroundTaskTokensNotReported(
 
 export function backgroundTaskTitle(trace: SubagentTrace): string {
   if (trace.providerName || trace.providerRole) return subagentTraceLabel(trace);
+  return backgroundTaskHeading(trace);
+}
+
+export function backgroundTaskHeading(trace: SubagentTrace): string {
   return subagentMissionSummary(trace) ?? subagentTraceLabel(trace);
+}
+
+export function backgroundTaskHeadingIsTask(trace: SubagentTrace): boolean {
+  const mission = trace.description?.trim();
+  return Boolean(mission) && backgroundTaskHeading(trace) === mission;
+}
+
+export function backgroundTaskKind(trace: SubagentTrace, parentTitle: string | null): string {
+  const name = trace.providerName || trace.providerRole ? subagentTraceLabel(trace) : null;
+  return [
+    "Agent",
+    name && name !== backgroundTaskHeading(trace) ? name : null,
+    parentTitle ? `from ${parentTitle}` : null,
+  ].filter(Boolean).join(" · ");
 }
 
 export function backgroundTaskCurrentActivity(trace: SubagentTrace): string | null {
@@ -124,9 +142,7 @@ export function backgroundTaskDoingNow(trace: SubagentTrace): string | null {
 }
 
 export function backgroundTaskElapsedMs(trace: SubagentTrace, now: number): number | null {
-  if (isLiveSubagentTrace(trace)) return subagentElapsedMs(trace, now);
-  if (trace.durationMs !== null) return trace.durationMs;
-  return trace.status === "lost" ? null : subagentElapsedMs(trace, now);
+  return subagentReportedElapsedMs(trace, now);
 }
 
 export function backgroundCommandElapsedMs(run: WorkspaceRun, now: number): number | null {

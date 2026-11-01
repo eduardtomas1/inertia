@@ -7,6 +7,8 @@ import {
   COLOR_THEME_IDS,
   type ColorThemeId,
 } from "../../src/shared/contracts";
+import { createCascade } from "./css-cascade";
+import { parseCssRules, readRendererCss } from "./css-rules";
 
 const css = [
   "../../src/renderer/src/styles.css",
@@ -217,6 +219,20 @@ describe("visual contrast system", () => {
       blend(tokens.get("accent")!, surface, disabledOpacity),
     ), `${colorTheme} ${theme} disabled accent action`)
       .toBeGreaterThanOrEqual(3);
+
+    const settledDim = Number.parseFloat(
+      /--settled-dim:\s*(?<opacity>\d+(?:\.\d+)?)/u
+        .exec(root)?.groups?.opacity ?? "0",
+    );
+    expect(settledDim, "--settled-dim").toBeGreaterThan(0);
+    expect(settledDim, "--settled-dim").toBeLessThan(1);
+    const transcript = tokens.get("bg")!;
+    expect(contrast(blend(tokens.get("text")!, transcript, settledDim), transcript),
+      `${colorTheme} ${theme} settled subagent title on --bg`)
+      .toBeGreaterThanOrEqual(4.5);
+    expect(contrast(blend(tokens.get("text-muted")!, transcript, settledDim), transcript),
+      `${colorTheme} ${theme} settled subagent status on --bg`)
+      .toBeGreaterThanOrEqual(3);
   });
 
   it.each(["light", "dark"] as const)(
@@ -362,6 +378,76 @@ describe("visual contrast system", () => {
   });
 });
 
+function glassWeight(theme: "light" | "dark"): number {
+  const block = cssBlock(theme === "dark" ? ':root[data-theme="dark"]' : ":root");
+  const weight = /--glass-surface:\s*color-mix\(in oklab, var\(--surface-raised\) (?<weight>\d+)%, transparent\);/u
+    .exec(block)?.groups?.weight;
+  return Number.parseInt(weight ?? "0", 10) / 100;
+}
+
+function glassLayers(tokens: Map<string, string>, backdrop: string, weight: number): Map<string, string> {
+  const raised = tokens.get("surface-raised")!;
+  return new Map([
+    ["glass", blend(raised, backdrop, weight)],
+    ["solid fill row on glass", blend(tokens.get("text")!, raised, inkWeight("fill"))],
+    ["solid fill-strong row on glass", blend(tokens.get("text")!, raised, inkWeight("fill-strong"))],
+  ]);
+}
+
+function expectReadableGlass(tokens: Map<string, string>, layers: Map<string, string>, label: string): void {
+  for (const [layer, background] of layers) {
+    const where = `${label} ${layer}`;
+    expect(contrast(tokens.get("text")!, background), `${where}: --text`).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(tokens.get("text-muted")!, background), `${where}: --text-muted`).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(tokens.get("accent")!, background), `${where}: --accent`).toBeGreaterThanOrEqual(3);
+    expect(contrast(tokens.get("danger")!, background), `${where}: --danger`).toBeGreaterThanOrEqual(4.5);
+  }
+}
+
+const EXTREME_BACKDROPS = [["pure white", "#ffffff"], ["pure black", "#000000"]] as const;
+
+describe("glass surfaces", () => {
+  it("declares lighter, less saturated glass in light and a denser, wider blur in dark", () => {
+    const root = tokenDeclarations(cssBlock(":root"));
+    const dark = tokenDeclarations(cssBlock(':root[data-theme="dark"]'));
+    expect([glassWeight("light"), root.get("glass-blur"), root.get("glass-saturate")]).toEqual([0.88, "12px", "1.14"]);
+    expect([glassWeight("dark"), dark.get("glass-blur"), dark.get("glass-saturate")]).toEqual([0.92, "16px", "1.08"]);
+    expect(root.get("glass-filter")).toBe("blur(var(--glass-blur)) saturate(var(--glass-saturate))");
+    expect(root.get("glass-edge")).toBe("1px solid var(--line-soft)");
+    expect(dark.has("glass-filter")).toBe(false);
+  });
+
+  it("backs every fill row inside a glass layer with the solid raised surface at the shared ink weights", () => {
+    const rules = parseCssRules([css, readRendererCss("components/TasksView.css")].join("\n"))
+      .filter(({ context, declarations }) => context === "@supports (backdrop-filter: blur(1px))" && declarations.has("backdrop-filter"));
+    expect(rules.map(({ selectors }) => selectors[0]!.startsWith(":where(") ? ":where()" : selectors[0])).toEqual([":where()", ".tasks-toast"]);
+    const root = tokenDeclarations(cssBlock(":root"));
+    for (const fill of ["fill", "fill-strong"] as const) {
+      expect(root.get(`${fill}-raised`), `--${fill}-raised`)
+        .toBe(`color-mix(in srgb, var(--text) ${Math.round(inkWeight(fill) * 100)}%, var(--surface-raised))`);
+      for (const { selectors, declarations } of rules) {
+        expect(declarations.get(`--${fill}`), `${selectors[0]} --${fill}`).toBe(`var(--${fill}-raised)`);
+      }
+    }
+  });
+
+  it.each(themeCases)("keeps %s %s text, muted text and the accent readable on glass over the canvas and the sidebar", (colorTheme, theme) => {
+    const tokens = themeTokens(theme, colorTheme);
+    const weight = glassWeight(theme);
+    expect(weight).toBeGreaterThan(0.5);
+    for (const backdrop of ["bg", "surface"]) {
+      expectReadableGlass(tokens, glassLayers(tokens, tokens.get(backdrop)!, weight), `${colorTheme} ${theme} over --${backdrop}:`);
+    }
+  });
+
+  it.each(themeCases)("keeps %s %s text, muted text, accent and danger readable on glass over pure white and pure black", (colorTheme, theme) => {
+    const tokens = themeTokens(theme, colorTheme);
+    for (const [backdropName, backdrop] of EXTREME_BACKDROPS) {
+      expectReadableGlass(tokens, glassLayers(tokens, backdrop, glassWeight(theme)), `${colorTheme} ${theme} over ${backdropName}:`);
+    }
+  });
+});
+
 // Stylesheets that can style the composer primary action, in bundle order.
 const composerCascadeCss = [
   "../../src/renderer/src/styles.css",
@@ -371,140 +457,7 @@ const composerCascadeCss = [
   .join("\n")
   .replace(/\r\n?/gu, "\n");
 
-type StyleRule = { selectors: string[]; body: string; order: number };
-
-function splitTopLevel(text: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index];
-    if (character === "(" || character === "[") depth += 1;
-    else if (character === ")" || character === "]") depth -= 1;
-    else if (character === "," && depth === 0) {
-      parts.push(text.slice(start, index).trim());
-      start = index + 1;
-    }
-  }
-  parts.push(text.slice(start).trim());
-  return parts.filter(Boolean);
-}
-
-// Top-level style rules only; at-rule blocks (media, container, keyframes) are skipped.
-function topLevelStyleRules(source: string): StyleRule[] {
-  const text = source.replace(/\/\*[\s\S]*?\*\//gu, "");
-  const rules: StyleRule[] = [];
-  let depth = 0;
-  let start = 0;
-  let prelude = "";
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index];
-    if (character === "{") {
-      if (depth === 0) {
-        prelude = text.slice(start, index).trim();
-        start = index + 1;
-      }
-      depth += 1;
-    } else if (character === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        if (!prelude.startsWith("@")) {
-          rules.push({
-            selectors: splitTopLevel(prelude),
-            body: text.slice(start, index),
-            order: rules.length,
-          });
-        }
-        start = index + 1;
-      }
-    } else if (character === ";" && depth === 0) {
-      start = index + 1;
-    }
-  }
-  return rules;
-}
-
-function withoutWhere(selector: string): string {
-  let output = "";
-  let index = 0;
-  while (index < selector.length) {
-    if (!selector.startsWith(":where(", index)) {
-      output += selector[index];
-      index += 1;
-      continue;
-    }
-    let depth = 0;
-    for (index += ":where".length; index < selector.length; index += 1) {
-      if (selector[index] === "(") depth += 1;
-      else if (selector[index] === ")" && (depth -= 1) === 0) {
-        index += 1;
-        break;
-      }
-    }
-  }
-  return output;
-}
-
-function specificity(selector: string): number {
-  const counted = withoutWhere(selector)
-    .replace(/:(?:not|is|has)\(/gu, " ")
-    .replace(/\)/gu, " ");
-  const ids = counted.match(/#[\w-]+/gu)?.length ?? 0;
-  const classes = counted.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):[\w-]+/gu)?.length ?? 0;
-  const types = counted
-    .replace(/#[\w-]+|\.[\w-]+|\[[^\]]*\]|:[\w-]+/gu, " ")
-    .match(/[a-z][\w-]*/giu)?.length ?? 0;
-  return ids * 10_000 + classes * 100 + types;
-}
-
-function declaredValue(body: string, names: readonly string[]): string | undefined {
-  let value: string | undefined;
-  for (const declaration of body.split(";")) {
-    const separator = declaration.indexOf(":");
-    if (separator < 0) continue;
-    if (names.includes(declaration.slice(0, separator).trim())) {
-      value = declaration.slice(separator + 1).trim();
-    }
-  }
-  return value;
-}
-
-const composerRules = topLevelStyleRules(composerCascadeCss);
-
-// Resolves which declaration wins for an element: importance, then
-// specificity, then source order. Hover is simulated by dropping `:hover`.
-function cascadedValue(
-  element: { matches(selector: string): boolean },
-  names: readonly string[],
-  hover: boolean,
-): string | undefined {
-  let winner: { value: string; rank: readonly [number, number, number] } | undefined;
-  for (const rule of composerRules) {
-    const declared = declaredValue(rule.body, names);
-    if (!declared) continue;
-    const important = declared.endsWith("!important");
-    const value = declared.replace(/\s*!important$/u, "");
-    for (const selector of rule.selectors) {
-      if (selector.includes("::")) continue;
-      if (/:(?:active|focus|focus-visible|focus-within)\b/u.test(selector)) continue;
-      if (!hover && selector.includes(":hover")) continue;
-      let matches = false;
-      try {
-        matches = element.matches(selector.replaceAll(":hover", ""));
-      } catch {
-        matches = false;
-      }
-      if (!matches) continue;
-      const rank = [important ? 1 : 0, specificity(selector), rule.order] as const;
-      const wins = !winner
-        || rank[0] > winner.rank[0]
-        || (rank[0] === winner.rank[0] && rank[1] > winner.rank[1])
-        || (rank[0] === winner.rank[0] && rank[1] === winner.rank[1] && rank[2] >= winner.rank[2]);
-      if (wins) winner = { value, rank };
-    }
-  }
-  return winner?.value;
-}
+const cascadedValue = createCascade(composerCascadeCss);
 
 function resolveColor(value: string, tokens: Map<string, string>): string | undefined {
   if (/^#[\da-f]{6}$/iu.test(value)) return value;
@@ -523,13 +476,15 @@ function resolveColor(value: string, tokens: Map<string, string>): string | unde
 // Icons are non-text UI graphics, so WCAG 1.4.11 asks for 3:1. The inactive
 // (empty draft) Send state is exempt, but its glyph must stay perceptible.
 const primaryActionStates = [
-  { name: "send ready", classes: [], disabled: false, hover: false, minimumContrast: 3 },
-  { name: "send hover", classes: [], disabled: false, hover: true, minimumContrast: 3 },
-  { name: "send disabled", classes: [], disabled: true, hover: false, minimumContrast: 2 },
-  { name: "sending", classes: ["send-button-loading"], disabled: true, hover: false, minimumContrast: 3 },
-  { name: "stop ready", classes: ["stop-button"], disabled: false, hover: false, minimumContrast: 3 },
-  { name: "stop hover", classes: ["stop-button"], disabled: false, hover: true, minimumContrast: 3 },
-  { name: "stopping", classes: ["stop-button"], disabled: true, hover: false, minimumContrast: 3 },
+  { name: "send ready", classes: [], actionState: "send-ready", disabled: false, hover: false, minimumContrast: 3 },
+  { name: "send hover", classes: [], actionState: "send-ready", disabled: false, hover: true, minimumContrast: 3 },
+  { name: "send disabled", classes: [], actionState: "send-disabled", disabled: true, hover: false, minimumContrast: 2 },
+  { name: "sending", classes: ["send-button-loading"], actionState: "submitting", disabled: true, hover: false, minimumContrast: 3 },
+  { name: "stop ready", classes: ["stop-button"], actionState: "stop-ready", disabled: false, hover: false, minimumContrast: 3 },
+  { name: "stop hover", classes: ["stop-button"], actionState: "stop-ready", disabled: false, hover: true, minimumContrast: 3 },
+  { name: "stopping", classes: ["stop-button"], actionState: "stop-pending", disabled: false, hover: false, minimumContrast: 3 },
+  { name: "stop and send", classes: ["stop-button"], actionState: "stop-and-send", disabled: false, hover: false, minimumContrast: 3 },
+  { name: "stop and send hover", classes: ["stop-button"], actionState: "stop-and-send", disabled: false, hover: true, minimumContrast: 3 },
 ] as const;
 
 describe("composer primary action contrast", () => {
@@ -552,6 +507,7 @@ describe("composer primary action contrast", () => {
 
   const cascades = primaryActionStates.map((state) => {
     primary.className = ["icon-button", "send-button", ...state.classes].join(" ");
+    primary.setAttribute("data-composer-action-state", state.actionState);
     primary.toggleAttribute("disabled", state.disabled);
     return {
       state,
@@ -570,7 +526,20 @@ describe("composer primary action contrast", () => {
     expect(cascades.find(({ state }) => state.name === "send ready")?.color)
       .toBe("var(--accent-text)");
     expect(cascades.find(({ state }) => state.name === "stop ready")?.color)
+      .toBe("var(--surface-raised)");
+    expect(cascades.find(({ state }) => state.name === "stop and send")?.color)
       .toBe("var(--danger)");
+  });
+
+  it("draws Stop agent as a status-failed disc and keeps Stop and send on the quiet fill", () => {
+    for (const name of ["stop ready", "stop hover", "stopping"]) {
+      const stop = cascades.find(({ state }) => state.name === name)!;
+      expect([stop.background, stop.color], name).toEqual(["var(--status-failed)", "var(--surface-raised)"]);
+    }
+    for (const name of ["stop and send", "stop and send hover"]) {
+      const stopAndSend = cascades.find(({ state }) => state.name === name)!;
+      expect([stopAndSend.background, stopAndSend.color], name).toEqual(["var(--fill)", "var(--danger)"]);
+    }
   });
 
   it("draws disabled send as a neutral circle instead of a faded accent", () => {
@@ -582,30 +551,39 @@ describe("composer primary action contrast", () => {
   });
 
   it.each(themeCases)(
-    "keeps the %s %s send and stop icons visible in every state",
+    "keeps the %s %s send and stop icons visible in every state, on the solid composer and on menu glass",
     (colorTheme, theme) => {
-      const tokens = themeTokens(theme, colorTheme);
-      const composerSurface = tokens.get("surface-raised");
-      expect(composerSurface, "missing --surface-raised").toBeDefined();
-      for (const fill of ["fill", "fill-strong"] as const) {
-        tokens.set(fill, blend(tokens.get("text")!, composerSurface!, inkWeight(fill)));
-      }
-      for (const { state, color, background, opacity } of cascades) {
-        const label = `${colorTheme} ${theme} ${state.name}: ${color} on ${background}`;
-        const foreground = color ? resolveColor(color, tokens) : undefined;
-        const fill = background ? resolveColor(background, tokens) : undefined;
-        expect(foreground, `${label} (icon color)`).toBeDefined();
-        expect(fill, `${label} (button fill)`).toBeDefined();
-        const opacityToken = opacity
-          ? /^var\(--(?<name>[\w-]+)\)$/u.exec(opacity)?.groups?.name
-          : undefined;
-        const alpha = Number.parseFloat(
-          (opacityToken ? rootDeclarations.get(opacityToken) : opacity) ?? "1",
-        );
-        expect(contrast(
-          blend(foreground!, composerSurface!, alpha),
-          blend(fill!, composerSurface!, alpha),
-        ), label).toBeGreaterThanOrEqual(state.minimumContrast);
+      const themed = themeTokens(theme, colorTheme);
+      const raised = themed.get("surface-raised");
+      expect(raised, "missing --surface-raised").toBeDefined();
+      const backdrops: (readonly [string, string])[] = [["--bg", themed.get("bg")!], ["--surface", themed.get("surface")!], ...EXTREME_BACKDROPS];
+      const surfaces: [string, string][] = [
+        ["solid --surface-raised", raised!],
+        ...backdrops.map(([name, backdrop]): [string, string] =>
+          [`glass over ${name}`, glassLayers(themed, backdrop, glassWeight(theme)).get("glass")!]),
+      ];
+      for (const [surfaceName, composerSurface] of surfaces) {
+        const tokens = new Map(themed);
+        for (const fill of ["fill", "fill-strong"] as const) {
+          tokens.set(fill, blend(tokens.get("text")!, raised!, inkWeight(fill)));
+        }
+        for (const { state, color, background, opacity } of cascades) {
+          const label = `${colorTheme} ${theme} ${surfaceName} ${state.name}: ${color} on ${background}`;
+          const foreground = color ? resolveColor(color, tokens) : undefined;
+          const fill = background ? resolveColor(background, tokens) : undefined;
+          expect(foreground, `${label} (icon color)`).toBeDefined();
+          expect(fill, `${label} (button fill)`).toBeDefined();
+          const opacityToken = opacity
+            ? /^var\(--(?<name>[\w-]+)\)$/u.exec(opacity)?.groups?.name
+            : undefined;
+          const alpha = Number.parseFloat(
+            (opacityToken ? rootDeclarations.get(opacityToken) : opacity) ?? "1",
+          );
+          expect(contrast(
+            blend(foreground!, composerSurface, alpha),
+            blend(fill!, composerSurface, alpha),
+          ), label).toBeGreaterThanOrEqual(state.minimumContrast);
+        }
       }
     },
   );

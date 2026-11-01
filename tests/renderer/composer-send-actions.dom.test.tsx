@@ -29,6 +29,46 @@ afterEach(() => {
 
 describe("composer morphing send actions", () => {
   it.each([
+    ["send-disabled", "Send message", { disabled: true, busy: false, stop: false, icon: "send" }],
+    ["send-ready", "Send message", { disabled: false, busy: false, stop: false, icon: "send" }],
+    ["submitting", "Sending message", { disabled: true, busy: true, stop: false, icon: "sending" }],
+    ["stop-ready", "Stop agent", { disabled: false, busy: false, stop: true, icon: "stop" }],
+    ["stop-pending", "Stopping agent", { disabled: false, busy: true, stop: true, icon: "stop" }],
+    ["stop-and-send", "Stop and send", { disabled: false, busy: false, stop: true, icon: "stop" }],
+  ] as const)("presents %s as %s in the deferred action and its fallback", (primaryAction, label, expected) => {
+    const view = render(<ComposerSendActionsFallback {...idle} primaryAction={primaryAction} />);
+    for (const deferred of [false, true]) {
+      if (deferred) view.rerender(<ComposerSendActions {...idle} primaryAction={primaryAction} />);
+      const primary = screen.getByRole("button", { name: label });
+      expect(primary).toHaveClass("send-button");
+      expect(primary).toHaveAttribute("data-composer-action-state", primaryAction);
+      expect(primary.classList.contains("stop-button")).toBe(expected.stop);
+      expect(primary.hasAttribute("disabled")).toBe(expected.disabled);
+      expect(primary).toHaveAttribute("aria-busy", String(expected.busy));
+      if (deferred) {
+        expect(primary).toHaveAttribute("data-motion-state", expected.icon);
+        expect(primary.querySelector("svg")).toHaveAttribute("width", "16");
+      }
+    }
+  });
+
+  it("stops the agent from the stop disc and sends from the arrow", () => {
+    const onStop = vi.fn(async () => undefined);
+    const onSubmit = vi.fn(async () => undefined);
+    const view = render(<ComposerSendActions {...idle} onStop={onStop} onSubmit={onSubmit} primaryAction="stop-ready" />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop agent" }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    view.rerender(<ComposerSendActions {...idle} onStop={onStop} onSubmit={onSubmit} primaryAction="stop-and-send" />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop and send" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    view.rerender(<ComposerSendActions {...idle} onStop={onStop} onSubmit={onSubmit} primaryAction="send-ready" />);
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
     ["Send message", "send-ready"],
     ["Stop agent", "stop-ready"],
     ["Stop and send", "stop-and-send"],

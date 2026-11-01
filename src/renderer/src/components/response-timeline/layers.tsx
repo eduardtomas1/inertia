@@ -21,7 +21,7 @@ import {
 import {
   activeAgentPresentation,
   buildTurnExecutionStream,
-  shouldConsolidateSettledWorkIntoRunDetails,
+  isQuietSettledTurn,
   type ActiveAgentPhase,
   type ResponseTurn,
 } from "../../utils/responseTimeline";
@@ -40,12 +40,11 @@ import {
   workingOrbSyncKey,
 } from "../working-indicator/orbMotion";
 import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
-import { TurnAgentsLine } from "./TurnAgentsLine";
+import { SubagentGroup } from "./SubagentGroup";
 import { useFreshRequest } from "./useFreshRequest";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
   LiveElapsed,
-  SettledWorkDetails,
   WorkLog,
 } from "./activity";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
@@ -56,6 +55,7 @@ import {
 } from "./changedFiles";
 import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
+import type { TurnFoldControl } from "./TurnFold";
 import "./ConversationContextProvenance.css";
 import { TooltipText } from "../TooltipText";
 
@@ -243,6 +243,8 @@ export function AgentExecutionLayer({
   heldFollowUpIds,
   timerStart,
   completionAnnouncement,
+  fold,
+  agentsInFold,
   onBeforeToggle,
   onAfterToggle,
 }: {
@@ -255,6 +257,8 @@ export function AgentExecutionLayer({
   heldFollowUpIds: string[];
   timerStart: string;
   completionAnnouncement: string;
+  fold: TurnFoldControl | null;
+  agentsInFold: boolean;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
@@ -275,7 +279,7 @@ export function AgentExecutionLayer({
     stopPressedAtRef.current = pressedAt;
     props.onStop();
   };
-  const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
+  const consolidatesSettledWork = isQuietSettledTurn(turn, fold?.visible ?? false);
   const settledCompactions = useMemo(
     () => turn.isActive
       ? []
@@ -291,6 +295,17 @@ export function AgentExecutionLayer({
   usePublishLiveAgentPhase(turn.isActive
     ? { conversationId: props.conversationId, turnId: turn.id, phase: activePresentation.phase }
     : null);
+  const subagentGroup = (
+    <SubagentGroup
+      conversationId={props.conversationId}
+      turnId={turn.id}
+      subagents={subagents}
+      onOpenSurface={props.onOpenSurface}
+      onBeforeToggle={onBeforeToggle}
+      onAfterToggle={onAfterToggle}
+    />
+  );
+  const groupInFold = agentsInFold && !turn.isActive && !consolidatesSettledWork;
   return (
     <section
       className={clsx(
@@ -364,7 +379,10 @@ export function AgentExecutionLayer({
           />
         </div>
       ) : !consolidatesSettledWork ? (
-        <div className="turn-execution-rail is-settled">
+        <div
+          className="turn-execution-rail is-settled"
+          data-turn-fold={fold?.visible ? fold.open ? "open" : "closed" : undefined}
+        >
           <WorkLog
             key="work-log"
             turn={turn}
@@ -381,18 +399,15 @@ export function AgentExecutionLayer({
             onOpenProjectFile={props.onOpenTurnFile}
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
+            fold={fold}
+            foldedWork={groupInFold ? subagentGroup : null}
           />
         </div>
       ) : null}
       {settledCompactions.map((entry) => (
         <ContextCompactionActivityMarker key={entry.id} activities={entry.activities} />
       ))}
-      <TurnAgentsLine
-        conversationId={props.conversationId}
-        turnId={turn.id}
-        subagents={subagents}
-        onOpenSurface={props.onOpenSurface}
-      />
+      {!groupInFold && subagentGroup}
       <span
         className="visually-hidden"
         role="status"
@@ -498,21 +513,17 @@ export function SupportingLedgerLayer({
   turn,
   props,
   previousArtifactTurnId,
+  durationShownAbove = false,
   onBeforeToggle,
   onAfterToggle,
 }: {
   turn: ResponseTurn;
   props: ResponseTimelineProps;
   previousArtifactTurnId: string | null;
+  durationShownAbove?: boolean;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
-  const consolidatesSettledWork = !turn.isActive
-    && shouldConsolidateSettledWorkIntoRunDetails(turn);
-  const settledWorkStream = useMemo(
-    () => consolidatesSettledWork ? buildTurnExecutionStream(turn) : [],
-    [consolidatesSettledWork, turn],
-  );
   if (turn.isActive) {
     return props.showTimestamps
       ? (
@@ -526,12 +537,6 @@ export function SupportingLedgerLayer({
         )
       : null;
   }
-  const includesReasoning = consolidatesSettledWork
-    && props.showThinking
-    && Boolean(turn.reasoning?.content);
-  const hasSettledWorkDetails = settledWorkStream.length > 0
-    || includesReasoning
-    || turn.plans.length > 0;
   const showChangedFiles = props.showChangedFileSummaries
     && turn.gitArtifact !== null
     && shouldShowChangedFilesSummary(turn.gitArtifact);
@@ -550,25 +555,7 @@ export function SupportingLedgerLayer({
           turn={turn}
           terminalAnswer={turn.terminalAssistantMessage}
           showTimestamp={props.showTimestamps}
-          settledWorkDetails={hasSettledWorkDetails
-            ? (
-                <SettledWorkDetails
-                  entries={settledWorkStream}
-                  turn={turn}
-                  reasoningContent={turn.reasoning?.content ?? ""}
-                  includesReasoning={includesReasoning}
-                  projectRoot={props.projectRoot}
-                  projectId={props.projectId}
-                  conversationId={props.conversationId}
-                  defaultCodeWrap={props.defaultCodeWrap}
-                  onOpenProjectFile={props.onOpenTurnFile}
-                  onBeforeToggle={onBeforeToggle}
-                  onAfterToggle={onAfterToggle}
-                />
-              )
-            : null}
-          workDetailsExpandedByDefault={hasSettledWorkDetails
-            && !props.autoCollapseWorkLog}
+          durationShownAbove={durationShownAbove}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />

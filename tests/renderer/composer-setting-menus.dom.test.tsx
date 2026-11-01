@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProviderInfo } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { composerProps, conversation, routedProvider } from "./composer-fixtures";
 import { ComposerResponseSpeedOptions } from "../../src/renderer/src/components/composer/ComposerResponseSpeedOptions";
+import { declarationsFor, parseCssRules } from "./css-rules";
+import { readSourceText } from "../helpers/source-text";
 
 const reasoningProvider: ProviderInfo = {
   ...routedProvider,
@@ -23,6 +25,29 @@ const reasoningProvider: ProviderInfo = {
     fastMode: { providerValue: "fast", label: "Fast", description: "Faster replies", isDefault: false },
   }],
 };
+
+const longestLabelProvider: ProviderInfo = {
+  ...routedProvider,
+  models: [{
+    id: "agent",
+    label: "Routed Agent",
+    description: "",
+    isDefault: true,
+    inputModalities: ["text"],
+    reasoningOptions: [
+      { value: "medium", label: "Medium", description: "Balanced" },
+      { value: "xhigh", label: "Extra high", description: "Deepest" },
+    ],
+    defaultReasoningEffort: "medium",
+    fastMode: { providerValue: "priority", label: "Fast", description: "Faster replies", isDefault: false },
+  }],
+};
+
+const FOLD = "@container (max-width: 820px) or ((max-width: 900px) and style(--interface-scale: large))";
+
+afterEach(() => {
+  delete document.documentElement.dataset.interfaceScale;
+});
 
 function renderComposer(): void {
   const current = conversation("setting-menus");
@@ -73,15 +98,106 @@ describe("composer setting menus", () => {
     expectCheckOnChosenRowOnly(workMode);
   });
 
-  it("shows the access control as its label and chevron only, in every access mode", () => {
+  it("draws every setting as one chip of icon, label and chevron", () => {
+    renderComposer();
+    const family = screen.getByRole("group", { name: "Composer settings" });
+    const chips = [...family.querySelectorAll<HTMLButtonElement>("button[data-composer-setting]")];
+    expect(chips.map((chip) => chip.dataset.composerSetting)).toEqual(["reasoning", "access", "mode"]);
+    const icons = { reasoning: "lucide-gauge", access: "lucide-shield-check", mode: "lucide-hammer" };
+    for (const chip of chips) {
+      const parts = [...chip.children].map((child) => child.getAttribute("class") ?? "");
+      expect(parts, chip.dataset.composerSetting).toEqual([
+        expect.stringContaining("composer-setting-icon"),
+        "composer-setting-value",
+        expect.stringContaining("composer-setting-chevron"),
+      ]);
+      expect(chip.firstElementChild).toHaveClass(icons[chip.dataset.composerSetting as keyof typeof icons]);
+      expect(chip.firstElementChild).toHaveAttribute("aria-hidden", "true");
+      expect(chip.lastElementChild).toHaveAttribute("aria-hidden", "true");
+      expect(chip).toHaveAttribute("aria-haspopup", "menu");
+      expect(chip).toHaveAttribute("aria-expanded", "false");
+    }
+    expect(chips.map((chip) => chip.textContent)).toEqual(["High", "Supervised", "Build"]);
+    expect(family.textContent).not.toContain("·");
+  });
+
+  it("opens each chip's menu by click and by ArrowDown and marks the open chip expanded", () => {
+    renderComposer();
+    for (const [setting, menuName] of [
+      ["reasoning", "Reasoning level"],
+      ["access", "Project access"],
+      ["mode", "Work mode"],
+    ] as const) {
+      const chip = document.querySelector<HTMLButtonElement>(`[data-composer-setting="${setting}"]`)!;
+      fireEvent.click(chip);
+      expect(screen.getByRole("menu", { name: menuName })).toBeVisible();
+      expect(chip).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(chip);
+      expect(screen.queryByRole("menu", { name: menuName })).toBeNull();
+      chip.focus();
+      fireEvent.keyDown(chip, { key: "ArrowDown" });
+      expect(screen.getByRole("menu", { name: menuName })).toBeVisible();
+      fireEvent.keyDown(screen.getByRole("menu", { name: menuName }), { key: "Escape" });
+      expect(screen.queryByRole("menu", { name: menuName })).toBeNull();
+    }
+  });
+
+  it("keeps the longest chip labels whole at Large scale and folds them into More up to a 900px composer", async () => {
+    document.documentElement.dataset.interfaceScale = "large";
+    render(<Composer {...composerProps({
+      ...conversation("large-longest-labels"),
+      accessMode: "auto-edit",
+      modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "agent", reasoningEffort: "xhigh" }),
+      reasoningEffort: "xhigh",
+    }, { providers: [longestLabelProvider] })} />);
+    const family = screen.getByRole("group", { name: "Composer settings" });
+    const chips = [...family.querySelectorAll<HTMLButtonElement>("button[data-composer-setting]")];
+    expect(chips.map((chip) => [chip.dataset.composerSetting, chip.textContent])).toEqual([
+      ["reasoning", "Extra high"],
+      ["speed", "Standard"],
+      ["access", "Auto-accept edits"],
+      ["mode", "Build"],
+    ]);
+    for (const chip of chips) {
+      expect(chip.querySelector(".composer-setting-chevron")).toHaveAttribute("width", "12");
+      expect(chip.querySelector(".composer-setting-value")?.childNodes).toHaveLength(1);
+    }
+
+    fireEvent.click(await screen.findByRole("button", { name: "More composer options" }));
+    const more = screen.getByRole("menu", { name: "More composer options" });
+    expect(within(more).getAllByRole("menuitem").map((row) => row.textContent)).toEqual([
+      "ReasoningExtra high",
+      "Response speedStandard",
+      "ModeBuild",
+      "AccessAuto-accept edits",
+    ]);
+
+    const css = parseCssRules([
+      readSourceText("src/renderer/src/styles.css"),
+      readSourceText("src/renderer/src/components/composer/ComposerSurface.css"),
+    ].join("\n"));
+    expect(declarationsFor(css, ':root[data-interface-scale="large"]').get("--interface-scale")).toBe("large");
+    expect(declarationsFor(css, ".composer-setting-family", FOLD).get("display")).toBe("none");
+    expect(declarationsFor(css, ".composer-options > .composer-more-control", FOLD).get("display")).toBe("block");
+    expect(declarationsFor(css, ".composer-shell .composer-options", FOLD).get("min-width")).toBe("var(--composer-control-height)");
+    expect(css.some(({ context }) => context === "@container (max-width: 820px)")).toBe(false);
+    const chip = declarationsFor(css, ".composer-shell .composer-setting-family .composer-pill");
+    expect([chip.get("max-width"), chip.get("padding")]).toEqual(["none", "0 8px"]);
+    expect(declarationsFor(css, ".composer-pill").get("white-space")).toBe("nowrap");
+    expect(declarationsFor(css, ".composer-setting-value").get("max-width")).toBe("9em !important");
+  });
+
+  it("shows the access chip with the icon for its access mode, in every access mode", () => {
     for (const accessMode of ["supervised", "auto-edit", "full"] as const) {
       const current = conversation(`access-${accessMode}`);
       const { unmount } = render(<Composer {...composerProps({ ...current, accessMode })} />);
       const label = { supervised: "Supervised", "auto-edit": "Auto-accept edits", full: "Full access" }[accessMode];
+      const icon = { supervised: "lucide-shield-check", "auto-edit": "lucide-pen-line", full: "lucide-lock-open" }[accessMode];
       const trigger = screen.getByRole("button", { name: `Choose project access. Current access: ${label}.` });
       expect(trigger).toHaveTextContent(label);
-      expect(trigger.querySelector(".composer-setting-icon")).toBeNull();
-      expect([...trigger.querySelectorAll("svg")].map((icon) => icon.getAttribute("class"))).toEqual([
+      expect(trigger.firstElementChild).toHaveClass("composer-setting-icon");
+      expect([...trigger.querySelectorAll("svg")].map((svg) => svg.getAttribute("class"))).toEqual([
+        expect.stringContaining(`${icon} `),
         expect.stringContaining("composer-setting-chevron"),
       ]);
       fireEvent.click(trigger);

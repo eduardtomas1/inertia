@@ -1068,6 +1068,7 @@ export function FilesPanel({
                     conversationId={conversationId}
                     markdownBasePath={workspaceParentPath(preview.path)}
                     defaultCodeWrap
+                    fileChips={false}
                     onOpenProjectFile={openMarkdownEntry}
                     onShowSource={() => setPreviewViewState({
                       identity: previewViewIdentity,

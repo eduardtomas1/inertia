@@ -24,7 +24,7 @@ import {
   buildTimelineMinimapMarkers,
   formatElapsed,
   resolveTimelineKeyboardIntent,
-  shouldConsolidateSettledWorkIntoRunDetails,
+  isQuietSettledTurn,
   shouldFollowTimeline,
   shouldShowTimelineMinimap,
   shouldVirtualizeTimeline,
@@ -279,7 +279,7 @@ describe("authoritative response timeline", () => {
       turns: [turn], messages, activities, reasonings: [], checkpoints: [],
     }), turn.id);
 
-    expect(shouldConsolidateSettledWorkIntoRunDetails(response)).toBe(false);
+    expect(isQuietSettledTurn(response, false)).toBe(false);
     expect(buildTurnExecutionStream(response).flatMap((entry) =>
       entry.kind === "commentary" ? [`${entry.id}:${entry.answer === true ? "answer" : "commentary"}`] : []))
       .toEqual(["note:commentary", "earlier-answer:answer"]);
@@ -312,8 +312,9 @@ describe("authoritative response timeline", () => {
       onOpenTurnFile: () => undefined,
       onStop: () => undefined,
     }));
-    const detailsEnd = html.indexOf("</details>");
+    const detailsEnd = html.indexOf('id="turn-fold-turn-exchange"');
     const earlierAnswer = html.indexOf("The parser is fixed.");
+    expect(detailsEnd).toBeGreaterThan(0);
     const followUp = html.indexOf('data-follow-up-message-id="follow-up"');
     const finalAnswer = html.indexOf('data-turn-layer="final-answer"');
     expect(html).not.toContain("Reading the parser.");
@@ -634,7 +635,7 @@ describe("authoritative response timeline", () => {
     expect(html).toContain(">Stop</span></button>");
     expect(html.match(/data-activity-group=/g)).toHaveLength(2);
     expect(html).toContain(
-      'aria-label="4 commands, 1 file read, 1 edit, 1 failed, 1 warning"',
+      'aria-label="Ran 4 commands, made 1 edit and 1 other action, 1 failed, 1 warning"',
     );
     expect(html).toContain('data-activity-group-state="live"');
     // Running calls remain visible even after falling outside the recent four.
@@ -791,10 +792,9 @@ describe("authoritative response timeline", () => {
       turn: unchangedTurn,
       terminalAnswer: unchangedTurn.terminalAssistantMessage,
       showTimestamp: false,
-      workDetailsExpandedByDefault: true,
     }));
-    expect(runDetailsHtml).toContain('<p class="turn-run-no-changes">');
-    expect(runDetailsHtml).toContain("<span>No file changes</span>");
+    expect(runDetailsHtml).toContain('aria-expanded="false"');
+    expect(runDetailsHtml).not.toContain("No file changes");
   });
 
   it("renders changed files as a quiet disclosure with exact actions and completeness context", () => {
@@ -1088,7 +1088,7 @@ describe("authoritative response timeline", () => {
     expect(footerPrimary).toContain('aria-label="Copy final answer"');
     expect(footerPrimary).toContain(`dateTime="${turn.completedAt}"`);
     expect(footerPrimary).not.toContain(">Completed</span>");
-    expect(footerPrimary).toContain('class="turn-duration" data-turn-status="completed">Worked 7s</span>');
+    expect(footerPrimary).toContain('class="turn-duration" data-turn-status="completed">Worked for 7s</span>');
     expect(footerPrimary).toContain('aria-expanded="false"');
     expect(footerPrimary).toContain('aria-controls="turn-run-details-turn-footer"');
     expect(footerPrimary).toContain("<span>Run details</span>");

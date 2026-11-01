@@ -15,11 +15,24 @@
  * each light fades out on its own gradient before the search row.
  *
  * Seams: each drifting layer repeats its gradient tile and moves exactly one
- * tile per loop, and every light stays inside its tile. */
+ * tile per loop, and every light stays inside its tile.
+ *
+ * Stars: a dozen small elements over the lights (SidebarStarfield.tsx), each
+ * painted once. Their field drifts with the stepped layers. Each star's
+ * opacity breathes in an ordinary CSS animation with literal keyframes, so
+ * the compositor runs it smoothly without layout or repaint; it plays only
+ * while the strip is moving and the window is focused and visible
+ * (.is-live), and holds its place otherwise. Without motion the stars rest
+ * at mid strength. */
 .sidebar-aurora {
   --aurora-peak: 60%;
   --aurora-mid: 42%;
   --aurora-wash: 18%;
+  --aurora-band-duration: 26s;
+  --aurora-parallax-duration: 40s;
+  --star-breathe-shortest: 7s;
+  --star-breathe-range: 5s;
+  --star-color: color-mix(in srgb, var(--accent) 30%, transparent);
   position: absolute;
   z-index: -1;
   inset: 0 0 auto;
@@ -36,6 +49,7 @@
   --aurora-peak: 40%;
   --aurora-mid: 16%;
   --aurora-wash: 8%;
+  --star-color: color-mix(in srgb, var(--text) 72%, var(--aurora-1));
 }
 
 @property --aurora-boost {
@@ -71,6 +85,7 @@
 }
 
 .sidebar-aurora-near,
+.sidebar-aurora-band,
 .sidebar-aurora-far {
   top: 0;
   left: 0;
@@ -105,6 +120,17 @@
   animation-duration: 76s;
 }
 
+/* A thin, faint high wisp that crosses against the near lights, above the lockup. */
+.sidebar-aurora-band {
+  --aurora-light-e: color-mix(in srgb, var(--aurora-3) calc(var(--aurora-mid-live) / 2), transparent);
+  width: calc(100% + 208px);
+  background-image:
+    radial-gradient(80px 7px at 104px 9px, var(--aurora-light-e), color-mix(in srgb, var(--aurora-light-e) 45%, transparent) 45%, transparent);
+  background-size: 208px 100%;
+  animation-name: sidebar-sky-band;
+  animation-duration: var(--aurora-band-duration);
+}
+
 .sidebar-aurora-glow {
   top: -48px;
   right: -44px;
@@ -123,13 +149,77 @@
   to { transform: translate3d(0, 0, 0); }
 }
 
+.sidebar-aurora-stars {
+  inset: 0;
+  animation: sidebar-sky-parallax var(--aurora-parallax-duration) ease-in-out infinite paused;
+}
+
+.sidebar-star {
+  --star-size: 1px;
+  --star-cycle: calc(var(--star-breathe-shortest) + var(--star-breathe-range) * var(--star-t));
+  position: absolute;
+  width: var(--star-size);
+  height: var(--star-size);
+  margin: calc(var(--star-size) / -2) 0 0 calc(var(--star-size) / -2);
+  border-radius: 50%;
+  background: var(--star-color);
+  opacity: 0.375;
+}
+
+.sidebar-star[data-depth="near"] {
+  --star-size: 8px;
+  background: radial-gradient(closest-side, var(--star-color) 25%, color-mix(in srgb, var(--star-color) 28%, transparent) 50%, transparent);
+  opacity: 0.6;
+}
+
+.platform-darwin .sidebar-star[data-macos="hidden"] {
+  display: none;
+}
+
+.sidebar-aurora.is-moving .sidebar-star {
+  animation: sidebar-star-breathe-far var(--star-cycle) ease-in-out calc(var(--star-cycle) * var(--star-phase) * -1) infinite paused;
+}
+
+.sidebar-aurora.is-moving .sidebar-star[data-depth="near"] {
+  animation-name: sidebar-star-breathe-near;
+}
+
+.sidebar-aurora.is-live .sidebar-star {
+  animation-play-state: running;
+}
+
 @keyframes sidebar-aurora-breathe {
   from { opacity: 0.6; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1.04); }
 }
 
+@keyframes sidebar-sky-band {
+  from { transform: translate3d(-208px, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes sidebar-sky-parallax {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(-6px, 1px, 0); }
+}
+
+@keyframes sidebar-star-breathe-far {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes sidebar-star-breathe-near {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sidebar-aurora > span {
+    animation: none;
+  }
+
+  .sidebar-aurora.is-moving .sidebar-star,
+  .sidebar-aurora.is-moving .sidebar-star[data-depth="near"] {
     animation: none;
   }
 }
@@ -152,6 +242,10 @@
 
 @media (forced-colors: active) {
   .sidebar::before {
+    display: none;
+  }
+
+  .sidebar-aurora {
     display: none;
   }
 }

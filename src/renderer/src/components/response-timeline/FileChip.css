@@ -1,0 +1,58 @@
+.response-markdown .response-file-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: var(--fill);
+  font: inherit;
+  line-height: 1.35;
+  text-align: start;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.response-markdown .response-file-chip:hover {
+  background: var(--fill-strong);
+}
+
+.response-markdown .response-file-chip > :not(.response-file-chip-text) {
+  user-select: none;
+}
+
+.response-markdown .response-file-chip-text {
+  user-select: text;
+}
+
+.response-markdown .response-file-chip-icon {
+  flex: none;
+  align-self: center;
+  color: var(--text-muted);
+}
+
+.response-markdown .response-file-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.response-markdown .response-file-chip-line {
+  flex: none;
+  margin-left: -4px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.response-markdown .response-file-chip-folder {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+}

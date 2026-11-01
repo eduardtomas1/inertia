@@ -931,7 +931,7 @@ describe("composer asynchronous ownership", () => {
     await screen.findByRole("button", { name: "Remove attachment spec.pdf" });
     view.rerender(<Composer {...props} running latestTurn={{ ...latestTurn, id: "queued-turn", status: "running" }} />);
 
-    expect(input).toHaveAttribute("placeholder", "Follow up");
+    expect(input).toHaveAttribute("placeholder", "Follow up. / commands");
     expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
 
     expect(screen.queryByRole("alert")).toBeNull();

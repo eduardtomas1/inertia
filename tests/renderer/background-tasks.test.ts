@@ -7,7 +7,10 @@ import {
   backgroundTaskCurrentActivity,
   backgroundTaskDoingNow,
   backgroundTaskElapsedMs,
+  backgroundTaskHeading,
+  backgroundTaskHeadingIsTask,
   backgroundTaskItems,
+  backgroundTaskKind,
   backgroundTaskLatestStep,
   backgroundTaskStateWord,
   backgroundTaskTitle,
@@ -32,6 +35,23 @@ import {
 } from "./background-task-fixtures";
 
 describe("background task rows", () => {
+  it("heads a card with its mission and moves the agent's name to the kind line", () => {
+    const named = taskTrace({ providerName: null, providerRole: "general_purpose", description: "  Map the persistence layer " });
+    expect(backgroundTaskHeading(named)).toBe("Map the persistence layer");
+    expect(backgroundTaskHeadingIsTask(named)).toBe(true);
+    expect(backgroundTaskKind(named, null)).toBe("Agent · General purpose");
+    expect(backgroundTaskKind(named, "Explorer")).toBe("Agent · General purpose · from Explorer");
+    const unnamed = taskTrace({ providerName: null, providerRole: null, description: "Summarize threads" });
+    expect(backgroundTaskKind(unnamed, null)).toBe("Agent");
+    const silent = taskTrace({ providerName: "Explorer", description: null });
+    expect(backgroundTaskHeading(silent)).toBe("Explorer");
+    expect(backgroundTaskHeadingIsTask(silent)).toBe(false);
+    expect(backgroundTaskKind(silent, null)).toBe("Agent");
+    const long = taskTrace({ description: "x".repeat(400) });
+    expect(Array.from(backgroundTaskHeading(long))).toHaveLength(280);
+    expect(backgroundTaskHeadingIsTask(long)).toBe(false);
+  });
+
   it("titles a task by provider name, then role, then its mission", () => {
     expect(backgroundTaskTitle(taskTrace({ providerName: "code_reviewer" })))
       .toBe("Code reviewer");

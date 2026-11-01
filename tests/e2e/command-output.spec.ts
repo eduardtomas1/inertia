@@ -159,7 +159,7 @@ test("shows streamed command output once, in order, under one Output heading", a
     await app.resizeWindow(1440, 920);
     const turn = page.locator("[data-turn-id]").last();
     await turn.scrollIntoViewIfNeeded();
-    const runDetails = turn.getByRole("button", { name: "Run details" });
+    const runDetails = turn.getByRole("button", { name: /^Worked for /u });
     await runDetails.click();
     await expect(runDetails).toHaveAttribute("aria-expanded", "true");
     const disclosure = turn.getByRole("button", { name: /^Output: / });

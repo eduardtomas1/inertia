@@ -80,11 +80,9 @@ export interface ComposerInputZoneProps {
   onImportAttachments: (files: File[]) => Promise<boolean>;
   onSubmit: () => Promise<void>;
   canQueue: boolean;
-  queueBlocked: boolean;
   onQueue: () => void;
   running: boolean;
-  stopsBeforeSending: boolean;
-  hasHistory: boolean;
+  placeholder: string;
   submissionPending: boolean;
   followUpPending: boolean;
   typedMessageLimit: number;
@@ -144,11 +142,9 @@ export function ComposerInputZone({
   onImportAttachments,
   onSubmit,
   canQueue,
-  queueBlocked,
   onQueue,
   running,
-  stopsBeforeSending,
-  hasHistory,
+  placeholder,
   submissionPending,
   followUpPending,
   typedMessageLimit,
@@ -647,11 +643,7 @@ export function ComposerInputZone({
               ? `${mentionListboxId}-${mentionOptions.indexOf(activeMention)}`
               : undefined}
           aria-label="Message"
-          placeholder={stopsBeforeSending && !queueBlocked
-            ? "Enter stops and sends · Tab queues"
-            : running && !queueBlocked
-            ? "Enter sends · Tab queues"
-            : hasHistory ? "Follow up" : "Message"}
+          placeholder={placeholder}
         />
         {!messageFits && (
           <p className="composer-limit-warning" role="alert">

@@ -229,6 +229,15 @@ export function subagentElapsedMs(
   return Math.max(0, end - startedAt);
 }
 
+export function subagentReportedElapsedMs(
+  trace: SubagentTrace,
+  now: number,
+): number | null {
+  if (isLiveSubagentTrace(trace)) return subagentElapsedMs(trace, now);
+  if (trace.durationMs !== null) return trace.durationMs;
+  return trace.status === "lost" ? null : subagentElapsedMs(trace, now);
+}
+
 export function subagentDisclosureRows(
   traces: readonly SubagentTrace[],
   turns: readonly AgentTurn[],

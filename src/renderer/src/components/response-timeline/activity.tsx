@@ -1,4 +1,5 @@
 import {
+  Fragment,
   memo,
   lazy,
   Suspense,
@@ -39,13 +40,14 @@ import {
   activityDetailPresentation,
   activityExecutionCategory,
   activityNeedsAttention,
-  activitySummaryLabel,
-  activitySummaryParts,
+  activitySummarySentence,
+  activitySummarySentenceLabel,
   activityWorkKind,
   buildTurnExecutionStream,
   formatElapsed,
   hostToolActivityTitle,
   isInterruptedActivity,
+  needsStaticFoldRow,
   resolveActivityGroupWindow,
   summarizeActivities,
   turnStatusLabel,
@@ -68,7 +70,6 @@ import { LoadingMark } from "../ui";
 import { WorkingOrb } from "../working-indicator/WorkingOrb";
 import { useWorkingIndicator } from "../working-indicator/WorkingIndicatorContext";
 import {
-  ACTIVITY_ORB_MOTION,
   orbMotionForActivity,
   resolveOrbMotion,
   usesActivityOrbs,
@@ -82,66 +83,17 @@ import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
 import { StreamingMarkdownText } from "./StreamingMarkdownText";
 import {
-  advanceThinkingLine,
-  createReasoningLinesReader,
-  IDLE_THINKING_LINE,
-  parseReasoningSummary,
-  reasoningLineAt,
-  thinkingLineWakeAt,
-  type ReasoningLine,
-} from "../../utils/reasoningSummary";
+  ReasoningSummary,
+  useReadableThinkingLine,
+  useReasoningSpan,
+  type ReasoningSpan,
+  type ThinkingLineView,
+} from "./thinking";
+import { TurnBlockTime, TurnFoldRow, type TurnFoldControl } from "./TurnFold";
+
+export { ReasoningSummary } from "./thinking";
 
 const FailureDiagnostics = lazy(() => import("./failurePanel"));
-
-export function ReasoningSummary({
-  content,
-  streaming = false,
-}: {
-  content: string;
-  streaming?: boolean;
-}): React.JSX.Element {
-  const segments = useMemo(() => parseReasoningSummary(content), [content]);
-  const indicator = useWorkingIndicator();
-  const stepOrb = streaming && usesActivityOrbs(indicator)
-    ? resolveOrbMotion(indicator, ACTIVITY_ORB_MOTION.reasoning)
-    : null;
-  if (segments.length === 0) {
-    return (
-      <p className="turn-reasoning-body">
-        {content}
-      </p>
-    );
-  }
-  return (
-    <ol className="turn-reasoning-steps">
-      {segments.map((segment, index) => (
-        <li
-          key={segment.id}
-          className={clsx(
-            "turn-reasoning-step",
-            streaming && index === segments.length - 1 && "is-active",
-          )}
-          data-step-indicator={stepOrb && index === segments.length - 1 ? "orb" : undefined}
-        >
-          {stepOrb && index === segments.length - 1 && (
-            <WorkingOrb
-              className="turn-reasoning-step-orb"
-              size={12}
-              design={stepOrb.design}
-              pace={stepOrb.pace}
-            />
-          )}
-          {segment.title && (
-            <span className="turn-reasoning-step-title">{segment.title}</span>
-          )}
-          {segment.body && (
-            <span className="turn-reasoning-step-body">{segment.body}</span>
-          )}
-        </li>
-      ))}
-    </ol>
-  );
-}
 
 export function LiveElapsed({
   startedAt,
@@ -150,17 +102,24 @@ export function LiveElapsed({
   startedAt: string;
   excludedMs?: number;
 }): React.JSX.Element {
-  const [now, setNow] = useState(Date.now());
+  const elapsedRef = useRef<HTMLSpanElement>(null);
   const documentVisible = useDocumentVisibility();
   useEffect(() => {
     if (!documentVisible) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    const started = Date.parse(startedAt);
+    const write = (): void => {
+      const element = elapsedRef.current;
+      if (element) {
+        element.textContent = formatElapsed(Math.max(0, Date.now() - started - excludedMs), true);
+      }
+    };
+    write();
+    const timer = window.setInterval(write, 1_000);
     return () => window.clearInterval(timer);
-  }, [documentVisible]);
+  }, [documentVisible, excludedMs, startedAt]);
   return (
-    <span>
-      {formatElapsed(Math.max(0, now - Date.parse(startedAt) - excludedMs), true)}
+    <span ref={elapsedRef}>
+      {formatElapsed(Math.max(0, Date.now() - Date.parse(startedAt) - excludedMs), true)}
     </span>
   );
 }
@@ -366,6 +325,7 @@ export const CommentaryRow = memo(function CommentaryRow({
   conversationId,
   defaultCodeWrap,
   onOpenProjectFile,
+  showTime = false,
 }: {
   entry: Extract<TurnExecutionStreamEntry, { kind: "commentary" }>;
   projectRoot: string;
@@ -373,18 +333,26 @@ export const CommentaryRow = memo(function CommentaryRow({
   conversationId: string;
   defaultCodeWrap: boolean;
   onOpenProjectFile: (path: string) => void;
+  showTime?: boolean;
 }): React.JSX.Element {
   useLayoutEffect(() => {
     if (entry.streaming && entry.content) {
       markTestStreamingStage("renderer-live-text-commit");
     }
   }, [entry.content, entry.streaming]);
+  const timed = showTime && !entry.streaming && entry.message !== null;
   return (
     <article
-      className={clsx("turn-commentary-row", entry.streaming && "is-streaming", entry.answer && "is-answer")}
+      className={clsx(
+        "turn-commentary-row",
+        entry.streaming && "is-streaming",
+        entry.answer && "is-answer",
+        timed && "has-block-time",
+      )}
       aria-label={entry.streaming ? "Live agent update" : entry.answer ? "Agent answer" : "Agent update"}
       data-assistant-commentary-id={entry.message?.id ?? entry.id}
       {...(entry.message && !entry.streaming ? messageContextMenu(entry.message, entry.content) : undefined)}
+      tabIndex={entry.message && !entry.streaming ? -1 : undefined}
     >
       {entry.streaming
         ? (
@@ -414,6 +382,7 @@ export const CommentaryRow = memo(function CommentaryRow({
               onOpenProjectFile={onOpenProjectFile}
             />
           )}
+      {timed && <TurnBlockTime createdAt={entry.createdAt} />}
     </article>
   );
 });
@@ -511,7 +480,7 @@ export const ActivityGroup = memo(function ActivityGroup({
       </div>
     );
   }
-  const parts = activitySummaryParts(summary);
+  const sentence = activitySummarySentence(summary);
   const rows = resolveActivityGroupWindow(entry.activities, {
     expanded,
     settled: folded,
@@ -524,7 +493,7 @@ export const ActivityGroup = memo(function ActivityGroup({
     setExpanded((current) => !current);
     window.requestAnimationFrame(() => onAfterToggle?.());
   };
-  const MarkIcon = folded ? Check : CircleDot;
+  const MarkIcon = !folded ? CircleDot : summary.failed > 0 ? TriangleAlert : Check;
   return (
     <div
       className="turn-activity-group"
@@ -538,12 +507,13 @@ export const ActivityGroup = memo(function ActivityGroup({
         className="turn-activity-group-summary"
         aria-expanded={expanded}
         aria-controls={rowsId}
-        aria-label={activitySummaryLabel(parts)}
+        aria-label={activitySummarySentenceLabel(summary)}
         onClick={toggle}
       >
         <span
           className="turn-activity-group-mark"
           data-running={summary.running > 0}
+          data-tone={folded && summary.failed > 0 ? "failure" : undefined}
           data-group-indicator={groupOrb ? "orb" : undefined}
           aria-hidden="true"
         >
@@ -554,18 +524,31 @@ export const ActivityGroup = memo(function ActivityGroup({
               : <MarkIcon size={14} />}
         </span>
         <span className="turn-activity-group-parts">
-          {parts.map((part) => (
-            <span
-              className="turn-activity-group-part"
-              data-tone={part.tone}
-              key={part.key}
-            >
-              <span className="turn-activity-group-count" key={part.count}>
-                {part.count}
-              </span>
-              {` ${part.label}`}
+          {sentence.length > 0 && (
+            <span className="turn-activity-group-part turn-activity-group-sentence" data-tone="neutral">
+              {sentence.map((phrase) => (
+                <Fragment key={phrase.key}>
+                  {`${phrase.joiner}${phrase.lead ? `${phrase.lead} ` : ""}`}
+                  <span className="turn-activity-group-count" key={phrase.count}>
+                    {phrase.count}
+                  </span>
+                  {` ${phrase.noun}`}
+                </Fragment>
+              ))}
             </span>
-          ))}
+          )}
+          {summary.failed > 0 && (
+            <span className="turn-activity-group-part" data-tone="failure">
+              <span className="turn-activity-group-count" key={summary.failed}>{summary.failed}</span>
+              {" failed"}
+            </span>
+          )}
+          {summary.warnings > 0 && (
+            <span className="turn-activity-group-part" data-tone="warning">
+              <span className="turn-activity-group-count" key={summary.warnings}>{summary.warnings}</span>
+              {summary.warnings === 1 ? " warning" : " warnings"}
+            </span>
+          )}
         </span>
         <ChevronDown
           size={14}
@@ -615,6 +598,7 @@ export const ActivityGroup = memo(function ActivityGroup({
 function ExecutionStream({
   entries,
   live = false,
+  showTimes = false,
   label = "Agent work transcript",
   projectRoot,
   projectId,
@@ -626,6 +610,7 @@ function ExecutionStream({
 }: {
   entries: TurnWorkStreamEntry[];
   live?: boolean;
+  showTimes?: boolean;
   label?: string;
   projectRoot: string;
   projectId: string;
@@ -660,6 +645,7 @@ function ExecutionStream({
                 conversationId={conversationId}
                 defaultCodeWrap={defaultCodeWrap}
                 onOpenProjectFile={onOpenProjectFile}
+                showTime={showTimes}
               />
             </div>
           );
@@ -706,79 +692,6 @@ export function shouldCollapseSuccessfulWorkOnSettlement(input: {
     && input.wasActive
     && !input.isActive
     && input.status === "completed";
-}
-
-export interface ThinkingLineView {
-  current: ReasoningLine | null;
-  previous: ReasoningLine | null;
-  holding: boolean;
-}
-
-const NO_REASONING_LINES: ReasoningLine[] = [];
-
-export function useReadableThinkingLine(
-  content: string,
-  active: boolean,
-): ThinkingLineView {
-  const [state, setState] = useState(IDLE_THINKING_LINE);
-  const [readReasoningLines] = useState(createReasoningLinesReader);
-  const reading = active || state.offset !== null;
-  const lines = useMemo(
-    () => reading ? readReasoningLines(content) : NO_REASONING_LINES,
-    [content, reading, readReasoningLines],
-  );
-  const next = advanceThinkingLine(state, lines, {
-    active,
-    length: content.length,
-    now: Date.now(),
-  });
-  if (next !== state) setState(next);
-  const wakeAt = thinkingLineWakeAt(next, lines, active);
-  const length = content.length;
-  useEffect(() => {
-    if (wakeAt === null) return;
-    const timer = window.setTimeout(() => {
-      setState((current) => advanceThinkingLine(current, lines, {
-        active,
-        length,
-        now: Date.now(),
-      }));
-    }, Math.max(0, wakeAt - Date.now()));
-    return () => window.clearTimeout(timer);
-  }, [active, length, lines, wakeAt]);
-  return {
-    current: next.offset === null ? null : reasoningLineAt(lines, next.offset),
-    previous: next.previousOffset === null
-      ? null
-      : reasoningLineAt(lines, next.previousOffset),
-    holding: !active && next.offset !== null,
-  };
-}
-
-interface ReasoningSpan {
-  startedAt: string;
-  durationMs: number | null;
-}
-
-export function useReasoningSpan(active: boolean): ReasoningSpan {
-  const [span, setSpan] = useState(() => ({
-    active,
-    since: active ? Date.now() : 0,
-    spentMs: 0,
-  }));
-  let current = span;
-  if (span.active !== active) {
-    const now = Date.now();
-    current = active
-      ? { active, since: now, spentMs: span.spentMs }
-      : { active, since: 0, spentMs: span.spentMs + now - span.since };
-    setSpan(current);
-  }
-  return {
-    startedAt: new Date((current.active ? current.since : Date.now()) - current.spentMs)
-      .toISOString(),
-    durationMs: !current.active && current.spentMs > 0 ? current.spentMs : null,
-  };
 }
 
 function ThinkingSummary({
@@ -901,6 +814,8 @@ export function WorkLog({
   onOpenProjectFile,
   onBeforeToggle,
   onAfterToggle,
+  fold = null,
+  foldedWork = null,
 }: {
   turn: ResponseTurn;
   autoCollapse: boolean;
@@ -917,8 +832,11 @@ export function WorkLog({
   onOpenProjectFile: (path: string) => void;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
+  fold?: TurnFoldControl | null;
+  foldedWork?: React.ReactNode;
 }): React.JSX.Element | null {
   const [expanded, setExpanded] = useState(!autoCollapse);
+  const [failureExpanded, setFailureExpanded] = useState(!autoCollapse);
   const workWasActive = useRef(turn.isActive);
   const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
   const detailsId = `turn-work-details-${turn.id}`;
@@ -1006,6 +924,57 @@ export function WorkLog({
       ? `${planStepCount} ${planStepCount === 1 ? "step" : "steps"}`
       : null,
   ].filter(Boolean).join(" · ") || `${supplementalCount} update`;
+  const traceDetails = supplementalCount > 0 && (
+    <details
+      className={includesReasoning ? "turn-thinking" : undefined}
+      data-thinking-state={includesReasoning
+        ? thinkingLive ? "live" : "folded"
+        : undefined}
+      data-thinking-hold={thinkingLive && !activeReasoning ? "" : undefined}
+      data-agent-trace={activeReasoning
+        ? "thinking"
+        : includesReasoning
+          ? "reasoning"
+          : "plan"}
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        {...anchorToggleHandlers}
+      >
+        {includesReasoning
+          ? (
+              <ThinkingSummary
+                live={thinkingLive}
+                line={thinkingLine}
+                span={reasoningSpan}
+                count={activeTraceCount}
+              />
+            )
+          : (
+              <>
+                <span>Plan</span>
+                <small>{activeTraceCount}</small>
+              </>
+            )}
+        <ChevronDown size={14} className="turn-work-chevron" aria-hidden="true" />
+      </summary>
+      <div className="turn-work-details" id={detailsId} hidden={!expanded}>
+        {expanded && includesReasoning && (
+          <div className="turn-reasoning-detail">
+            <span>Reasoning summary</span>
+            <ReasoningSummary
+              content={reasoningContent}
+              streaming={activeReasoning}
+            />
+          </div>
+        )}
+        {expanded && turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
+      </div>
+    </details>
+  );
   if (turn.isActive) {
     if (stream.length === 0 && supplementalCount === 0) return null;
     return (
@@ -1022,57 +991,7 @@ export function WorkLog({
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />
-        {supplementalCount > 0 && (
-          <details
-            className={includesReasoning ? "turn-thinking" : undefined}
-            data-thinking-state={includesReasoning
-              ? thinkingLive ? "live" : "folded"
-              : undefined}
-            data-thinking-hold={thinkingLive && !activeReasoning ? "" : undefined}
-            data-agent-trace={activeReasoning
-              ? "thinking"
-              : includesReasoning
-                ? "reasoning"
-                : "plan"}
-            open={expanded}
-            onToggle={(event) => setExpanded(event.currentTarget.open)}
-          >
-            <summary
-              aria-expanded={expanded}
-              aria-controls={detailsId}
-              {...anchorToggleHandlers}
-            >
-              {includesReasoning
-                ? (
-                    <ThinkingSummary
-                      live={thinkingLive}
-                      line={thinkingLine}
-                      span={reasoningSpan}
-                      count={activeTraceCount}
-                    />
-                  )
-                : (
-                    <>
-                      <span>Plan</span>
-                      <small>{activeTraceCount}</small>
-                    </>
-                  )}
-              <ChevronDown size={14} className="turn-work-chevron" aria-hidden="true" />
-            </summary>
-            <div className="turn-work-details" id={detailsId} hidden={!expanded}>
-              {expanded && includesReasoning && (
-                <div className="turn-reasoning-detail">
-                  <span>Reasoning summary</span>
-                  <ReasoningSummary
-                    content={reasoningContent}
-                    streaming={activeReasoning}
-                  />
-                </div>
-              )}
-              {expanded && turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
-            </div>
-          </details>
-        )}
+        {traceDetails}
       </div>
     );
   }
@@ -1095,6 +1014,98 @@ export function WorkLog({
     || status === "limited"
     || failureDiagnostics.length > 0;
   const latestFailure = failureDiagnostics.at(-1);
+  if (fold) {
+    const foldId = `turn-fold-${turn.id}`;
+    const failureTitle = latestFailure
+      ? activityTitleConveysSeverity(latestFailure.title, "failure")
+        ? latestFailure.title
+        : `Failed · ${latestFailure.title}`
+      : null;
+    const staticFold = needsStaticFoldRow(turn, fold.visible);
+    if (!fold.visible && !staticFold && !failureTitle && !attentionGroup && exchange.length === 0) return null;
+    return (
+      <div
+        className="turn-work-log is-settled is-folded"
+        data-settled-work-status={status}
+        data-settled-work-visibility={fold.visible ? fold.open ? "expanded" : "collapsed" : "static"}
+      >
+        {fold.visible && <TurnFoldRow fold={fold} controlsId={foldId} />}
+        {staticFold && (
+          <div className="turn-fold-row" data-turn-fold-row="static">
+            <span className="turn-fold-label">{fold.label}</span>
+          </div>
+        )}
+        {fold.visible && (
+          <div className="turn-work-log turn-fold-body" id={foldId} hidden={!fold.open}>
+            {fold.open && (
+              <>
+                <ExecutionStream
+                  key="work-stream"
+                  entries={workStream}
+                  showTimes={fold.showTimes}
+                  projectRoot={projectRoot}
+                  projectId={projectId}
+                  conversationId={conversationId}
+                  defaultCodeWrap={defaultCodeWrap}
+                  onOpenProjectFile={onOpenProjectFile}
+                  onBeforeToggle={onBeforeToggle}
+                  onAfterToggle={onAfterToggle}
+                />
+                {foldedWork}
+                {traceDetails}
+              </>
+            )}
+          </div>
+        )}
+        {failureTitle && (
+          <details
+            className="turn-fold-failure"
+            open={failureExpanded}
+            onToggle={(event) => setFailureExpanded(event.currentTarget.open)}
+          >
+            <summary
+              className="turn-settled-summary"
+              aria-expanded={failureExpanded}
+              aria-controls={`${detailsId}-failure`}
+              {...anchorToggleHandlers}
+            >
+              <TriangleAlert size={14} aria-hidden="true" />
+              <span>{failureTitle}</span>
+              <small>Details</small>
+              <ChevronRight size={14} className="turn-work-chevron" aria-hidden="true" />
+            </summary>
+            <div id={`${detailsId}-failure`} hidden={!failureExpanded}>
+              {failureExpanded && failureDiagnostics.map((activity) => (
+                <Suspense fallback={null} key={activity.id}>
+                  <FailureDiagnostics turn={turn.agentTurn} activity={activity} />
+                </Suspense>
+              ))}
+            </div>
+          </details>
+        )}
+        {attentionGroup && (
+          <ActivityGroup
+            entry={attentionGroup}
+            settled
+            onBeforeToggle={onBeforeToggle}
+            onAfterToggle={onAfterToggle}
+          />
+        )}
+        <ExecutionStream
+          key="stream"
+          entries={exchange}
+          label="Follow-up messages"
+          projectRoot={projectRoot}
+          projectId={projectId}
+          conversationId={conversationId}
+          defaultCodeWrap={defaultCodeWrap}
+          onOpenProjectFile={onOpenProjectFile}
+          onBeforeToggle={onBeforeToggle}
+          onAfterToggle={onAfterToggle}
+        />
+      </div>
+    );
+  }
   const hasFoldableDetails = workStream.length > 0
     || supplementalCount > 0
     || failureDiagnostics.length > 0

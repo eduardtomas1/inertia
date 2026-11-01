@@ -225,10 +225,21 @@ describe("Quiet Ledger user request layer", () => {
       },
     });
 
+    const bubble = html.slice(
+      html.indexOf('data-turn-layer="user-request"'),
+      html.indexOf("</article>"),
+    );
+    const meta = html.slice(
+      html.indexOf('data-turn-layer="user-request-meta"'),
+      html.indexOf("</div>", html.indexOf('data-turn-layer="user-request-meta"')),
+    );
     expect(html).toContain('class="message is-user turn-user-request"');
     expect(html).toContain('data-turn-layer="user-request"');
     expect(html).toContain('data-request-layout="content"');
-    expect(html).not.toContain("<time");
+    expect(bubble).not.toContain("<time");
+    expect(meta).toContain('<time dateTime="2026-07-23T10:00:00.000Z">');
+    expect(html.indexOf('data-turn-layer="user-request-meta"'))
+      .toBeGreaterThan(html.indexOf("</article>"));
     expect(html).not.toContain("<span>You</span>");
     expect(html).toContain('class="message-revert"');
     expect(html).toContain('disabled=""');

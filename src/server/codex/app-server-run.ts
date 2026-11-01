@@ -44,18 +44,12 @@ import {
 } from "./protocol";
 import { codexWatcherThreadConfig } from "./read-only-thread-config";
 import {
-  codexResumedThreadWithheldInstructions,
-  codexThreadStartTools,
-  recordCodexThreadRegistration,
-} from "./app-server-thread-tools";
-import {
-  codexDeveloperInstructions,
+  codexPromptWithSessionInstruction,
+  codexSessionDeveloperInstructions,
   configuredDeveloperInstructions,
   readConfiguredDeveloperInstructions,
 } from "./developer-instructions";
 import { codexModelProviderThreadConfig } from "./model-provider-config";
-import { withoutInternalProviderInstructions } from "../runtime/turns/request-context";
-import { withoutSessionInstructions } from "../runtime/turns/turn-instruction-delivery";
 import type {
   CodexAppServerOptions,
   CodexAppServerResult,
@@ -138,6 +132,7 @@ export function startCodexAppServerRun(
   let decoder: JsonLineDecoder | undefined;
   let compatibilityError: CodexAppServerResult["compatibilityError"];
   let continuationError: CodexAppServerResult["continuationError"];
+  let sessionInstructionDeferred = false;
   let resolveResult!: (result: CodexAppServerResult) => void;
   let startupGateReleased = false;
   let startupFailure: Error | undefined;
@@ -370,6 +365,7 @@ export function startCodexAppServerRun(
         ...(finalFailure ? { failure: finalFailure } : {}),
         ...(compatibilityError ? { compatibilityError } : {}),
         ...(continuationError ? { continuationError } : {}),
+        ...(sessionInstructionDeferred ? { sessionInstructionApplied: false as const } : {}),
         cleanupConfirmed,
         ...(cleanupConfirmed ? {} : providerUnconfirmedCleanup(child)),
       });
@@ -752,6 +748,9 @@ export function startCodexAppServerRun(
       setCompatibilityError: (error) => {
         compatibilityError = error;
       },
+      deferSessionInstruction: () => {
+        sessionInstructionDeferred = true;
+      },
       setPhase: (nextPhase) => {
         phase = nextPhase;
       },
@@ -922,6 +921,7 @@ interface OpenCodexTurnOptions {
   setCompatibilityError?: (
     error: CodexAppServerResult["compatibilityError"],
   ) => void;
+  deferSessionInstruction?: () => void;
   setPhase: (phase: CodexRunPhase) => void;
   isSettled: () => boolean;
   isCancelRequested: () => boolean;
@@ -951,6 +951,7 @@ export async function openCodexTurn({
   projectGoalResponse,
   setContinuationError,
   setCompatibilityError,
+  deferSessionInstruction,
   setPhase,
   isSettled,
   isCancelRequested,
@@ -979,26 +980,18 @@ export async function openCodexTurn({
   const providerConfig = modelProvider
     ? codexModelProviderThreadConfig(modelProvider, effectiveConfig)
     : null;
-  // A resumed thread keeps the dynamic tools it registered at thread/start,
-  // so instructions for packs it did not register leave both channels.
-  const withheldInstructions = options.sessionId
-    ? codexResumedThreadWithheldInstructions(options.sessionId, options.hostTools)
-    : [];
-  const sessionDeveloperInstructions = withoutSessionInstructions(
-    options.sessionDeveloperInstructions,
-    withheldInstructions,
-  );
-  const developerInstructions = codexDeveloperInstructions([
-    sessionDeveloperInstructions === undefined
+  const { developerInstructions, sessionInstructionApplied } = codexSessionDeveloperInstructions(
+    options.sessionDeveloperInstructions === undefined
       ? undefined
       : effectiveConfig
         ? configuredDeveloperInstructions(effectiveConfig)
         : await readConfiguredDeveloperInstructions(
           () => request("config/read", { includeLayers: false, cwd: options.cwd }, undefined, false),
         ),
-    sessionDeveloperInstructions,
+    options.sessionDeveloperInstructions,
     options.developerInstructions,
-  ]);
+  );
+  if (!sessionInstructionApplied) deferSessionInstruction?.();
   const threadConfig = {
     cwd: options.cwd,
     approvalPolicy: accessPolicy.approvalPolicy,
@@ -1016,11 +1009,9 @@ export async function openCodexTurn({
   if (options.sessionId) {
     try {
       // The audited App Server protocol persists thread/start dynamic tools in
-      // its rollout/state DB and exposes no registration field on resume, so
-      // the developer instructions and the prompt keep only instructions for
-      // packs this thread registered. Schema 65 clears Codex identities from before the current
-      // Browser tool capability epoch, so persisted sessions reaching this
-      // path own the Browser tools.
+      // its rollout/state DB and exposes no registration field on resume.
+      // Schema 65 clears Codex identities from before the current Browser tool
+      // capability epoch, so persisted sessions reaching this path own them.
       opened = await request("thread/resume", {
         threadId: options.sessionId,
         excludeTurns: true,
@@ -1039,7 +1030,7 @@ export async function openCodexTurn({
       ...threadConfig,
       ...(options.hostTools
         ? {
-            dynamicTools: codexThreadStartTools(options.hostTools).map((definition) => ({
+            dynamicTools: options.hostTools.definitions.map((definition) => ({
               name: definition.name,
               description: definition.description,
               inputSchema: definition.inputSchema,
@@ -1067,7 +1058,6 @@ export async function openCodexTurn({
       "Codex did not confirm the requested response service tier.",
     );
   }
-  if (!options.sessionId) recordCodexThreadRegistration(openedThreadId, options.hostTools);
   setProviderThreadId(openedThreadId);
   options.onSession?.(openedThreadId);
   if (isCancelRequested()) {
@@ -1140,7 +1130,9 @@ export async function openCodexTurn({
   }
   const input: JsonObject[] = [{
     type: "text",
-    text: withoutInternalProviderInstructions(options.prompt, withheldInstructions),
+    text: sessionInstructionApplied || options.sessionDeveloperInstructions === undefined
+      ? options.prompt
+      : codexPromptWithSessionInstruction(options.prompt, options.sessionDeveloperInstructions),
     text_elements: [],
   }];
   for (const skill of options.skills ?? []) {

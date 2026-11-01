@@ -7,7 +7,6 @@ import {
 } from "../../src/shared/model-routing";
 import type { ProviderRunInput } from "../../src/server/provider/contracts";
 import { createInertiaHarnessCapabilities } from "../../src/server/runtime/inertia-harness-capabilities";
-import { FULL_HARNESS_CAPABILITY_OFFER } from "../../src/server/runtime/harness-capabilities";
 import {
   BUILD_MODE_INSTRUCTION,
   type HiddenProviderInstruction,
@@ -49,6 +48,7 @@ async function chatRuntime(
   providerId: ProviderId,
   pack: () => readonly HiddenProviderInstruction[] = () => PACK,
   interactionMode: "build" | "plan" = "build",
+  reportIncident?: TurnControllerHooks["reportIncident"],
 ): Promise<{ runtime: TurnControllerTestRuntime; hooks: TurnControllerHooks; clock: () => Date }> {
   let clockMs = Date.parse("2030-01-01T00:00:00.000Z");
   const clock = () => new Date(clockMs++);
@@ -64,7 +64,8 @@ async function chatRuntime(
         harnessId: providerNativeHarnessId(providerId),
       },
     }],
-    capabilityOfferForTurn: () => ({ instructions: pack(), offer: FULL_HARNESS_CAPABILITY_OFFER }),
+    harnessInstructionsForTurn: () => pack(),
+    ...(reportIncident ? { reportIncident } : {}),
   };
   const runtime = await createTurnControllerTestRuntime(hooks, {
     modelSelection: providerNativeModelSelection({ providerId, modelId: "gpt-test" }),
@@ -79,7 +80,11 @@ async function runTurn(
   content: string,
   sessionId = "session-1",
   controller = runtime.controller,
-  options: { goalStart?: { objective: string }; compactionActivity?: string } = {},
+  options: {
+    goalStart?: { objective: string };
+    compactionActivity?: string;
+    sessionInstructionApplied?: false;
+  } = {},
 ): Promise<ProviderRunInput> {
   const queued = controller.queue({
     conversationId: runtime.conversationId,
@@ -99,7 +104,11 @@ async function runTurn(
       activityId: "compaction-1",
     });
   }
-  runtime.provider.resolve({ status: "completed", sessionId });
+  runtime.provider.resolve({
+    status: "completed",
+    sessionId,
+    ...(options.sessionInstructionApplied === false ? { sessionInstructionApplied: false } : {}),
+  });
   await flushTurnControllerTestPromises();
   expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed");
   return input;
@@ -228,6 +237,27 @@ describe("hidden instruction delivery", () => {
     expect(fallback.sessionInstruction).toBe(sessionText(runtime.conversationId));
     expect(fallback.prompt).toBe(`two\n\n${INSTRUCTIONS_HEADER}\n${sessionText(runtime.conversationId).replaceAll("\n\n[", "\n[")}`);
     expect(settled.prompt).toBe("three");
+    runtime.store.close();
+  });
+
+  it("falls back to the prompt when a Codex thread could not take its system instructions", async () => {
+    const incidents: unknown[] = [];
+    const { runtime } = await chatRuntime("codex", () => PACK, "build", (observation) => incidents.push(observation));
+
+    const deferred = await runTurn(runtime, "one", "session-1", runtime.controller, {
+      sessionInstructionApplied: false,
+    });
+    const fallback = await runTurn(runtime, "two");
+    const settled = await runTurn(runtime, "three");
+
+    expect(deferred.sessionInstruction).toBe(sessionText(runtime.conversationId));
+    expect(fallback.sessionId).toBe("session-1");
+    expect(fallback.prompt).toBe(`two\n\n${INSTRUCTIONS_HEADER}\n${sessionText(runtime.conversationId).replaceAll("\n\n[", "\n[")}`);
+    expect(settled.prompt).toBe("three");
+    expect(incidents).toEqual([expect.objectContaining({
+      code: "provider.session-instructions-deferred",
+      context: expect.objectContaining({ providerId: "codex" }),
+    })]);
     runtime.store.close();
   });
 

@@ -8,6 +8,7 @@ import { OrchestrationEffectOutbox } from "../../src/server/orchestration-v2/eff
 import { OrchestrationEventStore } from "../../src/server/orchestration-v2/event-store";
 import { durableJson } from "../../src/server/orchestration-v2/json";
 import { orchestrationV2Migration } from "../../src/server/persistence/migrations/orchestration-v2";
+import { orchestrationV2ReceiptStatusMigration } from "../../src/server/persistence/migrations/orchestration-v2-receipt-status";
 import type { CommandCommit, ProjectEvent } from "../../src/server/orchestration-v2/types";
 import {
   cleanupTurnControllerTestDirectories,
@@ -23,6 +24,7 @@ function fixture() {
   databases.push(db);
   db.pragma("foreign_keys = ON");
   db.exec(orchestrationV2Migration.up as string);
+  (orchestrationV2ReceiptStatusMigration.up as (database: Database.Database) => void)(db);
   let now = "2026-10-29T21:00:00.000Z";
   const clock = () => now;
   const store = new OrchestrationEventStore(db, project, "runtime-1", clock);

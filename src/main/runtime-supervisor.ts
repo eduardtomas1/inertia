@@ -702,6 +702,7 @@ export class RuntimeSupervisor {
       this.lastError = record.reportedFailure;
       this.startupBlockerCode = event.blockerCode ?? null;
       if (event.blockerCode) {
+        this.incidents.startupBlocked(record.runtimeGenerationId, event.blockerCode);
         // A reason-coded startup blocker is an authoritative safety decision,
         // not a transient crash. Let this generation finish its own bounded
         // cleanup, but close replacement admission before its exit can enter

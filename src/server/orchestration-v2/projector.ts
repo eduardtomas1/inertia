@@ -16,6 +16,8 @@ import { projectMergeBackEvent } from "./merge-back-projector";
 import { isDelegationEvent, projectDelegationEvent } from "./delegation-projector";
 import { OrchestrationConflict, type ProjectEvent, type ProjectionWrite } from "./types";
 
+export const ORCHESTRATION_V2_PROJECTION_VERSION = 1;
+
 export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   const event = orchestrationDomainEventSchema.parse({ type: envelope.type, payload: envelope.payload });
   const existingThread = read("thread", envelope.threadId);

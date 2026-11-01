@@ -298,6 +298,7 @@ export class RuntimeStore {
     });
     try {
       openRuntimeConnection(this.database, migrateRuntimeDatabase);
+      this.orchestration.maintainProjections();
       this.agentThreadManagement.recoverInterrupted();
       this.contextPackets.recoverInterruptedAgentRequests();
       this.projectRepository.enrollMissingPaths();

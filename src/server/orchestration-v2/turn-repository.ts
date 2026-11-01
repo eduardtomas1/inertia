@@ -10,6 +10,7 @@ import {
   orchestrationAttemptSchema,
   orchestrationCleanupReleaseSchema,
   orchestrationRunSchema,
+  orchestrationThreadSchema,
   type OrchestrationAttempt,
   type OrchestrationCleanupRelease,
   type OrchestrationDomainEvent,
@@ -19,7 +20,7 @@ import { OrchestrationEffectOutbox } from "./effect-outbox";
 import { CHECKPOINT_CAPTURE_EFFECT_KIND, checkpointCaptureEffect, type OrchestrationEffectRuntime } from "./effect-runtime";
 import { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint, durableJson } from "./json";
-import { projectOrchestrationEvent } from "./projector";
+import { ORCHESTRATION_V2_PROJECTION_VERSION, projectOrchestrationEvent } from "./projector";
 import { readPortableContinuationHistory } from "./portable-history-source";
 import { ProviderBackingRepository } from "./backing-repository";
 import { NativeBoundaryRepository } from "./native-boundary-repository";
@@ -30,7 +31,14 @@ import { MergeBackRepository, type MergeBackAccess } from "./merge-back-reposito
 import { DelegationRepository } from "./delegation-repository";
 import { OrchestrationCommandLanes } from "./command-lanes";
 import { providerInstanceId } from "./provider-instance";
-import { OrchestrationConflict, type CommandSource, type JsonValue, type OrchestrationEffect } from "./types";
+import {
+  OrchestrationConflict,
+  OrchestrationProjectionVerificationError,
+  type CommandSource,
+  type JsonValue,
+  type OrchestrationEffect,
+  type ProjectionMaintenance,
+} from "./types";
 
 interface TurnProjectionAccess extends MergeBackAccess {
   conversation(id: string): Conversation;
@@ -42,6 +50,12 @@ interface TurnProjectionAccess extends MergeBackAccess {
 
 function withoutCleanupRelease({ cleanupRelease: _release, ...attempt }: OrchestrationAttempt): OrchestrationAttempt {
   return attempt;
+}
+
+function readableProjection(kind: string, value: JsonValue): boolean {
+  if (kind === "thread") return orchestrationThreadSchema.safeParse(value).success;
+  if (kind === "run") return orchestrationRunSchema.safeParse(value).success;
+  return kind !== "attempt" || orchestrationAttemptSchema.safeParse(value).success;
 }
 
 /** Bridges existing transcript/execution projections into the V2 transaction. */
@@ -63,10 +77,11 @@ export class OrchestratedTurnRepository {
     private readonly access: TurnProjectionAccess,
     readonly runtimeId: string = randomUUID(),
     systemBootId: string | null = null,
+    projectionVersion: number = ORCHESTRATION_V2_PROJECTION_VERSION,
   ) {
     this.effects = new OrchestrationEffectOutbox(database, runtimeId);
     this.events = new OrchestrationEventStore(database, projectOrchestrationEvent, runtimeId, undefined,
-      () => this.effects.notifyAvailable());
+      () => this.effects.notifyAvailable(), projectionVersion, readableProjection);
     this.backings = new ProviderBackingRepository(database, this.events);
     this.nativeBoundaries = new NativeBoundaryRepository(database, this.events);
     this.history = new HistoryRollbackRepository(database, this.events);
@@ -74,6 +89,16 @@ export class OrchestratedTurnRepository {
     this.forks = new ForkRepository(database, this.events, this.nativeBoundaries, this.history, access);
     this.mergeBacks = new MergeBackRepository(database, this.events, this.forks, this.history, access);
     this.delegation = new DelegationRepository(database, this.events, access);
+  }
+
+  maintainProjections(): ProjectionMaintenance {
+    const checked = this.events.verify();
+    if (checked.valid) return { ...checked, rebuilt: false, beforeRebuild: null };
+    const beforeRebuild = this.events.verify({ readable: true });
+    this.delegation.rebuildProjections();
+    const repaired = this.events.verify({ readable: true });
+    if (!repaired.valid) throw new OrchestrationProjectionVerificationError(repaired);
+    return { ...repaired, rebuilt: true, beforeRebuild };
   }
 
   admit(

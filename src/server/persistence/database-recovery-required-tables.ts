@@ -1,3 +1,4 @@
+import { ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION } from "./migrations/orchestration-v2-receipt-status";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
 
 export type DatabaseRequiredTables = readonly (
@@ -156,6 +157,13 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
   ]],
   [111, "delegated_task_turns", ["child_turn_id", "task_id"]],
   [112, "app_state", ["delegation_automatic_wakes"]],
+  [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, "orchestration_v2_receipts", ["status", "error", "command_type"]],
+  [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, "orchestration_v2_projection_metadata", [
+    "projection_name",
+    "schema_version",
+    "last_sequence",
+    "updated_at",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -203,6 +211,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [99, ["watcher_links", "watcher_wakes"]],
   [103, ["turn_failure_kinds"]],
   [111, ["delegated_tasks", "delegated_task_turns"]],
+  [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, ["orchestration_v2_projection_metadata"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {

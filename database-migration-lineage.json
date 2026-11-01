@@ -853,6 +853,11 @@
       "version": 112,
       "name": "PersistDelegationAutomaticWakes",
       "digest": "d039ed0300f1a07b4211d8ac6d84289f2f6a4ecdd16ad35c9f02bf2aa79b2c9c"
+    },
+    {
+      "version": 113,
+      "name": "OrchestrationV2ReceiptStatusAndProjectionMetadata",
+      "digest": "5884cd9872f786352dd3259488cbf538adac7a6e722ad40429698ce5df5facaf"
     }
   ]
 }

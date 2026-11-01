@@ -2170,6 +2170,7 @@ describe("runtime migration catalog", () => {
       { version: 110 },
       { version: 111 },
       { version: 112 },
+      { version: 113 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2232,6 +2233,12 @@ describe("runtime migration catalog", () => {
     expect(migrated.prepare(
       "SELECT delegation_automatic_wakes AS automaticWakes FROM app_state WHERE id = 1",
     ).get()).toEqual({ automaticWakes: 1 });
+    expect((migrated.prepare("PRAGMA table_info(orchestration_v2_receipts)").all() as Array<{
+      name: string;
+    }>).map(({ name }) => name)).toEqual(expect.arrayContaining(["status", "error", "command_type"]));
+    expect(migrated.prepare(
+      "SELECT projection_name AS name, schema_version AS version, last_sequence AS sequence FROM orchestration_v2_projection_metadata",
+    ).all()).toEqual([{ name: "orchestration-v2", version: 1, sequence: 0 }]);
     expect((migrated.prepare("PRAGMA table_info(thread_usage)").all() as Array<{
       name: string;
     }>).map(({ name }) => name)).toEqual(expect.arrayContaining([

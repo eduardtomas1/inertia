@@ -1244,3 +1244,65 @@ lacked the upstream `conversationWork` dependency; `npm run build:bundle`
 passed with core at 2,521,262 of 2,521,518 bytes; the delegation wake,
 history rollback and session continuity Electron specs passed 7 of 7 on the
 second run after the first launch never reached the ready state.
+
+## G6: receipt status and projection metadata — 2026-11-01
+
+Migration 113 (`OrchestrationV2ReceiptStatusAndProjectionMetadata`,
+`src/server/persistence/migrations/orchestration-v2-receipt-status.ts`) adds
+`status`, `error` and `command_type` to `orchestration_v2_receipts` and creates
+`orchestration_v2_projection_metadata`, seeded with projector version 1 and the
+latest event sequence. It checks `PRAGMA table_info` and uses `IF NOT EXISTS`
+and `INSERT OR IGNORE`, so running it again changes nothing. Older receipts
+read as `accepted` with no command type. The event store now records the
+command type on every receipt, moves `last_sequence` forward in the same
+transaction as each commit that has events, and writes the metadata row when
+it rebuilds projections (pages of 500). `reject()` stores a `rejected`
+receipt, and both `receipt()` and `commit()` throw `OrchestrationCommandRejected`
+when that identity is replayed. A different payload still fails with
+`command-conflict`, and `human` and `runtime` receipts stay independent.
+`verify()` compares the projector version (`ORCHESTRATION_V2_PROJECTION_VERSION`
+in `projector.ts`), the projection sequence and the registered threads.
+`verify({ readable: true })` also reads every thread, run and attempt row
+against the shared schemas, in pages of 500.
+
+`RuntimeStore` calls `OrchestratedTurnRepository.maintainProjections()` right
+after migrating. A normal open runs only the cheap checks and parses no
+projection rows. When a cheap check fails, it records a full verification,
+rebuilds through `delegation.rebuildProjections()` (which also rebuilds the
+delegated-task index), and verifies again with the row scan. If that still
+fails, it throws `OrchestrationProjectionVerificationError`, a
+`RuntimeStartupBlockerError` with the new code
+`orchestration-projection-invalid`. The worker reports that code. The
+supervisor stops restarting and records the incident
+`runtime.orchestration-projection-invalid` in the diagnostics history. The
+connection tells the user that saved data and backups were not changed and
+points to Runtime diagnostics in Settings → Help. The support summary names
+the quarantine reason `orchestration-projection-rebuild-failed`. Nothing
+calls `reject()` yet: G5 will record rejections only for deterministic
+refusals of commands the user sends directly, and never for queue
+re-dispatch.
+
+Deliberate differences from T3 Code: receipts are scoped by actor and
+fingerprinted by payload; rejections are recorded only for those refusals;
+the cheap verification runs at every database open, not only before
+compaction; and there is still no event or receipt compaction.
+
+Tests: `tests/server/orchestration-v2-receipts.test.ts` has 16 cases. They
+cover rejected replay, actor independence, no-op receipts, sequence tracking,
+the version bump, corruption repair, a clean open that parses no rows, the
+boot-time rebuild with the delegated-task index, the typed blocker raised by
+both the repository and `RuntimeStore` when a rebuild still leaves an
+unreadable row, upgrades from schema 112 and 110, and an idempotent second
+run of 113. The migration, lineage, recovery-schema, worker startup-failure,
+supervisor preflight, connection, support-summary and incident tests were
+extended. A combined run of 58 files covered orchestration, migration,
+database and recovery tests plus the touched main-process and worker tests.
+It passed 736 of 748 tests, skipped 4 and failed 8. Four failures were
+Windows symlink `EPERM` errors. The other four were timeouts and lock
+contention in `database-migrations`, `database-recovery-import-worker`,
+`legacy-backfill-compatibility` and `orchestration-rollback-restore`.
+`database-migrations`, `database-recovery-import-worker` and
+`orchestration-rollback-restore` passed when rerun together.
+`legacy-backfill-compatibility` timed out in another case during that rerun
+and passed 11 of 11 when run alone. `check:migrations`, `check:architecture`,
+`lint` and `typecheck` passed. The full `npm run check` was not run.

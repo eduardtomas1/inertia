@@ -191,6 +191,10 @@ describe("lifecycle support report boundary", () => {
       "provider-installation-quarantined",
       "recovery-requires-manual-attention",
     ],
+    [
+      "orchestration-projection-invalid",
+      "recovery-requires-manual-attention",
+    ],
   ] as const)(
     "prefers the main-owned %s blocker over a stale renderer snapshot",
     async (startupBlockerCode, expectedState) => {
@@ -213,6 +217,11 @@ describe("lifecycle support report boundary", () => {
       const report = writeClipboard.mock.calls[0]?.[0] as string;
       expect(report).toContain(`Lifecycle state: ${expectedState}`);
       expect(report).toContain(`Startup blockers: ${startupBlockerCode}`);
+      expect(report).toContain(`Quarantine reason: ${startupBlockerCode === "prior-runtime-cleanup-unconfirmed"
+        ? "prior-runtime-cleanup-unconfirmed"
+        : startupBlockerCode === "orchestration-projection-invalid"
+          ? "orchestration-projection-rebuild-failed"
+          : "provider-maintenance-recovery-required"}`);
       expect(report).not.toContain("Lifecycle state: safe-and-ready");
     },
   );

@@ -13,6 +13,7 @@ import {
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "../../src/server/persistence/migrations/turn-scoped-indexes";
 import { DUO_COMPARISON_BRIEFS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/duo-comparison-briefs";
+import { ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/orchestration-v2-receipt-status";
 import { removeDelegatedTasksFromFixture } from "../support/legacy-project-settings-schema";
 
 const directories: string[] = [];
@@ -36,6 +37,14 @@ const contextPacketTriggers = [
 ];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION) {
+    database.exec(`
+      DROP TABLE orchestration_v2_projection_metadata;
+      ALTER TABLE orchestration_v2_receipts DROP COLUMN command_type;
+      ALTER TABLE orchestration_v2_receipts DROP COLUMN error;
+      ALTER TABLE orchestration_v2_receipts DROP COLUMN status;
+    `);
+  }
   if (version < 111) removeDelegatedTasksFromFixture(database);
   if (version < 107) database.exec(`
     DROP TABLE orchestration_v2_effects;
@@ -170,13 +179,17 @@ describe("database health check for settings and subagent columns", () => {
       "reasonings_conversation_created_idx",
     ].map((index) => ({ version: TURN_SCOPED_INDEXES_SCHEMA_VERSION, sql: `DROP INDEX ${index}` })),
     { version: DUO_COMPARISON_BRIEFS_SCHEMA_VERSION, sql: "ALTER TABLE messages DROP COLUMN duo_comparison_json" },
+    { version: ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, sql: "DROP TABLE orchestration_v2_projection_metadata" },
+    ...["status", "error", "command_type"].map((column) => ({ version: ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION,
+      sql: `ALTER TABLE orchestration_v2_receipts DROP COLUMN ${column}` })),
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each(Array.from({ length: DUO_COMPARISON_BRIEFS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each([...Array.from({ length: DUO_COMPARISON_BRIEFS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index), 112,
+    ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

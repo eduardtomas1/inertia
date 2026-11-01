@@ -15,6 +15,7 @@ import {
 } from "../../src/server/orchestration-v2/effect-runtime";
 import { OrchestrationEventStore } from "../../src/server/orchestration-v2/event-store";
 import { orchestrationV2Migration } from "../../src/server/persistence/migrations/orchestration-v2";
+import { orchestrationV2ReceiptStatusMigration } from "../../src/server/persistence/migrations/orchestration-v2-receipt-status";
 import type { EffectDraft, ProjectEvent } from "../../src/server/orchestration-v2/types";
 import { RuntimeStore } from "../../src/server/database";
 import { checkpointCaptureExecutor } from "../../src/server/runtime/checkpoint-capture-executor";
@@ -43,13 +44,17 @@ function databaseFile(): string {
   const directory = mkdtempSync(join(tmpdir(), "inertia-outbox-"));
   directories.push(directory);
   const path = join(directory, "orchestration.sqlite");
-  openDatabase(path).exec(orchestrationV2Migration.up as string);
+  migrateOrchestration(openDatabase(path));
   return path;
 }
 
 function memoryDatabase(): Database.Database {
-  const db = openDatabase();
+  return migrateOrchestration(openDatabase());
+}
+
+function migrateOrchestration(db: Database.Database): Database.Database {
   db.exec(orchestrationV2Migration.up as string);
+  (orchestrationV2ReceiptStatusMigration.up as (database: Database.Database) => void)(db);
   return db;
 }
 

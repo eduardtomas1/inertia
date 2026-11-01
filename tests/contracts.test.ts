@@ -550,6 +550,19 @@ describe("client command contract", () => {
     }).success).toBe(false);
   });
 
+  it("accepts provider and host-tool approval identities and rejects other approval identities", () => {
+    const respond = (requestId: string) => clientCommandSchema.safeParse({
+      type: "agent.approval.respond",
+      requestId: crypto.randomUUID(),
+      payload: { conversationId: crypto.randomUUID(), requestId, decision: "approve" },
+    }).success;
+    expect(respond(crypto.randomUUID())).toBe(true);
+    expect(respond(`inertia-host-tool:${crypto.randomUUID()}`)).toBe(true);
+    expect(respond("inertia-host-tool:forged")).toBe(false);
+    expect(respond(`inertia-host-tool:${crypto.randomUUID()}\n`)).toBe(false);
+    expect(respond(`other-tool:${crypto.randomUUID()}`)).toBe(false);
+  });
+
   it("accepts scoped turn-artifact reads and rejects unbounded or cross-shaped payloads", () => {
     const projectId = crypto.randomUUID();
     const conversationId = crypto.randomUUID();

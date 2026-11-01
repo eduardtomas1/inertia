@@ -80,13 +80,13 @@ const budgets = {
   // The review fixes and the collapsed dock handle add 863 workbench bytes;
   // removing the composer chip saves 873 detached bytes.
   // See docs/pr-evidence/watcher/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 902_835 + 512,
+  mainWorkbenchFirstLoadJavaScript: 904_996 + 512,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 796_620 + 512,
+  detachedChatFirstLoadJavaScript: 798_741 + 512,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -149,7 +149,7 @@ const budgets = {
   // Provider OAuth validation and its terminal UI remain off the initial route.
   deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,
-  deferredComposerQueueJavaScript: 13_302,
+  deferredComposerQueueJavaScript: 13_599 + 256,
   // Explicit recovery of pre-v55 saved prompts loads with the deferred stash menu.
   // Account only this new module here; all existing ceilings remain unchanged.
   deferredLegacyPromptStashJavaScript: 1.5 * kibibyte,
@@ -202,7 +202,7 @@ const budgets = {
   // (foundation) and 5,734 bytes of eager renderer wiring, after subtracting
   // the separately capped deferred dock and attach dialog closures. The review
   // fixes add 1,078 core bytes.
-  coreJavaScript: 2_448_860 + 29_203 + 7_060 + 233 + 419 + 256,
+  coreJavaScript: 2_448_860 + 29_203 + 7_060 + 233 + 419 + 32_310 + 2_293 + 530 + 354 + 256,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

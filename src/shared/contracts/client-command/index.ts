@@ -15,6 +15,8 @@ import { updatesCommandSchemas } from "./updates";
 import { watcherCommandSchemas } from "./watcher";
 import { forkCommandSchemas } from "./forks";
 import { cursorSdkCommandSchemas } from "./cursor-sdk";
+import { delegationCommandSchemas } from "./delegation";
+import { observedChildCommandSchemas } from "./observed-children";
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   ...appCommandSchemas,
@@ -28,6 +30,8 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...watcherCommandSchemas,
   ...forkCommandSchemas,
   ...cursorSdkCommandSchemas,
+  ...delegationCommandSchemas,
+  ...observedChildCommandSchemas,
   ...gitCommandSchemas,
   ...workspaceCommandSchemas,
 ]);

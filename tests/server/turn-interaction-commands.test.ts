@@ -173,6 +173,7 @@ function dependencies(options: {
   return {
     store: {
       orchestration: { acceptedRequest: vi.fn(() => null) },
+      conversationWork: { restoreBlocksConversation: vi.fn(() => false) },
       conversation: vi.fn(() => ({
         id: conversationId,
         title: "Existing conversation",

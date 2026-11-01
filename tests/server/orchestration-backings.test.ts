@@ -196,6 +196,31 @@ describe("durable native provider backings and context delivery", () => {
       expect(runtime.store.orchestration.backings.handoff(settled.turn.runId)).toBeNull();
     } finally { runtime.store.close(); }
   });
+
+  it("names the context retrieval tool in portable history only on a route whose host tool bridge is attested", async () => {
+    const runtime = await handoffRuntime();
+    try {
+      const claude = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue on Claude" });
+      runtime.controller.start(claude.turn.id);
+      const unattested = runtime.provider.input?.prompt ?? "";
+      expect(unattested).toContain("Original answer");
+      expect(unattested).toContain("Omitted history cannot be retrieved in this session");
+      expect(unattested).not.toContain("inertia_request_context");
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "claude-native" });
+      runtime.provider.resolve({ text: "Claude answer", sessionId: "claude-native" });
+      await flushTurnControllerTestPromises();
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "codex",
+        modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test", reasoningEffort: "high" }) });
+      const returned = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex" });
+      runtime.controller.start(returned.turn.id);
+      const attested = runtime.provider.input?.prompt ?? "";
+      expect(attested).toContain("Claude answer");
+      expect(attested).toContain("Retrieve omitted turns with inertia_request_context");
+      expect(attested).not.toContain("Omitted history cannot be retrieved in this session");
+      runtime.provider.resolve({ text: "Back on Codex", sessionId: "original-native" });
+      await flushTurnControllerTestPromises();
+    } finally { runtime.store.close(); }
+  });
 });
 
 const usageSnapshot = (usedTokens: number | null, maxTokens: number | null): AgentTurnUsageSnapshot => ({

@@ -233,6 +233,7 @@ export interface ReadOnlyWatcherTurn {
 export interface FollowUpSteerOptions {
   providerContent?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   queuedMessageId?: string;
 }
 
@@ -254,6 +255,7 @@ export interface QueueTurnRequest {
   duoComparison?: DuoComparisonBrief;
   authorizedWatcherWakeId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   content: string;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];

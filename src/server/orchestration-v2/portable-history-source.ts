@@ -11,7 +11,7 @@ import { WATCHER_NOTE_HISTORY_LABELS } from "../../shared/watcher";
 import { sentConversationContextReferences } from "../persistence/conversation-context-packet-repository";
 import { sentReferenceBlocks, type ContinuationHistoryBlock } from "../persistence/continuation-history";
 import { RESTORED_CHAT_HISTORY_LABEL } from "../persistence/conversation-context-transport";
-import { providerHandoffBlockBytes, providerHandoffFilesBlock } from "../persistence/provider-handoff-files";
+import { providerHandoffBlockBytes } from "../persistence/provider-handoff-files";
 import type { AgentPlanRow } from "../persistence/rows";
 import {
   portableCommandText, portableErrorText, portableFileChangeText, portableInterruptText, portablePlanText,
@@ -271,7 +271,6 @@ export function readPortableContinuationHistory(database: Database.Database, inp
     blocks.push(block);
     remaining -= cost;
   };
-  if (input.route) append(providerHandoffFilesBlock(database, input.threadId, input.route));
   const moved = input.route?.handoff ? providerHandoffReason(database, input.threadId,
     input.route.handoff.before, input.route.handoff.providerId) : null;
   if (moved) append({ label: "Handoff outcome", optional: true, structured: true, content: JSON.stringify({ moved }) });

@@ -34,6 +34,7 @@ interface AgentThreadRuntimeDependencies {
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   agentBrowser?: RuntimeAgentBrowserBroker;
   watcherPolicy?: AgentContextWatcherPolicy;
+  delegation?: import("./delegation/task-service").DelegationTaskService;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;

@@ -4,6 +4,7 @@ import { nativeControlSchema, type NativeControl, type NativeControlEvent } from
 import type { NativeConversationResult } from "../provider/native-conversation-operations";
 import type { OrchestrationEventStore } from "./event-store";
 import type { OrchestrationEffectOutbox } from "./effect-outbox";
+import { CHECKPOINT_CAPTURE_EFFECT_KIND } from "./effect-runtime";
 import { commandFingerprint, durableJson } from "./json";
 import { OrchestrationConflict, type CommandSource, type JsonValue, type OrchestrationEffect } from "./types";
 import { nativeControlLockResources } from "./native-control-projector";
@@ -55,7 +56,7 @@ export class NativeControlRepository {
         threadId: control.threadId, command: source?.command ?? event, expectedRevision: this.events.revision(control.threadId),
         events: [event], effects: [{ id: effectId, eventIndex: 0, kind: `native.${control.request.kind}`, replayPolicy: "process-bound",
           payload: { operationId: control.id } }], result: source ? result : { operationId: control.id } });
-      const effect = this.effects.claim(effectId);
+      const effect = this.effects.claim(effectId, { passing: [CHECKPOINT_CAPTURE_EFFECT_KIND] });
       if (!effect) throw new OrchestrationConflict("revision-conflict");
       return effect;
     }).immediate();

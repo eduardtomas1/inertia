@@ -55,6 +55,7 @@ export class OrchestrationEventStore {
     private readonly project: ProjectEvent,
     readonly runtimeId: string,
     private readonly clock: () => string = () => new Date().toISOString(),
+    private readonly onEffectsCommitted: (() => void) | null = null,
   ) {
     durableId(runtimeId);
   }
@@ -111,7 +112,7 @@ export class OrchestrationEventStore {
       }
       return { ...effect, json: durableJson(effect.payload) };
     });
-    return this.database.transaction((): CommitResult => {
+    const committed = this.database.transaction((): CommitResult => {
       const existing = this.receipt(input, input.command);
       if (existing) return { replayed: true, receipt: existing, events: [] };
       const head = this.database.prepare(`SELECT project_id, revision FROM orchestration_v2_events
@@ -153,6 +154,8 @@ export class OrchestrationEventStore {
           receipt.firstSequence, receipt.lastSequence, resultJson, now);
       return { replayed: false, receipt, events };
     }).immediate();
+    if (!committed.replayed && effects.length > 0) this.onEffectsCommitted?.();
+    return committed;
   }
 
   readEvents(input: { projectId: string; threadId?: string; afterSequence?: number; limit?: number }): OrchestrationEvent[] {
@@ -170,7 +173,7 @@ export class OrchestrationEventStore {
   }
 
   /** Offline recovery only: effects and receipts are never re-executed by rebuilding projections. */
-  rebuildProjections(): void {
+  rebuildProjections(rebuildCompatibilityProjections?: () => void): void {
     this.database.transaction(() => {
       this.database.prepare("DELETE FROM orchestration_v2_entities").run();
       let after = 0;
@@ -181,6 +184,7 @@ export class OrchestrationEventStore {
         for (const row of rows) this.applyProjection(eventFromRow(row));
         after = rows.at(-1)!.sequence;
       }
+      rebuildCompatibilityProjections?.();
     }).immediate();
   }
 

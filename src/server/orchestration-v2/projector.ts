@@ -13,6 +13,7 @@ import { projectForkEvent } from "./fork-projector";
 import { projectNativeControl } from "./native-control-projector";
 import { projectHistoryEvent } from "./history-projector";
 import { projectMergeBackEvent } from "./merge-back-projector";
+import { isDelegationEvent, projectDelegationEvent } from "./delegation-projector";
 import { OrchestrationConflict, type ProjectEvent, type ProjectionWrite } from "./types";
 
 export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
@@ -34,6 +35,7 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
     return projectHistoryEvent(event, envelope, read);
   }
   if (event.type === "merge-back.prepared" || event.type === "merge-back.changed") return projectMergeBackEvent(event, envelope, read);
+  if (isDelegationEvent(event)) return projectDelegationEvent(event, envelope, read);
   if (event.type === "provider.native-boundary") return projectNativeBoundary(event, envelope, read);
   if (event.type === "thread.forked" || event.type === "fork.history-part" || event.type === "fork.history-sealed") {
     return projectForkEvent(event, envelope, read);

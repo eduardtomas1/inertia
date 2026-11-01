@@ -234,6 +234,10 @@ export type ServerEvent =
         | import("../orchestration-forks").ForkHistoryResult
         | import("../orchestration-history").ConversationRollbackResult
         | import("../orchestration-merge-back").MergeBackResult
+        | import("./client-command/delegation").DelegationTaskResult
+        | import("./client-command/delegation").DelegationCancelResult
+        | import("./client-command/delegation").DelegationDeliveryResult
+        | import("../observed-child-thread").ObservedChildReadResult
         | { kind: "todo.started"; conversationId: string }
         | { kind: "conversation.cli.scan"; scan: CliConversationScan }
         | { kind: "conversation.cli.preview"; preview: CliConversationPreview }

@@ -9,6 +9,11 @@ import { AGENT_GOAL_STATUSES } from "../agent-workflows";
 
 export const MAX_AGENT_INPUT_QUESTIONS = 4;
 
+const agentApprovalRequestIdSchema = z.union([
+  z.string().uuid(),
+  z.string().regex(/^inertia-host-tool:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u),
+]);
+
 export const messageSendPayloadSchema = z
   .object({
     conversationId: z.string().uuid(),
@@ -153,7 +158,7 @@ export const agentCommandSchemas = [
       type: z.literal("agent.approval.respond"),
       payload: z.object({
         conversationId: z.string().uuid(),
-        requestId: z.string().uuid(),
+        requestId: agentApprovalRequestIdSchema,
         decision: z.enum(["approve", "deny", "cancel"]),
       }).strict(),
     })

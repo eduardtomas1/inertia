@@ -202,7 +202,7 @@ describe("deferred native history rollback", () => {
     } finally { runtime.store.close(); }
   });
 
-  it("leaves rolled-back file changes out of fresh-session and provider-switch handoffs", async () => {
+  it("carries retained turns' file changes as per-turn items and leaves rolled-back ones out of fresh-session and provider-switch handoffs", async () => {
     const runtime = await createTurnControllerTestRuntime();
     try {
       const first = await finish(runtime, "first");
@@ -214,8 +214,8 @@ describe("deferred native history rollback", () => {
       await expect(rollback(runtime, deps, first.id)).resolves.toMatchObject({ transfer: "portable", reason: "unsupported" });
       send(runtime, "fresh request");
       expect(runtime.provider.input?.sessionId).toBeUndefined();
-      expect(runtime.provider.input?.prompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
-      expect(runtime.provider.input?.prompt).toContain('"content":{"files":["M src/retained.ts +3 -1"]}');
+      expect(runtime.provider.input?.prompt).not.toContain(PROVIDER_HANDOFF_FILES_LABEL);
+      expect(runtime.provider.input?.prompt).toContain("File change (modified): src/retained.ts");
       expect(runtime.provider.input?.prompt).not.toContain("src/rolled-back.ts");
       runtime.provider.resolve({ text: "fresh answer", sessionId: "renewed-native" });
       await flushTurnControllerTestPromises();
@@ -227,8 +227,8 @@ describe("deferred native history rollback", () => {
       send(runtime, "switched request");
       expect(runtime.provider.input?.providerId).toBe("claude");
       expect(runtime.provider.input?.sessionId).toBeUndefined();
-      expect(runtime.provider.input?.prompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
-      expect(runtime.provider.input?.prompt).toContain('"content":{"files":["M src/retained.ts +3 -1"]}');
+      expect(runtime.provider.input?.prompt).not.toContain(PROVIDER_HANDOFF_FILES_LABEL);
+      expect(runtime.provider.input?.prompt).toContain("File change (modified): src/retained.ts");
       expect(runtime.provider.input?.prompt).not.toContain("src/rolled-back.ts");
       runtime.provider.resolve({ text: "switched answer", sessionId: "claude-native" });
       await flushTurnControllerTestPromises();

@@ -10,6 +10,7 @@ import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { WatcherWakeRequest } from "./WatcherWakeRequest";
+import { DelegatedCompletionCard } from "../orchestration/delegated-completion-card";
 import { DuoComparisonRequest } from "./DuoComparisonRequest";
 import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
@@ -130,6 +131,9 @@ export function UserRequestLayer({
   ) ?? [];
   const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
   if (turn.watcherWake) return <WatcherWakeRequest turn={turn} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
+  if (turn.userMessage.delegatedCompletion) {
+    return <DelegatedCompletionCard message={turn.userMessage} turnId={turn.id} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
+  }
   const watcherNote = turn.userMessage.role === "user" ? turn.userMessage.watcherNote : undefined;
   const requestMeta = (turn.userMessage.privateConnectDeviceId || watcherNote || turnCheckpoint || turn.extraCheckpoints.length > 0 || turn.checkpointUnavailableReason !== null) && (
     <div className="message-meta">
@@ -398,6 +402,7 @@ export function AgentExecutionLayer({
       <TurnAgentsLine
         conversationId={props.conversationId}
         turnId={turn.id}
+        turnIndex={turn.index}
         subagents={subagents}
         onOpenSurface={props.onOpenSurface}
       />

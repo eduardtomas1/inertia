@@ -4,6 +4,7 @@ import type Database from "better-sqlite3";
 
 import type { AgentTurn, ChatMessage, Conversation } from "../../shared/contracts";
 import { modelSelectionSchema } from "../../shared/model-routing";
+import { TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS } from "../../shared/runtime-command-timeouts";
 import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import {
   orchestrationAttemptSchema,
@@ -15,6 +16,7 @@ import {
 } from "../../shared/orchestration-v2";
 import type { BeginAgentTurnInput, NewConversationOptions } from "../persistence/types";
 import { OrchestrationEffectOutbox } from "./effect-outbox";
+import { CHECKPOINT_CAPTURE_EFFECT_KIND, checkpointCaptureEffect, type OrchestrationEffectRuntime } from "./effect-runtime";
 import { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint, durableJson } from "./json";
 import { projectOrchestrationEvent } from "./projector";
@@ -25,6 +27,7 @@ import { NativeControlRepository } from "./native-control-repository";
 import { ForkRepository } from "./fork-repository";
 import { HistoryRollbackRepository } from "./history-rollback-repository";
 import { MergeBackRepository, type MergeBackAccess } from "./merge-back-repository";
+import { DelegationRepository } from "./delegation-repository";
 import { OrchestrationCommandLanes } from "./command-lanes";
 import { providerInstanceId } from "./provider-instance";
 import { OrchestrationConflict, type CommandSource, type JsonValue, type OrchestrationEffect } from "./types";
@@ -51,7 +54,9 @@ export class OrchestratedTurnRepository {
   readonly forks: ForkRepository;
   readonly history: HistoryRollbackRepository;
   readonly mergeBacks: MergeBackRepository;
+  readonly delegation: DelegationRepository;
   readonly lanes = new OrchestrationCommandLanes();
+  #effectRuntime: OrchestrationEffectRuntime | null = null;
 
   constructor(
     private readonly database: Database.Database,
@@ -59,14 +64,16 @@ export class OrchestratedTurnRepository {
     readonly runtimeId: string = randomUUID(),
     systemBootId: string | null = null,
   ) {
-    this.events = new OrchestrationEventStore(database, projectOrchestrationEvent, runtimeId);
     this.effects = new OrchestrationEffectOutbox(database, runtimeId);
+    this.events = new OrchestrationEventStore(database, projectOrchestrationEvent, runtimeId, undefined,
+      () => this.effects.notifyAvailable());
     this.backings = new ProviderBackingRepository(database, this.events);
     this.nativeBoundaries = new NativeBoundaryRepository(database, this.events);
     this.history = new HistoryRollbackRepository(database, this.events);
     this.nativeControls = new NativeControlRepository(database, this.events, this.effects, this.history, runtimeId, systemBootId);
     this.forks = new ForkRepository(database, this.events, this.nativeBoundaries, this.history, access);
     this.mergeBacks = new MergeBackRepository(database, this.events, this.forks, this.history, access);
+    this.delegation = new DelegationRepository(database, this.events, access);
   }
 
   admit(
@@ -226,9 +233,14 @@ export class OrchestratedTurnRepository {
       startedAt: run.startedAt, completedAt: run.completedAt, terminalMessageId: run.terminalMessageId,
       nativeSessionId: attempt.nativeSessionId };
     if (durableJson(before) === durableJson(event.payload)) return;
+    const capture = isAgentTurnTerminalStatus(turn.status) && !isAgentTurnTerminalStatus(run.status)
+      && !this.readOnlyWatcher(turn.conversationId)
+      ? checkpointCaptureEffect({ conversationId: turn.conversationId, turnId: turn.id, runId: turn.runId }, 0)
+      : null;
     this.events.commit({ actorId: "runtime", commandId: `lifecycle:${commandFingerprint({ turnId: turn.id, ...event.payload })}`,
       projectId: run.projectId, threadId: run.threadId, command: event,
-      expectedRevision: this.events.revision(run.threadId), events: [event], result: null });
+      expectedRevision: this.events.revision(run.threadId), events: [event],
+      ...(capture && !this.effects.get(capture.id) ? { effects: [capture] } : {}), result: null });
     if (isAgentTurnTerminalStatus(turn.status)) this.effects.retirePending(this.startEffectId(turn.runId), "run-settled");
     this.backings.settle(turn);
     this.history.settleRun(turn, (backing) => this.backings.invalidate(backing, "uncertain-delivery"));
@@ -296,10 +308,32 @@ export class OrchestratedTurnRepository {
   }
 
   claimStart(runId: string): OrchestrationEffect | null {
-    return this.effects.claim(this.startEffectId(runId));
+    return this.effects.claim(this.startEffectId(runId), { passing: [CHECKPOINT_CAPTURE_EFFECT_KIND] });
   }
 
-  dispatchStart(runId: string, dispatch: () => boolean): boolean {
+  attachEffectRuntime(runtime: OrchestrationEffectRuntime): void {
+    this.#effectRuntime = runtime;
+  }
+
+  captureBarrier(runId: string, timeoutMs = TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS): Promise<void> | null {
+    const runtime = this.#effectRuntime;
+    const intent = this.startIntent(runId);
+    if (!runtime?.executes(CHECKPOINT_CAPTURE_EFFECT_KIND) || intent?.state !== "pending") return null;
+    const captures = this.effects.unsettledBefore(intent.threadId, intent.sequence, [CHECKPOINT_CAPTURE_EFFECT_KIND]);
+    if (captures.length === 0) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, Math.max(1, timeoutMs));
+      timer.unref?.();
+    });
+    return Promise.race([Promise.allSettled(captures.map((id) => runtime.awaitSettled(id))).then(() => undefined), expired])
+      .finally(() => { clearTimeout(timer); });
+  }
+
+  dispatchStart(runId: string, dispatch: () => boolean,
+    defer?: (barrier: Promise<void>, resume: () => boolean) => boolean): boolean {
+    const barrier = defer ? this.captureBarrier(runId) : null;
+    if (barrier) return defer!(barrier, () => this.dispatchStart(runId, dispatch));
     const intent = this.startIntent(runId);
     const claim = intent ? this.claimStart(runId) : null;
     if (intent && !claim) return false;
@@ -326,6 +360,11 @@ export class OrchestratedTurnRepository {
       reconcileCompatibilityProjection();
       this.reconcile();
     })();
+  }
+
+  private readOnlyWatcher(conversationId: string): boolean {
+    return this.database.prepare(`SELECT 1 FROM watcher_links
+      WHERE watcher_conversation_id = ? AND status <> 'detached' AND read_only <> 0`).get(conversationId) !== undefined;
   }
 
   private startEffectId(runId: string): string {

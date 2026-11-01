@@ -214,11 +214,13 @@ describe("provider handoff continuation", () => {
     expect(prompt).toContain("Export the customer list as UTF-8.");
     expect(prompt).toContain("CLAUDE_REPLY_SENTINEL: the exporter now writes UTF-8.");
     expect(prompt).toContain("Continue on Codex.");
-    expect(prompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
-    expect(prompt).toContain('"content":{"files":["A src/export.ts +43 -1","M src/legacy-export.ts +2 -5"]}');
+    expect(prompt).not.toContain(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(prompt).toContain("File change (added): src/export.ts");
+    expect(prompt).toContain("File change (modified): src/legacy-export.ts");
+    expect(prompt).toContain("File change (modified): src/export.ts");
     expect(prompt).toContain('"moved":"from Claude by the user\'s choice"');
     expect(f.store.turnExecutionManifest(handoff.queued.turn.id)?.references.map(({ label }) => label))
-      .toContain(PROVIDER_HANDOFF_FILES_LABEL);
+      .not.toContain(PROVIDER_HANDOFF_FILES_LABEL);
   });
 
   it("keeps restoring the Claude messages after the first Codex turn fails before a session exists", async () => {
@@ -234,7 +236,8 @@ describe("provider handoff continuation", () => {
     expect(retry.queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 5, omittedMessageCount: 0 });
     expect(retry.providerInput.prompt).toContain("CLAUDE_REPLY_SENTINEL: the exporter now writes UTF-8.");
     expect(retry.providerInput.prompt).toContain("Continue on Codex.");
-    expect(retry.providerInput.prompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(retry.providerInput.prompt).not.toContain(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(retry.providerInput.prompt).toContain("File change (modified): src/legacy-export.ts");
   });
 
   it("does not let messages from a later endpoint leak back through the handoff", async () => {
@@ -477,7 +480,7 @@ describe("provider handoff continuation", () => {
     expect(later.providerInput.prompt).toContain("CODEX_DEFAULT_REPLY");
   });
 
-  it("lists the changed files when a rejected Claude resume restarts on a fresh session", async () => {
+  it("carries the changed files as per-turn items when a rejected Claude resume restarts on a fresh session", async () => {
     const f = await fixture();
     f.seedClaudeHistory();
     const resolved = f.resolve({ content: "Keep going on Claude." });
@@ -487,8 +490,8 @@ describe("provider handoff continuation", () => {
     const fresh = active.freshSessionRequest!(queued.message.id);
     expect(fresh.sessionRecovery).toEqual({ restoredMessageCount: 4, omittedMessageCount: 0 });
     expect(fresh.executionPrompt).toContain("CLAUDE_REPLY_SENTINEL");
-    expect(fresh.executionPrompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
-    expect(fresh.executionPrompt).toContain("src/legacy-export.ts");
+    expect(fresh.executionPrompt).not.toContain(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(fresh.executionPrompt).toContain("File change (modified): src/legacy-export.ts");
   });
 
   it("carries a reference used before the switch to the new provider", async () => {

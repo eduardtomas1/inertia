@@ -150,6 +150,7 @@ export interface BeginAgentTurnInput
   content: string;
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   duoComparison?: DuoComparisonBrief;
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
@@ -171,6 +172,7 @@ export interface BeginAgentTurnInput
 export interface CreateMessageOptions {
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   duoComparison?: DuoComparisonBrief;
   compaction?: import("../../shared/context-compaction").ContextCompaction;
   /** Turn-scoped system messages only; written with its html_renders row. */

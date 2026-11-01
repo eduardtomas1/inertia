@@ -134,7 +134,8 @@ describe("provider session continuity", () => {
     expect(input.prompt).toContain("I will use UTF-8 and verify café.");
     expect(input.prompt).toContain("Continue the export.");
     expect(input.prompt).toContain("3 intact historical items included; 0 omitted.");
-    expect(input.prompt).toContain("inertia_request_context");
+    expect(input.prompt).toContain("Omitted history cannot be retrieved in this session");
+    expect(input.prompt).not.toContain("inertia_request_context");
     expect(input.prompt.indexOf("The export must preserve accented names.")).toBeLessThan(input.prompt.indexOf("I will use UTF-8 and verify café."));
     expect(input.prompt.indexOf("I will use UTF-8 and verify café.")).toBeLessThan(input.prompt.indexOf("Continue the export."));
     expect(input.prompt).not.toContain("OTHER_CHAT_PRIVATE_SENTINEL");
@@ -629,7 +630,8 @@ describe("restored history on a custom backend", () => {
       expect(result.recovery!.restoredMessageCount).toBeGreaterThan(0);
       expect(result.recovery!.omittedMessageCount).toBeGreaterThan(0);
       expect(result.recovery!.restoredMessageCount + result.recovery!.omittedMessageCount).toBe(42);
-      expect(result.prompt).toContain("inertia_request_context");
+      expect(result.prompt).toContain("Omitted history cannot be retrieved in this session");
+      expect(result.prompt).not.toContain("inertia_request_context");
       expect(result.prompt).toContain("The export must preserve accented names.");
       expect(result.prompt).toContain(`message-38: ${"x".repeat(4_000)}`);
       expect(result.prompt).toContain(`message-39: ${"x".repeat(4_000)}`);

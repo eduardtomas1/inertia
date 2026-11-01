@@ -33,6 +33,9 @@ import { watcherMutationEvent, watcherRequestResultValidators, watcherWakeSummar
 import { forkHistoryResultSchema } from "../orchestration-forks";
 import { conversationRollbackResultSchema, rolledBackTurnIdsCoherent } from "../orchestration-history";
 import { mergeBackResultSchema } from "../orchestration-merge-back";
+import { conversationDelegationSchema } from "../orchestration-delegation";
+import { observedChildReadResultSchema } from "../observed-child-thread";
+import { delegationCancelResultSchema, delegationDeliveryResultSchema, delegationTaskResultSchema } from "./client-command/delegation";
 import { cursorSdkLoginEventSchema, cursorSdkStatusResultSchema, cursorSdkModelsResultSchema } from "./cursor-sdk-auth-schema";
 import { compactOnReturnResultValidators, isConversationCompactionState, isPromptCacheFacts, validCompactOnReturnSetting } from "./compact-on-return-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "pi"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
@@ -367,7 +370,8 @@ function appSettings(value: unknown): boolean {
     && validAttachmentStorageSettings(value)
     && (value.workingIndicator === undefined || isWorkingIndicatorSettings(value.workingIndicator))
     && (value.completionSound === undefined || isCompletionSoundSettings(value.completionSound))
-    && validNotificationSettings(value) && validCompactOnReturnSetting(value);
+    && validNotificationSettings(value) && validCompactOnReturnSetting(value)
+    && (value.delegationAutomaticWakes === undefined || typeof value.delegationAutomaticWakes === "boolean");
 }
 function appSnapshot(value: unknown): boolean {
   if (!(record(value)
@@ -999,6 +1003,7 @@ function conversationDetail(
     && (value.rollbackRevision === undefined
       || (typeof value.rollbackRevision === "number" && Number.isSafeInteger(value.rollbackRevision) && value.rollbackRevision >= 0))
     && watcherWakeSummariesCoherent(value.watcherWakes, value.agentTurns)
+    && (value.delegation === undefined || conversationDelegationSchema.safeParse(value.delegation).success)
     && conversationDetailCollectionsCoherent(value, conversationId);
 }
 
@@ -1109,6 +1114,10 @@ const REQUEST_RESULT_VALIDATORS = {
   "conversation.fork.history": (value) => forkHistoryResultSchema.safeParse(value).success,
   "conversation.rollback": (value) => conversationRollbackResultSchema.safeParse(value).success,
   "conversation.merge-back": (value) => mergeBackResultSchema.safeParse(value).success,
+  "delegation.task": (value) => delegationTaskResultSchema.safeParse(value).success,
+  "delegation.task.cancel": (value) => delegationCancelResultSchema.safeParse(value).success,
+  "delegation.delivery": (value) => delegationDeliveryResultSchema.safeParse(value).success,
+  "observed-child.read": (value) => observedChildReadResultSchema.safeParse(value).success,
   "provider.cursor-sdk.status": (value) => cursorSdkStatusResultSchema.safeParse(value).success,
   "provider.cursor-sdk.models": (value) => cursorSdkModelsResultSchema.safeParse(value).success,
   "todo.started": (value) => stringField(value, "conversationId"),

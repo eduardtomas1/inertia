@@ -44,7 +44,8 @@ function cloneRow(database: Database.Database, table: string, sourceId: string, 
 }
 
 const rows = (database: Database.Database, sql: string): Row[] => database.prepare(sql).all() as Row[];
-const withoutNote = (entries: Row[]): Row[] => entries.map(({ watcher_note_json: _note, duo_comparison_json: _duo, ...row }) => row);
+const withoutNote = (entries: Row[]): Row[] => entries.map(({ watcher_note_json: _note, duo_comparison_json: _duo,
+  delegated_completion_json: _delegated, ...row }) => row);
 
 async function schema98Database() {
   const directory = await mkdtemp(join(tmpdir(), "inertia-watcher-migration-"));
@@ -102,8 +103,9 @@ describe("watcher link migration", () => {
       const messages = rows(migrated, "SELECT * FROM messages ORDER BY id");
       expect(withoutNote(messages)).toEqual(before.messages);
       expect(messages.every((row) => row.watcher_note_json === null)).toBe(true);
-      expect(messages.every((row) => row.duo_comparison_json === null)).toBe(true);
+      expect(messages.every((row) => row.duo_comparison_json === null && row.delegated_completion_json === null)).toBe(true);
       const queued = rows(migrated, "SELECT * FROM queued_messages ORDER BY sequence");
+      expect(queued.every((row) => row.delegated_completion_json === null)).toBe(true);
       expect(withoutNote(queued)).toEqual(before.queued);
       expect(rows(migrated, "SELECT * FROM agent_context_reads ORDER BY id")).toEqual(before.reads);
       expect(rows(migrated, `

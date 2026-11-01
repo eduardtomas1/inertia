@@ -174,6 +174,7 @@ export async function initializeRuntimePersistence(
       }
     }
     orchestrationEffects = new OrchestrationEffectRuntime(store.orchestration.effects);
+    store.orchestration.attachEffectRuntime(orchestrationEffects);
     if (!runtimeSafetyLock) orchestrationEffects.start();
     return { conversationAttachments, recovery, providerMaintenanceJournal, orchestrationEffects };
   } catch (error) {

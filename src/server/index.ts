@@ -43,6 +43,7 @@ import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError, userCorrectableRuntimeError } from "./runtime-errors";
 import { ScratchWorkspace } from "./runtime/scratch-workspace";
 import { PostReadyWork, shellSnapshotDigest } from "./runtime/post-ready-work";
+import { checkpointCaptureExecutor } from "./runtime/checkpoint-capture-executor";
 import { isWithinScratchRoot, SCRATCH_RECOVERY_TARGET_REFUSAL } from "./scratch-root";
 import {
   ProjectIdentityRefresher,
@@ -70,6 +71,7 @@ import { createWatcherRuntime, type WatcherRuntime } from "./runtime/watcher/wat
 import { createWatcherTurnPolicy } from "./runtime/watcher/watcher-turn-policy";
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
+import { createDelegationRuntime, type DelegationRuntime } from "./runtime/delegation/delegation-runtime";
 import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
 import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/agent-thread-runtime";
@@ -141,6 +143,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
   let agentThreads: AgentThreadRuntime | undefined;
+  let delegation: DelegationRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
   let watchers: WatcherRuntime | undefined;
   let closed = false;
@@ -160,7 +163,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       duoLaunchCoordinator.resumeComparisons(),
       Promise.resolve(watchers?.resume()),
     ]),
-    reconcileArtifacts: () => turnGitArtifacts.reconcile(),
+    reconcileArtifacts: () => {
+      registerCheckpointCaptures();
+      return turnGitArtifacts.reconcile();
+    },
     snapshotDigest: () => shellSnapshotDigest(currentSnapshot()),
     broadcastSnapshot: () => broadcastSnapshot(),
     startProviderDiscovery: () => {
@@ -228,6 +234,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     conversationAttachments: initializedConversationAttachments,
     recovery,
     providerMaintenanceJournal,
+    orchestrationEffects,
   } = await initializeRuntimePersistence(options, startupRecovery, store);
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
@@ -276,6 +283,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   };
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
+  const registerCheckpointCaptures = checkpointCaptureExecutor({
+    effects: orchestrationEffects, store, artifacts: turnGitArtifacts,
+    invalidate: (conversationId) => broadcast({ type: "conversation.detail.invalidated", conversationId }),
+  });
   const providerInstallationLeases = new ProviderInstallationLeaseCoordinator();
   const terminals = new TerminalManager({
     windowsTerminalAuthority: options.windowsTerminalAuthority,
@@ -444,6 +455,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const broadcast = (event: RuntimeMutationEvent): void => {
     mascotStatus.observe(event);
     watchers?.observe(event);
+    delegation?.observe(event);
     runtimeSync.broadcast(event);
   };
   const broadcastConversationShell = (conversationId: string): void => {
@@ -663,6 +675,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         (settled) => queuedMessages?.onTurnSettled(settled),
         (settled) => conversationTitles.onTurnSettled(settled, settlement),
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
+        (settled) => delegation?.onTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
         (settled) => watchers?.onTurnSettled(settled),
         (settled) => testOnlyOnTurnSettled?.(settled),
@@ -674,12 +687,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       systemBootId: options.systemBootId,
     },
   );
+  delegation = createDelegationRuntime({ store, turns, pendingApprovals, pendingInputs, broadcast, queue: () => queuedMessages });
   agentThreads = createAgentThreadRuntime({
     store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
     conversationAttachments: initializedConversationAttachments,
-    agentBrowser: options.agentBrowser, watcherPolicy,
+    agentBrowser: options.agentBrowser, watcherPolicy, delegation: delegation.service,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
@@ -707,10 +721,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {
     signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
     onWatcherNoteUndelivered: (note, reason) => watchers?.delivery.noteUndelivered(note, reason),
-    compacting: (conversationId) => compactions.isCompacting(conversationId),
+    compacting: (conversationId) => compactions.isCompacting(conversationId), delegated: () => delegation?.queueHooks,
   });
   compactions.onSettled((conversationId) => queuedMessages?.onCompactionSettled(conversationId));
-  queuedMessages.start();
+  void queuedMessages.start(() => delegation?.recover());
   watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,
     interaction: turnInteractionDependencies, queuedMessages, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, send,
     turnDiff: (turnId) => turnGitArtifacts.settledTurnDiff(turnId) });
@@ -762,6 +776,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       watchers,
       agentThreads,
       agentWorkflows,
+      delegation,
       queuedMessages,
       usageHandlers: usageRuntime.handlers,
       turnInteraction: turnInteractionDependencies,
@@ -1123,6 +1138,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
               turnGitArtifacts.beginShutdown(deadlineAt);
               providers.beginShutdown(deadlineAt);
               await store.orchestration.lanes.close();
+              await orchestrationEffects.stop();
               await gitInspectionLifecycle.cancelAndDrainWhile(async () => {
                 await gitScanCoordinator.cancelAndDrainWhile(async () => {
                   await updatePreparation.drainTracked();

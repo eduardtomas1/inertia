@@ -23,11 +23,16 @@ tests, not just interfaces, documentation, or a disconnected prototype.
   ambiguity handling; native continuation where supported.
 - [ ] Lazy forks at stable boundaries, native forks/revert where supported,
   portable cross-provider forks, inherited history and context merge-back.
-- [ ] Managed delegation across providers/models, explicit task context,
+- [x] Managed delegation across providers/models, explicit task context,
   permission ceilings, nested completion, stable result generations,
   follow-up/cancel/wait, durable parent inbox and wake acknowledgements.
-- [ ] Native children represented separately as observed child threads, with
+  (Phase 4, 2026-11-01, verified with fixture providers only. Deferred:
+  inherited runtime-mode step-down for delegated tasks and the child-question
+  reactor; see [phase4-verification.md](phase4-verification.md).)
+- [x] Native children represented separately as observed child threads, with
   provider-specific status/results and supported control operations.
+  (Phase 4, 2026-11-01: a derived read-only projection over subagent traces,
+  not child thread rows; Stop only through the existing exact-trace stop.)
 - [ ] Durable message/configuration queues, edits/cancellation/reorder,
   native steering or explicit interrupt/restart fallback, automatic-result
   priority, delivery attribution and retry identities.
@@ -80,6 +85,14 @@ phases were deliberately not started; the checklist above stays open.
 Code was recompared at `15fe2832727893cbdd2214383f9f971474849695` (v0.1.6 plus
 six commits); the delta and decisions are in `t3code-delta-2026-10-31.md`.
 Later phases remain open. PR #686 stays draft; no merge.
+
+**Resumed on 2026-11-01.** Phase 4 (managed delegation, durable parent wakes
+and observed native children) is implemented, uncommitted, in the
+`orchestrator-v2-p4` worktree on top of the phase-3 polish staging commit,
+with its fidelity review fixes. Evidence is in
+[phase4-verification.md](phase4-verification.md); `npm run check` and the
+portable suite remain to be run. Later phases remain open. PR #686 stays
+draft; no merge.
 
 Current code and check results are recorded in `implementation-progress.md`.
 

@@ -16,6 +16,15 @@ import {
 import { OrchestrationEventStore } from "../../src/server/orchestration-v2/event-store";
 import { orchestrationV2Migration } from "../../src/server/persistence/migrations/orchestration-v2";
 import type { EffectDraft, ProjectEvent } from "../../src/server/orchestration-v2/types";
+import { RuntimeStore } from "../../src/server/database";
+import { checkpointCaptureExecutor } from "../../src/server/runtime/checkpoint-capture-executor";
+import { TurnGitArtifactManager } from "../../src/server/turn-git-artifacts";
+import {
+  cleanupTurnControllerTestDirectories,
+  createTurnControllerTestRuntime,
+  flushTurnControllerTestPromises,
+  type TurnControllerTestRuntime,
+} from "../support/turn-controller-runtime";
 
 const project: ProjectEvent = (event) => [{ kind: "test", id: event.threadId, value: event.payload }];
 const databases: Database.Database[] = [];
@@ -80,6 +89,7 @@ afterEach(async () => {
   await Promise.allSettled(runtimes.splice(0).map((runtime) => runtime.stop()));
   for (const db of databases.splice(0)) if (db.open) db.close();
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  await cleanupTurnControllerTestDirectories();
 });
 
 describe("Orchestrator V2 effect classification", () => {
@@ -413,5 +423,109 @@ describe("Orchestrator V2 effect runtime", () => {
     closing.close();
     expect(closingRuntime.pump()).toBe(0);
     expect(closingRuntime.running).toBe(false);
+  });
+});
+
+async function finishTurn(runtime: TurnControllerTestRuntime, content: string) {
+  const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content });
+  const runs = runtime.provider.runCount;
+  expect(runtime.controller.start(queued.turn.id)).toBe(true);
+  await vi.waitFor(() => { expect(runtime.provider.runCount).toBe(runs + 1); });
+  runtime.provider.resolve({ status: "completed", text: `${content} done` });
+  await flushTurnControllerTestPromises();
+  return queued.turn;
+}
+
+function turnCapture(turn: { conversationId: string; id: string; runId: string }): string {
+  return checkpointCaptureEffect({ conversationId: turn.conversationId, turnId: turn.id, runId: turn.runId }, 0).id;
+}
+
+describe("Orchestrator V2 checkpoint capture effect", () => {
+  it("commits the capture with the terminal run status and finalizes the turn's artifacts once", async () => {
+    let artifacts!: TurnGitArtifactManager;
+    const runtime = await createTurnControllerTestRuntime({
+      captureGitBefore: (input) => artifacts.captureBefore(input),
+      captureGitArtifacts: (input) => artifacts.finalize(input),
+    });
+    try {
+      artifacts = new TurnGitArtifactManager(runtime.store, runtime.directory);
+      const completions = vi.spyOn(runtime.store, "completeTurnGitArtifact");
+      const effects = runtimeFor(runtime.store.orchestration.effects);
+      runtime.store.orchestration.attachEffectRuntime(effects);
+      const invalidated: string[] = [];
+      checkpointCaptureExecutor({ effects, store: runtime.store, artifacts,
+        invalidate: (conversationId) => { invalidated.push(conversationId); } })();
+      effects.start();
+      const turn = await finishTurn(runtime, "Capture once");
+      const captureId = turnCapture(turn);
+      await effects.awaitSettled(captureId);
+      await flush();
+      const effect = runtime.store.orchestration.effects.get(captureId)!;
+      expect(effect).toMatchObject({ state: "succeeded", attempts: 1, kind: CAPTURE });
+      const terminal = runtime.store.orchestration.events.readEvents({ projectId: effect.projectId, threadId: runtime.conversationId })
+        .find(({ sequence }) => sequence === effect.eventSequence);
+      expect(terminal).toMatchObject({ type: "run.status-changed", payload: { runId: turn.runId, status: "completed" } });
+      expect(completions.mock.calls.filter(([turnId]) => turnId === turn.id)).toHaveLength(1);
+      expect(runtime.store.turnGitArtifact(turn.id)?.capturedAt).not.toBeNull();
+      expect(invalidated).toEqual([runtime.conversationId]);
+      runtime.store.orchestration.reconcile();
+      effects.wake();
+      await flush();
+      expect(completions.mock.calls.filter(([turnId]) => turnId === turn.id)).toHaveLength(1);
+    } finally { runtime.store.close(); }
+  });
+
+  it("runs a capture left pending at shutdown exactly once after restart", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    const turn = await finishTurn(runtime, "Pending at shutdown");
+    const captureId = turnCapture(turn);
+    expect(runtime.store.orchestration.effects.get(captureId)).toMatchObject({ state: "pending", attempts: 0 });
+    runtime.store.close();
+    const reopened = new RuntimeStore(join(runtime.directory, "inertia.sqlite"), runtime.workspace);
+    try {
+      expect(reopened.orchestration.effects.get(captureId))
+        .toMatchObject({ state: "pending", attempts: 0, runtimeId: reopened.orchestration.runtimeId });
+      const effects = runtimeFor(reopened.orchestration.effects);
+      reopened.orchestration.attachEffectRuntime(effects);
+      const finalized: string[] = [];
+      checkpointCaptureExecutor({ effects, store: reopened,
+        artifacts: { finalize: async ({ turn: captured }) => { finalized.push(captured.id); } },
+        invalidate: () => undefined })();
+      effects.start();
+      await effects.awaitSettled(captureId);
+      effects.wake();
+      await flush();
+      expect(finalized).toEqual([turn.id]);
+      expect(reopened.orchestration.effects.get(captureId)).toMatchObject({ state: "succeeded", attempts: 1 });
+    } finally { reopened.close(); }
+  });
+
+  it("holds the next start until the previous turn's capture settles", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const effects = runtimeFor(runtime.store.orchestration.effects);
+      runtime.store.orchestration.attachEffectRuntime(effects);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const finalized: string[] = [];
+      checkpointCaptureExecutor({ effects, store: runtime.store,
+        artifacts: { finalize: async ({ turn }) => { finalized.push(turn.id); await gate; } },
+        invalidate: () => undefined })();
+      effects.start();
+      const first = await finishTurn(runtime, "First");
+      await vi.waitFor(() => { expect(finalized).toEqual([first.id]); });
+      const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Second" });
+      expect(runtime.controller.start(next.turn.id)).toBe(true);
+      await flush();
+      expect(runtime.provider.runCount).toBe(1);
+      expect(runtime.store.orchestration.startIntent(next.turn.runId)?.state).toBe("pending");
+      release();
+      await effects.awaitSettled(turnCapture(first));
+      await vi.waitFor(() => { expect(runtime.provider.runCount).toBe(2); });
+      expect(runtime.store.orchestration.startIntent(next.turn.runId)?.state).toBe("succeeded");
+      runtime.provider.resolve({ status: "completed", text: "Second done" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(next.turn.id).status).toBe("completed");
+    } finally { runtime.store.close(); }
   });
 });

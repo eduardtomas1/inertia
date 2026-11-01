@@ -69,6 +69,9 @@ const IMPLEMENTATION_SOURCES = new Map<
   number,
   readonly ImplementationSourceDefinition[]
 >([
+  [111, [implementation("src/server/persistence/migrations/delegated-tasks.ts", "DELEGATION_OPERATION_TOOLS",
+    "addDelegationColumn", "delegationColumns", "delegationCompletionCheck", "delegationIdentifier",
+    "widenDelegationOperationTools")]],
   [109, [implementation("src/server/persistence/migrations/cursor-sdk-provider.ts", "cursorSdkIdentifier", "rebuildCursorSdkTable")]],
   [108, [implementation("src/server/persistence/migrations/native-pi-provider.ts",
     "PI_TABLES", "quotePiIdentifier", "piTableDefinition", "rebuildPiTable")]],

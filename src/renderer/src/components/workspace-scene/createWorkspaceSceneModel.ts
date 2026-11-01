@@ -203,6 +203,7 @@ export function visibleChatProjection(
     contextPackets: detailOwned ? projection.detail?.contextPackets ?? [] : [],
     rolledBackTurnIds: detailOwned ? projection.detail?.rolledBackTurnIds : undefined,
     watcherWakes: detailOwned ? projection.detail?.watcherWakes : undefined,
+    delegation: detailOwned ? projection.detail?.delegation : undefined,
     history: projectionOwned ? projection.history : undefined,
   };
 }
@@ -703,6 +704,10 @@ export function createWorkspaceSceneModel({
       contextPackets: chatProjection.contextPackets,
       rolledBackTurnIds: chatProjection.rolledBackTurnIds,
       watcherWakes: chatProjection.watcherWakes,
+      delegation: chatProjection.delegation,
+      conversations: connection.snapshot?.conversations,
+      onDelegationCommand: actions.run,
+      onOpenConversation: actions.openConversation,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
       onForkCommand: savedChatRunner(actions.run, draftConversation, snapshotConversations),
       onQueueCommand: chatQueueRunner(actions.runQueueCommand, draftConversation, snapshotConversations),
@@ -1044,6 +1049,7 @@ export function createWorkspaceSceneModel({
           Boolean(conversationIsRunning
             && canStopSubagentTrace(trace, projection.turns)),
         onStopSubagent: stopSubagent,
+        onObservedChildCommand: actions.run,
       },
       plan: {
         steps: planSteps,

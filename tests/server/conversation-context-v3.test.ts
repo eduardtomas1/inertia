@@ -237,7 +237,9 @@ function restoredHistory(section: ReturnType<typeof handoffSection>, conversatio
   if (!block || typeof block.content !== "string") throw new Error("Restored history is missing.");
   const content = block.content;
   const counts = /^(\d+) intact historical items included; (\d+) omitted\.$/mu.exec(content);
-  expect(content).toContain(`Retrieve omitted turns with ${AGENT_CONTEXT_TOOL_NAME}({conversationId:"${conversationId}"})`);
+  expect(content).toContain("Omitted history cannot be retrieved in this session; ask the user when earlier detail matters.");
+  expect(content).not.toContain(AGENT_CONTEXT_TOOL_NAME);
+  expect(content).toContain(`Conversation context handoff from ${JSON.stringify(conversationId)}.`);
   const items: RestoredItem[] = content.split("\n\nHistorical item ").slice(1).map((entry) => {
     const newline = entry.indexOf("\n");
     return { id: (JSON.parse(entry.slice(0, newline)) as { id: string }).id, text: entry.slice(newline + 1) };
@@ -265,7 +267,7 @@ function supplementColumn(database: Database.Database, packetId: string) {
 }
 
 describe("conversation context transport version 3", () => {
-  it("hands a realistic chat to a new provider as bounded intact history with a retrieval route", async () => {
+  it("hands a realistic chat to a new provider as bounded intact history without naming retrieval on an unattested route", async () => {
     const w = await world();
     const { source } = await w.exportChat();
     await w.switchProvider(source.id, "codex");
@@ -276,7 +278,7 @@ describe("conversation context transport version 3", () => {
     const section = handoffSection(prompt);
     expect(section.version).toBe(1);
     expect(section.attachments.map(({ label }) => label).slice(1))
-      .toEqual(["Files changed earlier in this chat", "Handoff outcome"]);
+      .toEqual(["Handoff outcome"]);
     const history = restoredHistory(section, source.id);
     expect(history).toMatchObject({ count: 13, omitted: 1 });
     expect(history.count + history.omitted).toBe(14);

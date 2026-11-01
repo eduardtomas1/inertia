@@ -21,6 +21,9 @@ import type { RuntimeCommandHandler } from "./command-router";
 import { createConversationCommandHandler, type ConversationCommandDependencies } from "./conversation-commands";
 import { createConversationCompactionCommandHandler } from "./conversation-compaction-commands";
 import { createCursorSdkLoginCommandHandler } from "./cursor-sdk-login-commands";
+import { createDelegationCommandHandler } from "./delegation-commands";
+import { createObservedChildCommandHandler } from "./observed-child-commands";
+import type { DelegationRuntime } from "../delegation/delegation-runtime";
 import { createDiffReviewCommandHandler } from "./diff-review-commands";
 import { createDuoCommandHandler } from "./duo-commands";
 import { createIsolatedReviewCommandHandler } from "./isolated-review-commands";
@@ -81,6 +84,7 @@ export interface RuntimeCommandHandlerServices {
   watchers: WatcherRuntime;
   agentThreads: AgentThreadRuntime;
   agentWorkflows: AgentWorkflowController;
+  delegation: DelegationRuntime;
   queuedMessages: ReturnType<typeof createQueuedMessageRuntime>;
   usageHandlers: readonly RuntimeCommandHandler[];
   turnInteraction: TurnInteractionCommandDependencies;
@@ -122,6 +126,9 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       send,
     }),
     services.watchers.handler,
+    createDelegationCommandHandler({ delegation: services.delegation.service, send, broadcastSnapshot: flushSnapshot }),
+    createObservedChildCommandHandler({ observedChildren: store.observedChildren, send,
+      activeTurn: (conversationId) => turns.activeIdentity(conversationId) }),
     createTodoCommandHandler({ ...services.turnInteraction, creation: services.agentThreads.creation, broadcastSnapshot: flushSnapshot }),
     createAgentWorkflowCommandHandler({
       workflows: services.agentWorkflows,
@@ -168,6 +175,7 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       creation: services.agentThreads.creation,
       contextRequests: services.agentThreads.contextRequests,
       reportIncident: services.reportIncident,
+      decorateDelegation: (delegation) => services.delegation.service.decorateDetail(delegation),
       rollbackHistory: enableProviders
         ? (input) => rollbackConversationHistory({ store, providers, turns, providerTerminalResumes, terminals: services.terminals }, input, lifetimeSignal)
         : undefined,
@@ -228,6 +236,7 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       refreshProviderInfo,
       broadcastSnapshot,
       send,
+      automaticWakesTurnedOff: (trigger) => services.delegation.automaticWakesTurnedOff(trigger),
     }),
     createProjectWorkspaceCommandHandler({
       store,

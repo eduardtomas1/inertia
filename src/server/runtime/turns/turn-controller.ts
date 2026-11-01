@@ -45,8 +45,7 @@ import type {
 import {
   defaultTurnScheduler,
   broadcastTurnConversationShell,
-  DEFAULT_TURN_MAX_LIFETIME_MS,
-  DEFAULT_TURN_TIMEOUT_MS,
+  DEFAULT_TURN_MAX_LIFETIME_MS, DEFAULT_TURN_TIMEOUT_MS, deferredTurnStart,
   normalizedProviderRunFailure,
   providerPromiseFailure,
   publicTurnError,
@@ -760,7 +759,8 @@ export class TurnController {
         return true;
       }
       return this.captureBeforeAndStartProvider(active);
-    });
+    }, deferredTurnStart((value) => this.track(value), () => !active.runState.isTerminal() && !this.closing,
+      () => { this.failBeforeStart(active.conversation.id, "The turn could not start."); }));
   }
 
   private beginStart(active: ActiveTurn): void {

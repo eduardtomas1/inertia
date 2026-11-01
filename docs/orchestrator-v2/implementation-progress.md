@@ -928,6 +928,9 @@ recorded under Verification below.
 
 ### Tracked for the Phase 4 rebase
 
+All five items were resolved in the Phase 4 rebase; see
+[Rebase onto 630aa2cf and deferred hooks](#rebase-onto-630aa2cf-and-deferred-hooks--2026-11-01).
+
 - **Effect runtime post-commit wake hook.** Enqueuing an effect does not
   notify the outbox's subscribers; only settle, retire, cancel, requeue and
   recovery do (`notifyAvailable`,
@@ -1026,3 +1029,218 @@ last rebuild and the Electron run ran after it.
 
 Not exercised: macOS and Linux, a packaged build, real provider accounts, a
 real legacy-history Codex thread, and the full `npm run check` suite.
+## Phase 4: managed delegation, durable parent wakes, observed native children — 2026-11-01
+
+Status: implemented and verified on Windows 11 x64 with Node 22.23.1, first
+against the uncommitted working tree on top of `112c4a46`, then rebased onto
+`origin/orchestrator-v2` at `630aa2cf` with the deferred fidelity hooks wired
+and the full gate run (see
+[Rebase onto 630aa2cf and deferred hooks](#rebase-onto-630aa2cf-and-deferred-hooks--2026-11-01)).
+Evidence, the decisions
+table, deferrals, the T3 test mapping and unexercised environments are in
+[phase4-verification.md](phase4-verification.md).
+
+What landed:
+
+- **Migrations 111 and 112.** 111 `PersistDelegatedTasks` widens the
+  `agent_thread_operations` tool check to `inertia_delegate_task` and
+  `inertia_cancel_task`, adds the `client_request_key` retry column with a
+  per-source unique index, adds `delegated_completion_json` to
+  `queued_messages` and `messages` with one active delivery row per chat, and
+  creates the `delegated_tasks` and `delegated_task_turns` projections. It does
+  not drop provider sessions. 112 `PersistDelegationAutomaticWakes` adds
+  `app_state.delegation_automatic_wakes`, on by default. Both lineage entries
+  are appended to `database-migration-lineage.json`.
+- **Events and records.** Seven V2 events (`delegation.task-created`,
+  `task-turn-attached`, `task-finalized`, `wake-policy-changed`,
+  `delivery-changed`, `mailbox-changed`, `wakes-disarmed`) are projected into
+  the task records and a per-parent mailbox. Commits are receipted on the
+  parent's lane, boot recovery runs per parent through the lanes, and the
+  index can be rebuilt from the event log.
+- **Host tools.** `inertia_delegate_task`, `inertia_get_task_status`,
+  `inertia_wait_for_task` and `inertia_cancel_task` join the orchestration
+  pack, whose revision is now 4. Create and cancel ask the user; the approval
+  names the wake policy. Status, wait and acknowledgement need no approval.
+  An approved `inertia_send_message` attaches to or starts a follow-up task.
+- **Runtime commands.** `delegation.task.read`, `delegation.task.cancel`,
+  `delegation.delivery.dismiss`, `delegation.delivery.send`,
+  `delegation.wake.set` and `observed-child.read`, plus the
+  `delegationAutomaticWakes` setting through `settings.update`. Detached
+  windows may read their own tasks and children only; Private Connect receives
+  neither delegation detail nor wake messages.
+- **Durable wakes.** Finished results are planned into one typed queued row
+  ahead of user and watcher entries and outside the user cap, steered into a
+  running parent when allowed, dispatched once otherwise, and recovered after
+  a restart between queue reconcile and scheduling.
+- **Observed native children.** A read-only projection over subagent traces
+  with lineage, status, usage, task, progress and result. Stop is offered only
+  through the existing exact-trace stop.
+- **Renderer surfaces.** The Delegated work panel and child breadcrumb, the
+  timeline completion card, the pinned Delegated results queue row, Agent
+  details on a turn's agents line, and the Settings › Chats switch "Continue
+  chats automatically when delegated tasks finish".
+- **Fidelity review and fixes.** A read-only review against T3 `15fe2832`
+  found two major and several minor gaps. F1 re-evaluates tasks when a
+  limit-reset or continuation plan settles without a turn, keeps a
+  usage-limited parent's tasks, cancels limit plans through the scheduler and
+  dismisses the child's continuation on cancel, persists the automatic-wakes
+  setting and gates steering on it, runs recovery through the lanes, and
+  dispatches a waiting delivery before a manual send. F2 fixes the "N of M"
+  wake wording, result-turn selection, `latest`, dispose clearing the wake,
+  task-scoped `needsAction` in the detail and the derived terminal status. F3
+  adds typed escalation codes, the post-approval interaction recheck, the
+  follow-up wake in the send approval, the `design` role, the optional title,
+  `clientRequestId` on cancel and logged follow-up link failures. F4 moves the
+  renderer to the server's `needsAction` and the delivered outcome wording,
+  removes the unpopulated `observedChildControls` detail field and deletes the
+  unused `recheckObservedChildStop`.
+- **Package E corrections.** Host-tool approvals can be answered from the UI
+  again (the approval command accepted only UUIDs); Continue with results is
+  offered for results dismissed by Stop; a delivery held after an interrupted
+  turn offers Send now.
+
+Verification: the delegation suites pass 132 of 132 tests in 17 files; the
+Electron scenario `tests/e2e/delegation-wake.spec.ts` passes 5 of 5; the
+renderer bundle passes with core at 2,520,075 of 2,520,238 bytes. Sixteen
+captures are in `docs/pr-evidence/orchestrator-v2/screenshots/`.
+
+Known limits: real providers, resumed native sessions (R1), long host-tool
+waits (R3), macOS, Linux and packaged builds were not exercised. The detail
+reload that showed live assistant text twice during a streaming turn was fixed
+after the scenario (see the rebase entry below).
+
+Deferred: inherited runtime-mode step-down for `inertia_delegate_task`
+(design §5 Q6, provider-registry work), the child-question reactor (§5 Q4,
+persisted-questions phase) and usage-limit refinements e496db3a5e and
+63b0e3d82e (recovery phase).
+
+### Rebase onto 630aa2cf and deferred hooks — 2026-11-01
+
+The Phase 4 tree was committed locally as one staging commit and replayed with
+`git rebase --onto origin/orchestrator-v2 112c4a46`. `112c4a46` and `907ad3d2`
+share the tree `d869618e`, so the one commit replays over `d17f89ef`,
+`b28d5a9f`, `7c27c05d` and `630aa2cf`. Four files conflicted; every other
+overlap (`turn-request-preparation.ts`, `turn-repository.ts`, `projector.ts`,
+`event-store.ts`, `ChatWorkspace.tsx`, `layers.tsx`,
+`createWorkspaceSceneModel.ts`, `agent-thread-manager.ts`, the runtime and
+turn command handlers, `src/shared/orchestration-v2.ts`) merged cleanly.
+Upstream added no migrations, so 111 and 112 keep their numbers and the
+lineage has 112 entries.
+
+| File | Resolution |
+| --- | --- |
+| `src/server/runtime/queued-message-runtime.ts` | Both. The upstream checkout-restore fence (a chat whose files are being restored keeps its queue and retries after admission) runs first; Phase 4's delegated-content resolution and withdrawal of an empty delegated delivery follow it. |
+| `scripts/check-renderer-bundle.mjs` | The larger cap on each line: Phase 4's main workbench, detached chat and core caps over the upstream ones, then core re-measured (below). |
+| `docs/pr-evidence/orchestrator-v2/renderer-bundle.json` | Both. The three upstream blocks (`detachedHistoryAndLinuxE2eFixes`, `fidelityAuditFixes`, `fidelityAuditFixes2`) and the three Phase 4 blocks (`phase4Renderer`, `phase4FidelityRenderer`, `phase4PackageE`) are all kept, upstream first. |
+| `docs/orchestrator-v2/implementation-progress.md` | Both appended sections kept, upstream first. |
+
+`npm run typecheck` passed on the rebased tree before any hook work.
+
+Deferred hooks from the fidelity packages:
+
+- **Effect wake.** `OrchestrationEventStore` takes an `onEffectsCommitted`
+  callback and calls it after a commit that was not a replay and carried
+  effects. `OrchestratedTurnRepository` creates the outbox first and passes
+  `() => this.effects.notifyAvailable()`, so a committed replay-safe effect is
+  claimed on the next microtask instead of the next state change, timer or
+  liveness poll. A commit nested in an outer transaction notifies before the
+  outer commit; the runtime's wake is microtask-deferred, so the claim still
+  runs after it.
+- **Shutdown and executor.** `src/server/index.ts` takes
+  `orchestrationEffects` from startup recovery and stops it in
+  `quiesceRuntimeWork` right after `store.orchestration.lanes.close()`, before
+  the store closes. The `checkpoint.capture-requested` executor
+  (`src/server/runtime/checkpoint-capture-executor.ts`) reads the turn, checks
+  its conversation and run against the request, calls
+  `turnGitArtifacts.finalize` and invalidates the chat's detail. It is
+  registered when post-ready artifact reconciliation starts, so captures never
+  start Git before `runtime.ready`, matching the existing rule for boot
+  artifact work. Startup recovery attaches the runtime to the repository.
+  `index.ts` is 1,175 lines, under the 1,250-line ceiling.
+- **Capture emission and the start barrier.** The terminal
+  `run.status-changed` commit carries `checkpointCaptureEffect` when the run
+  moves from a non-terminal to a terminal status, unless the chat is a
+  read-only watcher (an attached link with `read_only`), and only once per run
+  and turn. Starts no longer refuse behind a capture: the start claim and the
+  native-control claims pass over earlier capture effects in the thread, and
+  `dispatchStart` takes a deferral. When an executing runtime is attached and
+  the thread has an unsettled capture before the start intent, the controller
+  answers the start as accepted, waits for the captures to settle, bounded by
+  `TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS` (60 seconds, the budget that
+  bounds the artifact barrier), and then dispatches; a turn stopped meanwhile
+  is not started, and a refused dispatch fails the turn before start. Without
+  an executing runtime (safety lock, before post-ready, tests) the start never
+  waits. The direct finalization in `turn-settlement-coordinator.ts` and the
+  boot catch-up in `TurnGitArtifactManager.reconcile` stay. The controller hook
+  `captureGitArtifacts` is called only from that direct path, and
+  `tests/server/turn-controller.test.ts` ("atomically queues the visible
+  request, captures immutable config, and owns all completion associations")
+  expects the hook for the settled turn, so removing the direct path fails an
+  existing artifact test; the read-only watcher and failed-cleanup tests
+  assert the hook is not called.
+  The direct path also installs the per-chat artifact barrier that orders the
+  next turn's pre-capture for paired Duo starts, which do not go through
+  `dispatchStart`, and publishes the detail refresh. The boot catch-up also
+  covers pre-V2 turns without a run projection, terminal turns from before
+  this change that have no capture effect, missing-artifact records and
+  pruning. Both paths call `finalize`, which shares one in-flight
+  finalization per turn and leaves a finished artifact unchanged, so a turn is
+  finalized once. One difference: the effect path also finalizes when the
+  turn's local in-memory cleanup threw, which the direct path skips.
+- **Retrieval attestation.** The portable history call in
+  `turn-request-preparation.ts` passes the `hostToolBridgeAttested` value
+  computed for the route, so `inertia_request_context` is named only where the
+  host tool bridge is attested; elsewhere the coverage says omitted history
+  cannot be retrieved in this session.
+- **Files decision.** Following T3, provider handoffs carry file changes only
+  as attributed per-turn `file-change` items. The aggregate "Files changed
+  earlier in this chat" block is no longer appended to portable continuation
+  history (`portable-history-source.ts`). `providerHandoffFilesBlock` stays for
+  chat-reference packets (`referencedContinuationHistory`), where G1's
+  rolled-back exclusion still applies; the test-only legacy
+  `continuationHistory` path keeps its block. The session-recovery "N
+  messages" counts are unchanged.
+
+Tests:
+
+- `tests/server/orchestration-v2-outbox.test.ts` gains three cases: a
+  terminal turn commits one capture with its terminal `run.status-changed`
+  event and the turn's artifact is finalized once even though the direct
+  path also runs; a capture left pending at shutdown runs once after a
+  restart; and the next start waits for the previous capture (no provider
+  run until it settles, then the start intent succeeds).
+- `tests/server/orchestration-backings.test.ts`: portable history on an
+  unattested route says retrieval is unavailable and does not name the tool;
+  the attested Codex route names `inertia_request_context`.
+- `tests/server/orchestration-history-rollback.test.ts` and
+  `tests/server/provider-handoff-continuation.test.ts` now assert that fresh
+  sessions, provider switches and retries carry the retained turns' files as
+  `File change (...)` items, exclude rolled-back turns, and no longer contain
+  the aggregate block or its execution-manifest reference; the chat-reference
+  test keeps asserting the block. `tests/server/conversation-context-v3.test.ts`
+  expects only the handoff outcome attachment and, because its world has no
+  attested provider, the unattested retrieval wording.
+
+Streaming detail refresh: the duplicated live text recorded as open in
+[phase4-verification.md](phase4-verification.md) was fixed before the rebase
+(`continuedLiveSegment` and `liveSegmentContinuation` in
+`src/renderer/src/utils/response-timeline/execution.ts`;
+`tests/renderer/streaming-detail-refresh.dom.test.tsx`), at a cost of 530
+core bytes on the cap.
+
+Full gate on the rebased tree (commands, numbers and the classification of
+every failure are in
+[phase4-verification.md](phase4-verification.md#rebase-onto-630aa2cf-deferred-hooks-and-full-gate)):
+`npm run check:quality` passed, and again after the gate fixes;
+`npm run test:portable` 3,878 of 3,961 tests passed with 3 failed (2 EPERM
+symlink tests and a 15-second timeout that passes alone) and 80 skipped;
+`npm test -- --maxWorkers=4` 17,756 passed, 117 failed and 481 skipped, of
+which 42 are machine noise (EPERM symlinks, the pdfjs worker and the Cursor
+SDK through the `node_modules` junction), 5 are load timeouts that pass
+alone, and 70 were fixed: a default-locale comparison in
+`delegation-reads.ts`, the query plan snapshot for the delegation reads, the
+session-continuity retrieval expectations, and two command test stubs that
+lacked the upstream `conversationWork` dependency; `npm run build:bundle`
+passed with core at 2,521,262 of 2,521,518 bytes; the delegation wake,
+history rollback and session continuity Electron specs passed 7 of 7 on the
+second run after the first launch never reached the ready state.

@@ -102,14 +102,26 @@ export class OrchestrationEffectOutbox {
     return recovered;
   }
 
-  /** One exact claim per lane. A delayed predecessor holds later effects in that thread. */
-  claim(id?: string): OrchestrationEffect | null {
-    return this.claimWhere(id ?? null, null);
+  /** One exact claim per lane. A delayed predecessor holds later effects in that thread unless its kind is passed over. */
+  claim(id?: string, options: { passing?: Iterable<string> } = {}): OrchestrationEffect | null {
+    const passing = options.passing === undefined ? null : kindList(options.passing);
+    return this.claimWhere(id ?? null, null, passing === "[]" ? null : passing);
   }
 
   claimNext(kinds: Iterable<string>): OrchestrationEffect | null {
     const list = kindList(kinds);
-    return list === "[]" ? null : this.claimWhere(null, list);
+    return list === "[]" ? null : this.claimWhere(null, list, null);
+  }
+
+  unsettledBefore(threadId: string, sequence: number, kinds: Iterable<string>): string[] {
+    durableId(threadId);
+    if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error("Invalid effect sequence.");
+    const list = kindList(kinds);
+    if (list === "[]") return [];
+    return (this.database.prepare(`SELECT id FROM orchestration_v2_effects
+      WHERE thread_id = ? AND sequence < ? AND state IN ('pending','running')
+        AND kind IN (SELECT value FROM json_each(?)) ORDER BY sequence`)
+      .all(threadId, sequence, list) as { id: string }[]).map(({ id }) => id);
   }
 
   nextClaimableAt(kinds: Iterable<string>): string | null {
@@ -173,16 +185,19 @@ export class OrchestrationEffectOutbox {
       .run(before, kinds, kinds, limit).changes;
   }
 
-  private claimWhere(id: string | null, kinds: string | null): OrchestrationEffect | null {
+  private claimWhere(id: string | null, kinds: string | null, passing: string | null): OrchestrationEffect | null {
     return this.database.transaction(() => {
       const now = durableTimestamp(this.clock());
       const row = this.database.prepare(`SELECT candidate.* FROM orchestration_v2_effects candidate
         WHERE candidate.state = 'pending' AND candidate.runtime_id = ? AND candidate.available_at <= ?
           AND (? IS NULL OR candidate.id = ?)
           AND (? IS NULL OR candidate.kind IN (SELECT value FROM json_each(?)))
-          AND ${unblockedCandidate}
+          AND NOT EXISTS (SELECT 1 FROM orchestration_v2_effects predecessor
+            WHERE predecessor.thread_id = candidate.thread_id AND predecessor.sequence < candidate.sequence
+              AND predecessor.state IN ('pending','running')
+              AND (? IS NULL OR predecessor.kind NOT IN (SELECT value FROM json_each(?))))
         ORDER BY candidate.sequence LIMIT 1`)
-        .get(this.runtimeId, now, id, id, kinds, kinds) as EffectRow | undefined;
+        .get(this.runtimeId, now, id, id, kinds, kinds, passing, passing) as EffectRow | undefined;
       if (!row) return null;
       const claimId = randomUUID();
       const changed = this.database.prepare(`UPDATE orchestration_v2_effects

@@ -46,6 +46,7 @@ export const ORCHESTRATION_EFFECT_KINDS = {
 } as const satisfies Readonly<Record<string, EffectKindPolicy>>;
 
 export type OrchestrationEffectKind = keyof typeof ORCHESTRATION_EFFECT_KINDS;
+export const CHECKPOINT_CAPTURE_EFFECT_KIND = "checkpoint.capture-requested" satisfies OrchestrationEffectKind;
 type KindsWithPolicy<P extends EffectReplayPolicy> = {
   [K in OrchestrationEffectKind]: (typeof ORCHESTRATION_EFFECT_KINDS)[K]["replayPolicy"] extends P ? K : never
 }[OrchestrationEffectKind];
@@ -167,6 +168,10 @@ export class OrchestrationEffectRuntime {
 
   get inFlight(): number {
     return this.dispatcher.inFlight;
+  }
+
+  executes(kind: OrchestrationEffectKind): boolean {
+    return this.state === "running" && this.handlers.has(kind);
   }
 
   register<K extends ReplaySafeEffectKind>(kind: K, executor: ReplaySafeEffectExecutor<K>): () => void {

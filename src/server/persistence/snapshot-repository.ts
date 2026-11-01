@@ -73,6 +73,7 @@ import {
 } from "./stream-text-storage";
 import { agentContextReadSummaries } from "./conversation-context-turn-reads";
 import { watcherLinkViews, watcherWakeSummaries } from "./watcher-link-codecs";
+import { DelegationReads, defaultLiveNativeChildren } from "../orchestration-v2/delegation-reads";
 
 type ConversationShellRow = ConversationRow & { has_history: number };
 type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number; failure_kind: string | null };
@@ -93,6 +94,11 @@ function rolledBackTurnIds(database: PersistenceContext["database"], conversatio
   return (database.prepare(`SELECT id FROM orchestration_v2_entities WHERE kind = 'rolled-back-turn' AND thread_id = ?
     AND id IN (SELECT value FROM json_each(?)) ORDER BY id`).all(conversationId, JSON.stringify(turnIds)) as { id: string }[])
     .map(({ id }) => id);
+}
+
+function delegationField(database: PersistenceContext["database"], conversationId: string): Pick<ConversationDetail, "delegation"> {
+  const delegation = new DelegationReads(database, defaultLiveNativeChildren(database)).detail(conversationId);
+  return delegation ? { delegation } : {};
 }
 
 function watcherWakeField(
@@ -253,6 +259,7 @@ export class SnapshotRepository {
       attachmentGallery: conversationAttachmentGallery(this.context.database, conversationId),
       rollbackRevision: rollbackRevision(this.context.database, conversationId),
       ...(latest ? this.conversationRecords(conversationId) : EMPTY_CONVERSATION_RECORDS),
+      ...(latest ? delegationField(this.context.database, conversationId) : {}),
     };
     const page = (records: HistoryPageRecords, omittedTurnIds: string[] = []): ConversationDetail | null => {
       const detail: ConversationDetail = { ...shared, ...records,
@@ -291,6 +298,7 @@ export class SnapshotRepository {
       rollbackRevision: rollbackRevision(this.context.database, conversationId),
       ...this.historyRecords(conversationId),
       ...this.conversationRecords(conversationId),
+      ...delegationField(this.context.database, conversationId),
     };
   }
 
@@ -304,7 +312,8 @@ export class SnapshotRepository {
       ...EMPTY_CONVERSATION_RECORDS,
       conversation: conversationDetailFromRow(conversationRow),
       messages: newest<MessageRow>(`SELECT id, conversation_id, turn_id, role, substr(content, 1, ?) AS content,
-          attachments_json, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, created_at
+          attachments_json, compaction_json, html_render_json, private_connect_device_id, watcher_note_json,
+          delegated_completion_json, created_at
         FROM (SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages
           WHERE messages.conversation_id = ? AND ${CONVERSATION_CONTEXT_MESSAGE_SQL}
           ORDER BY messages.created_at DESC, messages.id DESC LIMIT ?)`,

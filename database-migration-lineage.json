@@ -829,6 +829,30 @@
       "version": 110,
       "name": "RaiseConversationContextSupplementBound",
       "digest": "6eed844c77bdcb2425f0d27eb8595b028300b05cd71ff6ca6763cff76b40130b"
+    },
+    {
+      "version": 111,
+      "name": "PersistDelegatedTasks",
+      "digest": "b95fc918dbcd42fcd40d02131312a91734e99b1cc740f7d7b2979b47bf153d8e",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/delegated-tasks.ts",
+          "symbols": [
+            "DELEGATION_OPERATION_TOOLS",
+            "addDelegationColumn",
+            "delegationColumns",
+            "delegationCompletionCheck",
+            "delegationIdentifier",
+            "widenDelegationOperationTools"
+          ],
+          "digest": "eb48ddfc0ac1da849f2e0f62b3095129099c2de405bb85409bdaaac81713ffe1"
+        }
+      ]
+    },
+    {
+      "version": 112,
+      "name": "PersistDelegationAutomaticWakes",
+      "digest": "d039ed0300f1a07b4211d8ac6d84289f2f6a4ecdd16ad35c9f02bf2aa79b2c9c"
     }
   ]
 }

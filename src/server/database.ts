@@ -15,6 +15,7 @@ import {
   type AgentPlan,
   type AgentReasoning,
   type AgentTurn,
+  type AppSettings,
   type AppSettingsUpdate,
   type AppSnapshot,
   type ChatAttachment,
@@ -41,6 +42,7 @@ import type { PersistedProviderMetadata } from "./provider/metadata";
 import type { SanitizedTurnExecutionManifest } from "./runtime/turns/request-context";
 import { BackendProfileRepository } from "./persistence/backend-profile-repository";
 import { AgentThreadManagementRepository } from "./persistence/agent-thread-management-repository";
+import { ObservedChildRepository } from "./persistence/observed-child-repository";
 import { AgentWorkflowRepository, type NativeAgentGoalMergeResult } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import { ConversationContextPacketRepository } from "./persistence/conversation-context-packet-repository";
@@ -127,6 +129,7 @@ export class RuntimeStore {
   private readonly backendProfileRepository: BackendProfileRepository;
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
   readonly agentThreadManagement: AgentThreadManagementRepository;
+  readonly observedChildren: ObservedChildRepository;
   private readonly conversationRepository: ConversationRepository;
   readonly contextPackets: ConversationContextPacketRepository;
   readonly conversationWorktrees: ConversationWorktreeRepository;
@@ -193,6 +196,7 @@ export class RuntimeStore {
         this.requireConversation(conversationId),
     });
     this.agentThreadManagement = new AgentThreadManagementRepository(this.database);
+    this.observedChildren = new ObservedChildRepository(this.database);
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database);
     this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database,
       (identity, cleanup) => this.orchestration.cleanup(identity, cleanup));
@@ -873,19 +877,12 @@ export class RuntimeStore {
   }
 
   createAcknowledgedFollowUpMessage(
-    conversationId: string,
-    turnId: string,
-    content: string,
-    createdAt?: string,
+    conversationId: string, turnId: string, content: string, createdAt?: string,
     acknowledgedAt?: string, attachments: readonly ChatAttachment[] = [],
-    queuedMessageId?: string, options: { watcherNote?: CreateMessageOptions["watcherNote"] } = {},
+    queuedMessageId?: string, options: Pick<CreateMessageOptions, "watcherNote" | "delegatedCompletion"> = {},
   ): ChatMessage {
     return this.transcriptRepository.createAcknowledgedFollowUpMessage(
-      conversationId,
-      turnId,
-      content,
-      createdAt,
-      acknowledgedAt, attachments, queuedMessageId, options,
+      conversationId, turnId, content, createdAt, acknowledgedAt, attachments, queuedMessageId, options,
     );
   }
 
@@ -1218,6 +1215,9 @@ export class RuntimeStore {
   }
   updateSettings(update: AppSettingsUpdate): void {
     this.settingsRepository.update(update);
+  }
+  appSettings(): AppSettings {
+    return this.settingsRepository.settings();
   }
 
   project(projectId: string): Project {

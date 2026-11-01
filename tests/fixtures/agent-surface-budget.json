@@ -158,6 +158,30 @@
       "cursorKimi": 484,
       "opencode": 484
     },
+    "inertia_delegate_task": {
+      "claude": 1831,
+      "codex": 1687,
+      "cursorKimi": 1793,
+      "opencode": 1793
+    },
+    "inertia_get_task_status": {
+      "claude": 459,
+      "codex": 317,
+      "cursorKimi": 421,
+      "opencode": 421
+    },
+    "inertia_wait_for_task": {
+      "claude": 546,
+      "codex": 404,
+      "cursorKimi": 508,
+      "opencode": 508
+    },
+    "inertia_cancel_task": {
+      "claude": 637,
+      "codex": 494,
+      "cursorKimi": 600,
+      "opencode": 599
+    },
     "inertia_render_html": {
       "claude": 1546,
       "codex": 1403,
@@ -173,20 +197,20 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 20469,
-      "withoutBrowser": 8440
+      "withBrowser": 23942,
+      "withoutBrowser": 11913
     },
     "codex": {
-      "withBrowser": 16611,
-      "withoutBrowser": 6867
+      "withBrowser": 19513,
+      "withoutBrowser": 9769
     },
     "cursorKimi": {
-      "withBrowser": 19452,
-      "withoutBrowser": 8022
+      "withBrowser": 22774,
+      "withoutBrowser": 11344
     },
     "opencode": {
-      "withBrowser": 19443,
-      "withoutBrowser": 8022
+      "withBrowser": 22764,
+      "withoutBrowser": 11343
     }
   }
 }

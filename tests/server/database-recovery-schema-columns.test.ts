@@ -13,6 +13,7 @@ import {
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "../../src/server/persistence/migrations/turn-scoped-indexes";
 import { DUO_COMPARISON_BRIEFS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/duo-comparison-briefs";
+import { removeDelegatedTasksFromFixture } from "../support/legacy-project-settings-schema";
 
 const directories: string[] = [];
 
@@ -35,6 +36,7 @@ const contextPacketTriggers = [
 ];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < 111) removeDelegatedTasksFromFixture(database);
   if (version < 107) database.exec(`
     DROP TABLE orchestration_v2_effects;
     DROP TABLE orchestration_v2_receipts;

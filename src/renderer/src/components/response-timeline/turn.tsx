@@ -16,7 +16,11 @@ import {
   type ResponseTurn,
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
-import { trackLiveTextFollowUps, type LiveTextFollowUps } from "../../utils/response-timeline/execution";
+import {
+  liveSegmentContinuation,
+  trackLiveTextFollowUps,
+  type LiveTextFollowUps,
+} from "../../utils/response-timeline/execution";
 import { layeredHtmlRenders } from "../../utils/response-timeline/model";
 import { CommentaryRow } from "./activity";
 import {
@@ -75,28 +79,34 @@ function TurnTimelineComponent({
   onBeforeToggle?: (turnId: string) => void;
   onAfterToggle?: (turnId: string) => void;
 }): React.JSX.Element {
-  const streamedText = turn.isActive && !turn.terminalAssistantMessage
+  const liveText = turn.isActive && !turn.terminalAssistantMessage
     ? props.streamingText
     : "";
+  const continuedText = liveSegmentContinuation(turn, liveText);
+  const continuesSegment = continuedText !== null;
+  const liveTurn = useMemo(() => continuesSegment
+    ? { ...turn, commentaryMessages: turn.commentaryMessages.slice(0, -1) }
+    : turn, [continuesSegment, turn]);
+  const streamedText = continuedText ?? liveText;
   const streamedTextLive = props.streamingChannel === "text";
-  const tailCommentary = useMemo(() => answerTailCommentary(turn), [turn]);
+  const tailCommentary = useMemo(() => answerTailCommentary(liveTurn), [liveTurn]);
   const layeredRenders = useMemo(() => ({ htmlRenders: layeredHtmlRenders(turn) }), [turn]);
   const railTurn = useMemo(() => tailCommentary?.length
     ? {
-        ...turn,
-        commentaryMessages: turn.commentaryMessages.filter((message) =>
+        ...liveTurn,
+        commentaryMessages: liveTurn.commentaryMessages.filter((message) =>
           !tailCommentary.includes(message)),
       }
-    : turn, [tailCommentary, turn]);
+    : liveTurn, [liveTurn, tailCommentary]);
   const liveContent = tailCommentary ? "" : streamedText;
   const liveTextOpen = turn.isActive && Boolean(streamedText);
   const liveTextFollowUps = useRef<LiveTextFollowUps | null>(null);
   const heldFollowUpIds = useMemo(() => {
     liveTextFollowUps.current = liveTextOpen
-      ? trackLiveTextFollowUps(liveTextFollowUps.current, turn)
+      ? trackLiveTextFollowUps(liveTextFollowUps.current, liveTurn)
       : null;
     return liveTextFollowUps.current?.held ?? NO_HELD_FOLLOW_UPS;
-  }, [liveTextOpen, turn]);
+  }, [liveTextOpen, liveTurn]);
   const tailEntries = useMemo<CommentaryEntry[]>(() => {
     if (!tailCommentary) return [];
     const saved = tailCommentary.map((message): CommentaryEntry => ({

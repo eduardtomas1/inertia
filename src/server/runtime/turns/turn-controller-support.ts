@@ -21,6 +21,19 @@ import type {
 } from "./turn-controller-types";
 
 export const MAX_ASSISTANT_TEXT = 4 * 1024 * 1024;
+
+export function deferredTurnStart(
+  track: (value: Promise<void>) => void,
+  startable: () => boolean,
+  fail: () => void,
+): (barrier: Promise<void>, resume: () => boolean) => boolean {
+  return (barrier, resume) => {
+    track(barrier.then(() => {
+      if (startable() && !resume()) fail();
+    }));
+    return true;
+  };
+}
 export const MAX_REASONING_TEXT = 512 * 1024;
 export const DEFAULT_TURN_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
 export const DEFAULT_TURN_MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000;

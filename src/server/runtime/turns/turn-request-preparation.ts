@@ -481,6 +481,7 @@ export function resolveTurnRequest(
       }),
       ...(excludedMessageId === undefined ? {} : { excludedMessageId }),
       ...(target ? { excludedItemIds: target.coveredItemIds } : {}), route: restoredHistoryRoute(),
+      hostToolBridgeAttested,
     });
     if (!history || (options.skipEmpty && history.messageCount === 0 && history.omittedMessageCount === 0)) {
       return offer(null, null);
@@ -623,6 +624,7 @@ export function resolveTurnRequest(
     activateConversation: request.activateConversation,
     privateConnectDeviceId: request.privateConnectDeviceId,
     ...(request.watcherNote ? { watcherNote: request.watcherNote } : {}),
+    ...(request.delegatedCompletion ? { delegatedCompletion: request.delegatedCompletion } : {}),
     ...(request.duoComparison && request.duoComparison.launchId === request.authorizedDuoComparisonLaunchId
       ? { duoComparison: request.duoComparison }
       : {}),

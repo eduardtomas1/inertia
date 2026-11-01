@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import "./ActivityGroup.css";
 import { PlanDetail } from "./PlanDetail";
+import { DelegatedCompletionCard } from "../orchestration/delegated-completion-card";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
 import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import { usePhaseLockedAnimations } from "../../hooks/usePhaseLockedAnimations";
@@ -423,6 +424,7 @@ export function FollowUpRow({
 }: {
   entry: Extract<TurnExecutionStreamEntry, { kind: "follow-up" }>;
 }): React.JSX.Element {
+  if (entry.message.delegatedCompletion) return <DelegatedCompletionCard message={entry.message} followUp />;
   return (
     <article
       className="turn-follow-up-row"

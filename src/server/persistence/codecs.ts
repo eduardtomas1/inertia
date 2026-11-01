@@ -6,6 +6,7 @@ import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
+import { delegatedCompletionAttributionSchema, type DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
 import { duoComparisonBriefFromJson } from "../../shared/duo-comparison-brief";
 import {
   AGENT_RUN_STATES,
@@ -466,6 +467,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     desktopNotifications: state.desktop_notifications === 1,
     notifyOnlyInBackground: state.notify_only_in_background === 1,
     compactOnReturn: compactOnReturnFromState(state.compact_on_return),
+    delegationAutomaticWakes: state.delegation_automatic_wakes !== 0,
     quotaWarnings: {
       enabled: state.quota_warnings_enabled !== 0,
       firstThreshold: isQuotaWarningThreshold(state.quota_warning_threshold)
@@ -779,8 +781,19 @@ export function watcherNoteFromJson(value: string | null | undefined): WatcherNo
   }
 }
 
+export function delegatedCompletionFromJson(value: string | null | undefined): DelegatedCompletionAttribution | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = delegatedCompletionAttributionSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function messageFromRow(row: MessageRow): ChatMessage {
   const watcherNote = row.role === "user" ? watcherNoteFromJson(row.watcher_note_json) : undefined;
+  const delegatedCompletion = row.role === "user" && !watcherNote ? delegatedCompletionFromJson(row.delegated_completion_json) : undefined;
   const duoComparison = row.role === "user" ? duoComparisonBriefFromJson(row.duo_comparison_json) : undefined;
   let compaction: unknown;
   try { compaction = row.compaction_json ? JSON.parse(row.compaction_json) : undefined; } catch { /* Older or malformed optional metadata stays unprojected. */ }
@@ -790,6 +803,7 @@ export function messageFromRow(row: MessageRow): ChatMessage {
     ...(row.role === "user" && isMessageOriginDeviceId(row.private_connect_device_id)
       ? { privateConnectDeviceId: row.private_connect_device_id } : {}),
     ...(watcherNote ? { watcherNote } : {}),
+    ...(delegatedCompletion ? { delegatedCompletion } : {}),
     ...(duoComparison ? { duoComparison } : {}),
     ...(row.role === "system" && row.turn_id === null && isContextCompaction(compaction) ? { compaction } : {}),
     ...(row.role === "system" && row.turn_id !== null && isHtmlRenderReference(htmlRender) ? { htmlRender } : {}),

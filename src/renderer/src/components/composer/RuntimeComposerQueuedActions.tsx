@@ -26,7 +26,10 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
 }): React.JSX.Element | null {
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const queueSignature = useRef("[]");
-  const updateQueue = useCallback((entries: QueuedMessage[]): void => {
+  const updateQueue = useCallback((received: QueuedMessage[]): void => {
+    const entries = received.some(({ delegatedCompletion }) => delegatedCompletion)
+      ? [...received].sort((left, right) => Number(!left.delegatedCompletion) - Number(!right.delegatedCompletion))
+      : received;
     const signature = JSON.stringify(entries);
     if (queueSignature.current === signature) return;
     queueSignature.current = signature;
@@ -75,11 +78,13 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
     }, 10_000);
     return () => { current = false; window.clearInterval(timer); window.removeEventListener(RUNTIME_QUEUE_CHANGED, changed); document.removeEventListener("visibilitychange", refresh); };
   }, [conversationId, onCommand, latestTurnId, latestTurnStatus, updateQueue]);
-  const userQueued = queue.filter(({ watcherNote }) => !watcherNote).length;
+  const userQueued = queue.filter(({ watcherNote, delegatedCompletion }) => !watcherNote && !delegatedCompletion).length;
   useEffect(() => setRuntimeQueueLength(conversationId, userQueued), [conversationId, userQueued]);
   const first = queue[0];
   if (!first) return null;
   const dispatching = first.state === "dispatching";
+  const delegated = Boolean(first.delegatedCompletion);
+  const sendable = !delegated || (latestTurnStatus !== null && isAgentTurnTerminalStatus(latestTurnStatus as AgentTurnStatus));
   const mutate = async (type: "message.queue.send" | "message.queue.remove"): Promise<void> => {
     if (busy) return;
     setBusy(true); setError(null);
@@ -98,11 +103,12 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
     <div className={`composer-queue-item${first.attachments.length ? " has-media" : ""}`} role="listitem">
       <CornerDownRight size={14} aria-hidden="true" />
       {first.watcherNote && <small className="composer-queue-count">From watcher</small>}
+      {delegated && <small className="composer-queue-count">Delegated results</small>}
       <span className="composer-queue-copy" title={first.content}>{first.content}</span>
       {first.attachments.length > 0 && <span className="composer-queue-media"><Paperclip size={14} aria-hidden="true" />{first.attachments.length} {first.attachments.length === 1 ? "image" : "images"}</span>}
       <small className="composer-queue-count">{dispatching ? "Sending…" : first.state === "blocked" ? "Needs attention" : queue.length > 1 ? `1 of ${queue.length}` : "Queued"}</small>
-      <button type="button" className="composer-queue-send" aria-label="Send queued message now" disabled={busy || dispatching || !canSend} onClick={() => void mutate("message.queue.send")}>Send now</button>
-      <IconButton label="Remove" aria-label="Remove queued message" className="composer-queue-remove" disabled={busy || dispatching} onClick={() => void mutate("message.queue.remove")}><Trash2 size={14} aria-hidden="true" /></IconButton>
+      {sendable && <button type="button" className="composer-queue-send" aria-label={delegated ? "Send delegated results now" : "Send queued message now"} disabled={busy || dispatching || !canSend} onClick={() => void mutate("message.queue.send")}>Send now</button>}
+      <IconButton label="Remove" aria-label={delegated ? "Remove delegated results" : "Remove queued message"} className="composer-queue-remove" disabled={busy || dispatching} onClick={() => void mutate("message.queue.remove")}><Trash2 size={14} aria-hidden="true" /></IconButton>
     </div>
     {(error ?? first.error) && <span role="status">{error ?? first.error}</span>}
   </div>;

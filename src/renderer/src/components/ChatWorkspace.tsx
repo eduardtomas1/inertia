@@ -106,6 +106,8 @@ import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import { composerFocusRestorer } from "../utils/composerFocusRestore";
 import { StreamingResponseTimeline } from "./response-timeline/streaming-timeline";
 import { ForkSurfaceProvider, ForkHistoryPanel, type ForkCommandRunner } from "./orchestration/fork-surface";
+import { DelegationLineagePanel, DelegationSurfaceProvider } from "./orchestration/delegation-surface";
+import type { DelegationCommandRunner, DelegationSurface } from "./orchestration/delegation-model";
 import "./ChatWorkspace.css";
 
 const ProviderMaintenanceNotice = lazy(async () => ({
@@ -176,6 +178,10 @@ type ChatWorkspaceProps = {
   contextPackets?: readonly ConversationContextPacketSummary[];
   rolledBackTurnIds?: readonly string[];
   watcherWakes?: readonly WatcherWakeSummary[];
+  delegation?: DelegationSurface["delegation"];
+  conversations?: DelegationSurface["conversations"];
+  onDelegationCommand?: DelegationCommandRunner;
+  onOpenConversation?: (conversationId: string) => boolean;
   onConversationContextCommand?: ConversationContextCommandRunner;
   onQueueCommand?: QueueCommandRunner;
   onForkCommand?: ForkCommandRunner;
@@ -297,6 +303,10 @@ export function ChatWorkspace({
   contextPackets = EMPTY_CONTEXT_PACKETS,
   rolledBackTurnIds,
   watcherWakes,
+  delegation,
+  conversations,
+  onDelegationCommand,
+  onOpenConversation,
   onConversationContextCommand,
   onQueueCommand,
   onForkCommand,
@@ -486,7 +496,7 @@ export function ChatWorkspace({
     }
   }, [stopOwner, stopTurnStatus]);
   const promptHistory = useMemo(() => ownedMessages
-    .filter(({ role, content }) => role === "user" && Boolean(content.trim()))
+    .filter(({ role, content, delegatedCompletion }) => role === "user" && !delegatedCompletion && Boolean(content.trim()))
     .map(({ id, content }) => ({ id, content })), [ownedMessages]);
   const stopWithPromptRestore = useCallback(async (): Promise<void> => {
     const stoppedConversationId = conversation?.id ?? null;
@@ -984,6 +994,8 @@ export function ChatWorkspace({
   return (
     <ForkSurfaceProvider projectId={project.id} conversationId={conversation.id} run={onForkCommand}
       rolledBackTurnIds={rolledBackTurnIds} canRollBackToStart={canRollBackToStart}>
+    <DelegationSurfaceProvider conversationId={conversation.id} delegation={delegation}
+      conversations={conversations} run={onDelegationCommand} openConversation={onOpenConversation}>
     <Root
       className={clsx(
         "chat-workspace",
@@ -1015,6 +1027,7 @@ export function ChatWorkspace({
         </span>
         <div ref={timelineRef} className="response-timeline">
           <ForkHistoryPanel />
+          <DelegationLineagePanel />
           {history && (history.hasOlder || history.error) && (
             <div className="conversation-history-controls">
               {history.hasOlder && <button ref={keepHistoryFocus} type="button" className="subtle-button"
@@ -1221,6 +1234,7 @@ export function ChatWorkspace({
         />
       </div>
     </Root>
+    </DelegationSurfaceProvider>
     </ForkSurfaceProvider>
   );
 }

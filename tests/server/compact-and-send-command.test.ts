@@ -121,6 +121,7 @@ function fixture(options: FixtureOptions = {}) {
   } as unknown as ProviderInfo;
   const store = {
     orchestration: { acceptedRequest: vi.fn(() => null) },
+    conversationWork: { restoreBlocksConversation: vi.fn(() => false) },
     conversation: vi.fn(() => conversation),
     conversationPath: vi.fn(() => tmpdir()),
     cliConversationImport: vi.fn(() => null),

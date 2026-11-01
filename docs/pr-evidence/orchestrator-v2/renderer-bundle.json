@@ -280,5 +280,211 @@
     },
     "attribution": "Typed checkpoint and handoff supplement lines on the composer context chip: the chip renders the checkpoint and handoff lines from the typed supplement fields, with their formatters already moved to a lazily loaded shared module. Core grew 419 bytes over the previous recorded measurement; contributions were not isolated individually.",
     "headroomDecision": "Measured bytes plus 256 on core, matching the branch convention for core and chunks. Startup routes did not change size and keep 349 bytes of headroom. No exclusion changed and no other limit relaxed."
+  },
+  "phase4Renderer": {
+    "date": "2026-10-31",
+    "checkpoint": "Uncommitted Phase 4 package D (renderer) over packages A, B and C in progress",
+    "platform": "Windows 11 x64, Node 22.23.1",
+    "measurement": "electron-vite renderer output measured three ways on the same tree: before package D (packages A and C only), a control build with every package D renderer edit reverted (packages A, B and C), and the package D build.",
+    "accounting": "All route closures and core inclusions/exclusions unchanged. Only the four failing budgets were raised.",
+    "measured": {
+      "beforePackageD": {
+        "mainWorkbenchFirstLoadJavaScript": 902804,
+        "detachedChatFirstLoadJavaScript": 796568,
+        "transcriptJavaScript": 622271,
+        "deferredComposerQueueJavaScript": 13302,
+        "coreJavaScript": 2490964
+      },
+      "controlWithoutPackageD": {
+        "mainWorkbenchFirstLoadJavaScript": 902850,
+        "detachedChatFirstLoadJavaScript": 796614,
+        "transcriptJavaScript": 622271,
+        "deferredComposerQueueJavaScript": 13302,
+        "coreJavaScript": 2495132
+      },
+      "withPackageD": {
+        "mainWorkbenchFirstLoadJavaScript": 904996,
+        "detachedChatFirstLoadJavaScript": 798741,
+        "transcriptJavaScript": 628412,
+        "deferredComposerQueueJavaScript": 13599,
+        "coreJavaScript": 2517433
+      }
+    },
+    "raised": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 904996,
+        "previousLimit": 902865,
+        "limit": 905508,
+        "headroom": 512
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 798741,
+        "previousLimit": 796629,
+        "limit": 799253,
+        "headroom": 512
+      },
+      "deferredComposerQueueJavaScript": {
+        "bytes": 13599,
+        "previousLimit": 13302,
+        "limit": 13855,
+        "headroom": 256
+      },
+      "coreJavaScript": {
+        "bytes": 2517433,
+        "previousLimit": 2485379,
+        "limit": 2517689,
+        "headroom": 256
+      }
+    },
+    "unchangedLimitsMeasured": {
+      "transcriptJavaScript": {
+        "bytes": 628412,
+        "limit": 649783
+      },
+      "entryCss": {
+        "bytes": 243221,
+        "limit": 243221
+      }
+    },
+    "attribution": "First-load routes: package D adds 2,146 workbench and 2,127 detached bytes of eager wiring (the delegation surface context and lazy slot, the chat workspace and scene model props, the six new command policies, detail refresh after delegation mutations, the delegated wake row height and minimap label, and the prompt-history exclusion). The Delegated work panel, child breadcrumb, full-result reader and observed child view load in their own deferred chunks; the timeline wake card, its model and the Agent details toggle live in the deferred transcript chunk (+6,141 bytes, within its existing limit). Queue: the pinned Delegated results row adds 297 bytes. Core: +22,301 bytes from package D and +4,168 bytes from packages A, B and C between the earlier measurements, on top of the 5,585 bytes packages A and C had already put over the previous core limit. Package D's CSS is imported only from deferred modules; entry CSS is unchanged.",
+    "headroomDecision": "Measured bytes plus 512 on each first-load route and plus 256 on the deferred queue route and core, matching the branch convention. Packages A, B and C were still in progress, so the core and first-load figures must be remeasured at the integrated checkpoint."
+  },
+  "phase4FidelityRenderer": {
+    "date": "2026-11-01",
+    "checkpoint": "Uncommitted Phase 4 fidelity package F4 over packages A to D and fidelity packages F1 to F3 in progress",
+    "platform": "Windows 11 x64, Node 22.23.1",
+    "measurement": "npm run build:bundle on the integrated worktree; the only failing budget was core (2,519,982 bytes against 2,517,689). Every route closure and core inclusion or exclusion is unchanged.",
+    "measured": {
+      "mainWorkbenchFirstLoadJavaScript": 904815,
+      "detachedChatFirstLoadJavaScript": 798560,
+      "transcriptJavaScript": 630369,
+      "settingsJavaScript": 79156,
+      "deferredComposerQueueJavaScript": 13599,
+      "entryCss": 243221,
+      "coreJavaScript": 2519982
+    },
+    "raised": {
+      "coreJavaScript": {
+        "bytes": 2519982,
+        "previousBytes": 2517433,
+        "previousLimit": 2517689,
+        "limit": 2520238,
+        "headroom": 256
+      }
+    },
+    "unchangedLimitsMeasured": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 904815,
+        "limit": 905508
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 798560,
+        "limit": 799253
+      },
+      "transcriptJavaScript": {
+        "bytes": 630369,
+        "limit": 649783
+      },
+      "settingsJavaScript": {
+        "bytes": 79156,
+        "limit": 81511
+      },
+      "deferredComposerQueueJavaScript": {
+        "bytes": 13599,
+        "limit": 13855
+      },
+      "entryCss": {
+        "bytes": 243221,
+        "limit": 243221
+      }
+    },
+    "attribution": "Against the package D measurement, first-load routes shrink by 181 bytes each (the observedChildControls prop and the chat-status Needs-you proxy are gone) and the deferred transcript chunk grows by 1,957 bytes (the completion card parses the wake summary line and per-task headers, with the outcome verbs and labels). Core grows by 2,549 bytes; it also carries the shared delegation and settings contract changes of fidelity packages F1 to F3 that the renderer imports. Contributions were not isolated individually and are not additive.",
+    "headroomDecision": "Measured core bytes plus 256, matching the branch convention; no other limit changed. Core must be remeasured once F1 to F3 settle."
+  },
+  "phase4PackageE": {
+    "date": "2026-11-01",
+    "checkpoint": "Uncommitted Phase 4 packages A to D, fidelity packages F1 to F4 and package E product corrections",
+    "platform": "Windows 11 x64, Node 22.23.1",
+    "measurement": "npm run build:bundle on the integrated worktree after the package E renderer corrections; every budget passed and no limit, route closure or core inclusion or exclusion changed.",
+    "measured": {
+      "mainWorkbenchFirstLoadJavaScript": 904815,
+      "detachedChatFirstLoadJavaScript": 798560,
+      "transcriptJavaScript": 630369,
+      "settingsJavaScript": 79156,
+      "deferredComposerQueueJavaScript": 13650,
+      "entryCss": 243221,
+      "coreJavaScript": 2520075
+    },
+    "limits": {
+      "deferredComposerQueueJavaScript": 13855,
+      "coreJavaScript": 2520238
+    },
+    "attribution": "Against the F4 measurement the deferred queue chunk grows by 51 bytes (Send now for delegated results once no turn is running) and core by 93 bytes (Continue with results offered for dismissed results in the Delegated work panel, plus the queue change). First-load, transcript and settings routes are unchanged."
+  },
+  "phase4Final": {
+    "date": "2026-11-01",
+    "checkpoint": "Phase 4 (packages A to E, fidelity packages F1 to F4 and the streaming detail-refresh fix) rebased onto origin/orchestrator-v2 630aa2cf (stop ladder, detached-head and fidelity packages G1 to G4, G7, G10, G12), with the deferred G7 hooks and the portable files decision",
+    "platform": "Windows 11 x64, Node 22.23.1",
+    "measurement": "npm run build:bundle on the rebased tree; before the re-cap the only failing budget was coreJavaScript (2521262 bytes against 2520768). Every route closure and core inclusion or exclusion is unchanged.",
+    "streamingDetailRefreshFix": {
+      "budget": "coreJavaScript",
+      "raise": 530,
+      "previousLimit": 2520238,
+      "limit": 2520768,
+      "attribution": "Live assistant segment reconciliation in the response timeline (continuedLiveSegment and liveSegmentContinuation in src/renderer/src/utils/response-timeline/execution.ts, consumed by virtualization.ts): a detail refresh during a streaming turn no longer shows the persisted partial segment next to the live one. Covered by tests/renderer/streaming-detail-refresh.dom.test.tsx."
+    },
+    "rebaseCapResolution": "The rebase conflicted on the main workbench, detached chat and core caps; each took the larger side (Phase 4: 905508, 799253 and 2520768 against upstream 903347, 797132 and 2486031) and was re-measured here.",
+    "raised": {
+      "coreJavaScript": {
+        "bytes": 2521262,
+        "previousLimit": 2520768,
+        "limit": 2521518,
+        "headroom": 256
+      }
+    },
+    "unchangedLimitsMeasured": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 905416,
+        "limit": 905508
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 799182,
+        "limit": 799253
+      },
+      "transcriptJavaScript": {
+        "bytes": 630555,
+        "limit": 649783
+      },
+      "settingsJavaScript": {
+        "bytes": 79156,
+        "limit": 81511
+      },
+      "deferredComposerQueueJavaScript": {
+        "bytes": 13650,
+        "limit": 13855
+      },
+      "deferredThreadActionsJavaScript": {
+        "bytes": 9295,
+        "limit": 9551
+      },
+      "detachedChatJavaScript": {
+        "bytes": 21826,
+        "limit": 22082
+      },
+      "filesFirstLoadJavaScript": {
+        "bytes": 145998,
+        "limit": 153087
+      },
+      "entryJavaScript": {
+        "bytes": 222755,
+        "limit": 222900
+      },
+      "entryCss": {
+        "bytes": 243221,
+        "limit": 243221
+      }
+    },
+    "attribution": "Against the package E measurement (2520075) core grows by 1187 bytes: the upstream fidelity packages' renderer and shared-contract growth (233 and 419 bytes over their base), the streaming detail-refresh fix and the combination of both sides. The two startup routes grow by 601 and 622 bytes and the transcript chunk by 186 bytes over package E; all stay within their limits. The server-side hooks (effect wake, capture effect, start barrier, attestation pass-through, files decision) add no renderer bytes. Contributions were not isolated individually and are not additive.",
+    "headroomDecision": "Only the failing budget was re-baselined, to its measurement plus 256 as for core throughout the branch. The startup routes keep 92 and 71 bytes of headroom under the Phase 4 limits and were not raised because they passed."
   }
 }

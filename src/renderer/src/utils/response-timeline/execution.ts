@@ -156,6 +156,34 @@ export function trackLiveTextFollowUps(
     : { segment, known: [...tracked.known, ...fresh], held: [...tracked.held, ...fresh] };
 }
 
+const LIVE_SEGMENT_MIN_OVERLAP = 24;
+
+export function continuedLiveSegment(persisted: string, live: string): string | null {
+  if (!persisted) return null;
+  if (live.startsWith(persisted)) return live;
+  const probe = live.slice(0, LIVE_SEGMENT_MIN_OVERLAP);
+  for (
+    let at = probe.length < LIVE_SEGMENT_MIN_OVERLAP ? -1 : persisted.indexOf(probe, 1);
+    at > 0;
+    at = persisted.indexOf(probe, at + 1)
+  ) {
+    if (live.startsWith(persisted.slice(at))) return persisted.slice(0, at) + live;
+  }
+  return null;
+}
+
+export function liveSegmentContinuation(
+  turn: Pick<ResponseTurn, "isActive" | "terminalAssistantMessage" | "commentaryMessages" | "activities">,
+  live: string,
+): string | null {
+  const latest = turn.isActive && !turn.terminalAssistantMessage && live
+    ? turn.commentaryMessages.at(-1)
+    : undefined;
+  return latest && !turn.activities.some(({ createdAt }) => timestamp(createdAt) > timestamp(latest.createdAt))
+    ? continuedLiveSegment(latest.content, live)
+    : null;
+}
+
 export function withLiveCommentary(
   stream: TurnWorkStreamEntry[],
   live: Extract<TurnExecutionStreamEntry, { kind: "commentary" }>,

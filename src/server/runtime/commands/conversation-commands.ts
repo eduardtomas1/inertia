@@ -1,3 +1,4 @@
+import type { ConversationDelegation } from "../../../shared/orchestration-delegation";
 import type WebSocket from "ws";
 import { resolve } from "node:path";
 
@@ -133,6 +134,7 @@ export interface ConversationCommandDependencies {
   creation?: ConversationCreationService;
   contextRequests?: ConversationContextRequestCoordinator;
   reportIncident?(observation: IncidentObservation): unknown;
+  decorateDelegation?(delegation: ConversationDelegation): ConversationDelegation | undefined;
 }
 
 export function createConversationCommandHandler(
@@ -272,10 +274,12 @@ export function createConversationCommandHandler(
           return "handled";
         }
         try {
-          const detail = dependencies.store.conversationHistory(
+          const loaded = dependencies.store.conversationHistory(
             conversationId,
             command.payload.history,
           );
+          const delegation = loaded?.delegation && dependencies.decorateDelegation?.(loaded.delegation);
+          const detail = loaded && delegation ? { ...loaded, delegation } : loaded;
           dependencies.send(socket, {
             type: "request.result",
             requestId: command.requestId,

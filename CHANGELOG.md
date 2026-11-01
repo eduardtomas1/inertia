@@ -43,6 +43,65 @@ The useful changes in each Inertia release, in plain language.
   that chat's terminal. If it is already at its terminal limit (four per
   window) or the local service is offline, they stop after 30 seconds unless
   you open that terminal, and Diagnostics records it.
+- A chat's own window also has the new Git, blame and search commands for
+  its workspace. Worktree management and creating tasks stay in the main
+  window.
+
+### Agent tools
+
+- Agents with Inertia's tools can read their own workspace: Git status, the
+  turn's diff, the plan, the chat's goal, and the project's tasks and
+  actions. Every read is limited in size, and secrets and local paths are
+  removed before the agent sees it.
+- A chat can wait up to 20 seconds at a time for a chat it started and read
+  that chat's turns without asking you first. Waiting does not use up the
+  turn's tool allowance.
+- An agent is told only about the tools it can call on that turn. A resumed
+  Codex chat that started before a tool existed is not told about it until
+  its next new session, also after Inertia restarts. With Browser access
+  off, the Browser tools answer that access is off.
+
+### Plan
+
+- Steps read from a reply appear only for replies in Plan mode, are marked
+  as read from the reply and are never ticked off. **Implement** sends the
+  plan's own text, and **Implement in a new chat** opens a new chat on the
+  same worktree with the plan as its first draft.
+
+### Terminal and Files
+
+- The terminal opens web links, including OSC 8 links, through Inertia's
+  link rules, opens printed file paths at their line and column, has a find
+  bar (Ctrl+Shift+F, or Cmd+F on macOS) and **Add selection to prompt**.
+- Files lets you select lines to **Ask about** or **Add to prompt**, and
+  searches file names or contents.
+- Files a chat's own messages carry can be attached again.
+
+### Tasks
+
+- **Create task from message**, and **Create task** on a plan step, make a
+  task that links back to its chat without handing it to an agent.
+
+### Git
+
+- Diffs are syntax-highlighted, show which words changed, and switch between
+  **Unified** and **Split** per chat.
+- **Stage** and **Unstage** work per file in Changes and touch only the
+  index.
+- The commit message box has room for several lines and starts from a draft
+  based on the review summary of the same changes.
+- **History…** lists commits and opens any of them, and Files has a
+  **Blame** gutter.
+- **Settings → Projects → Worktrees** lists worktrees and removes one only
+  when it is clean, unlocked, not in use and created by Inertia. Removal is
+  never forced.
+
+### Palette and keyboard
+
+- Cmd/Ctrl+K has Surfaces, Git and Window groups, and Cmd/Ctrl+G opens a
+  surface from anywhere.
+- A focused Browser page keeps the keys Inertia does not use, such as
+  Ctrl+Y, Ctrl+U and Ctrl+H.
 
 ### Accounts and API keys
 

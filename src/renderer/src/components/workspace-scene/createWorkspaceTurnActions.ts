@@ -1,4 +1,5 @@
 import type {
+  AgentTurn,
   CheckpointSummary,
   Conversation,
   ServerEvent,
@@ -18,6 +19,14 @@ interface WorkspaceTurnActionInput {
     earlierTurnId: string,
     laterTurnId: string,
   ) => Promise<void>;
+}
+
+export function revertsRolledBackTurn(
+  checkpoint: Pick<CheckpointSummary, "id" | "turnId">,
+  turn: Pick<AgentTurn, "id" | "checkpointId">,
+  rolledBack: boolean,
+): boolean {
+  return rolledBack && checkpoint.turnId === turn.id && turn.checkpointId === checkpoint.id;
 }
 
 export function createWorkspaceTurnActions({

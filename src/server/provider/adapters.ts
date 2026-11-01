@@ -262,6 +262,7 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     skills.length > 0
     && input.harnessId !== "codex-app-server"
     && input.harnessId !== "claude-agent-sdk"
+    && input.harnessId !== "pi-rpc"
   ) {
     throw new ProviderRuntimeError(
       "invalid_input",
@@ -286,6 +287,8 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       input.harnessId === "claude-agent-sdk"
       && skill.source !== "claude-native"
     )
+    || (input.harnessId === "pi-rpc" && (skill.source !== "pi-native" || !isAbsolute(skill.path)
+      || skill.path.length > 4096 || skill.path.includes("\0")))
   )) {
     throw new ProviderRuntimeError("invalid_input", "A skill reference is invalid.");
   }

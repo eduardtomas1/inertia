@@ -38,7 +38,7 @@ describe("update everything contract", () => {
   });
 
   it("keeps the renderer pending through every provider update and treats a timeout as ambiguous", () => {
-    expect(runtimeCommandPolicy("updates.run")).toEqual({ timeoutMs: 37 * 60_000, timeoutDelivery: "ambiguous" });
+    expect(runtimeCommandPolicy("updates.run")).toEqual({ timeoutMs: 43 * 60_000, timeoutDelivery: "ambiguous" });
     expect(runtimeCommandPolicy("updates.finish")).toEqual({ timeoutMs: 15_000, timeoutDelivery: "ambiguous" });
   });
 });

@@ -57,4 +57,16 @@ describe("runtime incidents", () => {
     expect(sink.mock.calls[2]![0]).toMatchObject({ id: warning.id, runtimeGeneration: first, outcome: "recovered" });
     expect(sink.mock.calls[3]![0]).toMatchObject({ code: "runtime.reconnected", runtimeGeneration: second, correlationId: warning.id });
   });
+
+  it("records an orchestration projection startup blocker as its own incident", () => {
+    const sink = vi.fn(); const observer = new RuntimeIncidentObserver(sink);
+    const generation = `${randomUUID()}:1`;
+    observer.startupBlocked(generation, "prior-runtime-cleanup-unconfirmed");
+    observer.startupBlocked(generation, "provider-installation-quarantined");
+    expect(sink).not.toHaveBeenCalled();
+    observer.startupBlocked(generation, "orchestration-projection-invalid");
+    expect(sink).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      code: "runtime.orchestration-projection-invalid", outcome: "failed", runtimeGeneration: generation,
+    }));
+  });
 });

@@ -161,6 +161,13 @@ exports[`hot query plans on a seeded runtime database > snapshots every history 
     ],
   },
   {
+    "query": "SELECT count(*) AS count FROM orchestration_v2_entities WHERE kind = 'rolled-back-turn' AND thread_id = ?",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH orchestration_v2_entities USING COVERING INDEX orchestration_v2_entities_thread (thread_id=? AND kind=?)",
+    ],
+  },
+  {
     "query": "SELECT * FROM thread_usage WHERE conversation_id = ? ORDER BY updated_at ASC",
     "withStatistics": "same",
     "withoutStatistics": [
@@ -195,6 +202,36 @@ exports[`hot query plans on a seeded runtime database > snapshots every history 
     "withStatistics": "same",
     "withoutStatistics": [
       "SEARCH diff_review_notes USING INDEX diff_review_notes_conversation_idx (conversation_id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT COUNT(*) AS count FROM delegated_tasks WHERE parent_conversation_id = ?",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH delegated_tasks USING COVERING INDEX delegated_tasks_parent_delivery_idx (parent_conversation_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT task_id FROM delegated_tasks WHERE parent_conversation_id = ? ORDER BY created_at DESC, task_id DESC LIMIT ?",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH delegated_tasks USING INDEX delegated_tasks_parent_delivery_idx (parent_conversation_id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT payload_json FROM orchestration_v2_entities WHERE kind = ? AND id = ?",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH orchestration_v2_entities USING INDEX sqlite_autoindex_orchestration_v2_entities_1 (kind=? AND id=?)",
+    ],
+  },
+  {
+    "query": "SELECT task_id FROM delegated_tasks WHERE child_conversation_id = ? ORDER BY created_at, task_id LIMIT 1024",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH delegated_tasks USING INDEX delegated_tasks_child_status_idx (child_conversation_id=?)",
       "USE TEMP B-TREE FOR ORDER BY",
     ],
   },
@@ -413,6 +450,15 @@ exports[`hot query plans on a seeded runtime database > snapshots every history 
       "CORRELATED SCALAR SUBQUERY 1",
       "SEARCH source USING COVERING INDEX sqlite_autoindex_conversations_1 (id=?)",
       "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT id FROM orchestration_v2_entities WHERE kind = 'rolled-back-turn' AND thread_id = ? AND id IN (SELECT value FROM json_each(?)) ORDER BY id",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SEARCH orchestration_v2_entities USING COVERING INDEX orchestration_v2_entities_thread (thread_id=? AND kind=? AND id=?)",
+      "LIST SUBQUERY 1",
+      "SCAN json_each VIRTUAL TABLE INDEX 1:",
     ],
   },
   {

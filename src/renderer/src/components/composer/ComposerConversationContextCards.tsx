@@ -11,6 +11,7 @@ import {
   type ConversationContextOmissions,
   type ConversationContextSupplement,
 } from "@shared/conversation-context";
+import { conversationContextSupplementLines } from "@shared/conversation-context-supplement";
 import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
@@ -133,16 +134,7 @@ function ContextPreview({
     onDismiss();
     if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
   };
-  const supplement = content?.supplement;
-  const supplementLines = supplement
-    ? [
-        ...(supplement.files ?? []),
-        ...(supplement.omittedFiles
-          ? [`${supplement.omittedFiles} more ${supplement.omittedFiles === 1 ? "file" : "files"}`]
-          : []),
-        ...(supplement.commands ?? []),
-      ]
-    : [];
+  const supplementLines = content?.supplement ? conversationContextSupplementLines(content.supplement) : [];
   const gapAt = (index: number): React.JSX.Element | null => (
     content && (content.omissions?.earlierMessages ?? 0) > 0 && content.omissions!.gapIndex === index
       ? (

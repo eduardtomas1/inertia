@@ -85,12 +85,22 @@ export default defineConfig({
       },
     ],
     build: {
-      externalizeDeps: true,
+      externalizeDeps: {
+        include: [
+          "@cursor/sdk",
+          "@cursor/sdk-darwin-arm64",
+          "@cursor/sdk-darwin-x64",
+          "@cursor/sdk-linux-arm64",
+          "@cursor/sdk-linux-x64",
+          "@cursor/sdk-win32-x64",
+        ],
+      },
       target: "node22",
       sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
+          "cursor-sdk-worker": resolve("src/server/provider/cursor-sdk-worker.ts"),
           "linux-file-icon-worker": resolve("src/main/linux-file-icon-worker.ts"),
           "snapshot-capture-worker": resolve("src/main/snapshot-capture-worker.ts"),
           "snapshot-binding-worker": resolve("src/main/snapshot-binding-worker.ts"),

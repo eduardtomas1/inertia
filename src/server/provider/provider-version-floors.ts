@@ -29,8 +29,8 @@ export const PROVIDER_VERSION_FLOORS = {
 } as const satisfies Partial<Record<ProviderId, ProviderVersionFloor>>;
 
 export const OPENCODE_VERSION_CEILING = {
-  firstUnsupportedMajor: 2,
-  message: "OpenCode 2 is not supported yet; use OpenCode 1.x (opencode-ai).",
+  firstUnsupportedMajor: 3,
+  message: "This OpenCode major version is not supported; use OpenCode 1.x or 2.x.",
 } as const;
 
 interface ParsedVersion {

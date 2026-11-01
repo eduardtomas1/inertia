@@ -15,6 +15,7 @@ import type { ProviderManagerInstallationAuthority } from "./provider-manager-in
 export async function prepareProviderAuthLaunch(options: {
   providerId: ProviderId;
   executable: string;
+  installationVersion?: string | null;
   cwd: string;
   environment: NodeJS.ProcessEnv;
   signal: AbortSignal;
@@ -23,7 +24,8 @@ export async function prepareProviderAuthLaunch(options: {
 }): Promise<ProviderAuthLaunch> {
   const { providerId, executable, cwd, signal, installationAuthority } = options;
   signal.throwIfAborted();
-  const loginArgs = providerAuthLoginArgs(providerId, options.method);
+  const nativeLoginArgs = providerAuthLoginArgs(providerId, options.method);
+  const loginArgs = providerId === "opencode" && (options.installationVersion ?? "").startsWith("2.") ? ["--standalone", ...nativeLoginArgs] : nativeLoginArgs;
   const environment = providerAuthLaunchEnvironment(
     providerId, providerChildEnvironment(providerId, options.environment),
   );

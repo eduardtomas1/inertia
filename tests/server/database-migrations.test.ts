@@ -1475,7 +1475,7 @@ describe("runtime migration catalog", () => {
       expect(database.prepare("SELECT name FROM sqlite_master WHERE name = 'messages_created_id_idx'").get()).toBeUndefined();
       migrateRuntimeDatabase(database);
       expect(database.prepare("SELECT * FROM messages ORDER BY id").all())
-        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, html_render_json: null, private_connect_device_id: null, watcher_note_json: null, duo_comparison_json: null })));
+        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, html_render_json: null, private_connect_device_id: null, watcher_note_json: null, duo_comparison_json: null, delegated_completion_json: null })));
       expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 69 ORDER BY version").all()).toEqual(history);
       expect(database.pragma("index_xinfo(messages_created_id_idx)")).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "created_at", desc: 1, key: 1 }),
@@ -2164,6 +2164,13 @@ describe("runtime migration catalog", () => {
       { version: 104 },
       { version: 105 },
       { version: 106 },
+      { version: 107 },
+      { version: 108 },
+      { version: 109 },
+      { version: 110 },
+      { version: 111 },
+      { version: 112 },
+      { version: 113 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2201,6 +2208,15 @@ describe("runtime migration catalog", () => {
         name: string;
       }>).some(({ name }) => name === "watcher_note_json")).toBe(true);
     }
+    for (const table of ["messages", "queued_messages"]) {
+      expect((migrated.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+        name: string;
+      }>).some(({ name }) => name === "delegated_completion_json")).toBe(true);
+    }
+    expect(migrated.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('delegated_tasks', 'delegated_task_turns') ORDER BY name",
+    ).all()).toEqual([{ name: "delegated_task_turns" }, { name: "delegated_tasks" }]);
+    expect(migrated.prepare("SELECT COUNT(*) AS count FROM delegated_tasks").get()).toEqual({ count: 0 });
     expect((migrated.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
       name: string;
     }>).some(({ name }) => name === "suspended_duration_ms")).toBe(true);
@@ -2214,6 +2230,15 @@ describe("runtime migration catalog", () => {
     expect(migrated.prepare(
       "SELECT compact_on_return AS compactOnReturn FROM app_state WHERE id = 1",
     ).get()).toEqual({ compactOnReturn: "offer" });
+    expect(migrated.prepare(
+      "SELECT delegation_automatic_wakes AS automaticWakes FROM app_state WHERE id = 1",
+    ).get()).toEqual({ automaticWakes: 1 });
+    expect((migrated.prepare("PRAGMA table_info(orchestration_v2_receipts)").all() as Array<{
+      name: string;
+    }>).map(({ name }) => name)).toEqual(expect.arrayContaining(["status", "error", "command_type"]));
+    expect(migrated.prepare(
+      "SELECT projection_name AS name, schema_version AS version, last_sequence AS sequence FROM orchestration_v2_projection_metadata",
+    ).all()).toEqual([{ name: "orchestration-v2", version: 1, sequence: 0 }]);
     expect((migrated.prepare("PRAGMA table_info(thread_usage)").all() as Array<{
       name: string;
     }>).map(({ name }) => name)).toEqual(expect.arrayContaining([

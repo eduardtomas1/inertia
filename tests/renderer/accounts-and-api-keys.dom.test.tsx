@@ -172,7 +172,7 @@ describe("Accounts and API keys", () => {
     expect(screen.getByRole("heading", { name: "Accounts and API keys" })).toBeInTheDocument();
     expect(screen.getByText(/A chat uses one route at a time: the account, or an API key you choose in the model chooser/u)).toBeInTheDocument();
     const cards = screen.getAllByRole("region").flatMap((region) => region.dataset.providerCard ?? []);
-    expect(cards).toEqual(["claude", "codex", "opencode", "cursor", "kimi", "antigravity"]);
+    expect(cards).toEqual(["claude", "codex", "opencode", "cursor", "kimi", "antigravity", "pi"]);
 
     const claude = card("Claude Code");
     expect(within(claude).getByText("Signed out")).toBeInTheDocument();

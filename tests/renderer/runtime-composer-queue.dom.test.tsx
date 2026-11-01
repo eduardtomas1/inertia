@@ -269,4 +269,30 @@ describe("runtime queue presentation and durable draft identity", () => {
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     vi.useRealTimers();
   });
+  it("pins the delegated results delivery first and offers only Remove during a turn, which the service treats as dismiss", async () => {
+    const delivery: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606060", content: "Delegated tasks finished.",
+      createdAt: "2026-09-26T00:01:00.000Z",
+      delegatedCompletion: { parentConversationId: conversationId, generation: 1, taskIds: ["a".repeat(64)] } };
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValueOnce(response([queued, delivery]))
+      .mockResolvedValue(response([queued]));
+    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend latestTurnId="first" latestTurnStatus="running" queueHost={null} />);
+    const item = (await screen.findByText("Delegated results")).closest<HTMLElement>("[role=listitem]")!;
+    expect(item).toHaveTextContent("Delegated tasks finished.");
+    expect(item).toHaveTextContent("1 of 2");
+    expect(screen.queryByRole("button", { name: /^Send .* now$/u })).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove delegated results" })));
+    expect(run).toHaveBeenCalledWith({ type: "message.queue.remove", payload: { conversationId, id: delivery.id } });
+    expect(await screen.findByText("Next task")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send queued message now" })).toBeTruthy();
+  });
+  it("offers Send now for held delegated results once the chat has no running turn", async () => {
+    const delivery: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606060", content: "Delegated tasks finished.",
+      delegatedCompletion: { parentConversationId: conversationId, generation: 1, taskIds: ["a".repeat(64)] } };
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValueOnce(response([delivery])).mockResolvedValue(response());
+    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend latestTurnId="first" latestTurnStatus="interrupted" queueHost={null} />);
+    await screen.findByText("Delegated results");
+    expect(screen.queryByRole("button", { name: "Send queued message now" })).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send delegated results now" })));
+    expect(run).toHaveBeenCalledWith({ type: "message.queue.send", payload: { conversationId, id: delivery.id } });
+  });
 });

@@ -1,4 +1,11 @@
+import { cursorSdkProviderMigration } from "./cursor-sdk-provider";
+import { conversationContextSupplementBoundMigration } from "./conversation-context-supplement-bound";
+import { delegatedTasksMigration } from "./delegated-tasks";
+import { delegationAutomaticWakesMigration } from "./delegation-automatic-wakes";
+import { orchestrationV2ReceiptStatusMigration } from "./orchestration-v2-receipt-status";
 import { limitResetMigration } from "./limit-reset";
+import { orchestrationV2Migration } from "./orchestration-v2";
+import { nativePiProviderMigration } from "./native-pi-provider";
 import type { DatabaseMigrationDefinition } from "./catalog";
 import { cliConversationImportsMigration } from "./cli-conversation-imports";
 import { agentThreadTargetOwnershipMigration } from "./agent-thread-target-ownership";
@@ -63,4 +70,11 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   persistCompactOnReturnMigration,
   turnScopedIndexesMigration,
   duoComparisonBriefsMigration,
+  orchestrationV2Migration,
+  nativePiProviderMigration,
+  cursorSdkProviderMigration,
+  conversationContextSupplementBoundMigration,
+  delegatedTasksMigration,
+  delegationAutomaticWakesMigration,
+  orchestrationV2ReceiptStatusMigration,
 ];

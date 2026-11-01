@@ -259,13 +259,13 @@ own compaction.
 
 Discovery refuses a Claude Code or OpenCode installation older than its
 security floor. The floors, the reason each one exists, Antigravity's headless
-floor and the OpenCode 2 ceiling are defined together in
+floor and the OpenCode major-version ceiling are defined together in
 `src/server/provider/provider-version-floors.ts`.
 
 | Provider | Supported | Why |
 | --- | --- | --- |
 | Claude Code | 2.1.309 or newer | Inertia passes `managedSettings` with `disableAllHooks` and `disableSkillShellExecution`; Claude Code before 2.1.309 dropped host-supplied managed settings, so those hook and skill-shell restrictions silently did not apply. 2.1.309 also carries the fixes for GHSA-5j29-h97v-84ch (a symlink race lets writes escape the project; fixed in 2.1.129) and GHSA-pq7j-f95f-qfcv (a plugin pinned-commit bypass; fixed in 2.1.179). |
-| OpenCode | 1.18.22 or newer, below 2 | GHSA-632h-h47v-g4x4: a cross-site request to `/global/upgrade` on `opencode serve` installs arbitrary packages (fixed in 1.18.22). The random basic-auth password Inertia gives its owned server reduces this risk but does not remove it. OpenCode 2 is not supported yet. |
+| OpenCode | 1.18.22 or newer, below 3 | GHSA-632h-h47v-g4x4: a cross-site request to `/global/upgrade` on `opencode serve` installs arbitrary packages (fixed in 1.18.22). The random basic-auth password Inertia gives its owned server reduces this risk but does not remove it. OpenCode 3 is not supported yet. |
 | Antigravity | 1.2.2 or newer | First release with the headless stream-json contract below. |
 
 Below a security floor, discovery runs only the version probe. It never runs

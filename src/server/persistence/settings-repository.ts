@@ -1,5 +1,6 @@
 import {
   defaultSettings,
+  type AppSettings,
   type AppSettingsUpdate,
 } from "../../shared/contracts";
 import { settingsFromState } from "./codecs";
@@ -19,6 +20,10 @@ export class SettingsRepository {
     const state = this.context.database.prepare("SELECT * FROM app_state WHERE id = 1").get() as StateRow | undefined;
     if (!state) throw new Error("Runtime state is unavailable.");
     return state;
+  }
+
+  settings(): AppSettings {
+    return settingsFromState(this.state());
   }
 
   update(update: AppSettingsUpdate): void {
@@ -66,6 +71,7 @@ export class SettingsRepository {
         quota_warnings_enabled = ?, quota_warning_threshold = ?,
         notify_only_in_background = ?,
         compact_on_return = ?,
+        delegation_automatic_wakes = ?,
         muted_custom_colors = ?
       WHERE id = 1
     `).run(
@@ -110,6 +116,7 @@ export class SettingsRepository {
       Number(next.quotaWarnings.enabled), next.quotaWarnings.firstThreshold,
       Number(next.notifyOnlyInBackground),
       next.compactOnReturn,
+      Number(next.delegationAutomaticWakes),
       Number(mutedCustomColors),
     );
   }

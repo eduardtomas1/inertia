@@ -123,9 +123,11 @@ type ProductionHarnessId =
   | "codex-app-server"
   | "claude-agent-sdk"
   | "cursor-acp"
+  | "cursor-sdk"
   | "kimi-acp"
   | "opencode-sdk"
-  | "antigravity-cli";
+  | "antigravity-cli"
+  | "pi-rpc";
 
 interface ManifestDefinition {
   readonly providerId: ProviderId;
@@ -201,6 +203,7 @@ const PROVIDER_IDS = new Set<ProviderId>([
   "kimi",
   "opencode",
   "antigravity",
+  "pi",
 ]);
 const CAPABILITY_IDS = new Set<ProviderCapabilityId>(PROVIDER_CAPABILITY_IDS);
 const SUPPORT_VALUES = new Set<ProviderCapabilitySupport>([
@@ -233,9 +236,11 @@ const CONTRACT_TESTS: Readonly<Record<ProductionHarnessId, string>> = {
   "codex-app-server": "tests/server/codex-app-server.test.ts",
   "claude-agent-sdk": "tests/server/claude-agent-sdk-harness.test.ts",
   "cursor-acp": "tests/server/cursor-acp-harness.test.ts",
+  "cursor-sdk": "tests/server/cursor-sdk-harness.test.ts",
   "kimi-acp": "tests/server/kimi-acp-harness.test.ts",
   "opencode-sdk": "tests/server/opencode-sdk-harness.test.ts",
   "antigravity-cli": "tests/server/antigravity-cli-harness.test.ts",
+  "pi-rpc": "tests/server/pi-rpc-harness.test.ts",
 };
 
 const CORE_NATIVE = {
@@ -318,6 +323,14 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     },
   },
   {
+    providerId: "cursor", harnessId: "cursor-sdk", implementationRevision: 1,
+    protocolRevision: "cursor-sdk/1.0.38/owned-worker-v1", bundledSdkVersion: "1.0.38",
+    support: { "text-streaming": "native", reasoning: "native", "tool-activity": "native",
+      "session-resume": "native", "native-session-id": "native", cancellation: "native",
+      "follow-up-steer": "native", "provider-native-tools": "native", "host-tool-bridge": "host-exact-turn",
+      "process-cleanup": "host-exact-turn", approvals: "host-exact-turn" },
+  },
+  {
     providerId: "kimi",
     harnessId: "kimi-acp",
     implementationRevision: 1,
@@ -335,8 +348,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
   {
     providerId: "opencode",
     harnessId: "opencode-sdk",
-    implementationRevision: 2,
-    protocolRevision: "opencode-owned-server/sdk-1.19.4",
+    implementationRevision: 3,
+    protocolRevision: "opencode-owned-server/sdk-1.19.4+http-2.0.28",
     bundledSdkVersion: "1.19.4",
     support: {
       ...CORE_NATIVE,
@@ -366,6 +379,12 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       "process-cleanup": "host-exact-turn",
       "maintenance-update": "negotiated",
     },
+  },
+  {
+    providerId: "pi", harnessId: "pi-rpc", implementationRevision: 1,
+    protocolRevision: "pi-rpc/1.0", bundledSdkVersion: null,
+    support: { ...CORE_NATIVE, images: "native", plans: "unavailable", "auth-state-discovery": "unavailable",
+      "usage-tokens": "native", "follow-up-steer": "native" },
   },
 ];
 

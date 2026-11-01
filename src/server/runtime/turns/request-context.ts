@@ -110,12 +110,14 @@ export interface PersistedTurnExecutionContext {
 }
 
 export interface AssembledTurnRequest {
+  contextHandoff?: import("../../../shared/orchestration-backings").PreparedContextHandoff;
   visibleContent: string;
   executionPrompt: string;
   imagePaths: string[];
   persistence: PersistedTurnExecutionContext;
   conversationContextDeliveries: ConversationContextDelivery[];
   sessionRecovery: TurnSessionRecovery | null;
+  restoredItemIds?: readonly string[];
 }
 
 export interface RestoredChatHistory {
@@ -123,6 +125,7 @@ export interface RestoredChatHistory {
   messageCount: number;
   omittedMessageCount: number;
   withheldMessageCount?: number;
+  itemIds?: readonly string[];
 }
 
 export interface ConversationContextMaterialization {
@@ -148,7 +151,7 @@ export interface AssembleTurnRequestInput {
   internalInstructions?: readonly HiddenProviderInstruction[];
   sessionInstructionDigest?: string;
   promptWithheld?: true;
-  restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
+  restoredHistory?: (capacityBytes: number, currentPromptBytes: number) => RestoredChatHistory | null;
 }
 
 interface MaterializedContext {
@@ -808,13 +811,14 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   if (carriedFit) append(carried, carriedFit);
 
   let sessionRecovery: TurnSessionRecovery | null = null;
+  let restoredItemIds: readonly string[] | undefined;
   if (input.restoredHistory) {
     const history = input.restoredHistory(Math.min(
       MAX_CONVERSATION_CONTEXT_TURN_BYTES,
       MAX_EXECUTION_PAYLOAD_BYTES - assembledPayloadBytes
         - (providerContexts.length === 0 ? EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES : 0)
         - MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET * CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES,
-    ));
+    ), assembledPayloadBytes);
     if (history) {
       const fitRestored = (blocks: RestoredChatHistory["blocks"]) => {
         const restored = blocks.map((block) => providerContext({
@@ -835,6 +839,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
           ?? (required.length < history.blocks.length ? fitRestored(required) : null);
       const fits = selected !== null;
       if (selected) append(selected.restored, selected.fit);
+      if (selected && history.itemIds) restoredItemIds = [...history.itemIds];
       sessionRecovery = {
         ...(fits
           ? {
@@ -877,6 +882,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     imagePaths,
     conversationContextDeliveries,
     sessionRecovery,
+    ...(restoredItemIds ? { restoredItemIds } : {}),
     persistence: {
       manifest: {
         version: 1,

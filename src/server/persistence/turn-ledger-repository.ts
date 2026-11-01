@@ -36,6 +36,7 @@ import {
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { CONTEXT_COMPACTION_ACTIVITY_TITLES } from "../provider/context-compaction-activity";
 import { assertConversationProvider } from "./conversation-provider-policy";
+import { assertNativeControlIdle } from "../orchestration-v2/native-control-fence";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import { completeRestartContinuationPlan } from "./restart-continuation-repository";
 import {
@@ -261,6 +262,7 @@ export class TurnLedgerRepository {
    */
   begin(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
     return this.context.database.transaction(() => {
+      assertNativeControlIdle(this.context.database, input.conversationId);
       assertConversationProvider(this.context, input.conversationId, input.providerId);
       if (input.providerSessionInvalidation) {
         if ((input.providerSessionBefore ?? null) !== null) {
@@ -291,7 +293,7 @@ export class TurnLedgerRepository {
         input.attachments ?? [],
         null,
         input.requestedAt,
-        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, duoComparison: input.duoComparison },
+        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, delegatedCompletion: input.delegatedCompletion, duoComparison: input.duoComparison },
       );
       const turn = this.create({
         ...input,

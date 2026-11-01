@@ -49,7 +49,7 @@ export interface AgentSkillSummary {
   shortDescription: string | null;
   scope: AgentSkillScope;
   enabled: boolean;
-  source: "codex-native" | "claude-native";
+  source: "codex-native" | "claude-native" | "pi-native";
 }
 
 export type AgentWorkflowGoalCapability =
@@ -72,6 +72,7 @@ export type AgentWorkflowGoalCapability =
     };
 
 export type AgentWorkflowSkillsCapability =
+  | { kind: "pi-native"; available: true; label: "Pi skills" }
   | {
       kind: "codex-native";
       available: true;
@@ -106,6 +107,7 @@ export interface AgentWorkflowState {
 
 /** Resolved only inside the privileged local runtime. */
 export type ProviderSkillInput =
+  | { source: "pi-native"; name: string; path: string }
   | {
       source: "codex-native";
       name: string;

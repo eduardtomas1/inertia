@@ -13,7 +13,7 @@ import { PROVIDER_INFO } from "./catalog";
 export const MAX_PROVIDER_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_PROVIDER_REQUEST_IMAGE_COUNT = 32;
 const MAX_IMAGE_BYTES = MAX_PROVIDER_REQUEST_IMAGE_BYTES;
-const INLINE_IMAGE_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "cursor", "kimi"]);
+const INLINE_IMAGE_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "cursor", "kimi", "pi"]);
 
 export function providerImageRequestLimitError(
   providerId: ProviderId,

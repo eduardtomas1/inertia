@@ -101,6 +101,7 @@ export interface PendingDatabaseRecoveryRequest {
 }
 
 export interface RuntimeCredentialBroker {
+  saveCursorSdk?(secret: string, signal?: AbortSignal): Promise<BackendCredentialStatus>;
   resolve(secretReference: string, signal?: AbortSignal): Promise<string | null>;
   status(secretReference: string, signal?: AbortSignal): Promise<BackendCredentialStatus>;
   clear(secretReference: string, signal?: AbortSignal): Promise<boolean>;

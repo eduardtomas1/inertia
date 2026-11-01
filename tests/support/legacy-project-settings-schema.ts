@@ -30,8 +30,29 @@ export function removeProjectSettingsFromLegacyFixture(database: Database.Databa
   }
 }
 
-export function removeWatcherLinksFromLegacyFixture(database: Database.Database): void {
+export function removeDelegatedTasksFromFixture(database: Database.Database): void {
   database.exec(`
+    DROP TABLE IF EXISTS delegated_task_turns;
+    DROP TABLE IF EXISTS delegated_tasks;
+    DROP INDEX IF EXISTS queued_messages_delegated_delivery_idx;
+    DROP INDEX IF EXISTS agent_thread_operations_client_request_idx;
+  `);
+  for (const [table, column] of [["messages", "delegated_completion_json"], ["queued_messages", "delegated_completion_json"],
+    ["agent_thread_operations", "client_request_key"], ["app_state", "delegation_automatic_wakes"]] as const) {
+    if ((database.pragma(`table_info(${table})`) as Array<{ name: string }>).some(({ name }) => name === column)) {
+      database.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+    }
+  }
+  database.exec("DELETE FROM schema_migrations WHERE version >= 111");
+}
+
+export function removeWatcherLinksFromLegacyFixture(database: Database.Database): void {
+  removeDelegatedTasksFromFixture(database);
+  database.exec(`
+    DROP TABLE IF EXISTS orchestration_v2_effects;
+    DROP TABLE IF EXISTS orchestration_v2_receipts;
+    DROP TABLE IF EXISTS orchestration_v2_entities;
+    DROP TABLE IF EXISTS orchestration_v2_events;
     DROP TRIGGER IF EXISTS watcher_links_watched_delete;
     DROP TABLE IF EXISTS watcher_wakes;
     DROP TABLE IF EXISTS watcher_links;

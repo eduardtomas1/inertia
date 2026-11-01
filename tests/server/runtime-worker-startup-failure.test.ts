@@ -7,6 +7,7 @@ import {
   categorizedRuntimeStartupFailureMessage,
 } from "../../src/shared/runtime-startup-diagnostics";
 import { GitError, GIT_PROCESS_TREE_TERMINATION_FAILURE } from "../../src/server/git/types";
+import { OrchestrationProjectionVerificationError } from "../../src/server/orchestration-v2/types";
 import type { RunningRuntime } from "../../src/server/index";
 import { completeRuntimeWorkerShutdown } from "../../src/server/runtime-worker-shutdown";
 import {
@@ -59,6 +60,20 @@ describe("bounded runtime startup failure evidence", () => {
       message: "Runtime startup is blocked because prior process cleanup remains unconfirmed.",
       blockerCode: "prior-runtime-cleanup-unconfirmed",
     });
+    expect(parseRuntimeWorkerEvent(event)).toEqual(event);
+  });
+
+  it("carries the orchestration projection blocker without its verification detail", () => {
+    const event = runtimeStartupErrorEvent(new OrchestrationProjectionVerificationError({
+      valid: false, schemaVersion: 1, expectedSchemaVersion: 1, expectedSequence: 4, projectionSequence: 4,
+      missingThreadIds: [], unexpectedThreadIds: [], unreadable: [{ kind: "attempt", id: privateText }],
+    }), "initialization");
+    expect(event).toEqual({
+      type: "runtime.startup-failed",
+      message: "The orchestration projection could not be rebuilt from saved history.",
+      blockerCode: "orchestration-projection-invalid",
+    });
+    expect(JSON.stringify(event)).not.toContain(privateText);
     expect(parseRuntimeWorkerEvent(event)).toEqual(event);
   });
 

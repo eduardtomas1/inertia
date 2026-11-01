@@ -35,6 +35,7 @@ const WATCHER_NOTE_ROW_HEIGHT = 64;
 const WATCHER_WAKE_REQUEST_HEIGHT = 44;
 const DUO_COMPARISON_REQUEST_HEIGHT = 136;
 export const DUO_COMPARISON_REQUEST_LABEL = "Comparing A and B";
+export const DELEGATED_RESULTS_REQUEST_LABEL = "Delegated results";
 
 /**
  * Row count alone misses short-but-expensive histories. A turn containing
@@ -103,7 +104,7 @@ function estimatePlanTextChars(plans: ResponseTurn["plans"]): number {
 function estimateResponseTurnRenderWeight(turn: ResponseTurn): number {
   const messageChars = turn.assistantMessages.reduce(
     (total, message) => total + message.content.length,
-    (turn.watcherWake || turn.userMessage.duoComparison ? 0 : turn.userMessage.content.length)
+    (turn.watcherWake || turn.userMessage.duoComparison || turn.userMessage.delegatedCompletion ? 0 : turn.userMessage.content.length)
       + turn.followUpMessages.reduce(
         (total, message) => total + message.content.length,
         0,
@@ -524,10 +525,11 @@ function estimateTurnRowSize(
   const requestActionsHeight = turn.userMessage.privateConnectDeviceId
     || turn.userMessage.watcherNote
     || turn.checkpoint
+    || turn.extraCheckpoints.length > 0
     || turn.checkpointUnavailableReason !== null
     ? 28
     : 0;
-  const requestHeight = turn.watcherWake ? WATCHER_WAKE_REQUEST_HEIGHT : turn.userMessage.duoComparison ? DUO_COMPARISON_REQUEST_HEIGHT : (24
+  const requestHeight = turn.watcherWake || turn.userMessage.delegatedCompletion ? WATCHER_WAKE_REQUEST_HEIGHT : turn.userMessage.duoComparison ? DUO_COMPARISON_REQUEST_HEIGHT : (24
     + requestActionsHeight
     + requestLines * 22
     + attachmentRows * 25
@@ -747,9 +749,11 @@ export function buildTimelineMinimapMarkers(
     const turn = turns[index]!;
     const request = turn.watcherWake
       ? watcherCheckTitle(turn.watcherWake)
-      : turn.userMessage.duoComparison
-        ? DUO_COMPARISON_REQUEST_LABEL
-        : turn.userMessage.content.replace(/\s+/gu, " ").trim();
+      : turn.userMessage.delegatedCompletion
+        ? DELEGATED_RESULTS_REQUEST_LABEL
+        : turn.userMessage.duoComparison
+          ? DUO_COMPARISON_REQUEST_LABEL
+          : turn.userMessage.content.replace(/\s+/gu, " ").trim();
     return {
       index,
       id: turn.id,

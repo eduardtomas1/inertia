@@ -7,12 +7,27 @@ import type { RuntimeStore } from "../database";
 import { assertCheckpointPreservesIgnoredFiles } from "../git/checkpoint-ignored-paths";
 import { getRepositoryStatus } from "../git/status";
 
+export interface CheckpointRecoveryAttribution {
+  turnId: string | null;
+  label: string;
+}
+
+type RestorationStore = Pick<RuntimeStore, "conversationPath" | "addCheckpoint" | "checkpointCount">
+  & Partial<Pick<RuntimeStore, "agentTurn" | "latestAgentTurnForConversation">>;
+
+function recoveryTurnId(store: RestorationStore, conversationId: string, requested: string | null | undefined): string | null {
+  const turn = requested === undefined ? store.latestAgentTurnForConversation?.(conversationId) ?? null
+    : requested === null ? null : store.agentTurn?.(requested) ?? null;
+  return turn && turn.conversationId === conversationId && turn.checkpointId !== null ? turn.id : null;
+}
+
 /** The caller must hold the checkout's work reservation for this entire operation. */
 export async function restoreConversationCheckpoint(
-  store: Pick<RuntimeStore, "conversationPath" | "addCheckpoint" | "checkpointCount">,
+  store: RestorationStore,
   checkpoint: CheckpointSummary,
-  recoveryPersisted: () => void,
-): Promise<void> {
+  recoveryPersisted: (recovery: CheckpointSummary) => void,
+  attribution?: CheckpointRecoveryAttribution,
+): Promise<CheckpointSummary> {
   const repositoryPath = store.conversationPath(checkpoint.conversationId);
   const deadlineAt = Date.now() + 60_000;
   const storage = await mkdtemp(join(tmpdir(), "inertia-checkpoint-recovery-"));
@@ -25,19 +40,21 @@ export async function restoreConversationCheckpoint(
     );
     // Persist the recovery before the first destructive Git operation. If
     // persistence fails, preserve its Git ref and leave the worktree alone.
-    store.addCheckpoint({
+    const saved = store.addCheckpoint({
       conversationId: checkpoint.conversationId,
+      turnId: recoveryTurnId(store, checkpoint.conversationId, attribution?.turnId),
       ref: recovery.ref,
-      label: "Before checkpoint restore",
+      label: attribution?.label ?? "Before checkpoint restore",
       turnIndex: store.checkpointCount(checkpoint.conversationId) + 1,
       filesChanged: status.files.length,
       insertions: status.insertions,
       deletions: status.deletions,
     });
-    recoveryPersisted();
+    recoveryPersisted(saved);
     await restoreCheckpoint(
       repositoryPath, checkpoint.ref, checkpoint.conversationId, { deadlineAt },
     );
+    return saved;
   } finally {
     await rm(storage, { recursive: true, force: true });
   }

@@ -25,6 +25,7 @@ import type { AgentContextReadSummary, ConversationContextPacketSummary } from "
 import type { ConversationHistoryPage } from "../conversation-history";
 import type { ConversationAttachmentGalleryItem } from "../conversation-attachment-gallery";
 import type { WatcherWakeSummary } from "../watcher";
+import type { ConversationDelegation } from "../orchestration-delegation";
 
 /**
  * Heavy state for one conversation. This is loaded independently from the
@@ -52,6 +53,9 @@ export interface ConversationDetail {
   /** Chats an agent read through the context tool, per turn; absent from legacy projections. */
   contextReads?: AgentContextReadSummary[];
   watcherWakes?: WatcherWakeSummary[];
+  rolledBackTurnIds?: string[];
+  rollbackRevision?: number;
+  delegation?: ConversationDelegation;
 }
 
 export type ConversationDetailResult =

@@ -77,6 +77,16 @@ const duoCancellation = {
 // choose its timeout and timeout-delivery semantics before TypeScript accepts
 // it; it must never inherit a silent renderer default.
 export const RUNTIME_COMMAND_POLICIES = {
+  "conversation.fork": longMutation,
+  "conversation.fork.history": shortRetrySafe,
+  "conversation.rollback": longMutation,
+  "conversation.merge-back": shortMutation,
+  "delegation.task.cancel": shortMutation,
+  "delegation.task.read": shortRetrySafe,
+  "delegation.delivery.dismiss": shortMutation,
+  "delegation.delivery.send": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
+  "delegation.wake.set": shortMutation,
+  "observed-child.read": shortRetrySafe,
   "conversation.cli.scan": shortRetrySafe,
   "conversation.cli.preview": { timeoutMs: CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS, timeoutDelivery: "rejected" },
   "conversation.cli.import": { timeoutMs: CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
@@ -216,6 +226,10 @@ export const RUNTIME_COMMAND_POLICIES = {
   "prompt-preset.reorder": shortMutation,
   "prompt-preset.update": shortMutation,
   "provider.auth.start": shortMutation,
+  "provider.cursor-sdk.status": { timeoutMs: PROVIDER_REFRESH_REQUEST_TIMEOUT_MS, timeoutDelivery: "rejected" },
+  "provider.cursor-sdk.models": { timeoutMs: PROVIDER_REFRESH_REQUEST_TIMEOUT_MS, timeoutDelivery: "rejected" },
+  "provider.cursor-sdk.login": shortMutation,
+  "provider.cursor-sdk.login.cancel": shortMutation,
   "provider.maintenance.cancel": shortMutation,
   "provider.maintenance.refresh": {
     timeoutMs: PROVIDER_MAINTENANCE_REFRESH_REQUEST_TIMEOUT_MS,

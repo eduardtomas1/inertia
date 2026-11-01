@@ -44,7 +44,7 @@ export function createInertiaHarnessCapabilities(
 ): HarnessCapabilityRegistry {
   const packs: HarnessCapabilityPack[] = [{
     id: "inertia.orchestration",
-    revision: 3,
+    revision: 4,
     title: "Inertia orchestration",
     summary: "Bounded, approval-owned coordination of independent top-level Inertia chats.",
     instructions: [ORCHESTRATION_INSTRUCTION],
@@ -59,6 +59,7 @@ export function createInertiaHarnessCapabilities(
         "delegation-bounds",
         "exact-turn-authority",
         "terminal-result-observation",
+        "delegated-result-wake",
       ],
     },
   }];

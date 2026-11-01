@@ -106,7 +106,10 @@ export class TurnFollowUpCoordinator {
     const current = this.options.activeForConversation(lease.conversationId);
     const followUp = input.content.trim();
     const providerContent = options.providerContent?.trim() ?? followUp;
-    const messageOptions = options.watcherNote ? [{ watcherNote: options.watcherNote }] as const : [] as const;
+    const messageOptions = options.watcherNote || options.delegatedCompletion ? [{
+      ...(options.watcherNote ? { watcherNote: options.watcherNote } : {}),
+      ...(options.delegatedCompletion ? { delegatedCompletion: options.delegatedCompletion } : {}),
+    }] as const : [] as const;
     if (
       !active
       || current !== active

@@ -9,6 +9,13 @@ import {
   isProviderTerminalSessionId,
 } from "../../../shared/provider-terminal-resume";
 import { restoreConversationCheckpoint } from "../checkpoint-restoration";
+import {
+  CHECKOUT_RESTORE_BUSY,
+  CHECKOUT_RESTORE_TERMINAL_REFUSAL,
+  claimCheckoutForRestore,
+  isRolledBackTurnCheckpoint,
+  ROLLED_BACK_CHECKPOINT,
+} from "../checkout-restore-fence";
 import { importedResumeCwd } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import { cloneProject } from "../../project-clone";
@@ -477,49 +484,63 @@ export function createProjectWorkspaceCommandHandler(
         return "handled";
       }
       case "checkpoint.revert": {
-        const checkpoint = dependencies.store.checkpoint(
-          command.payload.checkpointId,
-        );
-        if (checkpoint.conversationId !== command.payload.conversationId) {
-          throw new RuntimeRequestError(
-            "The checkpoint does not belong to this thread.",
+        const revert = async (): Promise<void> => {
+          const checkpoint = dependencies.store.checkpoint(
+            command.payload.checkpointId,
           );
-        }
-        if (
-          dependencies.store.hasActiveWorkspaceRunForConversation(
-            command.payload.conversationId,
-          )
-          || !dependencies.providerTerminalResumes.acquire(
-            command.payload.conversationId,
-          )
-        ) {
-          throw new RuntimeRequestError(
-            "Stop active work, reviews, or resumed terminals before restoring a checkpoint.",
-          );
-        }
-        try {
-          await restoreConversationCheckpoint(
-            dependencies.store,
-            checkpoint,
-            () => dependencies.broadcastSnapshot(),
-          );
-          dependencies.send(socket, {
-            type: "request.ok",
-            requestId: command.requestId,
-          });
-          dependencies.broadcastSnapshot();
-          return "handled";
-        } finally {
-          dependencies.providerTerminalResumes.release(
-            command.payload.conversationId,
-          );
-        }
+          if (checkpoint.conversationId !== command.payload.conversationId) {
+            throw new RuntimeRequestError(
+              "The checkpoint does not belong to this thread.",
+            );
+          }
+          if (isRolledBackTurnCheckpoint(dependencies.store, checkpoint)) {
+            throw new RuntimeRequestError(ROLLED_BACK_CHECKPOINT);
+          }
+          if (
+            dependencies.store.hasActiveWorkspaceRunForConversation(
+              command.payload.conversationId,
+            )
+            || !dependencies.providerTerminalResumes.acquire(
+              command.payload.conversationId,
+            )
+          ) {
+            throw new RuntimeRequestError(
+              "Stop active work, reviews, or resumed terminals before restoring a checkpoint.",
+            );
+          }
+          let releaseClaim: (() => void) | null = null;
+          try {
+            releaseClaim = claimCheckoutForRestore(
+              dependencies.store,
+              command.payload.conversationId,
+              { turns: dependencies.turns, terminals: dependencies.terminals },
+            );
+            if (!releaseClaim) throw new RuntimeRequestError(CHECKOUT_RESTORE_BUSY);
+            await restoreConversationCheckpoint(
+              dependencies.store,
+              checkpoint,
+              () => dependencies.broadcastSnapshot(),
+            );
+          } finally {
+            releaseClaim?.();
+            dependencies.providerTerminalResumes.release(
+              command.payload.conversationId,
+            );
+          }
+        };
+        await dependencies.store.orchestration.lanes.run(command.payload.conversationId, revert);
+        dependencies.send(socket, { type: "request.ok", requestId: command.requestId });
+        dependencies.broadcastSnapshot();
+        return "handled";
       }
       case "terminal.create": {
         const cwd = dependencies.workspacePath(
           command.payload.projectId,
           command.payload.conversationId,
         );
+        if (dependencies.store.conversationWork.hasRestoreClaim(cwd)) {
+          throw new RuntimeRequestError(CHECKOUT_RESTORE_TERMINAL_REFUSAL);
+        }
         if (dependencies.store.conversationWork.hasExclusiveCheckout(cwd)) {
           throw new RuntimeRequestError("This checkout is finishing an automatic Git update. Try opening the terminal again shortly.");
         }

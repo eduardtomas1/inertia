@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { OrchestrationConflict, type CommandSource, type JsonValue } from "../../orchestration-v2/types";
 
 import type WebSocket from "ws";
 
@@ -20,6 +21,7 @@ import {
   publicRuntimeError,
   RuntimeRequestError,
 } from "../../runtime-errors";
+import { CHECKOUT_RESTORE_IN_PROGRESS } from "../conversation-work-authority";
 import {
   prepareDocumentAttachments,
   type PreparedDocumentAttachments,
@@ -87,6 +89,9 @@ function classifiedMessageSendError(
   error: unknown,
   stage: MessageSendStage,
 ): RuntimeRequestError {
+  if (error instanceof OrchestrationConflict && error.code === "cleanup-pending") {
+    return new RuntimeRequestError(publicRuntimeError(error), MESSAGE_ADMISSION_UNAVAILABLE);
+  }
   if (error instanceof RuntimeRequestError && error.delivery === "ambiguous") return error;
   const code = `message-send/${stage}/unexpected`;
   if (stage === "turn-publication") {
@@ -129,6 +134,7 @@ export interface TurnInteractionCommandDependencies {
   };
   limitResetDispatch?: { planId: string; assertCurrent(): void };
   watcherDelivery?: import("../watcher/watcher-note-instruction").WatcherNoteDelivery;
+  delegatedDelivery?: import("../delegation/delivery-instruction").DelegatedDelivery;
   restartContinuationDispatch?: { planId: string; assertCurrent(): void };
   compactionHandoff?: CompactionHandoff;
   store: RuntimeStore;
@@ -148,6 +154,7 @@ export interface TurnInteractionCommandDependencies {
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   providerInfo(): readonly ProviderInfo[];
   verifyProviderInstallation?(providerId: ProviderInfo["id"]): Promise<void>;
+  prepareForkSession?(conversationId: string, signal: AbortSignal): Promise<void>;
   broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -170,6 +177,15 @@ export function createTurnInteractionCommandHandler(
     switch (command.type) {
       case "message.send": {
         if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+        const orchestrationRequest: CommandSource = { actorId: "human", commandId: command.requestId,
+          command: JSON.parse(JSON.stringify(command)) as JsonValue };
+        const accepted = dependencies.store.orchestration.acceptedRequest(command.payload.conversationId, orchestrationRequest);
+        if (accepted) {
+          dependencies.send(socket, { type: "request.result", requestId: command.requestId,
+            result: { kind: "message.accepted", conversationId: accepted.turn.conversationId,
+              turnId: accepted.turn.id, userMessageId: accepted.message.id, disposition: "new-turn" } });
+          return "handled";
+        }
         const scheduledDispatch = dependencies.limitResetDispatch ?? dependencies.restartContinuationDispatch;
         let messageSendStage: MessageSendStage = "conversation-state";
         let conversation: ReturnType<RuntimeStore["conversation"]>;
@@ -228,7 +244,7 @@ export function createTurnInteractionCommandHandler(
           );
         }
         if (dependencies.turns.isActive(conversation.id)) {
-          if (scheduledDispatch || dependencies.watcherDelivery) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
+          if (scheduledDispatch || dependencies.watcherDelivery || dependencies.delegatedDelivery) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
           messageSendStage = "follow-up-preparation";
           if (command.payload.context !== undefined) {
             throw new RuntimeRequestError(
@@ -486,6 +502,16 @@ export function createTurnInteractionCommandHandler(
           );
         }
         try {
+        if (dependencies.store.conversationWork.restoreBlocksConversation(conversation.id)) {
+          throw new RuntimeRequestError(CHECKOUT_RESTORE_IN_PROGRESS, MESSAGE_ADMISSION_UNAVAILABLE);
+        }
+        if (dependencies.prepareForkSession) {
+          messageSendStage = "provider-transition";
+          const preparation = new AbortController();
+          await awaitMessageSendPreparation(dependencies.prepareForkSession(conversation.id, preparation.signal),
+            preparationDeadlineAt, () => preparation.abort());
+          conversation = dependencies.store.conversation(conversation.id);
+        }
         messageSendStage = "attachments";
         let resolvedAttachments: Awaited<
           ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
@@ -790,6 +816,7 @@ export function createTurnInteractionCommandHandler(
             && !dependencies.store.hasConversationMessages(conversation.id);
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
+                orchestrationRequest,
                 queuedMessageId: dependencies.queuedMessage?.id,
                 limitResetPlanId: dependencies.limitResetDispatch?.planId,
                 restartContinuationPlanId: dependencies.restartContinuationDispatch?.planId,
@@ -805,6 +832,8 @@ export function createTurnInteractionCommandHandler(
                 turnCheckpoint: true,
                 skills: resolvedSkills.inputs,
                 ...(dependencies.watcherDelivery ? { watcherNote: dependencies.watcherDelivery.note, internalInstructions: [dependencies.watcherDelivery.instruction] } : {}),
+                ...(dependencies.delegatedDelivery ? { delegatedCompletion: dependencies.delegatedDelivery.attribution,
+                  internalInstructions: [dependencies.delegatedDelivery.instruction] } : {}),
               }, () => {
                 durableTurnPersisted = true;
                 acceptRetainedAttachments();

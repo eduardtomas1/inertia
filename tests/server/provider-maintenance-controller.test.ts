@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { PROVIDER_MAINTENANCE_PROVIDER_IDS } from "../../src/shared/provider-maintenance";
 
 import type {
   ProviderMaintenanceOperation,
@@ -691,7 +692,7 @@ describe("ProviderMaintenanceController", () => {
 
     await waitForTerminal(operations, started.id);
     const diagnosticStates = controller.diagnosticStates();
-    expect(diagnosticStates).toHaveLength(6);
+    expect(diagnosticStates).toHaveLength(PROVIDER_MAINTENANCE_PROVIDER_IDS.length);
     expect(diagnosticStates).toContainEqual({
       providerId: "claude",
       state: "quarantined",
@@ -730,7 +731,7 @@ describe("ProviderMaintenanceController unreadable journal diagnostics", () => {
 
     const states = controller.diagnosticStates();
 
-    expect(states).toHaveLength(6);
+    expect(states).toHaveLength(PROVIDER_MAINTENANCE_PROVIDER_IDS.length);
     expect(states.every(({ state }) => state === "quarantined")).toBe(true);
     expect(controller.hasBlockingAuthority("claude")).toBe(true);
   });

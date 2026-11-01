@@ -17,6 +17,7 @@ import {
 } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
 import { RuntimeRequestError } from "../../runtime-errors";
+import { assertNoCheckoutRestore } from "./turn-checkout-restore-fence";
 import { clearPendingInteractionsForTurn } from "../pending-interaction-registry";
 import {
   isProviderRunRefusal,
@@ -44,18 +45,13 @@ import type {
 import {
   defaultTurnScheduler,
   broadcastTurnConversationShell,
-  DEFAULT_TURN_MAX_LIFETIME_MS,
-  DEFAULT_TURN_TIMEOUT_MS,
+  DEFAULT_TURN_MAX_LIFETIME_MS, DEFAULT_TURN_TIMEOUT_MS, deferredTurnStart,
   normalizedProviderRunFailure,
   providerPromiseFailure,
   publicTurnError,
   updateActiveTurnProviderSession,
 } from "./turn-controller-support";
-import {
-  compactionSessionInstruction,
-  prepareTurnRequest,
-  type PreparedTurnRequest,
-} from "./turn-request-preparation";
+import { compactionSessionInstruction, prepareTurnRequest, type PreparedTurnRequest } from "./turn-request-preparation";
 import { TurnStreamProjection } from "./turn-stream-projection";
 import { TurnActivityProjection } from "./turn-activity-projection";
 import { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
@@ -67,7 +63,7 @@ import { stopActiveSubagent } from "./turn-subagent-stop";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
 import { quarantineActiveDuoTurn } from "../duo/duo-active-turn-quarantine";
-import { exitedProviderTurns, hasActiveTurnCheckout, hasLiveProviderRun, liveProviderRunConversationIds, providerConversationIds, turnOwnedProviderRuns } from "./turn-checkout-activity";
+import { checkoutActivityConversationIds, exitedProviderTurns, hasActiveTurnCheckout, hasLiveProviderRun, liveProviderRunConversationIds, providerConversationIds, turnOwnedProviderRuns } from "./turn-checkout-activity";
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
@@ -317,6 +313,7 @@ export class TurnController {
   async clearNativeGoal(conversationId: string): Promise<boolean | "superseded" | null> { return await this.nativeGoals.clear(conversationId); }
 
   isClosing(): boolean { return this.closing; }
+  checkoutActivityConversationIds(): string[] { return checkoutActivityConversationIds(this.store, this.providers, [...this.activeByConversation.keys(), ...this.providerRunOwnershipBarriers.keys(), ...this.admissions.conversationIds()]); }
 
   hasActiveCheckout(checkoutPath: string): boolean {
     const tracked = [
@@ -560,6 +557,7 @@ export class TurnController {
       throw new RuntimeRequestError("The local runtime is shutting down.");
     }
     if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+    assertNoCheckoutRestore(this.store, request.conversationId);
     this.admissions.assertQueueAuthority(request.conversationId, admission);
     if (
       !request.goalStart
@@ -614,6 +612,7 @@ export class TurnController {
     requests: readonly [QueueTurnRequest, QueueTurnRequest],
   ): [QueuedTurn, QueuedTurn] {
     if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+    for (const request of requests) assertNoCheckoutRestore(this.store, request.conversationId);
     return queuePairedTurns({
       store: this.store,
       providers: this.providers,
@@ -744,20 +743,20 @@ export class TurnController {
   start(turnId: string): boolean {
     const active = this.activeByTurn.get(turnId);
     if (!active || active.runState.isTerminal() || this.closing) return false;
-    this.beginStart(active);
-
-    const priorProviderCleanup = this.providerRunOwnershipBarriers.get(
-      active.conversation.id,
-    );
-    if (priorProviderCleanup) {
-      this.track(priorProviderCleanup
-        .catch(() => undefined)
-        .then(() => {
-          this.captureBeforeAndStartProvider(active);
-        }));
-      return true;
-    }
-    return this.captureBeforeAndStartProvider(active);
+    return this.store.orchestration.dispatchStart(active.turn.runId, () => {
+      this.beginStart(active);
+      const priorProviderCleanup = this.providerRunOwnershipBarriers.get(active.conversation.id);
+      if (priorProviderCleanup) {
+        this.track(priorProviderCleanup
+          .catch(() => undefined)
+          .then(() => {
+            this.captureBeforeAndStartProvider(active);
+          }));
+        return true;
+      }
+      return this.captureBeforeAndStartProvider(active);
+    }, deferredTurnStart((value) => this.track(value), () => !active.runState.isTerminal() && !this.closing,
+      () => { this.failBeforeStart(active.conversation.id, "The turn could not start."); }));
   }
 
   private beginStart(active: ActiveTurn): void {

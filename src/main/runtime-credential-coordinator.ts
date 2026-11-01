@@ -1,6 +1,5 @@
 import type { BackendCredentialStatus } from "../shared/backend-credentials.js";
 import type {
-  RuntimeCredentialOperation,
   RuntimeWorkerCommand,
 } from "../node/runtime-process-protocol.js";
 import type {
@@ -12,12 +11,8 @@ import type {
 import { drainRuntimeRecordRequests } from
   "./runtime-supervisor-process-record.js";
 
-export type RuntimeCredentialRequest = {
-  type: "runtime.credential-request";
-  requestId: string;
-  operation: RuntimeCredentialOperation;
-  secretReference: string;
-};
+import { CURSOR_SDK_SECRET_REFERENCE, type RuntimeCredentialRequest } from "../node/runtime-credential-protocol.js";
+export type { RuntimeCredentialRequest } from "../node/runtime-credential-protocol.js";
 
 export class RuntimeCredentialCoordinator {
   private readonly pending = new Map<string, PendingCredentialRequest>();
@@ -65,7 +60,11 @@ export class RuntimeCredentialCoordinator {
     const broker = this.options.broker;
     const operation = Promise.resolve().then<
       string | null | boolean | BackendCredentialStatus
-    >(() => event.operation === "resolve"
+    >(() => event.operation === "save"
+      ? event.secretReference === CURSOR_SDK_SECRET_REFERENCE && broker.saveCursorSdk
+        ? broker.saveCursorSdk(event.secret, controller.signal)
+        : Promise.reject(new Error("Credential saving is unavailable."))
+      : event.operation === "resolve"
       ? broker.resolve(event.secretReference, controller.signal)
       : event.operation === "status"
         ? broker.status(event.secretReference, controller.signal)
@@ -113,14 +112,14 @@ export class RuntimeCredentialCoordinator {
       }
       return;
     }
-    if (event.operation === "status") {
+    if (event.operation === "status" || event.operation === "save") {
       const status = typeof value === "object" && value !== null
         ? value as BackendCredentialStatus
         : { hasSecret: false, credentialGeneration: null };
       this.options.post(record, {
         type: "runtime.credential-result",
         requestId: event.requestId,
-        operation: "status",
+        operation: event.operation,
         ok: true,
         hasSecret: status.hasSecret,
         credentialGeneration: status.credentialGeneration,

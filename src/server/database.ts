@@ -1,4 +1,6 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
+import { OrchestratedTurnRepository } from "./orchestration-v2/turn-repository";
+import type { CommandSource } from "./orchestration-v2/types";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository";
 import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
@@ -13,6 +15,7 @@ import {
   type AgentPlan,
   type AgentReasoning,
   type AgentTurn,
+  type AppSettings,
   type AppSettingsUpdate,
   type AppSnapshot,
   type ChatAttachment,
@@ -39,6 +42,7 @@ import type { PersistedProviderMetadata } from "./provider/metadata";
 import type { SanitizedTurnExecutionManifest } from "./runtime/turns/request-context";
 import { BackendProfileRepository } from "./persistence/backend-profile-repository";
 import { AgentThreadManagementRepository } from "./persistence/agent-thread-management-repository";
+import { ObservedChildRepository } from "./persistence/observed-child-repository";
 import { AgentWorkflowRepository, type NativeAgentGoalMergeResult } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import { ConversationContextPacketRepository } from "./persistence/conversation-context-packet-repository";
@@ -125,6 +129,7 @@ export class RuntimeStore {
   private readonly backendProfileRepository: BackendProfileRepository;
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
   readonly agentThreadManagement: AgentThreadManagementRepository;
+  readonly observedChildren: ObservedChildRepository;
   private readonly conversationRepository: ConversationRepository;
   readonly contextPackets: ConversationContextPacketRepository;
   readonly conversationWorktrees: ConversationWorktreeRepository;
@@ -145,6 +150,7 @@ export class RuntimeStore {
   readonly htmlRenders: HtmlRenderRepository;
   readonly watcherLinks: WatcherLinkRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
+  readonly orchestration: OrchestratedTurnRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
   readonly conversationWork = new ConversationWorkAuthority(storedConversationWorkspaceResolver(this));
@@ -152,6 +158,7 @@ export class RuntimeStore {
     databasePath: string,
     _defaultWorkspacePath: string,
     options: {
+      runtimeGenerationId?: string; systemBootId?: string;
       onDatabaseBackupCreated?: (result: DatabaseBackupResult) => void;
       canStartDatabaseBackup?: () => boolean;
       databaseBackupQuietGraceMs?: number; databaseBackupInitialDelayMs?: number;
@@ -189,7 +196,10 @@ export class RuntimeStore {
         this.requireConversation(conversationId),
     });
     this.agentThreadManagement = new AgentThreadManagementRepository(this.database);
-    this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
+    this.observedChildren = new ObservedChildRepository(this.database);
+    this.providerMetadataRepository = new ProviderMetadataRepository(this.database);
+    this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database,
+      (identity, cleanup) => this.orchestration.cleanup(identity, cleanup));
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
     this.limitResets = new LimitResetRepository(this.database);
@@ -272,6 +282,7 @@ export class RuntimeStore {
         this.contextPackets.materialize(conversationId, packetIds).deliveries,
     });
     this.systemSuspends = new SystemSuspendRepository(this.database);
+    this.orchestration = new OrchestratedTurnRepository(this.database, this, options.runtimeGenerationId, options.systemBootId);
     this.transcriptRepository = new TranscriptRepository({
       assertAgentTurnIdentity: (conversationId, runId, turnId) =>
         this.assertAgentTurnIdentity(conversationId, runId, turnId),
@@ -287,6 +298,7 @@ export class RuntimeStore {
     });
     try {
       openRuntimeConnection(this.database, migrateRuntimeDatabase);
+      this.orchestration.maintainProjections();
       this.agentThreadManagement.recoverInterrupted();
       this.contextPackets.recoverInterruptedAgentRequests();
       this.projectRepository.enrollMissingPaths();
@@ -478,26 +490,18 @@ export class RuntimeStore {
     return this.turnLedgerRepository.begin(input);
   }
 
+  beginOrchestratedAgentTurn(input: BeginAgentTurnInput, source?: CommandSource): { message: ChatMessage; turn: AgentTurn } {
+    return this.orchestration.admit(input, () => this.turnLedgerRepository.begin(input), source);
+  }
+
   beginPairedAgentTurns(
     launchId: string,
     inputs: readonly [BeginAgentTurnInput, BeginAgentTurnInput],
     now = new Date().toISOString(),
-  ): [
-    { message: ChatMessage; turn: AgentTurn },
-    { message: ChatMessage; turn: AgentTurn },
-  ] {
-    return this.database.transaction(() => {
-      const queued = inputs.map((input) => this.turnLedgerRepository.begin(input)) as [
-        { message: ChatMessage; turn: AgentTurn },
-        { message: ChatMessage; turn: AgentTurn },
-      ];
-      this.pairedLaunchRepository.attachTurns(
-        launchId,
-        [queued[0].turn.id, queued[1].turn.id],
-        now,
-      );
-      return queued;
-    })();
+  ): [{ message: ChatMessage; turn: AgentTurn }, { message: ChatMessage; turn: AgentTurn }] {
+    return this.orchestration.admitPair(() => [
+      this.beginOrchestratedAgentTurn(inputs[0]), this.beginOrchestratedAgentTurn(inputs[1]),
+    ], (queued) => this.pairedLaunchRepository.attachTurns(launchId, [queued[0].turn.id, queued[1].turn.id], now));
   }
 
   createPairedLaunch(
@@ -830,14 +834,15 @@ export class RuntimeStore {
   }
 
   updateAgentTurnLifecycle(turnId: string, update: AgentTurnLifecycleUpdate): AgentTurn {
-    return this.turnLedgerRepository.updateLifecycle(turnId, update);
+    return this.orchestration.lifecycle(turnId, () => this.turnLedgerRepository.updateLifecycle(turnId, update));
   }
 
   settleAgentTurn(
     turnId: string,
     update: AgentTurnSettlementUpdate,
   ): AgentTurnSettlementResult {
-    return settleProjectedAgentTurn(this.database, this, update.projection, () => this.turnLedgerRepository.settle(turnId, update));
+    return this.orchestration.lifecycle(turnId, () =>
+      settleProjectedAgentTurn(this.database, this, update.projection, () => this.turnLedgerRepository.settle(turnId, update)));
   }
 
   settleConversation(conversationId: string, settled: boolean): Conversation {
@@ -873,19 +878,12 @@ export class RuntimeStore {
   }
 
   createAcknowledgedFollowUpMessage(
-    conversationId: string,
-    turnId: string,
-    content: string,
-    createdAt?: string,
+    conversationId: string, turnId: string, content: string, createdAt?: string,
     acknowledgedAt?: string, attachments: readonly ChatAttachment[] = [],
-    queuedMessageId?: string, options: { watcherNote?: CreateMessageOptions["watcherNote"] } = {},
+    queuedMessageId?: string, options: Pick<CreateMessageOptions, "watcherNote" | "delegatedCompletion"> = {},
   ): ChatMessage {
     return this.transcriptRepository.createAcknowledgedFollowUpMessage(
-      conversationId,
-      turnId,
-      content,
-      createdAt,
-      acknowledgedAt, attachments, queuedMessageId, options,
+      conversationId, turnId, content, createdAt, acknowledgedAt, attachments, queuedMessageId, options,
     );
   }
 
@@ -1219,6 +1217,9 @@ export class RuntimeStore {
   updateSettings(update: AppSettingsUpdate): void {
     this.settingsRepository.update(update);
   }
+  appSettings(): AppSettings {
+    return this.settingsRepository.settings();
+  }
 
   project(projectId: string): Project {
     return this.projectRepository.get(projectId);
@@ -1243,6 +1244,6 @@ export class RuntimeStore {
   private requireAgentTurn(turnId: string): AgentTurnRow { return requireRow(this.database, "agent_turns", turnId, "Agent turn not found."); }
 
   recoverInterruptedRuns(): void {
-    this.recoveryRepository.recoverInterruptedRuns();
+    this.orchestration.recover(() => this.recoveryRepository.recoverInterruptedRuns());
   }
 }

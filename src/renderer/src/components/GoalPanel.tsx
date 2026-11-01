@@ -42,6 +42,7 @@ import { formatElapsed } from "../utils/responseTimeline";
 import { SubagentElapsed } from "./SubagentElapsed";
 import { SubagentStatusMark } from "./SubagentStatusMark";
 import { SubagentTraceDetails } from "./SubagentTraceDetails";
+import type { ObservedChildCommandRunner } from "./orchestration/delegation-model";
 import {
   MAX_GOAL_TOKEN_BUDGET,
   parseGoalTokenBudget,
@@ -82,6 +83,7 @@ export interface GoalPanelProps {
   onOpenSubagent?: (trace: SubagentTrace) => void;
   canStopSubagent?: (trace: SubagentTrace) => boolean;
   onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
+  onObservedChildCommand?: ObservedChildCommandRunner;
 }
 
 function sourceLabel(source: AgentGoalSource): string {
@@ -601,6 +603,7 @@ export function SubagentsSection({
   onOpenSubagent,
   canStopSubagent,
   onStopSubagent,
+  onObservedChildCommand,
   headingId,
   listId,
 }: Pick<
@@ -612,6 +615,7 @@ export function SubagentsSection({
   | "onOpenSubagent"
   | "canStopSubagent"
   | "onStopSubagent"
+  | "onObservedChildCommand"
 > & {
   now?: number;
   headingId: string;
@@ -792,6 +796,7 @@ export function SubagentsSection({
                       trace={trace}
                       traces={subagents}
                       turns={turns}
+                      run={onObservedChildCommand}
                     />
                   </div>
                 )}
@@ -840,6 +845,7 @@ export function GoalPanel({
   onOpenSubagent,
   canStopSubagent,
   onStopSubagent,
+  onObservedChildCommand,
 }: GoalPanelProps): React.JSX.Element {
   const executionStatus = providedExecutionStatus
     ?? goalExecutionStatus(turns);
@@ -1043,6 +1049,7 @@ export function GoalPanel({
                 onOpenSubagent={onOpenSubagent}
                 canStopSubagent={canStopSubagent}
                 onStopSubagent={onStopSubagent}
+                onObservedChildCommand={onObservedChildCommand}
                 headingId={subagentsHeadingId}
                 listId={subagentsListId}
               />

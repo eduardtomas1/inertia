@@ -139,12 +139,18 @@ export interface AgentTurnLifecycleUpdate {
 
 export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
+  contextHandoff?: import("../../shared/orchestration-backings").PreparedContextHandoff;
+  nativeContinuation?: {
+    rollbackId: string;
+    continuation: import("../../shared/orchestration-history").HistoryCursor["continuation"] & object;
+  };
   queuedMessageId?: string;
   limitResetPlanId?: string;
   restartContinuationPlanId?: string;
   content: string;
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   duoComparison?: DuoComparisonBrief;
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
@@ -166,6 +172,7 @@ export interface BeginAgentTurnInput
 export interface CreateMessageOptions {
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   duoComparison?: DuoComparisonBrief;
   compaction?: import("../../shared/context-compaction").ContextCompaction;
   /** Turn-scoped system messages only; written with its html_renders row. */

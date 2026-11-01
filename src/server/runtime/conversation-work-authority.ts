@@ -3,6 +3,8 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { normalizeIdentityPath } from "../project-identity";
 
+export const CHECKOUT_RESTORE_IN_PROGRESS = "Files are being restored in this chat's checkout. Send again when the restore finishes.";
+
 export interface ConversationWorkspaceIdentity {
   projectId: string;
   checkoutPath: string;
@@ -46,6 +48,7 @@ export class ConversationWorkAuthority {
     string,
     CheckoutReservations
   >();
+  private readonly restoreClaims = new Set<string>();
 
   constructor(
     private readonly workspaceForConversation: (
@@ -152,9 +155,68 @@ export class ConversationWorkAuthority {
       reservation.kind === "exclusive" && overlappingCheckout(identity, reservation.checkoutIdentity));
   }
 
+  claimRestoreCheckout(reservationId: string): boolean {
+    const reservation = this.workspaceByReservation.get(reservationId);
+    if (!reservation || reservation.kind !== "provider" || this.restoreClaims.has(reservationId)) return false;
+    const checkout = this.reservationsByCheckout.get(reservation.checkoutIdentity);
+    if (!checkout || checkout.reservationIds.size !== 1 || !checkout.reservationIds.has(reservationId)) return false;
+    if ([...this.workspaceByReservation].some(([id, other]) =>
+      id !== reservationId && overlappingCheckout(reservation.checkoutIdentity, other.checkoutIdentity))) return false;
+    reservation.kind = "exclusive";
+    checkout.kind = "exclusive";
+    this.restoreClaims.add(reservationId);
+    return true;
+  }
+
+  releaseRestoreCheckout(reservationId: string): void {
+    if (!this.restoreClaims.delete(reservationId)) return;
+    const reservation = this.workspaceByReservation.get(reservationId);
+    if (!reservation) return;
+    reservation.kind = "provider";
+    const checkout = this.reservationsByCheckout.get(reservation.checkoutIdentity);
+    if (checkout) checkout.kind = "provider";
+  }
+
+  restoreBlocksConversation(conversationId: string): boolean {
+    if (this.restoreClaims.size === 0) return false;
+    try {
+      return this.hasRestoreClaim(this.workspaceForConversation(conversationId).checkoutPath);
+    } catch {
+      return true;
+    }
+  }
+
+  hasRestoreClaim(checkoutPath: string): boolean {
+    if (this.restoreClaims.size === 0) return false;
+    const identity = canonicalCheckoutIdentity(checkoutPath);
+    return [...this.restoreClaims].some((reservationId) => {
+      const claim = this.workspaceByReservation.get(reservationId);
+      return claim !== undefined && overlappingCheckout(identity, claim.checkoutIdentity);
+    });
+  }
+
+  overlapsReservation(reservationId: string, checkoutPath: string): boolean {
+    const reservation = this.workspaceByReservation.get(reservationId);
+    if (!reservation) return true;
+    try {
+      return overlappingCheckout(canonicalCheckoutIdentity(checkoutPath), reservation.checkoutIdentity);
+    } catch {
+      return true;
+    }
+  }
+
+  conversationOverlapsReservation(conversationId: string, reservationId: string): boolean {
+    try {
+      return this.overlapsReservation(reservationId, this.workspaceForConversation(conversationId).checkoutPath);
+    } catch {
+      return true;
+    }
+  }
+
   release(reservationId: string): void {
     const workspace = this.workspaceByReservation.get(reservationId);
     if (!workspace) return;
+    this.restoreClaims.delete(reservationId);
     this.workspaceByReservation.delete(reservationId);
     const checkout = this.reservationsByCheckout.get(
       workspace.checkoutIdentity,
@@ -209,6 +271,7 @@ export class ConversationWorkAuthority {
   }
 
   clear(): void {
+    this.restoreClaims.clear();
     this.workspaceByReservation.clear();
     this.reservationsByCheckout.clear();
   }

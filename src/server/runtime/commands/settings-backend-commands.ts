@@ -37,6 +37,7 @@ export interface SettingsBackendCommandDependencies {
   ): Promise<void>;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
+  automaticWakesTurnedOff?(trigger: string): Promise<void>;
 }
 
 export function createSettingsBackendCommandHandler(
@@ -128,6 +129,9 @@ export function createSettingsBackendCommandHandler(
         }
         if (command.payload.codexBinaryPath !== undefined) {
           await dependencies.refreshProviderInfo("codex", true, true);
+        }
+        if (command.payload.delegationAutomaticWakes === false) {
+          await dependencies.automaticWakesTurnedOff?.(command.requestId);
         }
         return "mutation";
       }

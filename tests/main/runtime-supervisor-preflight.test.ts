@@ -97,6 +97,10 @@ it.each([
     "provider-installation-quarantined" as const,
     "Provider installation recovery requires manual attention." as const,
   ],
+  [
+    "orchestration-projection-invalid" as const,
+    "The orchestration projection could not be rebuilt from saved history." as const,
+  ],
 ])("does not retry the terminal startup blocker %s", async (
   blockerCode,
   message,

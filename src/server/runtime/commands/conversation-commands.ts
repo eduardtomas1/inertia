@@ -1,3 +1,4 @@
+import type { ConversationDelegation } from "../../../shared/orchestration-delegation";
 import type WebSocket from "ws";
 import { resolve } from "node:path";
 
@@ -44,6 +45,9 @@ import { ConversationContextService } from "../conversation-context-service";
 import type {
   ConversationContextRequestCoordinator,
 } from "../conversation-context-request-coordinator";
+import type { ConversationRollbackResult } from "../../../shared/orchestration-history";
+import { MergeBackError } from "../../orchestration-v2/merge-back-repository";
+import type { CommandSource } from "../../orchestration-v2/types";
 
 type ConversationUpdatePayload = Extract<
   Parameters<RuntimeCommandHandler>[1],
@@ -118,6 +122,7 @@ export interface ConversationCommandDependencies {
   };
   deletedConversationIds: Set<string>;
   dataDirectory: string;
+  rollbackHistory?(input: { conversationId: string; turnId: string | null; restoreFiles?: boolean; source: CommandSource }): Promise<ConversationRollbackResult>;
   rememberDeletedConversation(conversationId: string): void;
   forgetRemoteTranscript(conversationId: string): void;
   broadcastSnapshot(): void;
@@ -129,6 +134,7 @@ export interface ConversationCommandDependencies {
   creation?: ConversationCreationService;
   contextRequests?: ConversationContextRequestCoordinator;
   reportIncident?(observation: IncidentObservation): unknown;
+  decorateDelegation?(delegation: ConversationDelegation): ConversationDelegation | undefined;
 }
 
 export function createConversationCommandHandler(
@@ -139,6 +145,10 @@ export function createConversationCommandHandler(
   return defineRuntimeCommandHandler([
     "project.ensure-scratch",
     "conversation.create",
+    "conversation.fork",
+    "conversation.fork.history",
+    "conversation.rollback",
+    "conversation.merge-back",
     "conversation.select",
     "conversation.detail.load",
     "conversation.detail.subscription",
@@ -158,6 +168,50 @@ export function createConversationCommandHandler(
     "conversation.regenerate-title",
   ], async (socket, command) => {
     switch (command.type) {
+      case "conversation.fork": {
+        const create = () => dependencies.store.orchestration.forks.create(command.payload,
+          { actorId: "human", commandId: command.requestId, command: JSON.parse(JSON.stringify(command)) });
+        const fork = await dependencies.store.orchestration.lanes.run(command.payload.sourceConversationId, create);
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId,
+          result: { kind: "conversation.created", conversationId: fork.id } });
+        return "handled";
+      }
+      case "conversation.rollback": {
+        const rollback = dependencies.rollbackHistory;
+        if (!rollback) throw new RuntimeRequestError("Rolling back chat history requires the provider runtime.");
+        const source = { actorId: "human", commandId: command.requestId, command: JSON.parse(JSON.stringify(command)) };
+        const run = () => rollback({ ...command.payload, source });
+        const result = await dependencies.store.orchestration.lanes.run(command.payload.conversationId, run);
+        dependencies.broadcastSnapshot();
+        dependencies.runtimeSync.broadcast({ type: "conversation.detail.invalidated", conversationId: result.conversationId });
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId, result });
+        return "handled";
+      }
+      case "conversation.merge-back": {
+        const lineage = dependencies.store.orchestration.forks.get(command.payload.forkConversationId);
+        if (!lineage) throw new RuntimeRequestError("Only a fork can merge its findings back into its source chat.");
+        const source = { actorId: "human", commandId: command.requestId, command: JSON.parse(JSON.stringify(command)) };
+        const result = await dependencies.store.orchestration.lanes.run(lineage.parentThreadId, () => {
+          try {
+            return dependencies.store.orchestration.mergeBacks.prepare(command.payload.forkConversationId, source,
+              command.payload.throughTurnId ?? null);
+          }
+          catch (error) { if (error instanceof MergeBackError) throw new RuntimeRequestError(error.message); throw error; }
+        });
+        dependencies.broadcastSnapshot();
+        dependencies.runtimeSync.broadcast({ type: "conversation.detail.invalidated", conversationId: result.parentConversationId });
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId, result });
+        return "handled";
+      }
+      case "conversation.fork.history": {
+        const { conversationId, afterRevision, limit } = command.payload;
+        const history = dependencies.store.orchestration.forks.history(conversationId, afterRevision, limit);
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId,
+          result: { kind: "conversation.fork.history", conversationId,
+            lineage: dependencies.store.orchestration.forks.get(conversationId), ...history } });
+        return "handled";
+      }
       case "project.ensure-scratch": {
         const project = await creation.ensureScratchProject();
         dependencies.broadcastSnapshot();
@@ -220,10 +274,12 @@ export function createConversationCommandHandler(
           return "handled";
         }
         try {
-          const detail = dependencies.store.conversationHistory(
+          const loaded = dependencies.store.conversationHistory(
             conversationId,
             command.payload.history,
           );
+          const delegation = loaded?.delegation && dependencies.decorateDelegation?.(loaded.delegation);
+          const detail = loaded && delegation ? { ...loaded, delegation } : loaded;
           dependencies.send(socket, {
             type: "request.result",
             requestId: command.requestId,

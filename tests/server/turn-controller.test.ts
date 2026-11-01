@@ -1014,7 +1014,7 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it.each(["cancel", "timeout"] as const)(
-    "holds %s until the provider stop returns, then releases the chat and its checkout while keeping the recovery record",
+    "holds %s through an unconfirmed stop, then admits the next turn while the released attempt still awaits cleanup proof",
     async (scenario) => {
       const runtime = await testRuntime();
       runtime.provider.deferOwnedStop();
@@ -1033,7 +1033,6 @@ describe("TurnController authoritative lifecycle", () => {
       runtime.controller.start(first.turn.id);
       const firstIdentity = identity(runtime);
       const firstCallbacks = runtime.provider.callbacks;
-
       if (scenario === "cancel") {
         expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
       } else {
@@ -1082,8 +1081,12 @@ describe("TurnController authoritative lifecycle", () => {
       runtime.provider.resolve({ status: "cancelled", text: "" });
       await flushPromises();
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+      expect(runtime.store.orchestration.hasPendingCleanup(runtime.conversationId)).toBe(false);
+      expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(true);
+      expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId))
+        .toEqual([expect.objectContaining({ turnId: first.turn.id })]);
       const retry = runtime.controller.queue({ conversationId: runtime.conversationId,
-        content: `Retry after confirmed ${scenario} cleanup.` });
+        content: `Retry after the released ${scenario} stop.` });
       expect(runtime.controller.start(retry.turn.id)).toBe(true);
       expect(runtime.provider.runCount).toBe(2);
       runtime.provider.resolve({ status: "completed", text: "Retry completed." });
@@ -1092,6 +1095,10 @@ describe("TurnController authoritative lifecycle", () => {
       expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId))
         .toEqual([expect.objectContaining({ turnId: first.turn.id })]);
       expect(runtime.controller.hasActiveCheckout(runtime.workspace)).toBe(false);
+      runtime.controller.providerCleanupConfirmedLate({ conversationId: runtime.conversationId,
+        runId: first.turn.runId, turnId: first.turn.id });
+      expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId)).toEqual([]);
+      expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(false);
       runtime.store.close();
     },
   );
@@ -1176,7 +1183,7 @@ describe("TurnController authoritative lifecycle", () => {
     reopened.close();
   });
 
-  it("gates retries until the provider stop returns when a synchronous provider event settles during start", async () => {
+  it("gates retries until the provider stop is released when a synchronous provider event settles during start", async () => {
     const runtime = await testRuntime();
     runtime.provider.deferOwnedStop();
     const attachment = await testAttachment(
@@ -1234,15 +1241,15 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.provider.resolve({ status: "cancelled", text: "" });
     await flushPromises();
     expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+    expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(true);
     const retry = runtime.controller.queue({ conversationId: runtime.conversationId,
-      content: "Retry after exact-run cleanup." });
+      content: "Retry after the released stop." });
     expect(runtime.controller.start(retry.turn.id)).toBe(true);
     expect(runtime.provider.runCount).toBe(2);
     runtime.provider.resolve({ status: "completed", text: "Retry completed." });
     await flushPromises();
     runtime.store.close();
   });
-
   it("treats a rejected provider promise as an interrupted transport without exposing diagnostics", async () => {
     const runtime = await testRuntime();
     const queued = runtime.controller.queue({
@@ -1966,7 +1973,7 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
-  it("does not pair a stale conversation session with another turn's identity", async () => {
+  it("uses the authoritative V2 backing instead of a stale conversation session", async () => {
     const runtime = await testRuntime();
     const first = runtime.controller.queue({
       conversationId: runtime.conversationId,
@@ -1994,12 +2001,11 @@ describe("TurnController authoritative lifecycle", () => {
       content: "Do not reuse unrelated hidden state.",
     });
 
-    expect(next.turn.providerSessionBefore).toBeNull();
-    expect(next.turn.continuationReasonCode)
-      .toBe("missing-continuation-identity");
+    expect(next.turn.providerSessionBefore).toBe("authoritative-session");
+    expect(next.turn.continuationReasonCode).toBe("same-continuation");
     runtime.controller.start(next.turn.id);
-    expect(runtime.provider.input?.sessionId).toBeUndefined();
-    runtime.provider.resolve({ status: "completed", text: "Fresh session." });
+    expect(runtime.provider.input?.sessionId).toBe("authoritative-session");
+    runtime.provider.resolve({ status: "completed", text: "Continued verified session." });
     await flushPromises();
     runtime.store.close();
   });

@@ -1,3 +1,4 @@
+import { CursorSdkContext } from "./components/cursor-sdk/CursorSdkContext";
 import { layoutStorage } from "./utils/layoutStorage";
 import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
@@ -1123,6 +1124,7 @@ export default function App(): React.JSX.Element {
   }
 
   return (
+    <CursorSdkContext.Provider value={layoutProviderAuth}>
     <UsageLimitsProvider request={request} status={connection.status}>
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
@@ -1181,5 +1183,6 @@ export default function App(): React.JSX.Element {
     </HtmlRenderRuntimeStatusContext.Provider>
     </WorkingIndicatorProvider>
     </UsageLimitsProvider>
+    </CursorSdkContext.Provider>
   );
 }

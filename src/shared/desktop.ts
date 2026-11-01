@@ -430,6 +430,7 @@ const MAIN_WINDOW_PROVIDER_IDS: Readonly<Record<ProviderId, true>> = {
   kimi: true,
   opencode: true,
   antigravity: true,
+  pi: true,
 };
 const BACKEND_PROFILE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 const MAX_TARGET_BRANCH_LENGTH = 255;

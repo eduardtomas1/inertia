@@ -36,6 +36,8 @@ import {
   type ProviderRunResult,
 } from "./contracts";
 import { markdownPlanSteps } from "./markdown-plan-steps";
+import { createCodexNativeConversationOperations } from "./codex-native-conversation";
+import { trackNativeConversationRun } from "./native-conversation-run-tracking";
 
 export const CODEX_APP_SERVER_HARNESS_CAPABILITIES = {
   lifecycle: {
@@ -102,12 +104,14 @@ export interface CodexAppServerHarnessDependencies {
 export function createCodexAppServerHarness(
   dependencies: CodexAppServerHarnessDependencies = {},
 ): AgentHarness {
+  const activeNativeConversations = new Set<string>();
   return {
     id: "codex-app-server",
     providerId: "codex",
     capabilities: CODEX_APP_SERVER_HARNESS_CAPABILITIES,
+    nativeConversation: createCodexNativeConversationOperations(activeNativeConversations, dependencies.withControlClient),
     supports: (input) => input.providerId === "codex",
-    start: (options) => startCodexRun(options, dependencies),
+    start: (options) => trackNativeConversationRun(activeNativeConversations, options, (tracked) => startCodexRun(tracked, dependencies)),
   };
 }
 
@@ -182,6 +186,8 @@ function startCodexRun(
       ...(options.input.sessionInstruction ? { sessionDeveloperInstructions: options.input.sessionInstruction } : {}),
       onText: emitter.text,
       onTextBoundary: emitter.textBoundary,
+      onNativeBoundary: (threadId, turnId, phase) => emitter.nativeBoundary({ nativeConversationId: threadId,
+        nativeSessionId: null, nativeTurnId: turnId, persistedHeadId: phase === "settled" ? turnId : null, phase }),
       onActivity: emitter.activity,
       onSession: (sessionId) => {
         // The App Server has returned the exact opened/resumed thread and has

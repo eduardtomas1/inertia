@@ -56,6 +56,9 @@ function changedFilesNewestFirst(
     WHERE artifact.conversation_id = ?
       AND turn.association = 'authoritative'
       AND artifact.status IN ('ready', 'partial')
+      AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS rollback
+        WHERE rollback.kind = 'rolled-back-turn' AND rollback.id = artifact.turn_id
+          AND rollback.thread_id = artifact.conversation_id)
       AND ${routed.sql}
     ORDER BY artifact.created_at DESC, artifact.id DESC
     LIMIT ?
@@ -113,8 +116,8 @@ export function changedFileLines(
 
 /**
  * Lists the paths this chat changed so a provider handoff carries the
- * workspace story without file contents. Only turns whose messages the route
- * may carry contribute. Null when nothing was recorded.
+ * workspace story without file contents. Only retained turns whose messages
+ * the route may carry contribute. Null when nothing was recorded.
  */
 export function providerHandoffFilesBlock(
   database: Database.Database,

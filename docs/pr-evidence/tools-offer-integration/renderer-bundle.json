@@ -535,14 +535,15 @@
       "previousPassAfterBytes": 4776
     },
     "coreJavaScript": {
-      "mainCapBytes": 2450422,
-      "mainAfterBytes": 2450422,
-      "afterBytes": 2524347,
+      "mainCapBytes": 2450555,
+      "mainAfterBytes": 2450555,
+      "afterBytes": 2524480,
       "branchGrowthBytes": 73925,
-      "capBytes": 2524347,
+      "capBytes": 2524480,
       "capChangeBytes": 73925,
       "withinCap": true,
-      "previousPassAfterBytes": 2522779
+      "previousPassAfterBytes": 2522779,
+      "note": "Re-measured after merging main ce0767c9: #692 added 133 bytes to both main and this branch, so the raise stays 73,925."
     },
     "deferredPdfJavaScript": {
       "mainCapBytes": 512000,

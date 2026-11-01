@@ -246,7 +246,7 @@ const budgets = {
   // Tools-offer integration onto main 8e096d0b (#630): the tools-offer
   // contracts, validators and renderer wiring (palette, Files, terminal links,
   // task creation, diff readability, commit, history, blame and worktrees) add
-  // 73,925 bytes over main's cap (2,524,347 measured on Windows x64). See
+  // 73,925 bytes over main's cap (2,524,480 measured on Windows x64 after #692). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
   coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 73_925,
   deferredPdfJavaScript: 500 * kibibyte,

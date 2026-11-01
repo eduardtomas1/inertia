@@ -28,6 +28,7 @@ import type { SecureFileAuthorityRegistry } from "../secure-file-authorities";
 import {
   listWorkspaceEntries,
   readWorkspaceTextFile,
+  searchWorkspaceContent,
   searchWorkspaceEntries,
   WorkspaceError,
   writeWorkspaceTextFile,
@@ -79,12 +80,16 @@ export interface ProjectWorkspaceCommandDependencies {
 export function createProjectWorkspaceCommandHandler(
   dependencies: ProjectWorkspaceCommandDependencies,
 ): RuntimeCommandHandler {
+  // One content search per socket: a newer query (typing) or a closed
+  // socket cancels the previous scan instead of letting scans pile up.
+  const contentSearches = new WeakMap<WebSocket, AbortController>();
   return defineRuntimeCommandHandler([
     "project.create",
     "project.select",
     "project.remove",
     "project.update",
     "workspace.entries",
+    "workspace.search.content",
     "workspace.file.read",
     "workspace.file.write",
     "project.actions",
@@ -310,6 +315,44 @@ export function createProjectWorkspaceCommandHandler(
             truncated: result.truncated,
           },
         });
+        return "handled";
+      }
+      case "workspace.search.content": {
+        const path = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
+        contentSearches.get(socket)?.abort();
+        const controller = new AbortController();
+        contentSearches.set(socket, controller);
+        const cancel = (): void => controller.abort();
+        socket.once("close", cancel);
+        try {
+          const result = await searchWorkspaceContent(
+            path,
+            command.payload.query,
+            {
+              maxResults: command.payload.maxResults,
+              signal: controller.signal,
+            },
+          );
+          dependencies.send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: result.cancelled
+              ? { kind: "workspace.search.content", matches: [], truncated: false, cancelled: true }
+              : {
+                kind: "workspace.search.content",
+                matches: result.matches,
+                truncated: result.truncated,
+              },
+          });
+        } finally {
+          socket.off("close", cancel);
+          if (contentSearches.get(socket) === controller) {
+            contentSearches.delete(socket);
+          }
+        }
         return "handled";
       }
       case "workspace.file.read": {

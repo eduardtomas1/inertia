@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import { ChangesPanel } from "../../src/renderer/src/components/ChangesPanel";
 import type { ChangedFile } from "../../src/shared/contracts";
+import { diffLineText } from "../helpers/diff-line-text";
 
 const file: ChangedFile = {
   path: "README.md", status: "modified", insertions: 2, deletions: 2, untracked: false,
@@ -27,7 +28,7 @@ it("scrolls the hunk inside its own panel when split panes show the same diff", 
   const scrolled: Element[] = [];
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) { scrolled.push(this); });
   render(<><Panel /><Panel /></>);
-  await waitFor(() => expect(screen.getAllByText("second after")).toHaveLength(2));
+  await waitFor(() => expect(screen.getAllByText(diffLineText("second after"))).toHaveLength(2));
   const [, secondPanel] = screen.getAllByRole("region", { name: "Workspace changes" });
   fireEvent.click(within(secondPanel!).getByRole("button", { name: "Next review hunk (N)" }));
   await waitFor(() => expect(scrolled).toHaveLength(1));

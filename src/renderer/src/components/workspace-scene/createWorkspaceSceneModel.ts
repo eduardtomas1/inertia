@@ -58,6 +58,12 @@ import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
 import { requestComposerPrefill } from "../../utils/composerPrefill";
 import { latestPlanDocument } from "../../utils/terminalTurnProjection";
+import {
+  planImplementationMessage,
+  reportedPlanStepCount,
+  textPlanGate,
+  visiblePlanSteps,
+} from "../../utils/planFromText";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../utils/transcriptNavigation";
@@ -68,10 +74,13 @@ import {
 import { usageQuotaSourceForSelection } from "../../utils/usageDisplay";
 import { compactOnReturnChatState } from "../../utils/compactOnReturn";
 import { WORKSPACE_BOUND_SURFACES } from "../../utils/rightPanelSurfaces";
+import { requestGitBlame } from "../../utils/gitHistoryCommands";
 import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 const EMPTY_LIST: never[] = [];
+/** Shown when no message box for the chat is open to receive a skill. */
+export const SKILL_INSERT_UNAVAILABLE = "Open this chat's message box to insert the skill.";
 
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
 type ConversationProjection = ReturnType<typeof useConversationProjection>;
@@ -207,6 +216,7 @@ export interface WorkspaceSceneActions {
   createConversation: (
     targetProject?: Project | null,
     location?: NewConversationLocation,
+    options?: { draft?: string },
   ) => void;
   sendMessage: (
     content: string,
@@ -314,6 +324,25 @@ export interface WorkspaceSceneModelInput {
   actions: WorkspaceSceneActions;
   setActionError: Dispatch<SetStateAction<string | null>>;
   setLatestContentVisible: Dispatch<SetStateAction<boolean>>;
+}
+
+/** Each chat, and each unsaved draft, keeps its own Unified or Split choice. */
+export function diffLayoutScopeFor(
+  projectId: string,
+  persistedConversationId: string | null,
+  draftConversationId: string | null,
+): string {
+  return `${projectId}:${persistedConversationId ?? (draftConversationId ? `draft:${draftConversationId}` : "draft")}`;
+}
+
+/** A new chat for a plan opens in the same checkout as the chat that made it. */
+export function planImplementationLocation(
+  conversation: Pick<Conversation, "worktreePath" | "branch"> | null,
+  currentBranch: string | null,
+): NewConversationLocation {
+  return conversation?.worktreePath
+    ? { kind: "worktree", branch: currentBranch ?? conversation.branch, path: conversation.worktreePath }
+    : { kind: "defaults" };
 }
 
 export function runtimeConversationReference(
@@ -479,7 +508,17 @@ export function createWorkspaceSceneModel({
     usageQuotaSource,
   });
   const canUpdatePlan = planActionsAvailable(conversation);
+  const panelPlanSteps = visiblePlanSteps(
+    planSteps,
+    textPlanGate(
+      projection.messages,
+      projection.turns,
+      conversation?.interactionMode ?? null,
+      projection.latestTurnSummary?.id ?? null,
+    ),
+  );
   const latestPlan = projection.plans.at(-1) ?? null;
+  const planDocumentText = latestPlanDocument(projection.plans, projection.turns, projection.detail?.plans ?? []);
   const visibleDetailState = detailState?.conversationId === conversation?.id
     ? detailState
     : null;
@@ -817,7 +856,7 @@ export function createWorkspaceSceneModel({
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
           goal: currentWorkflow?.goals.some(({ status }) =>
             status !== "complete") ? 1 : 0,
-          plan: planSteps.length,
+          plan: reportedPlanStepCount(panelPlanSteps),
           attachments: environmentSummary.attachments.length,
         },
         onActivateSurface: openPanelSurface,
@@ -833,7 +872,7 @@ export function createWorkspaceSceneModel({
           : {}),
         ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },
-      attachments: { attachments: environmentSummary.attachments },
+      attachments: { attachments: environmentSummary.attachments, conversationId: conversation?.id ?? null },
       agents: {
         runtimeStatus: environmentSummary.runtime.status,
         subagents: projection.subagents,
@@ -898,6 +937,7 @@ export function createWorkspaceSceneModel({
         summaryLoading: busyAction === "review.summary.generate",
         questionRunning: workspaceTools.selectionQuestionRunning,
         wrapLines: settings.wrapDiffs,
+        diffLayoutScope: diffLayoutScopeFor(project.id, persistedConversation?.id ?? null, draftConversation?.id ?? null),
         lastReversal: workspaceTools.lastDiffReversal,
         onRefresh: () => {
           void workspaceTools.loadGit({ authoritative: true }).catch((error) => setActionError(
@@ -949,6 +989,11 @@ export function createWorkspaceSceneModel({
         onSelectFile: workspaceTools.selectWorkspaceFile,
         onOpenWorkspaceEntry: workspaceTools.openWorkspaceFile,
         onLoadEntries: workspaceTools.requestWorkspaceEntries,
+        onSearchContent: workspaceTools.requestWorkspaceContentSearch,
+        onComposerPrefill: (mode) => {
+          // Reveal the composer so the user can type the question.
+          if (mode === "ask" && sheetPanel) setActiveTool(null);
+        },
         onRefresh: () => {
           void workspaceTools.loadGit({ scope: "workspace-status", authoritative: true }).catch(() => undefined);
           void workspaceTools.loadFiles().catch((error) => setActionError(
@@ -963,6 +1008,7 @@ export function createWorkspaceSceneModel({
           relativePath: path,
           action: "open-externally",
         }),
+        onLoadBlame: (blameRequest) => requestGitBlame(actions.run, { projectId: project.id, ...runtimeConversation }, blameRequest),
         canSaveFile: workspaceTools.canSaveWorkspaceFile,
         onSaveFile: async (...args) => {
           const saved = await workspaceTools.saveWorkspaceFile(...args);
@@ -990,6 +1036,7 @@ export function createWorkspaceSceneModel({
         resumeRequestConversationId: activityActions.pendingResumeConversationId,
         onResumeRequestHandled: activityActions.clearPendingResume,
         onClose: closeTerminal,
+        onOpenWorkspaceFile: workspaceTools.openWorkspaceFile,
       },
       terminalKey: `${project.id}:${conversation?.id ?? "project"}`,
       goal: {
@@ -1005,10 +1052,10 @@ export function createWorkspaceSceneModel({
         onClearGoal: (goal) => clearGoal(goal.source),
         onInsertSkill: (skill) => {
           if (!persistedConversation) return;
-          requestComposerPrefill({
-            conversationId: persistedConversation.id,
-            text: `$${skill.name} `,
-          });
+          if (!requestComposerPrefill({ conversationId: persistedConversation.id, text: `${skill.name} ` })) {
+            setActionError(SKILL_INSERT_UNAVAILABLE);
+            return;
+          }
           setActiveTool(null);
         },
         onRefreshSkills: () => {
@@ -1033,8 +1080,8 @@ export function createWorkspaceSceneModel({
         onStopSubagent: stopSubagent,
       },
       plan: {
-        steps: planSteps,
-        document: latestPlanDocument(projection.plans, projection.turns, projection.detail?.plans ?? []),
+        steps: panelPlanSteps,
+        document: planDocumentText,
         markdown: {
           projectRoot: conversation?.worktreePath ?? project.normalizedPath,
           projectId: project.id,
@@ -1057,19 +1104,24 @@ export function createWorkspaceSceneModel({
               ));
           },
         } : {}),
-        ...(canUpdatePlan && planSteps.length > 0 ? {
+        ...(canUpdatePlan && panelPlanSteps.length > 0 ? {
           onImplement: () => {
+            const message = planImplementationMessage({ document: planDocumentText, steps: panelPlanSteps });
             void actions.updateConversation({ interactionMode: "build" })
-              .then(() => actions.sendMessage(
-                "Implement the plan above and validate the result.",
-                [],
-              ))
+              .then(() => actions.sendMessage(message, []))
               .catch((error) => setActionError(
                 error instanceof Error
                   ? error.message
                   : "Build mode could not be selected.",
               ));
             setActiveTool("changes");
+          },
+          onImplementInNewChat: () => {
+            actions.createConversation(
+              project,
+              planImplementationLocation(conversation, workspaceTools.gitStatus?.branch ?? null),
+              { draft: planImplementationMessage({ document: planDocumentText, steps: panelPlanSteps }) },
+            );
           },
         } : {}),
       },

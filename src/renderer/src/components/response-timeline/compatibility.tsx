@@ -16,6 +16,7 @@ import {
   type ResponseTimelineCompatibility,
 } from "../../utils/responseTimeline";
 import { messageContextMenu } from "./messageContextMenu";
+import { useTaskCreator } from "../tasks/taskCreation";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { ActivityRow } from "./activity";
@@ -85,6 +86,7 @@ function CompatibilityDisclosure({
   props: ResponseTimelineProps;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(initiallyExpanded);
+  const taskCreator = useTaskCreator();
   return (
     <section className="orphan-run-flow" aria-label="Recovered legacy and orphaned history" data-response-row-id="legacy-orphan-history" tabIndex={-1}>
       <details
@@ -118,7 +120,7 @@ function CompatibilityDisclosure({
               return (
                 <div className="legacy-exchange" key={exchange[0]!.id}>
                   {exchange.map((message) => (
-                    <article className={clsx("message", `is-${message.role}`)} key={message.id} aria-label={LEGACY_MESSAGE_LABELS[message.role]} data-message-search-id={message.id} tabIndex={-1} {...messageContextMenu(message, message.content)}>
+                    <article className={clsx("message", `is-${message.role}`)} key={message.id} aria-label={LEGACY_MESSAGE_LABELS[message.role]} data-message-search-id={message.id} tabIndex={-1} {...messageContextMenu(message, message.content, taskCreator)}>
                       {message.role === "system"
                         ? <div className="message-meta"><span>System</span>{props.showTimestamps && <TooltipText tooltip={formatFullDateTime(message.createdAt)}><time dateTime={message.createdAt}>{formatMessageTime(message.createdAt)}</time></TooltipText>}</div>
                         : message.privateConnectDeviceId && <div className="message-meta"><MessageOrigin message={message} /></div>}

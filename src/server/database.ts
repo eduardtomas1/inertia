@@ -1,6 +1,6 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
-import { RestartContinuationRepository } from "./persistence/restart-continuation-repository";
-import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository";
+import { RestartContinuationRepository } from "./persistence/restart-continuation-repository"; import { WorkspaceToolReads } from "./persistence/workspace-tool-reads";
+import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository"; import { CodexThreadToolPackRepository } from "./persistence/codex-thread-tool-pack-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
@@ -143,6 +143,7 @@ export class RuntimeStore {
   readonly limitResets: LimitResetRepository;
   readonly queuedMessages: QueuedMessageRepository;
   readonly htmlRenders: HtmlRenderRepository;
+  readonly codexThreadToolPacks = new CodexThreadToolPackRepository(() => this.database);
   readonly watcherLinks: WatcherLinkRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
@@ -185,8 +186,7 @@ export class RuntimeStore {
     });
     this.agentWorkflowRepository = new AgentWorkflowRepository({
       database: this.database,
-      requireConversation: (conversationId) =>
-        this.requireConversation(conversationId),
+      requireConversation: (conversationId) => this.requireConversation(conversationId),
     });
     this.agentThreadManagement = new AgentThreadManagementRepository(this.database);
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
@@ -363,6 +363,7 @@ export class RuntimeStore {
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
   get restartContinuations() { return RestartContinuationRepository.for(this.database); }
+  get workspaceToolReads() { return new WorkspaceToolReads(this.database); }
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
     return {
@@ -907,7 +908,7 @@ export class RuntimeStore {
   attachments(conversationId?: string): ChatAttachment[] { return [...this.transcriptRepository.attachments(conversationId), ...this.queuedMessages.attachments(conversationId)]; }
   referencedAttachmentIds(candidateIds: readonly string[]): Set<string> { return this.queuedMessages.referencedAttachmentIds(candidateIds, this.transcriptRepository.referencedAttachmentIds(candidateIds)); }
   evictableAttachmentIds(conversationIds?: ReadonlySet<string>): string[] { return this.queuedMessages.excludeQueuedAttachments(this.transcriptRepository.evictableAttachmentIds(conversationIds)); }
-  attachmentConversationIds(attachmentIds: readonly string[]): string[] { return this.transcriptRepository.attachmentConversationIds(attachmentIds); }
+  attachmentConversationIds(attachmentIds: readonly string[], options?: { includeUnreadable?: boolean }): string[] { return this.transcriptRepository.attachmentConversationIds(attachmentIds, options); }
   messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
   message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
   continuationHistory(...input: Parameters<TranscriptRepository["continuationHistory"]>) { return this.transcriptRepository.continuationHistory(...input); }

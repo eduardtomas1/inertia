@@ -80,6 +80,8 @@ export interface ConversationLatestTurnSummary {
   updatedAt: string;
   usageLimited?: boolean;
   failureKind?: import("../turn-lifecycle").TurnFailureKind;
+  /** The mode the turn was sent in. Optional only for legacy snapshots. */
+  interactionMode?: InteractionMode;
   providerActivityAt?: string;
 }
 

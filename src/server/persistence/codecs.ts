@@ -362,6 +362,7 @@ function conversationTurnSummary(
     updatedAt: turn.updatedAt,
     ...(usageLimited ? { usageLimited: true } : {}),
     ...(turn.failureKind ? { failureKind: turn.failureKind } : {}),
+    interactionMode: turn.interactionMode,
   };
 }
 

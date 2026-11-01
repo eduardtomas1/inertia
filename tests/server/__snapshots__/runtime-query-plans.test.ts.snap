@@ -67,7 +67,7 @@ exports[`hot query plans on a seeded runtime database > snapshots every app snap
     ],
   },
   {
-    "query": "SELECT id, title, note, priority, due_date, due_time, project_id, completed_at, conversation_id, linked_at, created_at, updated_at FROM todos ORDER BY created_a…",
+    "query": "SELECT id, title, note, priority, due_date, due_time, project_id, completed_at, conversation_id, linked_at, source_conversation_id, created_at, updated_at FROM …",
     "withStatistics": "same",
     "withoutStatistics": [
       "SCAN todos",

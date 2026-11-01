@@ -53,7 +53,11 @@ import {
   createProviderHostToolMcpSession,
   type ProviderHostToolMcpConnection,
 } from "./host-tool-mcp-http";
-import { acpHostMcpServers } from "./host-tool-mcp-config";
+import {
+  acpHostMcpServers,
+  acpPromptForHostMcp,
+  type HostMcpProxyRuntimeOptions,
+} from "./host-tool-mcp-config";
 import {
   cursorHostToolsCleanupResult,
   cursorProcessCleanupResult,
@@ -164,6 +168,8 @@ export interface CursorAcpHarnessOptions {
   commandAdvertisementTimeoutMs?: number;
   /** Test seam for initialize, auth, session, and configuration RPC deadlines. */
   controlRpcTimeoutMs?: number;
+  /** Test seam for locating the host MCP stdio proxy runtime. */
+  hostMcpProxyRuntime?: HostMcpProxyRuntimeOptions;
 }
 
 export function createCursorAcpHarness(
@@ -183,6 +189,7 @@ export function createCursorAcpHarness(
         options.controlRpcTimeoutMs,
         options.createHostMcpSession,
         todoSessions,
+        options.hostMcpProxyRuntime,
       ),
   };
 }
@@ -194,6 +201,7 @@ function startCursorRun(
   controlRpcTimeoutMs = CONTROL_RPC_TIMEOUT_MS,
   createHostMcpSession: typeof createProviderHostToolMcpSession = createProviderHostToolMcpSession,
   todoSessions = new CursorTodoSessions(),
+  hostMcpProxyRuntime: HostMcpProxyRuntimeOptions = {},
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
@@ -548,8 +556,15 @@ function startCursorRun(
           hostMcpConnection,
           initialized.agentCapabilities?.mcpCapabilities?.http === true,
           options.environment,
+          hostMcpProxyRuntime,
         )
       : [];
+    const turnPrompt = acpPromptForHostMcp(
+      options.input.prompt,
+      options.hostTools,
+      hostMcpServers,
+      options.input.conversationId,
+    );
     const cursorLogin = selectAcpAgentAuthMethod("Cursor", initialized.authMethods, "cursor_login");
     if (cursorLogin) {
       activeFailurePhase = "auth"; activeTerminalEvent = "authenticate";
@@ -627,7 +642,7 @@ function startCursorRun(
     }
     const providerPrompt = options.input.operation?.kind === "compact"
       ? "/summarize"
-      : options.input.prompt;
+      : turnPrompt;
     const prompt = await cursorPrompt(
       providerPrompt, options.input.imagePaths ?? [], initialized, promptPreparationAbort.signal,
     );

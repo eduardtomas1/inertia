@@ -6,7 +6,10 @@ import type {
 } from "../../../shared/contracts";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
-import type { ConversationWorkAuthority } from "../conversation-work-authority";
+import type {
+  ConversationReservationOptions,
+  ConversationWorkAuthority,
+} from "../conversation-work-authority";
 import { RuntimeRequestError } from "../../runtime-errors";
 import {
   defineRuntimeCommandHandler,
@@ -24,9 +27,12 @@ export interface AgentWorkflowCommandDependencies {
 export function createAgentWorkflowCommandHandler(
   dependencies: AgentWorkflowCommandDependencies,
 ): RuntimeCommandHandler {
-  const reserveNativeSession = (conversationId: string): boolean => (
+  const reserveNativeSession = (
+    conversationId: string,
+    options?: ConversationReservationOptions,
+  ): boolean => (
     !dependencies.providerTerminalResumes.isActive(conversationId)
-    && dependencies.conversationWork.reserve(conversationId)
+    && dependencies.conversationWork.reserve(conversationId, options)
   );
 
   const withNativeSessionReservation = async <T>(
@@ -45,7 +51,7 @@ export function createAgentWorkflowCommandHandler(
   };
 
   const refreshWorkflow = async (conversationId: string) => {
-    if (!reserveNativeSession(conversationId)) {
+    if (!reserveNativeSession(conversationId, { locksRunConfiguration: false })) {
       const saved = dependencies.workflows.state(conversationId);
       return saved.goalCapability.kind === "codex-native"
         ? {

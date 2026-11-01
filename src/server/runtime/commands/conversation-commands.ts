@@ -507,8 +507,13 @@ export function createConversationCommandHandler(
         }
         if (
           changesRunConfiguration
-          && dependencies.store.hasActiveWorkspaceRunForConversation(
-            conversationId,
+          && (
+            dependencies.store.conversationWork.locksRunConfiguration(
+              conversationId,
+            )
+            || dependencies.store.hasRecordedActiveWorkspaceRunForConversation(
+              conversationId,
+            )
           )
         ) {
           throw new RuntimeRequestError(

@@ -5,10 +5,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import {
-  COMPOSER_PREFILL_EVENT,
-  type ComposerPrefillDetail,
-} from "../../utils/composerPrefill";
+import { registerComposerPrefillTarget } from "../../utils/composerPrefill";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 
 interface CurrentValue<T> {
@@ -49,13 +46,9 @@ export function useComposerPrefill({
   setMessage,
   textareaRef,
 }: ComposerPrefillOptions): void {
-  const applyPrefill = useEffectEvent((detail: ComposerPrefillDetail): void => {
-    if (
-      detail.conversationId !== conversationIdRef.current
-      || typeof detail.text !== "string"
-    ) return;
+  const applyPrefill = useEffectEvent((text: string): void => {
     setMessage((current) => {
-      const next = mergeComposerPrefill(current, detail.text);
+      const next = mergeComposerPrefill(current, text);
       if (next !== current) {
         markEditorChanged(conversationIdRef.current);
         draftValueRef.current = next;
@@ -66,12 +59,8 @@ export function useComposerPrefill({
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   });
 
-  useEffect(() => {
-    const prefill = (event: Event): void => {
-      const detail = (event as CustomEvent<ComposerPrefillDetail>).detail;
-      if (detail) applyPrefill(detail);
-    };
-    window.addEventListener(COMPOSER_PREFILL_EVENT, prefill);
-    return () => window.removeEventListener(COMPOSER_PREFILL_EVENT, prefill);
-  }, []);
+  useEffect(() => registerComposerPrefillTarget({
+    conversationId: () => conversationIdRef.current,
+    receive: (text) => applyPrefill(text),
+  }), [conversationIdRef]);
 }

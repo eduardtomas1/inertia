@@ -23,6 +23,10 @@ import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
 import type { RetainedDiffLock } from "../utils/retainedDiffLock";
 import { scopedReviewDispatch } from "../utils/scopedReviewDispatch";
 import { TooltipText } from "./TooltipText";
+import { ChangesDiffLines } from "./ChangesDiffLines";
+import { ChangesSplitLayout } from "./ChangesSplitLayout";
+import { useDiffViewMode, type DiffViewMode } from "../hooks/useDiffViewMode";
+import { diffFileRenders, type DiffHunkRender } from "../utils/diffHighlighting";
 
 export type DiffSelection = {
   fingerprint: string;
@@ -59,6 +63,8 @@ export type ChangesPanelProps = {
   repositoryPath?: string;
   reviewScope?: string;
   reviewLock?: RetainedDiffLock;
+  /** Per-chat identity for the Unified | Split preference; omitted, it is not persisted. */
+  diffLayoutScope?: string;
   onSelectFile: (path: string) => void;
   onOpenFile?: (path: string) => void;
   onRefresh?: () => void;
@@ -78,6 +84,7 @@ export type ChangesPanelProps = {
   onAddToPrompt: (selection: DiffSelection) => void;
 };
 
+const emptyHunkRender: DiffHunkRender = { html: [], ranges: [], intralineCells: 0 };
 const loadReviewNoteDialog = createSurfaceLoader(() => import("./ReviewNoteDialog"));
 type ReviewAction = "ask" | "revise" | "revert" | "note";
 type ReviewFilter = "all" | "unreviewed" | "reviewed";
@@ -199,6 +206,7 @@ export function ChangesPanel({
   repositoryPath = ".",
   reviewScope,
   reviewLock,
+  diffLayoutScope,
   onSelectFile,
   onOpenFile,
   onRefresh,
@@ -284,6 +292,14 @@ export function ChangesPanel({
   }), [structured.files]);
   const fingerprintsRef = useRef(fingerprints);
   fingerprintsRef.current = fingerprints;
+  const diffView = useDiffViewMode(diffLayoutScope ?? null, panelRef);
+  const hunkRenders = useMemo(() => {
+    const renders = new Map<DiffHunk, DiffHunkRender>();
+    if (!selectedFile) return renders;
+    const fileRenders = diffFileRenders(selectedFile, (hunk) => fingerprints.hunks.get(hunk) ?? diffHunkFingerprint(selectedFile, hunk));
+    selectedFile.hunks.forEach((hunk, index) => renders.set(hunk, fileRenders[index]!));
+    return renders;
+  }, [fingerprints, selectedFile]);
   const hunkFingerprint =(file: DiffFile, hunk: DiffHunk): string => fingerprints.hunks.get(hunk) ?? diffHunkFingerprint(file, hunk);
   const fileFingerprint = (file: DiffFile): string => fingerprints.files.get(file) ?? diffFileFingerprint(file);
   const hunkReviewed = (file: DiffFile, hunk: DiffHunk): boolean => {
@@ -551,6 +567,18 @@ export function ChangesPanel({
               <RotateCcw size={14} />Undo revert
             </HintButton>
           )}
+          {toolbarFiles > 0 && (
+            <div
+              className="diff-view-toggle"
+              role="group"
+              aria-label={diffView.narrow ? "Diff layout: split view needs a panel at least 720 pixels wide" : "Diff layout"}
+              title={diffView.narrow ? "Widen the panel to use the split view" : undefined}
+            >
+              {([["unified", "Unified"], ["split", "Split"]] as const satisfies readonly (readonly [DiffViewMode, string])[]).map(([value, label]) => (
+                <button type="button" aria-pressed={diffView.renderedMode === value} disabled={diffView.narrow} onClick={() => diffView.setMode(value)} key={value}>{label}</button>
+              ))}
+            </div>
+          )}
           {onGenerateSummary && toolbarFiles > 0 && (
             <button
               type="button"
@@ -605,9 +633,8 @@ export function ChangesPanel({
       {files.length === 0 && !fileNavigator ? (
         <div className="panel-empty changes-empty"><h3>{emptyState?.title ?? "No local changes"}</h3>{emptyState?.detail && <p>{emptyState.detail}</p>}{onRefresh && <button type="button" className="secondary-button" onClick={onRefresh} disabled={diffBusy}>Refresh</button>}</div>
       ) : (
-        <div className="changes-layout">
-          {compactFileNavigator ?? <div className="changes-file-picker"><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{changedFileStatusCode(file)} · {file.path}</option>)}</select></div>}
-          {fileNavigator ?? <nav className="changes-file-list" aria-label="Changed files">
+        (() => {
+          const fileList = fileNavigator ?? <nav className="changes-file-list" aria-label="Changed files">
             {files.filter((file) => visibleFiles.some((visible) => visible.path === file.path)).map((file) => {
               const parts = changedFilePathParts(file.path);
               const diffFile = structured.files.find((candidate) => candidate.path === file.path);
@@ -622,11 +649,11 @@ export function ChangesPanel({
                 {diffFile && fileReviewed(diffFile) && <Check className="change-file-reviewed" size={14} aria-label="File reviewed" />}
               </button>;
             })}
-          </nav>}
-
+          </nav>;
+          const diffPane = (
           <div className="changes-diff" aria-label={selectedFile ? `Diff for ${selectedFile.path}` : "Unified diff"}>
             {diffParsingError ? <div className="panel-empty changes-empty" role="alert"><h3>Diff unavailable</h3><p>{diffParsingError}</p></div> : diffBusy && (!diff || diffParsing) ? <div className="panel-loading"><LoadingMark label="Loading diff" /><span>Loading diff…</span></div> : selectedFile ? (
-              <div className={clsx("diff-code", wrapLines && "wraps")} role="region" aria-label={`Diff content for ${selectedFile.path}`} tabIndex={0} onKeyDown={(event) => {
+              <div className={clsx("diff-code", wrapLines && "wraps", diffView.renderedMode === "split" && "is-split")} role="region" aria-label={`Diff content for ${selectedFile.path}`} tabIndex={0} onKeyDown={(event) => {
                 if (event.metaKey || event.ctrlKey || event.altKey || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) return;
                 if (event.key.toLowerCase() === "n") { event.preventDefault(); navigateHunk(1); }
                 if (event.key.toLowerCase() === "p") { event.preventDefault(); navigateHunk(-1); }
@@ -661,7 +688,6 @@ export function ChangesPanel({
                   const statusFile = files.find((candidate) => candidate.path === selectedFile.path);
                   const hunkSummary = fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.summary;
                   const selected = reviewSelection(selectedFile, hunk);
-                  const lastSelectedId = selected ? hunk.lines.filter((line) => selected.lineIds.includes(line.id)).at(-1)?.id : null;
                   const changedSelection = selected ? hunk.lines.some((line) => selected.lineIds.includes(line.id) && (line.kind === "addition" || line.kind === "deletion")) : false;
                   const hunkNotes = notes.filter((note) => note.path === selectedFile.path && note.hunkId === hunk.id);
                   const hunkAnswer = selectionAnswer
@@ -689,23 +715,14 @@ export function ChangesPanel({
                         <IconButton label={noteControlLabel("Delete", hunkNoteKind(note), note)} onClick={() => void deleteNote(note)}><Trash2 size={14} /></IconButton>
                       </div>
                     ))}
-                    {hunk.lines.map((line, index) => <div key={line.id}>
-                      <button
-                        type="button"
-                        className={clsx("diff-line", `is-${line.kind}`, selected?.lineIds.includes(line.id) && "is-selected")}
-                        onClick={(event) => chooseLine(hunk, index, event.shiftKey)}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" || !event.shiftKey) return;
-                          event.preventDefault();
-                          chooseLine(hunk, index, true);
-                        }}
-                        disabled={line.kind === "meta"}
-                        aria-disabled={reviewLocked || undefined}
-                        aria-keyshortcuts="Shift+Enter"
-                      >
-                        <span className="diff-line-number" aria-hidden="true">{line.oldLineNumber ?? ""}</span><span className="diff-line-number" aria-hidden="true">{line.newLineNumber ?? ""}</span><span className="diff-line-prefix">{line.kind === "addition" ? "+" : line.kind === "deletion" ? "−" : " "}</span><span className="diff-line-content">{line.content || " "}</span>
-                      </button>
-                      {selected && line.id === lastSelectedId && (
+                    <ChangesDiffLines
+                      hunk={hunk}
+                      render={hunkRenders.get(hunk) ?? emptyHunkRender}
+                      view={diffView.renderedMode}
+                      selectedLineIds={selected?.lineIds ?? null}
+                      reviewLocked={reviewLocked}
+                      onChooseLine={(index, extend) => chooseLine(hunk, index, extend)}
+                      popover={selected && (
                         <div className="diff-selection-popover">
                           <div className="diff-selection-actions">
                             <button type="button" disabled={questionRunning} aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("ask")}><CircleHelp size={14} />Ask about</button>
@@ -754,7 +771,7 @@ export function ChangesPanel({
                           )}
                         </div>
                       )}
-                    </div>)}
+                    />
                   </section></div></div>;
                 })}
                 {selectionError && <p className="panel-notice diff-selection-error" role="alert">{selectionError}</p>}
@@ -762,7 +779,19 @@ export function ChangesPanel({
             ) : <div className="panel-empty changes-empty"><h3>{selectedPath ? "Diff unavailable" : diffEmptyState?.title ?? "Select a file"}</h3>{selectedPath ? <p>This file is outside the bounded diff preview. Refresh after reducing the change set.</p> : diffEmptyState?.detail && <p>{diffEmptyState.detail}</p>}</div>}
             {diff?.truncated && <p className="panel-notice diff-truncated">This diff is truncated to keep the workspace responsive.</p>}
           </div>
-        </div>
+          );
+          return (
+            <ChangesSplitLayout
+              split={diffView.renderedMode === "split"}
+              fileCount={toolbarFiles}
+              selectedPath={selectedFile?.path ?? selectedPath}
+              picker={compactFileNavigator ?? <div className="changes-file-picker"><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{changedFileStatusCode(file)} · {file.path}</option>)}</select></div>}
+              fileList={fileList}
+            >
+              {diffPane}
+            </ChangesSplitLayout>
+          );
+        })()
       )}
     </section>
   );

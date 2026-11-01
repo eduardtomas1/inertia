@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "../../src/server/runtime/harness-capabilities";
 import { CliConversationDiscovery, CLI_SCAN_FULL_READ_BYTES, cliConversationRoots, type CliScanLimits } from "../../src/server/cli-import/discovery";
 import { providerChildEnvironment } from "../../src/server/environment";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
@@ -332,7 +333,7 @@ describe("CLI conversation import authority and persistence", () => {
   });
   it("does not describe or pass Inertia's host tools to an imported Codex session that never registered them", async () => {
     const bridge = { definitions: [] } as never;
-    const runtime = await createTurnControllerTestRuntime({ harnessInstructionsForTurn: () => [{ label: "test-harness", text: "HARNESS_POLICY: use host tools." }], hostToolsForTurn: () => bridge },
+    const runtime = await createTurnControllerTestRuntime({ capabilityOfferForTurn: () => ({ instructions: [{ label: "test-harness", text: "HARNESS_POLICY: use host tools." }], offer: FULL_HARNESS_CAPABILITY_OFFER }), hostToolsForTurn: () => bridge },
       { modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "provider-default" }) });
     try {
       const selection = providerNativeModelSelection({ providerId: "codex" });

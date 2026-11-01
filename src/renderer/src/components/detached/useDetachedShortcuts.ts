@@ -31,6 +31,7 @@ export function detachedGlobalShortcutActions(
     setSidebarOpen: ignore,
     toggleSettings: actions.openSettings,
     openTasks: ignore,
+    openSurfaceChooser: ignore,
   };
 }
 

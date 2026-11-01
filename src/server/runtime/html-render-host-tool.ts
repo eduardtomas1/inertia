@@ -164,7 +164,7 @@ export class HtmlRenderHostTool {
       if (error instanceof HtmlRenderLimitReachedError) {
         return failure(
           "render_limit_reached",
-          `This turn already has ${HTML_RENDER_MAX_PER_TURN} rendered pages. Update one of them in your reply instead of adding more.`,
+          `This turn already holds its maximum of ${HTML_RENDER_MAX_PER_TURN} rendered pages, and pages cannot be changed after they are shown. Describe anything else in your written reply.`,
         );
       }
       return failure("render_not_saved", "Inertia could not save the page. Reply in text instead.");

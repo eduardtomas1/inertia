@@ -1109,7 +1109,7 @@ describe("detached chat projection for chat surfaces", () => {
     compactOnReturn: "never",
     desktopNotifications: false,
     quotaWarnings: { enabled: false, firstThreshold: 15 },
-    keybindings: { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t" },
+    keybindings: { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t", "open-surface": "j" },
     newThreadMode: "worktree",
     defaultAccessMode: "full",
     codexBinaryPath: "/Users/someone/bin/codex",
@@ -1136,7 +1136,7 @@ describe("detached chat projection for chat surfaces", () => {
       compactOnReturn: "never",
       desktopNotifications: false,
       quotaWarnings: { enabled: false, firstThreshold: 15 },
-      keybindings: { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t" },
+      keybindings: { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t", "open-surface": "j" },
       newThreadMode: "worktree",
       defaultAccessMode: "full",
     });
@@ -1195,6 +1195,34 @@ describe("global message search authority", () => {
     for (const command of commands) {
       expect(rejection(command)).not.toBeNull();
       expect(mainRejection(command)).toBeNull();
+    }
+  });
+});
+
+describe("detached chat workspace tools", () => {
+  it("opens history, blame, staging, content search and path resolution to the window's own workspace only", () => {
+    const commandsFor = (scope: { projectId: string; conversationId?: string }): ClientCommand[] => [
+      { type: "git.log", requestId: REQUEST, payload: scope },
+      { type: "git.commit.show", requestId: REQUEST, payload: { ...scope, sha: "abc1234" } },
+      { type: "git.blame", requestId: REQUEST, payload: { ...scope, path: "a.txt" } },
+      { type: "git.stage", requestId: REQUEST, payload: { ...scope, repositoryPath: ".", authorityRef: REQUEST, paths: ["a.txt"] } },
+      { type: "git.unstage", requestId: REQUEST, payload: { ...scope, repositoryPath: ".", authorityRef: REQUEST, paths: ["a.txt"] } },
+      { type: "workspace.search.content", requestId: REQUEST, payload: { ...scope, query: "needle" } },
+      { type: "workspace.path.resolve", requestId: REQUEST, payload: { ...scope, text: "src/a.ts:3" } },
+    ] as ClientCommand[];
+    for (const command of commandsFor({ projectId: PROJECT, conversationId: CONVERSATION })) {
+      expect(rejection(command), command.type).toBeNull();
+      expect(mainRejection(command), command.type).toBeNull();
+    }
+    for (const scope of [
+      { projectId: PROJECT, conversationId: OTHER_CONVERSATION },
+      { projectId: OTHER_PROJECT, conversationId: CONVERSATION },
+      { projectId: PROJECT },
+    ]) {
+      for (const command of commandsFor(scope)) {
+        expect(rejection(command), command.type).toBe("That request is unavailable in a detached chat.");
+        expect(mainRejection(command), command.type).toBeNull();
+      }
     }
   });
 });

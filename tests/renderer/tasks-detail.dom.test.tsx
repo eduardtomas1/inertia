@@ -9,6 +9,7 @@ import type { Todo } from "../../src/shared/todos";
 import {
   conversation,
   conversationId,
+  firstProjectId,
   firstId,
   harness,
   NOW,
@@ -191,6 +192,28 @@ describe("Task card wells", () => {
     const card = openCard();
     await user.click(within(card).getByRole("button", { name: "Open chat" }));
     expect(view.onOpenConversation).toHaveBeenCalledWith(chat);
+  });
+
+  it("shows the chat a task was written from and opens it, while the task stays unassigned", async () => {
+    const user = userEvent.setup();
+    const source = conversation({ status: "completed", latestTurn: turn(), title: "Release prep" });
+    const view = harness(snapshot([
+      todo(firstId, "Clean the downloads folder", { projectId: firstProjectId, sourceConversationId: conversationId }),
+    ], { conversations: [source] }));
+    const card = openCard();
+    expect(within(card).getByRole("group", { name: "Hand it to an agent" })).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: "Open chat" })).toBeNull();
+    expect(row("Clean the downloads folder")).not.toHaveTextContent("Ready for you");
+    await user.click(within(card).getByRole("button", { name: "From chat Release prep" }));
+    expect(view.onOpenConversation).toHaveBeenCalledExactlyOnceWith(source);
+  });
+
+  it("leaves out the source chip once the chat is gone", () => {
+    harness(snapshot([
+      todo(firstId, "Clean the downloads folder", { projectId: firstProjectId, sourceConversationId: otherConversationId }),
+    ], { conversations: [] }));
+    const card = openCard();
+    expect(within(card).queryByRole("button", { name: /^From chat/u })).toBeNull();
   });
 
   it("offers the row's actions minus Rename from the card's more menu", async () => {

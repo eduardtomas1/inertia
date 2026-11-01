@@ -70,13 +70,6 @@ export interface RuntimeProcessRecord {
   attachmentOperationTails: Map<string, Promise<void>>;
 }
 
-export interface PendingProjectPath {
-  record: RuntimeProcessRecord;
-  timer: RuntimeSupervisorTimer;
-  resolve: (path: string) => void;
-  reject: (error: Error) => void;
-}
-
 export interface PendingCredentialRequest {
   record: RuntimeProcessRecord;
   operation: RuntimeCredentialOperation;

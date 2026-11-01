@@ -44,12 +44,19 @@ import {
 } from "./protocol";
 import { codexWatcherThreadConfig } from "./read-only-thread-config";
 import {
+  codexResumedThreadWithheldInstructions,
+  codexThreadStartTools,
+  recordCodexThreadRegistration,
+} from "./app-server-thread-tools";
+import {
   codexPromptWithSessionInstruction,
   codexSessionDeveloperInstructions,
   configuredDeveloperInstructions,
   readConfiguredDeveloperInstructions,
 } from "./developer-instructions";
 import { codexModelProviderThreadConfig } from "./model-provider-config";
+import { withoutInternalProviderInstructions } from "../runtime/turns/request-context";
+import { withoutSessionInstructions } from "../runtime/turns/turn-instruction-delivery";
 import type {
   CodexAppServerOptions,
   CodexAppServerResult,
@@ -980,15 +987,24 @@ export async function openCodexTurn({
   const providerConfig = modelProvider
     ? codexModelProviderThreadConfig(modelProvider, effectiveConfig)
     : null;
+  // A resumed thread keeps the dynamic tools it registered at thread/start,
+  // so instructions for packs it did not register leave both channels.
+  const withheldInstructions = options.sessionId
+    ? codexResumedThreadWithheldInstructions(options.sessionId, options.hostTools)
+    : [];
+  const sessionDeveloperInstructions = withoutSessionInstructions(
+    options.sessionDeveloperInstructions,
+    withheldInstructions,
+  );
   const { developerInstructions, sessionInstructionApplied } = codexSessionDeveloperInstructions(
-    options.sessionDeveloperInstructions === undefined
+    sessionDeveloperInstructions === undefined
       ? undefined
       : effectiveConfig
         ? configuredDeveloperInstructions(effectiveConfig)
         : await readConfiguredDeveloperInstructions(
           () => request("config/read", { includeLayers: false, cwd: options.cwd }, undefined, false),
         ),
-    options.sessionDeveloperInstructions,
+    sessionDeveloperInstructions,
     options.developerInstructions,
   );
   if (!sessionInstructionApplied) deferSessionInstruction?.();
@@ -1009,9 +1025,11 @@ export async function openCodexTurn({
   if (options.sessionId) {
     try {
       // The audited App Server protocol persists thread/start dynamic tools in
-      // its rollout/state DB and exposes no registration field on resume.
-      // Schema 65 clears Codex identities from before the current Browser tool
-      // capability epoch, so persisted sessions reaching this path own them.
+      // its rollout/state DB and exposes no registration field on resume, so
+      // the developer instructions and the prompt keep only instructions for
+      // packs this thread registered. Schema 65 clears Codex identities from before the current
+      // Browser tool capability epoch, so persisted sessions reaching this
+      // path own the Browser tools.
       opened = await request("thread/resume", {
         threadId: options.sessionId,
         excludeTurns: true,
@@ -1030,7 +1048,7 @@ export async function openCodexTurn({
       ...threadConfig,
       ...(options.hostTools
         ? {
-            dynamicTools: options.hostTools.definitions.map((definition) => ({
+            dynamicTools: codexThreadStartTools(options.hostTools).map((definition) => ({
               name: definition.name,
               description: definition.description,
               inputSchema: definition.inputSchema,
@@ -1058,6 +1076,7 @@ export async function openCodexTurn({
       "Codex did not confirm the requested response service tier.",
     );
   }
+  if (!options.sessionId) recordCodexThreadRegistration(openedThreadId, options.hostTools);
   setProviderThreadId(openedThreadId);
   options.onSession?.(openedThreadId);
   if (isCancelRequested()) {
@@ -1128,11 +1147,12 @@ export async function openCodexTurn({
       throw new Error("Codex received an invalid selected skill.");
     }
   }
+  const turnPrompt = withoutInternalProviderInstructions(options.prompt, withheldInstructions);
   const input: JsonObject[] = [{
     type: "text",
-    text: sessionInstructionApplied || options.sessionDeveloperInstructions === undefined
-      ? options.prompt
-      : codexPromptWithSessionInstruction(options.prompt, options.sessionDeveloperInstructions),
+    text: sessionInstructionApplied || sessionDeveloperInstructions === undefined
+      ? turnPrompt
+      : codexPromptWithSessionInstruction(turnPrompt, sessionDeveloperInstructions),
     text_elements: [],
   }];
   for (const skill of options.skills ?? []) {

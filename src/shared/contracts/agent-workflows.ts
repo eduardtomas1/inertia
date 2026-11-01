@@ -12,8 +12,10 @@ export type AgentGoalSource = "codex-native" | "inertia-local";
 
 /**
  * A truthful projection of one current goal. Native Codex goals mirror the
- * provider thread. Inertia-local goals are intentionally product-owned and
- * are never presented as provider context or silently injected into a turn.
+ * provider thread. Inertia-local goals are intentionally product-owned: each
+ * turn's structured execution context carries one bounded, neutralized line
+ * naming the chat's tracked objective, labelled as context rather than as a
+ * user instruction. They are never injected as hidden provider instructions.
  */
 export interface AgentGoal {
   conversationId: string;

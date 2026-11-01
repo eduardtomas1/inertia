@@ -15,7 +15,6 @@ import { isContinuationReasonCode, isTurnSessionRecovery } from "../continuation
 import { backendDefault, backendProfile, backendProfileResultValidators, optionalProviderAccountKind, optionalTurnFailureKind } from "./backend-profile-result-schema";
 import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
-import { DUO_COMPARISON_STATES, DUO_DISPATCH_STATES, DUO_LAUNCH_STATES } from "./duo";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 import { validatePreMergeConfidence } from "./pre-merge-confidence-schema";
@@ -31,55 +30,13 @@ import { subagentTrace } from "./subagent-trace-schema";
 import { watcherMutationEvent, watcherRequestResultValidators, watcherWakeSummariesCoherent } from "./watcher-schema";
 import { validProviderUpdateRequirement } from "./provider-update-requirement-schema";
 import { compactOnReturnResultValidators, isConversationCompactionState, isPromptCacheFacts, validCompactOnReturnSetting } from "./compact-on-return-schema";
-type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
+import { workspaceToolResultValidators } from "./workspace-tool-results-schema";
+import { duoResultValidators } from "./duo-results-schema";
+import { record, stringField, nonemptyStringField, nullableStringField, booleanField, numberField, integerField, integerFieldAtLeast, nullableNumberField, optionalStringField, optionalNullableStringField, optionalBooleanField, oneOf, recordWithStrings, arrayOf, type UnknownRecord } from "./server-event-fields";
+const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
-function record(value: unknown): value is UnknownRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function stringField(value: UnknownRecord, key: string): boolean {
-  return typeof value[key] === "string";
-}
-function nonemptyStringField(value: UnknownRecord, key: string): boolean {
-  return stringField(value, key) && (value[key] as string).length > 0;
-}
-function nullableStringField(value: UnknownRecord, key: string): boolean {
-  return value[key] === null || stringField(value, key);
-}
-function booleanField(value: UnknownRecord, key: string): boolean {
-  return typeof value[key] === "boolean";
-}
-function numberField(value: UnknownRecord, key: string): boolean {
-  return typeof value[key] === "number" && Number.isFinite(value[key]);
-}
-function integerField(value: UnknownRecord, key: string): boolean {
-  return Number.isSafeInteger(value[key]);
-}
-function integerFieldAtLeast(value: UnknownRecord, key: string, minimum = 0): boolean {
-  return integerField(value, key) && Number(value[key]) >= minimum;
-}
-function nullableNumberField(value: UnknownRecord, key: string): boolean {
-  return value[key] === null || numberField(value, key);
-}
-function optionalStringField(value: UnknownRecord, key: string): boolean {
-  return value[key] === undefined || stringField(value, key);
-}
-function optionalNullableStringField(value: UnknownRecord, key: string): boolean {
-  return value[key] === undefined || nullableStringField(value, key);
-}
-function optionalBooleanField(value: UnknownRecord, key: string): boolean {
-  return value[key] === undefined || booleanField(value, key);
-}
-function oneOf(value: UnknownRecord, key: string, options: readonly string[]): boolean {
-  return typeof value[key] === "string" && options.includes(value[key] as string);
-}
 function providerId(value: UnknownRecord, key: string): boolean {
   return oneOf(value, key, PROVIDER_IDS);
-}
-function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownRecord {
-  return record(value) && keys.every((key) => stringField(value, key));
-}
-function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean {
-  return Array.isArray(value) && value.every(validate);
 }
 function modelSelection(value: unknown): boolean {
   return modelSelectionSchema.safeParse(value).success;
@@ -186,7 +143,8 @@ function latestTurn(value: unknown): boolean {
     && modelRouteIdentityCoherent(value)
     && optionalBooleanField(value, "usageLimited")
     && optionalStringField(value, "providerActivityAt")
-    && optionalTurnFailureKind(value);
+    && optionalTurnFailureKind(value)
+    && (value.interactionMode === undefined || oneOf(value, "interactionMode", INTERACTION_MODES));
 }
 
 function conversation(value: unknown): value is UnknownRecord {
@@ -465,7 +423,7 @@ function conversationContextPacketSummary(value: unknown): value is UnknownRecor
 }
 function agentContextReadSummary(value: unknown): boolean {
   return recordWithStrings(value, "targetMessageId", "targetTurnId", "sourceConversationId", "sourceConversationTitle", "sourceState", "access", "firstReadAt", "lastReadAt")
-    && oneOf(value, "sourceState", ["available", "deleted"]) && oneOf(value, "access", ["own", "referenced", "approved", "watched"])
+    && oneOf(value, "sourceState", ["available", "deleted"]) && oneOf(value, "access", ["own", "referenced", "approved", "watched", "managed"])
     && booleanField(value, "listedTurns") && arrayOf(value.turnIds, (entry) => typeof entry === "string");
 }
 function conversationContextPacket(value: unknown): boolean {
@@ -613,78 +571,6 @@ function workspaceFile(value: unknown): boolean {
 function projectAction(value: unknown): boolean {
   return recordWithStrings(value, "id", "label", "command")
     && booleanField(value, "preview");
-}
-
-function duoPreparedSide(value: unknown): boolean {
-  return recordWithStrings(value, "conversationId", "turnId")
-    && (value.ordinal === 0 || value.ordinal === 1);
-}
-
-function duoLaunchSide(value: unknown): boolean {
-  return record(value)
-    && (value.ordinal === 0 || value.ordinal === 1)
-    && nullableStringField(value, "conversationId")
-    && nullableStringField(value, "turnId")
-    && oneOf(value, "dispatchState", DUO_DISPATCH_STATES);
-}
-
-function duoComparison(value: unknown): boolean {
-  return record(value)
-    && oneOf(value, "state", DUO_COMPARISON_STATES)
-    && nullableStringField(value, "conversationId")
-    && nullableStringField(value, "turnId")
-    && integerFieldAtLeast(value, "attempt")
-    && nullableStringField(value, "error");
-}
-
-function duoRecoveryAction(value: unknown): boolean {
-  return recordWithStrings(value, "label", "cwd")
-    && value.executable === "git"
-    && arrayOf(value.args, (entry) => typeof entry === "string");
-}
-
-function duoRecoveryGuidance(value: unknown): boolean {
-  return recordWithStrings(
-    value,
-    "repositoryPath",
-    "plannedPath",
-    "generatedBranch",
-  )
-    && value.kind === "git-worktree"
-    && (value.ordinal === 0 || value.ordinal === 1)
-    && oneOf(value, "topology", ["owned", "conflict", "ambiguous", "branch-retained"])
-    && nullableStringField(value, "observedPath")
-    && nullableStringField(value, "worktreeId")
-    && nullableStringField(value, "expectedHead")
-    && nullableStringField(value, "observedBranch")
-    && nullableStringField(value, "observedHead")
-    && arrayOf(value.actions, duoRecoveryAction);
-}
-
-function duoPrepared(value: UnknownRecord): boolean {
-  return stringField(value, "launchId")
-    && value.state === "prepared"
-    && Array.isArray(value.sides)
-    && value.sides.length === 2
-    && value.sides[0]?.ordinal === 0
-    && value.sides[1]?.ordinal === 1
-    && value.sides.every(duoPreparedSide)
-    && (value.comparison === undefined
-      || recordWithStrings(value.comparison, "conversationId"));
-}
-
-function duoStatus(value: UnknownRecord): boolean {
-  return stringField(value, "launchId") && oneOf(value, "state", DUO_LAUNCH_STATES)
-    && optionalBooleanField(value, "cancelRequested")
-    && nullableStringField(value, "error")
-    && Array.isArray(value.sides)
-    && value.sides.length === 2
-    && value.sides[0]?.ordinal === 0
-    && value.sides[1]?.ordinal === 1
-    && value.sides.every(duoLaunchSide)
-    && (value.comparison === undefined || duoComparison(value.comparison))
-    && (value.recoveryGuidance === undefined
-      || arrayOf(value.recoveryGuidance, duoRecoveryGuidance));
 }
 
 function changedFile(value: unknown): boolean {
@@ -1122,6 +1008,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) => providerMaintenanceOperation(value.operation),
   ...usageResultValidators,
+  ...workspaceToolResultValidators,
   "updates.run": (value) => updatesRunResultSchema.safeParse(value).success,
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
@@ -1154,12 +1041,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && (value.state !== "ready"
       || conversationDetail(value.detail, value.conversationId as string))
     && (value.state !== "failed" || stringField(value, "message")),
-  "duo.pending": (value) =>
-    arrayOf(value.launchIds, (entry) => typeof entry === "string")
-    && new Set(value.launchIds as unknown[]).size === (value.launchIds as unknown[]).length
-    && booleanField(value, "hasMore"),
-  "duo.prepared": (value) => duoPrepared(value),
-  "duo.status": (value) => duoStatus(value),
+  ...duoResultValidators,
   ...watcherRequestResultValidators,
   "git.status": (value) => gitStatus(value.status),
   "git.workspace.status": (value) => workspaceGitStatus(value.status),

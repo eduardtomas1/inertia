@@ -53,7 +53,11 @@ import {
   type ProviderHostToolMcpConnection,
   type ProviderHostToolMcpSession,
 } from "./host-tool-mcp-http";
-import { acpHostMcpServers } from "./host-tool-mcp-config";
+import {
+  acpHostMcpServers,
+  acpPromptForHostMcp,
+  type HostMcpProxyRuntimeOptions,
+} from "./host-tool-mcp-config";
 import {
   BoundedKimiJsonLineTransform,
   kimiErrorDetail,
@@ -134,6 +138,8 @@ export interface KimiAcpHarnessOptions {
   createHostMcpSession?(
     runtime: ProviderHostToolRuntime,
   ): ProviderHostToolMcpSession;
+  /** Test seam for locating the host MCP stdio proxy runtime. */
+  hostMcpProxyRuntime?: HostMcpProxyRuntimeOptions;
 }
 
 interface PendingApproval {
@@ -180,6 +186,7 @@ export function createKimiAcpHarness(
       options.terminateProcessTree,
       options.controlRpcTimeoutMs,
       options.createHostMcpSession,
+      options.hostMcpProxyRuntime,
     ),
   };
 }
@@ -189,6 +196,7 @@ function startKimiRun(
   terminateProcessTree?: ProcessTreeTerminator,
   controlRpcTimeoutMs = CONTROL_RPC_TIMEOUT_MS,
   createHostMcpSession = createProviderHostToolMcpSession,
+  hostMcpProxyRuntime: HostMcpProxyRuntimeOptions = {},
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
@@ -462,8 +470,15 @@ function startKimiRun(
             hostMcpConnection,
             initialized.agentCapabilities?.mcpCapabilities?.http === true,
             options.environment,
+            hostMcpProxyRuntime,
           )
         : [];
+      const turnPrompt = acpPromptForHostMcp(
+        options.input.prompt,
+        options.hostTools,
+        hostMcpServers,
+        options.input.conversationId,
+      );
 
       let modes: SessionModeState | null | undefined;
       let configOptions: SessionConfigOption[] | null | undefined;
@@ -539,7 +554,7 @@ function startKimiRun(
       emitKimiMetadata(configuredOptions, supportsImages, emitter);
 
       const prompt = await kimiPrompt(
-        options.input.prompt,
+        turnPrompt,
         options.input.imagePaths ?? [],
         initialized,
         promptPreparationAbort.signal,

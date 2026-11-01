@@ -285,15 +285,16 @@ describe("chat provider handoff", () => {
   });
 
   it("keeps the in-flight configuration guard for same-provider updates", async () => {
-    const { store, update } = fixture();
-    vi.spyOn(store, "hasActiveWorkspaceRunForConversation").mockReturnValue(true);
+    const { store, conversation, update } = fixture();
+    expect(store.conversationWork.reserve(conversation.id)).toBe(true);
     await expect(update("codex")).rejects.toThrow("Stop the active run or review");
+    store.conversationWork.release(conversation.id);
   });
 
   it("keeps the in-flight configuration guard for provider changes", async () => {
     const { store, update, turnInput } = fixture();
     store.beginAgentTurn(turnInput("codex"));
-    vi.spyOn(store, "hasActiveWorkspaceRunForConversation").mockReturnValue(true);
+    vi.spyOn(store, "hasRecordedActiveWorkspaceRunForConversation").mockReturnValue(true);
     await expect(update("claude")).rejects.toThrow("Stop the active run or review");
   });
 

@@ -21,6 +21,7 @@ const SHORTCUT_ROWS: ReadonlyArray<readonly [AppShortcutAction, string]> = [
   ["toggle-sidebar", "Toggle project navigation"],
   ["toggle-terminal", "Toggle terminal"],
   ["tasks", "Open tasks"],
+  ["open-surface", "Open a surface"],
 ];
 
 function keybindingsFingerprint(value: AppKeybindings): string {

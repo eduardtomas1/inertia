@@ -40,7 +40,7 @@ function brief(overrides: Partial<DuoComparisonBrief> = {}): DuoComparisonBrief 
 
 describe("Duo comparison brief column", () => {
   it("is registered at its declared schema version", () => {
-    expect(DUO_COMPARISON_BRIEFS_SCHEMA_VERSION).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+    expect(DUO_COMPARISON_BRIEFS_SCHEMA_VERSION).toBeLessThanOrEqual(CURRENT_DATABASE_SCHEMA_VERSION);
     expect(runtimeMigrationCatalog().find(({ version }) => version === DUO_COMPARISON_BRIEFS_SCHEMA_VERSION))
       .toMatchObject({ name: duoComparisonBriefsMigration.name, up: duoComparisonBriefsMigration.up });
   });

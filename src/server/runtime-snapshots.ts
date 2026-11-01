@@ -114,6 +114,7 @@ export function providerSnapshot(
     authState: detection.authState,
     ...(detection.accountKind ? { accountKind: detection.accountKind } : {}),
     canRun: detection.canRun,
+    ...(detection.updateRequired ? { updateRequired: detection.updateRequired } : {}),
     statusMessage: detection.statusMessage ?? null,
     models: metadata.models,
     rateLimits: metadata.rateLimits,

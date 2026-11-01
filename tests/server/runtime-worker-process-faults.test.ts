@@ -60,6 +60,55 @@ describe("runtime worker fault handlers", () => {
     expect(order).toEqual(["runtime.uncaught-exception", "restart"]);
   });
 
+  it.each([
+    { event: "uncaughtException", started: true },
+    { event: "unhandledRejection", started: false },
+  ] as const)("exits after the shutdown deadline when a fatal $event shutdown does not finish", ({ event, started }) => {
+    vi.useFakeTimers();
+    try {
+      const target = new EventEmitter();
+      const forceExit = vi.fn();
+      installRuntimeWorkerFaultHandlers(target, {
+        started: () => started,
+        recordIncident: vi.fn(),
+        requestRestart: vi.fn(),
+        forceExit,
+        forceExitAfterMs: 1_000,
+      });
+
+      target.emit(event, new Error("PRIVATE"), Promise.resolve());
+      target.emit(event, new Error("PRIVATE"), Promise.resolve());
+      vi.advanceTimersByTime(999);
+      expect(forceExit).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(forceExit).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(10_000);
+      expect(forceExit).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not arm a forced exit for a recorded unhandled rejection", () => {
+    vi.useFakeTimers();
+    try {
+      const target = new EventEmitter();
+      const forceExit = vi.fn();
+      installRuntimeWorkerFaultHandlers(target, {
+        started: () => true,
+        recordIncident: vi.fn(),
+        requestRestart: vi.fn(),
+        forceExit,
+        forceExitAfterMs: 1_000,
+      });
+      target.emit("unhandledRejection", new Error("PRIVATE"), Promise.resolve());
+      vi.advanceTimersByTime(10_000);
+      expect(forceExit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("still asks for a restart when recording the incident fails", () => {
     const target = new EventEmitter();
     const requestRestart = vi.fn();

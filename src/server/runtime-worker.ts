@@ -40,6 +40,7 @@ import {
   runtimeOwnedProcessFaultIncidentCode,
 } from "./runtime-worker-process-faults.js";
 import { createIncidentReporter } from "../node/application-incidents.js";
+import { runtimeSupervisorShutdownGraceMs } from "../node/runtime-shutdown-deadline.js";
 import type { DiagnosticCode, DiagnosticOutcome } from "../shared/application-diagnostics.js";
 
 let runtime: RunningRuntime | null = null;
@@ -176,6 +177,8 @@ installRuntimeWorkerFaultHandlers(process, {
   started: () => runtimeGenerationId !== null,
   recordIncident: (code) => recordWorkerIncident(code, code === "runtime.uncaught-exception" ? "failed" : "unknown"),
   requestRestart: () => requestRuntimeRestart("uncaught-exception"),
+  forceExit: () => process.exit(1),
+  forceExitAfterMs: runtimeSupervisorShutdownGraceMs(),
 });
 
 parentPort.on("message", (messageEvent) => {

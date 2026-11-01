@@ -71,7 +71,7 @@ import { checkoutActivityConversationIds, exitedProviderTurns, hasActiveTurnChec
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
-import { PromptInstructionDeliveries } from "./turn-instruction-delivery";
+import { PromptInstructionDeliveries, recordDeferredSessionInstruction } from "./turn-instruction-delivery";
 import {
   providerEventMatchesActiveTurn,
   providerFailureCause,
@@ -1130,6 +1130,7 @@ export class TurnController {
       });
       return;
     }
+    if (result.sessionInstructionApplied === false) recordDeferredSessionInstruction(this.store, result, this.hooks.reportIncident);
     if (rootAlreadyTerminal) return;
     if (result.status === "completed") {
       this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");

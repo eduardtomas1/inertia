@@ -354,6 +354,28 @@ describe("durable runtime message queue", () => {
     } finally { await f.close(); }
   });
 
+  it("keeps Send now pressed during a compaction and sends the message once compaction ends after a failed turn", async () => {
+    const f = await fixture();
+    try {
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
+      f.controller.start(initial.turn.id);
+      f.provider.resolve({ status: "failed" }); await f.drain();
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id);
+      await f.drain();
+      f.compaction.active = true;
+      await f.command("message.queue.send", id);
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "waiting", error: null });
+      expect(f.provider.runCount).toBe(1);
+      f.compaction.active = false;
+      f.queue.onCompactionSettled(f.conversationId);
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
+      expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
   it("dispatches in the background after completion and replays a lost enqueue acknowledgement without a duplicate turn", async () => {
     const f = await fixture();
     try {

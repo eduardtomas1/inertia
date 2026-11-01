@@ -94,6 +94,12 @@ export const DIAGNOSTIC_CATALOG = {
     cause: "The chat was released after the bounded stop, but the provider process tree was not proven to exit. It may still be running.",
     nextStep: "Check for a leftover provider process before deleting this chat or its checkout.", action: "conversation",
   },
+  "provider.session-instructions-deferred": {
+    severity: "info", subsystem: "provider", operation: "turn",
+    title: "Inertia's chat instructions went with the message", causeKnown: true,
+    cause: "Reading Codex's configured developer instructions failed or did not return in time, so Inertia left them untouched and sent its own chat instructions with the message for this turn.",
+    nextStep: "No action is needed. If this keeps happening, check that Codex starts normally in Settings > Agents.", action: "providers",
+  },
   "provider.discovery-cleanup-unconfirmed": {
     severity: "warning", subsystem: "provider", operation: "provider-connect",
     title: "A provider check could not be confirmed stopped", causeKnown: false,
@@ -202,6 +208,12 @@ export const DIAGNOSTIC_CATALOG = {
     cause: "The terminal operation reported a failure. Its process outcome may need inspection.",
     nextStep: "Inspect the affected terminal and any partial work before starting another command.", action: "conversation",
   },
+  "terminal.handoff-unowned": {
+    severity: "warning", subsystem: "terminal", operation: "command",
+    title: "A closed chat window's terminal was not taken back", causeKnown: false,
+    cause: "The main window could not take over a terminal from a chat window that closed, for example because it was at its terminal limit or the local service was offline. A terminal nobody reconnects stops after 30 seconds.",
+    nextStep: "Open that chat's terminal to reconnect it, or close another terminal first.", action: "conversation",
+  },
   "application.validation-failed": {
     severity: "warning", subsystem: "application", operation: "command",
     title: "An operation needs attention before starting", causeKnown: true,
@@ -303,7 +315,12 @@ export interface DiagnosticPage {
 }
 
 export const rendererDiagnosticSchema = z.object({
-  code: z.enum(["discord.repository-missing", "discord.webhook-missing", "application.validation-failed"]),
+  code: z.enum([
+    "discord.repository-missing",
+    "discord.webhook-missing",
+    "application.validation-failed",
+    "terminal.handoff-unowned",
+  ]),
   correlationId: uuidSchema,
   context: diagnosticContextSchema.optional(),
 }).strict();

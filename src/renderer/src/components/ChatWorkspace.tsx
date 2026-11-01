@@ -61,7 +61,7 @@ import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useReaderScrollIntent } from "../hooks/useReaderScrollIntent";
-import { readerScrollReachesLatest, shouldFollowTimeline } from "../utils/responseTimeline";
+import { readerScrollFollow } from "../utils/responseTimeline";
 import {
   EMPTY_STREAMING_AGENT_SOURCE,
   type StreamingAgentSource,
@@ -460,6 +460,7 @@ export function ChatWorkspace({
     dispatchNavigation(action);
   }, []);
   const readerIntentRef = useRef(false);
+  const aimedAtLatestRef = useRef(false);
   const finalAnswerAutoScrollOwnerRef = useRef<string | null>(null);
   const pendingFinalAnswerNavigationRef = useRef<{
     conversationId: string;
@@ -571,6 +572,7 @@ export function ChatWorkspace({
 
   const clearReaderIntent = useCallback((): void => {
     readerIntentRef.current = false;
+    aimedAtLatestRef.current = false;
     if (readerIntentReleaseTimerRef.current !== null) {
       window.clearTimeout(readerIntentReleaseTimerRef.current);
       readerIntentReleaseTimerRef.current = null;
@@ -831,15 +833,14 @@ export function ChatWorkspace({
   }, [history, noteResponseTimelineNavigationIntent]);
   useOlderHistoryNearTop(scrollRef, history && { ...history, loadOlder: loadOlderNearTop });
 
-  const { noteWheelIntent, noteTouchIntent, noteKeyIntent, continueTouchIntent, aimsAtLatest } =
-    useReaderScrollIntent(noteReaderIntent);
+  const { noteWheelIntent, noteTouchIntent, continueTouchIntent } = useReaderScrollIntent(noteReaderIntent);
 
   const noteReaderKeyboardIntent = (
     event: React.KeyboardEvent<HTMLDivElement>,
   ): void => {
     if (!isTranscriptReaderNavigationKey(event.key)) return;
     noteReaderIntent();
-    noteKeyIntent(event.altKey ? null : event.key);
+    aimedAtLatestRef.current = !event.altKey && event.key === "End";
   };
 
   const onTranscriptScroll = (): void => {
@@ -849,10 +850,9 @@ export function ChatWorkspace({
     lastReaderScrollTopRef.current = element.scrollTop;
     continueTouchIntent();
     const intentional = readerIntentRef.current;
-    const follows = intentional
-      ? readerScrollReachesLatest({ scrollTop: element.scrollTop, clientHeight: element.clientHeight,
-          scrollHeight: element.scrollHeight, previousScrollTop, live: liveTurnRef.current, aimedAtLatest: aimsAtLatest() })
-      : shouldFollowTimeline(element.scrollTop, element.clientHeight, element.scrollHeight);
+    const { follows, arrived } = readerScrollFollow({ scrollTop: element.scrollTop, clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight, previousScrollTop, live: liveTurnRef.current, intentional, aimedAtLatest: aimedAtLatestRef.current });
+    if (arrived) aimedAtLatestRef.current = false;
     if (finalAnswerAutoScrollOwnerRef.current !== null) {
       onLatestContentVisibilityChange?.(follows);
       return;

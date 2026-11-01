@@ -291,6 +291,7 @@ export class TerminalManager {
     cols: number,
     rows: number,
     replacementRequestId?: string,
+    background = false,
   ): TerminalAttachment {
     if (this.disposingAll || this.updatePreparationHeld) {
       throw new TerminalError("The terminal service is stopping.");
@@ -339,8 +340,8 @@ export class TerminalManager {
     // Keep the former owner authoritative until resize and bounded replay both
     // succeed. A failed transfer must not evict a still-healthy renderer.
     session.flushOutput();
-    this.resizeSessionPty(session, cols, rows);
-    if (!session.replayOutput(owner)) {
+    if (!background) this.resizeSessionPty(session, cols, rows);
+    if (!background && !session.replayOutput(owner)) {
       throw new TerminalError("The terminal client disconnected.");
     }
     if (session.detachTimer) clearTimeout(session.detachTimer);

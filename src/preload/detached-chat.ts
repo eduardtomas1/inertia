@@ -68,16 +68,18 @@ const bridge = Object.freeze({
     ipcRenderer.invoke(DETACHED_CHAT_IPC.close, draft, terminalIds) as ReturnType<
       DesktopBridge["closeDetachedChat"]
     >,
-  persistDetachedChatDraft: (draft: string) => {
+  persistDetachedChatDraft: (draft: string, terminalIds: readonly string[]) => {
     return ipcRenderer.sendSync(
       DETACHED_CHAT_IPC.persistDraft,
       typeof draft === "string" ? draft : "",
+      terminalIds,
     ) === true;
   },
-  mirrorDetachedChatDraft: (draft: string) => {
+  mirrorDetachedChatDraft: (draft: string, terminalIds: readonly string[]) => {
     return ipcRenderer.sendSync(
       DETACHED_CHAT_IPC.mirrorDraft,
       typeof draft === "string" ? draft : "",
+      terminalIds,
     ) === true;
   },
   getRuntimeConnection: () =>

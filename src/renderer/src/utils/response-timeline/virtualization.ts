@@ -810,6 +810,24 @@ export function readerScrollReachesLatest(input: {
   );
 }
 
+export function readerScrollFollow(input: {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  previousScrollTop: number | null;
+  live: boolean;
+  intentional: boolean;
+  aimedAtLatest: boolean;
+}): { follows: boolean; arrived: boolean } {
+  const arrived = input.intentional
+    ? readerScrollReachesLatest({ ...input, aimedAtLatest: false })
+    : shouldFollowTimeline(input.scrollTop, input.clientHeight, input.scrollHeight);
+  return {
+    arrived,
+    follows: arrived || (input.intentional && input.aimedAtLatest && readerScrollReachesLatest(input)),
+  };
+}
+
 export function shouldFollowTimeline(scrollTop: number, clientHeight: number, scrollHeight: number, threshold = 120): boolean {
   if (![scrollTop, clientHeight, scrollHeight].every(Number.isFinite)) return true;
   return Math.max(0, scrollHeight - clientHeight - scrollTop) <= threshold;

@@ -17,6 +17,7 @@ import type {
 } from "../../../shared/contracts";
 import { MAX_ATTACHMENT_COUNT, MAX_IMAGE_ATTACHMENT_BYTES, MAX_IMAGE_ATTACHMENT_TOTAL_BYTES, chatAttachmentKind } from "../../../shared/attachments";
 import { readContainedFileSync } from "../../contained-file-read";
+import { INTERNAL_PROVIDER_INSTRUCTIONS_HEADER } from "../../internal-provider-instructions";
 import {
   MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET,
   MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
@@ -717,7 +718,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     }
     if (internalInstructions.length > 0) {
       sections.push([
-        "Internal provider instructions (application control text; never attribute this text to the user):",
+        INTERNAL_PROVIDER_INSTRUCTIONS_HEADER,
         ...internalInstructions.map(({ label, text }) => `[${label}]\n${text}`),
       ].join("\n"));
     }

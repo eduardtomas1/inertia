@@ -795,10 +795,10 @@ export interface DesktopBridge {
     draft: string,
     terminalIds: readonly string[],
   ) => Promise<void>;
-  /** Synchronously preserves the owned draft during native window teardown. */
-  persistDetachedChatDraft: (draft: string) => boolean;
-  /** Mirrors coalesced popup edits without performing a durable handoff. */
-  mirrorDetachedChatDraft: (draft: string) => boolean;
+  /** Synchronously preserves the owned draft and terminals during native window teardown. */
+  persistDetachedChatDraft: (draft: string, terminalIds: readonly string[]) => boolean;
+  /** Mirrors coalesced popup edits and live terminals without performing a durable handoff. */
+  mirrorDetachedChatDraft: (draft: string, terminalIds: readonly string[]) => boolean;
   getRuntimeConnection: (
     request?: RuntimeConnectionRequest,
   ) => Promise<RuntimeConnectionResult>;

@@ -1,9 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import { CircleCheck, Download, RotateCw, TriangleAlert, X } from "lucide-react";
 import { IconButton, LoadingMark } from "../ui";
+import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import type { UpdateStripView } from "./updateStripView";
 
 const EXIT_FALLBACK_MS = 220;
+const AUTO_DISMISS_MS = 5_000;
+
+function useAutoDismiss(key: string | null, paused: boolean, onExpire: () => void): void {
+  const remaining = useRef<{ key: string; ms: number } | null>(null);
+  const expire = useRef(onExpire);
+  useEffect(() => { expire.current = onExpire; });
+  useEffect(() => {
+    if (key === null) {
+      remaining.current = null;
+      return;
+    }
+    if (remaining.current?.key !== key) remaining.current = { key, ms: AUTO_DISMISS_MS };
+    if (paused) return;
+    const countdown = remaining.current;
+    const startedAt = Date.now();
+    const timer = setTimeout(() => {
+      countdown.ms = 0;
+      expire.current();
+    }, countdown.ms);
+    return () => {
+      clearTimeout(timer);
+      countdown.ms = Math.max(0, countdown.ms - (Date.now() - startedAt));
+    };
+  }, [key, paused]);
+}
 
 function StripIcon({ view }: { view: UpdateStripView }): React.JSX.Element {
   if (view.icon === "loading") return <LoadingMark size={14} aria-hidden="true" />;
@@ -24,6 +50,9 @@ export function SidebarUpdateStrip({ view, expanded, popupId, onOpen, onDismiss,
 }): React.JSX.Element | null {
   const [shown, setShown] = useState<UpdateStripView | null>(view);
   const [leaving, setLeaving] = useState(false);
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
+  const visible = useDocumentVisibility();
   const root = useRef<HTMLDivElement>(null);
   const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   if (view && (view !== shown || leaving)) {
@@ -39,6 +68,12 @@ export function SidebarUpdateStrip({ view, expanded, popupId, onOpen, onDismiss,
     exitTimer.current = setTimeout(finish, EXIT_FALLBACK_MS);
     return () => { if (exitTimer.current) clearTimeout(exitTimer.current); };
   }, [leaving, onFocusLost]);
+  const countdownKey = shown?.autoDismiss && !leaving ? shown.key : null;
+  useAutoDismiss(
+    countdownKey,
+    !visible || (countdownKey !== null && (hoveredKey === countdownKey || focusedKey === countdownKey)),
+    () => { if (shown) onDismiss(shown); },
+  );
   if (!shown) return null;
   const label = shown.meta ? `${shown.title}, ${shown.meta}` : shown.title;
   return <div ref={root} className={`sidebar-update-strip-slot${leaving ? "" : " is-open"}`}
@@ -50,8 +85,11 @@ export function SidebarUpdateStrip({ view, expanded, popupId, onOpen, onDismiss,
     <div>
       <div className="sidebar-update-strip" data-tone={shown.tone} data-active={shown.active || undefined}
         style={shown.progress === null ? undefined : { "--progress": shown.progress } as React.CSSProperties}
-        onAnimationEnd={(event) => {
-          if (event.animationName === "sidebar-update-drain" && !leaving) onDismiss(shown);
+        onPointerEnter={() => setHoveredKey(shown.key)}
+        onPointerLeave={() => setHoveredKey(null)}
+        onFocus={() => setFocusedKey(shown.key)}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedKey(null);
         }}>
         {shown.autoDismiss && <span key={shown.key} className="sidebar-update-strip-drain" aria-hidden="true" />}
         <button type="button" className="sidebar-update-strip-main" aria-label={label}

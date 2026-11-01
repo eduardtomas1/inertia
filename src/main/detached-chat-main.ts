@@ -154,13 +154,15 @@ export class DetachedChatMain {
   #shuttingDown = false;
   readonly #drafts = new Map<string, string>();
   readonly #terminalHandoffs = new Map<string, readonly string[]>();
+  readonly #reportedTerminalIds = new Map<string, readonly string[]>();
+  readonly #closingHandoffs = new Map<string, ScheduledClosure>();
   readonly #scheduledClosures = new Map<WebContents, ScheduledClosure>();
   readonly #persistDraftListener = (
     event: IpcMainEvent,
     ...args: unknown[]
   ): void => {
     try {
-      this.#persistDraftForEvent(event, args);
+      this.#persistDraftBeforeUnload(event, args);
       event.returnValue = true;
     } catch {
       event.returnValue = false;
@@ -205,6 +207,7 @@ export class DetachedChatMain {
       formatTitle: (title) => `${title} — ${options.productName ?? "Inertia"}`,
       onWindowsChanged: (windows) => this.#broadcastWindows(windows),
       onRendererGone: (id) => this.#persistDraftAfterRendererCrash(id),
+      onWindowClosed: (id) => this.#handOffClosedWindow(id),
     });
   }
 
@@ -555,6 +558,9 @@ export class DetachedChatMain {
       throw error;
     }
     window.once("closed", unregisterHealth);
+    window.webContents.on("will-prevent-unload", () => {
+      this.#closingHandoffs.delete(input.request.conversationId);
+    });
     window.once("ready-to-show", () => {
       if (!window.isDestroyed()) window.show();
     });
@@ -569,16 +575,18 @@ export class DetachedChatMain {
     const window = this.#manager.windowForSender(sender);
     if (!liveWindow(window)) throw new Error(UNTRUSTED_RENDERER_ERROR);
     if (this.#scheduledClosures.has(sender)) return;
-    this.#scheduledClosures.set(sender, {
+    const closure = {
       dock,
       conversationId: context.conversationId,
       terminalIds: context.terminalIds,
-    });
+    };
+    this.#scheduledClosures.set(sender, closure);
+    this.#closingHandoffs.delete(context.conversationId);
+    this.#sendTerminalHandoff(closure);
     window.once("closed", () => {
       const scheduled = this.#scheduledClosures.get(sender);
       this.#scheduledClosures.delete(sender);
       if (!scheduled) return;
-      this.#sendTerminalHandoff(scheduled);
       if (scheduled.dock) {
         void Promise.resolve()
           .then(() => this.#options.onDock(scheduled.conversationId))
@@ -618,6 +626,24 @@ export class DetachedChatMain {
     return { ...context, draft: handoff.draft };
   }
 
+  #persistDraftBeforeUnload(event: IpcMainEvent, args: unknown[]): void {
+    const context = this.#persistDraftForEvent(event, args, 2);
+    const terminalIds = parseTerminalHandoffIds(args[1]) ?? [];
+    this.#reportedTerminalIds.set(context.conversationId, terminalIds);
+    if (this.#scheduledClosures.has(event.sender)) return;
+    this.#closingHandoffs.set(context.conversationId, {
+      dock: false,
+      conversationId: context.conversationId,
+      terminalIds,
+    });
+  }
+
+  #handOffClosedWindow(conversationId: string): void {
+    const handoff = this.#closingHandoffs.get(conversationId);
+    this.#closingHandoffs.delete(conversationId);
+    if (handoff && !this.#shuttingDown) this.#sendTerminalHandoff(handoff);
+  }
+
   #handOffForEvent(
     event: IpcMainInvokeEvent,
     args: unknown[],
@@ -650,14 +676,16 @@ export class DetachedChatMain {
     const context = this.#assertDetachedIpc(
       event as unknown as IpcMainInvokeEvent,
       args.length,
-      1,
+      2,
     );
     const handoff = parseDetachedChatDraftHandoff({
       conversationId: context.conversationId,
       draft: args[0],
     });
-    if (!handoff) throw new Error("Invalid detached-chat draft mirror");
+    const terminalIds = parseTerminalHandoffIds(args[1]);
+    if (!handoff || !terminalIds) throw new Error("Invalid detached-chat draft mirror");
     this.#drafts.set(handoff.conversationId, handoff.draft);
+    this.#reportedTerminalIds.set(handoff.conversationId, terminalIds);
     const main = this.#options.mainWindow();
     if (liveWindow(main) && !main.webContents.isDestroyed()) {
       main.webContents.send(DETACHED_CHAT_IPC.draftMirrored, handoff);
@@ -677,6 +705,13 @@ export class DetachedChatMain {
   }
 
   #persistDraftAfterRendererCrash(conversationId: string): void {
+    this.#closingHandoffs.set(conversationId, {
+      dock: false,
+      conversationId,
+      terminalIds: this.#reportedTerminalIds.get(conversationId)
+        ?? this.#terminalHandoffs.get(conversationId)
+        ?? [],
+    });
     const draft = this.#drafts.get(conversationId);
     if (draft === undefined) return;
     this.#persistDraftHandoff({ conversationId, draft });
@@ -706,8 +741,10 @@ export class DetachedChatMain {
     for (const id of this.#drafts.keys()) {
       if (!liveConversationIds.has(id)) this.#drafts.delete(id);
     }
-    for (const id of this.#terminalHandoffs.keys()) {
-      if (!liveConversationIds.has(id)) this.#terminalHandoffs.delete(id);
+    for (const handoffs of [this.#terminalHandoffs, this.#reportedTerminalIds, this.#closingHandoffs]) {
+      for (const id of handoffs.keys()) {
+        if (!liveConversationIds.has(id)) handoffs.delete(id);
+      }
     }
     const main = this.#options.mainWindow();
     if (

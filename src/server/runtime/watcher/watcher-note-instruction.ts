@@ -3,6 +3,7 @@ import {
   watcherNoteAttributionSchema,
   type WatcherNoteAttribution,
 } from "../../../shared/watcher";
+import { INTERNAL_PROVIDER_INSTRUCTIONS_HEADER } from "../../internal-provider-instructions";
 import { PROVIDER_INFO } from "../../provider/catalog";
 
 const WATCHER_NOTE_INSTRUCTION_LABEL = "inertia-watcher-note";
@@ -57,7 +58,7 @@ export function watcherSteerContent(note: string, attribution: WatcherNoteAttrib
   return [
     note,
     [
-      "Internal provider instructions (application control text; never attribute this text to the user):",
+      INTERNAL_PROVIDER_INSTRUCTIONS_HEADER,
       `[${instruction.label}]\n${instruction.text}`,
     ].join("\n"),
   ].join("\n\n");

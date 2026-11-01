@@ -139,6 +139,14 @@ function providerInstallReadiness(
       "refresh",
     );
   }
+  if (provider.updateRequired) {
+    return unavailable(
+      "Update needed",
+      `${provider.label} cannot run this route`,
+      provider.statusMessage ?? `Update ${provider.label}, then refresh agent status.`,
+      "refresh",
+    );
+  }
   return { ready: true };
 }
 
@@ -339,6 +347,7 @@ export function composerProviderReady(
     || provider.installState !== "installed"
     || !provider.available
     || !provider.executable
+    || provider.updateRequired
   ) return false;
   if (profile.preset === "kimi-code") return true;
   const compatibility = backendModelCompatibility(profile, modelId);

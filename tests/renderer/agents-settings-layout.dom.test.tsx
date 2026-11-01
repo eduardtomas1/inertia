@@ -138,6 +138,47 @@ describe("Agents providers layout", () => {
     expect(screen.getAllByText("Sign in required")).toHaveLength(2);
   });
 
+  it.each([
+    {
+      id: "claude" as const,
+      label: "Claude",
+      version: "2.1.150",
+      minimumVersion: "2.1.309",
+      message: "Claude Code 2.1.150 is installed. Inertia needs 2.1.309 or newer because older versions ignore the restrictions Inertia sets and can write outside the project. Update Claude Code and refresh.",
+    },
+    {
+      id: "opencode" as const,
+      label: "OpenCode",
+      version: "1.18.21",
+      minimumVersion: "1.18.22",
+      message: "OpenCode 1.18.21 is installed. Inertia needs 1.18.22 or newer because older versions let a website install packages through OpenCode's local server. Update OpenCode and refresh.",
+    },
+  ])("shows that $label needs an update instead of a sign-in below Inertia's minimum version", async ({ id, label, version, minimumVersion, message }) => {
+    const onConnectProvider = vi.fn();
+    const onRefreshProvider = vi.fn();
+    const outdated = {
+      ...settingsProvider("claude", label), id, command: id, canRun: false,
+      authState: "unknown" as const, version, executable: `/opt/bin/${id}`,
+      updateRequired: { installedVersion: version, minimumVersion },
+      statusMessage: message,
+    };
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "agents" },
+      providers: [settingsProvider("codex", "Codex"), outdated],
+      onConnectProvider,
+      onRefreshProvider,
+    })} />);
+    const choose = await screen.findByRole("button", { name: `Configure ${label}` });
+    expect(choose).toHaveAccessibleDescription(/Update required/u);
+    fireEvent.click(choose);
+    expect(screen.getByText(message)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Configure" })).toBeNull();
+    expect(screen.queryAllByRole("button", { name: /^Sign in through/u })).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(onRefreshProvider).toHaveBeenCalledWith(id);
+    expect(onConnectProvider).not.toHaveBeenCalled();
+  });
   it("keeps provider actions focusable while Settings is unavailable and ignores their clicks", async () => {
     const onRefreshProvider = vi.fn();
     const onChooseCodexBinary = vi.fn();

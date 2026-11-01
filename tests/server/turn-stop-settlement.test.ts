@@ -6,6 +6,7 @@ import {
   cleanupTurnControllerTestDirectories,
   createTurnControllerTestRuntime,
   flushTurnControllerTestPromises,
+  turnControllerTestIdentity,
   type TurnControllerTestRuntime,
 } from "../support/turn-controller-runtime";
 
@@ -56,6 +57,11 @@ function deferredStop() {
     resolve = accept;
   });
   return { promise, resolve };
+}
+
+function turnActivities(runtime: TurnControllerTestRuntime, turnId: string) {
+  return (runtime.store.conversationDetail(runtime.conversationId)?.activities ?? [])
+    .filter((activity) => activity.turnId === turnId);
 }
 
 function stoppingBroadcasts(runtime: TurnControllerTestRuntime): number {
@@ -125,7 +131,7 @@ describe("turn stop settlement", () => {
     }
   });
 
-  it("finalizes a natural completion without the stop note when the provider is force-detached", async () => {
+  it("tells the chat a natural completion's provider may still be running when it is force-detached", async () => {
     const runtime = await createTurnControllerTestRuntime();
     try {
       const turn = await startedTurn(runtime);
@@ -136,11 +142,118 @@ describe("turn stop settlement", () => {
       await runtime.controller.drainSettlementTasks();
 
       expect(runtime.store.agentTurn(turn.id).status).toBe("completed");
-      expect(JSON.stringify(runtime.store.agentTurn(turn.id))).not.toContain(NOTE);
-      expect(runtime.store.workspaceRun(turn.runId).detail).not.toContain(NOTE);
+      expect(runtime.store.workspaceRun(turn.runId).detail).toBe(NOTE);
+      expect(turnActivities(runtime, turn.id)).toContainEqual(expect.objectContaining({
+        kind: "status", title: NOTE, status: "completed",
+      }));
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
       expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId))
         .toEqual([expect.objectContaining({ turnId: turn.id, runId: turn.runId })]);
+    } finally {
+      vi.restoreAllMocks();
+      runtime.store.close();
+    }
+  });
+
+  it("tells the chat a failed turn's provider may still be running when it is force-detached", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const turn = await startedTurn(runtime);
+      providerStop(runtime, async () => "force-detached");
+
+      runtime.provider.resolve({ status: "failed", error: "The provider failed." });
+      await flushTurnControllerTestPromises();
+      await runtime.controller.drainSettlementTasks();
+
+      expect(runtime.store.agentTurn(turn.id).status).toBe("failed");
+      expect(runtime.store.workspaceRun(turn.runId).detail).toContain(NOTE);
+      expect(turnActivities(runtime, turn.id)).toContainEqual(expect.objectContaining({
+        kind: "error", title: expect.stringContaining(NOTE),
+      }));
+    } finally {
+      vi.restoreAllMocks();
+      runtime.store.close();
+    }
+  });
+
+  it("adds the note after the provider's own failure text, also on interrupted work", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const turn = await startedTurn(runtime);
+      providerStop(runtime, async () => "force-detached");
+      runtime.provider.emit({
+        ...turnControllerTestIdentity(runtime),
+        type: "activity",
+        kind: "tool",
+        phase: "started",
+        label: "Run tests",
+        activityId: "running-tool",
+      });
+      await flushTurnControllerTestPromises();
+
+      runtime.provider.resolve({
+        status: "failed",
+        failure: { reason: "transport-closed", message: "The connection closed." },
+      });
+      await flushTurnControllerTestPromises();
+      await runtime.controller.drainSettlementTasks();
+
+      expect(runtime.store.agentTurn(turn.id).status).toBe("failed");
+      expect(turnActivities(runtime, turn.id)).toContainEqual(expect.objectContaining({
+        title: "Interrupted · Run tests",
+        detail: expect.stringContaining(`The connection closed. ${NOTE}`),
+      }));
+    } finally {
+      vi.restoreAllMocks();
+      runtime.store.close();
+    }
+  });
+
+  it("keeps the note when a terminal write is retried after the provider was force-detached", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const turn = await startedTurn(runtime);
+      providerStop(runtime, async () => "force-detached");
+      const settle = runtime.store.settleAgentTurn.bind(runtime.store);
+      const write = vi.spyOn(runtime.store, "settleAgentTurn").mockImplementation(() => {
+        throw new Error("Temporary SQLite failure");
+      });
+
+      runtime.provider.resolve({ status: "completed", sessionId: "provider-session" });
+      await flushTurnControllerTestPromises();
+      await runtime.controller.drainSettlementTasks();
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
+
+      write.mockImplementation(settle);
+      expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
+      await flushTurnControllerTestPromises();
+      await runtime.controller.drainSettlementTasks();
+
+      expect(runtime.store.agentTurn(turn.id).status).toBe("failed");
+      expect(runtime.store.workspaceRun(turn.runId).detail).toBe(`The turn could not be finalized cleanly. ${NOTE}`);
+      expect(turnActivities(runtime, turn.id)).toContainEqual(expect.objectContaining({
+        kind: "error",
+        title: `The turn could not be finalized cleanly. ${NOTE}`,
+      }));
+    } finally {
+      vi.restoreAllMocks();
+      runtime.store.close();
+    }
+  });
+
+  it("adds no note to a natural completion whose provider stop settles", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const turn = await startedTurn(runtime);
+      providerStop(runtime, async () => "settled");
+
+      runtime.provider.resolve({ status: "completed", sessionId: "provider-session" });
+      await flushTurnControllerTestPromises();
+      await runtime.controller.drainSettlementTasks();
+
+      expect(runtime.store.agentTurn(turn.id).status).toBe("completed");
+      expect(runtime.store.workspaceRun(turn.runId).detail).not.toContain(NOTE);
+      expect(JSON.stringify(turnActivities(runtime, turn.id))).not.toContain(NOTE);
     } finally {
       vi.restoreAllMocks();
       runtime.store.close();

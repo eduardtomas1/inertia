@@ -11,9 +11,7 @@ import {
   CURSOR_ACP_TERMINAL_RESUME_VERIFIED_VERSION,
   cursorVersionHasVerifiedAcpTerminalResume,
 } from "../shared/provider-terminal-resume";
-import {
-  type BackendCompatibilityProbeResult,
-} from "../shared/backend-probe";
+import { type BackendCompatibilityProbeResult } from "../shared/backend-probe";
 import {
   modelBackendProfileSchema,
   providerNativeBackendProfile,
@@ -21,10 +19,7 @@ import {
   type ModelBackendProfile,
   type ModelSelection,
 } from "../shared/model-routing";
-import {
-  providerChildEnvironment,
-  providerEnvironment,
-} from "./environment";
+import { providerChildEnvironment, providerEnvironment } from "./environment";
 import { validateProviderRunInput } from "./provider/adapters";
 import {
   AgentHarnessRegistry,

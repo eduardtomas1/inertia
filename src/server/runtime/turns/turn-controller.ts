@@ -51,11 +51,7 @@ import {
   publicTurnError,
   updateActiveTurnProviderSession,
 } from "./turn-controller-support";
-import {
-  compactionSessionInstruction,
-  prepareTurnRequest,
-  type PreparedTurnRequest,
-} from "./turn-request-preparation";
+import { compactionSessionInstruction, prepareTurnRequest, type PreparedTurnRequest } from "./turn-request-preparation";
 import { TurnStreamProjection } from "./turn-stream-projection";
 import { TurnActivityProjection } from "./turn-activity-projection";
 import { TurnInteractionCoordinator } from "./turn-interaction-coordinator";

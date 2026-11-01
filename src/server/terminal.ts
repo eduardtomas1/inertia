@@ -19,10 +19,7 @@ import {
 } from "./process-lifecycle";
 import { requestRecoveryFromTaintedOwnedProcess } from "./terminal-runtime-recovery";
 import { waitForTerminalExit } from "./terminal-exit";
-import {
-  terminalCloseTimeoutMs,
-  terminalShutdownTimeoutMs,
-} from "./terminal-shutdown-deadline";
+import { terminalCloseTimeoutMs, terminalShutdownTimeoutMs } from "./terminal-shutdown-deadline";
 import {
   waitForBooleanWithinTerminalDeadline,
   waitForGuardianStopWithinDeadline,

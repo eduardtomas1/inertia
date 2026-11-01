@@ -486,5 +486,78 @@
     },
     "attribution": "Against the package E measurement (2520075) core grows by 1187 bytes: the upstream fidelity packages' renderer and shared-contract growth (233 and 419 bytes over their base), the streaming detail-refresh fix and the combination of both sides. The two startup routes grow by 601 and 622 bytes and the transcript chunk by 186 bytes over package E; all stay within their limits. The server-side hooks (effect wake, capture effect, start barrier, attestation pass-through, files decision) add no renderer bytes. Contributions were not isolated individually and are not additive.",
     "headroomDecision": "Only the failing budget was re-baselined, to its measurement plus 256 as for core throughout the branch. The startup routes keep 92 and 71 bytes of headroom under the Phase 4 limits and were not raised because they passed."
+  },
+  "mainSync": {
+    "date": "2026-11-01",
+    "checkpoint": "Merge of origin/main ce0767c9 (#688 provider version floors, watcher spec hardening, Claude Agent SDK 0.3.310 and the post-v0.0.77 review fixes; #692 follow-latest on disclosure toggles) into fc010d52",
+    "platform": "Windows 11 x64, Node 22.23.1",
+    "measurement": "electron-vite renderer output of fc010d52 and of the merged tree, built on the same machine; npm run build:bundle passes on the merged tree after the re-cap. Every route closure and core inclusion or exclusion is unchanged.",
+    "capResolution": "The merge conflicted on the main workbench, detached chat first-load, detached chat chunk and core caps. Each merged cap is the branch's measured cap plus the increments main added to that cap in #688 and #692 (main workbench 328 + 152 + 248 + 289, detached first load 351 + 272 + 56, detached chat chunk 34 + 56, core 848 + 177 + 248 + 289 + 133). Main's own expressions for the two first-load routes (948,080 and 841,705 bytes) still carry the allowance the branch narrowed in its first measurement, so taking them would have relaxed both routes by about 41 KiB. deferredSidebarUpdateControlJavaScript, which only main changed, keeps main's cap.",
+    "measured": {
+      "branchHead": {
+        "mainWorkbenchFirstLoadJavaScript": 905416,
+        "detachedChatFirstLoadJavaScript": 799182,
+        "detachedChatJavaScript": 21826,
+        "deferredSidebarUpdateControlJavaScript": 28490,
+        "transcriptJavaScript": 630555,
+        "settingsJavaScript": 79156,
+        "deferredDiagnosticCatalogJavaScript": 13505,
+        "coreJavaScript": 2521262
+      },
+      "merged": {
+        "mainWorkbenchFirstLoadJavaScript": 906446,
+        "detachedChatFirstLoadJavaScript": 799861,
+        "detachedChatJavaScript": 21916,
+        "deferredSidebarUpdateControlJavaScript": 29205,
+        "transcriptJavaScript": 630719,
+        "settingsJavaScript": 79192,
+        "deferredDiagnosticCatalogJavaScript": 14516,
+        "coreJavaScript": 2522970
+      }
+    },
+    "raised": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 906446,
+        "previousBytes": 905416,
+        "previousLimit": 905508,
+        "mainIncrement": 1017,
+        "limit": 906525,
+        "headroom": 79
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 799861,
+        "previousBytes": 799182,
+        "previousLimit": 799253,
+        "mainIncrement": 679,
+        "limit": 799932,
+        "headroom": 71
+      },
+      "detachedChatJavaScript": {
+        "bytes": 21916,
+        "previousBytes": 21826,
+        "previousLimit": 22082,
+        "mainIncrement": 90,
+        "limit": 22172,
+        "headroom": 256
+      },
+      "coreJavaScript": {
+        "bytes": 2522970,
+        "previousBytes": 2521262,
+        "previousLimit": 2521518,
+        "mainIncrement": 1695,
+        "limit": 2523213,
+        "headroom": 243
+      }
+    },
+    "mainOnlyCap": {
+      "deferredSidebarUpdateControlJavaScript": {
+        "bytes": 29205,
+        "previousBytes": 28490,
+        "limit": 29205,
+        "headroom": 0
+      }
+    },
+    "attribution": "Growth over fc010d52 is main's: the update strip, quota polling, reader scroll, compact-on-return composer and detached chat terminal fixes of #688 and the disclosure follow-latest guard of #692. The merged growth (1,030 / 679 / 90 / 1,708 bytes) matches main's recorded increments (1,017 / 679 / 90 / 1,695) to within 13 bytes on each budget. The sidebar update control chunk measures exactly main's cap. Contributions were not isolated individually and are not additive.",
+    "headroomDecision": "Branch cap plus main's measured increments on the four conflicting budgets; no other limit changed and no closure accounting changed."
   }
 }

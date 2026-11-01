@@ -29,6 +29,7 @@ import {
   resolveTimelineKeyboardIntent,
   shouldAdjustTimelineScrollPosition,
   shouldConsolidateSettledWorkIntoRunDetails,
+  shouldFollowTimeline,
   shouldShowTimelineMinimap,
   shouldShowTurnGitArtifactSummary,
   shouldVirtualizeTimeline,
@@ -553,9 +554,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     cancelAnchor?.();
   }, []);
   const onTurnAnchorSettledRef = useRef(props.onTurnAnchorSettled);
+  const followsLatestRef = useRef(props.followsLatest);
   const onTurnAnchorCancelledRef = useRef(props.onTurnAnchorCancelled);
   const onFinalAnswerAutoScroll = props.onFinalAnswerAutoScroll;
   onTurnAnchorSettledRef.current = props.onTurnAnchorSettled;
+  followsLatestRef.current = props.followsLatest;
   onTurnAnchorCancelledRef.current = props.onTurnAnchorCancelled;
   const cancelLayoutAnchorRestoration = useRef<(() => void) | null>(null);
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
@@ -957,10 +960,10 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);
 
   const captureExpansionAnchor = useCallback((sourceTurnId: string): void => {
-    // Disclosures are deliberate history navigation. Claim it before their
-    // resize can let the parent follow-latest observer reclaim the viewport.
-    beginReaderTimelineNavigation();
     const scrollElement = props.scrollElementRef?.current;
+    if (followsLatestRef.current && scrollElement
+      && shouldFollowTimeline(scrollElement.scrollTop, scrollElement.clientHeight, scrollElement.scrollHeight)) return;
+    beginReaderTimelineNavigation();
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root) return;
     const viewport = scrollElement.getBoundingClientRect();

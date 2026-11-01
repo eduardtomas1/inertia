@@ -51,6 +51,12 @@ function dynamicToolNames(calls: Array<{ method: string; params: JsonObject }>):
   return ((started?.params.dynamicTools ?? []) as Array<{ name: string }>).map(({ name }) => name);
 }
 
+function sessionBlock(bridge: ReturnType<typeof bridgeFor>): string {
+  return [...(bridge.instructions ?? []), { label: "inertia-chat", text: "This chat's id is chat-1." }]
+    .map(({ label, text }) => `[${label}]\n${text}`)
+    .join("\n\n");
+}
+
 const THREAD_ID = "thread-host-tools";
 const TURN_ID = "turn-host-tools";
 
@@ -71,12 +77,20 @@ const hostTools: NonNullable<CodexAppServerOptions["hostTools"]> = {
 function turnHarness(
   sessionId?: string,
   tools: CodexAppServerOptions["hostTools"] = hostTools,
-  overrides: { prompt?: string; threadId?: string; sessionDeveloperInstructions?: string; configured?: string } = {},
+  overrides: {
+    prompt?: string;
+    threadId?: string;
+    sessionDeveloperInstructions?: string;
+    configured?: string;
+    configReadFails?: boolean;
+  } = {},
 ): {
   calls: Array<{ method: string; params: JsonObject }>;
+  deferSessionInstruction: ReturnType<typeof vi.fn>;
   run(): Promise<void>;
 } {
   const calls: Array<{ method: string; params: JsonObject }> = [];
+  const deferSessionInstruction = vi.fn();
   let activeTurnId: string | undefined;
   let phase: CodexRunPhase = "opening";
   const options: CodexAppServerOptions = {
@@ -94,13 +108,17 @@ function turnHarness(
   };
   return {
     calls,
+    deferSessionInstruction,
     run: () => openCodexTurn({
       options,
       modelProvider: undefined,
       request: async (method, params) => {
         calls.push({ method, params });
         if (method === "initialize") return { userAgent: "fake" };
-        if (method === "config/read") return { config: { developer_instructions: overrides.configured ?? "" } };
+        if (method === "config/read") {
+          if (overrides.configReadFails) throw new Error("config unreadable");
+          return { config: { developer_instructions: overrides.configured ?? "" } };
+        }
         if (method === "thread/start" || method === "thread/resume") {
           return { thread: { id: sessionId ?? overrides.threadId ?? THREAD_ID }, model: "fake" };
         }
@@ -123,6 +141,7 @@ function turnHarness(
       awaitInitialGoalTurn: vi.fn(),
       projectGoalResponse: () => null,
       setContinuationError: vi.fn(),
+      deferSessionInstruction,
       setPhase: (value) => {
         phase = value;
       },
@@ -228,6 +247,46 @@ describe("Codex host-tool registration", () => {
     const resumed = turnHarness("thread-started-now", bridge, { sessionDeveloperInstructions: block });
     await resumed.run();
     expect(resumed.calls.find(({ method }) => method === "thread/resume")?.params.developerInstructions).toBe(block);
+  });
+
+  it("keeps withheld packs out of the prompt when config cannot be read and the block moves into the prompt", async () => {
+    const bridge = bridgeFor(null);
+    const workspace = bridge.instructions!.find(({ label }) => label === "inertia-workspace")!;
+    const frontend = bridge.instructions!.find(({ label }) => label === "inertia-frontend-workbench")!;
+    const harness = turnHarness("thread-from-an-earlier-build-3", bridge, {
+      prompt: promptWith([{ label: "build-mode", text: "BUILD_MODE_TEXT" }, workspace]),
+      sessionDeveloperInstructions: sessionBlock(bridge),
+      configReadFails: true,
+    });
+    await harness.run();
+
+    expect(harness.calls.filter(({ method }) => method === "config/read")).toHaveLength(1);
+    expect(harness.calls.find(({ method }) => method === "thread/resume")?.params).not.toHaveProperty("developerInstructions");
+    expect(harness.deferSessionInstruction).toHaveBeenCalledTimes(1);
+    expect(sentPrompt(harness.calls)).toBe([
+      "Continue",
+      `${INSTRUCTIONS_HEADER}\n[build-mode]\nBUILD_MODE_TEXT`,
+      `${INSTRUCTIONS_HEADER}\n[inertia-frontend-workbench]\n${frontend.text}`,
+      "[inertia-chat]\nThis chat's id is chat-1.",
+    ].join("\n\n"));
+    expect(sentPrompt(harness.calls)).not.toContain("[inertia-workspace]");
+    expect(sentPrompt(harness.calls)).not.toContain("[inertia-orchestration]");
+  });
+
+  it("moves only the chat line into the prompt when config cannot be read and every pack is withheld", async () => {
+    const withoutTools = turnHarness(undefined, undefined, { threadId: "thread-started-bare-deferred" });
+    await withoutTools.run();
+    const bridge = bridgeFor(null);
+    const harness = turnHarness("thread-started-bare-deferred", bridge, {
+      sessionDeveloperInstructions: sessionBlock(bridge),
+      configReadFails: true,
+    });
+    await harness.run();
+
+    expect(harness.calls.filter(({ method }) => method === "config/read")).toHaveLength(1);
+    expect(harness.calls.find(({ method }) => method === "thread/resume")?.params).not.toHaveProperty("developerInstructions");
+    expect(harness.deferSessionInstruction).toHaveBeenCalledTimes(1);
+    expect(sentPrompt(harness.calls)).toBe(`Continue\n\n${INSTRUCTIONS_HEADER}\n[inertia-chat]\nThis chat's id is chat-1.`);
   });
 
   it("withholds instructions from a resumed thread that started without host tools or with an older pack", async () => {

@@ -370,8 +370,9 @@ removed unless the thread registered that pack with the same digest: from the
 `developerInstructions` sent on `thread/resume`, where each exact `[label]`
 section of the block is dropped with its separating blank line and the
 person's configured text is left as it was, and from the prompt when the block
-travels there, so a thread started before `inertia.workspace` existed, or before a
-pack's tools changed, is not told about tools it cannot call; those tools
+travels there, including when an unreadable `config/read` moves it there, so
+a thread started before `inertia.workspace` existed, or before a pack's tools
+changed, is not told about tools it cannot call; those tools
 arrive with the chat's next new thread. The record is kept in the database
 (schema 109, `codex_thread_tool_packs`: the thread id, each pack's id and
 digest, and when it was registered), keyed by the same thread id the chat
@@ -423,8 +424,12 @@ sessions never receive it. The rule lives in
   `developer_instructions` on both). That value replaces a
   `developer_instructions` setting from the person's Codex configuration,
   so Inertia first reads it through `config/read` (bounded to 3 seconds) and
-  sends the configured text, a blank line, then the block; when the read
-  fails or times out it sends the block alone and the turn goes on. The
+  sends the configured text, a blank line, then the block. When the read
+  fails or times out it sends no `developerInstructions`, so the person's own
+  Codex instructions stay in force: the block rides in that turn's prompt
+  under the internal-instructions header, the ledger forgets the turn's
+  digest so later turns follow the prompt rule below, and a
+  `provider.session-instructions-deferred` diagnostic records it. The
   value is the same on every call while the configured text stays the same.
 - A turn that sends the block at system level records the block's SHA-256
   digest, never its text, in its execution manifest as

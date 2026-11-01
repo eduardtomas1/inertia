@@ -201,7 +201,7 @@ describe("final-answer turn metadata", () => {
 
     expect(turnMetadataPresentation(completed)).toMatchObject({
       statusLabel: "Completed",
-      durationLabel: "Worked 7s",
+      durationLabel: "Worked for 7s",
     });
     expect(turnMetadataPresentation(failed)).toMatchObject({
       statusLabel: "Failed",
@@ -268,7 +268,7 @@ describe("final-answer turn metadata", () => {
     const primary = html.slice(primaryStart, primaryEnd);
 
     expect(primary).not.toContain(">Completed</span>");
-    expect(primary).toContain('class="turn-duration" data-turn-status="completed">Worked 7s</span>');
+    expect(primary).toContain('class="turn-duration" data-turn-status="completed">Worked for 7s</span>');
     expect(primary).not.toContain("custom-harness");
     expect(primary).not.toContain("custom:acme");
     expect(primary).not.toContain("acme/code-pro");

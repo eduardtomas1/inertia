@@ -715,6 +715,22 @@
   pointer-events: auto;
 }
 
+@supports (backdrop-filter: blur(1px)) {
+  .tasks-toast {
+    --fill: var(--fill-raised);
+    --fill-strong: var(--fill-strong-raised);
+    background: var(--glass-surface);
+    backdrop-filter: var(--glass-filter);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .tasks-toast {
+    background: var(--surface-raised);
+    backdrop-filter: none;
+  }
+}
+
 .tasks-toast-text {
   min-width: 0;
   overflow: hidden;

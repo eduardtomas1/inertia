@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -20,6 +19,7 @@ import {
   isTurnGitArtifactWithoutChanges,
   turnExecutionElapsedMs,
   turnQueueElapsedMs,
+  turnFoldLabel,
   turnStatusLabel,
   workSummaryLabel,
   type ResponseTurn,
@@ -106,7 +106,7 @@ export function turnMetadataPresentation(
     durationLabel = turn.isActive
       ? `Working ${duration}`
       : agentTurn.status === "completed"
-        ? `Worked ${duration}`
+        ? turnFoldLabel(turn, now)
         : `Ran ${duration}`;
   }
 
@@ -188,22 +188,18 @@ export function TurnMetadata({
   turn,
   terminalAnswer,
   showTimestamp,
-  settledWorkDetails,
-  workDetailsExpandedByDefault,
+  durationShownAbove = false,
   onBeforeToggle,
   onAfterToggle,
 }: {
   turn: ResponseTurn;
   terminalAnswer: ChatMessage | null;
   showTimestamp: boolean;
-  settledWorkDetails?: React.JSX.Element | null;
-  workDetailsExpandedByDefault?: boolean;
+  durationShownAbove?: boolean;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
-  const [detailsExpanded, setDetailsExpanded] = useState(
-    workDetailsExpandedByDefault === true,
-  );
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
   const { agentTurn } = turn;
   const presentation = turnMetadataPresentation(turn);
@@ -229,9 +225,6 @@ export function TurnMetadata({
     onAfterToggle?.();
     togglePrepared.current = false;
   }, [detailsExpanded, diagnosticsExpanded, onAfterToggle]);
-  useEffect(() => {
-    setDetailsExpanded(workDetailsExpandedByDefault === true);
-  }, [workDetailsExpandedByDefault]);
   const completed = agentTurn.status === "completed";
   const time = terminalAnswer?.createdAt
     ?? (turn.isActive ? turn.startedAt ?? turn.requestedAt : turn.completedAt ?? turn.requestedAt);
@@ -257,8 +250,8 @@ export function TurnMetadata({
         {showTimestamp && (
           <TooltipText tooltip={formatFullDateTime(time)}><time dateTime={time}>{formatMessageTime(time)}</time></TooltipText>
         )}
-        {!completed && <span data-turn-status={agentTurn.status}>{presentation.statusLabel}</span>}
-        <span className="turn-duration" data-turn-status={completed ? agentTurn.status : undefined}>{presentation.durationLabel}</span>
+        {!durationShownAbove && !completed && <span data-turn-status={agentTurn.status}>{presentation.statusLabel}</span>}
+        {!durationShownAbove && <span className="turn-duration" data-turn-status={completed ? agentTurn.status : undefined}>{presentation.durationLabel}</span>}
         <button
           type="button"
           className="turn-run-details-toggle"
@@ -278,9 +271,6 @@ export function TurnMetadata({
         hidden={!detailsExpanded}
         role="group"
       >
-        {detailsExpanded && settledWorkDetails && (
-          <div className="turn-run-work-details">{settledWorkDetails}</div>
-        )}
         {detailsExpanded && turn.gitArtifact && isTurnGitArtifactWithoutChanges(turn.gitArtifact) && (
           <p className="turn-run-no-changes">
             <Files size={14} aria-hidden="true" />

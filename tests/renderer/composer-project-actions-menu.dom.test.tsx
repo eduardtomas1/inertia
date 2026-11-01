@@ -51,16 +51,15 @@ describe("composer project actions menu", () => {
 
   it("hides the inline actions control only at widths where the More menu offers it", () => {
     const css = readSourceText("src/renderer/src/styles.css");
-    const blocks = [...css.matchAll(/^@container \(max-width: (\d+)px\) \{\n([\s\S]*?)\n\}$/gmu)]
-      .map(([, width, body]) => ({ width: Number(width), body: body! }));
-    const moreWidths = blocks
-      .filter(({ body }) => /\.composer-more-control \{\n\s+display: block;/u.test(body))
-      .map(({ width }) => width);
-    const hiddenWidths = blocks
-      .filter(({ body }) => /\.composer-action-control[^{]*\{\n\s+display: none;/u.test(body))
-      .map(({ width }) => width);
-    expect(moreWidths).toHaveLength(1);
-    expect(hiddenWidths.length).toBeGreaterThan(0);
-    expect(Math.max(...hiddenWidths)).toBeLessThanOrEqual(moreWidths[0]!);
+    const blocks = [...css.matchAll(/^@container (\([^{\n]*\)) \{\n([\s\S]*?)\n\}$/gmu)]
+      .map(([, query, body]) => ({ query: query!, body: body! }));
+    const more = blocks.filter(({ body }) => /\.composer-more-control \{\n\s+display: block;/u.test(body));
+    const hidden = blocks.filter(({ body }) => /\.composer-action-control[^{]*\{\n\s+display: none;/u.test(body));
+    expect(more.map(({ query }) => query)).toEqual(["(max-width: 820px) or ((max-width: 900px) and style(--interface-scale: large))"]);
+    expect(hidden.length).toBeGreaterThan(0);
+    const widest = (query: string): number => Math.max(...[...query.matchAll(/max-width: (\d+)px/gu)].map(([, width]) => Number(width)));
+    for (const { query } of hidden) {
+      expect(query === more[0]!.query || widest(query) <= 820, query).toBe(true);
+    }
   });
 });

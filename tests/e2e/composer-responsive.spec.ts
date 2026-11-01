@@ -10,10 +10,18 @@ import { attachRuntimeConnectionEvidence, createRuntimeConnectionEvidence } from
 import {
   createComposerResponsiveHelpers,
   exerciseComposerQueue,
+  expectGlassLayer,
   expectHoverBackground,
+  expectLongestChipsFoldAtLarge,
+  expectRoundSendScalesOnHover,
+  expectSettingChips,
+  expectSolidComposerSurface,
+  expectSolidRow,
   fixtureCheckoutLabel,
   inspectLongComposerHeading,
   loadComposerResponsiveFixture,
+  recycleRuntimeAndWait,
+  seedLongestComposerLabels,
 } from "./support/composer-responsive";
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -224,8 +232,6 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         backdropFilter: computed.backdropFilter,
         webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
         surfaceImage: getComputedStyle(element.querySelector(".composer-surface")!).backgroundImage,
-        surfaceColor: getComputedStyle(element.querySelector(".composer-surface")!).backgroundColor,
-        raisedSurface: getComputedStyle(element).getPropertyValue("--surface-raised").trim(),
         inputBackground: inputStyle?.backgroundColor,
         shellOrder: [...(element.parentElement?.children ?? [])].map((child) =>
           child === element
@@ -273,11 +279,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.centerDelta).toBeLessThanOrEqual(1);
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
-    const raisedHex = /^#[0-9a-f]{3}$/iu.test(wideGeometry.raisedSurface)
-      ? `#${wideGeometry.raisedSurface.slice(1).split("").map((digit) => digit + digit).join("")}`
-      : wideGeometry.raisedSurface;
-    const raisedChannels = [1, 3, 5].map((offset) => Number.parseInt(raisedHex.slice(offset, offset + 2), 16));
-    expect([wideGeometry.surfaceImage, wideGeometry.surfaceColor]).toEqual(["none", `rgb(${raisedChannels.join(", ")})`]);
+    expect(wideGeometry.surfaceImage).toBe("none");
+    await expectSolidComposerSurface(dock);
     expect(wideGeometry.inputBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.shellOrder).toEqual(["dock"]);
     expect(wideGeometry.readinessOutside).toBe(0);
@@ -307,6 +310,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       expect(wideGeometry.optionMarkers.indexOf("reasoning")).toBe(1);
     }
     await expect(send).toBeDisabled();
+    await send.hover({ force: true });
+    expect(await send.evaluate((button) => getComputedStyle(button).transform)).toBe("none");
     await expectHoverBackground(page, model);
     await model.focus();
     await expect(model).toBeFocused();
@@ -327,39 +332,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       '[data-composer-setting="reasoning"]',
     );
     await expect(settingFamily).toBeVisible();
-    const settingGeometry = await settingFamily.evaluate((element) => {
-      const style = getComputedStyle(element);
-      const controls = [...element.querySelectorAll<HTMLButtonElement>(
-        "button[data-composer-setting]",
-      )];
-      return {
-        borderLeft: style.borderLeftWidth,
-        borderRight: style.borderRightWidth,
-        heights: controls.map((control) =>
-          control.getBoundingClientRect().height),
-        borders: controls.map((control) =>
-          getComputedStyle(control).borderTopWidth),
-        fontSizes: controls.map((control) =>
-          getComputedStyle(control).fontSize),
-        accessSvgs: element.querySelectorAll(
-          '[data-composer-setting="access"] svg:not(.composer-setting-chevron)',
-        ).length,
-        shownIcons: controls.flatMap((control) => {
-          const icon = control.querySelector<SVGElement>(".composer-setting-icon");
-          return icon && getComputedStyle(icon).display !== "none"
-            ? [control.dataset.composerSetting]
-            : [];
-        }),
-      };
-    });
-    expect(settingGeometry.borderLeft).toBe("0px");
-    expect(settingGeometry.borderRight).toBe("0px");
-    expect(Math.max(...settingGeometry.heights)
-      - Math.min(...settingGeometry.heights)).toBeLessThanOrEqual(1);
-    expect(new Set(settingGeometry.borders)).toEqual(new Set(["0px"]));
-    expect(new Set(settingGeometry.fontSizes).size).toBe(1);
-    expect(settingGeometry.accessSvgs).toBe(0);
-    expect(settingGeometry.shownIcons.filter((setting) => setting !== "speed")).toEqual([]);
+    await expectSettingChips(settingFamily);
     const accessIdleBackground = await expectHoverBackground(page, accessTrigger);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(
@@ -429,6 +402,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await accessTrigger.click();
     await expect(page.getByRole("menu", { name: "Project access" }))
       .toBeVisible();
+    await expectGlassLayer(page.getByRole("menu", { name: "Project access" }), 0.88, "blur(12px) saturate(1.14)");
     await capture("composer-controls-access-light-default-1440x920");
     await page.keyboard.press("Escape");
 
@@ -488,8 +462,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       { exact: true },
     )).toHaveCount(0);
     await textbox.fill("Summarize the attached document.");
-    await expect(dock.getByRole("button", { name: "Send message" }))
-      .toBeEnabled();
+    await expect(dock.getByRole("button", { name: "Send message" })).toBeEnabled();
+    await expectRoundSendScalesOnHover(page, dock.getByRole("button", { name: "Send message" }));
     await textbox.fill("");
     await expectComposerEndsAtDock(dock);
     const attachmentGeometry = await attachmentList.evaluate((list) => {
@@ -553,6 +527,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     );
     await darkModeTrigger.click();
     await expect(page.getByRole("menu", { name: "Work mode" })).toBeVisible();
+    await expectGlassLayer(page.getByRole("menu", { name: "Work mode" }), 0.92, "blur(16px) saturate(1.08)");
+    await expectSolidRow(page.getByRole("menu", { name: "Work mode" }).locator('[aria-checked="true"]'));
+    await expectSolidComposerSurface(dock);
     await capture("composer-controls-mode-dark-large-1440x920");
     await page.keyboard.press("Escape");
 
@@ -791,5 +768,24 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await setWorkspaceTools(workspacePanelWasVisible);
   }
   if (rendererErrors.length) await attachRuntimeConnectionEvidence(() => testInfo, runtimeConnections.snapshot);
+  expect(rendererErrors).toEqual([]);
+});
+
+test("folds the longest chips into More at Large scale up to a 900px composer and keeps them whole above it", async ({ browserName: _browserName }, testInfo) => {
+  const databasePath = join(testDirectory, "data", "inertia.sqlite");
+  const { originalProject, restore } = loadComposerResponsiveFixture(databasePath, workspaceDirectory);
+  const helpers = createComposerResponsiveHelpers({ databasePath, workspaceDirectory, projectId: originalProject.id, page, testInfo });
+  const restoreLabels = seedLongestComposerLabels(databasePath, workspaceDirectory);
+  try {
+    helpers.updateAppearance("dark", "large", "comfortable");
+    await recycleRuntimeAndWait(app);
+    await expectLongestChipsFoldAtLarge(page, resizeWindow, helpers);
+  } finally {
+    restoreLabels();
+    restore();
+    await recycleRuntimeAndWait(app);
+    await resizeWindow(1440, 920);
+    await page.reload();
+  }
   expect(rendererErrors).toEqual([]);
 });

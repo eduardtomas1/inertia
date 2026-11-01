@@ -280,6 +280,42 @@ advancing foreground times and the frozen unfocused times, and
 `tests/renderer/sidebar-aurora.test.ts` keeps the motion contract (paused
 layers, compositor-only keyframes, no mask or filter, seamless tiles).
 
+The strip later gained a quiet night sky. A thin, faint high band
+(`sidebar-sky-band`, one 208 px tile per 26 s at half the strength of the
+other lights, drifting against the near lights) joins the three lights, and
+twelve seeded stars sit over them (`SidebarStarfield.tsx`, positions from
+`sidebarStarLayout.ts`): eight far stars, 1 px dots, and four near stars, a
+2 px core with a 3 px glow painted once as a radial gradient. The star field
+parallaxes at most 6 px over 40 s on the same 125 ms timer as the lights.
+Each star breathes on its own: an opacity-only CSS animation with literal
+keyframes (0.2 to 0.55 for far stars, 0.35 to 0.85 for near ones, eased, on a
+seeded 7 to 12 s cycle and phase), so the compositor plays it smoothly
+without layout or repaint. Breathing runs only while the strip is moving and
+the window is visible and focused (`.is-live`); otherwise every star holds its
+place, and hidden windows are also covered by `background-motion.css`. No new
+timer is added, and the stepping timer leaves the breathing alone. While the
+window is focused, the breathing is the one part of the strip that produces
+frames at the display refresh rate; it is limited to twelve tiny layers.
+Without motion (reduced motion or a closed drawer) the stars rest at mid
+strength. Forced colours hide the whole strip, and the stepping timer does
+not start; it also stops after eight empty captures if the strip never shows.
+
+What the layout guarantees, at every sidebar width from 220 to 420 px: no star
+is within 14 px of the logo or the name in the Windows and Linux brand row at
+the default or the Large interface scale (the exclusion box is the Large-scale
+logo and name, 19 to 127 px across and 19 to 53 px down, so it reaches 141 px
+across, beyond the Large lockup's 135 px hover box); stars stay above the
+first navigation row; at most one star sits above the wordmark and at most
+three along the top edge. Stars are at least 22 px apart at the default width
+of 276 px and wider (the gap shrinks with the width, to about 17.5 px at
+220 px). Stars that could touch the inset macOS lockup at any width are hidden
+on macOS, which shows the remaining seven. The new keyframes are named
+`sidebar-sky-*` and `sidebar-star-*`; `workspace.spec.ts` and
+`renderer-background.spec.ts` check that the band, the parallax and every
+star's breathing advance in the foreground, freeze in a visible background
+window and stop under reduced motion. `tests/renderer/sidebar-starfield.test.ts`
+and the aurora unit and DOM tests cover the layout and the motion contract.
+
 ## Issue #248 acceptance audit
 
 The combined changes in merged #254 and this follow-up address the reported

@@ -7,6 +7,7 @@ import type {
 } from "@shared/contracts";
 import { LoadingMark } from "../ui";
 import type { ComposerMenuController } from "./useComposerMenus";
+import { skillsMenuEnabled } from "./composerPlaceholder";
 import "./ComposerSkillsMenu.css";
 import { TooltipText } from "../TooltipText";
 
@@ -43,7 +44,7 @@ export function ComposerSkillsMenu({
   const openedQuery = useRef<string | null>(null);
   const discoveryRequested = useRef(false);
   const { menu, toggleMenu, dismissMenu, setMenuPopover } = menuController;
-  const available = Boolean(capability?.available) && !disabled && !running;
+  const available = skillsMenuEnabled({ skillsAvailable: Boolean(capability?.available), disabled, running });
   const showCompletion = completion !== null && available;
   const visibleSkills = skills.filter((skill) => skill.enabled
     && skill.name.toLowerCase().startsWith(completion ?? ""));

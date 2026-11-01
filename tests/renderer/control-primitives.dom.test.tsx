@@ -275,7 +275,9 @@ describe("dialog primitives", () => {
     expect(css).toMatch(/@keyframes dialog-surface-out \{\n  to \{\n    opacity: 0;\n    transform: scale\(0\.98\);/u);
     expect(css).toMatch(/\.dialog-presence\.is-closing > \.dialog-backdrop > \* \{\n    animation: dialog-surface-out/u);
     expect(css).toMatch(/\.dialog-backdrop > \*,[\s\S]*?\{\n    animation: dialog-surface-in var\(--dur\) var\(--ease\) backwards;/u);
-    expect(css).toMatch(/  \.dialog-backdrop,\n  \.update-restart-dialog::backdrop \{\n    animation: dialog-veil-in/u);
+    expect(css).toMatch(/  \.dialog-backdrop,\n  \.update-restart-dialog::backdrop \{\n    animation: dialog-scrim-in/u);
+    expect(css).toMatch(/@keyframes dialog-scrim-in \{\n  from \{ background-color: transparent; \}\n\}/u);
+    expect(css).toMatch(/\.dialog-presence\.is-closing > \.dialog-backdrop \{\n    animation: dialog-scrim-out/u);
     expect(css).toMatch(/  \.dialog-backdrop > \*,\n  \.update-restart-dialog \{\n    animation: dialog-surface-in/u);
   });
 });
@@ -368,18 +370,24 @@ describe("icon primitives", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("draws lucide glyphs at 14px or 16px with the shared stroke", () => {
+  it("draws lucide glyphs at 14px or 16px with the shared stroke, and composer chip chevrons at 12px", () => {
     const offSize: string[] = [];
+    const chipChevrons: string[] = [];
     for (const { path, source, names } of lucideImports) {
       if (path.endsWith("WelcomeDemos.tsx") || names.length === 0) continue;
       const tags = new RegExp(String.raw`<(?:${names.join("|")})\b[^<>]*?size=\{(\d+)\}`, "gsu");
       for (const match of source.matchAll(tags)) {
+        if (/^<ChevronDown\s+className="composer-setting-chevron"\s+size=\{12\}$/u.test(match[0])) {
+          chipChevrons.push(path);
+          continue;
+        }
         if (!["14", "16"].includes(match[1]!)) offSize.push(`${path}: ${match[0].slice(0, 60)}`);
       }
       const stroked = new RegExp(String.raw`<(?:${names.join("|")})\b[^<>]*?strokeWidth=`, "su");
       if (stroked.test(source)) offSize.push(`${path}: strokeWidth`);
     }
     expect(offSize).toEqual([]);
+    expect(chipChevrons).toEqual([expect.stringMatching(/ComposerSettings\.tsx$/u)]);
     expect(css).toMatch(/svg\.lucide \{\n  stroke-width: 1\.75;\n\}/u);
   });
 });

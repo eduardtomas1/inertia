@@ -361,9 +361,9 @@ async function openBackgroundTasks(page: Page): Promise<Locator> {
 }
 
 function card(region: Locator, title: string): Locator {
-  return region.locator("li").filter({
-    has: region.page().locator(".background-task-title").getByText(title, { exact: true }),
-  });
+  const page = region.page();
+  const transcript = page.getByRole("button", { name: `View transcript for ${title}`, exact: true });
+  return region.locator("li").filter({ has: transcript.or(page.locator(".background-task-title").getByText(title, { exact: true })) });
 }
 
 function toggle(region: Locator, title: string): Locator {
@@ -409,7 +409,7 @@ async function expectInStatusColumn(line: Locator): Promise<void> {
       turn?.querySelector(selector)?.getBoundingClientRect().left ?? null;
     return {
       line: element.getBoundingClientRect().left,
-      row: left(".turn-working-status, .turn-settled-summary"),
+      row: left(".turn-working-status, .turn-settled-summary, .turn-fold-row"),
       rail: left(".turn-execution-rail"),
     };
   });
@@ -460,7 +460,7 @@ test("lists a chat's running work as plain cards with keyboard access", async ({
     await expect(explorer.getByText("Searching src/server for usage parsers", { exact: true })).toHaveClass(/background-task-live/u);
     await expect(explorer.locator(".background-task-title")).not.toHaveClass(/background-task-live/u);
     const collapsedHeight = await explorer.evaluate((element) => element.getBoundingClientRect().height);
-    await expect(card(region, "Fixture writer")).toContainText("Agent · from Explorer");
+    await expect(card(region, "Fixture writer")).toContainText("Agent · Fixture writer · from Explorer");
     const devServer = card(region, "npm run dev");
     await expect(devServer).toContainText("Command");
     await expect(devServer).toContainText("1m 15s");
@@ -486,7 +486,6 @@ test("lists a chat's running work as plain cards with keyboard access", async ({
     await expect(explorerToggle).toHaveAttribute("aria-expanded", "true");
     const details = explorer.locator(".background-task-transcript");
     await expect(details.locator("p")).toHaveText([
-      "Map every place that parses provider token usage.",
       "Mapping the token usage pipeline",
       "Input 18.2K · Cached 12.8K · Output 1.9K · Reasoning 640 · 75% context left",
     ]);
@@ -524,7 +523,7 @@ test("lists a chat's running work as plain cards with keyboard access", async ({
     const finished = await openFinished(region);
     await expect(finished.getByRole("listitem")).toHaveCount(3);
     const verifier = card(region, "Build verifier");
-    await expect(verifier).toContainText("Agent · Failed");
+    await expect(verifier).toContainText("Agent · Build verifier · Failed");
     await expect(verifier.locator(".background-task-danger")).toHaveText("Failed");
     await expect(verifier).toContainText("42s");
     await expect(card(region, "npm test")).toContainText("Command · Failed");
@@ -553,7 +552,7 @@ test("shows what each harness reports and nothing more", async ({ browserName: _
     await openFinished(region);
     await toggle(region, "Test runner").click();
     const runnerDetails = card(region, "Test runner").locator(".background-task-transcript");
-    await expect(runnerDetails.locator("p")).toHaveText(["All 214 tests passed.", "Run the focused unit tests."]);
+    await expect(runnerDetails.locator("p")).toHaveText(["All 214 tests passed."]);
     await expect(card(region, "Test runner")).toContainText("1m 23s");
     await expect(card(region, "Test runner")).toContainText("9K tokens");
     await expectLayoutHolds(app, region);
@@ -595,34 +594,37 @@ test("shows what each harness reports and nothing more", async ({ browserName: _
   }
 });
 
-test("shows each turn's agents as one line that opens Background tasks", async ({ browserName: _browserName }, info) => {
+test("shows each turn's agents as one group row whose agents open their cards in Background tasks", async ({ browserName: _browserName }, info) => {
   let settledConversationId: string | null = null;
   try {
     await app.resizeWindow(1440, 1100);
     const page = app.page;
     await showChat(app, seed.codex);
     await closeWorkspaceTools(page);
-    const working = page.getByRole("button", { name: "Open Background tasks, 2 agents working · 1 failed" });
-    await expect(working).toHaveText("2 agents working · 1 failed");
-    await expect(working.locator(".background-task-live")).toHaveText("2 agents working");
-    await expect(working.locator(".turn-agents-danger")).toHaveText("1 failed");
-    await expect(page.locator(".turn-agents-line")).toHaveCount(1);
+    const working = page.getByRole("button", { name: "4 subagents, 2 working · 1 done · 1 failed" });
+    await expect(working.locator(".subagent-avatar.is-overflow")).toHaveText("+1");
+    await expect(page.locator(".subagent-group:not(.is-idle)")).toHaveCount(1);
     await expectInStatusColumn(working);
     const workingHeight = await working.evaluate((element) => element.getBoundingClientRect().height);
-    await capture(page, info, "after-chat-agents-line-dark");
+    await capture(page, info, "after-chat-subagent-group-dark");
 
     await working.focus();
     await page.keyboard.press("Enter");
+    const explorerRow = page.getByRole("button", { name: "Open Explorer in Background tasks, Working" });
+    await capture(page, info, "after-chat-subagent-group-expanded-dark");
+    await explorerRow.focus();
+    await page.keyboard.press("Enter");
     const agentsTab = page.locator('[data-workspace-tab="agents"]');
     await expect(agentsTab).toHaveAttribute("aria-selected", "true");
-    await expect(agentsTab).toBeFocused();
     const region = page.getByRole("region", { name: "Background tasks" });
-    await expect(card(region, "Explorer")).toBeVisible();
-    await expect(card(region, "Fixture writer")).toBeVisible();
+    await expect(toggle(region, "Explorer")).toBeFocused();
+    await expect(page.getByRole("button", { name: "Jump to latest", exact: true })).toHaveCount(0);
+    await expect(page.locator(".composer-region > .timeline-jump")).toHaveCount(0);
     await expectLayoutHolds(app, region);
-    await capture(page, info, "after-chat-agents-line-opened-dark");
+    await capture(page, info, "after-chat-subagent-group-opened-dark");
 
     await closeWorkspaceTools(page);
+    await working.click();
     await setAppearanceInPlace(app, "light");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await app.resizeWindow(1000, 800);
@@ -630,7 +632,7 @@ test("shows each turn's agents as one line that opens Background tasks", async (
     expect(await working.evaluate((element) => element.getBoundingClientRect().height)).toBe(workingHeight);
     await expectInStatusColumn(working);
     await app.expectNoViewportOverflow();
-    await capture(page, info, "after-chat-agents-line-narrow-light");
+    await capture(page, info, "after-chat-subagent-group-narrow-light");
     await setAppearanceInPlace(app, "dark");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await app.resizeWindow(760, 800);
@@ -666,20 +668,21 @@ test("shows each turn's agents as one line that opens Background tasks", async (
     if (!settledConversationId) throw new Error("Settled agents fixture setup failed.");
     await showChat(app, { conversationId: settledConversationId, title: "Settled usage audit" });
     await closeWorkspaceTools(page);
-    const finished = page.getByRole("button", { name: "Open Background tasks, 4 agents finished · 1 failed" });
-    await expect(finished).toHaveText("4 agents finished · 1 failed");
-    await expect(finished.locator(".background-task-live")).toHaveCount(0);
-    await expect(finished.locator(".turn-agents-danger")).toHaveText("1 failed");
+    const finished = page.getByRole("button", { name: "4 subagents, 3 done · 1 failed" });
+    await expect(page.locator(".subagent-group.is-idle")).toHaveCount(0);
+    await expect(finished).toHaveCSS("opacity", "1");
     expect(await finished.evaluate((element) => element.getBoundingClientRect().height)).toBe(workingHeight);
     await expectInStatusColumn(finished);
-    await capture(page, info, "after-chat-agents-finished-dark");
+    await capture(page, info, "after-chat-subagent-group-finished-dark");
     await finished.focus();
     await page.keyboard.press("Space");
-    await expect(agentsTab).toBeFocused();
+    await expect(finished).toHaveAttribute("aria-expanded", "true");
+    await page.getByRole("button", { name: "Open Migration verifier in Background tasks, Failed" }).click();
     await expect(region.getByRole("button", { name: /^Finished/u })).toHaveAttribute("aria-expanded", "true");
-    await expect(card(region, "Contract reader")).toBeInViewport();
+    await expect(card(region, "Migration verifier")).toBeInViewport();
+    await expect(toggle(region, "Migration verifier")).toBeFocused();
     await expect(card(region, "Migration verifier")).toContainText("Agent · Failed");
-    await capture(page, info, "after-chat-agents-finished-opened-dark");
+    await capture(page, info, "after-chat-subagent-group-finished-opened-dark");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     await attachFailure(info);
@@ -713,7 +716,10 @@ test("keeps the whole chat's tasks in the panel when the transcript loads only i
       store.close();
     }
     const region = await showChat(app, chat);
-    await expect(page.getByRole("button", { name: "Open Background tasks, 12 agents finished" })).toBeVisible();
+    const turnWith = (step: number) => page.locator("[data-turn-id]")
+      .filter({ has: page.getByText(`Step ${step} of the long delegated history.`, { exact: true }) });
+    await turnWith(46).getByRole("button", { name: /^Worked/u }).click();
+    await expect(page.getByRole("button", { name: "12 subagents, 12 done" })).toBeVisible();
     await expect(page.getByText("Step 1 of the long delegated history.", { exact: true })).toHaveCount(0);
     const finished = region.getByRole("button", { name: "Finished 38 · 2 failed" });
     await expect(finished).toBeVisible();
@@ -724,10 +730,15 @@ test("keeps the whole chat's tasks in the panel when the transcript loads only i
     await expect(card(region, "Newest helper 11")).toBeInViewport();
     await expect(card(region, "Target writer")).not.toBeInViewport();
 
-    const line = page.getByRole("button", { name: "Open Background tasks, 2 agents finished" });
-    await line.scrollIntoViewIfNeeded();
-    await line.click();
+    const targetFold = turnWith(45).getByRole("button", { name: /^Worked/u });
+    await targetFold.scrollIntoViewIfNeeded();
+    await targetFold.click();
+    const group = page.getByRole("button", { name: "2 subagents, 2 done" });
+    await group.scrollIntoViewIfNeeded();
+    await group.click();
+    await page.getByRole("button", { name: "Open Target writer in Background tasks, Done" }).click();
     await expect(card(region, "Target writer")).toBeInViewport();
+    await expect(toggle(region, "Target writer")).toBeFocused();
     expect(await scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 
     await region.getByRole("button", { name: "Show 18 more finished tasks" }).click();
@@ -737,6 +748,10 @@ test("keeps the whole chat's tasks in the panel when the transcript loads only i
     await expect(card(region, "Archived reader 0")).toContainText("Stopped early.");
     await expect(card(region, "Archived reader 0").getByRole("button", { name: /^View turn/u })).toHaveCount(0);
     await expect(region.getByRole("button", { name: "Show fewer finished tasks" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Jump to latest", exact: true })).toBeHidden();
+    await expect(page.locator(".composer-region > .timeline-jump")).toHaveCount(0);
+    await expect.poll(() => page.getByLabel("Thread transcript", { exact: true }).evaluate((element) =>
+      element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(1);
     await expectLayoutHolds(app, region);
     await capture(page, info, "background-tasks-long-history-dark");
     expect(app.rendererErrors).toEqual([]);
@@ -770,7 +785,7 @@ test("keeps the surface and reported tokens across a restart", async ({ browserN
     await expect(region.getByRole("list", { name: "Running" })).toHaveCount(0);
     await openFinished(region);
     const explorer = card(region, "Explorer");
-    await expect(explorer).toContainText("Agent · Lost");
+    await expect(explorer).toContainText("Agent · Explorer · Lost");
     await expect(explorer).toContainText("128.4K tokens");
     await expect(explorer.locator(".subagent-elapsed")).toHaveCount(0);
     await expect(card(region, "Docs reviewer")).toContainText("31.25K tokens");

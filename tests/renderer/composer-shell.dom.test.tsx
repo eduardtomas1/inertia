@@ -4,9 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { CheckoutBranchControlProvider } from "../../src/renderer/src/components/CheckoutBranchControl";
 import { composerCheckoutStrip } from "../../src/renderer/src/components/composer/ComposerToolbar";
+import { WatcherContext } from "../../src/renderer/src/components/watcher/watcherContext";
 import type { GitStatusSnapshot, Project } from "../../src/shared/contracts";
 import { readSourceText } from "../helpers/source-text";
 import { composerProps, conversation } from "./composer-fixtures";
+import { WATCHER_ID, link, surfaceModel } from "./watcher-fixtures";
 
 const project: Project = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -49,14 +51,77 @@ afterEach(() => {
 });
 
 describe("composer shell", () => {
-  it("says Message in a chat without messages and Follow up once it has history", () => {
+  it("names only the input triggers this chat supports in its placeholder", () => {
     const current = conversation("placeholder-chat");
+    const skills = { kind: "codex-native", available: true, label: "Codex skills" } as const;
     const view = render(<Composer {...composerProps(current)} />);
-    expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute("placeholder", "Message");
-    view.rerender(<Composer {...composerProps(current, { hasVisibleHistory: true })} />);
-    expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute("placeholder", "Follow up");
-    view.rerender(<Composer {...composerProps(current, { hasVisibleHistory: true, running: true })} />);
-    expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute("placeholder", "Enter sends · Tab queues");
+    const input = () => screen.getByRole("textbox", { name: "Message" });
+    expect(input()).toHaveAttribute("placeholder", "Ask anything. @ files, / commands");
+    view.rerender(<Composer {...composerProps(current, { skillsCapability: skills })} />);
+    expect(input()).toHaveAttribute("placeholder", "Ask anything. @ files, $ skills, / commands");
+    view.rerender(<Composer {...composerProps(current, { hasVisibleHistory: true, skillsCapability: skills })} />);
+    expect(input()).toHaveAttribute("placeholder", "Follow up. @ files, $ skills, / commands");
+    view.rerender(<Composer {...composerProps(current, {
+      hasVisibleHistory: true,
+      skillsCapability: { kind: "unavailable", available: false, label: "Skills unavailable", reason: "Not supported" },
+    })} />);
+    expect(input()).toHaveAttribute("placeholder", "Follow up. @ files, / commands");
+    view.rerender(<Composer {...composerProps(current, { hasVisibleHistory: true, running: true, skillsCapability: skills })} />);
+    expect(input()).toHaveAttribute("placeholder", "Enter sends · Tab queues");
+    expect(input()).toHaveAccessibleName("Message");
+  });
+
+  it("keeps the placeholder truthful while disabled, compacting, run-locked and discovering skills", async () => {
+    const skills = { kind: "codex-native", available: true, label: "Codex skills" } as const;
+    const input = () => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+    const skillMenu = () => screen.queryByRole("listbox", { name: "Skill suggestions" });
+    const typeSkillTrigger = () => fireEvent.change(input(), { target: { value: "$" } });
+    const clear = () => fireEvent.change(input(), { target: { value: "" } });
+
+    const disabled = render(<Composer {...composerProps(conversation("disabled-chat"), { disabled: true, skillsCapability: skills })} />);
+    expect(input()).toHaveAttribute("placeholder", "Ask anything.");
+    disabled.rerender(<Composer {...composerProps(conversation("disabled-chat"), { disabled: true, hasVisibleHistory: true, running: true, skillsCapability: skills })} />);
+    expect(input()).toHaveAttribute("placeholder", "Follow up.");
+    disabled.rerender(<Composer {...composerProps(conversation("disabled-chat"), { disabled: true, skillsCapability: skills })} />);
+    typeSkillTrigger();
+    await act(async () => undefined);
+    expect(skillMenu()).toBeNull();
+    disabled.unmount();
+
+    const compacting = render(<Composer {...composerProps(conversation("compacting-chat"), {
+      hasVisibleHistory: true,
+      skillsCapability: skills,
+      compaction: { state: "compacting", trigger: "on-return", startedAt: "2026-10-31T09:00:00.000Z" },
+    })} />);
+    expect(input()).toHaveAttribute("placeholder", "Follow up. @ files, $ skills, / commands");
+    typeSkillTrigger();
+    expect(await screen.findByRole("listbox", { name: "Skill suggestions" })).toBeInTheDocument();
+    clear();
+    compacting.unmount();
+
+    const locked = render(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [link()] })}>
+        <Composer {...composerProps(conversation(WATCHER_ID), { skillsCapability: skills })} />
+      </WatcherContext.Provider>,
+    );
+    expect(locked.container.querySelector('[data-composer-setting="run-lock"]')).toHaveTextContent("Read-only watcher");
+    expect(input()).toHaveAttribute("placeholder", "Ask anything. @ files, $ skills, / commands");
+    typeSkillTrigger();
+    expect(await screen.findByRole("listbox", { name: "Skill suggestions" })).toBeInTheDocument();
+    clear();
+    locked.unmount();
+
+    const loading = render(<Composer {...composerProps(conversation("skills-loading-chat"), { skillsCapability: null, skillsLoading: true })} />);
+    expect(input()).toHaveAttribute("placeholder", "Ask anything. @ files, / commands");
+    typeSkillTrigger();
+    await act(async () => undefined);
+    expect(skillMenu()).toBeNull();
+    clear();
+    loading.rerender(<Composer {...composerProps(conversation("skills-loading-chat"), { skillsCapability: skills, skillsLoading: true })} />);
+    expect(input()).toHaveAttribute("placeholder", "Ask anything. @ files, $ skills, / commands");
+    typeSkillTrigger();
+    expect(await screen.findByText("Discovering skills…")).toBeInTheDocument();
+    expect(skillMenu()).toBeInTheDocument();
   });
 
   it("shows the branch as one quiet line and the checkout context only when it differs", async () => {
@@ -183,7 +248,7 @@ describe("composer shell", () => {
     const tray = css.slice(css.indexOf(".composer-shell .composer-more-tools {"), css.indexOf("}", css.indexOf(".composer-shell .composer-more-tools {")));
     expect(tray).toContain("flex: 0 0 auto;");
     expect(tray).not.toContain("min-width: 0");
-    expect(css).toContain("@container (max-width: 820px) {\n  .composer-shell .composer-options {\n    min-width: var(--composer-control-height);\n  }");
+    expect(css).toContain("@container (max-width: 820px) or ((max-width: 900px) and style(--interface-scale: large)) {\n  .composer-shell .composer-options {\n    min-width: var(--composer-control-height);\n  }");
     expect(css).toContain('@container (max-width: 320px) {\n  .composer-shell .composer-primary-rail:has(> .composer-tools-toggle[aria-expanded="true"]) > .composer-options {\n    display: none;\n  }');
     expect(css).toContain(".composer-shell .composer-primary-rail:not(:has(.prompt-presets-control, .prompt-stash-control)) > :is(.composer-tools-toggle, .composer-more-tools) {\n    display: none;\n  }");
   });

@@ -164,7 +164,7 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     await captureElement(antigravity, testInfo, `antigravity-mark-settings-${theme.toLowerCase()}`);
   };
 
-  const chooseAntigravityModel = async (name: string, placeholder: "Message" | "Follow up"): Promise<void> => {
+  const chooseAntigravityModel = async (name: string, placeholder: RegExp): Promise<void> => {
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     const composer = page.getByRole("region", { name: "Message composer" });
     const chip = composer.getByRole("button", { name: /^Choose model\./u });
@@ -197,7 +197,8 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     await capture(page, testInfo, `running-turn-${theme}`);
     writeFileSync(gatePath, "release");
     try {
-      await expect(turn.locator('[data-turn-status="completed"]')).toBeVisible({ timeout: 30_000 });
+      await expect(turn.locator('[data-turn-status="completed"], [data-settled-work-status="completed"]').first())
+        .toBeVisible({ timeout: 30_000 });
     } catch (error) {
       await testInfo.attach("antigravity-wire", {
         body: Buffer.from(existsSync(wirePath) ? readFileSync(wirePath, "utf8") : ""),
@@ -212,12 +213,12 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
   await app.resizeWindow(1440, 920);
   await openAntigravitySettings("Light");
   await capture(page, testInfo, "provider-readiness-light");
-  await chooseAntigravityModel("model-chooser-light", "Message");
+  await chooseAntigravityModel("model-chooser-light", /^Ask anything\. @ files, (?:\$ skills, )?\/ commands$/u);
   await streamTurn("Check how the stream parser handles step updates.", "light");
 
   await openAntigravitySettings("Dark");
   await capture(page, testInfo, "provider-readiness-dark");
-  await chooseAntigravityModel("model-chooser-dark", "Follow up");
+  await chooseAntigravityModel("model-chooser-dark", /^Follow up\. @ files, (?:\$ skills, )?\/ commands$/u);
   await streamTurn("Confirm non-success results fail the turn.", "dark");
 
   const entries = wire().filter(({ kind }) => kind === "launch");

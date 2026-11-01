@@ -229,7 +229,10 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
       const jump = page.getByRole("button", { name: "Jump to latest", exact: true });
       if (await jump.isVisible()) await jump.click();
       await expect(jump).toBeHidden();
-      await page.getByRole("button", { name: "Open Background tasks, 6 agents working" }).click();
+      const agents = page.getByRole("button", { name: "6 subagents, 6 working" });
+      await agents.click();
+      await page.getByRole("button", { name: /^Open .+ in Background tasks, Working$/u }).first().click();
+      await agents.click();
       await expect(page.getByRole("region", { name: "Background tasks" }).locator(".subagent-elapsed")).toHaveCount(6);
     }
     await expect(page.locator(".composer")).toHaveAttribute("data-maximum-reasoning", "true");
@@ -287,17 +290,25 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
       expect(measurement.end.counters.reactCommits).toBe(measurement.start.counters.reactCommits);
       expect(measurement.end.counters.rafCallbacks).toBe(measurement.start.counters.rafCallbacks);
     }
-    const auroraTimes = (animations: { name: string; time: unknown }[]) => animations
-      .filter(({ name }) => name.startsWith("sidebar-aurora")).map(({ time }) => Number(time));
+    const auroraTimes = (animations: { name: string; time: unknown }[], pattern = /^sidebar-(?:aurora|sky)-/u) => animations
+      .filter(({ name }) => pattern.test(name)).map(({ time }) => Number(time));
+    const starTimes = (animations: { name: string; time: unknown }[]) => auroraTimes(animations, /^sidebar-star-breathe-/u);
     for (const measurement of [foreground, resumed]) {
-      const start = auroraTimes(measurement.start.animations);
-      expect(start).toHaveLength(3);
-      auroraTimes(measurement.end.animations).forEach((time, index) =>
-        expect(time - start[index]!).toBeGreaterThan(4_000));
+      expect(auroraTimes(measurement.start.animations)).toHaveLength(5);
+      expect(starTimes(measurement.start.animations).length).toBeGreaterThan(0);
+      for (const times of [auroraTimes, starTimes]) {
+        const start = times(measurement.start.animations);
+        const end = times(measurement.end.animations);
+        expect(end).toHaveLength(start.length);
+        end.forEach((time, index) => expect(time - start[index]!).toBeGreaterThan(4_000));
+      }
     }
     for (const measurement of [background, ...(backgroundContinuation ? [backgroundContinuation] : [])]) {
-      expect(auroraTimes(measurement.start.animations)).toHaveLength(3);
-      expect(auroraTimes(measurement.end.animations)).toEqual(auroraTimes(measurement.start.animations));
+      expect(auroraTimes(measurement.start.animations)).toHaveLength(5);
+      expect(starTimes(measurement.start.animations).length).toBeGreaterThan(0);
+      for (const times of [auroraTimes, starTimes]) {
+        expect(times(measurement.end.animations)).toEqual(times(measurement.start.animations));
+      }
     }
     for (const measurement of [foreground, background, ...(backgroundContinuation ? [backgroundContinuation] : []), resumed]) {
       expect(measurement.start.visibility).toBe("visible");

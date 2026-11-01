@@ -5,8 +5,10 @@ import type { AgentTurn, SubagentTrace, WorkspaceRun } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
 import { backgroundCommandRuns } from "../utils/backgroundTaskRuns";
 import {
+  focusMayMoveToRevealedTask,
   subscribeBackgroundTaskReveal,
   takeBackgroundTaskReveal,
+  type BackgroundTaskReveal,
 } from "../utils/backgroundTaskReveal";
 import {
   backgroundTaskItems,
@@ -101,7 +103,7 @@ function useFocusContinuity(): {
 
 const MAX_REVEAL_PAGES = 10;
 
-function useTurnReveal(
+function useTaskReveal(
   conversationId: string | null,
   regionRef: React.RefObject<HTMLElement | null>,
   items: BackgroundTaskItems,
@@ -109,9 +111,10 @@ function useTurnReveal(
   finishedOpen: boolean,
   showAllFinished: boolean,
   openFinished: (showAll: boolean) => void,
+  openTranscript: (traceId: string) => void,
   more: { hasMore: boolean; loadMore: () => Promise<boolean> } | null,
 ): void {
-  const [turnId, setTurnId] = useState<string | null>(null);
+  const [target, setTarget] = useState<BackgroundTaskReveal | null>(null);
   const paging = useRef({ pages: 0, pending: false });
   const [paged, setPaged] = useState(0);
   useLayoutEffect(() => {
@@ -120,20 +123,22 @@ function useTurnReveal(
       const requested = takeBackgroundTaskReveal(conversationId);
       if (!requested) return;
       paging.current = { pages: 0, pending: false };
-      setTurnId(requested);
+      setTarget(requested);
     };
     take();
     return subscribeBackgroundTaskReveal(take);
   }, [conversationId]);
   useLayoutEffect(() => {
-    if (!turnId || paging.current.pending) return;
-    const ofTurn = (item: BackgroundTaskItem) => item.type === "agent" && item.trace.turnId === turnId;
-    const index = items.finished.findIndex(ofTurn);
+    if (!target || paging.current.pending) return;
+    const { turnId, traceId } = target;
+    const matches = (item: BackgroundTaskItem) => item.type === "agent"
+      && (traceId ? item.trace.id === traceId : item.trace.turnId === turnId);
+    const index = items.finished.findIndex(matches);
     const requestedAt = turns.find(({ id }) => id === turnId)?.requestedAt;
     const oldest = items.finished.at(-1)?.startedAt;
     if (
       index < 0
-      && !items.active.some(ofTurn)
+      && !items.active.some(matches)
       && more?.hasMore
       && requestedAt !== undefined
       && (oldest === undefined || oldest >= requestedAt)
@@ -142,7 +147,7 @@ function useTurnReveal(
       paging.current = { pages: paging.current.pages + 1, pending: true };
       void more.loadMore().then((loaded) => {
         paging.current = { ...paging.current, pending: false };
-        if (!loaded) setTurnId(null);
+        if (!loaded) setTarget(null);
         else setPaged((count) => count + 1);
       });
       return;
@@ -152,10 +157,19 @@ function useTurnReveal(
       openFinished(showAll);
       return;
     }
-    const rows = regionRef.current?.querySelectorAll<HTMLElement>("[data-reveal-turn]") ?? [];
-    [...rows].find((row) => row.dataset.revealTurn === turnId)?.scrollIntoView({ block: "nearest" });
-    setTurnId(null);
-  }, [finishedOpen, items, more, openFinished, paged, regionRef, showAllFinished, turnId, turns]);
+    const rows = [...regionRef.current?.querySelectorAll<HTMLElement>("[data-reveal-turn]") ?? []];
+    const row = traceId
+      ? rows.find((element) => element.dataset.focusRow === `agent:${traceId}`)
+      : rows.find((element) => element.dataset.revealTurn === turnId);
+    row?.scrollIntoView({ block: "nearest" });
+    if (row && traceId) {
+      openTranscript(traceId);
+      if (focusMayMoveToRevealedTask(document.activeElement)) {
+        row.querySelector<HTMLElement>('[data-focus-key="transcript"]')?.focus();
+      }
+    }
+    setTarget(null);
+  }, [finishedOpen, items, more, openFinished, openTranscript, paged, regionRef, showAllFinished, target, turns]);
 }
 
 function toggled(current: ReadonlySet<string>, id: string, on?: boolean): ReadonlySet<string> {
@@ -203,7 +217,8 @@ export function BackgroundTasksSurface({
     setFinishedOpen(true);
     if (showAll) setShowAllFinished(true);
   }, []);
-  useTurnReveal(conversationId, focus.regionRef, items, turns, finishedOpen, showAllFinished, openFinished, feed);
+  const openTranscript = useCallback((id: string) => setExpanded((current) => toggled(current, id, true)), []);
+  useTaskReveal(conversationId, focus.regionRef, items, turns, finishedOpen, showAllFinished, openFinished, openTranscript, feed);
   const latest = useRef({ subagents: traces, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent });
   useLayoutEffect(() => {
     latest.current = { subagents: traces, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent };

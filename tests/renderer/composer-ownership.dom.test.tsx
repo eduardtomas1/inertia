@@ -984,7 +984,7 @@ describe("image-less composer routes", () => {
     }
 
     expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder"))
-      .toBe("Message");
+      .toBe("Ask anything. @ files, / commands");
     fireEvent.click(screen.getByRole("button", {
       name: "Attach documents or spreadsheets. Antigravity can't read images in Inertia.",
     }));

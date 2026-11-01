@@ -110,7 +110,12 @@ function surface(overrides: Partial<BackgroundTasksSurfaceProps> = {}): React.JS
 }
 
 function card(title: string): HTMLElement {
-  return screen.getByText(title, { selector: ".background-task-title" }).closest("li")!;
+  const transcript = screen.queryByRole("button", { name: `View transcript for ${title}` });
+  return (transcript ?? screen.getByText(title, { selector: ".background-task-title" })).closest("li")!;
+}
+
+function heading(title: string): HTMLElement {
+  return card(title).querySelector<HTMLElement>(".background-task-title")!;
 }
 
 async function openTranscript(title: string): Promise<HTMLElement> {
@@ -155,13 +160,14 @@ describe("Background tasks surface", () => {
     expect(within(running).getAllByRole("listitem")).toHaveLength(2);
     expect(within(region).queryByRole("heading")).toBeNull();
     const explorer = card("Explorer");
-    expect(explorer).toHaveTextContent("Agent");
+    expect(heading("Explorer")).toHaveTextContent(/^Inspect the provider lifecycle\.$/u);
+    expect(explorer).toHaveTextContent("Agent · Explorer");
     expect(within(explorer).getByText("1m")).toBeVisible();
     expect(within(explorer).getByText("gpt-5.3-codex")).toBeVisible();
     expect(explorer).toHaveTextContent("128.4K tokens");
     expect(explorer).toHaveTextContent("14 tool uses");
     expect(within(explorer).getByText("Running rg subagent")).toBeVisible();
-    expect(screen.getByText("Explorer", { selector: ".background-task-title" }).closest("button")).toBeNull();
+    expect(heading("Explorer").closest("button")).toBeNull();
     expect(within(explorer).getAllByRole("button").map((button) => button.getAttribute("aria-label")))
       .toEqual(["View transcript for Explorer"]);
   });
@@ -181,7 +187,6 @@ describe("Background tasks surface", () => {
     render(surface({ onFollowUpSubagent: vi.fn(), canFollowUpSubagent: () => true }));
     const transcript = await openTranscript("Explorer");
     expect(paragraphs(transcript)).toEqual([
-      "Inspect the provider lifecycle.",
       "Searching the persistence layer",
       "Input 120K · Cached 96K · Output 8K · Reasoning 400 · 75% context left",
     ]);
@@ -197,7 +202,6 @@ describe("Background tasks surface", () => {
     const transcript = await openTranscript("Reviewer");
     expect(paragraphs(transcript)).toEqual([
       "No regressions found in the adapter.",
-      "Inspect the provider lifecycle.",
     ]);
     expect(within(card("Reviewer")).getAllByText("No regressions found in the adapter.")).toHaveLength(1);
   });
@@ -232,7 +236,7 @@ describe("Background tasks surface", () => {
   it("names a child agent's parent instead of indenting it", () => {
     render(surface());
     const child = card("Fixture writer");
-    expect(child).toHaveTextContent("Agent · from Explorer");
+    expect(child).toHaveTextContent("Agent · Fixture writer · from Explorer");
     expect(child.closest("ol")).toBe(card("Explorer").closest("ol"));
   });
 
@@ -246,7 +250,7 @@ describe("Background tasks surface", () => {
       .toEqual(["agent:claude-failed", "agent:cursor-task", "agent:claude-reviewer"]);
     const failed = card("Build verifier");
     expect(within(failed).getByText("Failed")).toHaveClass("background-task-danger");
-    expect(failed).toHaveTextContent("Agent · Failed");
+    expect(failed).toHaveTextContent("Agent · Build verifier · Failed");
   });
 
   it("animates the line of running work only, with the timeline's thinking sweep", () => {
@@ -260,10 +264,10 @@ describe("Background tasks surface", () => {
     render(surface({ subagents: [codexTask, waiting, claudeTask] }));
     expect(within(card("Explorer")).getByText("Running rg subagent")).toHaveClass("background-task-live");
     const waitingCard = card("Schema checker");
-    expect(waitingCard).toHaveTextContent("Agent · Waiting");
+    expect(waitingCard).toHaveTextContent("Agent · Schema checker · Waiting");
     expect(waitingCard).not.toHaveTextContent("Edit tests/fixture.ts");
     expect(within(waitingCard).getByText("Waiting for review")).not.toHaveClass("background-task-live");
-    expect(screen.getByText("Explorer", { selector: ".background-task-title" })).not.toHaveClass("background-task-live");
+    expect(heading("Explorer")).not.toHaveClass("background-task-live");
   });
 
   it("keeps the moving line of an expanded running task and shows its sentence once", async () => {
@@ -281,7 +285,8 @@ describe("Background tasks surface", () => {
     const lines = within(card("Code reviewer")).getAllByText("Reading the provider adapters");
     expect(lines).toHaveLength(1);
     expect(lines[0]).toHaveClass("background-task-live");
-    expect(paragraphs(transcript)).toEqual(["Review the usage refactor for regressions."]);
+    expect(heading("Code reviewer")).toHaveTextContent(/^Review the usage refactor for regressions\.$/u);
+    expect(paragraphs(transcript)).toEqual([]);
   });
 
   it("omits the runtime of a lost task instead of counting the downtime", async () => {
@@ -295,7 +300,7 @@ describe("Background tasks surface", () => {
     render(surface({ subagents: [lost], now: Date.parse("2030-01-05T00:00:00.000Z") }));
     await openFinished();
     const item = card("Recovered");
-    expect(item).toHaveTextContent("Agent · Lost");
+    expect(item).toHaveTextContent("Agent · Recovered · Lost");
     expect(item.querySelector(".subagent-elapsed")).toBeNull();
   });
 
@@ -427,6 +432,11 @@ describe("Background tasks stylesheets", () => {
   it("lifts the two-line clamp on what a task is doing only while its transcript is open", () => {
     expect(css).toMatch(/\.background-task-line \{[^}]*-webkit-line-clamp: 2;/u);
     expect(css).toMatch(/\.background-task-doing:has\(\[aria-expanded="true"\]\) \.background-task-line \{[^}]*-webkit-line-clamp: unset;/u);
+  });
+
+  it("clamps a card's heading to two lines and shows all of it while its transcript is open", () => {
+    expect(css).toMatch(/\.background-task-title \{[^}]*-webkit-line-clamp: 2;/u);
+    expect(css).toMatch(/\.background-task-card:has\(\.background-task-transcript-toggle\[aria-expanded="true"\]\) \.background-task-title \{[^}]*-webkit-line-clamp: unset;/u);
   });
 
   it("stays plain: no shadows, uppercase labels or pill shapes", () => {

@@ -5,7 +5,21 @@ import type { ResponseTimelineItem } from "../../utils/responseTimeline";
 import { MESSAGE_SEARCH_FOCUS_EVENT, clearMessageSearchFocus, pendingMessageSearchFocus } from "../../utils/messageSearchFocus";
 import { CONVERSATION_HISTORY_PREPEND_EVENT } from "../../utils/conversationHistoryNavigation";
 
-export function resolveMessageSearchDestination(row: HTMLElement, messageId: string, turnId?: string): HTMLElement | null {
+export function foldedCommentaryIds(item: ResponseTimelineItem, turnId: string | undefined): string[] {
+  const turn = item.kind === "turn"
+    ? item.turn
+    : item.kind === "compatibility"
+      ? item.compatibility.inferredTurns.find(({ id }) => id === turnId)
+      : undefined;
+  return turn?.commentaryMessages.map(({ id }) => id) ?? [];
+}
+
+export function resolveMessageSearchDestination(
+  row: HTMLElement,
+  messageId: string,
+  turnId?: string,
+  foldedMessageIds: readonly string[] = [],
+): HTMLElement | null {
   if (turnId && row.dataset.turnId !== turnId) {
     const nested = Array.from(row.querySelectorAll<HTMLElement>("[data-turn-id]"))
       .find((element) => element.dataset.turnId === turnId);
@@ -16,8 +30,8 @@ export function resolveMessageSearchDestination(row: HTMLElement, messageId: str
     }
     row = nested;
   }
-  const destination = Array.from(row.querySelectorAll<HTMLElement>("[data-follow-up-message-id], [data-message-search-id], [data-terminal-answer-id]"))
-    .find((element) => (element.dataset.followUpMessageId ?? element.dataset.messageSearchId ?? element.dataset.terminalAnswerId) === messageId);
+  const destination = Array.from(row.querySelectorAll<HTMLElement>("[data-follow-up-message-id], [data-message-search-id], [data-terminal-answer-id], [data-assistant-commentary-id]"))
+    .find((element) => (element.dataset.followUpMessageId ?? element.dataset.messageSearchId ?? element.dataset.terminalAnswerId ?? element.dataset.assistantCommentaryId) === messageId);
   if (destination) {
     const expand = destination.querySelector<HTMLButtonElement>('.turn-user-request-expand[aria-expanded="false"]');
     if (!expand) return destination;
@@ -26,8 +40,14 @@ export function resolveMessageSearchDestination(row: HTMLElement, messageId: str
   }
   // Collapsed work/legacy disclosures mount their content only after expansion.
   // The timeline's bounded focus controller keeps resolving until that commit.
-  const details = row.querySelector<HTMLDetailsElement>(".turn-work-log.is-settled > details, :scope > details");
-  if (details) details.open = true;
+  const fold = foldedMessageIds.includes(messageId)
+    ? row.querySelector<HTMLButtonElement>('.turn-fold-toggle[aria-expanded="false"]')
+    : null;
+  const details = fold ? null : row.querySelector<HTMLDetailsElement>(
+    ".turn-work-log.is-settled > details:not(.turn-fold-failure), :scope > details",
+  );
+  if (fold) fold.click();
+  else if (details) details.open = true;
   else row.querySelector<HTMLButtonElement>('.turn-run-details-toggle[aria-expanded="false"]')?.click();
   return null;
 }

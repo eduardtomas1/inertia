@@ -127,7 +127,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(activeTurn.locator(".turn-execution-rail.is-live")).toBeVisible();
     await expect(activeTurn.locator(".turn-commentary-row")).toHaveCount(2);
     await expect(activeTurn.locator(".turn-activity-group")).toHaveCount(2);
-    await expect(activeTurn.getByRole("button", { name: "1 command, 1 tool call" })).toHaveAttribute("aria-expanded", "false");
+    await expect(activeTurn.getByRole("button", { name: "Ran 1 command and 1 other action" })).toHaveAttribute("aria-expanded", "false");
     await expect(activeTurn.locator('[data-activity-group-state="live"] [data-folded="false"]')).toHaveCount(2);
     await expect(activeTurn.getByRole("button", { name: "Stop Codex · OpenAI run" })).toBeVisible();
     await expect(activeTurn.locator(".turn-working-elapsed")).toHaveAttribute("aria-live", "off");
@@ -298,8 +298,10 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     for (const successfulFixture of [completed, detailed, kimi]) {
       const successfulTurn = page.locator(`[data-turn-id="${successfulFixture.turn.id}"]`);
       await expect(successfulTurn.locator(".turn-settled-summary")).toHaveCount(0);
-      await expect(successfulTurn.locator(".turn-duration")).toHaveText("Worked 42s");
-      await expect(successfulTurn.getByText("Worked 42s", { exact: true })).toHaveCount(1);
+      await expect(successfulTurn.locator(".turn-duration")).toHaveCount(0);
+      await expect(successfulTurn.getByRole("button", { name: "Worked for 42s" }))
+        .toHaveAttribute("aria-expanded", "false");
+      await expect(successfulTurn.getByText("Worked for 42s", { exact: true })).toHaveCount(1);
     }
     const successfulGeometry = await Promise.all(
       [completedTurn, detailedTurn, kimiTurn].map((successfulTurn) =>
@@ -307,15 +309,19 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
           const request = element.querySelector<HTMLElement>(
             '[data-turn-layer="user-request"]',
           )?.getBoundingClientRect();
+          const execution = element.querySelector<HTMLElement>(
+            '[data-turn-layer="agent-execution"]',
+          )?.getBoundingClientRect();
           const answer = element.querySelector<HTMLElement>(
             '[data-turn-layer="final-answer"]',
           )?.getBoundingClientRect();
           const metadata = element.querySelector<HTMLElement>(
             ".turn-meta",
           )?.getBoundingClientRect();
-          return request && answer && metadata
+          return request && execution && answer && metadata
             ? {
-                requestToAnswer: answer.top - request.bottom,
+                requestToExecution: execution.top - request.bottom,
+                executionToAnswer: answer.top - execution.bottom,
                 answerToMetadata: metadata.top - answer.bottom,
                 metadataHeight: metadata.height,
               }
@@ -325,8 +331,10 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     for (const geometry of successfulGeometry) {
       expect(geometry).not.toBeNull();
       if (!geometry) continue;
-      expect(geometry.requestToAnswer).toBeGreaterThanOrEqual(8);
-      expect(geometry.requestToAnswer).toBeLessThanOrEqual(17);
+      expect(geometry.requestToExecution).toBeGreaterThanOrEqual(36);
+      expect(geometry.requestToExecution).toBeLessThanOrEqual(44);
+      expect(geometry.executionToAnswer).toBeGreaterThanOrEqual(8);
+      expect(geometry.executionToAnswer).toBeLessThanOrEqual(17);
       expect(geometry.answerToMetadata).toBeGreaterThanOrEqual(5);
       expect(geometry.answerToMetadata).toBeLessThanOrEqual(13);
       expect(geometry.metadataHeight).toBeCloseTo(32, 0);
@@ -354,6 +362,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     );
     expect(completedLayers).toEqual([
       "user-request",
+      "user-request-meta",
       "agent-execution",
       "final-answer",
       "supporting-ledger",
@@ -428,7 +437,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await revealTurn(detailedTurn, detailed.turn.id);
     await captureScenario("settled-history-dark-1440x920");
     await revealTurn(detailedTurn, detailed.turn.id);
-    const detailsSummary = detailedTurn.getByRole("button", { name: "Run details" });
+    const detailsSummary = detailedTurn.getByRole("button", { name: "Worked for 42s" });
     await expect(detailsSummary).toHaveAttribute("aria-expanded", "false");
     const followingKimiTurn = page.locator(`[data-turn-id="${kimi.turn.id}"]`);
     const beforeFollowingTurnTop = await followingKimiTurn.evaluate(
@@ -436,12 +445,17 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     );
     await detailsSummary.click();
     await expect(detailsSummary).toHaveAttribute("aria-expanded", "true");
-    await expect(detailedTurn.locator(".turn-run-work-details")).toBeVisible();
+    await expect(detailedTurn.locator(".turn-fold-body")).toBeVisible();
+    await expect(detailedTurn.locator(".turn-fold-body")
+      .getByRole("list", { name: "Agent work transcript" })).toBeVisible();
     await expect.poll(() => followingKimiTurn.evaluate(
       (element, top) => Math.abs(element.getBoundingClientRect().top - top),
       beforeFollowingTurnTop,
     )).toBeLessThanOrEqual(2);
     await captureScenario("expanded-details");
+    await detailsSummary.press("Enter");
+    await expect(detailsSummary).toHaveAttribute("aria-expanded", "false");
+    await expect(detailedTurn.locator(".turn-fold-body")).toBeHidden();
 
     await revealTurn(kimiTurn, kimi.turn.id);
     await expect(kimiTurn.locator('[data-final-answer-identity="historical-model-selection"]'))
@@ -450,7 +464,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
 
     const warningTurn = page.locator(`[data-turn-id="${warning.turn.id}"]`);
     await revealTurn(warningTurn, warning.turn.id);
-    await expect(warningTurn.locator(".turn-settled-summary")).toContainText("Worked for 42s · 1 action");
+    await expect(warningTurn.getByRole("button", { name: "Worked for 42s" })).toBeVisible();
     await expect(warningTurn.locator('[data-activity-severity="warning"]'))
       .toContainText("optional provider capability skipped");
     await expect(warningTurn.locator('[data-activity-severity="warning"]')).toBeVisible();
@@ -500,8 +514,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     for (const geometry of exceptionalGeometry) {
       expect(geometry).not.toBeNull();
       if (!geometry) continue;
-      expect(geometry.requestToExecution).toBeGreaterThanOrEqual(8);
-      expect(geometry.requestToExecution).toBeLessThanOrEqual(17);
+      expect(geometry.requestToExecution).toBeGreaterThanOrEqual(36);
+      expect(geometry.requestToExecution).toBeLessThanOrEqual(44);
       expect(geometry.executionToAnswer).toBeGreaterThanOrEqual(8);
       expect(geometry.executionToAnswer).toBeLessThanOrEqual(17);
       expect(geometry.answerToMetadata).toBeGreaterThanOrEqual(5);
@@ -513,9 +527,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
 
     const cancelledTurn = page.locator(`[data-turn-id="${cancelled.turn.id}"]`);
     await revealTurn(cancelledTurn, cancelled.turn.id);
-    await expect(cancelledTurn.locator(".turn-settled-summary"))
-      .toContainText("Stopped after 42s · 1 action");
-    await expect(cancelledTurn.locator(".turn-settled-summary")).toBeVisible();
+    await expect(cancelledTurn.getByRole("button", { name: "Stopped after 42s" })).toBeVisible();
+    await expect(cancelledTurn.locator(".turn-meta [data-turn-status]")).toHaveCount(0);
     const lightSettings = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
     lightSettings.updateSettings({ theme: "light" });
     lightSettings.close();
@@ -528,7 +541,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     const lightCompletedTurn = page.locator(`[data-turn-id="${completed.turn.id}"]`);
     await revealTurn(lightCompletedTurn, completed.turn.id);
     await expect(lightCompletedTurn.locator(".turn-settled-summary")).toHaveCount(0);
-    await expect(lightCompletedTurn.getByText("Worked 42s", { exact: true })).toHaveCount(1);
+    await expect(lightCompletedTurn.getByText("Worked for 42s", { exact: true })).toHaveCount(1);
     await captureElementScenario(
       "rich-markdown-light",
       lightCompletedTurn.locator('[data-turn-layer="final-answer"]'),
@@ -601,7 +614,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       ];
       return {
         requestInside: contained(".turn-user-request"),
-        executionAbsent: !element.querySelector(".turn-execution-rail"),
+        executionInside: contained(".turn-execution-rail"),
         answerInside: contained(".turn-final-answer-document"),
         runDetailsInside: contained(".turn-run-details"),
         changedFilesInside: contained(".turn-changed-files"),
@@ -624,7 +637,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     });
     expect(narrowCompletedGeometry).toEqual({
       requestInside: true,
-      executionAbsent: true,
+      executionInside: true,
       answerInside: true,
       runDetailsInside: true,
       changedFilesInside: true,
@@ -680,8 +693,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await page.reload();
     const recentlySettledTurn = page.locator(`[data-turn-id="${active.turn.id}"]`);
     await expect(recentlySettledTurn.locator(".turn-settled-summary")).toHaveCount(0);
-    await expect(recentlySettledTurn.locator(".turn-duration")).toHaveText("Worked 52s");
-    await expect(recentlySettledTurn.getByText("Worked 52s", { exact: true })).toHaveCount(1);
+    await expect(recentlySettledTurn.locator(".turn-duration")).toHaveCount(0);
+    await expect(recentlySettledTurn.getByText("Worked for 52s", { exact: true })).toHaveCount(1);
     await expect(recentlySettledTurn.locator(".turn-changed-files.is-pending"))
       .toContainText("Capturing changes…");
     await expect(recentlySettledTurn.locator(".turn-execution-rail.is-live")).toHaveCount(0);
@@ -755,7 +768,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     })).toBeVisible();
     const reconnectedRecentTurn = page.locator(`[data-turn-id="${active.turn.id}"]`);
     await expect(reconnectedRecentTurn.locator(".turn-settled-summary")).toHaveCount(0);
-    await expect(reconnectedRecentTurn.getByText("Worked 52s", { exact: true })).toHaveCount(1);
+    await expect(reconnectedRecentTurn.getByText("Worked for 52s", { exact: true })).toHaveCount(1);
     expect(rendererErrors).toEqual([]);
   } catch (error) {
     await attachRuntimeLifecycleFailureDiagnostic(testInfo, async () =>

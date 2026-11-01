@@ -36,6 +36,7 @@ import {
   type PromptStashEntry,
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
+import { composerPlaceholder } from "./composerPlaceholder";
 import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps } from "./types";
 import { useRuntimeQueueLength } from "./runtimeQueueEvents";
@@ -1106,10 +1107,16 @@ export const Composer = memo(function Composer({
           onImportAttachments={importAttachments}
           onSubmit={submit}
           canQueue={canQueue}
-          queueBlocked={queueBlocked}
           onQueue={() => void queueCurrentMessage()}
-          running={running} hasHistory={hasVisibleHistory || latestKnownTurn !== null}
-          stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}
+          running={running}
+          placeholder={composerPlaceholder({
+            disabled,
+            running,
+            stopsBeforeSending: running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null),
+            queueBlocked,
+            hasHistory: hasVisibleHistory || latestKnownTurn !== null,
+            skillsAvailable: Boolean(skillsCapability?.available),
+          })}
           submissionPending={submissionPending}
           followUpPending={followUpPending}
           typedMessageLimit={typedMessageLimit}

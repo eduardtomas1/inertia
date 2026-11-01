@@ -21,6 +21,9 @@ import {
   backgroundTaskCurrentActivity,
   backgroundTaskDoingNow,
   backgroundTaskElapsedMs,
+  backgroundTaskHeading,
+  backgroundTaskHeadingIsTask,
+  backgroundTaskKind,
   backgroundTaskStateWord,
   backgroundTaskTitle,
   backgroundTaskTranscriptMeta,
@@ -152,6 +155,7 @@ function Transcript({
   turns,
   title,
   line,
+  taskShown,
   canOpen,
   canFollowUp,
   onOpen,
@@ -162,6 +166,7 @@ function Transcript({
   turns: readonly AgentTurn[];
   title: string;
   line: string | null;
+  taskShown: boolean;
   canOpen: boolean;
   canFollowUp: boolean;
   onOpen: () => void;
@@ -170,9 +175,10 @@ function Transcript({
   const live = isLiveSubagentTrace(trace);
   const reported = live ? trace.progress : trace.result;
   const update = reported === line ? null : reported;
+  const task = taskShown ? null : trace.description;
   const texts = live
-    ? [[trace.description, 4, "the task"], [update, 6, "the progress"]] as const
-    : [[update, 6, "the outcome"], [trace.description, 4, "the task"]] as const;
+    ? [[task, 4, "the task"], [update, 6, "the progress"]] as const
+    : [[update, 6, "the outcome"], [task, 4, "the task"]] as const;
   const meta = backgroundTaskTranscriptMeta(trace, turns);
   return (
     <div id={id} className="background-task-transcript">
@@ -244,6 +250,7 @@ export const AgentCard = memo(function AgentCard({
   onStop,
 }: AgentCardProps): React.JSX.Element {
   const title = backgroundTaskTitle(trace);
+  const heading = backgroundTaskHeading(trace);
   const doing = backgroundTaskDoingNow(trace);
   const live = isLiveSubagentTrace(trace);
   const running = live && (trace.status === "running" || trace.status === "spawned");
@@ -256,9 +263,9 @@ export const AgentCard = memo(function AgentCard({
   return (
     <li className="background-task-card" data-focus-row={`agent:${trace.id}`} data-reveal-turn={trace.turnId}>
       <div className="background-task-body">
-        <span className="background-task-title">{title}</span>
+        <span className="background-task-title">{heading}</span>
         <KindLine
-          kind={parentTitle ? `Agent · from ${parentTitle}` : "Agent"}
+          kind={backgroundTaskKind(trace, parentTitle)}
           state={backgroundTaskStateWord(trace)}
         >
           {live
@@ -303,6 +310,7 @@ export const AgentCard = memo(function AgentCard({
           turns={turns}
           title={title}
           line={line}
+          taskShown={backgroundTaskHeadingIsTask(trace)}
           canOpen={canOpen}
           canFollowUp={canFollowUp}
           onOpen={() => onOpen(trace.id)}

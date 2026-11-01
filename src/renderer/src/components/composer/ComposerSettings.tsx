@@ -2,12 +2,18 @@ import { accessModeUnavailableReason, effectiveAccessMode } from "@shared/access
 import {
   Check,
   ChevronDown,
-  ChevronRight,
+  Gauge,
   Hammer,
   ListChecks,
+  LockOpen,
+  PenLine,
+  ShieldCheck,
+  Zap,
+  type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import type {
+  AccessMode,
   Conversation,
   InteractionMode,
 } from "@shared/contracts";
@@ -19,6 +25,22 @@ import {
 import { ComposerResponseSpeedOptions } from "./ComposerResponseSpeedOptions";
 import { useWatcherRunLock, WATCHER_RUN_LOCK_LABEL } from "../watcher/watcherContext";
 import type { ComposerMenuController } from "./useComposerMenus";
+
+const ACCESS_MODE_ICONS: Record<AccessMode, LucideIcon> = {
+  supervised: ShieldCheck,
+  "auto-edit": PenLine,
+  full: LockOpen,
+};
+
+function SettingChevron(): React.JSX.Element {
+  return (
+    <ChevronDown
+      className="composer-setting-chevron"
+      size={12}
+      aria-hidden="true"
+    />
+  );
+}
 
 export interface ComposerSettingsModel {
   reasoningOptions: ReadonlyArray<{
@@ -82,6 +104,7 @@ export function ComposerSettings({
   const access = accessOptions.find(
     (item) => item.value === effectiveAccess,
   ) ?? accessOptions[2]!;
+  const AccessIcon = ACCESS_MODE_ICONS[access.value];
   const ModeIcon = conversation.interactionMode === "build"
     ? Hammer
     : ListChecks;
@@ -116,12 +139,13 @@ export function ComposerSettings({
             onClick={() => toggleMenu("reasoning")}
             onKeyDown={(event) => handleComposerMenuTriggerKeyDown("reasoning", event)}
           >
-            <span className="composer-setting-value">{reasoningLabel}</span>
-            <ChevronDown
-              className="composer-setting-chevron"
+            <Gauge
+              className="composer-setting-icon"
               size={14}
               aria-hidden="true"
             />
+            <span className="composer-setting-value">{reasoningLabel}</span>
+            <SettingChevron />
           </button>
           {menu === "reasoning" && (
             <div
@@ -179,17 +203,13 @@ export function ComposerSettings({
             onClick={() => toggleMenu("speed")}
             onKeyDown={(event) => handleComposerMenuTriggerKeyDown("speed", event)}
           >
-            <ChevronRight
+            <Zap
               className="composer-setting-icon"
               size={14}
               aria-hidden="true"
             />
             <span className="composer-setting-value">{responseSpeedLabel}</span>
-            <ChevronDown
-              className="composer-setting-chevron"
-              size={14}
-              aria-hidden="true"
-            />
+            <SettingChevron />
           </button>
           {menu === "speed" && (
             <div
@@ -234,12 +254,13 @@ export function ComposerSettings({
           onKeyDown={(event) =>
             handleComposerMenuTriggerKeyDown("access", event)}
         >
-          <span className="composer-setting-value">{access.label}</span>
-          <ChevronDown
-            className="composer-setting-chevron"
+          <AccessIcon
+            className="composer-setting-icon"
             size={14}
             aria-hidden="true"
           />
+          <span className="composer-setting-value">{access.label}</span>
+          <SettingChevron />
         </button>
         {menu === "access" && (
           <div
@@ -305,11 +326,7 @@ export function ComposerSettings({
           <span className="composer-setting-value">
             {conversation.interactionMode === "build" ? "Build" : "Plan"}
           </span>
-          <ChevronDown
-            className="composer-setting-chevron"
-            size={14}
-            aria-hidden="true"
-          />
+          <SettingChevron />
         </button>
         {menu === "mode" && (
           <div

@@ -84,12 +84,23 @@ The useful changes in each Inertia release, in plain language.
 
 ### Dependencies
 
-- Updated the Claude Agent SDK to 0.3.310 to match Claude Code 2.1.310. The
+- Updated the Claude Agent SDK to 0.3.314 to match Claude Code 2.1.314. The
   hook and skill-shell restrictions Inertia sets for every Claude turn are
-  honoured by Claude Code 2.1.309 or newer, which is now the minimum.
+  honoured by Claude Code 2.1.309 or newer, which is now the minimum. When
+  your organization requires Claude Code's sandbox and it can't run on your
+  computer, the chat now says so instead of showing a generic failure.
 - Private Connect saves its encrypted state with Electron's asynchronous
   secure storage, ahead of Electron 46 removing the synchronous one. Existing
   pairings keep working.
+- Updated Electron to 45.1.0, with Chromium 156.0.8078.49 and Node 24.22.1.
+- Updated the Agent Client Protocol SDK used by Cursor and Kimi to 2.1.0. A
+  usage update with a negative or fractional token count is now skipped
+  instead of failing the turn.
+- Updated the Anthropic SDK to 1.3.0, now licensed Apache-2.0; the
+  third-party notices include both its Apache-2.0 and earlier MIT terms.
+- Updated the OpenCode SDK to 1.19.5, the MCP SDK to 1.32.2, lucide-react to
+  1.64.0, morphicons to 2.0.2, the virtual list to 3.14.24, the accessibility
+  reader to 0.15.4, oxlint to 1.90.0 and the Babel parser to 7.29.12.
 
 ## 0.0.80 — 2026-10-28
 

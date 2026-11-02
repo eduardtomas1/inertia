@@ -103,7 +103,7 @@ function noticeFiles(entry, manifest, license) {
   }
   const names = new Set(
     readdirSync(entry.path)
-      .filter((name) => /^(licen[cs]e|copying|notice)(\.|$)/iu.test(name)),
+      .filter((name) => /^(licen[cs]e|copying|notice)([._-]|$)/iu.test(name)),
   );
   const referenced = license?.match(/^SEE LICEN[CS]E IN\s+(.+)$/iu)?.[1]?.trim();
   if (referenced) names.add(referenced);

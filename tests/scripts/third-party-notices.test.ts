@@ -106,6 +106,26 @@ describe("third-party notice generation", () => {
     expect(output).toContain("Use is subject to these terms.");
   });
 
+  it("includes every license file of a package that changed license", () => {
+    const output = generate([{
+      name: "relicensed-package",
+      version: "1.0.0",
+      license: "Apache-2.0",
+      files: {
+        LICENSE: "Apache License text",
+        "LICENSE-MIT": "MIT License text for earlier contributions",
+        "LICENSE_BSD.txt": "BSD License text",
+        "LICENSES.json": "{}",
+      },
+    }]);
+
+    expect(output).toContain("Included text: L1, L2, L3");
+    expect(output).toContain("Apache License text");
+    expect(output).toContain("MIT License text for earlier contributions");
+    expect(output).toContain("BSD License text");
+    expect(output).not.toContain("LICENSES.json");
+  });
+
   it("runs npm's JavaScript entry point through Node without a platform shell", () => {
     const { outputPath, treePath } = fixture([{
       name: "portable-package",

@@ -53,6 +53,7 @@ export const CLAUDE_ISOLATED_SKILL_SETTINGS = {
   syncClaudeAiSkills: false,
   allowedMcpServers: [],
   strictPluginOnlyCustomization: ["skills", "agents", "hooks", "mcp"],
+  useAutoModeDuringPlan: false,
 } as const satisfies Settings;
 
 export interface ClaudeFilesystemSkill extends SlashCommand {

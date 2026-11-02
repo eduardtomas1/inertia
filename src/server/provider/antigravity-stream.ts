@@ -204,7 +204,7 @@ export function parseAntigravityLine(
 }
 
 export function antigravityAuthRequired(detail: string): boolean {
-  return /authentication (?:required|failed or timed out)|please visit the url to log in|please sign in/iu
+  return /authentication (?:required|failed or timed out|expired\. please log back in)|please visit the url to log in|please sign in/iu
     .test(detail);
 }
 

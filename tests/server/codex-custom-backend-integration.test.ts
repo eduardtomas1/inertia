@@ -43,6 +43,13 @@ describe("Codex custom Responses backend integration", { concurrent: false }, ()
 const fs = require("node:fs");
 const readline = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const launchOverrides = process.argv.slice(2).flatMap((argument, index, all) =>
+  all[index - 1] === "-c" ? [argument] : []);
+const configuredProvider = launchOverrides
+  .filter((override) => override.startsWith("model_provider="))
+  .map((override) => override.slice("model_provider=".length))
+  .at(-1) ?? "openai";
+let savedProvider = configuredProvider;
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "fixture" } });
@@ -50,14 +57,34 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "config/read") {
     return send({ id: message.id, result: { config: { shell_environment_policy: { exclude: ["PRIVATE_*"] } } } });
   }
+  if (message.method === "thread/resume") {
+    savedProvider = "inertia_custom_responses";
+    if (savedProvider !== configuredProvider) {
+      return send({ id: message.id, error: {
+        code: -32600,
+        message: "thread model provider does not match the configured model provider",
+        data: { type: "modelProviderMismatch", modelProvider: savedProvider, currentModelProvider: configuredProvider }
+      } });
+    }
+    return send({ id: message.id, result: { thread: { id: message.params.threadId }, model: "responses-model" } });
+  }
   if (message.method === "thread/start") {
+    savedProvider = message.params.modelProvider ?? configuredProvider;
     fs.writeFileSync(process.env.INERTIA_CODEX_CUSTOM_CAPTURE, JSON.stringify({
       message,
+      launchOverrides,
       credentialPresent: process.env.INERTIA_CODEX_BACKEND_TOKEN === "owned-integration-secret"
     }));
     return send({ id: message.id, result: { thread: { id: "thread-custom" }, model: "responses-model" } });
   }
   if (message.method === "turn/start") {
+    if (savedProvider !== configuredProvider) {
+      return send({ id: message.id, error: {
+        code: -32600,
+        message: "thread model provider does not match the configured model provider",
+        data: { type: "modelProviderMismatch", modelProvider: savedProvider, currentModelProvider: configuredProvider }
+      } });
+    }
     send({ id: message.id, result: { turn: { id: "turn-custom", status: "inProgress", items: [], error: null } } });
     send({ method: "turn/started", params: { threadId: "thread-custom", turn: { id: "turn-custom", status: "inProgress", items: [], error: null } } });
     send({ method: "thread/tokenUsage/updated", params: { threadId: "thread-custom", turnId: "turn-custom", tokenUsage: { total: { totalTokens: 3, inputTokens: 2, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0 }, last: { totalTokens: 3, inputTokens: 2, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0 }, modelContextWindow: 1000 } } });
@@ -224,9 +251,20 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(usage).toEqual([3]);
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
       credentialPresent: boolean;
+      launchOverrides: string[];
       message: { params: Record<string, unknown> };
     };
     expect(captured.credentialPresent).toBe(true);
+    expect(captured.launchOverrides).toEqual([
+      "model_provider=inertia_custom_responses",
+      "model_providers.inertia_custom_responses.name=inertia_custom_responses",
+      `model_providers.inertia_custom_responses.base_url=${probeEndpoint}`,
+      "model_providers.inertia_custom_responses.wire_api=responses",
+      "model_providers.inertia_custom_responses.requires_openai_auth=false",
+      "model_providers.inertia_custom_responses.env_key=INERTIA_CODEX_BACKEND_TOKEN",
+    ]);
+    expect(captured.launchOverrides.some((override) => override.includes('"'))).toBe(false);
+    expect(captured.launchOverrides.join(" ")).not.toContain("owned-integration-secret");
     expect(captured.message.params).toMatchObject({
       model: "responses-model",
       modelProvider: "inertia_custom_responses",
@@ -243,6 +281,29 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       },
     });
     expect(JSON.stringify(captured.message)).not.toContain("owned-integration-secret");
+
+    const resumed = await manager.run({
+      providerId: route.providerId,
+      harnessId: route.harnessId,
+      backendProfile: route.backendProfile,
+      backendCompatibility: route.compatibility,
+      modelSelection,
+      continuationIdentity: route.continuationIdentity,
+      conversationId: "conversation-custom",
+      runId: "run-conversation-custom-2",
+      turnId: "turn-conversation-custom-2",
+      cwd: root,
+      prompt: "Continue",
+      model: modelSelection.modelId,
+      sessionId: "thread-custom",
+      interactionMode: "build",
+      access: "supervised",
+    });
+    expect(resumed).toMatchObject({
+      status: "completed",
+      sessionId: "thread-custom",
+      text: "Custom response",
+    });
   });
 });
 

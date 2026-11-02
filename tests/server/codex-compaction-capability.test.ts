@@ -153,4 +153,62 @@ describe("Codex compaction exact-run performance capability", () => {
     expect(resumed).toMatchObject({ threadId: input.sessionId, model: "model-a" });
     expect(resumed).not.toHaveProperty("effort");
   });
+
+  it("launches the compaction App Server with the chat's custom provider", async () => {
+    const launches: (readonly string[] | undefined)[] = [];
+    const harness = createCodexAppServerHarness({
+      withControlClient: async (control, run) => {
+        launches.push(control.launchArguments);
+        return await run({
+          request: async (method, params = {}) => {
+            if (method === "config/read") return { config: {} };
+            if (method === "thread/resume") {
+              return { thread: { id: params.threadId }, initialTurnsPage: { data: [{ id: "previous-turn" }] } };
+            }
+            if (method === "thread/compact/start") {
+              const turn = { id: "compaction-turn", status: "inProgress", items: [], error: null };
+              const item = { id: "compaction-item", type: "contextCompaction" };
+              control.onNotification!("turn/started", { threadId: params.threadId, turn });
+              control.onNotification!("item/started", { threadId: params.threadId, turnId: turn.id, item, startedAtMs: 1 });
+              control.onNotification!("item/completed", { threadId: params.threadId, turnId: turn.id, item, completedAtMs: 2 });
+              control.onNotification!("turn/completed", { threadId: params.threadId, turn: { ...turn, status: "completed" } });
+              return {};
+            }
+            if (method === "thread/turns/list") return { data: [{ id: "compaction-turn" }, { id: "previous-turn" }] };
+            throw new Error(`Unexpected compaction request: ${method}`);
+          },
+        });
+      },
+    });
+    const run = harness.start({
+      input: {
+        ...nativeProviderRunInput({
+          providerId: "codex", conversationId: "compact-custom-provider", cwd: process.cwd(),
+          prompt: "/compact", model: "model-a", sessionId: "custom-thread",
+          interactionMode: "build", access: "supervised",
+        }),
+        operation: { kind: "compact" },
+      },
+      executable: process.execPath,
+      environment: { INERTIA_CODEX_BACKEND_TOKEN: "compaction-secret" },
+      providerNativeToolsAvailable: false,
+      harnessConfiguration: {
+        kind: "codex-responses",
+        providerId: "inertia_custom_gateway",
+        displayName: "Gateway",
+        baseUrl: "https://gateway.example/v1",
+        credentialEnvironmentKey: "INERTIA_CODEX_BACKEND_TOKEN",
+      },
+    });
+
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+    expect(launches).toEqual([[
+      "-c", "model_provider=inertia_custom_gateway",
+      "-c", "model_providers.inertia_custom_gateway.name=inertia_custom_gateway",
+      "-c", "model_providers.inertia_custom_gateway.base_url=https://gateway.example/v1",
+      "-c", "model_providers.inertia_custom_gateway.wire_api=responses",
+      "-c", "model_providers.inertia_custom_gateway.requires_openai_auth=false",
+      "-c", "model_providers.inertia_custom_gateway.env_key=INERTIA_CODEX_BACKEND_TOKEN",
+    ]]);
+  });
 });

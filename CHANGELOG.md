@@ -98,6 +98,17 @@ The useful changes in each Inertia release, in plain language.
   instead of failing the turn.
 - Updated the Anthropic SDK to 1.3.0, now licensed Apache-2.0; the
   third-party notices include both its Apache-2.0 and earlier MIT terms.
+- Claude chats in Plan mode ask before running commands again. Claude Code
+  lets its auto mode classifier approve planning commands by default whenever
+  auto mode is available, which skipped Inertia's approval.
+- On an API-key backend, Claude's Monitor tool can no longer run commands that
+  print the key, as Bash and PowerShell already could not.
+- Codex chats on a custom or API-key backend keep working with Codex 0.166,
+  which refuses a chat whose backend was not chosen when Codex started.
+- OpenCode installed with Homebrew no longer shows an update to OpenCode 2,
+  which Inertia does not support yet; Homebrew only offers 2.x now.
+- An expired Antigravity sign-in now shows the Connect prompt instead of a
+  generic error.
 - Updated the OpenCode SDK to 1.19.5, the MCP SDK to 1.32.2, lucide-react to
   1.64.0, morphicons to 2.0.2, the virtual list to 3.14.24, the accessibility
   reader to 0.15.4, oxlint to 1.90.0 and the Babel parser to 7.29.12.

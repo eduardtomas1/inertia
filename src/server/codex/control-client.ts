@@ -50,6 +50,7 @@ export interface CodexControlClientOptions {
   executable: string;
   environment: NodeJS.ProcessEnv;
   cwd: string;
+  launchArguments?: readonly string[];
   timeoutMs?: number;
   terminateProcessTree?: ProcessTreeTerminator;
   processLabel?: string;
@@ -83,7 +84,7 @@ export async function withCodexControlClient<T>(
     ?? terminateProcessTreeAndWait;
   const invocation = providerProcessInvocation(
     options.executable,
-    ["app-server"],
+    ["app-server", ...(options.launchArguments ?? [])],
     options.environment,
   );
   const spawnProcess = options.spawnProcess ?? spawn;

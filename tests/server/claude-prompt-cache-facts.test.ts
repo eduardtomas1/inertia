@@ -146,19 +146,21 @@ describe("Claude prompt cache facts", () => {
       { at: LAST_REQUEST, message: messageStart("plain", { input_tokens: 5, output_tokens: 1 }) },
     ], { harnessConfiguration: { kind: "claude-messages", promptCacheTtl: "1h" } });
     expect(promptCache(events)).toEqual([{ lastRequestStartedAt: LAST_REQUEST, lifetimeMs: 3_600_000, source: "configured" }]);
-    expect(queryOptions?.settings).toEqual({ promptCacheTtl: "1h" });
+    expect(queryOptions?.settings).toEqual({ useAutoModeDuringPlan: false, promptCacheTtl: "1h" });
   });
 
   it("leaves earlier facts in place when the run made no main-thread request", async () => {
     const { events, queryOptions } = await run([]);
     expect(promptCache(events)).toEqual([undefined]);
-    expect(queryOptions).not.toHaveProperty("settings");
+    expect(queryOptions?.settings).toEqual({ useAutoModeDuringPlan: false });
   });
 
   it("merges the cache length with the fast mode settings", async () => {
     const { queryOptions } = await run([], {
       harnessConfiguration: { kind: "claude-messages", promptCacheTtl: "5m" },
     }, { supportedFastMode: "fast" });
-    expect(queryOptions?.settings).toEqual({ fastMode: false, fastModePerSessionOptIn: true, promptCacheTtl: "5m" });
+    expect(queryOptions?.settings).toEqual({
+      useAutoModeDuringPlan: false, fastMode: false, fastModePerSessionOptIn: true, promptCacheTtl: "5m",
+    });
   });
 });

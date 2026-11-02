@@ -126,6 +126,31 @@ describe("third-party notice generation", () => {
     expect(output).not.toContain("LICENSES.json");
   });
 
+  it("skips license-named directories when looking for license files", () => {
+    const { outputPath, treePath } = fixture([{
+      name: "license-folder-package",
+      version: "1.0.0",
+      license: "MIT",
+      files: { LICENSE: "Top-level license text" },
+    }]);
+    const packagePath = join(dirname(treePath), "node_modules", "license-folder-package");
+    mkdirSync(join(packagePath, "license-files"));
+    writeFileSync(join(packagePath, "license-files", "THIRD_PARTY"), "Nested material");
+
+    execFileSync(process.execPath, [script], {
+      env: {
+        ...process.env,
+        INERTIA_NOTICES_TREE_PATH: treePath,
+        INERTIA_NOTICES_OUTPUT: outputPath,
+      },
+    });
+    const output = readFileSync(outputPath, "utf8");
+
+    expect(output).toContain("Included text: L1");
+    expect(output).toContain("Top-level license text");
+    expect(output).not.toContain("Nested material");
+  });
+
   it("runs npm's JavaScript entry point through Node without a platform shell", () => {
     const { outputPath, treePath } = fixture([{
       name: "portable-package",

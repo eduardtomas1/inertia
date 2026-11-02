@@ -49,7 +49,10 @@ import {
   configuredDeveloperInstructions,
   readConfiguredDeveloperInstructions,
 } from "./developer-instructions";
-import { codexModelProviderThreadConfig } from "./model-provider-config";
+import {
+  codexModelProviderLaunchArguments,
+  codexModelProviderThreadConfig,
+} from "./model-provider-config";
 import type {
   CodexAppServerOptions,
   CodexAppServerResult,
@@ -94,7 +97,7 @@ export function startCodexAppServerRun(
   const protocolLimits = codexProtocolLimits(options.protocolLimits);
   const invocation = providerProcessInvocation(
     options.executable,
-    ["app-server"],
+    ["app-server", ...(modelProvider ? codexModelProviderLaunchArguments(modelProvider) : [])],
     options.environment,
   );
   const ownedInvocation = runtimeOwnedProcessInvocation(

@@ -123,6 +123,28 @@ describe("Codex control client", () => {
       .toHaveBeenCalledWith(fixture.child, true);
   });
 
+  it("starts App Server with the caller's launch arguments", async () => {
+    const fixture = fakeChild((text) => {
+      const message = JSON.parse(text) as { id?: number };
+      if (message.id !== undefined) fixture.stdout.write(`${JSON.stringify({ id: message.id, result: {} })}\n`);
+    });
+    const spawned: string[][] = [];
+    const clientOptions = {
+      ...options(fixture.child),
+      launchArguments: ["-c", "model_provider=inertia_custom_gateway"],
+      spawnProcess: ((_command: string, args: readonly string[]) => {
+        spawned.push([...args]);
+        return fixture.child;
+      }) as unknown as typeof spawn,
+    };
+
+    await withCodexControlClient(clientOptions, async ({ request }) => await request("config/read", {}));
+    expect(spawned).toHaveLength(1);
+    const appServer = spawned[0]!.indexOf("app-server");
+    expect(appServer).toBeGreaterThanOrEqual(0);
+    expect(spawned[0]!.slice(appServer)).toEqual(["app-server", "-c", "model_provider=inertia_custom_gateway"]);
+  });
+
   it("delivers bounded App Server notifications to the control observer", async () => {
     const onNotification = vi.fn();
     const fixture = fakeChild((text) => {

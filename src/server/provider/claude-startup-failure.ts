@@ -28,6 +28,7 @@ const STARTUP_FAILURE_MESSAGES: Record<SDKStartupFailureReason, string> = {
   bypass_root: "Claude Code won't run with full access as the root user. Choose another access mode.",
   org_config_required_unavailable: "Claude Code couldn't load the configuration your organization requires. Check your connection and try again.",
   org_config_refused: "Your organization's Claude Code configuration doesn't allow this run. Ask your administrator.",
+  sandbox_required_unavailable: "Claude Code requires its sandbox, which can't run on this computer. Install what it needs, such as bubblewrap on Linux, or ask your administrator.",
 };
 
 export function claudeSessionUnavailable(message: SDKMessage): boolean {

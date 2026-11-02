@@ -36,12 +36,13 @@ const NESTED_SHELLS: ReadonlySet<string> = new Set([
 const NESTED_SHELL_FLAGS: ReadonlySet<string> = new Set(["-c", "/c", "/k", "-command", "-lc"]);
 const ENV_OPTIONS_WITH_VALUES: ReadonlySet<string> = new Set(["-u", "--unset", "-C", "--chdir"]);
 const MAX_NESTED_SHELL_DEPTH = 4;
-export const CLAUDE_CREDENTIAL_COMMAND_HOOK_MATCHER = "Bash|PowerShell";
+export const CLAUDE_SHELL_COMMAND_TOOLS: ReadonlySet<string> = new Set(["Bash", "PowerShell", "Monitor"]);
+export const CLAUDE_CREDENTIAL_COMMAND_HOOK_MATCHER = [...CLAUDE_SHELL_COMMAND_TOOLS].join("|");
 
 export const claudeCredentialCommandHook: HookCallback = async (input) => {
   if (
     input.hook_event_name !== "PreToolUse"
-    || (input.tool_name !== "Bash" && input.tool_name !== "PowerShell")
+    || !CLAUDE_SHELL_COMMAND_TOOLS.has(input.tool_name)
   ) return {};
   const toolInput = input.tool_input;
   const command = typeof toolInput === "object" && toolInput !== null

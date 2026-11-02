@@ -82,8 +82,20 @@ describe.each(["cursor", "kimi"] as const)("%s ACP drift regressions", (provider
 
   it.each([
     { used: 1.5, size: 1000 }, { used: 1, size: -1 },
-  ])("rejects malformed usage $used / $size", async (usage) => {
+  ])("drops a usage update the ACP schema rejects ($used / $size) and completes the turn", async (usage) => {
     const { start } = fixture(providerId, undefined, { sessionUpdate: "usage_update", ...usage });
+    const events: string[] = [];
+    const result = await start({ onEvent: (event) => {
+      if (event.type === "extension" && "event" in event) events.push(event.event.type);
+    } }).result;
+    expect(result).toMatchObject({ status: "completed", text: "Done", cleanupConfirmed: true });
+    expect(events).not.toContain("usage");
+  });
+
+  it("rejects a usage update beyond the safe integer range", async () => {
+    const { start } = fixture(providerId, undefined, {
+      sessionUpdate: "usage_update", used: 2 ** 53, size: 2 ** 54,
+    });
     const result = await start().result;
     expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true });
     expect(JSON.stringify(result.failure)).toMatch(/malformed usage update/iu);

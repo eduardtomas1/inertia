@@ -1,5 +1,16 @@
 // @inertia-test-suite portable
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, parse } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -205,11 +216,12 @@ describe("Claude selected-skill staging", () => {
       const qualified = (name: string): string => `inertia-selected-skills:${name}`;
       expect(staged!.selectedSkillNames).toEqual([qualified("review")]);
       expect([...staged!.skillNames].sort()).toEqual(
-        ["helper", "review", "shared"].map(qualified),
+        ["helper", "oversized", "review", "shared"].map(qualified),
       );
       expect(readFileSync(join(staged!.path, "skills", "shared", "SKILL.md"), "utf8"))
         .toContain("User copy.");
-      expect(existsSync(join(staged!.path, "skills", "oversized"))).toBe(false);
+      expect(readFileSync(join(staged!.path, "skills", "oversized", "part-69.md"), "utf8"))
+        .toBe("x");
       expect(existsSync(join(staged!.path, "skills", "linked"))).toBe(false);
     } finally {
       await staged!.cleanup();
@@ -220,6 +232,90 @@ describe("Claude selected-skill staging", () => {
       path: realpathSync(join(linked, "SKILL.md")),
     }], root, { HOME: home }, { includeDiscovered: true }))
       .rejects.toThrow("A selected Claude skill contains a symbolic link.");
+  });
+
+  it("links the folders of a selected skill too large to copy", async () => {
+    const root = portableFixtureRoot("Claude large skill staging");
+    roots.push(root);
+    const skillPath = writeClaudeSkill(root, "wiki-expert");
+    const skill = join(skillPath, "..");
+    mkdirSync(join(skill, "wiki", "pages"), { recursive: true });
+    for (let index = 0; index < 300; index += 1) {
+      writeFileSync(join(skill, "wiki", "pages", `page-${index}.md`), `Page ${index}`);
+    }
+    writeFileSync(join(skill, "index.py"), "print('index')");
+    writeFileSync(join(skill, "archive.bin"), Buffer.alloc(2 * 1024 * 1024, 1));
+    mkdirSync(join(skill, ".git", "objects"), { recursive: true });
+    writeFileSync(join(skill, ".git", "objects", "pack.pack"), Buffer.alloc(2 * 1024 * 1024));
+
+    const staged = await stageClaudeSkillPlugin([{
+      source: "claude-native",
+      name: "wiki-expert",
+      path: realpathSync(skillPath),
+    }], root, {});
+    const stagedSkill = join(staged!.path, "skills", "wiki-expert");
+    try {
+      expect(staged!.selectedSkillNames).toEqual(["inertia-selected-skills:wiki-expert"]);
+      expect(lstatSync(join(stagedSkill, "wiki")).isSymbolicLink()).toBe(true);
+      expect(realpathSync(join(stagedSkill, "wiki"))).toBe(realpathSync(join(skill, "wiki")));
+      expect(readFileSync(join(stagedSkill, "wiki", "pages", "page-299.md"), "utf8"))
+        .toBe("Page 299");
+      expect(lstatSync(join(stagedSkill, "index.py")).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(stagedSkill, "index.py"), "utf8")).toBe("print('index')");
+      expect(statSync(join(stagedSkill, "archive.bin")).size).toBe(2 * 1024 * 1024);
+      expect(existsSync(join(stagedSkill, ".git"))).toBe(false);
+      expect(readFileSync(join(stagedSkill, "SKILL.md"), "utf8")).toContain('name: "wiki-expert"');
+    } finally {
+      await staged!.cleanup();
+    }
+    expect(existsSync(staged!.path)).toBe(false);
+    expect(readdirSync(join(skill, "wiki", "pages"))).toHaveLength(300);
+    expect(lstatSync(join(skill, "archive.bin")).size).toBe(2 * 1024 * 1024);
+    expect(existsSync(join(skill, ".git", "objects", "pack.pack"))).toBe(true);
+  });
+
+  it("copies a cloned skill without its version-control metadata", async () => {
+    const root = portableFixtureRoot("Claude cloned skill staging");
+    roots.push(root);
+    const skillPath = writeClaudeSkill(root, "cloned");
+    const skill = join(skillPath, "..");
+    mkdirSync(join(skill, "scripts"));
+    writeFileSync(join(skill, "scripts", "run.sh"), "echo run");
+    mkdirSync(join(skill, ".git", "objects"), { recursive: true });
+    writeFileSync(join(skill, ".git", "objects", "pack.pack"), Buffer.alloc(2 * 1024 * 1024));
+
+    const staged = await stageClaudeSkillPlugin([{
+      source: "claude-native",
+      name: "cloned",
+      path: realpathSync(skillPath),
+    }], root, {});
+    try {
+      const stagedSkill = join(staged!.path, "skills", "cloned");
+      expect(lstatSync(join(stagedSkill, "scripts")).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(stagedSkill, "scripts", "run.sh"), "utf8")).toBe("echo run");
+      expect(existsSync(join(stagedSkill, ".git"))).toBe(false);
+    } finally {
+      await staged!.cleanup();
+    }
+  });
+
+  it("refuses a selected skill too large to copy when it contains a link", async () => {
+    const root = portableFixtureRoot("Claude large linked skill staging");
+    roots.push(root);
+    mkdirSync(join(root, ".git"));
+    const skillPath = writeClaudeSkill(root, "large-linked");
+    const skill = join(skillPath, "..");
+    mkdirSync(join(skill, "wiki"));
+    for (let index = 0; index < 300; index += 1) {
+      writeFileSync(join(skill, "wiki", `page-${index}.md`), "x");
+    }
+    symlinkSync(join(root, ".git"), join(skill, "wiki", "escape"), "junction");
+
+    await expect(stageClaudeSkillPlugin([{
+      source: "claude-native",
+      name: "large-linked",
+      path: realpathSync(skillPath),
+    }], root, {})).rejects.toThrow("A selected Claude skill contains a symbolic link.");
   });
 
   describe("symlinked skill folders", () => {

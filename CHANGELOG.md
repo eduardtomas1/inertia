@@ -2,7 +2,23 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Unreleased
+## 0.0.81 — 2026-11-03
+
+Large Claude skills that work, a reader who stays where they stop, Linux
+window controls inside the app, a larger allowance for Inertia's own tools,
+and minimum versions for Claude Code and OpenCode.
+
+### Skills
+
+- Claude skills too large to copy, such as a skill installed with
+  `git clone` or one bundling its own documentation, no longer fail every
+  turn with *A selected Claude skill file could not be revalidated*. Small
+  skills are still copied for each turn; larger ones keep their checked
+  `SKILL.md` and link to their folders, so the agent reads files such as
+  `./wiki/` from where you installed them. Version-control folders like
+  `.git` are never included.
+- Large skills Inertia finds on its own are offered to Claude too, instead of
+  being left out silently.
 
 ### Security
 
@@ -18,6 +34,13 @@ The useful changes in each Inertia release, in plain language.
 
 ### Chats
 
+- Scrolling up through an answer, while it streams or after it finishes,
+  leaves you where you stop. Before, stopping anywhere near the end pulled you
+  back to the bottom less than a second later. Scrolling back to the very end,
+  **Jump to latest**, End or sending a message follows new messages again, and
+  coming back to a chat restores the row you were reading.
+- Opening or closing a tool's output or an agent's steps at the bottom of a
+  chat keeps following new messages instead of showing **Jump to latest**.
 - **Compact and send** is offered only once the chat has a provider session
   to compact. When the chat cannot be compacted, for example because its next
   turn starts a new session after you changed the model backend, the draft
@@ -43,6 +66,22 @@ The useful changes in each Inertia release, in plain language.
   that chat's terminal. If it is already at its terminal limit (four per
   window) or the local service is offline, they stop after 30 seconds unless
   you open that terminal, and Diagnostics records it.
+
+### Linux
+
+- Minimize, maximize and close sit inside Inertia's header, in the main
+  window and in a chat's own window, instead of in a separate system title
+  bar above it. They follow the app theme, and buttons placed on the left by
+  your desktop keep clear of the sidebar.
+- A Linux app update no longer reports a failed stop when Inertia's process
+  guardian had already exited cleanly.
+
+### Agents and Inertia tools
+
+- An agent can make up to 1,024 calls to Inertia's own tools (Browser, chats)
+  in one turn, up from 128, which long Browser checks used up. When the
+  allowance does run out, the agent is told a retry won't help until the next
+  turn.
 
 ### Accounts and API keys
 

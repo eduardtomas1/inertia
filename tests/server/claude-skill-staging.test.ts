@@ -318,6 +318,79 @@ describe("Claude selected-skill staging", () => {
     }], root, {})).rejects.toThrow("A selected Claude skill contains a symbolic link.");
   });
 
+  it("keeps later discovered skills when one is too large to check", async () => {
+    const root = portableFixtureRoot("Claude huge discovered skill");
+    roots.push(root);
+    const picked = writeClaudeSkill(root, "review");
+    const huge = join(writeClaudeSkill(root, "huge"), "..");
+    mkdirSync(join(huge, "vendor"));
+    for (let index = 0; index < 4_200; index += 1) {
+      writeFileSync(join(huge, "vendor", `${index}.js`), "");
+    }
+    for (const name of ["alpha", "omega"]) {
+      writeFileSync(join(writeClaudeSkill(root, name), "..", "notes.md"), name);
+    }
+
+    const staged = await stageClaudeSkillPlugin([{
+      source: "claude-native",
+      name: "review",
+      path: realpathSync(picked),
+    }], root, {}, { includeDiscovered: true });
+    try {
+      expect([...staged!.skillNames].sort()).toEqual(
+        ["alpha", "omega", "review"].map((name) => `inertia-selected-skills:${name}`),
+      );
+    } finally {
+      await staged!.cleanup();
+    }
+  });
+
+  it("refuses a nested version-control link in a skill too large to copy", async () => {
+    const root = portableFixtureRoot("Claude nested git link");
+    roots.push(root);
+    mkdirSync(join(root, ".git"));
+    const skillPath = writeClaudeSkill(root, "nested-git");
+    const skill = join(skillPath, "..");
+    mkdirSync(join(skill, "docs"));
+    for (let index = 0; index < 300; index += 1) {
+      writeFileSync(join(skill, "docs", `page-${index}.md`), "x");
+    }
+    symlinkSync(join(root, ".git"), join(skill, "docs", ".git"), "junction");
+
+    await expect(stageClaudeSkillPlugin([{
+      source: "claude-native",
+      name: "nested-git",
+      path: realpathSync(skillPath),
+    }], root, {})).rejects.toThrow("A selected Claude skill contains a symbolic link.");
+  });
+
+  it("never removes original files when a staged skill folder was replaced by a link", async () => {
+    const root = portableFixtureRoot("Claude swapped staged folder");
+    roots.push(root);
+    const skillPath = writeClaudeSkill(root, "swapped");
+    const skill = join(skillPath, "..");
+    mkdirSync(join(skill, "wiki"));
+    for (let index = 0; index < 300; index += 1) {
+      writeFileSync(join(skill, "wiki", `page-${index}.md`), "x");
+    }
+    writeFileSync(join(skill, "archive.bin"), Buffer.alloc(2 * 1024 * 1024, 1));
+
+    const staged = await stageClaudeSkillPlugin([{
+      source: "claude-native",
+      name: "swapped",
+      path: realpathSync(skillPath),
+    }], root, {});
+    const stagedSkill = join(staged!.path, "skills", "swapped");
+    rmSync(stagedSkill, { recursive: true, force: true });
+    symlinkSync(skill, stagedSkill, "junction");
+    await staged!.cleanup();
+
+    expect(existsSync(staged!.path)).toBe(false);
+    expect(statSync(join(skill, "archive.bin")).size).toBe(2 * 1024 * 1024);
+    expect(readdirSync(join(skill, "wiki"))).toHaveLength(300);
+    expect(existsSync(skillPath)).toBe(true);
+  });
+
   describe("symlinked skill folders", () => {
     function skillFolder(directory: string, name: string, body = "Linked body."): string {
       mkdirSync(directory, { recursive: true });

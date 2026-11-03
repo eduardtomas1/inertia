@@ -1,5 +1,4 @@
 import {
-  link,
   lstat,
   mkdir,
   mkdtemp,
@@ -11,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import type {
   Settings,
@@ -54,6 +53,7 @@ const MAX_UNSELECTED_SKILL_FILES = 64;
 const MAX_UNSELECTED_SKILL_BYTES = 2 * 1024 * 1024;
 const MAX_STAGED_DEPTH = 12;
 const MAX_SCANNED_SKILL_ENTRIES = 32_768;
+const MAX_SCANNED_UNSELECTED_SKILL_ENTRIES = 4_096;
 const VERSION_CONTROL_ENTRIES = new Set([".git", ".hg", ".svn"]);
 
 export const CLAUDE_ISOLATED_SKILL_PLUGIN_NAME = "inertia-selected-skills";
@@ -124,8 +124,13 @@ interface CopyBudget {
 }
 
 interface StagingState {
-  scannedEntries: number;
+  pluginPath: string;
   links: string[];
+}
+
+interface SkillScan {
+  entries: number;
+  limit: number;
 }
 
 type SkillFootprint =
@@ -639,8 +644,9 @@ async function scanSkillFootprint(
   source: string,
   budget: CopyBudget,
   depth: number,
-  state: StagingState,
+  scan: SkillScan,
   control: ClaudeSkillOperationControl,
+  counted = true,
 ): Promise<SkillFootprint> {
   checkClaudeSkillOperation(control);
   if (depth > MAX_STAGED_DEPTH) {
@@ -668,23 +674,32 @@ async function scanSkillFootprint(
       );
       if (!entry) return { kind: fits ? "copy" : "link" };
       if (depth === 0 && entry.name.toLowerCase() === "skill.md") continue;
-      if (VERSION_CONTROL_ENTRIES.has(entry.name)) continue;
-      state.scannedEntries += 1;
-      if (state.scannedEntries > MAX_SCANNED_SKILL_ENTRIES) {
-        return {
-          kind: "unsupported",
-          reason: "Selected Claude skills contain too many files to check.",
-        };
-      }
       if (entry.isSymbolicLink()) {
         return {
           kind: "unsupported",
           reason: "A selected Claude skill contains a symbolic link.",
         };
       }
+      const versionControl = VERSION_CONTROL_ENTRIES.has(entry.name);
+      if (versionControl && depth === 0) continue;
+      scan.entries += 1;
+      if (scan.entries > scan.limit) {
+        return {
+          kind: "unsupported",
+          reason: "A selected Claude skill contains too many files to check.",
+        };
+      }
       const path = join(source, entry.name);
+      const nestedCounted = counted && !versionControl;
       if (entry.isDirectory()) {
-        const nested = await scanSkillFootprint(path, budget, depth + 1, state, control);
+        const nested = await scanSkillFootprint(
+          path,
+          budget,
+          depth + 1,
+          scan,
+          control,
+          nestedCounted,
+        );
         if (nested.kind === "unsupported") return nested;
         if (nested.kind === "link") fits = false;
         continue;
@@ -695,7 +710,7 @@ async function scanSkillFootprint(
           reason: "A selected Claude skill contains an unsupported filesystem entry.",
         };
       }
-      if (!fits) continue;
+      if (!fits || !nestedCounted) continue;
       const status = await runClaudeSkillFilesystemOperation(
         control,
         "lstat",
@@ -835,22 +850,25 @@ async function linkStagedEntry(
   const type = kind === "file"
     ? "file"
     : process.platform === "win32" ? "junction" : "dir";
-  await runClaudeSkillFilesystemOperation(
+  const linked = await runClaudeSkillFilesystemOperation(
     control,
     "symlink",
     path,
     async () => {
       try {
         await symlink(target, path, type);
+        return true;
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
-        if (kind !== "file" || (code !== "EPERM" && code !== "EACCES")) throw error;
-        await link(target, path);
+        if (kind === "file" && (code === "EPERM" || code === "EACCES")) return false;
+        throw error;
       }
     },
-    async () => await unlink(path).catch(() => undefined),
+    async (created) => {
+      if (created) await unlink(path).catch(() => undefined);
+    },
   );
-  state.links.push(path);
+  if (linked) state.links.push(path);
 }
 
 async function removeStagedPath(path: string, state: StagingState): Promise<void> {
@@ -858,6 +876,10 @@ async function removeStagedPath(path: string, state: StagingState): Promise<void
   const links = state.links.filter(inside);
   for (const link of links) {
     try {
+      if (
+        !await plainPathComponents(state.pluginPath, dirname(link), {})
+        || !(await lstat(link)).isSymbolicLink()
+      ) continue;
       await unlink(link);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -877,6 +899,7 @@ async function stageSkillEntry(
   destination: string,
   budget: CopyBudget,
   state: StagingState,
+  scanLimit: number,
   options: ClaudeSkillOperationControl & { metadataOnly?: boolean },
 ): Promise<void> {
   budget.files += 1;
@@ -898,7 +921,7 @@ async function stageSkillEntry(
       skill.skillDirectory,
       { ...budget },
       0,
-      state,
+      { entries: 0, limit: scanLimit },
       options,
     );
     if (footprint.kind === "unsupported") throw new Error(footprint.reason);
@@ -942,7 +965,14 @@ async function stageUnselectedSkillEntry(
     maxBytes: Math.min(budget.maxBytes, budget.bytes + MAX_UNSELECTED_SKILL_BYTES),
   };
   try {
-    await stageSkillEntry(skill, destination, local, state, options);
+    await stageSkillEntry(
+      skill,
+      destination,
+      local,
+      state,
+      MAX_SCANNED_UNSELECTED_SKILL_ENTRIES,
+      options,
+    );
   } catch {
     checkClaudeSkillOperation(options);
     await removeStagedPath(destination, state).catch(() => undefined);
@@ -997,7 +1027,7 @@ export async function stageClaudeSkillPlugin(
       retryDelay: 100,
     }),
   );
-  const state: StagingState = { scannedEntries: 0, links: [] };
+  const state: StagingState = { pluginPath, links: [] };
   const cleanup = async (): Promise<void> => {
     await removeStagedPath(pluginPath, state);
   };
@@ -1042,7 +1072,14 @@ export async function stageClaudeSkillPlugin(
       checkClaudeSkillOperation(options);
       const destination = join(skillsDirectory, skill.name);
       if (skill.selected) {
-        await stageSkillEntry(skill, destination, budget, state, options);
+        await stageSkillEntry(
+          skill,
+          destination,
+          budget,
+          state,
+          MAX_SCANNED_SKILL_ENTRIES,
+          options,
+        );
       } else if (
         !await stageUnselectedSkillEntry(skill, destination, budget, state, options)
       ) continue;

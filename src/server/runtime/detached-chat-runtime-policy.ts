@@ -14,6 +14,7 @@ export interface DetachedChatRuntimePolicyResources {
   subagentConversationId(traceId: string): string | null;
   checkpointConversationId(checkpointId: string): string | null;
   turnConversationId(turnId: string): string | null;
+  savedAnswerConversationId(savedAnswerId: string): string | null;
   duoLaunchConversationIds(launchId: string): readonly string[] | null;
   pendingApproval(
     conversationId: string,
@@ -69,11 +70,8 @@ export function detachedChatCommandRejection(
   };
   const ownsTurn = (turnId: string): boolean =>
     resources.turnConversationId(turnId) === authority.conversationId;
-  const ownsSavedAnswer = (savedAnswerId: string): boolean => Boolean(
-    shell()
-    && snapshot().library?.savedAnswers.some(({ id, conversationId }) =>
-      id === savedAnswerId && owns(conversationId)),
-  );
+  const ownsSavedAnswer = (savedAnswerId: string): boolean =>
+    resources.savedAnswerConversationId(savedAnswerId) === authority.conversationId;
   const ownsRun = (runId: string): boolean => snapshot().runs.some(
     ({ id, conversationId }) =>
       id === runId && conversationId === authority.conversationId,

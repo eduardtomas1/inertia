@@ -7,7 +7,7 @@ import {
   type WorkspaceRun,
 } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
-import { applyConversationShellEvent, applyLibraryEvent, applyTodosEvent } from "../../src/renderer/src/utils/runtimeSnapshotProjection";
+import { applyConversationShellEvent, applyLibraryEvent, applyTodosEvent, withStableLibrary } from "../../src/renderer/src/utils/runtimeSnapshotProjection";
 import type { Todo } from "../../src/shared/todos";
 
 function conversation(id: string, updatedAt: string): ConversationShell {
@@ -308,5 +308,16 @@ describe("applyLibraryEvent", () => {
       type: "library.updated",
       library: { categories: [{ ...library.categories[0]! }], savedAnswers: [] },
     })).toBe(snapshot);
+  });
+
+  it("keeps the previous library identity across an equal authoritative snapshot", () => {
+    const equal: AppSnapshot = { ...snapshot, library: { categories: [{ ...library.categories[0]! }], savedAnswers: [] } };
+    const kept = withStableLibrary(snapshot, equal);
+    expect(kept.library).toBe(library);
+    expect(kept.conversations).toBe(equal.conversations);
+    const changed: AppSnapshot = { ...snapshot, library: { categories: [], savedAnswers: [] } };
+    expect(withStableLibrary(snapshot, changed)).toBe(changed);
+    expect(withStableLibrary(null, equal)).toBe(equal);
+    expect(withStableLibrary({ ...snapshot, library: undefined }, equal)).toBe(equal);
   });
 });

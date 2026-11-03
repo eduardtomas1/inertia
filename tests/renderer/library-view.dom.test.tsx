@@ -392,6 +392,51 @@ describe("Library view", () => {
     expect(choosePreviewSlots(ids, new Map([["b", 0.75]]), ["a"], 2)).toEqual(["b"]);
   });
 
+  it("gives a failed preview's slot to the next visible page", () => {
+    const ids = ["a", "b", "c"];
+    const ratios = new Map([["a", 1], ["b", 1], ["c", 0.5]]);
+    expect(choosePreviewSlots(ids, ratios, [], 2)).toEqual(["a", "b"]);
+    expect(choosePreviewSlots(ids, ratios, ["a", "b"], 2, new Set(["a"]))).toEqual(["b", "c"]);
+  });
+
+  it("frees the slot of a page whose preview is unavailable", async () => {
+    const user = userEvent.setup();
+    const observed = new Map<Element, IntersectionObserverCallback>();
+    class FakeIntersectionObserver {
+      constructor(private readonly callback: IntersectionObserverCallback) {}
+      observe(element: Element): void { observed.set(element, this.callback); }
+      unobserve(element: Element): void { observed.delete(element); }
+      disconnect(): void { observed.clear(); }
+    }
+    vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+    const ids = Array.from({ length: 13 }, (_, index) => `0000000${String(index).padStart(2, "0")}-bbbb-4bbb-8bbb-bbbbbbbbbbbb`.slice(-36));
+    const pages = ids.map((renderId, index) => page({ renderId, title: `Page ${index + 1}` }));
+    harness(appSnapshot(fullLibrary, false), vi.fn<Request>(async () => result({ kind: "library.pages", pages })));
+    await user.click(screen.getByRole("tab", { name: "Pages" }));
+    await screen.findByText("Page 1");
+    const cards = [...document.querySelectorAll<HTMLElement>(".library-page")];
+    act(() => {
+      observed.get(cards[0]!)!(cards.map((target) => ({
+        target, isIntersecting: true, intersectionRatio: 1,
+      }) as unknown as IntersectionObserverEntry), {} as IntersectionObserver);
+    });
+    expect(screen.getAllByTestId("library-page-preview")).toHaveLength(12);
+    expect(cards[12]!.querySelector("[data-testid=library-page-preview]")).toBeNull();
+    const failing = cards[0]!.querySelector<HTMLIFrameElement>("[data-testid=library-page-preview]")!;
+    const frameWindow = { postMessage: vi.fn() };
+    Object.defineProperty(failing, "contentWindow", { configurable: true, value: frameWindow });
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", {
+        data: { type: "inertia-html-render:unavailable" },
+        origin: "null",
+        source: frameWindow as unknown as MessageEventSource,
+      }));
+    });
+    expect(cards[0]!.querySelector("[data-testid=library-page-preview]")).toBeNull();
+    expect(cards[12]!.querySelector("[data-testid=library-page-preview]")).not.toBeNull();
+    expect(screen.getAllByTestId("library-page-preview")).toHaveLength(12);
+  });
+
   it("explains an empty Pages tab", async () => {
     const user = userEvent.setup();
     const request = vi.fn<Request>(async () => result({ kind: "library.pages", pages: [] }));

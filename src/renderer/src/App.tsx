@@ -55,6 +55,7 @@ import { DuoJudgeNoticeContext } from "./components/DuoJudgeNoticeContext";
 import {
   LIBRARY_NAVIGATION_COPY,
   LibraryAnswerContext,
+  savedAnswersByMessage,
   type LibraryAnswerController,
 } from "./components/library/LibraryAnswerContext";
 import { useProjectChatNavigation } from "./hooks/useProjectChatNavigation";
@@ -1032,6 +1033,7 @@ export default function App(): React.JSX.Element {
   );
   const libraryAnswers = useMemo<LibraryAnswerController>(() => ({
     library: connection.snapshot?.library ?? null,
+    savedByMessageId: savedAnswersByMessage(connection.snapshot?.library),
     online: connection.status === "online",
     request: libraryRequest,
     onError: setActionError,

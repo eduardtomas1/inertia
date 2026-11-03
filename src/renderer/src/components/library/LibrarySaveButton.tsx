@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useRef, useState } from "react";
 import { Bookmark } from "lucide-react";
 import clsx from "clsx";
 import type { ChatMessage } from "@shared/contracts";
@@ -38,10 +38,7 @@ function LibrarySaveControl({
   const [settling, setSettling] = useState(false);
   const savePromise = useRef<Promise<SavedAnswer | null> | null>(null);
   const [created, setCreated] = useState<SavedAnswer | null>(null);
-  const stored = useMemo(
-    () => library.savedAnswers.find(({ messageId }) => messageId === answer.id) ?? null,
-    [answer.id, library.savedAnswers],
-  );
+  const stored = controller.savedByMessageId.get(answer.id) ?? null;
   if (stored && created) setCreated(null);
   const saved = stored ?? created;
   const savedRef = useRef(saved);
@@ -72,34 +69,33 @@ function LibrarySaveControl({
     return promise;
   }, [answer.conversationId, answer.id, onError, request, turnId]);
 
-  const savedAnswerId = useCallback(async (): Promise<string | null> => {
-    const known = savedRef.current?.id;
-    if (known) return known;
+  const resolveSaved = useCallback(async (): Promise<SavedAnswer | null> => {
+    if (savedRef.current) return savedRef.current;
     const created = await savePromise.current;
-    return created?.id ?? (savedRef.current as SavedAnswer | null)?.id ?? null;
+    return (savedRef.current as SavedAnswer | null) ?? created ?? null;
   }, []);
 
   const move = useCallback(async (categoryId: string | null): Promise<void> => {
     rememberLibraryCategory(categoryId);
-    const id = await savedAnswerId();
-    if (!id || savedRef.current?.categoryId === categoryId) return;
+    const current = await resolveSaved();
+    if (!current || current.categoryId === categoryId) return;
     try {
-      await request({ type: "library.answer.update", payload: { savedAnswerId: id, categoryId } });
+      await request({ type: "library.answer.update", payload: { savedAnswerId: current.id, categoryId } });
     } catch (error) {
       onError(libraryError(error, "This answer could not be moved."));
     }
-  }, [onError, request, savedAnswerId]);
+  }, [onError, request, resolveSaved]);
 
   const remove = useCallback(async (): Promise<void> => {
-    const id = await savedAnswerId();
-    if (!id) return;
+    const current = await resolveSaved();
+    if (!current) return;
     setCreated(null);
     try {
-      await request({ type: "library.answer.remove", payload: { savedAnswerId: id } });
+      await request({ type: "library.answer.remove", payload: { savedAnswerId: current.id } });
     } catch (error) {
       onError(libraryError(error, "This answer could not be removed from the Library."));
     }
-  }, [onError, request, savedAnswerId]);
+  }, [onError, request, resolveSaved]);
 
   const createCategory = useCallback(async (name: string): Promise<string | null> => {
     try {

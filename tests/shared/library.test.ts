@@ -6,6 +6,7 @@ import { parseServerEvent } from "../../src/shared/contracts/server-event-schema
 import {
   MAX_LIBRARY_CATEGORIES,
   MAX_LIBRARY_CATEGORY_NAME_CHARS,
+  MAX_LIBRARY_SERIALIZED_BYTES,
   MAX_SAVED_ANSWER_EXCERPT_CHARS,
   MAX_SAVED_ANSWER_TITLE_CHARS,
   SAVED_ANSWER_FALLBACK_TITLE,
@@ -86,6 +87,29 @@ describe("library text derivation", () => {
     expect(savedAnswerExcerpt("")).toBe("");
   });
 
+  it("normalises hostile markdown in bounded time", () => {
+    const hostile = ["__a ", "**a ", "`", "``a ", " ", "[](", "<a", "*a ", "- ", "| "]
+      .map((unit) => unit.repeat(Math.ceil(16 * 1_024 / unit.length)));
+    hostile.push("x\n".repeat(8 * 1_024), `${" ".repeat(16 * 1_024)}x`);
+    for (const input of hostile) {
+      const started = performance.now();
+      const excerpt = savedAnswerExcerpt(input);
+      const title = savedAnswerDefaultTitle(input, input);
+      expect(performance.now() - started).toBeLessThan(50);
+      expect(excerpt.length).toBeLessThanOrEqual(MAX_SAVED_ANSWER_EXCERPT_CHARS);
+      expect(title.length).toBeLessThanOrEqual(MAX_SAVED_ANSWER_TITLE_CHARS);
+    }
+    expect(savedAnswerExcerpt("__a ".repeat(4_096)).startsWith("__a __a")).toBe(true);
+    expect(savedAnswerExcerpt("**bold** and __strong__ with `code` and ``a b``")).toBe("bold and strong with code and a b");
+  });
+
+  it("stops reading the answer once the excerpt is full", () => {
+    const excerpt = savedAnswerExcerpt(`${"word ".repeat(60)}\n${"later ".repeat(60)}`);
+    expect(excerpt.startsWith("word word")).toBe(true);
+    expect(excerpt).not.toContain("later");
+    expect(excerpt.length).toBeLessThanOrEqual(MAX_SAVED_ANSWER_EXCERPT_CHARS);
+  });
+
   it("never splits a surrogate pair when truncating", () => {
     const text = `${"a".repeat(8)}😀tail`;
     const truncated = truncateLibraryText(text, 10);
@@ -150,6 +174,16 @@ describe("library event coherence", () => {
         category({ id: `${String(index).padStart(8, "0")}-2222-4222-8222-222222222222`, name: `C${index}` })), savedAnswers: [] },
       { categories: [{ ...category(), extra: true }], savedAnswers: [] },
     ]) expect(() => libraryUpdated(invalid)).toThrow("Malformed server event");
+    const large = Array.from({ length: 600 }, (_, index) => answer({
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      messageId: `message-${index}`,
+      categoryId: null,
+      title: "\u0001".repeat(120),
+      excerpt: "\u0001".repeat(200),
+    }));
+    expect(() => libraryUpdated({ categories: [], savedAnswers: large })).toThrow("Malformed server event");
+    expect(libraryUpdated({ categories: [], savedAnswers: large.slice(0, 300) })).toBeTruthy();
+    expect(MAX_LIBRARY_SERIALIZED_BYTES).toBe(1_024 * 1_024);
   });
 
   it("checks saved answers against the snapshot's conversations", () => {

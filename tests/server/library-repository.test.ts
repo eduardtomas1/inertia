@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import {
+  LIBRARY_FULL_MESSAGE,
   LIBRARY_CATEGORY_DUPLICATE_MESSAGE,
   LIBRARY_CATEGORY_LIMIT_MESSAGE,
   LIBRARY_CATEGORY_MISSING_MESSAGE,
@@ -22,7 +23,12 @@ import { LIBRARY_SCHEMA_VERSION, libraryMigration } from "../../src/server/persi
 import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
 import { publicRuntimeError, userCorrectableRuntimeError } from "../../src/server/runtime-errors";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
-import { MAX_LIBRARY_CATEGORIES, MAX_SAVED_ANSWERS } from "../../src/shared/library";
+import {
+  MAX_LIBRARY_CATEGORIES,
+  MAX_LIBRARY_SERIALIZED_BYTES,
+  MAX_SAVED_ANSWERS,
+  librarySerializedBytes,
+} from "../../src/shared/library";
 
 const fixture = resolve(import.meta.dirname, "..", "fixtures", "database", "v0.0.6.sqlite");
 const directories: string[] = [];
@@ -153,18 +159,18 @@ describe("saved answers", () => {
     expect(store.library.savedAnswer(saved.id)).toEqual(saved);
   });
 
-  it("accepts an explicit title and saves idempotently by message", async () => {
+  it("accepts an explicit title and returns an existing save unchanged", async () => {
     const { store, conversation } = await openStore();
     const category = store.library.createCategory("Bread");
     const { turn, message } = settledAnswer(store, conversation.id);
     const input = { conversationId: conversation.id, turnId: turn.id, messageId: message.id };
     const saved = store.library.saveAnswer({ ...input, categoryId: null, title: "  Bread basics " });
     expect(saved.title).toBe("Bread basics");
-    const again = store.library.saveAnswer({ ...input, categoryId: category.id });
-    expect(again).toMatchObject({ id: saved.id, categoryId: category.id, title: "Bread basics" });
-    const renamed = store.library.saveAnswer({ ...input, categoryId: category.id, title: "Loaves" });
-    expect(renamed).toMatchObject({ id: saved.id, title: "Loaves" });
-    expect(store.library.savedAnswers()).toHaveLength(1);
+    expect(store.library.saveAnswer({ ...input, categoryId: category.id })).toEqual(saved);
+    expect(store.library.saveAnswer({ ...input, categoryId: category.id, title: "Loaves" })).toEqual(saved);
+    expect(store.library.saveAnswer({ ...input, categoryId: "00000000-0000-4000-8000-000000000000" })).toEqual(saved);
+    expect(store.library.savedAnswers()).toEqual([saved]);
+    expect(store.library.updateAnswer(saved.id, { categoryId: category.id })).toMatchObject({ id: saved.id, categoryId: category.id });
   });
 
   it("only saves the settled turn's final assistant message", async () => {
@@ -268,6 +274,100 @@ describe("saved answers", () => {
       type: "snapshot.updated",
       snapshot: { ...snapshot, library: { ...snapshot.library!, categories: [] } },
     })).toThrow("Malformed server event");
+  });
+});
+
+describe("published library snapshot", () => {
+  function fillerAnswers(database: Database.Database, conversationId: string, turnId: string, count: number, text: { title: string; excerpt: string }) {
+    const now = new Date().toISOString();
+    const insertMessage = database.prepare(`
+      INSERT INTO messages (id, conversation_id, role, content, created_at, turn_id) VALUES (?, ?, 'assistant', 'Filler', ?, ?)
+    `);
+    const insertAnswer = database.prepare(`
+      INSERT INTO saved_answers (id, conversation_id, turn_id, message_id, category_id, title, excerpt, created_at, updated_at)
+      VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)
+    `);
+    database.transaction(() => {
+      for (let index = 0; index < count; index += 1) {
+        const id = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+        insertMessage.run(`filler-${index}`, conversationId, now, turnId);
+        insertAnswer.run(id, conversationId, turnId, `filler-${index}`, text.title, text.excerpt, now, now);
+      }
+    })();
+  }
+
+  it("files answers as unsorted when their category cannot be published", async () => {
+    const { store, conversation, database } = await openStore();
+    const kept = store.library.createCategory("Bread");
+    const { turn, message } = settledAnswer(store, conversation.id);
+    const saved = store.library.saveAnswer({ conversationId: conversation.id, turnId: turn.id, messageId: message.id, categoryId: kept.id });
+    const unpublishable = "00000000-0000-4000-8000-0000000000aa";
+    const now = new Date().toISOString();
+    database.prepare("INSERT INTO library_categories (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run(unpublishable, "Unreadable", "not a timestamp at all", now);
+    const second = settledAnswer(store, conversation.id);
+    const orphaned = store.library.saveAnswer({ conversationId: conversation.id, turnId: second.turn.id, messageId: second.message.id, categoryId: null });
+    database.prepare("UPDATE saved_answers SET category_id = ? WHERE id = ?").run(unpublishable, orphaned.id);
+    const library = store.library.snapshot();
+    expect(library.categories).toEqual([kept]);
+    expect(library.savedAnswers.find(({ id }) => id === orphaned.id)?.categoryId).toBeNull();
+    expect(library.savedAnswers.find(({ id }) => id === saved.id)?.categoryId).toBe(kept.id);
+    expect(parseServerEvent({ type: "snapshot.updated", snapshot: store.shellSnapshot() })).toBeTruthy();
+  });
+
+  it("reuses the built snapshot until the library or its chats change", async () => {
+    const { store, project, database } = await openStore();
+    const first = store.library.snapshot();
+    expect(store.library.snapshot()).toBe(first);
+    const category = store.library.createCategory("Bread");
+    const afterCreate = store.library.snapshot();
+    expect(afterCreate).not.toBe(first);
+    expect(afterCreate.categories).toEqual([category]);
+    expect(store.library.snapshot()).toBe(afterCreate);
+    const other = store.createConversation(project.id, "Other");
+    const { turn, message } = settledAnswer(store, other.id);
+    const saved = store.library.saveAnswer({ conversationId: other.id, turnId: turn.id, messageId: message.id, categoryId: null });
+    expect(store.library.snapshot().savedAnswers).toEqual([saved]);
+    database.prepare("UPDATE saved_answers SET title = 'Edited elsewhere', updated_at = ? WHERE id = ?")
+      .run("2099-01-01T00:00:00.000Z", saved.id);
+    expect(store.library.snapshot().savedAnswers[0]!.title).toBe("Edited elsewhere");
+    const cached = store.library.snapshot();
+    store.archiveConversation(other.id, true);
+    expect(store.library.snapshot()).toBe(cached);
+    store.deleteConversation(other.id);
+    expect(store.library.snapshot().savedAnswers).toEqual([]);
+    expect(store.library.snapshot().categories).toEqual([category]);
+    expect(store.shellSnapshot().library).toBe(store.library.snapshot());
+  });
+
+  it("refuses growing writes past the serialized cap and still publishes a library within it", async () => {
+    const { store, conversation, database } = await openStore();
+    const { turn } = settledAnswer(store, conversation.id);
+    fillerAnswers(database, conversation.id, turn.id, 600, { title: "\u0001".repeat(120), excerpt: "\u0001".repeat(200) });
+    expect(librarySerializedBytes({ categories: [], savedAnswers: store.library.savedAnswers() })).toBeGreaterThan(MAX_LIBRARY_SERIALIZED_BYTES);
+    const next = settledAnswer(store, conversation.id);
+    expect(rejection(() => store.library.saveAnswer({
+      conversationId: conversation.id, turnId: next.turn.id, messageId: next.message.id, categoryId: null,
+    }))).toBe(LIBRARY_FULL_MESSAGE);
+    expect(rejection(() => store.library.createCategory("Bread"))).toBe(LIBRARY_FULL_MESSAGE);
+    expect(store.library.categories()).toEqual([]);
+    const published = store.library.snapshot();
+    expect(librarySerializedBytes(published)).toBeLessThanOrEqual(MAX_LIBRARY_SERIALIZED_BYTES);
+    expect(published.savedAnswers.length).toBeGreaterThan(0);
+    expect(published.savedAnswers.length).toBeLessThan(600);
+    expect(parseServerEvent({ type: "snapshot.updated", snapshot: store.shellSnapshot() })).toBeTruthy();
+    const all = store.library.savedAnswers();
+    for (const answer of all.slice(0, 200)) store.library.removeAnswer(answer.id);
+    expect(store.library.createCategory("Bread")).toMatchObject({ name: "Bread" });
+    expect(librarySerializedBytes(store.library.snapshot())).toBeLessThanOrEqual(MAX_LIBRARY_SERIALIZED_BYTES);
+  });
+
+  it("looks up a saved answer's chat with one row", async () => {
+    const { store, conversation } = await openStore();
+    const { turn, message } = settledAnswer(store, conversation.id);
+    const saved = store.library.saveAnswer({ conversationId: conversation.id, turnId: turn.id, messageId: message.id, categoryId: null });
+    expect(store.library.savedAnswerConversationId(saved.id)).toBe(conversation.id);
+    expect(store.library.savedAnswerConversationId("00000000-0000-4000-8000-000000000000")).toBeNull();
   });
 });
 

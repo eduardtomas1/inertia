@@ -530,6 +530,7 @@ export function LibraryView({
                     page={page}
                     previewMounted={previews.mounted.has(page.renderId)}
                     observe={previews.observe}
+                    onPreviewFailed={previews.markFailed}
                     onOpen={openPageDialog}
                   />
                 ))}

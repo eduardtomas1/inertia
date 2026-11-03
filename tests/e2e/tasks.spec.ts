@@ -127,16 +127,20 @@ function expectWithinPixel(actual: number, expected: number): void {
   expect(Math.abs(actual - expected)).toBeLessThanOrEqual(1);
 }
 
-async function expectTasksRowBetweenNewChatAndSearch(tasks: Locator): Promise<void> {
+async function expectTasksAndLibraryRowsBetweenNewChatAndSearch(tasks: Locator): Promise<void> {
   const sidebar = app.page.locator(".sidebar");
   const newChat = await sidebar.locator(".sidebar-primary-row").getByRole("button", { name: "New chat", exact: true }).boundingBox();
   const row = await tasks.boundingBox();
+  const library = await sidebar.getByRole("button", { name: "Library", exact: true }).boundingBox();
   const search = await sidebar.locator(".sidebar-search-wrap").boundingBox();
-  expectWithinPixel(row!.height, newChat!.height);
-  expectWithinPixel(row!.x, newChat!.x);
-  expectWithinPixel(row!.x + row!.width, search!.x + search!.width);
+  for (const box of [row!, library!]) {
+    expectWithinPixel(box.height, newChat!.height);
+    expectWithinPixel(box.x, newChat!.x);
+    expectWithinPixel(box.x + box.width, search!.x + search!.width);
+  }
   expectWithinPixel(row!.y, newChat!.y + newChat!.height + 2);
-  expectWithinPixel(search!.y, row!.y + row!.height + 2);
+  expectWithinPixel(library!.y, row!.y + row!.height + 2);
+  expectWithinPixel(search!.y, library!.y + library!.height + 2);
 }
 
 async function expectAlignedHandOff(agent: Locator): Promise<void> {
@@ -175,7 +179,7 @@ test("adds, orders, schedules and finishes tasks from the sidebar", async ({ bro
   const destination = page.locator(".sidebar").getByRole("button", { name: "Tasks", exact: true });
   await destination.click();
   await expect(destination).toHaveAttribute("aria-current", "page");
-  await expectTasksRowBetweenNewChatAndSearch(destination);
+  await expectTasksAndLibraryRowsBetweenNewChatAndSearch(destination);
   const view = page.getByRole("main", { name: "Tasks" });
   await expect(view.getByText("Add anything you need to do", { exact: true })).toBeVisible();
   await expect(page.locator(".workspace-header")).toContainText("Tasks");
@@ -357,7 +361,7 @@ test("Start hands the task to an agent and keeps you in Tasks", async ({ browser
   await expect(view.locator(".tasks-heading p")).toHaveText(/^1 needs you\b/u);
   await expect(destination).toHaveAccessibleName("Tasks, 1 needs you");
   await expect(destination.locator(".sidebar-tasks-count")).toHaveText("1");
-  await expectTasksRowBetweenNewChatAndSearch(destination);
+  await expectTasksAndLibraryRowsBetweenNewChatAndSearch(destination);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await app.expectNoViewportOverflow();
   await capture(info, "tasks-started-light");

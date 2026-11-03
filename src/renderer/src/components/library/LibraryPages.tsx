@@ -103,8 +103,9 @@ export function choosePreviewSlots(
   ratios: ReadonlyMap<string, number>,
   previous: readonly string[],
   limit: number,
+  failed: ReadonlySet<string> = new Set(),
 ): string[] {
-  const ratio = (renderId: string): number => ratios.get(renderId) ?? 0;
+  const ratio = (renderId: string): number => failed.has(renderId) ? 0 : ratios.get(renderId) ?? 0;
   const visible = renderIds.filter((renderId) => ratio(renderId) > 0);
   const byVisibility = [...visible].sort((left, right) => ratio(right) - ratio(left));
   const next = previous.filter((renderId) => ratio(renderId) > 0 && renderIds.includes(renderId));
@@ -126,8 +127,13 @@ export function choosePreviewSlots(
 export function usePagePreviewSlots(
   renderIds: readonly string[],
   limit = MAX_MOUNTED_PAGE_PREVIEWS,
-): { observe: (renderId: string, element: Element | null) => void; mounted: ReadonlySet<string> } {
+): {
+  observe: (renderId: string, element: Element | null) => void;
+  mounted: ReadonlySet<string>;
+  markFailed: (renderId: string) => void;
+} {
   const [ratios, setRatios] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
   const observerRef = useRef<IntersectionObserver | null>(null);
   const elements = useRef(new Map<string, Element>());
   const previousSlots = useRef<readonly string[]>([]);
@@ -175,33 +181,38 @@ export function usePagePreviewSlots(
     }
   }, []);
 
+  const markFailed = useCallback((renderId: string): void => {
+    setFailed((current) => current.has(renderId) ? current : new Set(current).add(renderId));
+  }, []);
+
   const mounted = useMemo(() => {
-    const slots = choosePreviewSlots(renderIds, ratios, previousSlots.current, limit);
+    const slots = choosePreviewSlots(renderIds, ratios, previousSlots.current, limit, failed);
     previousSlots.current = slots;
     return new Set(slots);
-  }, [limit, renderIds, ratios]);
-  return { observe, mounted };
+  }, [failed, limit, renderIds, ratios]);
+  return { observe, mounted, markFailed };
 }
 
 export const LibraryPageCard = memo(function LibraryPageCard({
   page,
   previewMounted,
   observe,
+  onPreviewFailed,
   onOpen,
 }: {
   page: LibraryPage;
   previewMounted: boolean;
   observe: (renderId: string, element: Element | null) => void;
+  onPreviewFailed: (renderId: string) => void;
   onOpen: (page: LibraryPage) => void;
 }): React.JSX.Element {
-  const [failed, setFailed] = useState(false);
-  const markFailed = useCallback(() => setFailed(true), []);
+  const markFailed = useCallback(() => onPreviewFailed(page.renderId), [onPreviewFailed, page.renderId]);
   const ref = useCallback((element: HTMLLIElement | null) => observe(page.renderId, element), [observe, page.renderId]);
   return (
     <li ref={ref} className="library-page" data-render-id={page.renderId}>
       <span className="library-page-thumbnail" aria-hidden="true">
         <PageThumbnail renderId={page.renderId} />
-        {previewMounted && !failed && <PagePreview renderId={page.renderId} onFailed={markFailed} />}
+        {previewMounted && <PagePreview renderId={page.renderId} onFailed={markFailed} />}
       </span>
       <button
         type="button"

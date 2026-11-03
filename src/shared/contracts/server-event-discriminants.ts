@@ -39,7 +39,12 @@ import {
   todoSchema,
   todosSerializedBytes,
 } from "../todos";
-import { libraryCategoryNameKey, librarySnapshotSchema } from "../library";
+import {
+  MAX_LIBRARY_SERIALIZED_BYTES,
+  libraryCategoryNameKey,
+  librarySerializedBytes,
+  librarySnapshotSchema,
+} from "../library";
 import { watcherLinkCollectionCoherent } from "./watcher-schema";
 
 function exhaustiveOptions<T extends string>(
@@ -168,7 +173,8 @@ export function libraryCoherent(
     && savedAnswers.every((answer) =>
       (answer.categoryId === null || categoryIds.has(answer.categoryId))
       && (conversationProjects === undefined
-        || conversationProjects.get(answer.conversationId) === answer.projectId));
+        || conversationProjects.get(answer.conversationId) === answer.projectId))
+    && librarySerializedBytes(value) <= MAX_LIBRARY_SERIALIZED_BYTES;
 }
 
 const CONVERSATION_DETAIL_SCOPED_COLLECTIONS = [

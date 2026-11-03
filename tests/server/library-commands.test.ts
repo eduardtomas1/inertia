@@ -178,6 +178,8 @@ function resources(): DetachedChatRuntimePolicyResources {
     subagentConversationId: () => null,
     checkpointConversationId: () => null,
     turnConversationId: (turnId) => turnId === `${CONVERSATION}-turn` ? CONVERSATION : OTHER_CONVERSATION,
+    savedAnswerConversationId: (savedAnswerId) =>
+      library.savedAnswers.find(({ id }) => id === savedAnswerId)?.conversationId ?? null,
     duoLaunchConversationIds: () => null,
     pendingApproval: () => null,
     pendingInput: () => null,
@@ -229,5 +231,25 @@ describe("detached chat library authority", () => {
       expect(rejection(command)).not.toBeNull();
       expect(rejection(command, { kind: "main" })).toBeNull();
     }
+  });
+
+  it("checks saved answer ownership with one lookup instead of the app snapshot", () => {
+    let snapshots = 0;
+    const lookups: string[] = [];
+    const counting: DetachedChatRuntimePolicyResources = {
+      ...resources(),
+      snapshot: () => {
+        snapshots += 1;
+        return snapshot();
+      },
+      savedAnswerConversationId: (savedAnswerId) => {
+        lookups.push(savedAnswerId);
+        return savedAnswerId === OWN_ANSWER ? CONVERSATION : null;
+      },
+    };
+    expect(detachedChatCommandRejection(authority, { type: "library.answer.update", requestId: REQUEST, payload: { savedAnswerId: OWN_ANSWER, title: "Mine" } }, counting)).toBeNull();
+    expect(detachedChatCommandRejection(authority, { type: "library.answer.remove", requestId: REQUEST, payload: { savedAnswerId: FOREIGN_ANSWER } }, counting)).not.toBeNull();
+    expect(lookups).toEqual([OWN_ANSWER, FOREIGN_ANSWER]);
+    expect(snapshots).toBe(0);
   });
 });

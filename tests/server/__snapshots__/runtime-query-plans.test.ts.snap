@@ -75,6 +75,21 @@ exports[`hot query plans on a seeded runtime database > snapshots every app snap
     ],
   },
   {
+    "query": "SELECT (SELECT COUNT(*) FROM saved_answers) AS answers, (SELECT MAX(updated_at) FROM saved_answers) AS answers_updated, (SELECT COUNT(*) FROM library_categories…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN CONSTANT ROW",
+      "SCALAR SUBQUERY 1",
+      "SCAN saved_answers USING COVERING INDEX saved_answers_category_idx",
+      "SCALAR SUBQUERY 2",
+      "SEARCH saved_answers",
+      "SCALAR SUBQUERY 3",
+      "SCAN library_categories USING COVERING INDEX library_categories_name_idx",
+      "SCALAR SUBQUERY 4",
+      "SEARCH library_categories",
+    ],
+  },
+  {
     "query": "SELECT id, name, created_at, updated_at FROM library_categories ORDER BY name COLLATE NOCASE ASC, id ASC LIMIT ?",
     "withStatistics": "same",
     "withoutStatistics": [

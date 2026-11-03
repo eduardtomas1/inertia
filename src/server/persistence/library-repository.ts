@@ -6,11 +6,13 @@ import type { z } from "zod";
 import {
   MAX_LIBRARY_CATEGORIES,
   MAX_LIBRARY_PAGES,
+  MAX_LIBRARY_SERIALIZED_BYTES,
   MAX_SAVED_ANSWERS,
   libraryCategoryNameKey,
   libraryCategoryNameSchema,
   libraryCategorySchema,
   libraryPageSchema,
+  librarySerializedBytes,
   savedAnswerDefaultTitle,
   savedAnswerExcerpt,
   savedAnswerPatchSchema,
@@ -25,6 +27,7 @@ import {
 import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import type { AgentTurnStatus } from "../../shared/contracts";
 import { readBoundedMessageText } from "./bounded-message-text";
+import { cachedStatement } from "./statement-cache";
 
 export const LIBRARY_CATEGORY_LIMIT_MESSAGE =
   `You have ${MAX_LIBRARY_CATEGORIES} categories. Delete one first.`;
@@ -36,6 +39,7 @@ export const SAVED_ANSWER_MISSING_MESSAGE = "That saved answer no longer exists.
 export const SAVED_ANSWER_SOURCE_MISSING_MESSAGE = "That answer no longer exists.";
 export const SAVED_ANSWER_UNSETTLED_MESSAGE = "Wait for the answer to finish before saving it.";
 export const SAVED_ANSWER_NOT_FINAL_MESSAGE = "Only a turn's final answer can be saved.";
+export const LIBRARY_FULL_MESSAGE = "The Library is full. Remove some saved answers first.";
 
 const SOURCE_TEXT_BYTES = 16 * 1_024;
 
@@ -89,6 +93,50 @@ const SAVED_ANSWER_SELECT = `
   FROM saved_answers
   CROSS JOIN conversations ON conversations.id = saved_answers.conversation_id
 `;
+
+interface LibrarySnapshotCache {
+  generation: number;
+  fingerprint: string;
+  snapshot: LibrarySnapshot;
+}
+
+interface FingerprintRow {
+  answers: number;
+  answers_updated: string | null;
+  categories: number;
+  categories_updated: string | null;
+}
+
+export function coherentLibrarySnapshot(
+  categories: readonly LibraryCategory[],
+  savedAnswers: readonly SavedAnswer[],
+): LibrarySnapshot {
+  const names = new Set<string>();
+  const kept = categories.filter(({ name }) => {
+    const key = libraryCategoryNameKey(name);
+    if (names.has(key)) return false;
+    names.add(key);
+    return true;
+  });
+  const known = new Set(kept.map(({ id }) => id));
+  return {
+    categories: kept,
+    savedAnswers: savedAnswers.map((answer) => answer.categoryId === null || known.has(answer.categoryId)
+      ? answer
+      : { ...answer, categoryId: null }),
+  };
+}
+
+export function fitLibrarySnapshot(library: LibrarySnapshot): LibrarySnapshot {
+  let bytes = librarySerializedBytes(library);
+  if (bytes <= MAX_LIBRARY_SERIALIZED_BYTES) return library;
+  const savedAnswers = [...library.savedAnswers];
+  while (savedAnswers.length > 0 && bytes > MAX_LIBRARY_SERIALIZED_BYTES) {
+    const dropped = savedAnswers.pop()!;
+    bytes -= librarySerializedBytes(dropped) + (savedAnswers.length > 0 ? 1 : 0);
+  }
+  return { categories: library.categories, savedAnswers };
+}
 
 function parse<T>(schema: z.ZodType<T>, value: unknown, fallback: string): T {
   const parsed = schema.safeParse(value);
@@ -149,6 +197,9 @@ function pageFromRow(row: PageRow): LibraryPage | null {
 }
 
 export class LibraryRepository {
+  private generation = 0;
+  private cache: LibrarySnapshotCache | null = null;
+
   constructor(
     private readonly database: Database.Database,
     private readonly now: () => string = () => new Date().toISOString(),
@@ -156,7 +207,18 @@ export class LibraryRepository {
   ) {}
 
   snapshot(): LibrarySnapshot {
-    return { categories: this.categories(), savedAnswers: this.savedAnswers() };
+    const fingerprint = this.fingerprint();
+    const cached = this.cache;
+    if (cached && cached.generation === this.generation && cached.fingerprint === fingerprint) return cached.snapshot;
+    const snapshot = fitLibrarySnapshot(this.build());
+    this.cache = { generation: this.generation, fingerprint, snapshot };
+    return snapshot;
+  }
+
+  savedAnswerConversationId(savedAnswerId: string): string | null {
+    const row = cachedStatement(this.database, "SELECT conversation_id FROM saved_answers WHERE id = ?")
+      .get(savedAnswerId) as { conversation_id: string } | undefined;
+    return row?.conversation_id ?? null;
   }
 
   categories(): LibraryCategory[] {
@@ -183,7 +245,7 @@ export class LibraryRepository {
 
   createCategory(name: string): LibraryCategory {
     const trimmed = parse(libraryCategoryNameSchema, name, "The category name is invalid.");
-    return this.database.transaction(() => {
+    return this.write(() => {
       const count = (this.database.prepare("SELECT COUNT(*) AS count FROM library_categories")
         .get() as { count: number }).count;
       if (count >= MAX_LIBRARY_CATEGORIES) throw new LibraryRepositoryError(LIBRARY_CATEGORY_LIMIT_MESSAGE);
@@ -199,12 +261,12 @@ export class LibraryRepository {
         INSERT INTO library_categories (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
       `).run(category.id, category.name, category.createdAt, category.updatedAt);
       return category;
-    })();
+    });
   }
 
   renameCategory(categoryId: string, name: string): LibraryCategory {
     const trimmed = parse(libraryCategoryNameSchema, name, "The category name is invalid.");
-    return this.database.transaction(() => {
+    return this.write(() => {
       const existing = this.requireCategory(categoryId);
       if (existing.name === trimmed) return existing;
       this.assertUniqueName(trimmed, categoryId);
@@ -212,20 +274,22 @@ export class LibraryRepository {
       this.database.prepare("UPDATE library_categories SET name = ?, updated_at = ? WHERE id = ?")
         .run(renamed.name, renamed.updatedAt, renamed.id);
       return renamed;
-    })();
+    });
   }
 
   deleteCategory(categoryId: string): void {
-    if (this.database.prepare("DELETE FROM library_categories WHERE id = ?").run(categoryId).changes === 0) {
-      throw new LibraryRepositoryError(LIBRARY_CATEGORY_MISSING_MESSAGE);
-    }
+    this.write(() => {
+      if (this.database.prepare("DELETE FROM library_categories WHERE id = ?").run(categoryId).changes === 0) {
+        throw new LibraryRepositoryError(LIBRARY_CATEGORY_MISSING_MESSAGE);
+      }
+    }, false);
   }
 
   saveAnswer(input: SaveAnswerInput): SavedAnswer {
     const title = input.title === undefined
       ? undefined
       : parse(savedAnswerTitleSchema, input.title, "The title is invalid.");
-    return this.database.transaction(() => {
+    return this.write(() => {
       const turn = this.database.prepare(`
         SELECT conversation_id, user_message_id, terminal_assistant_message_id, status
         FROM agent_turns WHERE id = ?
@@ -252,15 +316,10 @@ export class LibraryRepository {
         || message.turn_id !== input.turnId
         || turn.terminal_assistant_message_id !== input.messageId
       ) throw new LibraryRepositoryError(SAVED_ANSWER_NOT_FINAL_MESSAGE);
-      if (input.categoryId !== null) this.requireCategory(input.categoryId);
       const existing = this.database.prepare("SELECT id FROM saved_answers WHERE message_id = ?")
         .get(input.messageId) as { id: string } | undefined;
-      if (existing) {
-        this.database.prepare(`
-          UPDATE saved_answers SET category_id = ?, title = COALESCE(?, title), updated_at = ? WHERE id = ?
-        `).run(input.categoryId, title ?? null, this.now(), existing.id);
-        return this.requireSavedAnswer(existing.id);
-      }
+      if (existing) return this.requireSavedAnswer(existing.id);
+      if (input.categoryId !== null) this.requireCategory(input.categoryId);
       const count = (this.database.prepare("SELECT COUNT(*) AS count FROM saved_answers")
         .get() as { count: number }).count;
       if (count >= MAX_SAVED_ANSWERS) throw new LibraryRepositoryError(SAVED_ANSWER_LIMIT_MESSAGE);
@@ -283,12 +342,12 @@ export class LibraryRepository {
         timestamp,
       );
       return this.requireSavedAnswer(id);
-    })();
+    });
   }
 
   updateAnswer(savedAnswerId: string, input: SavedAnswerPatch): SavedAnswer {
     const patch = parse(savedAnswerPatchSchema, input, "The saved answer update is invalid.");
-    return this.database.transaction(() => {
+    return this.write(() => {
       const existing = this.requireSavedAnswer(savedAnswerId);
       if (patch.categoryId !== undefined && patch.categoryId !== null) this.requireCategory(patch.categoryId);
       const categoryId = patch.categoryId === undefined ? existing.categoryId : patch.categoryId;
@@ -297,13 +356,15 @@ export class LibraryRepository {
       this.database.prepare("UPDATE saved_answers SET category_id = ?, title = ?, updated_at = ? WHERE id = ?")
         .run(categoryId, title, this.now(), savedAnswerId);
       return this.requireSavedAnswer(savedAnswerId);
-    })();
+    });
   }
 
   removeAnswer(savedAnswerId: string): void {
-    if (this.database.prepare("DELETE FROM saved_answers WHERE id = ?").run(savedAnswerId).changes === 0) {
-      throw new LibraryRepositoryError(SAVED_ANSWER_MISSING_MESSAGE);
-    }
+    this.write(() => {
+      if (this.database.prepare("DELETE FROM saved_answers WHERE id = ?").run(savedAnswerId).changes === 0) {
+        throw new LibraryRepositoryError(SAVED_ANSWER_MISSING_MESSAGE);
+      }
+    }, false);
   }
 
   pages(): LibraryPage[] {
@@ -325,6 +386,40 @@ export class LibraryRepository {
       ORDER BY html_renders.created_at DESC, html_renders.id DESC
       LIMIT ?
     `).all(MAX_LIBRARY_PAGES) as PageRow[]).flatMap((row) => pageFromRow(row) ?? []);
+  }
+
+  private build(): LibrarySnapshot {
+    return coherentLibrarySnapshot(this.categories(), this.savedAnswers());
+  }
+
+  private fingerprint(): string {
+    const row = cachedStatement(this.database, `
+      SELECT (SELECT COUNT(*) FROM saved_answers) AS answers,
+        (SELECT MAX(updated_at) FROM saved_answers) AS answers_updated,
+        (SELECT COUNT(*) FROM library_categories) AS categories,
+        (SELECT MAX(updated_at) FROM library_categories) AS categories_updated
+    `).get() as FingerprintRow;
+    return [row.answers, row.answers_updated ?? "", row.categories, row.categories_updated ?? ""].join("|");
+  }
+
+  private write<T>(change: () => T, grows = true): T {
+    this.generation += 1;
+    this.cache = null;
+    const measured: { snapshot: LibrarySnapshot | null } = { snapshot: null };
+    const result = this.database.transaction(() => {
+      const value = change();
+      if (grows) {
+        measured.snapshot = this.build();
+        if (librarySerializedBytes(measured.snapshot) > MAX_LIBRARY_SERIALIZED_BYTES) {
+          throw new LibraryRepositoryError(LIBRARY_FULL_MESSAGE);
+        }
+      }
+      return value;
+    })();
+    if (measured.snapshot && !this.database.inTransaction) {
+      this.cache = { generation: this.generation, fingerprint: this.fingerprint(), snapshot: measured.snapshot };
+    }
+    return result;
   }
 
   private assertUniqueName(name: string, exceptId: string | null): void {

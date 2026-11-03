@@ -71,6 +71,14 @@ export function applyTodosEvent(
   return { ...snapshot, todos: event.todos };
 }
 
+export function withStableLibrary(
+  previous: AppSnapshot | null,
+  next: AppSnapshot,
+): AppSnapshot {
+  if (!previous?.library || !next.library || previous.library === next.library) return next;
+  return structurallyEqual(previous.library, next.library) ? { ...next, library: previous.library } : next;
+}
+
 export function applyLibraryEvent(
   snapshot: AppSnapshot,
   event: LibraryEvent,

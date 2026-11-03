@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   LibraryAnswerContext,
+  savedAnswersByMessage,
   type LibraryAnswerController,
 } from "../../src/renderer/src/components/library/LibraryAnswerContext";
 import { LibrarySaveButton } from "../../src/renderer/src/components/library/LibrarySaveButton";
@@ -36,6 +37,7 @@ function harness(initial: LibrarySnapshot | null, request?: Request) {
   const onError = vi.fn();
   const controller = (value: LibrarySnapshot | null, online = true): LibraryAnswerController => ({
     library: value,
+    savedByMessageId: savedAnswersByMessage(value),
     online,
     request: mock,
     onError,
@@ -102,6 +104,25 @@ describe("Save to Library", () => {
     const view = harness(library([research], []));
     await user.click(screen.getByRole("button", { name: "Save to Library" }));
     expect(sent(view.request, "library.answer.save")[0]!.payload.categoryId).toBeNull();
+  });
+
+  it("shows what the Library already holds when a stale window saves again", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(LAST_CATEGORY_KEY, recipesId);
+    const view = harness(library([research, recipes], []), async (command) => command.type === "library.answer.save"
+      ? result({ kind: "library.answer", savedAnswer: stored })
+      : ok());
+    await user.click(screen.getByRole("button", { name: "Save to Library" }));
+    const menu = await screen.findByRole("menu", { name: "Saved to" });
+    await waitFor(() => expect(within(menu).getByRole("menuitemradio", { name: "Research" }))
+      .toHaveAttribute("aria-checked", "true"));
+    await user.click(within(menu).getByRole("menuitemradio", { name: "Research" }));
+    expect(sent(view.request, "library.answer.update")).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Saved to Library" }));
+    await user.click(within(await screen.findByRole("menu", { name: "Saved to" })).getByRole("menuitemradio", { name: "Recipes" }));
+    await waitFor(() => expect(sent(view.request, "library.answer.update")).toEqual([
+      { type: "library.answer.update", payload: { savedAnswerId: stored.id, categoryId: recipesId } },
+    ]));
   });
 
   it("shows a saved answer as saved and moves it to another category", async () => {

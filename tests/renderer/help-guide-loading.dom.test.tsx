@@ -58,6 +58,7 @@ function hostProps() {
       usage: vi.fn(),
       "daily-work": vi.fn(),
       tasks: vi.fn(),
+      library: vi.fn(),
       "welcome-guide": vi.fn(),
     },
     onOpenSettings: vi.fn(),

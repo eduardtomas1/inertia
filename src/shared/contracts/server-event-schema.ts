@@ -8,7 +8,7 @@ import { usageResultValidators } from "./usage-results-schema";
 import { backgroundTasksResult } from "./background-tasks-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
-import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, todoCollectionCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
+import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, todoCollectionCoherent, libraryCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
 import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode, isTurnSessionRecovery } from "../continuation-policy";
@@ -1044,6 +1044,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
         && nullableStringField(value, "conversationId");
     case "conversation.detail.invalidated": return stringField(value, "conversationId");
     case "todos.updated": return Array.isArray(value.todos) && todoCollectionCoherent(value.todos);
+    case "library.updated": return record(value.library) && libraryCoherent(value.library);
     case "conversation.message.persisted":
     case "agent.commentary.persisted":
       return chatMessage(value.message);
@@ -1103,7 +1104,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
 }
 import { issueReportResult } from "../issue-report";
 import { messageQueueResultSchema } from "../queued-messages";
-import { updatesRunResultSchema } from "../updates";
+import { updatesRunResultSchema } from "../updates"; import { libraryRequestResultValidators } from "../library";
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
@@ -1127,8 +1128,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "conversation.created": (value) => stringField(value, "conversationId"),
   "todo.started": (value) => stringField(value, "conversationId"),
   "conversation.cli.scan": (value) => cliConversationScanSchema.safeParse(value.scan).success, "conversation.cli.preview": (value) => cliConversationPreviewSchema.safeParse(value.preview).success, "conversation.cli.imported": (value) => stringField(value, "conversationId"),
-  "conversation.context.packet": (value) =>
-    conversationContextPacket(value.packet),
+  "conversation.context.packet": (value) => conversationContextPacket(value.packet),
   "conversation.context.source": (value) =>
     conversationContextSource(value.source),
   "project.created": (value) => stringField(value, "projectId"),
@@ -1160,7 +1160,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && booleanField(value, "hasMore"),
   "duo.prepared": (value) => duoPrepared(value),
   "duo.status": (value) => duoStatus(value),
-  ...watcherRequestResultValidators,
+  ...watcherRequestResultValidators, ...libraryRequestResultValidators,
   "git.status": (value) => gitStatus(value.status),
   "git.workspace.status": (value) => workspaceGitStatus(value.status),
   "git.diff": (value) => gitDiff(value.diff),

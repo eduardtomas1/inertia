@@ -40,6 +40,7 @@ interface AppNavigationOverlaysProps {
   importProject: () => Promise<void>;
   openSettings: (target?: SettingsTarget) => void;
   openTasks: () => void;
+  openLibrary?: () => void;
   addTask: () => void;
 }
 
@@ -61,6 +62,7 @@ export function AppNavigationOverlays({
   importProject,
   openSettings,
   openTasks,
+  openLibrary,
   addTask,
 }: AppNavigationOverlaysProps): React.JSX.Element {
   // Suspend the native preview from the always-loaded shell. Waiting for the
@@ -98,6 +100,7 @@ export function AppNavigationOverlays({
             onAddProject={() => void importProject()}
             onOpenSettings={openSettings}
             onOpenTasks={openTasks}
+            onOpenLibrary={openLibrary}
             onAddTask={addTask}
           />
         ) : <PaletteLoadingShell />

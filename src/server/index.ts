@@ -99,9 +99,8 @@ import { createConversationCompactionCommandHandler } from "./runtime/commands/c
 import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
-import {
-  createAgentWorkflowCommandHandler,
-} from "./runtime/commands/agent-workflow-commands";
+import { createLibraryCommandHandler } from "./runtime/commands/library-commands";
+import { createAgentWorkflowCommandHandler } from "./runtime/commands/agent-workflow-commands";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
 import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/agent-thread-runtime";
 import {
@@ -757,6 +756,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, visibleLaunchIds: detachedChatRuntimeSecurity.visibleDuoLaunchIds, broadcastSnapshot: flushSnapshot, send }),
       watchers.handler,
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
+      createLibraryCommandHandler({ store, broadcast, send }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork,

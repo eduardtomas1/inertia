@@ -2,6 +2,28 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.82 — 2026-11-03
+
+A Library for the answers worth keeping and the pages your agents drew.
+
+### Library
+
+- A new **Library** in the sidebar, below Tasks, and in the command palette,
+  keeps the answers you save. Choose the bookmark beside Copy under a finished
+  reply to save it. It goes to the category you used last, and the menu that
+  opens lets you move it, make a new category or remove it again.
+- Name your own categories, rename them or delete them; deleting one moves its
+  answers to *Unsorted*. Search finds saved answers by title, text, chat,
+  project or category, and you can rename a saved answer.
+- **Open in chat** takes you back to the chat and lands on that reply with a
+  brief highlight, even far back in a long history or in a chat open in its
+  own window. An answer in an archived chat offers **Restore and open**.
+- **Pages** shows every page an agent drew for you, across all chats, as live
+  previews. Open one full size, then **Go to answer** to read the turn it came
+  from.
+- A search result you open gets the same brief highlight.
+- Deleting a chat also removes its saved answers.
+
 ## 0.0.81 — 2026-11-03
 
 Large Claude skills that work, a reader who stays where they stop, Linux

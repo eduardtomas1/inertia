@@ -12,6 +12,7 @@ import {
 } from "react";
 import {
   ArrowLeft,
+  Bookmark,
   ChevronRight,
   CircleCheck,
   Check,
@@ -74,7 +75,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
-import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadTasksView, loadUsageView } from "./lazySurfaceLoaders";
+import { loadDailyWorkDialog, loadLibraryView, loadMultiSpawnDialog, loadSettingsView, loadTasksView, loadUsageView } from "./lazySurfaceLoaders";
 import { sidebarTasksLabel, tasksNeedingYou } from "./sidebar/sidebarTaskCount";
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
@@ -1062,6 +1063,10 @@ function SidebarView({
           <ListTodo size={16} aria-hidden="true" />
           <span>Tasks</span>
           {tasksNeedYou > 0 && <span className="sidebar-tasks-count" aria-hidden="true">{tasksNeedYou}</span>}
+        </button>
+        <button type="button" className={clsx("sidebar-primary-action sidebar-library-action", view === "library" && "is-active")} aria-current={view === "library" ? "page" : undefined} onFocus={() => void loadLibraryView()} onPointerDown={() => void loadLibraryView()} onPointerEnter={() => void loadLibraryView()} onClick={() => navigate("library")}>
+          <Bookmark size={16} aria-hidden="true" />
+          <span>Library</span>
         </button>
         <div className="sidebar-search-wrap">
           <Search size={16} aria-hidden="true" />

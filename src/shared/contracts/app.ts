@@ -36,6 +36,7 @@ import type { AgentTurnStatus } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
 import type { Todo } from "../todos";
+import type { LibrarySnapshot } from "../library";
 import type { WatcherLinkView } from "../watcher";
 
 export type { ProviderId } from "../provider";
@@ -353,6 +354,7 @@ export interface AppSnapshot {
   /** Present on authoritative snapshots; optional only for legacy fixtures. */
   promptPresets?: PromptPreset[];
   todos?: Todo[];
+  library?: LibrarySnapshot;
   watchers?: WatcherLinkView[];
   activeProjectId: string | null;
   activeConversationId: string | null;

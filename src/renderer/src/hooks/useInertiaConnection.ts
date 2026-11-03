@@ -21,6 +21,7 @@ import {
 } from "../utils/connectionMessages";
 import {
   applyConversationShellEvent,
+  applyLibraryEvent,
   applyTodosEvent,
   applyWatcherLinkEvent,
 } from "../utils/runtimeSnapshotProjection";
@@ -237,6 +238,11 @@ export function useInertiaConnection(
                   setSnapshot((current) => current
                     ? applyTodosEvent(current, todosEvent)
                     : current);
+                } else if (event.type === "library.updated") {
+                  const libraryEvent = event;
+                  setSnapshot((current) => current
+                    ? applyLibraryEvent(current, libraryEvent)
+                    : current);
                 } else if (
                   event.type === "watcher.link.updated"
                   || event.type === "watcher.link.removed"
@@ -273,6 +279,11 @@ export function useInertiaConnection(
                 const todosEvent = event;
                 setSnapshot((current) => current
                   ? applyTodosEvent(current, todosEvent)
+                  : current);
+              } else if (event.type === "library.updated") {
+                const libraryEvent = event;
+                setSnapshot((current) => current
+                  ? applyLibraryEvent(current, libraryEvent)
                   : current);
               }
 

@@ -1,13 +1,23 @@
 import type { AppSnapshot, Conversation, ServerEvent } from "@shared/contracts";
-import type { MessageSearchHit, MessageSearchTarget } from "@shared/message-search";
+import type { MessageSearchTarget } from "@shared/message-search";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { DetachedChatWindowsController } from "../hooks/useDetachedChatWindows";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { requestMessageSearchFocus } from "./messageSearchFocus";
 
-export async function openMessageSearchResult(hit: MessageSearchHit, {
+export interface MessageNavigationCopy {
+  unavailable: string;
+  failed: string;
+}
+
+export const MESSAGE_SEARCH_NAVIGATION_COPY: MessageNavigationCopy = {
+  unavailable: "This search result is no longer available.",
+  failed: "This search result could not be opened. Search again to refresh it.",
+};
+
+export async function openMessageSearchResult(hit: MessageSearchTarget, {
   snapshot, conversationSelectionGenerationRef, intent, detachedChats, request,
-  selectConversationInMain, setActionError, onReady, signal,
+  selectConversationInMain, setActionError, onReady, signal, copy = MESSAGE_SEARCH_NAVIGATION_COPY,
 }: {
   snapshot: AppSnapshot | null;
   conversationSelectionGenerationRef: RefObject<number>;
@@ -18,12 +28,13 @@ export async function openMessageSearchResult(hit: MessageSearchHit, {
   setActionError: Dispatch<SetStateAction<string | null>>;
   onReady?: () => void;
   signal?: AbortSignal;
+  copy?: MessageNavigationCopy;
 }): Promise<boolean> {
   if (signal?.aborted || intent !== conversationSelectionGenerationRef.current) return false;
   const nextConversation = snapshot?.conversations.find(({ id, projectId, archivedAt }) =>
     id === hit.conversationId && projectId === hit.projectId && archivedAt === null);
   if (!nextConversation) {
-    setActionError("This search result is no longer available.");
+    setActionError(copy.unavailable);
     return false;
   }
   const target: MessageSearchTarget = {
@@ -67,7 +78,7 @@ export async function openMessageSearchResult(hit: MessageSearchHit, {
     return true;
   } catch {
     if (!signal?.aborted && navigationGeneration === conversationSelectionGenerationRef.current) {
-      setActionError("This search result could not be opened. Search again to refresh it.");
+      setActionError(copy.failed);
     }
     return false;
   } finally { signal?.removeEventListener("abort", cancel); }

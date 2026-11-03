@@ -56,8 +56,13 @@
   flex: 0 0 auto;
   margin-top: 2px;
 }
+.sidebar-library-action {
+  flex: 0 0 auto;
+}
 .sidebar-tasks-action.is-active,
-.sidebar-tasks-action.is-active:hover {
+.sidebar-tasks-action.is-active:hover,
+.sidebar-library-action.is-active,
+.sidebar-library-action.is-active:hover {
   background: var(--fill-strong);
 }
 .sidebar-tasks-action > .sidebar-tasks-count {

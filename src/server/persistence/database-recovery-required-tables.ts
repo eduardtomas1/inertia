@@ -1,3 +1,4 @@
+import { LIBRARY_SCHEMA_VERSION } from "./migrations/library";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
 
 export type DatabaseRequiredTables = readonly (
@@ -133,6 +134,18 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "prompt_cache_source",
   ]],
   [106, "messages", ["duo_comparison_json"]],
+  [LIBRARY_SCHEMA_VERSION, "library_categories", ["id", "name", "created_at", "updated_at"]],
+  [LIBRARY_SCHEMA_VERSION, "saved_answers", [
+    "id",
+    "conversation_id",
+    "turn_id",
+    "message_id",
+    "category_id",
+    "title",
+    "excerpt",
+    "created_at",
+    "updated_at",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -179,6 +192,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [98, ["conversation_title_locks"]],
   [99, ["watcher_links", "watcher_wakes"]],
   [103, ["turn_failure_kinds"]],
+  [LIBRARY_SCHEMA_VERSION, ["library_categories", "saved_answers"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -203,6 +217,13 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "messages_conversation_created_idx"],
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "activities_conversation_created_idx"],
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "reasonings_conversation_created_idx"],
+    [LIBRARY_SCHEMA_VERSION, "library_categories_name_idx"],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_message_idx"],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_conversation_idx"],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_turn_idx"],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_category_idx"],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_created_idx"],
+    [LIBRARY_SCHEMA_VERSION, "html_renders_created_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [
@@ -227,6 +248,16 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
       "before insert on todos",
       "when new.completed_at is null",
       "(select count(*) from todos where completed_at is null) >= 200",
+      "raise(abort,",
+    ]],
+    [LIBRARY_SCHEMA_VERSION, "library_categories_count_limit", [
+      "before insert on library_categories",
+      "(select count(*) from library_categories) >= 100",
+      "raise(abort,",
+    ]],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_count_limit", [
+      "before insert on saved_answers",
+      "(select count(*) from saved_answers) >= 1000",
       "raise(abort,",
     ]],
   ],

@@ -75,6 +75,21 @@ exports[`hot query plans on a seeded runtime database > snapshots every app snap
     ],
   },
   {
+    "query": "SELECT id, name, created_at, updated_at FROM library_categories ORDER BY name COLLATE NOCASE ASC, id ASC LIMIT ?",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN library_categories USING INDEX library_categories_name_idx",
+    ],
+  },
+  {
+    "query": "SELECT saved_answers.id, saved_answers.conversation_id, conversations.project_id, saved_answers.turn_id, saved_answers.message_id, saved_answers.category_id, sa…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN saved_answers USING INDEX saved_answers_created_idx",
+      "SEARCH conversations USING INDEX sqlite_autoindex_conversations_1 (id=?)",
+    ],
+  },
+  {
     "query": "SELECT link.*, latest.outcome AS latest_outcome, latest.settled_at AS latest_at, substr(latest.finding_preview, 1, 1024) AS latest_finding, ( SELECT finding.set…",
     "withStatistics": "same",
     "withoutStatistics": [

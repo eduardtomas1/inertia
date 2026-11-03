@@ -35,6 +35,10 @@
   margin: 0;
 }
 
+.html-render:focus {
+  outline: none;
+}
+
 .html-render-frame {
   display: block;
   width: 100%;

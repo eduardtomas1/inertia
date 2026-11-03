@@ -7,7 +7,7 @@ import {
   type WorkspaceRun,
 } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
-import { applyConversationShellEvent, applyTodosEvent } from "../../src/renderer/src/utils/runtimeSnapshotProjection";
+import { applyConversationShellEvent, applyLibraryEvent, applyTodosEvent } from "../../src/renderer/src/utils/runtimeSnapshotProjection";
 import type { Todo } from "../../src/shared/todos";
 
 function conversation(id: string, updatedAt: string): ConversationShell {
@@ -272,5 +272,41 @@ describe("task list projection", () => {
 
   it("keeps the snapshot identity when the tasks did not change", () => {
     expect(applyTodosEvent(snapshot, { type: "todos.updated", todos: [{ ...task }] })).toBe(snapshot);
+  });
+});
+
+describe("applyLibraryEvent", () => {
+  const library = {
+    categories: [{
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      name: "Recipes",
+      createdAt: "2026-11-03T10:00:00.000Z",
+      updatedAt: "2026-11-03T10:00:00.000Z",
+    }],
+    savedAnswers: [],
+  };
+  const snapshot: AppSnapshot = {
+    projects: [],
+    conversations: [conversation("primary", "2026-07-30T10:00:00.000Z")],
+    runs: [],
+    providers: [],
+    settings: { ...defaultSettings },
+    activeProjectId: null,
+    activeConversationId: null,
+    library,
+  };
+
+  it("replaces the library and keeps every other collection", () => {
+    const next = applyLibraryEvent(snapshot, { type: "library.updated", library: { categories: [], savedAnswers: [] } });
+    expect(next.library).toEqual({ categories: [], savedAnswers: [] });
+    expect(next.conversations).toBe(snapshot.conversations);
+    expect(applyLibraryEvent({ ...snapshot, library: undefined }, { type: "library.updated", library }).library).toBe(library);
+  });
+
+  it("keeps the snapshot identity when the library did not change", () => {
+    expect(applyLibraryEvent(snapshot, {
+      type: "library.updated",
+      library: { categories: [{ ...library.categories[0]! }], savedAnswers: [] },
+    })).toBe(snapshot);
   });
 });

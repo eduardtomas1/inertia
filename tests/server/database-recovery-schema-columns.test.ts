@@ -13,6 +13,7 @@ import {
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "../../src/server/persistence/migrations/turn-scoped-indexes";
 import { DUO_COMPARISON_BRIEFS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/duo-comparison-briefs";
+import { LIBRARY_SCHEMA_VERSION } from "../../src/server/persistence/migrations/library";
 
 const directories: string[] = [];
 
@@ -35,6 +36,13 @@ const contextPacketTriggers = [
 ];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < LIBRARY_SCHEMA_VERSION) {
+    database.exec(`
+      DROP INDEX html_renders_created_idx;
+      DROP TABLE saved_answers;
+      DROP TABLE library_categories;
+    `);
+  }
   if (version < DUO_COMPARISON_BRIEFS_SCHEMA_VERSION) database.exec("ALTER TABLE messages DROP COLUMN duo_comparison_json");
   if (version < TURN_SCOPED_INDEXES_SCHEMA_VERSION) {
     database.exec(`
@@ -162,13 +170,21 @@ describe("database health check for settings and subagent columns", () => {
       "reasonings_conversation_created_idx",
     ].map((index) => ({ version: TURN_SCOPED_INDEXES_SCHEMA_VERSION, sql: `DROP INDEX ${index}` })),
     { version: DUO_COMPARISON_BRIEFS_SCHEMA_VERSION, sql: "ALTER TABLE messages DROP COLUMN duo_comparison_json" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP TABLE saved_answers" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP TABLE library_categories" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "ALTER TABLE saved_answers DROP COLUMN excerpt" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP INDEX saved_answers_message_idx" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP INDEX library_categories_name_idx" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP INDEX html_renders_created_idx" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP TRIGGER saved_answers_count_limit" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP TRIGGER library_categories_count_limit" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each(Array.from({ length: DUO_COMPARISON_BRIEFS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each(Array.from({ length: LIBRARY_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

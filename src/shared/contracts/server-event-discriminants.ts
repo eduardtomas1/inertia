@@ -39,6 +39,12 @@ import {
   todoSchema,
   todosSerializedBytes,
 } from "../todos";
+import {
+  MAX_LIBRARY_SERIALIZED_BYTES,
+  libraryCategoryNameKey,
+  librarySerializedBytes,
+  librarySnapshotSchema,
+} from "../library";
 import { watcherLinkCollectionCoherent } from "./watcher-schema";
 
 function exhaustiveOptions<T extends string>(
@@ -151,6 +157,26 @@ export function todoCollectionCoherent(value: unknown): boolean {
     && todosSerializedBytes(todos) <= MAX_TODOS_SERIALIZED_BYTES;
 }
 
+export function libraryCoherent(
+  value: unknown,
+  conversationProjects?: ReadonlyMap<unknown, unknown>,
+): boolean {
+  if (value === undefined) return true;
+  const parsed = librarySnapshotSchema.safeParse(value);
+  if (!parsed.success) return false;
+  const { categories, savedAnswers } = parsed.data;
+  const categoryIds = new Set(categories.map(({ id }) => id));
+  return categoryIds.size === categories.length
+    && new Set(categories.map(({ name }) => libraryCategoryNameKey(name))).size === categories.length
+    && new Set(savedAnswers.map(({ id }) => id)).size === savedAnswers.length
+    && new Set(savedAnswers.map(({ messageId }) => messageId)).size === savedAnswers.length
+    && savedAnswers.every((answer) =>
+      (answer.categoryId === null || categoryIds.has(answer.categoryId))
+      && (conversationProjects === undefined
+        || conversationProjects.get(answer.conversationId) === answer.projectId))
+    && librarySerializedBytes(value) <= MAX_LIBRARY_SERIALIZED_BYTES;
+}
+
 const CONVERSATION_DETAIL_SCOPED_COLLECTIONS = [
   "agentTurns", "turnGitArtifacts", "messages", "activities", "subagents",
   "reasonings", "usage", "plans", "goals", "checkpoints", "reviewSummaries",
@@ -260,6 +286,7 @@ export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): bool
       || conversationProjects.get(value.activeConversationId) === value.activeProjectId)
     && promptPresetCollectionCoherent(value.promptPresets)
     && todoCollectionCoherent(value.todos)
+    && libraryCoherent(value.library, conversationProjects)
     && watcherLinkCollectionCoherent(value.watchers, conversationProjects, projectIds);
 }
 
@@ -339,6 +366,7 @@ function mutationConversationId(event: RuntimeMutationEvent): string | null {
     case "snapshot.updated":
     case "conversation.shell.updated":
     case "todos.updated":
+    case "library.updated":
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":

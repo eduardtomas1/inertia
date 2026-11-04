@@ -447,6 +447,7 @@ export class TranscriptRepository {
       LEFT JOIN agent_turns t ON t.id = m.turn_id AND t.conversation_id = c.id
       WHERE m.id = ? AND c.archived_at IS NULL AND (
         m.role = 'user' OR (m.role = 'assistant' AND t.terminal_assistant_message_id = m.id)
+        OR (m.role = 'system' AND t.id IS NOT NULL AND m.html_render_json IS NOT NULL)
       )
     `).get(messageId) as MessageSearchTarget | undefined ?? null;
   }

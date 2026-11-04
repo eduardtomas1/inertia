@@ -18,7 +18,7 @@ import {
   type ProviderMaintenanceProviderId,
   type SubagentTrace,
 } from "@shared/contracts";
-import type { MessageSearchHit } from "@shared/message-search";
+import type { MessageSearchHit, MessageSearchTarget } from "@shared/message-search";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
 import { DEFAULT_QUOTA_WARNINGS } from "@shared/quota-warnings";
 import type { ProviderAuthMethod } from "@shared/provider";
@@ -52,6 +52,12 @@ import { useSplitPanes } from "./hooks/useSplitPanes";
 import { useSplitPaneScenes } from "./hooks/useSplitPaneScenes";
 import { useMultiSpawn } from "./hooks/useMultiSpawn";
 import { DuoJudgeNoticeContext } from "./components/DuoJudgeNoticeContext";
+import {
+  LIBRARY_NAVIGATION_COPY,
+  LibraryAnswerContext,
+  savedAnswersByMessage,
+  type LibraryAnswerController,
+} from "./components/library/LibraryAnswerContext";
 import { useProjectChatNavigation } from "./hooks/useProjectChatNavigation";
 import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
 import { useTheme } from "./hooks/useTheme";
@@ -1021,6 +1027,17 @@ export default function App(): React.JSX.Element {
     selectConversation,
     openConversationInSplit,
   });
+  const libraryRequest = useCallback(
+    (command: CommandWithoutId) => run(command.type, command, { passive: true, reportError: false }),
+    [run],
+  );
+  const libraryAnswers = useMemo<LibraryAnswerController>(() => ({
+    library: connection.snapshot?.library ?? null,
+    savedByMessageId: savedAnswersByMessage(connection.snapshot?.library),
+    online: connection.status === "online",
+    request: libraryRequest,
+    onError: setActionError,
+  }), [connection.snapshot?.library, connection.status, libraryRequest]);
   const layoutUsage = useMemo(
     () => ({ status: connection.status, request }),
     [connection.status, request],
@@ -1056,6 +1073,8 @@ export default function App(): React.JSX.Element {
     selectConversation,
     selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) =>
       selectMessage(hit, () => setView("workspace"), signal),
+    openLibraryAnswer: (target: MessageSearchTarget) =>
+      selectMessage(target, () => setView("workspace"), undefined, LIBRARY_NAVIGATION_COPY),
     openConversationInSplit,
     openConversationInWindow,
     closeConversationSplit: (target: Conversation) => {
@@ -1127,6 +1146,7 @@ export default function App(): React.JSX.Element {
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <DuoJudgeNoticeContext.Provider value={duoJudgeNotices}>
+    <LibraryAnswerContext.Provider value={libraryAnswers}>
     <Suspense fallback={null}><DialogPresence open={addProjectOpen}><AddProjectDialog onClose={() => setAddProjectOpen(false)} onImport={confirmProjectImport} /></DialogPresence></Suspense>
     <WatcherContext.Provider value={watchers.surface}>
     <WatcherAttachHost target={watchers.attach.target} snapshot={connection.snapshot} settings={settings} request={request}
@@ -1177,6 +1197,7 @@ export default function App(): React.JSX.Element {
       actions={layoutActions}
     />
     </WatcherContext.Provider>
+    </LibraryAnswerContext.Provider>
     </DuoJudgeNoticeContext.Provider>
     </HtmlRenderRuntimeStatusContext.Provider>
     </WorkingIndicatorProvider>

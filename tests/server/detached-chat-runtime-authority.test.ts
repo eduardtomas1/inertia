@@ -140,6 +140,7 @@ function resources(): DetachedChatRuntimePolicyResources {
       [TURN]: CONVERSATION,
       [OTHER_TURN]: OTHER_CONVERSATION,
     })[turnId] ?? null,
+    savedAnswerConversationId: () => null,
     duoLaunchConversationIds: (launchId) => ({
       [LAUNCH]: [CONVERSATION, OTHER_CONVERSATION],
       [JUDGED_LAUNCH]: [OTHER_CONVERSATION, "99999999-9999-4999-8999-999999999999", CONVERSATION],
@@ -587,6 +588,7 @@ describe("detached chat runtime authority", () => {
         subagentTrace: () => { throw new Error("Not found."); },
         checkpoint: () => { throw new Error("Not found."); },
         agentTurn: () => { throw new Error("Not found."); },
+        library: { savedAnswerConversationId: () => null },
         findPairedLaunch: () => null,
       },
       snapshot,

@@ -9,6 +9,7 @@ export const HELP_COMMANDS = [
   "usage",
   "daily-work",
   "tasks",
+  "library",
   "welcome-guide",
 ] as const;
 
@@ -207,6 +208,37 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     ],
     jumps: [
       { label: "Open Tasks", command: "tasks" },
+    ],
+  },
+  {
+    id: "library",
+    title: "Library",
+    summary: "Keep the answers and pages worth returning to.",
+    entries: [
+      {
+        name: "What it keeps",
+        detail: "Saved answers you choose to keep, and every page an agent has shown you. Open it from Library in the sidebar or the command palette.",
+        jump: "Open Library",
+      },
+      {
+        name: "Save an answer",
+        detail: "Choose the bookmark beside Copy under a finished reply. It goes to the category you used last, and the menu that opens lets you move it, start a new category or remove it again.",
+      },
+      {
+        name: "Categories",
+        detail: "Make categories in the Library or while saving. Rename or delete one from its … menu; deleting a category moves its answers to Unsorted.",
+      },
+      {
+        name: "Back to the answer",
+        detail: "Opening a saved answer returns you to its chat and lands on that reply, even far back in a long history or in a chat open in its own window. An archived chat is restored first.",
+      },
+      {
+        name: "Pages",
+        detail: "The Pages tab lists the visual pages agents drew for you. Open one full size, then Go to answer to read the turn it came from.",
+      },
+    ],
+    jumps: [
+      { label: "Open Library", command: "library" },
     ],
   },
   {

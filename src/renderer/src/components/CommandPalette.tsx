@@ -1,4 +1,4 @@
-import { ChevronRight, CircleHelp, Eye, FolderPlus, ListTodo, MessageSquare, Plus, Search, Settings, SquarePen, X } from "lucide-react";
+import { Bookmark, ChevronRight, CircleHelp, Eye, FolderPlus, ListTodo, MessageSquare, Plus, Search, Settings, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -39,6 +39,7 @@ type CommandPaletteProps = {
   onAddProject: () => void;
   onOpenSettings: (target?: SettingsTarget) => void;
   onOpenTasks?: () => void;
+  onOpenLibrary?: () => void;
   onAddTask?: () => void;
 };
 
@@ -141,7 +142,7 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return <>{parts}{text.slice(offset)}</>;
 }
 
-export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onNewThreadWithoutProject, onAddProject, onOpenSettings, onOpenTasks, onAddTask }: CommandPaletteProps): React.JSX.Element | null {
+export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onNewThreadWithoutProject, onAddProject, onOpenSettings, onOpenTasks, onOpenLibrary, onAddTask }: CommandPaletteProps): React.JSX.Element | null {
   const [view, setView] = useState(initialView);
   const choosingProject = view === "new-chat";
   const [query, setQuery] = useState("");
@@ -176,6 +177,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
       ...(onNewThreadWithoutProject ? [{ id: "action:no-project", group: "Actions" as const, label: "Start without a project", icon: <SquarePen size={14} />, run: onNewThreadWithoutProject }] : []),
       { id: "action:add-project", group: "Actions", label: "Add project", icon: <FolderPlus size={14} />, run: onAddProject },
       ...(onOpenTasks ? [{ id: "action:tasks", group: "Actions" as const, label: "Open tasks", icon: <ListTodo size={14} />, run: onOpenTasks }] : []),
+      ...(onOpenLibrary ? [{ id: "action:library", group: "Actions" as const, label: "Open Library", keywords: "saved answers bookmarks pages", icon: <Bookmark size={14} />, run: onOpenLibrary }] : []),
       ...(onAddTask ? [{ id: "action:add-task", group: "Actions" as const, label: "Add a task", keywords: "to-do todo", icon: <Plus size={14} />, run: onAddTask }] : []),
       { id: "action:settings", group: "Actions", label: "Open settings", icon: <Settings size={14} />, run: onOpenSettings },
       { id: "action:help", group: "Actions", label: "Open help", icon: <CircleHelp size={14} />, run: openHelpGuide },
@@ -185,7 +187,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={14} />, run: () => onSelectConversation(thread) }));
     return [...actions, ...projectItems, ...threadItems];
-  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onNewThreadWithoutProject, onOpenSettings, onOpenTasks, onAddTask, onSelectConversation, onSelectProject, projects, watcherSurface]);
+  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onNewThreadWithoutProject, onOpenSettings, onOpenTasks, onOpenLibrary, onAddTask, onSelectConversation, onSelectProject, projects, watcherSurface]);
   const settingsItems = useMemo<PaletteItem[]>(() => {
     const regular = projects.filter((project) => project.workspaceKind !== "scratch");
     const projectId = (regular.find(({ id }) => id === currentProjectId) ?? regular[0])?.id;

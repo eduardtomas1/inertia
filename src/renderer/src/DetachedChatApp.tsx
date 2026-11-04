@@ -31,6 +31,7 @@ import { cachedAppSettings } from "./utils/cachedSettings";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { WatcherContext } from "./components/watcher/watcherContext";
 import { DuoJudgeNoticeContext } from "./components/DuoJudgeNoticeContext";
+import { LibraryAnswerContext, savedAnswersByMessage, type LibraryAnswerController } from "./components/library/LibraryAnswerContext";
 import { useDuoLaunchWatch } from "./hooks/useDuoLaunchWatch";
 import { useWatcherSurfaceController } from "./hooks/useWatcherSurface";
 import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
@@ -267,12 +268,20 @@ export default function DetachedChatApp({
     onError: setActionError,
     openConversation: openDuoConversation,
   });
+  const libraryAnswers = useMemo<LibraryAnswerController>(() => ({
+    library: connection.snapshot?.library ?? null,
+    savedByMessageId: savedAnswersByMessage(connection.snapshot?.library),
+    online: connection.status === "online",
+    request,
+    onError: setActionError,
+  }), [connection.snapshot?.library, connection.status, request]);
   const platform = window.inertia?.getPlatform?.() ?? "unknown";
   return (
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <WatcherContext.Provider value={watchers.surface}>
     <DuoJudgeNoticeContext.Provider value={duoLaunches.notices}>
+    <LibraryAnswerContext.Provider value={libraryAnswers}>
     <div
       className={`detached-chat-shell platform-${platform}`}
       data-interface-scale={settings.interfaceScale}
@@ -303,6 +312,7 @@ export default function DetachedChatApp({
         </div>
       )}
     </div>
+    </LibraryAnswerContext.Provider>
     </DuoJudgeNoticeContext.Provider>
     </WatcherContext.Provider>
     </HtmlRenderRuntimeStatusContext.Provider>

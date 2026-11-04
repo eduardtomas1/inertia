@@ -787,6 +787,11 @@
       "version": 106,
       "name": "PersistDuoComparisonBriefs",
       "digest": "5f178914d0fa96fece0a0ad3c5dab4c1362971ed3c93d02d0a923457f0aec920"
+    },
+    {
+      "version": 107,
+      "name": "PersistLibrary",
+      "digest": "cf3360a481f8ec2e0a5bb891ad850fc46df8669cf93d4e102d30ba7f737b3565"
     }
   ]
 }

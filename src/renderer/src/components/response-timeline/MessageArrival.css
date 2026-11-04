@@ -1,0 +1,29 @@
+[data-arrival] {
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-arrival] {
+    animation: message-arrival 1.6s var(--ease-fade) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-arrival] {
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 7%, transparent);
+  }
+}
+
+@keyframes message-arrival {
+  0%,
+  35% {
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 9%, transparent);
+  }
+
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 6px transparent;
+  }
+}

@@ -105,6 +105,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   },
   "agent.input.respond": shortMutation,
   "agent.skills.list": agentWorkflowRead,
+  "agent.skills.preview": agentWorkflowRead,
   "agent.stop": shortMutation,
   "agent.subagent.stop": shortMutation,
   "agent.workflow.load": agentWorkflowRead,

@@ -38,6 +38,7 @@ import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
 import { usePlanSteps } from "./hooks/usePlanSteps";
 import { useAsyncOperationQueue, useAuthoritativeConversationCreateQueue, useWorkspaceAuthorityCommandQueue } from "./hooks/useConversationSelectionQueue";
+import { useDraftSkills } from "./hooks/useDraftSkills";
 import { agentWorkflowRouteIdentity, agentWorkflowTargetConversation, useAgentWorkflows } from "./hooks/useAgentWorkflows";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
@@ -401,6 +402,11 @@ export default function App(): React.JSX.Element {
     conversation,
     draftConversation.conversation,
   );
+  const draftSkills = useDraftSkills({
+    draft: draftConversation.conversation,
+    status: connection.status,
+    request,
+  });
   const agentWorkflows = useStableController(useAgentWorkflows({
     conversationId: workflowConversation?.id ?? null,
     routeIdentity: agentWorkflowRouteIdentity(workflowConversation, project),
@@ -888,6 +894,7 @@ export default function App(): React.JSX.Element {
     appUpdate,
     planSteps,
     workflow: agentWorkflows,
+    draftSkills,
     detailLoading,
     selectedMaintenanceStatus,
     selectedMaintenanceOperation,
@@ -909,6 +916,7 @@ export default function App(): React.JSX.Element {
     globalChatActive,
     planSteps,
     agentWorkflows,
+    draftSkills,
     composerProject,
     providerMaintenance,
     selectedMaintenanceOperation,

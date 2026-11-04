@@ -146,6 +146,10 @@ function harness(options: {
       if (options.providerRejection) throw new ConversationProviderChangeError(options.providerRejection);
     }),
     conversationPath: vi.fn(() => "/workspace/project"),
+    projectPath: vi.fn((projectId: string) => {
+      if (projectId !== PREVIEW_PROJECT) throw new Error("Project not found.");
+      return "/workspace/project";
+    }),
     agentGoals: vi.fn(() => [...goals]),
     upsertAgentGoal: vi.fn((goal: AgentGoal) => {
       clear(goal.conversationId, goal.source);
@@ -243,6 +247,9 @@ function codexSkillResponse(name = "security-review"): Record<string, unknown> {
   };
 }
 
+const PREVIEW_PROJECT = "22222222-2222-4222-8222-222222222222";
+const PREVIEW_DRAFT = "11111111-1111-4111-8111-111111111111";
+
 describe("AgentWorkflowController", () => {
   it("recognizes exact skill tokens in textual order without prefix collisions", () => {
     expect(mentionedSkillNames(
@@ -259,6 +266,72 @@ describe("AgentWorkflowController", () => {
     expect(containsPotentialSkillInvocation(
       "The budget is $12.50 and PATH contains $HOME.",
     )).toBe(false);
+  });
+
+  it("previews a draft's Codex skills from its project without a chat", async () => {
+    controlRequest.mockResolvedValue(codexSkillResponse());
+    const runtime = harness();
+
+    const preview = await runtime.controller.previewSkills({
+      draftConversationId: PREVIEW_DRAFT,
+      projectId: PREVIEW_PROJECT,
+      harnessId: "codex-app-server",
+      forceReload: true,
+    });
+
+    expect(controlRequest).toHaveBeenLastCalledWith("skills/list", {
+      cwds: ["/workspace/project"],
+      forceReload: true,
+    });
+    expect(preview.skills).toEqual([expect.objectContaining({
+      conversationId: PREVIEW_DRAFT,
+      name: "security-review",
+      source: "codex-native",
+    })]);
+    expect(preview.skillDiscovery).toMatchObject({ truncated: false, warningCount: 0 });
+  });
+
+  it("previews a draft's Claude skills from its project without a chat", async () => {
+    const runtime = harness({
+      claudeSkills: [{ name: "review", description: "Review.", argumentHint: "" }],
+    });
+
+    const preview = await runtime.controller.previewSkills({
+      draftConversationId: PREVIEW_DRAFT,
+      projectId: PREVIEW_PROJECT,
+      harnessId: "claude-agent-sdk",
+      forceReload: false,
+    });
+
+    expect(runtime.providers.claudeSkills).toHaveBeenCalledWith("/workspace/project", false);
+    expect(preview.skills).toEqual([expect.objectContaining({
+      conversationId: PREVIEW_DRAFT,
+      name: "review",
+      source: "claude-native",
+    })]);
+  });
+
+  it("keeps a draft preview out of every chat's invocable skills", async () => {
+    controlRequest.mockResolvedValue(codexSkillResponse());
+    const runtime = harness();
+
+    await runtime.controller.previewSkills({
+      draftConversationId: "conversation-1",
+      projectId: PREVIEW_PROJECT,
+      harnessId: "codex-app-server",
+      forceReload: false,
+    });
+
+    expect(runtime.controller.state("conversation-1").skills).toEqual([]);
+  });
+
+  it("refuses to preview skills for an unknown project", async () => {
+    await expect(harness().controller.previewSkills({
+      draftConversationId: PREVIEW_DRAFT,
+      projectId: "33333333-3333-4333-8333-333333333333",
+      harnessId: "codex-app-server",
+      forceReload: false,
+    })).rejects.toThrow("Project not found.");
   });
 
   it("does not discover skills for ordinary dollar content", async () => {

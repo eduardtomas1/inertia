@@ -68,6 +68,7 @@ export function createAgentWorkflowCommandHandler(
     "agent.goal.set",
     "agent.goal.clear",
     "agent.skills.list",
+    "agent.skills.preview",
   ], async (socket, command) => {
     switch (command.type) {
       case "agent.workflow.load": {
@@ -129,6 +130,24 @@ export function createAgentWorkflowCommandHandler(
         dependencies.send(socket, {
           type: "request.ok",
           requestId: command.requestId,
+        });
+        return "handled";
+      }
+      case "agent.skills.preview": {
+        const preview = await dependencies.workflows.previewSkills({
+          draftConversationId: command.payload.draftConversationId,
+          projectId: command.payload.projectId,
+          harnessId: command.payload.harnessId,
+          forceReload: command.payload.forceReload ?? false,
+        });
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "agent.skills",
+            conversationId: command.payload.draftConversationId,
+            ...preview,
+          },
         });
         return "handled";
       }

@@ -792,6 +792,11 @@
       "version": 107,
       "name": "PersistLibrary",
       "digest": "cf3360a481f8ec2e0a5bb891ad850fc46df8669cf93d4e102d30ba7f737b3565"
+    },
+    {
+      "version": 108,
+      "name": "SupportNativeGrokProvider",
+      "digest": "ebd503c313888340941e761cc7bcb54ffff101a54cfd06081afc1d6b5d68b1e2"
     }
   ]
 }

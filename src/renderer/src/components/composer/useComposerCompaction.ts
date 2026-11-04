@@ -10,6 +10,7 @@ import {
 
 import {
   ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
+  GROK_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
   KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
   type ProviderId,
 } from "../../../../shared/provider";
@@ -71,7 +72,9 @@ export function useComposerCompaction(options: {
     ? ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON
     : providerId === "kimi"
       ? KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON
-      : null;
+      : providerId === "grok"
+        ? GROK_EXPLICIT_COMPACTION_UNAVAILABLE_REASON
+        : null;
   const compactNotice = compactNotices[conversationId] ?? null;
   const clearCompactNotice = useCallback(() => {
     setCompactNotices((current) => {

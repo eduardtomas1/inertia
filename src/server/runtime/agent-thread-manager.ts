@@ -95,7 +95,7 @@ const tokenSchema = (maximum: number) => z.string()
   .max(maximum)
   .regex(new RegExp(tokenPattern(maximum), "u"), "must be one word without spaces or control characters");
 const routeSchema = z.object({
-  providerId: z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity"])
+  providerId: z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"])
     .optional(),
   backendProfileId: tokenSchema(200).optional(),
   modelId: safeSingleLineSchema(300).optional(),
@@ -169,7 +169,7 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
           additionalProperties: false,
           properties: {
             providerId: {
-              enum: ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"],
+              enum: ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"],
             },
             backendProfileId: { type: "string", pattern: tokenPattern(200) },
             modelId: { type: "string", maxLength: 300, pattern: SINGLE_LINE_PATTERN },

@@ -48,6 +48,11 @@ test("keeps two-line Work sidebar geometry", async ({
         "Check OpenCode packaging",
         { providerId: "opencode", branch: "opencode/offline-assets", activate: false },
       );
+      store.createConversation(
+        project.id,
+        "Review Grok ACP",
+        { providerId: "grok", branch: "grok/acp-provider", activate: false },
+      );
       const earlier = store.createConversation(
         project.id,
         "Investigate keyboard focus behavior",
@@ -67,6 +72,7 @@ test("keeps two-line Work sidebar geometry", async ({
           kimi: "Kimi Code",
           opencode: "OpenCode",
           antigravity: "Google",
+          grok: "Grok",
         },
       });
       store.selectConversation(recent.id);
@@ -106,7 +112,7 @@ test("keeps two-line Work sidebar geometry", async ({
     await expect(row.locator(".activity-thread-trailing time svg")).toHaveCount(0);
     await expect(row.locator(".activity-thread-project-meta")).toBeVisible();
     await expect(row.locator(".activity-thread-branch-meta")).toHaveText("codex/compact-work-tab");
-    for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"]) {
+    for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
       ).first();

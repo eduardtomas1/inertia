@@ -12,8 +12,15 @@
   flex: 1;
 }
 
-.provider-settings-heading > .icon-button {
+.provider-settings-heading-actions {
+  display: flex;
   margin-left: auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.provider-settings-heading-actions > .secondary-button {
+  min-height: var(--control-height);
 }
 
 .provider-settings-shell {

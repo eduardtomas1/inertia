@@ -118,6 +118,8 @@ export function providerTerminalResumeArguments(
       return ["--session", sessionId];
     case "antigravity":
       return ["--conversation", sessionId];
+    case "grok":
+      return ["--resume", sessionId];
   }
 }
 

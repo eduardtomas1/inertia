@@ -422,8 +422,9 @@ describe("rendered page metadata", () => {
 });
 
 describe("library migration", () => {
-  it("is registered at the current schema version", () => {
-    expect(LIBRARY_SCHEMA_VERSION).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+  it("is registered at schema 107", () => {
+    expect(LIBRARY_SCHEMA_VERSION).toBe(107);
+    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBeGreaterThan(LIBRARY_SCHEMA_VERSION);
     expect(runtimeMigrationCatalog().find(({ version }) => version === LIBRARY_SCHEMA_VERSION))
       .toMatchObject({ name: libraryMigration.name, up: libraryMigration.up });
   });

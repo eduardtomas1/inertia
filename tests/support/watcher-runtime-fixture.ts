@@ -175,6 +175,7 @@ export const WATCHER_TEST_PROVIDERS: ProviderInfo[] = [
   providerInfo("cursor", "cursor-acp"),
   providerInfo("kimi", "kimi-acp"),
   providerInfo("antigravity", "antigravity-cli"),
+  providerInfo("grok", "grok-acp"),
 ];
 
 export function watcherTestSelection(providerId: ProviderInfo["id"] = "codex"): ModelSelection {

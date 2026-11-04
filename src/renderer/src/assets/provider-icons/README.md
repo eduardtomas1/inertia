@@ -46,6 +46,9 @@ property of their respective owners.
   monochrome marks, Inertia inverts it in dark themes. The mark belongs to
   Google LLC and is used only to identify the provider, without implying any
   affiliation or endorsement.
+- `grok-light.svg` and `grok-dark.svg`: an original letter-G monogram drawn
+  for Inertia. No licensed xAI or Grok logo is recorded, so these files are
+  not a vendor mark and do not imply affiliation or endorsement.
 
 These assets are emitted into the packaged renderer for offline use; the
 application does not request vendor-hosted images at runtime. The imports use

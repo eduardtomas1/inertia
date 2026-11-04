@@ -85,6 +85,7 @@ describe("compact on return eligibility", () => {
       { harnessId: "opencode-sdk", preset: "native", protocol: "opencode-native" },
       { harnessId: "cursor-acp", preset: "native", protocol: "cursor-managed" },
       { harnessId: "antigravity-cli", preset: "native", protocol: "antigravity-managed" },
+      { harnessId: "grok-acp", preset: "native", protocol: "grok-managed" },
       { ...anthropicKey, preset: null },
       { ...nativeClaude, preset: null, routeKind: "api-key", accountKind: "Console API key" },
     ] as const) {

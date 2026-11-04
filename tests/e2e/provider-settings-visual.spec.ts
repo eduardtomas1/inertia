@@ -62,6 +62,12 @@ async function capture(testInfo: TestInfo, name: string): Promise<void> {
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
+async function captureAddProviderMenu(testInfo: TestInfo, name: string): Promise<void> {
+  const path = testInfo.outputPath(`${name}.png`);
+  await page.getByRole("dialog", { name: "Add provider" }).screenshot({ animations: "disabled", path });
+  await testInfo.attach(name, { path, contentType: "image/png" });
+}
+
 async function waitForCodexModels(): Promise<void> {
   const { websocketUrl } = await app.runtimeSnapshot();
   if (!websocketUrl) throw new Error("Fixture runtime is unavailable.");
@@ -188,6 +194,20 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await expectHoverQuieterThanSelection(rail);
   await capture(testInfo, "provider-settings-configuration-light-wide");
 
+  await page.getByRole("button", { name: "Add provider", exact: true }).click();
+  const addProvider = page.getByRole("dialog", { name: "Add provider" });
+  await expect(addProvider.getByRole("radio", { name: /^Codex,/ })).toHaveAttribute("aria-checked", "true");
+  await expect(addProvider.getByRole("button", { name: "Configure manually", exact: true })).toBeVisible();
+  await captureAddProviderMenu(testInfo, "add-provider-menu-light");
+  await addProvider.getByRole("button", { name: "Show more", exact: true }).click();
+  await expect(addProvider.getByText("Sign-in")).toBeVisible();
+  await captureAddProviderMenu(testInfo, "add-provider-menu-details-light");
+  await addProvider.getByRole("button", { name: "Configure manually", exact: true }).click();
+  await expect(addProvider.getByRole("textbox", { name: "Account name" })).toBeVisible();
+  await captureAddProviderMenu(testInfo, "add-provider-account-light");
+  await page.keyboard.press("Escape");
+  await expect(addProvider).toHaveCount(0);
+
   await page.getByRole("tab", { name: /Models 2/u }).click();
   await expect(page.getByText("GPT-5.3 Codex", { exact: true })).toBeVisible();
   await expect(page.getByText("GPT-5.2 Codex Mini", { exact: true })).toBeVisible();
@@ -224,6 +244,11 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await page.getByRole("radio", { name: "Dark" }).click();
   await page.getByRole("button", { name: "Agents", exact: true }).click();
   await expectHoverQuieterThanSelection(rail);
+  await page.getByRole("button", { name: "Add provider", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Add provider" })).toBeVisible();
+  await captureAddProviderMenu(testInfo, "add-provider-menu-dark");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Add provider" })).toHaveCount(0);
   await app.resizeWindow(760, 1100);
   const narrowGeometry = await Promise.all([rail.boundingBox(), editor.boundingBox()]);
   expect(narrowGeometry[0]?.y ?? 0).toBeLessThan(narrowGeometry[1]?.y ?? 0);

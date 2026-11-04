@@ -31,6 +31,11 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ProviderInfo>> = Object.
     name: "Antigravity",
     command: "agy",
   },
+  grok: {
+    id: "grok",
+    name: "Grok",
+    command: "grok",
+  },
 });
 
 export const PROVIDERS: readonly ProviderInfo[] = PROVIDER_IDS.map((id) => PROVIDER_INFO[id]);

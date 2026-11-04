@@ -3,7 +3,9 @@ VENDORED PROVIDER ICONS
 The OpenAI, Anthropic, Cursor, Antigravity, Kimi Code, and OpenCode marks are
 used only to identify the corresponding provider in Inertia. The marks remain the property of their
 respective owners. Source URLs, pinned revisions, and asset hashes are recorded
-in src/renderer/src/assets/provider-icons/README.md.
+in src/renderer/src/assets/provider-icons/README.md. The Grok mark is an
+original letter-G monogram drawn for Inertia. No licensed xAI or Grok logo is
+recorded for that asset.
 
 OpenAI mark
 Source repository license: MIT
@@ -253,6 +255,11 @@ the unmodified official marks are used under Moonshot's published brand
 guidance. The Kimi name and mark belong to Moonshot AI. They are used only to
 identify the Kimi provider in Inertia and do not imply any affiliation with,
 sponsorship by, or endorsement by Moonshot AI.
+
+Grok monogram
+Original letter-G artwork drawn for Inertia. No licensed xAI or Grok logo is
+recorded. The monogram identifies the Grok provider and does not imply any
+affiliation with, sponsorship by, or endorsement by xAI.
 
 OpenCode mark
 Source repository license: MIT

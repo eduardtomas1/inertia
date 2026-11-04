@@ -189,7 +189,7 @@ describe("Agents providers layout", () => {
       onRefreshProvider,
       onChooseCodexBinary,
     })} />);
-    for (const name of ["Refresh all providers", "Refresh", "Browse"]) {
+    for (const name of ["Add provider", "Refresh all providers", "Refresh", "Browse"]) {
       const button = await screen.findByRole("button", { name });
       expect(button).toHaveAttribute("aria-disabled", "true");
       expect(button).not.toBeDisabled();

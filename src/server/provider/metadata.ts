@@ -25,6 +25,7 @@ import { readClaudeAgentSdkMetadata } from "./claude-agent-sdk-harness";
 import type { ProviderAuthState, ProviderId } from "./contracts";
 import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
 import { readAntigravityModels } from "./antigravity-models";
+import { grokStaticModels } from "./grok-models";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 import { RATE_LIMIT_TTL_MS } from "../runtime/provider-usage-refresh";
 import { slowMachineProbeDeadline } from "./probe-deadline";
@@ -130,7 +131,7 @@ const DEFAULT_MODEL_TTL_MS = 5 * 60 * 1_000;
 const DEFAULT_RATE_LIMIT_TTL_MS = RATE_LIMIT_TTL_MS;
 const MAX_MODELS = 128;
 const MAX_RATE_LIMITS = 16;
-const SESSION_REASONING_PROVIDERS: readonly ProviderId[] = ["cursor", "kimi"];
+const SESSION_REASONING_PROVIDERS: readonly ProviderId[] = ["cursor", "kimi", "grok"];
 const AUTH_STATES: readonly ProviderAuthState[] = ["checking", "authenticated", "unauthenticated", "configured", "unknown", "error"];
 
 // @ts-expect-error New providers are appended below without rewriting this migration-pinned declaration.
@@ -149,9 +150,11 @@ const PROBE_FIELDS: Record<ProviderId, readonly ProviderMetadataField[]> = {
   kimi: [],
   opencode: ["models"],
   antigravity: ["models"],
+  grok: ["models"],
 };
 
 Object.assign(AVAILABLE_FIELDS, { antigravity: ["models"] as const });
+Object.assign(AVAILABLE_FIELDS, { grok: ["models"] as const });
 
 function cleanString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -501,6 +504,9 @@ export async function readProviderMetadata(
   }
   if (providerId === "antigravity" && fields.includes("models")) {
     return { models: await readAntigravityModels(executable, environment, cwd, { signal }) };
+  }
+  if (providerId === "grok" && fields.includes("models")) {
+    return { models: grokStaticModels() };
   }
   return {};
 }

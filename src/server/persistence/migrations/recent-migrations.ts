@@ -31,6 +31,7 @@ import { persistCompactOnReturnMigration } from "./persist-compact-on-return";
 import { duoComparisonBriefsMigration } from "./duo-comparison-briefs";
 import { turnScopedIndexesMigration } from "./turn-scoped-indexes";
 import { libraryMigration } from "./library";
+import { nativeGrokProviderMigration } from "./native-grok-provider";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -65,4 +66,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   turnScopedIndexesMigration,
   duoComparisonBriefsMigration,
   libraryMigration,
+  nativeGrokProviderMigration,
 ];

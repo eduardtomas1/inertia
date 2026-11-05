@@ -113,6 +113,7 @@ function inactiveExtension(
     harnessId === "claude-agent-sdk"
     || harnessId === "cursor-acp"
     || harnessId === "kimi-acp"
+    || harnessId === "grok-acp"
     || harnessId === "opencode-sdk"
   ) {
     return {
@@ -265,6 +266,7 @@ describe("production provider lifecycle conformance", () => {
       "kimi-acp",
       "opencode-sdk",
       "antigravity-cli",
+      "grok-acp",
     ]);
     expect(PRODUCTION_HARNESSES.some(({ harnessId }) =>
       ["codex-cli", "claude-cli", "cursor-cli", "opencode-cli"].includes(harnessId)))

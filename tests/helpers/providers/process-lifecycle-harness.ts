@@ -110,9 +110,9 @@ export const PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS = {
       modelMetadata: "unavailable-in-current-harness",
     },
   },
-} as const satisfies Readonly<Record<Exclude<ProviderId, "kimi" | "antigravity">, AgentHarnessCapabilities>>;
+} as const satisfies Readonly<Record<Exclude<ProviderId, "kimi" | "antigravity" | "grok">, AgentHarnessCapabilities>>;
 
-const HARNESS_IDS: Readonly<Record<Exclude<ProviderId, "kimi" | "antigravity">, AgentHarnessId>> = {
+const HARNESS_IDS: Readonly<Record<Exclude<ProviderId, "kimi" | "antigravity" | "grok">, AgentHarnessId>> = {
   codex: "codex-cli",
   claude: "claude-cli",
   cursor: "cursor-cli",
@@ -136,6 +136,9 @@ export function createProcessLifecycleHarnessForTests(
   }
   if (providerId === "kimi") {
     throw new Error("Kimi Code is available only through its native ACP harness.");
+  }
+  if (providerId === "grok") {
+    throw new Error("Grok is available only through its native ACP harness.");
   }
   const harnessId = HARNESS_IDS[providerId];
   return {

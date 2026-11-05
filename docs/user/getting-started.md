@@ -21,7 +21,7 @@ Choose **Add your first project** on the home screen, or the add-project button 
 
 ## Connect an agent
 
-Open **Settings → Agents** and connect a provider. Inertia uses the accounts you already have: each provider keeps its own authentication. To use API credits instead, add an API key under [Accounts and API keys](#accounts-and-api-keys); keys are stored in your operating system's credential vault. If a provider stops responding, refresh it in the same place.
+Open **Settings → Agents** and choose **Add provider**. The menu lists each agent, then the account or API key that chats should use. Inertia uses the accounts you already have: each provider keeps its own authentication. To use API credits instead, add an API key under [Accounts and API keys](#accounts-and-api-keys); keys are stored in your operating system's credential vault. If a provider stops responding, refresh it in the same place.
 
 The sign-in runs the provider's own login in a terminal. When the provider asks for a code, paste it there with ⌘V (Ctrl+V on Windows and Linux) or right-click and choose **Paste**. After **Copy link** or **Open again**, the terminal keeps focus, so the paste lands in it when you come back from the browser. The pasted code goes only to the provider's login; Inertia does not store it or add it to diagnostics.
 

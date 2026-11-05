@@ -38,6 +38,7 @@ export const PROVIDER_IDS = [
   "kimi",
   "opencode",
   "antigravity",
+  "grok",
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];

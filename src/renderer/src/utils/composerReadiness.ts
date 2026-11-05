@@ -66,6 +66,7 @@ function harnessLabel(harnessId: string): string {
   if (harnessId.startsWith("codex")) return "Codex harness";
   if (harnessId.startsWith("cursor")) return "Cursor harness";
   if (harnessId.startsWith("antigravity")) return "Antigravity";
+  if (harnessId.startsWith("grok")) return "Grok";
   if (harnessId.startsWith("opencode")) return "OpenCode harness";
   return "Selected harness";
 }

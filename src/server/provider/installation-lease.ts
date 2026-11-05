@@ -29,6 +29,7 @@ const PROVIDER_INSTALLATION_PACKAGES: Readonly<
   kimi: "@moonshot-ai/kimi-code",
   opencode: "opencode-ai",
   antigravity: null,
+  grok: null,
 };
 
 export function providerInstallationPackageIdentity(

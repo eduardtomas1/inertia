@@ -24,6 +24,11 @@ const PROVIDER_AUTH: Readonly<Record<ProviderId, ProviderAuthCommands>> =
     kimi: { statusArgs: ["provider", "list", "--json"], loginArgs: ["login"] },
     opencode: { statusArgs: ["auth", "list"], loginArgs: ["auth", "login"] },
     antigravity: { statusArgs: null, loginArgs: [] },
+    grok: {
+      statusArgs: null,
+      loginArgs: ["login"],
+      environment: { GROK_DISABLE_AUTOUPDATER: "1" },
+    },
   });
 
 export function providerAuthStatusArgs(

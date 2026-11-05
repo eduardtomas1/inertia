@@ -40,6 +40,7 @@ const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   kimi: "Kimi Code",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  grok: "Grok",
 };
 
 const PROVIDER_TERMINAL_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;

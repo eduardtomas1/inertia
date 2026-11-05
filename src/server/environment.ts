@@ -102,6 +102,10 @@ const PROVIDER_ENVIRONMENT_KEYS: Record<ProviderId, readonly RegExp[]> = {
     /^GEMINI_API_KEY$/u,
     /^GOOGLE_GEMINI_BASE_URL$/u,
   ],
+  grok: [
+    /^XAI_API_KEY$/u,
+    /^GROK_[A-Z0-9_]+$/u,
+  ],
   opencode: [
     /^(?:ANTHROPIC|CEREBRAS|COHERE|DEEPSEEK|FIREWORKS|GEMINI|GROQ|MISTRAL|OPENAI|OPENROUTER|PERPLEXITY|TOGETHER|XAI)_API_KEY$/u,
     /^(?:AZURE_OPENAI|GOOGLE_GENERATIVE_AI)_[A-Z0-9_]+$/u,
@@ -150,6 +154,7 @@ export function providerChildEnvironment(
       result[key] = value;
     }
   }
+  if (providerId === "grok") result.GROK_DISABLE_AUTOUPDATER = "1";
   if (providerId === "codex") expandHomeEnvironment(result, "CODEX_HOME");
   if (providerId === "claude") expandHomeEnvironment(result, "CLAUDE_CONFIG_DIR");
   if (

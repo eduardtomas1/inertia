@@ -165,6 +165,15 @@ const DEFINITIONS: Readonly<
     allowScripts: [],
     uvTool: null,
   },
+  grok: {
+    label: "Grok",
+    packageName: null,
+    packageRange: "latest",
+    commands: ["grok"],
+    homebrew: [],
+    allowScripts: [],
+    uvTool: null,
+  },
 };
 
 const SYSTEM_PREFIXES = [

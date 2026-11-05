@@ -28,6 +28,7 @@ const sessionIds: Readonly<Record<ProviderId, string>> = {
   kimi: "kimi-session-33333333",
   opencode: "ses_01K4Z9-safe.session",
   antigravity: "55555555-5555-4555-8555-555555555555",
+  grok: "66666666-6666-4666-8666-666666666666",
 };
 
 function nativeConversation(providerId: ProviderId): Conversation {

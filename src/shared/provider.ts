@@ -1,7 +1,7 @@
 /** Provider identities that existed before append-only migration lineage was introduced. */
 export type LegacyProviderId = "codex" | "claude" | "cursor" | "kimi" | "opencode";
 
-export type ProviderId = LegacyProviderId | "antigravity";
+export type ProviderId = LegacyProviderId | "antigravity" | "grok";
 
 export const PROVIDER_AUTH_METHODS = ["account", "console"] as const;
 
@@ -35,3 +35,6 @@ export const ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON =
 
 export const KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON =
   "Kimi Code compacts context in the background and does not report when it finishes, so Inertia can't confirm explicit compaction.";
+
+export const GROK_EXPLICIT_COMPACTION_UNAVAILABLE_REASON =
+  "Grok compacts in its own terminal with /compact and auto-compact. Inertia cannot confirm an explicit compaction request, so that action is unavailable.";

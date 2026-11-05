@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { FolderOpen, RefreshCw } from "lucide-react";
+import { FolderOpen, Plus, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 
 import type { ProviderAuthMethod } from "@shared/provider";
@@ -22,6 +22,7 @@ import {
 import { loadLifecycleIntegritySettings } from "../settingsSectionLoaders";
 import { useSectionMemory, type SettingsSectionMemory } from "./sectionMemory";
 import { IconButton } from "../ui";
+import { AddProviderMenu } from "./AddProviderMenu";
 import { SettingCopy } from "./SettingsLayout";
 import "./ProvidersSettings.css";
 import { useSettingAction } from "./useSettingAction";
@@ -40,6 +41,7 @@ export interface ProvidersSettingsProps {
   onCancelProviderUpdate: (operationId: string) => Promise<void>;
   onOpenProviderUpdateInstructions: (url: string) => void;
   onChooseCodexBinary: () => void;
+  onAddApiKey: (providerId: ProviderId) => void;
   memory: SettingsSectionMemory;
 }
 
@@ -79,11 +81,13 @@ export function ProvidersSettings({
   onCancelProviderUpdate,
   onOpenProviderUpdateInstructions,
   onChooseCodexBinary,
+  onAddApiKey,
   memory,
 }: ProvidersSettingsProps): React.JSX.Element {
   const LifecycleIntegritySettings = useLoadedSurface(loadLifecycleIntegritySettings, true);
   const labelAction = useSettingAction();
   const binaryAction = useSettingAction();
+  const [addProviderOpen, setAddProviderOpen] = useState(false);
   const [selectedProviderId, setSelectedProviderId] = useSectionMemory<ProviderId | null>(
     memory,
     "providers.selected",
@@ -221,13 +225,25 @@ export function ProvidersSettings({
         <span>
           <h3 id="providers-heading">Providers</h3>
         </span>
-        <IconButton
-          label="Refresh all providers"
-          aria-disabled={disabled || undefined}
-          onClick={() => { if (!disabled) onRefreshProvider(); }}
-        >
-          <RefreshCw size={14} aria-hidden="true" />
-        </IconButton>
+        <span className="provider-settings-heading-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            data-setting-id="add-provider"
+            aria-disabled={disabled || undefined}
+            onClick={() => { if (!disabled) setAddProviderOpen(true); }}
+          >
+            <Plus size={14} aria-hidden="true" />
+            Add provider
+          </button>
+          <IconButton
+            label="Refresh all providers"
+            aria-disabled={disabled || undefined}
+            onClick={() => { if (!disabled) onRefreshProvider(); }}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+          </IconButton>
+        </span>
       </div>
 
       <div className="provider-settings-shell">
@@ -481,6 +497,27 @@ export function ProvidersSettings({
           )}
         </div>
       </div>
+      {addProviderOpen && (
+        <AddProviderMenu
+          providers={providers}
+          providerIdentityLabels={providerIdentityLabelsDraft}
+          codexBinaryPath={settings.codexBinaryPath}
+          disabled={disabled}
+          onClose={() => setAddProviderOpen(false)}
+          onSelectProvider={(providerId) => {
+            setSelectedProviderId(providerId);
+            setProviderDetailTab("configuration");
+          }}
+          onConnectProvider={onConnectProvider}
+          onRefreshProvider={(providerId) => onRefreshProvider(providerId)}
+          onCommitIdentityLabel={commitProviderIdentityLabel}
+          onChooseCodexBinary={onChooseCodexBinary}
+          onUseAutomaticCodexBinary={() => {
+            void binaryAction.run(() => onUpdate({ codexBinaryPath: "" }));
+          }}
+          onAddApiKey={onAddApiKey}
+        />
+      )}
     </section>
   );
 }

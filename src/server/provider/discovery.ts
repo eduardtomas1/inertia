@@ -934,8 +934,8 @@ async function detectProviderRecordingCleanup(
       cleanupConfirmed: true,
       statusMessage: providerId === "grok"
         ? grokSignedIn
-          ? "Installed; Grok will use the saved sign-in when a session starts"
-          : "Installed; Grok will verify authentication when a session starts"
+          ? "Installed. Chats use the saved Grok account."
+          : "Installed. Sign in with grok login before the first chat."
         : providerId === "antigravity"
           ? "Installed; Antigravity checks your sign-in when a turn starts"
           : `Installed; ${providerShortName(provider.name)} ACP will verify authentication when a session starts`,

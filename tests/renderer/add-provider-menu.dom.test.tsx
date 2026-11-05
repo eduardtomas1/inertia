@@ -103,6 +103,24 @@ describe("Add provider menu", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("closes from Escape on the Grok identity step and keeps focus in the name field", () => {
+    const { onClose } = renderMenu([
+      provider("codex", "authenticated", true),
+      provider("grok", "unknown", true),
+    ]);
+    const dialog = screen.getByRole("dialog", { name: "Add provider" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Grok,/ }));
+    expect(within(dialog).getByText(/never sees that password/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("radio", { name: "Grok, Sign in required" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    const name = within(dialog).getByRole("textbox", { name: "Account name" });
+    expect(name).toHaveFocus();
+    expect(within(dialog).getByText(/Chats use the Grok sign-in/)).toBeInTheDocument();
+    name.blur();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("opens from Agents and hands an API key to the existing key dialog", async () => {
     const onConnectProvider = vi.fn();
     render(<SettingsView {...settingsViewProps({

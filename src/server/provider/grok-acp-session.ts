@@ -321,7 +321,7 @@ export async function grokPrompt(
     && initialized.agentCapabilities?.promptCapabilities?.image !== true
   ) {
     throw new Error(
-      "This Grok ACP server did not advertise image prompt support.",
+      "Grok did not advertise image support for this session, so the attachment cannot be sent.",
     );
   }
   const blocks: ContentBlock[] = [];

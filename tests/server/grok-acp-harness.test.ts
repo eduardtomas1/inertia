@@ -11,6 +11,7 @@ import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProc
   "../helpers/prepared-runtime-owned-process-registry";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import { providerChildEnvironment } from "../../src/server/environment";
+import { providerAuthLaunchEnvironment } from "../../src/server/provider/auth";
 import { selectGrokAcpAuthMethod } from "../../src/server/provider/grok-acp-auth";
 import {
   createGrokAcpHarness,
@@ -191,6 +192,8 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     expect(child.GROK_CODE_XAI_API_KEY).toBe("secret-grok");
     expect(child.GROK_HOME).toBe("C:\\grok-home");
     expect(child.RANDOM_SECRET).toBeUndefined();
+    expect(providerAuthLaunchEnvironment("grok", { GROK_DISABLE_AUTOUPDATER: "0", TERM: "xterm" }))
+      .toMatchObject({ GROK_DISABLE_AUTOUPDATER: "1", TERM: "xterm" });
   });
 
   it("prefers cached_token, then an advertised API key, and otherwise stays unauthenticated", () => {

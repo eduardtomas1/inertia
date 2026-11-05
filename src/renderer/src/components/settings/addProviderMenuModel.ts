@@ -164,10 +164,15 @@ export function addProviderNote(
     return { text: ANTIGRAVITY_POLICY, more: null };
   }
   if (id === "grok") {
-    return {
-      text: "Grok signs in with grok login. Usage is not reported to Inertia.",
-      more: null,
-    };
+    return provider?.authState === "authenticated" || provider?.authState === "configured"
+      ? {
+        text: "Grok is already signed in on this computer. Chats use that account.",
+        more: null,
+      }
+      : {
+        text: "Grok signs in with grok login. Inertia never sees that password.",
+        more: null,
+      };
   }
   return {
     text: "Kimi Code signs in with its own account. Usage is not reported to Inertia.",
@@ -344,8 +349,7 @@ export function addProviderFooter(input: {
   if (input.route === "api-key" && addProviderSupportsApiKey(input.providerId)) {
     return [back, primary({ type: "api-key" }, "Add API key")];
   }
-  const grokNeedsSignIn = input.providerId === "grok" && input.provider?.authState === "unknown";
-  if (setup === "connect" || grokNeedsSignIn) {
+  if (setup === "connect") {
     const method = input.providerId === "claude" ? input.claudeMethod : "account";
     return [back, primary({ type: "connect", method }, signInLabel(input.providerId, method, label))];
   }

@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronUp, Info } from "lucide-react";
 import clsx from "clsx";
 
@@ -72,6 +72,8 @@ export function AddProviderMenu({
   const [moreOpen, setMoreOpen] = useState(false);
   const [columns, setColumns] = useState(2);
   const gridRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
   const pendingFocus = useRef<ProviderId | null>(null);
   const items = addProviderMenuItems(providers);
   const selected = providers.find((provider) => provider.id === selectedId);
@@ -88,6 +90,7 @@ export function AddProviderMenu({
     route: activeRoute,
     claudeMethod,
   });
+  const primaryCommand = footer.find((button) => button.emphasis === "primary")?.command;
   const binaryValue = selectedId === "codex"
     ? codexBinaryPath || selected?.executable || ""
     : selected?.executable ?? "";
@@ -95,6 +98,30 @@ export function AddProviderMenu({
   useLayoutEffect(() => focusModalOnAnimationFrame(() => {
     document.getElementById("add-provider-card-codex")?.focus();
   }), []);
+
+  useLayoutEffect(() => {
+    if (step === 1) {
+      nameRef.current?.focus();
+      return;
+    }
+    if (step === 2) {
+      dialogRef.current?.querySelector<HTMLButtonElement>(".dialog-shell-footer .primary-button")?.focus();
+      return;
+    }
+    document.getElementById(`add-provider-card-${selectedId}`)?.focus();
+  }, [step, selectedId]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [onClose]);
 
   useLayoutEffect(() => {
     const providerId = pendingFocus.current;
@@ -154,6 +181,7 @@ export function AddProviderMenu({
 
   return (
     <DialogShell
+      ref={dialogRef}
       className="add-provider-menu"
       title="Add provider"
       titleId={titleId}
@@ -162,12 +190,6 @@ export function AddProviderMenu({
       closeLabel="Close"
       onClose={onClose}
       onDismiss={onClose}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      }}
       footer={footer.map((button) => (
         <button
           key={button.label}
@@ -252,7 +274,7 @@ export function AddProviderMenu({
                     </span>
                     {checked && (
                       <span className="add-provider-card-check" aria-hidden="true">
-                        <Check size={14} />
+                        <Check size={14} strokeWidth={2.5} />
                       </span>
                     )}
                   </button>
@@ -287,8 +309,8 @@ export function AddProviderMenu({
               aria-expanded={factsOpen}
               onClick={() => setFactsOpen((open) => !open)}
             >
-              {factsOpen ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
               {factsOpen ? "Show less" : "Show more"}
+              {factsOpen ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
             </button>
             {factsOpen && (
               <dl className="add-provider-facts">
@@ -306,11 +328,14 @@ export function AddProviderMenu({
         {step === 1 && (
           <>
             <p className="add-provider-lead">
-              Name this account, then choose how chats reach {selectedLabel}.
+              {routes.length > 1
+                ? `Name this account, then choose how chats reach ${selectedLabel}.`
+                : `Name this account. Chats use the ${selectedLabel} sign-in on this computer.`}
             </p>
             <div className="add-provider-field">
               <label htmlFor={nameId}>Account name</label>
               <input
+                ref={nameRef}
                 id={nameId}
                 className="setting-input"
                 aria-describedby={nameHintId}
@@ -367,12 +392,16 @@ export function AddProviderMenu({
               </p>
             ) : (
               <p className="add-provider-config-copy">
-                {selectedId === "codex"
-                  ? "Continuing opens Codex's own sign-in. The password stays with Codex."
-                  : selectedId === "opencode"
-                    ? "Continuing runs opencode auth login in a terminal."
-                    : selectedId === "grok"
-                      ? "Continuing runs grok login."
+                {selectedId === "grok"
+                  ? primaryCommand?.type === "connect"
+                    ? "Continuing runs grok login in Grok's own terminal. The password stays with Grok."
+                    : primaryCommand?.type === "done"
+                      ? "Grok is ready. New chats use the account stored on this computer."
+                      : "Refresh checks whether Grok is installed and signed in."
+                  : selectedId === "codex"
+                    ? "Continuing opens Codex's own sign-in. The password stays with Codex."
+                    : selectedId === "opencode"
+                      ? "Continuing runs opencode auth login in a terminal."
                       : `Continuing opens ${selectedLabel}'s own sign-in.`}
               </p>
             )}
@@ -470,7 +499,7 @@ function ChoiceGroup({
               </span>
               {checked && (
                 <span className="add-provider-card-check" aria-hidden="true">
-                  <Check size={14} />
+                  <Check size={14} strokeWidth={2.5} />
                 </span>
               )}
             </button>

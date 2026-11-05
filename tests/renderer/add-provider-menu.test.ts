@@ -82,7 +82,9 @@ describe("add provider menu", () => {
     }).map(({ label }) => label)).toEqual(["Cancel", "Next"]);
     const grok = provider("grok", "unauthenticated", false);
     expect(addProviderNote("grok", grok).text).toContain("grok login");
+    expect(addProviderNote("grok", grok).text).toContain("never sees that password");
     expect(addProviderNote("grok", grok).text).not.toContain("Kimi");
+    expect(addProviderNote("grok", provider("grok", "authenticated", true)).text).toContain("already signed in");
     expect(addProviderFooter({
       step: 2,
       providerId: "grok",

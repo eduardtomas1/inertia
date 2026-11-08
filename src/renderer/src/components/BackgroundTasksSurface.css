@@ -82,6 +82,21 @@
   color: var(--text-muted);
 }
 
+.background-task-command {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+code.background-task-command {
+  display: -webkit-box;
+  max-height: calc(3 * 1.45em);
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .background-task-danger {
   color: var(--danger);
 }
@@ -130,6 +145,7 @@
   color: var(--text);
 }
 
+.background-task-card:focus-visible,
 .background-task-stop:focus-visible,
 .background-task-link:focus-visible,
 .background-tasks-finished-toggle:focus-visible {

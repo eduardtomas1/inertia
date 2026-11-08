@@ -42,9 +42,20 @@ export function canStopSubagentTrace(
     && activeParent(turn)
     && turn.harnessId === "claude-agent-sdk"
     && trace.providerId === "claude"
-    && trace.providerTaskId
+    && (trace.providerTaskId || trace.providerToolUseId)
     && isLiveSubagentTrace(trace),
   );
+}
+
+/** A live Claude agent its parent is still waiting on can be moved to the background. */
+export function canBackgroundSubagentTrace(
+  trace: SubagentTrace,
+  turns: readonly AgentTurn[],
+): boolean {
+  return canStopSubagentTrace(trace, turns)
+    && trace.taskKind === "agent"
+    && trace.background === false
+    && Boolean(trace.providerToolUseId);
 }
 
 export function canFollowUpSubagentTrace(

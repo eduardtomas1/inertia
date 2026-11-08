@@ -1,6 +1,10 @@
 import type {
   AgentActivity,
   AgentApprovalRequest,
+  SubagentModelSource,
+  SubagentTaskEffort,
+  SubagentTaskKind,
+  SubagentTaskStep,
   SubagentTraceStatus,
 } from "./agent";
 import type { AgentGoal } from "./agent-workflows";
@@ -86,6 +90,18 @@ export const SERVER_EVENT_OPTIONS = Object.freeze({
     queued: true, spawned: true, running: true, waiting: true,
     completed: true, failed: true, cancelled: true, interrupted: true,
     unknown: true, lost: true,
+  }),
+  subagentTaskKinds: exhaustiveOptions<SubagentTaskKind>({
+    agent: true, workflow: true, shell: true, monitor: true, remote: true, mcp: true,
+  }),
+  subagentTaskEfforts: exhaustiveOptions<SubagentTaskEffort>({
+    low: true, medium: true, high: true, xhigh: true, max: true,
+  }),
+  subagentModelSources: exhaustiveOptions<SubagentModelSource>({
+    observed: true, requested: true,
+  }),
+  subagentStepStatuses: exhaustiveOptions<SubagentTaskStep["status"]>({
+    running: true, completed: true, failed: true,
   }),
   approvalKinds: exhaustiveOptions<AgentApprovalRequest["kind"]>({
     command: true, "file-change": true, permissions: true,

@@ -46,6 +46,12 @@ import {
 } from "../working-indicator/orbMotion";
 import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
 import { TurnAgentsLine } from "./TurnAgentsLine";
+import { UnlinkedSubagentRows } from "./SubagentActivityRow";
+import {
+  createSubagentActivityStore,
+  SubagentActivityContext,
+} from "./subagentActivityContext";
+import { unlinkedSubagentTraces } from "../../utils/subagentTraceRows";
 import { useFreshRequest } from "./useFreshRequest";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
@@ -67,6 +73,19 @@ import { TooltipText } from "../TooltipText";
 const SentContextPreview = lazy(async () => ({
   default: (await import("../composer/ComposerConversationContextCards")).ConversationContextPreviewCard,
 }));
+
+/** Lets each tool row of this turn find the delegated task it started. */
+export function TurnSubagentActivities({
+  subagents,
+  children,
+}: {
+  subagents: readonly SubagentTrace[];
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const [store] = useState(() => createSubagentActivityStore(subagents));
+  useLayoutEffect(() => store.publish(subagents), [store, subagents]);
+  return <SubagentActivityContext.Provider value={store}>{children}</SubagentActivityContext.Provider>;
+}
 
 export function AgentPixelLoader({
   animated,
@@ -297,6 +316,10 @@ export function AgentExecutionLayer({
         .flatMap((entry) => entry.kind === "compaction" ? [entry] : []),
     [turn],
   );
+  const unlinkedSubagents = useMemo(() => unlinkedSubagentTraces(
+    subagents,
+    new Set([...turn.activities, ...turn.importantActivities].map(({ id }) => id)),
+  ), [subagents, turn.activities, turn.importantActivities]);
   const activePresentation = activeAgentPresentation({
     turn,
     providerLabel,
@@ -401,6 +424,11 @@ export function AgentExecutionLayer({
       {settledCompactions.map((entry) => (
         <ContextCompactionActivityMarker key={entry.id} activities={entry.activities} />
       ))}
+      <UnlinkedSubagentRows
+        traces={unlinkedSubagents}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
       <TurnAgentsLine
         conversationId={props.conversationId}
         turnId={turn.id}

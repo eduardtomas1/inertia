@@ -33,6 +33,7 @@ import type {
   ProviderRunResult,
   ProviderSteerInput,
 } from "../../provider/contracts";
+import type { SubagentBackgroundResult, SubagentStopOutcome } from "../../provider/agent-harness";
 import type { AssembledTurnRequest, HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
 import type { HarnessCapabilityTurnOffer } from "../harness-capabilities";
 import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
@@ -102,9 +103,15 @@ export interface TurnProviderRuntime {
   ): Promise<boolean | "superseded">;
   stopSubagent?(
     conversationId: string,
-    providerTaskId: string,
+    providerTaskId: string | null,
     identity: { runId: string; turnId: string },
-  ): Promise<boolean>;
+    providerToolUseId?: string | null,
+  ): Promise<SubagentStopOutcome>;
+  backgroundSubagent?(
+    conversationId: string,
+    providerToolUseId: string,
+    identity: { runId: string; turnId: string },
+  ): Promise<SubagentBackgroundResult>;
   disposeAll(): Promise<void>;
 }
 
@@ -409,6 +416,12 @@ export interface ActiveTurn {
   lifetimeTimer: unknown;
   runningActivities: Map<ProviderActivityEvent["kind"], AgentActivity[]>;
   providerActivitiesById: Map<string, AgentActivity>;
+  /**
+   * Provider activity id to Inertia timeline row id, kept after the row
+   * settles so delegated-task traces can link to the tool call that began
+   * them. Bounded first-in first-out.
+   */
+  providerActivityLinks?: Map<string, string>;
   providerActivityDetailChars: number;
   providerCommandRuns: Map<string, { id: string; label: string }>;
   providerOutputActivityIds: Set<string>;

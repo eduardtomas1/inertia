@@ -12,6 +12,7 @@ import {
 } from "react";
 import { resolveMessageSearchDestination, useMessageSearchFocus } from "./useMessageSearchFocus";
 import { useViewportSyncedVirtualizer } from "./useViewportSyncedVirtualizer";
+import { groupSubagentsByTurn, subagentEstimateSignature } from "../../utils/response-timeline/virtualization";
 import type {
   InterfaceScale,
   ResponseDensity,
@@ -454,6 +455,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     props.showThinking ? "thinking" : "hidden-thinking",
     props.showChangedFileSummaries ? "files" : "hidden-files",
   ].join(":");
+  const subagentsByTurn = useMemo(() => {
+    const grouped = groupSubagentsByTurn(props.subagents ?? [], previousSubagentsByTurn.current);
+    previousSubagentsByTurn.current = grouped;
+    return grouped;
+  }, [props.subagents]);
   const getItemKey = useCallback(
     (index: number) => timelineRef.current[index]?.id ?? `missing-${index}`,
     [],
@@ -461,8 +467,10 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const estimateSize = useCallback((index: number) => {
     const item = timeline[index];
     if (!item) return 280;
+    const subagents = item.kind === "turn" ? subagentsByTurn.get(item.turn.id) : undefined;
+    const layoutKey = subagents ? `${estimateKey}:${subagentEstimateSignature(subagents)}` : estimateKey;
     const cachedByLayout = rowEstimateCache.current.get(item);
-    const cached = cachedByLayout?.get(estimateKey);
+    const cached = cachedByLayout?.get(layoutKey);
     if (cached !== undefined) return cached;
     const artifact = item.kind === "turn" ? item.turn.gitArtifact : null;
     const expandsConsolidatedWork = item.kind === "turn"
@@ -476,13 +484,14 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       showChangedFiles: props.showChangedFileSummaries
         && artifact !== null
         && shouldShowTurnGitArtifactSummary(artifact),
+      subagents,
     });
     const nextCache = cachedByLayout ?? new Map<string, number>();
-    if (!nextCache.has(estimateKey) && nextCache.size >= 12) {
+    if (!nextCache.has(layoutKey) && nextCache.size >= 12) {
       const oldestKey = nextCache.keys().next().value;
       if (oldestKey !== undefined) nextCache.delete(oldestKey);
     }
-    nextCache.set(estimateKey, estimate);
+    nextCache.set(layoutKey, estimate);
     rowEstimateCache.current.set(item, nextCache);
     return estimate;
   }, [
@@ -491,6 +500,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     props.showThinking,
     estimateLayout,
     estimateKey,
+    subagentsByTurn,
     timeline,
   ]);
   const [virtualizer, measureVirtualRow] = useViewportSyncedVirtualizer({
@@ -1071,26 +1081,6 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       number: turnItems[marker.index]!.turn.index,
       timelineIndex: turnItems[marker.index]!.timelineIndex,
     })), [turnItems]);
-  const subagentsByTurn = useMemo(() => {
-    const grouped = new Map<string, SubagentTrace[]>();
-    for (const trace of props.subagents ?? []) {
-      const current = grouped.get(trace.turnId);
-      if (current) current.push(trace);
-      else grouped.set(trace.turnId, [trace]);
-    }
-    for (const [turnId, traces] of grouped) {
-      const previous = previousSubagentsByTurn.current.get(turnId);
-      if (
-        previous
-        && previous.length === traces.length
-        && previous.every((trace, index) => trace === traces[index])
-      ) {
-        grouped.set(turnId, previous);
-      }
-    }
-    previousSubagentsByTurn.current = grouped;
-    return grouped;
-  }, [props.subagents]);
 
   const cancelTimelineItemFocus = useRef<(() => void) | null>(null);
   useLayoutEffect(() => () => {

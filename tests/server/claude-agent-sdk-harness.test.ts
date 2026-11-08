@@ -1771,7 +1771,7 @@ describe("Claude Agent SDK harness", () => {
       new AgentHarnessRegistry([harness]),
     );
     let followUpAccepted: Promise<boolean> | null = null;
-    let stopAccepted: Promise<boolean> | null = null;
+    let stopAccepted: Promise<boolean | "queued"> | null = null;
     const traceStatuses: string[] = [];
     const result = manager.run(nativeProviderRunInput({
       providerId: "claude",
@@ -1962,7 +1962,7 @@ describe("Claude Agent SDK harness", () => {
       new AgentHarnessRegistry([harness]),
     );
     const traceStatuses: string[] = [];
-    let stopAccepted: Promise<boolean> | null = null;
+    let stopAccepted: Promise<boolean | "queued"> | null = null;
     const result = manager.run(nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-bounded-task-stop",

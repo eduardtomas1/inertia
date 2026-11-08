@@ -66,7 +66,7 @@ describe("Background task cards", () => {
   it("re-renders only the card whose trace changed", () => {
     const traces = Array.from({ length: 128 }, (_, index) => taskTrace({
       id: `trace-${String(index).padStart(3, "0")}`,
-      providerName: `Task ${index}`,
+      providerName: `Task ${index}`, description: `Task ${index}`,
       usage: taskUsage({ totalTokens: index }),
       sequence: index + 1,
     }));
@@ -80,8 +80,8 @@ describe("Background task cards", () => {
   });
 
   it("keeps cards in place when telemetry bumps a sequence", () => {
-    const first = taskTrace({ id: "a", providerName: "Alpha", sequence: 1 });
-    const second = taskTrace({ id: "b", providerName: "Beta", sequence: 2 });
+    const first = taskTrace({ id: "a", providerName: "Alpha", description: "Alpha", sequence: 1 });
+    const second = taskTrace({ id: "b", providerName: "Beta", description: "Beta", sequence: 2 });
     const order = () => [...document.querySelectorAll<HTMLElement>("[data-focus-row]")]
       .map((item) => item.dataset.focusRow);
     const view = render(surface({ subagents: [first, second] }));
@@ -94,7 +94,7 @@ describe("Background task cards", () => {
     vi.useFakeTimers({ now: Date.parse("2030-01-01T00:01:00.000Z") });
     const traces = Array.from({ length: 16 }, (_, index) => taskTrace({
       id: `trace-${index}`,
-      providerName: `Task ${index}`,
+      providerName: `Task ${index}`, description: `Task ${index}`,
     }));
     const view = render(surface({ subagents: traces }));
     const first = view.container.querySelector(".subagent-elapsed")!;
@@ -106,8 +106,8 @@ describe("Background task cards", () => {
   });
 
   it("moves focus to the Finished row when the focused card settles into it while collapsed", () => {
-    const live = taskTrace({ id: "a", providerName: "Alpha" });
-    const other = taskTrace({ id: "b", providerName: "Beta" });
+    const live = taskTrace({ id: "a", providerName: "Alpha", description: "Alpha" });
+    const other = taskTrace({ id: "b", providerName: "Beta", description: "Beta" });
     const view = render(surface({ subagents: [live, other] }));
     toggle("Alpha").focus();
     view.rerender(surface({ subagents: [{ ...live, status: "completed", isLive: false }, other] }));
@@ -115,8 +115,8 @@ describe("Background task cards", () => {
   });
 
   it("keeps focus on the same card when it settles into an open Finished list", () => {
-    const live = taskTrace({ id: "a", providerName: "Alpha" });
-    const done = taskTrace({ id: "b", providerName: "Beta", status: "completed" });
+    const live = taskTrace({ id: "a", providerName: "Alpha", description: "Alpha" });
+    const done = taskTrace({ id: "b", providerName: "Beta", description: "Beta", status: "completed" });
     const view = render(surface({ subagents: [live, done] }));
     act(() => screen.getByRole("button", { name: /^Finished 1/u }).click());
     toggle("Alpha").focus();
@@ -125,7 +125,7 @@ describe("Background task cards", () => {
   });
 
   it("moves focus to the Finished row when a card with an open transcript settles into it while collapsed", () => {
-    const live = taskTrace({ id: "a", providerName: "Alpha" });
+    const live = taskTrace({ id: "a", providerName: "Alpha", description: "Alpha" });
     const view = render(surface({ subagents: [live] }));
     act(() => toggle("Alpha").click());
     expect(toggle("Alpha")).toHaveAttribute("aria-expanded", "true");
@@ -137,7 +137,7 @@ describe("Background task cards", () => {
   });
 
   it("moves focus to the card's transcript toggle when its focused Stop disappears", () => {
-    const live = taskTrace({ id: "a", providerName: "Alpha", providerTaskId: "task-a" });
+    const live = taskTrace({ id: "a", providerName: "Alpha", description: "Alpha", providerTaskId: "task-a" });
     const view = render(surface({
       subagents: [live],
       turns: [taskTurn({ status: "running" })],
@@ -167,7 +167,7 @@ describe("Background task cards", () => {
   it("keeps keyboard focus in the panel after dismissing finished commands", async () => {
     const user = userEvent.setup();
     const done = workspaceRun({ id: "build", label: "npm run build", status: "succeeded", canStop: false, finishedAt: "2030-01-01T00:00:40.000Z" });
-    const finishedAgent = taskTrace({ id: "b", providerName: "Beta", status: "completed" });
+    const finishedAgent = taskTrace({ id: "b", providerName: "Beta", description: "Beta", status: "completed" });
     const onDismissCommand = vi.fn();
     const view = render(surface({ subagents: [finishedAgent], runs: [done], onDismissCommand }));
     screen.getByRole("button", { name: "Dismiss finished commands" }).focus();
@@ -175,7 +175,7 @@ describe("Background task cards", () => {
     expect(onDismissCommand).toHaveBeenCalledWith(done);
     view.rerender(surface({ subagents: [finishedAgent], runs: [], onDismissCommand }));
     expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Finished 1/u }));
-    const live = taskTrace({ id: "a", providerName: "Alpha" });
+    const live = taskTrace({ id: "a", providerName: "Alpha", description: "Alpha" });
     view.rerender(surface({ subagents: [live], runs: [done], onDismissCommand }));
     screen.getByRole("button", { name: "Dismiss finished commands" }).focus();
     view.rerender(surface({ subagents: [live], runs: [], onDismissCommand }));
@@ -185,7 +185,7 @@ describe("Background task cards", () => {
   it("keeps focus in the panel when Show more finished tasks goes away", () => {
     const finished = Array.from({ length: 21 }, (_, index) => taskTrace({
       id: `done-${String(index).padStart(2, "0")}`,
-      providerName: `Done ${index}`,
+      providerName: `Done ${index}`, description: `Done ${index}`,
       status: "completed",
       createdAt: `2030-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
     }));
@@ -218,17 +218,17 @@ describe("Background task cards", () => {
   });
 
   it("forgets the focused card when nothing in the panel can take focus", () => {
-    const live = taskTrace({ id: "a", providerName: "Alpha" });
+    const live = taskTrace({ id: "a", providerName: "Alpha", description: "Alpha" });
     const view = render(surface({ subagents: [live] }));
     toggle("Alpha").focus();
     view.rerender(surface({ subagents: [] }));
     expect(document.activeElement).toBe(document.body);
-    view.rerender(surface({ subagents: [taskTrace({ id: "b", providerName: "Beta" })] }));
+    view.rerender(surface({ subagents: [taskTrace({ id: "b", providerName: "Beta", description: "Beta" })] }));
     expect(document.activeElement).toBe(document.body);
   });
 
   it("leaves focus alone when the user moved it out of the panel", () => {
-    const live = taskTrace({ id: "a", providerName: "Alpha" });
+    const live = taskTrace({ id: "a", providerName: "Alpha", description: "Alpha" });
     const view = render(<>{surface({ subagents: [live] })}<button type="button">Elsewhere</button></>);
     toggle("Alpha").focus();
     screen.getByRole("button", { name: "Elsewhere" }).focus();
@@ -239,7 +239,7 @@ describe("Background task cards", () => {
 
   it("renders each list once while agents and commands update together", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const live = taskTrace({ id: "a", providerName: "Alpha" });
+    const live = taskTrace({ id: "a", providerName: "Alpha", description: "Alpha" });
     const run = workspaceRun({ id: "dev", label: "npm run dev" });
     const view = render(surface({ subagents: [live], runs: [run] }));
     view.rerender(surface({

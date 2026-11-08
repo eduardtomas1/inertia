@@ -17,6 +17,7 @@ export function createTurnInteractionCommandHandler(
     "message.send",
     "agent.stop",
     "agent.subagent.stop",
+    "agent.subagent.background",
     "activity.stop",
     "activity.dismiss",
     "activity.mark-seen",
@@ -41,6 +42,14 @@ export function createTurnInteractionCommandHandler(
           );
         }
         return "mutation";
+      case "agent.subagent.background": {
+        const moved = await dependencies.turns.backgroundSubagent(
+          command.payload.conversationId,
+          command.payload.traceId,
+        );
+        if (!moved.moved) throw new RuntimeRequestError(moved.error);
+        return "mutation";
+      }
       case "activity.stop": {
         const activity = dependencies.store.workspaceRun(
           command.payload.runId,

@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 
 import { scrubCommandSecrets } from "./command-secrets";
-import { boundedSubagentText, scrubSubagentSecrets } from "./subagent-trace";
+import { scrubSubagentSecrets } from "./subagent-trace";
 
 /** Maximum persisted technical detail for one provider activity. */
 export const MAX_PROVIDER_ACTIVITY_DETAIL_CHARS = 32 * 1024;
@@ -162,9 +162,8 @@ export function sanitizeProviderActivityDetail(
     .replace(/(\b(?:docker\s+login|sshpass)\b[^\n]*?\s-p|\bredis-cli\b[^\n]*?\s-a)(?:\s+|=)?(?=[^\s-])\S+/gu, "$1 [redacted]")
     .replace(/(\baws\s+configure\s+set\s+(?:\S+\.)?(?:aws_secret_access_key|aws_session_token)\s+)\S+/giu, "$1[redacted]")
     .replace(/(\bnpm\s+config\s+set\s+\S*_auth(?:Token)?)(\s+|=)\S+/gu, "$1$2[redacted]");
-  text = options.preserveWhitespace
-    ? scrubSubagentSecrets(text)
-    : boundedSubagentText(text, text.length) ?? "";
+  // Scrubbing can lengthen the text, so only the caller's bound below cuts it.
+  text = scrubSubagentSecrets(options.preserveWhitespace ? text : text.trim());
   text = scrubPathPrefix(text, options.workspaceRoot, "<workspace>");
   text = scrubPathPrefix(text, options.homeDirectory ?? homedir(), "<home>");
   text = text

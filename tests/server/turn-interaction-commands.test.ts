@@ -426,6 +426,45 @@ describe("stop racing settlement", () => {
   });
 });
 
+describe("delegated task controls", () => {
+  const traceId = "77777777-7777-4777-8777-777777777777";
+
+  it("reports the reason Claude gave when it cannot move an agent to the background", async () => {
+    const runtime = dependencies({ queue: vi.fn(), relinquishAll: vi.fn(async () => undefined) });
+    const backgroundSubagent = vi.fn()
+      .mockResolvedValueOnce({ moved: true, error: "unused" })
+      .mockResolvedValueOnce({ moved: false, error: "Claude declined to move this agent to the background." })
+      .mockResolvedValueOnce({ moved: false, error: "Claude did not confirm the move to the background in time. The agent may still move there." });
+    Object.assign(runtime.turns, { backgroundSubagent });
+    const handler = createTurnInteractionCommandHandler(runtime);
+    const command = {
+      type: "agent.subagent.background" as const,
+      requestId: "33333333-3333-4333-8333-333333333333",
+      payload: { conversationId, traceId },
+    };
+    await expect(handler({} as never, command)).resolves.toBe("mutation");
+    const declined = handler({} as never, command);
+    await expect(declined).rejects.toBeInstanceOf(RuntimeRequestError);
+    await expect(declined).rejects.toThrow("Claude declined to move this agent to the background.");
+    await expect(handler({} as never, command)).rejects.toThrow("did not confirm the move to the background in time");
+    expect(backgroundSubagent).toHaveBeenCalledWith(conversationId, traceId);
+  });
+
+  it("accepts a held Stop and refuses one for a task that is no longer live", async () => {
+    const runtime = dependencies({ queue: vi.fn(), relinquishAll: vi.fn(async () => undefined) });
+    const stopSubagent = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    Object.assign(runtime.turns, { stopSubagent });
+    const handler = createTurnInteractionCommandHandler(runtime);
+    const command = {
+      type: "agent.subagent.stop" as const,
+      requestId: "33333333-3333-4333-8333-333333333333",
+      payload: { conversationId, traceId },
+    };
+    await expect(handler({} as never, command)).resolves.toBe("mutation");
+    await expect(handler({} as never, command)).rejects.toThrow("no longer live or cannot be stopped");
+  });
+});
+
 describe("new-turn admission recovery", () => {
   it("replays an accepted request before interpreting a duplicate as an active-turn follow-up", async () => {
     const queue = vi.fn();

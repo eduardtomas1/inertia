@@ -13,6 +13,8 @@ import {
   taskUsage,
   workspaceRun,
 } from "./background-task-fixtures";
+import { backgroundTaskTitle } from "../../src/renderer/src/utils/backgroundTasks";
+import { canBackgroundSubagentTrace } from "../../src/renderer/src/utils/subagentDisclosure";
 
 const NOW = Date.parse("2030-01-01T00:01:00.000Z");
 
@@ -29,6 +31,7 @@ const codexTask = taskTrace({
   runId: "run-codex",
   providerId: "codex",
   providerName: "Explorer",
+  description: "Map the persistence layer",
   model: "gpt-5.3-codex",
   activity: "Running rg subagent",
   progress: "Searching the persistence layer",
@@ -50,6 +53,7 @@ const childTask = taskTrace({
   runId: "run-opencode",
   providerId: "opencode",
   providerName: "Fixture writer",
+  description: "Write the fixture",
   parentTraceId: "codex-explorer",
   activity: "Edit tests/fixture.ts",
 });
@@ -59,6 +63,7 @@ const claudeTask = taskTrace({
   turnId: "turn-claude",
   runId: "run-claude",
   providerName: "Reviewer",
+  description: "Review the adapter",
   model: "claude-sonnet-4-5",
   status: "completed",
   result: "No regressions found in the adapter.",
@@ -88,6 +93,7 @@ const failedTask = taskTrace({
   turnId: "turn-claude",
   runId: "run-claude",
   providerName: "Build verifier",
+  description: "Verify the build",
   status: "failed",
   providerStatus: "error",
   result: "The optional check exited with code 1.",
@@ -114,7 +120,7 @@ function card(title: string): HTMLElement {
 }
 
 async function openTranscript(title: string): Promise<HTMLElement> {
-  const toggle = screen.getByRole("button", { name: `View transcript for ${title}` });
+  const toggle = within(card(title)).getByRole("button", { name: /^View transcript for /u });
   await userEvent.setup().click(toggle);
   expect(toggle).toHaveAttribute("aria-expanded", "true");
   return document.getElementById(toggle.getAttribute("aria-controls")!)!;
@@ -154,14 +160,14 @@ describe("Background tasks surface", () => {
     const running = within(region).getByRole("list", { name: "Running" });
     expect(within(running).getAllByRole("listitem")).toHaveLength(2);
     expect(within(region).queryByRole("heading")).toBeNull();
-    const explorer = card("Explorer");
+    const explorer = card("Map the persistence layer");
     expect(explorer).toHaveTextContent("Agent");
     expect(within(explorer).getByText("1m")).toBeVisible();
     expect(within(explorer).getByText("gpt-5.3-codex")).toBeVisible();
     expect(explorer).toHaveTextContent("128.4K tokens");
     expect(explorer).toHaveTextContent("14 tool uses");
     expect(within(explorer).getByText("Running rg subagent")).toBeVisible();
-    expect(screen.getByText("Explorer", { selector: ".background-task-title" }).closest("button")).toBeNull();
+    expect(screen.getByText("Map the persistence layer", { selector: ".background-task-title" }).closest("button")).toBeNull();
     expect(within(explorer).getAllByRole("button").map((button) => button.getAttribute("aria-label")))
       .toEqual(["View transcript for Explorer"]);
   });
@@ -172,16 +178,15 @@ describe("Background tasks surface", () => {
     expect(toggle).toHaveTextContent("View transcript");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(toggle).not.toHaveAttribute("aria-controls");
-    expect(card("Explorer").querySelector(".background-task-transcript")).toBeNull();
-    const transcript = await openTranscript("Explorer");
-    expect(card("Explorer")).toContainElement(transcript);
+    expect(card("Map the persistence layer").querySelector(".background-task-transcript")).toBeNull();
+    const transcript = await openTranscript("Map the persistence layer");
+    expect(card("Map the persistence layer")).toContainElement(transcript);
   });
 
   it("reads like a short transcript: task, progress, one meta line and quiet links", async () => {
     render(surface({ onFollowUpSubagent: vi.fn(), canFollowUpSubagent: () => true }));
-    const transcript = await openTranscript("Explorer");
+    const transcript = await openTranscript("Map the persistence layer");
     expect(paragraphs(transcript)).toEqual([
-      "Inspect the provider lifecycle.",
       "Searching the persistence layer",
       "Input 120K · Cached 96K · Output 8K · Reasoning 400 · 75% context left",
     ]);
@@ -194,12 +199,11 @@ describe("Background tasks surface", () => {
   it("puts the outcome first in a finished task's transcript", async () => {
     render(surface());
     await openFinished();
-    const transcript = await openTranscript("Reviewer");
+    const transcript = await openTranscript("Review the adapter");
     expect(paragraphs(transcript)).toEqual([
       "No regressions found in the adapter.",
-      "Inspect the provider lifecycle.",
     ]);
-    expect(within(card("Reviewer")).getAllByText("No regressions found in the adapter.")).toHaveLength(1);
+    expect(within(card("Review the adapter")).getAllByText("No regressions found in the adapter.")).toHaveLength(1);
   });
 
   it("names a harness that never reports tokens only inside the transcript", async () => {
@@ -217,8 +221,9 @@ describe("Background tasks surface", () => {
       return this.classList.contains("background-task-clamp") && this.dataset.open !== "true" ? 200 : 0;
     });
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(80);
-    render(surface({ subagents: [{ ...codexTask, description: "A long task ".repeat(80) }] }));
-    const transcript = await openTranscript("Explorer");
+    const long = { ...codexTask, description: "A long task ".repeat(80) };
+    render(surface({ subagents: [long] }));
+    const transcript = await openTranscript(backgroundTaskTitle(long));
     const clamps = [...transcript.querySelectorAll<HTMLElement>(".background-task-clamp")];
     expect(clamps.map((clamp) => clamp.style.getPropertyValue("--clamp-lines"))).toEqual(["4", "6"]);
     const more = within(transcript).getAllByRole("button", { name: /^Show more/u })[0]!;
@@ -231,9 +236,9 @@ describe("Background tasks surface", () => {
 
   it("names a child agent's parent instead of indenting it", () => {
     render(surface());
-    const child = card("Fixture writer");
-    expect(child).toHaveTextContent("Agent · from Explorer");
-    expect(child.closest("ol")).toBe(card("Explorer").closest("ol"));
+    const child = card("Write the fixture");
+    expect(child).toHaveTextContent("Agent · Fixture writer · from Map the persistence layer");
+    expect(child.closest("ol")).toBe(card("Map the persistence layer").closest("ol"));
   });
 
   it("collapses finished work into one row that counts failures in words", async () => {
@@ -244,26 +249,27 @@ describe("Background tasks surface", () => {
     expect(toggle).toHaveAttribute("aria-controls", finished.id);
     expect(within(finished).getAllByRole("listitem").map((item) => item.dataset.focusRow))
       .toEqual(["agent:claude-failed", "agent:cursor-task", "agent:claude-reviewer"]);
-    const failed = card("Build verifier");
+    const failed = card("Verify the build");
     expect(within(failed).getByText("Failed")).toHaveClass("background-task-danger");
-    expect(failed).toHaveTextContent("Agent · Failed");
+    expect(failed).toHaveTextContent("Agent · Build verifier · Failed");
   });
 
   it("animates the line of running work only, with the timeline's thinking sweep", () => {
     const waiting = taskTrace({
       id: "waiting",
       providerName: "Schema checker",
+      description: "Check the schema",
       status: "waiting",
       activity: "Edit tests/fixture.ts",
       progress: "Waiting for review",
     });
     render(surface({ subagents: [codexTask, waiting, claudeTask] }));
-    expect(within(card("Explorer")).getByText("Running rg subagent")).toHaveClass("background-task-live");
-    const waitingCard = card("Schema checker");
-    expect(waitingCard).toHaveTextContent("Agent · Waiting");
+    expect(within(card("Map the persistence layer")).getByText("Running rg subagent")).toHaveClass("background-task-live");
+    const waitingCard = card("Check the schema");
+    expect(waitingCard).toHaveTextContent("Agent · Schema checker · Waiting");
     expect(waitingCard).not.toHaveTextContent("Edit tests/fixture.ts");
     expect(within(waitingCard).getByText("Waiting for review")).not.toHaveClass("background-task-live");
-    expect(screen.getByText("Explorer", { selector: ".background-task-title" })).not.toHaveClass("background-task-live");
+    expect(screen.getByText("Map the persistence layer", { selector: ".background-task-title" })).not.toHaveClass("background-task-live");
   });
 
   it("keeps the moving line of an expanded running task and shows its sentence once", async () => {
@@ -277,25 +283,26 @@ describe("Background tasks surface", () => {
       progress: "Reading the provider adapters",
     });
     render(surface({ subagents: [summarized] }));
-    const transcript = await openTranscript("Code reviewer");
-    const lines = within(card("Code reviewer")).getAllByText("Reading the provider adapters");
+    const transcript = await openTranscript("Review the usage refactor for regressions.");
+    const lines = within(card("Review the usage refactor for regressions.")).getAllByText("Reading the provider adapters");
     expect(lines).toHaveLength(1);
     expect(lines[0]).toHaveClass("background-task-live");
-    expect(paragraphs(transcript)).toEqual(["Review the usage refactor for regressions."]);
+    expect(paragraphs(transcript)).toEqual([]);
   });
 
   it("omits the runtime of a lost task instead of counting the downtime", async () => {
     const lost = taskTrace({
       id: "lost",
       providerName: "Recovered",
+      description: "Recover the run",
       status: "lost",
       isLive: false,
       updatedAt: "2030-01-04T00:00:00.000Z",
     });
     render(surface({ subagents: [lost], now: Date.parse("2030-01-05T00:00:00.000Z") }));
     await openFinished();
-    const item = card("Recovered");
-    expect(item).toHaveTextContent("Agent · Lost");
+    const item = card("Recover the run");
+    expect(item).toHaveTextContent("Agent · Recovered · Lost");
     expect(item.querySelector(".subagent-elapsed")).toBeNull();
   });
 
@@ -305,7 +312,7 @@ describe("Background tasks surface", () => {
     const onFollowUpSubagent = vi.fn();
     let resolveStop!: () => void;
     const onStopSubagent = vi.fn(() => new Promise<void>((resolve) => { resolveStop = resolve; }));
-    const helper = taskTrace({ id: "claude-live", turnId: "turn-claude", providerName: "Claude helper" });
+    const helper = taskTrace({ id: "claude-live", turnId: "turn-claude", providerName: "Claude helper", description: "Help with Claude" });
     render(surface({
       subagents: [codexTask, helper],
       onOpenSubagent,
@@ -315,11 +322,11 @@ describe("Background tasks surface", () => {
       canStopSubagent: () => true,
     }));
     expect(screen.queryByRole("button", { name: "Stop Explorer" })).toBeNull();
-    await openTranscript("Explorer");
+    await openTranscript("Map the persistence layer");
     await user.click(screen.getByRole("button", { name: "View turn for Explorer" }));
     expect(onOpenSubagent).toHaveBeenCalledWith(codexTask);
     expect(screen.getByRole("button", { name: "View transcript for Explorer" })).toHaveAttribute("aria-expanded", "true");
-    await openTranscript("Claude helper");
+    await openTranscript("Help with Claude");
     await user.click(screen.getByRole("button", { name: "Guide parent about Claude helper" }));
     expect(onFollowUpSubagent).toHaveBeenCalledWith(helper);
     await user.click(screen.getByRole("button", { name: "Stop Claude helper" }));
@@ -328,6 +335,129 @@ describe("Background tasks surface", () => {
     expect(screen.getByRole("button", { name: "Stopping Claude helper" })).toBeDisabled();
     resolveStop();
     expect(await screen.findByRole("button", { name: "Stop Claude helper" })).toBeEnabled();
+  });
+
+  it("titles an agent by its task, names its role on the kind line and qualifies a requested model", () => {
+    const requested = taskTrace({
+      id: "requested",
+      turnId: "turn-claude",
+      providerRole: "general-purpose",
+      providerName: null,
+      description: "Audit the migrations",
+      model: "haiku",
+      modelSource: "requested",
+      steps: [{ label: "Read · migrations/107.ts", status: "running" }],
+    });
+    render(surface({ subagents: [requested] }));
+    const item = card("Audit the migrations");
+    expect(item).toHaveTextContent("Agent · General purpose");
+    expect(within(item).getByText("haiku (requested)")).toBeVisible();
+    expect(within(item).getByText("Read · migrations/107.ts")).toHaveClass("background-task-live");
+  });
+
+  it("moves a foreground Claude agent to the background on request", async () => {
+    const user = userEvent.setup();
+    let resolveMove!: () => void;
+    const onBackgroundSubagent = vi.fn(() => new Promise<void>((resolve) => { resolveMove = resolve; }));
+    const foreground = taskTrace({ id: "fg", turnId: "turn-claude", description: "Audit the cache", background: false });
+    const background = taskTrace({ id: "bg", turnId: "turn-claude", description: "Index the docs", background: true });
+    const claudeTurns = [taskTurn({ id: "turn-claude", runId: "run-claude", providerId: "claude", status: "running" })];
+    render(surface({
+      subagents: [foreground, background],
+      turns: claudeTurns,
+      onBackgroundSubagent,
+      canBackgroundSubagent: (trace) => canBackgroundSubagentTrace(trace, claudeTurns),
+    }));
+    expect(within(card("Index the docs")).queryByRole("button", { name: /to the background/u })).toBeNull();
+    const move = within(card("Audit the cache")).getByRole("button", { name: "Move Evidence scout to the background" });
+    await user.click(move);
+    expect(onBackgroundSubagent).toHaveBeenCalledWith(foreground);
+    expect(move).toBeDisabled();
+    resolveMove();
+    await vi.waitFor(() => expect(move).toBeEnabled());
+  });
+
+  it("moves focus to the card when Move to background goes away under the keyboard", async () => {
+    const user = userEvent.setup();
+    const onBackgroundSubagent = vi.fn(async () => undefined);
+    const foreground = taskTrace({ id: "fg", turnId: "turn-claude", description: "Audit the cache", background: false });
+    const claudeTurns = [taskTurn({ id: "turn-claude", runId: "run-claude", providerId: "claude", status: "running" })];
+    const props = {
+      turns: claudeTurns,
+      onBackgroundSubagent,
+      canBackgroundSubagent: (trace: Parameters<typeof canBackgroundSubagentTrace>[0]) => canBackgroundSubagentTrace(trace, claudeTurns),
+    };
+    const view = render(surface({ ...props, subagents: [foreground] }));
+    const move = within(card("Audit the cache")).getByRole("button", { name: "Move Evidence scout to the background" });
+    move.focus();
+    await user.keyboard("{Enter}");
+    expect(onBackgroundSubagent).toHaveBeenCalledWith(foreground);
+    view.rerender(surface({ ...props, subagents: [{ ...foreground, background: true, sequence: 2 }] }));
+    expect(within(card("Audit the cache")).queryByRole("button", { name: /to the background/u })).toBeNull();
+    expect(document.activeElement).toBe(card("Audit the cache"));
+  });
+
+  it("leaves focus alone when Move to background goes away while focus is elsewhere", () => {
+    const foreground = taskTrace({ id: "fg", turnId: "turn-claude", description: "Audit the cache", background: false });
+    const claudeTurns = [taskTurn({ id: "turn-claude", runId: "run-claude", providerId: "claude", status: "running" })];
+    const props = {
+      turns: claudeTurns,
+      onBackgroundSubagent: vi.fn(async () => undefined),
+      canBackgroundSubagent: (trace: Parameters<typeof canBackgroundSubagentTrace>[0]) => canBackgroundSubagentTrace(trace, claudeTurns),
+    };
+    const view = render(surface({ ...props, subagents: [foreground] }));
+    const transcript = within(card("Audit the cache")).getByRole("button", { name: /^View transcript for/u });
+    within(card("Audit the cache")).getByRole("button", { name: /to the background/u }).focus();
+    transcript.focus();
+    view.rerender(surface({ ...props, subagents: [{ ...foreground, background: true, sequence: 2 }] }));
+    expect(document.activeElement).toBe(transcript);
+  });
+
+  it("shows a background command with its command and stops it through the task stop", async () => {
+    const user = userEvent.setup();
+    let resolveStop!: () => void;
+    const onStopSubagent = vi.fn(() => new Promise<void>((resolve) => { resolveStop = resolve; }));
+    const shell = taskTrace({
+      id: "shell-dev",
+      turnId: "turn-claude",
+      providerTaskId: "shell-task",
+      providerName: null,
+      taskKind: "shell",
+      background: true,
+      description: "Start the dev server",
+      command: "npm run dev -- --port 5173",
+    });
+    const finishedShell = taskTrace({
+      id: "shell-build",
+      turnId: "turn-claude",
+      providerName: null,
+      taskKind: "shell",
+      background: true,
+      description: null,
+      command: "npm run build",
+      status: "failed",
+      result: "Build failed with exit code 2",
+      createdAt: "2030-01-01T00:00:05.000Z",
+    });
+    render(surface({
+      subagents: [shell, finishedShell],
+      turns: [taskTurn({ id: "turn-claude", runId: "run-claude", providerId: "claude", status: "running" })],
+      onStopSubagent,
+      canStopSubagent: () => true,
+    }));
+    const item = card("Start the dev server");
+    expect(item).toHaveTextContent("Background command · Running in background");
+    expect(within(item).getByText("npm run dev -- --port 5173").tagName).toBe("CODE");
+    expect(within(item).queryByRole("button", { name: /View transcript/u })).toBeNull();
+    await user.click(within(item).getByRole("button", { name: "Stop Background command: Start the dev server" }));
+    expect(onStopSubagent).toHaveBeenCalledWith(shell);
+    expect(within(item).getByRole("button", { name: "Stopping Background command: Start the dev server" })).toBeDisabled();
+    resolveStop();
+    await openFinished();
+    const failed = card("npm run build");
+    expect(failed).toHaveTextContent("Background command · Failed");
+    expect(within(failed).getByText("Build failed with exit code 2")).toBeVisible();
+    expect(within(failed).queryByRole("button", { name: /^Stop/u })).toBeNull();
   });
 
   it("shows commands as short cards without a transcript and dismisses finished ones", async () => {
@@ -372,6 +502,7 @@ describe("Background tasks surface", () => {
     const finished = Array.from({ length: 24 }, (_, index) => taskTrace({
       id: `done-${String(index).padStart(2, "0")}`,
       providerName: `Done ${index}`,
+      description: `Done ${index}`,
       status: "completed",
       createdAt: `2030-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
     }));

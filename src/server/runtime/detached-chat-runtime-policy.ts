@@ -173,7 +173,8 @@ export function detachedChatCommandRejection(
         && Object.keys(command.payload).length > 1
         ? null
         : REJECTION;
-    case "agent.subagent.stop": {
+    case "agent.subagent.stop":
+    case "agent.subagent.background": {
       if (!ownsExistingConversation(command.payload.conversationId)) {
         return REJECTION;
       }

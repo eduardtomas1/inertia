@@ -186,6 +186,20 @@ describe("conversation context contract boundary", () => {
   });
 });
 
+describe("delegated task control commands", () => {
+  it.each(["agent.subagent.stop", "agent.subagent.background"] as const)("accepts %s only for an exact chat and trace", (type) => {
+    const command = {
+      requestId: crypto.randomUUID(),
+      type,
+      payload: { conversationId: crypto.randomUUID(), traceId: crypto.randomUUID() },
+    };
+    expect(clientCommandSchema.parse(command)).toEqual(command);
+    expect(clientCommandSchema.safeParse({ ...command, payload: { ...command.payload, traceId: "tool-use-id" } }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({ ...command, payload: { ...command.payload, providerToolUseId: "toolu_1" } }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({ ...command, payload: { conversationId: command.payload.conversationId } }).success).toBe(false);
+  });
+});
+
 describe("client command contract", () => {
   it("accepts a bounded message command", () => {
     const command = {

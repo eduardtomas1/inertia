@@ -1537,9 +1537,14 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       }),
     ]);
     const serialized = JSON.stringify(subagents);
-    for (const leaked of ["thread-foreign", "CHILD_COMMAND_OUTPUT", "--fix", "src/nested-a.ts"]) {
+    for (const leaked of ["thread-foreign", "CHILD_COMMAND_OUTPUT"]) {
       expect(serialized).not.toContain(leaked);
     }
+    expect(JSON.stringify(subagents.map(({ activity }) => activity))).not.toMatch(/--fix|src\/nested-a\.ts/u);
+    expect(subagents.flatMap(({ providerAgentId, steps }) => steps ? [[providerAgentId, steps.at(-1)?.label]] : [])).toEqual([
+      ["child-parent", "Command · npm run lint -- --fix"], ["child-parent", "Command · npm run lint -- --fix"],
+      ["grandchild-a", "File change · src/nested-a.ts"],
+    ]);
     expect(subagents.map(({ sequence }) => sequence)).toEqual(
       subagents.map((_, index) => index + 1),
     );

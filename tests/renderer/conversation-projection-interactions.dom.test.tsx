@@ -230,6 +230,13 @@ describe("useConversationProjection delegated task reconciliation", () => {
       usage: null,
       toolUseCount: null,
       durationMs: null,
+      modelSource: null,
+      taskKind: "agent" as const,
+      background: null,
+      command: null,
+      effort: null,
+      activityId: null,
+      steps: null,
       sequence: 3,
       createdAt: "2026-07-28T12:00:40.000Z",
     };

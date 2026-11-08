@@ -149,6 +149,16 @@ export const agentCommandSchemas = [
   z
     .object({
       ...requestBase,
+      type: z.literal("agent.subagent.background"),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        traceId: z.string().uuid(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("activity.stop"),
       payload: z.object({ runId: z.string().uuid() }).strict(),
     })

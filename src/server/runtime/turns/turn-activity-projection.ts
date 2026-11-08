@@ -30,6 +30,33 @@ export interface RecordedTurnActivity {
   runsChanged: boolean;
 }
 
+export const MAX_PROVIDER_ACTIVITY_LINKS = 4_096;
+
+export function linkProviderActivity(
+  active: ActiveTurn,
+  providerActivityId: string | undefined,
+  activityId: string,
+): void {
+  if (!providerActivityId) return;
+  const links = active.providerActivityLinks ??= new Map<string, string>();
+  links.delete(providerActivityId);
+  links.set(providerActivityId, activityId);
+  while (links.size > MAX_PROVIDER_ACTIVITY_LINKS) {
+    const oldest = links.keys().next().value;
+    if (oldest === undefined) break;
+    links.delete(oldest);
+  }
+}
+
+export function linkedProviderActivity(
+  active: ActiveTurn,
+  providerActivityId: string | null | undefined,
+): string | null {
+  return providerActivityId
+    ? active.providerActivityLinks?.get(providerActivityId) ?? null
+    : null;
+}
+
 /**
  * Correlates provider activity with durable transcript rows and the compact
  * workspace-run projection. It never owns turn lifecycle state.
@@ -122,6 +149,7 @@ export class TurnActivityProjection {
       status,
       createdAt: this.options.now(),
     });
+    linkProviderActivity(active, event.activityId, activity.id);
     const runsChanged = this.syncCommandRun(active, activity, event.phase);
     if (event.phase === "started") {
       candidates.push(activity);

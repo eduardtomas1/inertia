@@ -353,8 +353,25 @@ export interface ProviderInteractiveRunExtension {
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Present only for transports with a persistent parent-session input stream. */
   steer?: (input: ProviderSteerInput) => Promise<boolean>;
-  /** Present only when the transport can stop an exact live delegated task. */
-  stopSubagent?: (providerTaskId: string) => Promise<boolean>;
+  /**
+   * Present only when the transport can stop an exact live delegated task. A
+   * tool-use id alone queues the Stop until the provider issues the task id.
+   */
+  stopSubagent?: (providerTaskId: string | null, providerToolUseId?: string | null) => Promise<SubagentStopOutcome>;
+  /** Present only when the transport can move one foreground agent to the background. */
+  backgroundSubagent?: (providerToolUseId: string) => Promise<SubagentBackgroundResult>;
+}
+
+/**
+ * True when the provider stopped the task, "queued" while the Stop waits for
+ * the provider to issue the task id, and false when it was refused.
+ */
+export type SubagentStopOutcome = boolean | "queued";
+
+export interface SubagentBackgroundResult {
+  moved: boolean;
+  /** The provider's bounded, scrubbed reason when it refused. */
+  error?: string;
 }
 
 export interface CliAgentHarnessRunExtension {
@@ -408,7 +425,7 @@ export interface AgentHarnessEmitter {
   sessionTitle: (sessionId: string, title: string) => void;
   goalUpdated: (sessionId: string, goal: ProviderGoalSnapshot) => void;
   goalCleared: (sessionId: string) => void;
-  subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type">) => void;
+  subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type" | "activityId">) => void;
   codex: (event: AgentInteractiveHarnessEvent) => void;
   rich: (event: ProviderInteractiveHarnessEvent) => void;
 }

@@ -83,6 +83,8 @@ import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
 import { StreamingMarkdownText } from "./StreamingMarkdownText";
+import { SubagentActivityRow } from "./SubagentActivityRow";
+import { useLinkedActivityStatuses, useLinkedSubagent } from "./subagentActivityContext";
 import {
   advanceThinkingLine,
   createReasoningLinesReader,
@@ -361,6 +363,14 @@ export const ActivityRow = memo(function ActivityRow({
   );
 });
 
+/** A tool row, or the delegated task it started when the provider linked one. */
+function TimelineActivityRow(props: React.ComponentProps<typeof ActivityRow>): React.JSX.Element {
+  const trace = useLinkedSubagent(props.activity.id);
+  return trace
+    ? <SubagentActivityRow trace={trace} activity={props.activity} onBeforeToggle={props.onBeforeToggle} onAfterToggle={props.onAfterToggle} />
+    : <ActivityRow {...props} />;
+}
+
 export const CommentaryRow = memo(function CommentaryRow({
   entry,
   projectRoot,
@@ -481,15 +491,13 @@ export const ActivityGroup = memo(function ActivityGroup({
   const [expanded, setExpanded] = useState(false);
   const [expandRunning, setExpandRunning] = useState(false);
   const rowsId = useId();
-  const summary = useMemo(
-    () => summarizeActivities(entry.activities),
-    [entry.activities],
-  );
+  const activities = useLinkedActivityStatuses(entry.activities);
+  const summary = useMemo(() => summarizeActivities(activities), [activities]);
   const containsAttention = summary.failed + summary.warnings > 0;
   const folded = settled && summary.running === 0;
   const indicator = useWorkingIndicator();
   const latestRunning = summary.running > 0 && usesActivityOrbs(indicator)
-    ? [...entry.activities].reverse().find((activity) => activity.status === "running")
+    ? [...activities].reverse().find((activity) => activity.status === "running")
     : undefined;
   const groupOrb = latestRunning
     ? resolveOrbMotion(
@@ -498,8 +506,8 @@ export const ActivityGroup = memo(function ActivityGroup({
       )
     : null;
   const mode = containsAttention ? "attention" : "calls";
-  if (entry.activities.length === 1) {
-    const [activity] = entry.activities;
+  if (activities.length === 1) {
+    const [activity] = activities;
     return (
       <div
         className="turn-activity-group"
@@ -507,7 +515,7 @@ export const ActivityGroup = memo(function ActivityGroup({
         data-activity-group-mode={mode}
         data-activity-group-state="single"
       >
-        <ActivityRow
+        <TimelineActivityRow
           activity={activity!}
           visibility={activityNeedsAttention(activity!) ? "important" : "recent"}
           onBeforeToggle={onBeforeToggle}
@@ -517,7 +525,7 @@ export const ActivityGroup = memo(function ActivityGroup({
     );
   }
   const parts = activitySummaryParts(summary);
-  const rows = resolveActivityGroupWindow(entry.activities, {
+  const rows = resolveActivityGroupWindow(activities, {
     expanded,
     settled: folded,
     revealLatestFailure,
@@ -603,7 +611,7 @@ export const ActivityGroup = memo(function ActivityGroup({
             key={activity.id}
           >
             <div>
-              <ActivityRow
+              <TimelineActivityRow
                 activity={activity}
                 visibility={activityNeedsAttention(activity) ? "important" : "recent"}
                 onBeforeToggle={onBeforeToggle}

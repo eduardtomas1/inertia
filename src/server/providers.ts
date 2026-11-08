@@ -32,6 +32,8 @@ import type {
 import type {
   AgentHarnessCapabilities,
   AgentHarnessId,
+  SubagentBackgroundResult,
+  SubagentStopOutcome,
 } from "./provider/agent-harness";
 import { prepareProviderAuthLaunch } from "./provider/auth-launch";
 import { PROVIDERS, PROVIDER_INFO } from "./provider/catalog";
@@ -1156,16 +1158,12 @@ export class ProviderManager {
     return this.runCoordinator.clearGoal(conversationId, identity);
   }
 
-  stopSubagent(
-    conversationId: string,
-    providerTaskId: string,
-    identity: { runId: string; turnId: string },
-  ): Promise<boolean> {
-    return this.runCoordinator.stopSubagent(
-      conversationId,
-      providerTaskId,
-      identity,
-    );
+  stopSubagent(conversationId: string, providerTaskId: string | null, identity: { runId: string; turnId: string }, providerToolUseId: string | null = null): Promise<SubagentStopOutcome> {
+    return this.runCoordinator.stopSubagent(conversationId, providerTaskId, identity, providerToolUseId);
+  }
+
+  backgroundSubagent(conversationId: string, providerToolUseId: string, identity: { runId: string; turnId: string }): Promise<SubagentBackgroundResult> {
+    return this.runCoordinator.backgroundSubagent(conversationId, providerToolUseId, identity);
   }
 
   stopOwned(

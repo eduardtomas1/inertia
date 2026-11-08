@@ -13,6 +13,7 @@ import { subagentTaskTelemetryMigration } from "../../src/server/persistence/mig
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const TELEMETRY_COLUMNS = ["model", "activity", "usage_json", "tool_use_count", "duration_ms"] as const;
+const TASK_SHAPE_COLUMNS = ["task_kind", "background", "command", "effort", "activity_id", "model_source", "steps_json"] as const;
 const directories: string[] = [];
 
 afterEach(async () => {
@@ -98,7 +99,7 @@ describe("subagent task telemetry migration", () => {
     try {
       migrateRuntimeDatabase(reference, 89);
       removeWatcherLinksFromLegacyFixture(database);
-      for (const column of TELEMETRY_COLUMNS) {
+      for (const column of [...TASK_SHAPE_COLUMNS, ...TELEMETRY_COLUMNS]) {
         database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
       }
       database.exec("DROP INDEX workspace_runs_conversation_started_idx");

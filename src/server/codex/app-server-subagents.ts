@@ -1,4 +1,5 @@
-import type { SubagentTaskUsage } from "../../shared/contracts";
+import type { SubagentTaskStep, SubagentTaskUsage } from "../../shared/contracts";
+import { SubagentStepRing, subagentStepLabel } from "../provider/subagent-steps";
 import { validateSubagentTaskUsage } from "../provider/usage-values";
 import {
   boundedText,
@@ -7,7 +8,11 @@ import {
   stringValue,
   type JsonObject,
 } from "./protocol";
-import { codexItemActivityLabel } from "./app-server-item-labels";
+import {
+  codexItemActivityLabel,
+  codexSubagentStep,
+  codexSubagentStepFailed,
+} from "./app-server-item-labels";
 import { codexTurnInterruptionFailure } from "./app-server-status";
 import type { CodexAppServerOptions } from "./types";
 import { parseCodexTokenUsage } from "./usage";
@@ -61,7 +66,7 @@ interface ProvisionalChildEvent {
 }
 
 type CodexChildTelemetry =
-  | { activity: string }
+  | { activity?: string; steps?: SubagentTaskStep[] }
   | { usage: SubagentTaskUsage };
 
 export interface CodexChildTurn {
@@ -199,6 +204,7 @@ function parseThreadSpawnSource(
 export class CodexSubagentLifecycle {
   private readonly childParents = new Map<string, string>();
   private readonly childResults = new Map<string, CappedTextBuffer>();
+  private readonly childSteps = new Map<string, SubagentStepRing>();
   private readonly childDeltaItems = new Set<string>();
   private readonly childActiveTurns = new Map<string, string>();
   private readonly completedChildTurns = new Set<string>();
@@ -217,6 +223,7 @@ export class CodexSubagentLifecycle {
   dispose(): void {
     this.childParents.clear();
     this.childResults.clear();
+    this.childSteps.clear();
     this.childDeltaItems.clear();
     this.childActiveTurns.clear();
     this.completedChildTurns.clear();
@@ -573,7 +580,7 @@ export class CodexSubagentLifecycle {
         result: terminal
           ? boundedText(agentState?.message, 16_000) ?? null
           : null,
-        ...(model ? { model } : {}),
+        ...(model ? { model, modelSource: "requested" as const } : {}),
       }, exactStatus ? "state" : "activity", isLive);
       this.replayProvisionalLifecycle(providerAgentId);
     }
@@ -770,7 +777,7 @@ export class CodexSubagentLifecycle {
     telemetry: CodexChildTelemetry,
   ): void {
     const projection = this.host.projection(threadId);
-    if (!projection || ("activity" in telemetry && !projection.isLive)) return;
+    if (!projection || (!("usage" in telemetry) && !projection.isLive)) return;
     this.emitChildLifecycle(
       threadId,
       projection.status,
@@ -792,6 +799,7 @@ export class CodexSubagentLifecycle {
       const priorTurnId = this.childActiveTurns.get(threadId);
       if (priorTurnId && priorTurnId !== turnId) {
         this.childResults.delete(threadId);
+        this.childSteps.delete(threadId);
       }
       this.childActiveTurns.set(threadId, turnId);
       const projection = this.host.projection(threadId);
@@ -838,6 +846,7 @@ export class CodexSubagentLifecycle {
     if (method === "thread/closed") {
       this.retireChildTurn(threadId);
       this.childResults.delete(threadId);
+      this.childSteps.delete(threadId);
       this.emitChildLifecycle(threadId, "unknown", "turn", {
         providerStatus: "closed",
         isLive: false,
@@ -869,9 +878,15 @@ export class CodexSubagentLifecycle {
         method === "item/started" ? "started" : "completed",
         threadId,
       )) return true;
-      if (method === "item/started") {
-        const activity = boundedText(codexItemActivityLabel(item), 200);
-        if (activity) this.emitChildTelemetry(threadId, { activity });
+      const steps = this.childStep(threadId, item, method === "item/started");
+      const activity = method === "item/started"
+        ? boundedText(codexItemActivityLabel(item), 200)
+        : undefined;
+      if (activity || steps) {
+        this.emitChildTelemetry(threadId, {
+          ...(activity ? { activity } : {}),
+          ...(steps ? { steps } : {}),
+        });
       }
       if (
         method === "item/completed"
@@ -944,7 +959,32 @@ export class CodexSubagentLifecycle {
       isLive: false,
     });
     this.childResults.delete(threadId);
+    this.childSteps.delete(threadId);
     return true;
+  }
+
+  /** Records one child item as a step; returns the new snapshot when it changed. */
+  private childStep(
+    threadId: string,
+    item: JsonObject,
+    started: boolean,
+  ): SubagentTaskStep[] | undefined {
+    const id = strictCodexProviderIdentifier(item.id);
+    const step = codexSubagentStep(item);
+    const label = step ? subagentStepLabel(step.tool, step.keyInput) : null;
+    if (!id || !label) return undefined;
+    let ring = this.childSteps.get(threadId);
+    if (!ring) {
+      ring = new SubagentStepRing();
+      this.childSteps.set(threadId, ring);
+    }
+    const failed = codexSubagentStepFailed(item);
+    const changed = started
+      ? ring.start(id, label)
+      : ring.has(id)
+        ? ring.settle(id, failed, label)
+        : ring.start(id, label) && ring.settle(id, failed);
+    return changed ? ring.snapshot() : undefined;
   }
 
   private retireChildTurn(

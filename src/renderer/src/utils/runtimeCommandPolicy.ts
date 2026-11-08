@@ -118,6 +118,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "agent.skills.preview": agentWorkflowRead,
   "agent.stop": shortMutation,
   "agent.subagent.stop": shortMutation,
+  "agent.subagent.background": shortMutation,
   "agent.workflow.load": agentWorkflowRead,
   "agent.workflow.saved.load": agentWorkflowRead,
   "app.refresh": shortRetrySafe,

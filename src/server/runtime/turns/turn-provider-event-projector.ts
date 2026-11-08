@@ -14,7 +14,10 @@ import {
   agentActivityKind,
   agentActivityStatus,
 } from "../../runtime-snapshots";
-import type { TurnActivityProjection } from "./turn-activity-projection";
+import {
+  linkedProviderActivity,
+  type TurnActivityProjection,
+} from "./turn-activity-projection";
 import {
   boundaryUsage,
   broadcastTurnSnapshot,
@@ -327,9 +330,21 @@ export class TurnProviderEventProjector {
           write: (subagent, updatedAt) =>
             this.persistSubagent(active, subagent, updatedAt),
         });
-        active.subagentTelemetry.project(event, this.options.now());
+        active.subagentTelemetry.project(
+          this.withLinkedActivity(active, event),
+          this.options.now(),
+        );
         break;
     }
+  }
+
+  private withLinkedActivity(
+    active: ActiveTurn,
+    event: ProviderSubagentEvent,
+  ): ProviderSubagentEvent {
+    const { activityId: _untrusted, ...reported } = event;
+    const activityId = linkedProviderActivity(active, event.providerToolUseId);
+    return activityId ? { ...reported, activityId } : reported;
   }
 
   private persistSubagent(
@@ -361,6 +376,14 @@ export class TurnProviderEventProjector {
       usage: event.usage ?? null,
       toolUseCount: event.toolUseCount ?? null,
       durationMs: event.durationMs ?? null,
+      modelSource: event.modelSource ?? null,
+      taskKind: event.taskKind ?? null,
+      background: event.background ?? null,
+      command: event.command ?? null,
+      effort: event.effort ?? null,
+      activityId: event.activityId
+        ?? linkedProviderActivity(active, event.providerToolUseId),
+      steps: event.steps ?? null,
       sequence: event.sequence,
       updatedAt,
     });

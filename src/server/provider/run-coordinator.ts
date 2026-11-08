@@ -1,6 +1,6 @@
 import type { PosixCleanupFailureReason } from "../posix-cleanup-diagnostics";
 import type { AgentApprovalDecision } from "./interactions";
-import type { AgentHarnessRun } from "./agent-harness";
+import type { AgentHarnessRun, SubagentBackgroundResult, SubagentStopOutcome } from "./agent-harness";
 import type { AgentHarnessRegistry } from "./agent-harness-registry";
 import {
   PROVIDER_CAPABILITY_IDS,
@@ -192,6 +192,8 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
     && "then" in value
     && typeof (value as { then?: unknown }).then === "function";
 }
+
+type RunIdentity = { runId: string; turnId: string };
 
 /**
  * Owns the exact provider-run tuple from admission through terminal process
@@ -969,30 +971,36 @@ export class ProviderRunCoordinator {
     return await extension.clearGoal() ? true : "superseded";
   }
 
-  async stopSubagent(
-    conversationId: string,
-    providerTaskId: string,
-    identity: { runId: string; turnId: string },
-  ): Promise<boolean> {
-    const active = this.activeRuns.get(conversationId);
-    if (
-      !active
-      || active.settled
-      || active.cancelRequested
-      || active.runId !== identity.runId
-      || active.turnId !== identity.turnId
-      || !active.capabilityAvailable("subagent-stop")
-    ) return false;
-    const extension = active.harnessRun?.extension;
-    const stopSubagent = extension && "stopSubagent" in extension
-      ? extension.stopSubagent
-      : undefined;
-    if (!stopSubagent) return false;
+  async stopSubagent(conversationId: string, providerTaskId: string | null, identity: RunIdentity, providerToolUseId: string | null = null): Promise<SubagentStopOutcome> {
+    const extension = this.subagentControlExtension(conversationId, identity);
     try {
-      return await stopSubagent(providerTaskId);
+      return extension && "stopSubagent" in extension && extension.stopSubagent
+        ? await extension.stopSubagent(providerTaskId, providerToolUseId)
+        : false;
     } catch {
       return false;
     }
+  }
+
+  async backgroundSubagent(conversationId: string, providerToolUseId: string, identity: RunIdentity): Promise<SubagentBackgroundResult> {
+    const extension = this.subagentControlExtension(conversationId, identity);
+    try {
+      return extension && "backgroundSubagent" in extension && extension.backgroundSubagent
+        ? await extension.backgroundSubagent(providerToolUseId)
+        : { moved: false };
+    } catch {
+      return { moved: false };
+    }
+  }
+
+  /** The live harness extension of exactly this run, while it accepts task controls. */
+  private subagentControlExtension(conversationId: string, identity: RunIdentity) {
+    const active = this.activeRuns.get(conversationId);
+    return active && !active.settled && !active.cancelRequested
+      && active.runId === identity.runId && active.turnId === identity.turnId
+      && active.capabilityAvailable("subagent-stop")
+      ? active.harnessRun?.extension
+      : undefined;
   }
 
   /**

@@ -1,0 +1,13 @@
+.fork-turn-action > .history-rollback-confirm, .fork-turn-action > [role="status"], .fork-turn-action > [role="alert"] { order: 1; }
+.history-files-toggle { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--text); cursor: pointer; }
+.history-files-toggle > input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.history-files-toggle:has(input:disabled) { cursor: default; opacity: 0.6; }
+.history-notice { color: var(--warning); }
+.history-files-restored { color: var(--text-muted); font-size: var(--text-xs); }
+.history-start { margin: 1rem 0; color: var(--text-muted); }
+.history-start > .history-rollback-confirm, .history-start > [role="status"], .history-start > [role="alert"] {
+  padding: 0.5rem 0.75rem; border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+}
+.history-start > .history-rollback-confirm { display: flex; }
+.history-start > .history-rollback-confirm > span:first-child { flex-basis: 100%; }
+.history-start > [role="status"], .history-start > [role="alert"] { display: block; }

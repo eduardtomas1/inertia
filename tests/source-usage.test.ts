@@ -132,6 +132,7 @@ describe("source usage inventory", () => {
       "src/main/linux-file-icon-worker.ts",
       "src/main/snapshot-shortcut-worker.ts",
       "src/server/runtime-worker.ts",
+      "src/server/provider/cursor-sdk-worker.ts",
       "src/server/runtime-status-cli.ts",
       "src/server/persistence/message-search-worker.ts",
       "src/server/persistence/database-recovery-import-worker.ts",

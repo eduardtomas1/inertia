@@ -75,7 +75,7 @@ describe("native preview suspension", () => {
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
 
     expect(nativePreviewSuspended()).toBe(true);
-    expect(screen.getByRole("dialog", { name: "Choose model" }))
+    expect(await screen.findByRole("dialog", { name: "Choose model" }))
       .toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: "Escape" });

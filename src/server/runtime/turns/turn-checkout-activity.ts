@@ -30,6 +30,18 @@ export function hasActiveTurnCheckout(
     ));
 }
 
+export function checkoutActivityConversationIds(
+  store: RuntimeStore,
+  providers: TurnProviderRuntime,
+  trackedConversationIds: Iterable<string>,
+): string[] {
+  return [...new Set([
+    ...trackedConversationIds,
+    ...liveProviderRunConversationIds(store),
+    ...providerConversationIds(store, providers),
+  ])];
+}
+
 export function liveProviderRunOwnership(
   store: RuntimeStore,
   owned: readonly OwnedProviderRun[],

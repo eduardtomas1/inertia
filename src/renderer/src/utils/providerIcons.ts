@@ -1,3 +1,4 @@
+import piIcon from "../assets/provider-icons/pi.svg?no-inline";
 import anthropicIcon from "../assets/provider-icons/anthropic.svg?no-inline";
 import antigravityIcon from "../assets/provider-icons/antigravity.svg?no-inline";
 import cursorDarkIcon from "../assets/provider-icons/cursor-dark.svg?no-inline";
@@ -12,7 +13,7 @@ import type { ProviderId } from "@shared/contracts";
 
 export type ProviderIconDefinition = Readonly<{
   providerId: ProviderId;
-  brand: "openai" | "anthropic" | "cursor" | "kimi" | "opencode" | "antigravity";
+  brand: "openai" | "anthropic" | "cursor" | "kimi" | "opencode" | "antigravity" | "pi";
   label: string;
   lightSrc: string;
   darkSrc?: string;
@@ -20,6 +21,7 @@ export type ProviderIconDefinition = Readonly<{
 }>;
 
 const providerIconDefinitions: Readonly<Record<ProviderId, ProviderIconDefinition>> = {
+  pi: { providerId: "pi", brand: "pi", label: "Pi", lightSrc: piIcon, invertInDark: true },
   codex: {
     providerId: "codex",
     brand: "openai",

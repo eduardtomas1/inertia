@@ -6,6 +6,7 @@ import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
+import { delegatedCompletionAttributionSchema, type DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
 import { DUO_COMPARISON_BRIEF_MAX_BYTES, duoComparisonBriefSchema, type DuoComparisonBrief } from "../../shared/duo-comparison-brief";
 import { AGENT_TURN_STATUSES, isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { randomUUID } from "node:crypto";
@@ -52,6 +53,15 @@ function projectAttachments(
 function validWatcherNote(role: ChatMessage["role"], note: WatcherNoteAttribution): WatcherNoteAttribution {
   const parsed = watcherNoteAttributionSchema.safeParse(note);
   if (role !== "user" || !parsed.success) throw new Error("Invalid watcher note attribution.");
+  return parsed.data;
+}
+
+function validDelegatedCompletion(role: ChatMessage["role"], attribution: DelegatedCompletionAttribution,
+  conversationId: string, watcherNote: WatcherNoteAttribution | undefined): DelegatedCompletionAttribution {
+  const parsed = delegatedCompletionAttributionSchema.safeParse(attribution);
+  if (role !== "user" || watcherNote !== undefined || !parsed.success || parsed.data.parentConversationId !== conversationId) {
+    throw new Error("Invalid delegated result attribution.");
+  }
   return parsed.data;
 }
 
@@ -176,13 +186,16 @@ export class TranscriptRepository {
       && (role !== "user" || !isMessageOriginDeviceId(options.privateConnectDeviceId))) throw new Error("Invalid remote message origin.");
     const watcherNote = options.watcherNote === undefined ? undefined : validWatcherNote(role, options.watcherNote);
     const duoComparison = options.duoComparison === undefined ? undefined : validDuoComparison(role, turnId, options.duoComparison);
+    const delegatedCompletion = options.delegatedCompletion === undefined ? undefined
+      : validDelegatedCompletion(role, options.delegatedCompletion, conversationId, watcherNote);
     const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}), ...(options.htmlRender ? { htmlRender: { ...options.htmlRender } } : {}) };
     if (options.privateConnectDeviceId !== undefined) message.privateConnectDeviceId = options.privateConnectDeviceId;
     if (watcherNote) message.watcherNote = watcherNote;
     if (duoComparison) message.duoComparison = duoComparison;
+    if (delegatedCompletion) message.delegatedCompletion = delegatedCompletion;
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null });
+      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, delegated_completion_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @delegatedCompletionJson)`).run({ ...message, delegatedCompletionJson: delegatedCompletion ? JSON.stringify(delegatedCompletion) : null,attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null });
       this.context.database.prepare(`
         UPDATE conversations
         SET updated_at = ?, settled_at = NULL,
@@ -216,10 +229,12 @@ export class TranscriptRepository {
     acknowledgedAt?: string,
     attachments: readonly ChatAttachment[] = [],
     queuedMessageId?: string,
-    options: { watcherNote?: WatcherNoteAttribution } = {},
+    options: { watcherNote?: WatcherNoteAttribution; delegatedCompletion?: DelegatedCompletionAttribution } = {},
   ): ChatMessage {
     const conversation = this.context.requireConversation(conversationId);
     const watcherNote = options.watcherNote === undefined ? undefined : validWatcherNote("user", options.watcherNote);
+    const delegatedCompletion = options.delegatedCompletion === undefined ? undefined
+      : validDelegatedCompletion("user", options.delegatedCompletion, conversationId, watcherNote);
     const turn = agentTurnFromRow(this.context.requireAgentTurn(turnId));
     if (turn.conversationId !== conversationId) {
       throw new Error("The follow-up turn belongs to a different conversation.");
@@ -239,17 +254,20 @@ export class TranscriptRepository {
       attachments: rendererSafeAttachments(attachments),
       createdAt: submittedAt,
       ...(watcherNote ? { watcherNote } : {}),
+      ...(delegatedCompletion ? { delegatedCompletion } : {}),
     };
     this.context.database.transaction(() => {
       this.context.database.prepare(`
         INSERT INTO messages (
           id, conversation_id, turn_id, role, content,
-          attachments_json, created_at, watcher_note_json
-        ) VALUES (@id, @conversationId, @turnId, 'user', @content, @attachmentsJson, @createdAt, @watcherNoteJson)
+          attachments_json, created_at, watcher_note_json, delegated_completion_json
+        ) VALUES (@id, @conversationId, @turnId, 'user', @content, @attachmentsJson, @createdAt, @watcherNoteJson,
+          @delegatedCompletionJson)
       `).run({
         ...message,
         attachmentsJson: JSON.stringify(message.attachments),
         watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null,
+        delegatedCompletionJson: delegatedCompletion ? JSON.stringify(delegatedCompletion) : null,
       });
       this.context.database.prepare(`
         UPDATE conversations

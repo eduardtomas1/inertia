@@ -9,7 +9,7 @@ export const RESTORE_DEFAULTS_RESETS = [
       "showThinking", "autoCollapseWorkLog", "autoScrollToFinalAnswer", "showTimestamps", "showChangedFileSummaries",
       "defaultCodeWrap", "autoOpenPlan", "confirmDestructiveActions", "usageDisplayMode", "wrapDiffs", "ignoreWhitespace",
       "terminalFontSize", "desktopNotifications", "notifyOnlyInBackground", "completionSound", "quotaWarnings",
-      "compactOnReturn",
+      "compactOnReturn", "delegationAutomaticWakes",
     ],
   },
   { label: "project grouping and the compact sidebar", keys: ["projectGrouping", "compactSidebar"] },

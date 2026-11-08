@@ -49,6 +49,7 @@ function agentThreadManagement(
     kimi: "Kimi Code's scoped MCP session",
     opencode: "OpenCode's scoped MCP session",
     antigravity: "Antigravity",
+    pi: "Pi",
   }[providerId];
   return capabilityContract?.installationVerified
     && capabilityContract.hostToolBridgeAvailable

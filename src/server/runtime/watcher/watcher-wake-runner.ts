@@ -261,7 +261,7 @@ export class WatcherWakeRunner {
       });
       if (!digest) return release("skipped");
       window = claimed.readOnly ? await this.#deps.guard.before(watcher.id) : skippedGuardWindow(watcher.id);
-      if (turns.isActive(watcher.id) || turns.isClosing()) {
+      if (turns.isActive(watcher.id) || turns.isClosing() || store.conversationWork.restoreBlocksConversation(watcher.id)) {
         window.dispose();
         return release("transient");
       }

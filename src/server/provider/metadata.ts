@@ -24,6 +24,8 @@ import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
 import { readClaudeAgentSdkMetadata } from "./claude-agent-sdk-harness";
 import type { ProviderAuthState, ProviderId } from "./contracts";
 import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
+import { readOpenCode2Models } from "./opencode2-metadata";
+import { readPiModels } from "./pi-models";
 import { readAntigravityModels } from "./antigravity-models";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 import { RATE_LIMIT_TTL_MS } from "../runtime/provider-usage-refresh";
@@ -149,9 +151,10 @@ const PROBE_FIELDS: Record<ProviderId, readonly ProviderMetadataField[]> = {
   kimi: [],
   opencode: ["models"],
   antigravity: ["models"],
+  pi: ["models"],
 };
 
-Object.assign(AVAILABLE_FIELDS, { antigravity: ["models"] as const });
+Object.assign(AVAILABLE_FIELDS, { antigravity: ["models"] as const, pi: ["models"] as const });
 
 function cleanString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -493,11 +496,16 @@ export async function readProviderMetadata(
   fields: readonly ProviderMetadataField[] = PROBE_FIELDS[providerId],
   signal?: AbortSignal,
   timeoutMs = PROVIDER_METADATA_TIMEOUT_MS,
+  installationVersion?: string | null,
 ): Promise<ProviderMetadataReadResult> {
   if (providerId === "codex") return await readCodexMetadata(executable, environment, cwd, timeoutMs, fields, { signal });
   if (providerId === "claude") return await readClaudeAgentSdkMetadata(executable, environment, cwd, timeoutMs, undefined, fields, {}, signal);
   if (providerId === "opencode" && fields.includes("models")) {
+    if ((installationVersion ?? "").startsWith("2.")) return { models: await readOpenCode2Models(executable, environment, cwd, signal, timeoutMs, installationVersion) };
     return { models: await readOpenCodeSdkModels(executable, environment, cwd, { signal }) };
+  }
+  if (providerId === "pi" && fields.includes("models")) {
+    return { models: await readPiModels(executable, environment, cwd, { signal }) };
   }
   if (providerId === "antigravity" && fields.includes("models")) {
     return { models: await readAntigravityModels(executable, environment, cwd, { signal }) };
@@ -817,6 +825,7 @@ export class ProviderMetadataCache {
         fields,
         signal,
         timeoutMs,
+        scope.version,
       );
     } catch (error) {
       if (isProcessTreeTerminationUnconfirmed(error)) {

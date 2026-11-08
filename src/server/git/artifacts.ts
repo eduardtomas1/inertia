@@ -21,7 +21,7 @@ import {
   settleGitInspections,
   utf8Prefix,
 } from "./runner";
-import { parseNumstat } from "./status";
+import { parseNumstat, porcelainBranchHead } from "./status";
 import {
   GitError,
   type GitArtifactState,
@@ -113,10 +113,8 @@ async function optionalCaptureValue<T>(
 function branchFromPorcelainStatus(status: Buffer): string | null {
   for (const field of status.toString("utf8").split("\0")) {
     if (!field.startsWith("# branch.head ")) continue;
-    const branch = field.slice(14);
-    return branch && branch !== "(detached)" && branch !== "(unknown)"
-      ? branch
-      : null;
+    const head = field.slice(14);
+    return head ? porcelainBranchHead(head).branch : null;
   }
   return null;
 }

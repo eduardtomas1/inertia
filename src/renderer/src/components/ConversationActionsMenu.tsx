@@ -25,6 +25,7 @@ import {
   RefreshCw,
   Settings,
   Trash2,
+  Undo2,
   X,
 } from "lucide-react";
 import type { Conversation, WorkspaceRun } from "@shared/contracts";
@@ -37,6 +38,7 @@ import { HintButton } from "./HintButton";
 import { useWatcherSurface } from "./watcher/watcherContext";
 import { watcherEntryFor } from "./watcher/watcherAvailability";
 import { prefetchWatcherAttachDialog } from "./watcher/watcherLoaders";
+import { requestStartRollback, useStartRollbackOffered } from "./orchestration/history-session";
 import "./sidebar/thread-actions.css";
 
 type DismissReason = "selection" | "context-change";
@@ -202,6 +204,7 @@ export function ConversationActionsMenu({
     && activeConversationId !== conversation.id,
   );
   const itemProps = { onDismiss };
+  const canRollBackToStart = useStartRollbackOffered(conversation.id) && !hasActiveWork;
   const watcherSurface = useWatcherSurface();
   const watcherEntry = watcherSurface?.openAttachDialog
     ? watcherEntryFor(watcherSurface, conversation)
@@ -261,6 +264,8 @@ export function ConversationActionsMenu({
       <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onStartRename}><Pencil size={14} />Rename thread</ConversationMenuItem>
       {onRegenerateTitle && <ConversationMenuItem {...itemProps} disabled={!canSettle} hint={canSettle ? "Use the latest user message as the title. Runs locally without an AI request." : "Available after the current turn finishes."} onActivate={onRegenerateTitle}><RefreshCw size={14} />Regenerate title</ConversationMenuItem>}
       {onMarkUnread && <ConversationMenuItem {...itemProps} onActivate={onMarkUnread}><Mail size={14} />Mark unread</ConversationMenuItem>}
+      {canRollBackToStart && <ConversationMenuItem {...itemProps} restoreFocus={false}
+        onActivate={() => requestStartRollback(conversation.id, conversationTrigger())}><Undo2 size={14} />Roll back to chat start…</ConversationMenuItem>}
       <div role="separator" />
       <ThreadSubmenu label="Copy" icon={<Copy size={14} />} open={submenu === "copy"}
         onOpenChange={(open) => setSubmenu((current) => open ? "copy" : current === "copy" ? null : current)}>

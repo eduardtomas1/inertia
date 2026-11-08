@@ -553,6 +553,27 @@ describe("client command contract", () => {
     }
   });
 
+  it("accepts Stop with an optional expected turn UUID only", () => {
+    const base = {
+      type: "agent.stop",
+      requestId: crypto.randomUUID(),
+      payload: { conversationId: crypto.randomUUID() },
+    } as const;
+    expect(clientCommandSchema.safeParse(base).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, expectedTurnId: crypto.randomUUID() },
+    }).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, expectedTurnId: "older turn" },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, runId: crypto.randomUUID() },
+    }).success).toBe(false);
+  });
+
   it("accepts only a scoped thread UUID for selection-question cancellation", () => {
     const base = {
       type: "review.selection.cancel",
@@ -568,6 +589,19 @@ describe("client command contract", () => {
       ...base,
       payload: { ...base.payload, runId: crypto.randomUUID() },
     }).success).toBe(false);
+  });
+
+  it("accepts provider and host-tool approval identities and rejects other approval identities", () => {
+    const respond = (requestId: string) => clientCommandSchema.safeParse({
+      type: "agent.approval.respond",
+      requestId: crypto.randomUUID(),
+      payload: { conversationId: crypto.randomUUID(), requestId, decision: "approve" },
+    }).success;
+    expect(respond(crypto.randomUUID())).toBe(true);
+    expect(respond(`inertia-host-tool:${crypto.randomUUID()}`)).toBe(true);
+    expect(respond("inertia-host-tool:forged")).toBe(false);
+    expect(respond(`inertia-host-tool:${crypto.randomUUID()}\n`)).toBe(false);
+    expect(respond(`other-tool:${crypto.randomUUID()}`)).toBe(false);
   });
 
   it("accepts scoped turn-artifact reads and rejects unbounded or cross-shaped payloads", () => {

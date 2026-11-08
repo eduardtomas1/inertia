@@ -16,6 +16,7 @@ export interface DetachedChatRuntimePolicyResources {
   turnConversationId(turnId: string): string | null;
   savedAnswerConversationId(savedAnswerId: string): string | null;
   duoLaunchConversationIds(launchId: string): readonly string[] | null;
+  delegatedTaskConversationIds?(taskId: string): readonly string[] | null;
   pendingApproval(
     conversationId: string,
     requestId: string,
@@ -85,6 +86,13 @@ export function detachedChatCommandRejection(
         : REJECTION;
     case "conversation.detail.load":
       return owns(command.payload.conversationId) ? null : REJECTION;
+    case "observed-child.read":
+      return ownsExistingConversation(command.payload.conversationId) ? null : REJECTION;
+    case "delegation.task.read":
+      return shell() && resources.delegatedTaskConversationIds?.(command.payload.taskId)
+        ?.includes(authority.conversationId)
+        ? null
+        : REJECTION;
     case "agent.workflow.load":
     case "agent.workflow.saved.load":
     case "agent.skills.list":

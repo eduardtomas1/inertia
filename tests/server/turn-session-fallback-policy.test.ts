@@ -404,17 +404,18 @@ describe("retiring a saved session after repeated rejected resumes", () => {
     }
   });
 
-  it("does not retire a session it started until that session completes a turn", async () => {
+  it("does not reuse a fresh session whose history delivery remained uncertain", async () => {
     const { runtime } = await establishedChat();
     try {
       await failTurn(runtime, "1", rejected);
       await failTurn(runtime, "2", rejected);
       const fresh = await failTurn(runtime, "3", outage, { sessionId: "second-session" });
       expect(fresh).toMatchObject({ providerSessionBefore: null, continuationReasonCode: "stale-provider-session" });
-      expect((await failTurn(runtime, "4", rejected)).providerSessionBefore).toBe("second-session");
-      expect((await failTurn(runtime, "5", rejected)).providerSessionBefore).toBe("second-session");
+      expect(runtime.store.orchestration.backings.handoff(fresh.runId)?.state).toBe("uncertain");
+      expect((await failTurn(runtime, "4", rejected)).providerSessionBefore).toBeNull();
+      expect((await failTurn(runtime, "5", rejected)).providerSessionBefore).toBeNull();
       const sixth = runtime.controller.queue({ conversationId: runtime.conversationId, content: "6" });
-      expect(sixth.turn.providerSessionBefore).toBe("second-session");
+      expect(sixth.turn.providerSessionBefore).toBeNull();
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();

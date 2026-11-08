@@ -13,6 +13,7 @@ import {
   type ConversationContextPacket,
   type ConversationContextPacketSummary,
   type ConversationContextSourceTranscript,
+  type ConversationContextSupplement,
   type ChatAttachment,
   type ChatMessage,
   type MaterializedConversationContext,
@@ -98,6 +99,7 @@ export interface CreateConversationContextPacketInput {
   targetConversationId: string;
   sourceMessageIds?: readonly string[];
   note?: string;
+  supplement?: ConversationContextSupplement;
   acknowledgedWorkspaceDifference: boolean;
 }
 
@@ -557,11 +559,13 @@ export class ConversationContextPacketRepository {
       (total, excerpt) => total + excerpt.content.length,
       0,
     );
-    const files = ownConversation || selectedIds
+    const files = input.supplement || ownConversation || selectedIds
       ? null
       : changedFileLines(this.context.database, source.id, null, REFERENCE_FILES_BYTES);
-    const commands = finalTurnCommands(this.context.database, excerpts);
-    const supplement = { ...files, ...(commands.length > 0 ? { commands } : {}) };
+    const commands = input.supplement ? [] : finalTurnCommands(this.context.database, excerpts);
+    const supplement = input.supplement
+      ? { ...input.supplement }
+      : { ...files, ...(commands.length > 0 ? { commands } : {}) };
     const supplementJson = Object.keys(supplement).length > 0 ? JSON.stringify(supplement) : null;
     const stored: StoredPacketExcerpts & { supplement_json: string | null } = {
       excerpts_json: excerptsJson,

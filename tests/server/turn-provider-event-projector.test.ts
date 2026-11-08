@@ -68,7 +68,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
     }));
     const broadcast = vi.fn();
     const projector = new TurnProviderEventProjector({
-      store: { upsertSubagentTrace } as unknown as RuntimeStore,
+      store: { orchestration: { acknowledge: vi.fn() }, upsertSubagentTrace } as unknown as RuntimeStore,
       hooks: {
         broadcast,
         broadcastSnapshot: vi.fn(),
@@ -131,7 +131,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
     const observeSubagent = vi.fn();
     const broadcast = vi.fn();
     const projector = new TurnProviderEventProjector({
-      store: {
+      store: { orchestration: { acknowledge: vi.fn() },
         upsertSubagentTrace: vi.fn(() => ({
           changed: false,
           trace: terminalTrace,
@@ -288,7 +288,7 @@ describe("TurnProviderEventProjector reasoning order", () => {
       activityId: `${kind}-activity`,
     });
     const projector = new TurnProviderEventProjector({
-      store: {
+      store: { orchestration: { acknowledge: vi.fn() },
         upsertAgentPlan: vi.fn(() => calls.push("persist-plan")),
       } as unknown as RuntimeStore,
       hooks: {
@@ -365,7 +365,7 @@ describe("TurnProviderEventProjector plan updates", () => {
     const broadcast = vi.fn();
     const agentPlans = new Map<string, AgentPlan>();
     const projector = new TurnProviderEventProjector({
-      store: { upsertAgentPlan } as unknown as RuntimeStore,
+      store: { orchestration: { acknowledge: vi.fn() }, upsertAgentPlan } as unknown as RuntimeStore,
       hooks: {
         broadcast,
         broadcastConversationShell: vi.fn(),
@@ -499,7 +499,7 @@ describe("TurnProviderEventProjector read-only watcher turns", () => {
     };
     const broadcast = vi.fn();
     const projector = new TurnProviderEventProjector({
-      store: {} as RuntimeStore,
+      store: { orchestration: { acknowledge: vi.fn() } } as unknown as RuntimeStore,
       hooks: { broadcast, broadcastSnapshot: vi.fn() } as unknown as TurnControllerHooks,
       agentPlans: new Map(),
       streams: { closeAssistantSegment: vi.fn(), flush: vi.fn() } as never,

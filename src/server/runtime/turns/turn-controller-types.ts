@@ -44,6 +44,7 @@ import type { StreamingTrace } from "../test-streaming-trace";
 import type { AuthoritativeRunStateEngine } from "../run-state-engine";
 import type { WatcherNoteAttribution } from "../../../shared/watcher";
 import type { DuoComparisonBrief } from "../../../shared/duo-comparison-brief";
+import type { CommandSource } from "../../orchestration-v2/types";
 
 export interface TurnTimerScheduler extends DeltaTimerScheduler {}
 
@@ -67,6 +68,7 @@ export interface TurnProviderRuntime {
     conversationId: string,
     identity: { runId: string; turnId: string },
     graceMs?: number,
+    hooks?: { escalated?(): void },
   ): Promise<"missing" | "identity-mismatch" | "settled" | "force-detached">;
   isRunning(conversationId: string): boolean;
   ownsRun(
@@ -254,6 +256,7 @@ export interface ReadOnlyWatcherTurn {
 export interface FollowUpSteerOptions {
   providerContent?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   queuedMessageId?: string;
 }
 
@@ -262,6 +265,8 @@ export interface TurnSettledEvidence {
 }
 
 export interface QueueTurnRequest {
+  /** Original validated ingress command for durable acknowledgement replay. */
+  orchestrationRequest?: CommandSource;
   queuedMessageId?: string;
   limitResetPlanId?: string;
   restartContinuationPlanId?: string;
@@ -273,6 +278,7 @@ export interface QueueTurnRequest {
   duoComparison?: DuoComparisonBrief;
   authorizedWatcherWakeId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   content: string;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];

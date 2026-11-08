@@ -24,9 +24,11 @@ const productionMappings = [
   ["codex", "codex-app-server"],
   ["claude", "claude-agent-sdk"],
   ["cursor", "cursor-acp"],
+  ["cursor", "cursor-sdk"],
   ["kimi", "kimi-acp"],
   ["opencode", "opencode-sdk"],
   ["antigravity", "antigravity-cli"],
+  ["pi", "pi-rpc"],
 ] as const;
 
 function manifest(harnessId: (typeof productionMappings)[number][1]) {
@@ -89,12 +91,12 @@ describe("provider capability manifests", () => {
     }
   });
 
-  it("publishes exactly six complete canonical provider-harness mappings", () => {
+  it("publishes eight complete canonical harness mappings for seven providers", () => {
     const manifests = productionProviderCapabilityManifests();
     expect(manifests.map(({ providerId, harnessId }) =>
       [providerId, harnessId])).toEqual(productionMappings);
-    expect(new Set(manifests.map(({ providerId }) => providerId)).size).toBe(6);
-    expect(new Set(manifests.map(({ harnessId }) => harnessId)).size).toBe(6);
+    expect(new Set(manifests.map(({ providerId }) => providerId)).size).toBe(7);
+    expect(new Set(manifests.map(({ harnessId }) => harnessId)).size).toBe(8);
 
     for (const value of manifests) {
       expect(value.schemaVersion).toBe(1);

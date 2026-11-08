@@ -100,10 +100,11 @@ export function composerCheckoutStrip({
 export function composerCheckoutBranch(
   conversation: Pick<Conversation, "branch" | "worktreePath">,
   checkoutBranch: string | null | undefined,
-): string {
+): string | null {
+  const liveBranch = checkoutBranch === null ? "Detached HEAD" : checkoutBranch;
   return (conversation.worktreePath
-    ? conversation.branch ?? checkoutBranch
-    : checkoutBranch ?? conversation.branch) ?? "Detached HEAD";
+    ? conversation.branch ?? liveBranch
+    : liveBranch ?? conversation.branch) ?? null;
 }
 
 export interface ComposerToolbarProps {
@@ -591,7 +592,9 @@ export function ComposerToolbar({
               <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
             </span>
           )}
-          {!scratchWorkspace && <CheckoutBranchSlot branch={visibleCheckoutBranch} />}
+          {!scratchWorkspace && visibleCheckoutBranch !== null && (
+            <CheckoutBranchSlot branch={visibleCheckoutBranch} />
+          )}
         </div>
       )}
     </div>

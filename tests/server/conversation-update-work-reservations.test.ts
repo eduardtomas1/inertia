@@ -64,10 +64,11 @@ function workflowState(conversationId: string): AgentWorkflowState {
 function modeUpdate(
   conversationId: string,
   interactionMode: "build" | "plan",
+  requestId: string,
 ): Extract<ClientCommand, { type: "conversation.update" }> {
   return {
     type: "conversation.update",
-    requestId: "11111111-1111-4111-8111-111111111111",
+    requestId,
     payload: { conversationId, interactionMode },
   };
 }
@@ -99,14 +100,14 @@ describe("conversation updates during background provider work", () => {
     await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
     expect(store.conversationWork.reserve(conversationId)).toBe(false);
 
-    await expect(conversations({} as never, modeUpdate(conversationId, "plan")))
+    await expect(conversations({} as never, modeUpdate(conversationId, "plan", "11111111-1111-4111-8111-111111111111")))
       .resolves.toBe("mutation");
     expect(store.conversation(conversationId).interactionMode).toBe("plan");
 
     settleRefresh();
     await expect(refreshing).resolves.toBe("handled");
     expect(store.conversationWork.reserve(conversationId)).toBe(true);
-    await expect(conversations({} as never, modeUpdate(conversationId, "build")))
+    await expect(conversations({} as never, modeUpdate(conversationId, "build", "33333333-3333-4333-8333-333333333333")))
       .rejects.toThrow("Stop the active run or review before changing its agent configuration.");
     expect(store.conversation(conversationId).interactionMode).toBe("plan");
     store.conversationWork.release(conversationId);

@@ -424,6 +424,7 @@ export const configurationCommandSchemas = [
           desktopNotifications: z.boolean().optional(),
           notifyOnlyInBackground: z.boolean().optional(),
           compactOnReturn: z.enum(COMPACT_ON_RETURN_SETTINGS).optional(),
+          delegationAutomaticWakes: z.boolean().optional(),
           quotaWarnings: z.object({
             enabled: z.boolean().optional(),
             firstThreshold: z.union(QUOTA_WARNING_THRESHOLDS.map((threshold) => z.literal(threshold))).optional(),

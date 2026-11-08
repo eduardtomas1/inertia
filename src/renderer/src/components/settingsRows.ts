@@ -62,6 +62,9 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["usage-display", "Usage display", ["quota", "token", "tokens", "limit", "limits", "context", "usage and context", "general"]],
       ["compact-on-return", "Compact large API chats when you return", ["compact on return", "compaction", "compact", "summarize", "prompt cache", "cache", "api key", "tokens", "cost", "context"]],
     ],
+    "Delegated tasks": [
+      ["delegation-automatic-wakes", "Continue chats automatically when delegated tasks finish", ["delegation", "delegated tasks", "delegate", "subagents", "agents", "wake", "automatic", "continue", "results", "orchestration"]],
+    ],
     "Review and terminal": [
       ["wrap-diffs", "Wrap long diff lines", ["diff", "wrap", "review", "source control"]],
       ["ignore-whitespace", "Ignore whitespace", ["diff", "whitespace", "review", "source control"]],

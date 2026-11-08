@@ -204,7 +204,7 @@ describe("composer detachment ownership", () => {
     const onUpdateConversation = vi.fn<React.ComponentProps<typeof Composer>["onUpdateConversation"]>(async () => undefined);
     render(<Composer {...composerProps(current, { providers: [available], onUpdateConversation })} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByTitle("Saved Agent").closest("button")!);
+    fireEvent.click((await screen.findByTitle("Saved Agent")).closest("button")!);
     await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
     expect(onUpdateConversation.mock.calls[0]![0]).toMatchObject({
       modelSelection: { reasoningEffort: "high", providerOptions: explicit ? { fastMode: "priority" } : {} },

@@ -40,6 +40,7 @@ const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   kimi: "Kimi Code",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  pi: "Pi",
 };
 
 const PROVIDER_TERMINAL_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
@@ -103,6 +104,8 @@ export function providerTerminalResumeAvailability(
       reason: `No resumable ${providerLabel} CLI session for this chat.`,
     };
   }
+  if (conversation.providerId === "pi") return { kind: "unavailable", resume,
+    reason: "Resume Pi through Inertia to preserve its exact native session directory." };
   if (!isProviderTerminalSessionId(conversation.providerSessionId)) {
     return {
       kind: "unavailable",

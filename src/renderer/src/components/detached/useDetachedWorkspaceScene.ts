@@ -336,6 +336,7 @@ export function useDetachedWorkspaceScene({
         ...model.chat,
         loading: false,
         previewContextUrl: null,
+        onForkCommand: undefined,
         sending: runtimeActions.sendingConversationIds.has(conversationId),
       },
       tools: model.tools ? {

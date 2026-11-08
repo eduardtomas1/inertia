@@ -164,6 +164,20 @@ describe("fresh provider session fallback", () => {
     expect(statuses()).toEqual(["starting", "running", "running", "completed"]);
   });
 
+  it("never carries a deferred native rollback cursor into the fresh replacement session", async () => {
+    const { harness, attempts } = scriptedHarness();
+    const nativeContinuation = { kind: "resume-cursor" as const, nativeConversationId: "saved-session", resumeSessionAt: "retained" };
+    const run = startHarnessWithFreshSessionFallback(harness, { input: { ...input(), nativeContinuation }, nativeContinuation,
+      executable: "provider", environment: {}, providerNativeToolsAvailable: true }, () => ({ prompt: "Replacement" }));
+    attempts[0]!.finish({ status: "failed", failure: unavailable, error: unavailable.message });
+    await vi.waitFor(() => expect(attempts).toHaveLength(2));
+    expect(attempts[0]!.options.nativeContinuation).toEqual(nativeContinuation);
+    expect(attempts[1]!.options).not.toHaveProperty("nativeContinuation");
+    expect(attempts[1]!.options.input).not.toHaveProperty("nativeContinuation");
+    attempts[1]!.finish({ status: "completed", sessionId: "fresh-session", text: "Answer" });
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+  });
+
   it("delivers the withheld terminal status when the first attempt stands", async () => {
     const { run, attempts, statuses } = start(() => null);
     attempts[0]!.emit({ type: "status", status: "starting" });

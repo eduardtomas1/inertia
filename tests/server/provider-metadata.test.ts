@@ -326,7 +326,7 @@ describe("provider metadata cache", () => {
     });
 
     expect(read).toHaveBeenCalledOnce();
-    expect(read.mock.calls[0]).toHaveLength(7);
+    expect(read.mock.calls[0]).toHaveLength(8);
     expect(read.mock.calls[0]![6]).toBe(18_000);
     expect(cache.lastReadTimedOut("claude")).toBe(true);
     await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true });

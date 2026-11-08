@@ -60,6 +60,10 @@ describe("runtime supervisor connection", () => {
       "provider-installation-quarantined",
       "Runtime startup is blocked because provider installation recovery requires manual attention. Review Runtime diagnostics in Settings → Help.",
     ],
+    [
+      "orchestration-projection-invalid",
+      "Runtime startup is blocked because the orchestration projection could not be rebuilt from saved chat history. Your saved data was not changed and the automatic database backups are kept. Review Runtime diagnostics in Settings → Help and copy the support summary.",
+    ],
   ] as const)(
     "classifies %s as a finite non-retryable blocker",
     (startupBlockerCode, message) => {

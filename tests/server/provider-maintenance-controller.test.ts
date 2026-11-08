@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { PROVIDER_MAINTENANCE_PROVIDER_IDS } from "../../src/shared/provider-maintenance";
 
 import type {
   ProviderMaintenanceOperation,
@@ -346,9 +347,9 @@ describe("ProviderMaintenanceController", () => {
     expect(runAction).not.toHaveBeenCalled();
   });
 
-  it("does not report OpenCode 2 as an update for a Homebrew install Inertia cannot update", async () => {
+  it("does not report OpenCode 3 as an update for a Homebrew install Inertia cannot update", async () => {
     const homebrewInfo = vi.fn(async () => JSON.stringify({
-      formulae: [{ versions: { stable: "2.2.5" } }],
+      formulae: [{ versions: { stable: "3.0.2" } }],
       casks: [],
     }));
     const controller = new ProviderMaintenanceController({
@@ -369,9 +370,9 @@ describe("ProviderMaintenanceController", () => {
 
     const [status] = await controller.refresh(["opencode"]);
     expect(status).toMatchObject({
-      latestVersion: "2.2.5",
+      latestVersion: "3.0.2",
       versionStatus: "unknown",
-      message: "Version 2.2.5 is a new major version that Inertia does not support yet. Your account cannot write this Homebrew installation.",
+      message: "Version 3.0.2 is a new major version that Inertia does not support yet. Your account cannot write this Homebrew installation.",
     });
   });
 
@@ -760,7 +761,7 @@ describe("ProviderMaintenanceController", () => {
 
     await waitForTerminal(operations, started.id);
     const diagnosticStates = controller.diagnosticStates();
-    expect(diagnosticStates).toHaveLength(6);
+    expect(diagnosticStates).toHaveLength(PROVIDER_MAINTENANCE_PROVIDER_IDS.length);
     expect(diagnosticStates).toContainEqual({
       providerId: "claude",
       state: "quarantined",
@@ -799,7 +800,7 @@ describe("ProviderMaintenanceController unreadable journal diagnostics", () => {
 
     const states = controller.diagnosticStates();
 
-    expect(states).toHaveLength(6);
+    expect(states).toHaveLength(PROVIDER_MAINTENANCE_PROVIDER_IDS.length);
     expect(states.every(({ state }) => state === "quarantined")).toBe(true);
     expect(controller.hasBlockingAuthority("claude")).toBe(true);
   });

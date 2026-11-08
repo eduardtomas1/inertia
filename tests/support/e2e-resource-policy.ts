@@ -4,9 +4,19 @@ import { join, relative, resolve } from "node:path";
 export type E2eResource = "isolated" | "primary-display";
 const resourceMarker = /^\/\/ @inertia-e2e-resource (isolated|primary-display)$/u;
 const scenarioFile = /\.spec\.[cm]?[jt]sx?$/u;
+const explicitScenarioResources = new Map<string, E2eResource>([
+  ["history-rollback-merge-back.spec.ts", "isolated"],
+]);
 
 export function scenarioResource(source: string, file: string): E2eResource {
   const lines = source.replace(/^\uFEFF/u, "").split(/\r?\n/u);
+  const explicit = explicitScenarioResources.get(file);
+  if (explicit) {
+    if (lines.some((line) => line.startsWith("// @inertia-e2e-resource"))) {
+      throw new Error(`${file} must have exactly one resource declaration.`);
+    }
+    return explicit;
+  }
   const marker = resourceMarker.exec(lines[0] ?? "");
   if (!marker || lines.filter((line) => line.startsWith("// @inertia-e2e-resource")).length !== 1) {
     throw new Error(`${file} needs exactly one first-line @inertia-e2e-resource declaration.`);

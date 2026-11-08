@@ -51,6 +51,19 @@ export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
         />
       </SettingsGroup>
 
+      <SettingsGroup title="Delegated tasks" headingId="delegated-tasks-heading">
+        <div className="settings-rows">
+          <SettingSwitch
+            id="delegation-automatic-wakes"
+            title="Continue chats automatically when delegated tasks finish"
+            description="When off, finished results wait in the chat's Delegated work panel until you choose Continue with results."
+            checked={settings.delegationAutomaticWakes}
+            disabled={disabled}
+            onChange={(delegationAutomaticWakes) => onUpdate({ delegationAutomaticWakes })}
+          />
+        </div>
+      </SettingsGroup>
+
       <SettingsGroup title="Review and terminal" headingId="source-heading">
         <div className="settings-rows">
           <SettingSwitch id="wrap-diffs" title="Wrap long diff lines" checked={settings.wrapDiffs} disabled={disabled} onChange={(wrapDiffs) => onUpdate({ wrapDiffs })} />

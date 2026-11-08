@@ -51,7 +51,7 @@ describe("provider version floors", { concurrent: false }, () => {
       product: "Antigravity",
       minimumVersion: "1.2.2",
     });
-    expect(OPENCODE_VERSION_CEILING.firstUnsupportedMajor).toBe(2);
+    expect(OPENCODE_VERSION_CEILING.firstUnsupportedMajor).toBe(3);
     for (const floor of Object.values(PROVIDER_VERSION_FLOORS)) {
       expect(floor.reason.length).toBeGreaterThan(0);
     }
@@ -296,8 +296,8 @@ describe("provider version floors", { concurrent: false }, () => {
     },
   );
 
-  it("keeps the OpenCode 2 message ahead of the floor", async () => {
-    const { detection } = await openCodeDetection("2.0.22");
+  it("keeps the unsupported OpenCode major message ahead of the floor", async () => {
+    const { detection } = await openCodeDetection("3.0.1");
     expect(detection).toMatchObject({
       canRun: false,
       statusMessage: OPENCODE_VERSION_CEILING.message,

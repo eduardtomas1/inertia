@@ -142,6 +142,12 @@ export const DIAGNOSTIC_CATALOG = {
     cause: "Startup or safe recovery did not reach readiness. See the existing lifecycle support summary for its safety state.",
     nextStep: "Keep affected work unchanged. Inspect lifecycle integrity or copy the support summary; do not bypass cleanup protections.",
   },
+  "runtime.orchestration-projection-invalid": {
+    severity: "error", subsystem: "runtime", operation: "runtime-lifecycle",
+    title: "The orchestration projection could not be rebuilt", causeKnown: true,
+    cause: "At startup the orchestration projection did not match its saved event history, and rebuilding it from that history still left records that could not be read. The runtime stayed stopped so nothing was changed.",
+    nextStep: "Keep the data folder unchanged and copy the support summary from Settings → Help. Saved chats and the automatic database backups are kept.",
+  },
   "runtime.restarting": {
     severity: "warning", subsystem: "runtime", operation: "runtime-lifecycle",
     title: "The local runtime is recovering", causeKnown: true,
@@ -224,7 +230,7 @@ export const DIAGNOSTIC_CATALOG = {
 
 export type DiagnosticCode = keyof typeof DIAGNOSTIC_CATALOG;
 const codeSchema = z.enum(Object.keys(DIAGNOSTIC_CATALOG) as [DiagnosticCode, ...DiagnosticCode[]]);
-const providerSchema = z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity"]);
+const providerSchema = z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "pi"]);
 const timestampSchema = z.string().datetime().max(30);
 const uuidSchema = z.string().uuid();
 const generationSchema = z.string().max(64).refine((value) => {

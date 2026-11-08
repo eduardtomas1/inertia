@@ -3,6 +3,10 @@ import type { ConversationDetail } from "@shared/contracts";
 export function mergeConversationHistory(current: ConversationDetail, incoming: ConversationDetail,
   mode: "refresh" | "older" | "target"): ConversationDetail {
   if (current.conversation.id !== incoming.conversation.id) return incoming;
+  const currentRevision = current.rollbackRevision ?? 0;
+  const incomingRevision = incoming.rollbackRevision ?? currentRevision;
+  if (incomingRevision > currentRevision) return incoming;
+  if (incomingRevision < currentRevision) return current;
   const replacedTurns = new Set(incoming.agentTurns.map(({ id }) => id));
   if (mode === "refresh" && !current.agentTurns.some(({ id }) => replacedTurns.has(id))
     && !current.messages.some(({ id }) => incoming.messages.some((message) => message.id === id))) return incoming;
@@ -60,6 +64,9 @@ export function mergeConversationHistory(current: ConversationDetail, incoming: 
     contextPackets: merge((current.contextPackets ?? []).filter((packet) =>
       mode !== "refresh" || packet.consumedMessageId !== null), incoming.contextPackets ?? []),
     plans,
+    ...(current.rolledBackTurnIds || incoming.rolledBackTurnIds
+      ? { rolledBackTurnIds: [...new Set([...current.rolledBackTurnIds ?? [], ...incoming.rolledBackTurnIds ?? []])] }
+      : {}),
     ...(watcherWakes ? { watcherWakes } : {}),
   };
 }

@@ -99,7 +99,7 @@ describe("TurnController cancellation persistence and cleanup", () => {
 
         expect(stop).toHaveBeenCalledExactlyOnceWith(runtime.conversationId, {
           runId: queued.turn.runId, turnId: queued.turn.id,
-        });
+        }, undefined, { escalated: expect.any(Function) });
         expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
         expect(runtime.store.agentTurn(queued.turn.id).status).not.toBe(initialStatus);
         expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
@@ -108,8 +108,13 @@ describe("TurnController cancellation persistence and cleanup", () => {
         expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId)).toHaveLength(1);
         expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
         expect(runtime.events.filter(({ type }) => type === "agent.failed" || type === "agent.completed")).toHaveLength(1);
+        expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(true);
         expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
           content: "The chat is released." })).not.toThrow();
+        runtime.store.providerRunOwnership.clear(queued.turn.id, "wrong-run");
+        expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(true);
+        runtime.store.providerRunOwnership.clear(queued.turn.id, queued.turn.runId);
+        expect(runtime.store.orchestration.awaitsCleanupProof(runtime.conversationId)).toBe(false);
       } finally {
         vi.restoreAllMocks();
         runtime.store.close();

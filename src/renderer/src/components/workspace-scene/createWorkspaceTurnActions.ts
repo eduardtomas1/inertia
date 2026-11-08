@@ -1,6 +1,8 @@
 import type {
+  AgentTurn,
   CheckpointSummary,
   Conversation,
+  ConversationShell,
   ServerEvent,
   SubagentTrace,
 } from "@shared/contracts";
@@ -18,6 +20,14 @@ interface WorkspaceTurnActionInput {
     earlierTurnId: string,
     laterTurnId: string,
   ) => Promise<void>;
+}
+
+export function revertsRolledBackTurn(
+  checkpoint: Pick<CheckpointSummary, "id" | "turnId">,
+  turn: Pick<AgentTurn, "id" | "checkpointId">,
+  rolledBack: boolean,
+): boolean {
+  return rolledBack && checkpoint.turnId === turn.id && turn.checkpointId === checkpoint.id;
 }
 
 export function createWorkspaceTurnActions({
@@ -75,7 +85,8 @@ export function createWorkspaceTurnActions({
       return conversation
         ? run("agent.stop", {
             type: "agent.stop",
-            payload: { conversationId: conversation.id },
+            payload: { conversationId: conversation.id,
+              expectedTurnId: (conversation as Partial<ConversationShell>).latestTurn?.id },
           }).then(() => undefined)
         : Promise.resolve();
     },

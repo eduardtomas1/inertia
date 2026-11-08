@@ -240,6 +240,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
   initialStore.close();
 
   const stopFrames: string[] = [];
+  const acknowledgements: string[] = [];
   let stopConversationId: string | null = null;
   let collectStopFrames = true;
   page.on("websocket", (socket) => {
@@ -249,6 +250,13 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
         ? frame.payload
         : frame.payload.toString();
       if (payload.includes('"agent.stop"')) stopFrames.push(payload);
+    });
+    socket.on("framereceived", (frame) => {
+      if (!collectStopFrames) return;
+      const payload = typeof frame.payload === "string"
+        ? frame.payload
+        : frame.payload.toString();
+      if (payload.includes('"request.ok"')) acknowledgements.push(payload);
     });
   });
 
@@ -445,20 +453,21 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
       (button as HTMLButtonElement).click();
       (button as HTMLButtonElement).click();
     });
-    await expect(page.getByRole("alert")).toContainText(
-      "This thread does not have an active run.",
-    );
+    await expect.poll(() => stopFrames.length).toBe(1);
+    const stopCommand = clientCommandSchema.parse(JSON.parse(stopFrames[0]!));
+    if (stopCommand.type !== "agent.stop") {
+      throw new Error("The captured command is not an agent stop request.");
+    }
+    expect(stopCommand.payload.conversationId).toBe(stopConversationId);
+    await expect.poll(() => acknowledgements.some((payload) =>
+      payload.includes(`"requestId":"${stopCommand.requestId}"`))).toBe(true);
+    await expect(page.getByRole("alert")).toHaveCount(0);
     await expect(stop).toBeEnabled();
     await expect(stop).toHaveAttribute(
       "data-composer-action-state",
       "stop-ready",
     );
     expect(stopFrames).toHaveLength(1);
-    const stopCommand = clientCommandSchema.parse(JSON.parse(stopFrames[0]!));
-    if (stopCommand.type !== "agent.stop") {
-      throw new Error("The captured command is not an agent stop request.");
-    }
-    expect(stopCommand.payload.conversationId).toBe(stopConversationId);
   } finally {
     await submissionGate?.release().catch(() => undefined);
     collectStopFrames = false;

@@ -133,7 +133,11 @@ describe("provider session continuity", () => {
     expect(input.prompt).toContain("The export must preserve accented names.");
     expect(input.prompt).toContain("I will use UTF-8 and verify café.");
     expect(input.prompt).toContain("Continue the export.");
-    expect(input.prompt).toContain("restored because this provider session does not have them");
+    expect(input.prompt).toContain("3 intact historical items included; 0 omitted.");
+    expect(input.prompt).toContain("Omitted history cannot be retrieved in this session");
+    expect(input.prompt).not.toContain("inertia_request_context");
+    expect(input.prompt.indexOf("The export must preserve accented names.")).toBeLessThan(input.prompt.indexOf("I will use UTF-8 and verify café."));
+    expect(input.prompt.indexOf("I will use UTF-8 and verify café.")).toBeLessThan(input.prompt.indexOf("Continue the export."));
     expect(input.prompt).not.toContain("OTHER_CHAT_PRIVATE_SENTINEL");
     expect(queued.turn).toMatchObject({
       continuationReasonCode: "missing-continuation-identity",
@@ -177,13 +181,18 @@ describe("provider session continuity", () => {
     const input = resolved.adopt(queued).active.providerInput;
     expect(input.sessionId).toBeUndefined();
     expect(input.prompt).not.toContain("The export must preserve accented names.");
-    expect(input.prompt).not.toContain("restored because this provider session does not have them");
+    expect(input.prompt).not.toContain("I will use UTF-8 and verify café.");
+    expect(input.prompt).not.toContain("OTHER_CHAT_PRIVATE_SENTINEL");
+    expect(input.prompt).toContain("0 intact historical items included; 0 omitted.");
     expect(input.prompt).toContain("Continue the export.");
     expect(queued.turn).toMatchObject({
       continuationReasonCode: reason,
       sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: 2 },
     });
-    expect(f.restoredReferences(queued.turn.id)).toEqual([]);
+    expect(f.restoredReferences(queued.turn.id)).toEqual([expect.objectContaining({
+      label: `${RESTORED_CHAT_HISTORY_LABEL} · 0 messages`,
+      truncated: false,
+    })]);
     expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
   });
 
@@ -610,16 +619,31 @@ describe("restored history on a custom backend", () => {
           .filter(({ label }) => label.startsWith(RESTORED_CHAT_HISTORY_LABEL))
           .reduce((total, { byteSize }) => total + byteSize, 0),
         recovery: resolved.input.sessionRecovery,
+        prompt: resolved.input.executionContext!.blobs.map(({ content }) => content).join("\n"),
       };
     };
     const native = restoredBytes(false);
     const custom = restoredBytes(true);
-    expect(native.recovery).toEqual({ restoredMessageCount: 42, omittedMessageCount: 0 });
-    expect(native.bytes).toBeGreaterThan(150 * 1_024);
-    expect(custom.bytes).toBeGreaterThan(0);
-    expect(custom.bytes).toBeLessThanOrEqual(48 * 1_024);
-    expect(custom.recovery!.restoredMessageCount).toBeGreaterThan(0);
-    expect(custom.recovery!.restoredMessageCount + custom.recovery!.omittedMessageCount).toBe(42);
+    for (const result of [native, custom]) {
+      expect(result.bytes).toBeGreaterThan(0);
+      expect(result.bytes).toBeLessThanOrEqual(16_000);
+      expect(result.recovery!.restoredMessageCount).toBeGreaterThan(0);
+      expect(result.recovery!.omittedMessageCount).toBeGreaterThan(0);
+      expect(result.recovery!.restoredMessageCount + result.recovery!.omittedMessageCount).toBe(42);
+      expect(result.prompt).toContain("Omitted history cannot be retrieved in this session");
+      expect(result.prompt).not.toContain("inertia_request_context");
+      expect(result.prompt).toContain("The export must preserve accented names.");
+      expect(result.prompt).toContain(`message-38: ${"x".repeat(4_000)}`);
+      expect(result.prompt).toContain(`message-39: ${"x".repeat(4_000)}`);
+      let previousPosition = -1;
+      for (let i = 0; i < 40; i += 1) {
+        const position = result.prompt.indexOf(`message-${i}: `);
+        if (position < 0) continue;
+        expect(result.prompt).toContain(`message-${i}: ${"x".repeat(4_000)}`);
+        expect(position).toBeGreaterThan(previousPosition);
+        previousPosition = position;
+      }
+    }
   });
 });
 

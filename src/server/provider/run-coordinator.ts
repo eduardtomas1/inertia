@@ -2,11 +2,7 @@ import type { PosixCleanupFailureReason } from "../posix-cleanup-diagnostics";
 import type { AgentApprovalDecision } from "./interactions";
 import type { AgentHarnessRun, SubagentBackgroundResult, SubagentStopOutcome } from "./agent-harness";
 import type { AgentHarnessRegistry } from "./agent-harness-registry";
-import {
-  PROVIDER_CAPABILITY_IDS,
-  providerCapabilityManifest,
-  type ProviderCapabilityId,
-} from "./capability-manifest";
+import { PROVIDER_CAPABILITY_IDS, providerCapabilityManifest, type ProviderCapabilityId } from "./capability-manifest";
 import { validateProviderRunInput } from "./adapters";
 import { PROVIDER_INFO } from "./catalog";
 import {
@@ -33,10 +29,7 @@ import {
   ProviderSteerDeliveryUnknownError,
   type ProviderSteerInput,
 } from "./contracts";
-import {
-  createProviderEmitter,
-  providerCallbacksFromHarness,
-} from "./emitter";
+import { createProviderEmitter, providerCallbacksFromHarness } from "./emitter";
 import { startHarnessWithFreshSessionFallback } from "./fresh-session-fallback";
 import type { ProviderMetadataCache } from "./metadata";
 import { ProviderInstallationAdmissionError } from "./installation-lease";
@@ -94,6 +87,7 @@ export type OwnedProviderStopResult =
   | "force-detached";
 
 export interface ProviderRunCoordinatorOptions {
+  cursorSdk?: ProviderManagerOptions["cursorSdk"];
   cancelGraceMs: number;
   harnessRegistry: AgentHarnessRegistry;
   metadataCache: ProviderMetadataCache;
@@ -101,6 +95,7 @@ export interface ProviderRunCoordinatorOptions {
     | ProviderManagerOptions["resolveBackendLaunchOptions"];
   conversationProviderGate?: ProviderManagerOptions["conversationProviderGate"];
   commandFor(providerId: ProviderId): string;
+  commandForRun?(input: ProviderRunInput): string;
   resolvedCommandFor(providerId: ProviderId): string | undefined;
   rememberResolvedCommand(providerId: ProviderId, executable: string): void;
   processEnvironment(): NodeJS.ProcessEnv | undefined;
@@ -172,6 +167,7 @@ function capabilitiesForEvent(
     case "subagent":
       return ["subagent-create"];
     case "session":
+    case "native-boundary":
       return ["native-session-id"];
     case "metadata":
       return [
@@ -375,9 +371,9 @@ export class ProviderRunCoordinator {
           negotiated,
         );
     };
-    const executable = this.options.commandFor(providerId);
+    const executable = this.options.commandForRun?.(input) ?? this.options.commandFor(providerId);
     const nativeProfile = providerNativeBackendProfile(providerId);
-    const ownsLegacyProviderMetadata = input.backendProfile.id === nativeProfile.id
+    const ownsLegacyProviderMetadata = input.harnessId !== "cursor-sdk" && input.backendProfile.id === nativeProfile.id
       && input.backendProfile.configurationRevision === nativeProfile.configurationRevision;
     const runMetadataScope = this.options.metadataCache.scopeForSelection(
       input.modelSelection,
@@ -609,6 +605,8 @@ export class ProviderRunCoordinator {
         active.harnessStartInvoked = true;
         harnessRun = startHarnessWithFreshSessionFallback(harness, {
           input: launchInput,
+          cursorSdk: this.options.cursorSdk,
+          ...(input.nativeContinuation ? { nativeContinuation: input.nativeContinuation } : {}),
           executable,
           // The harness owns this copy for the lifetime of its child process.
           // The resolver-owned source is scrubbed immediately below.
@@ -1006,6 +1004,7 @@ export class ProviderRunCoordinator {
     conversationId: string,
     identity: { runId: string; turnId: string },
     graceMs = this.options.cancelGraceMs,
+    hooks?: { escalated?(): void },
   ): Promise<OwnedProviderStopResult> {
     const active = this.activeRuns.get(conversationId);
     if (!active || active.settled) {
@@ -1027,7 +1026,7 @@ export class ProviderRunCoordinator {
       ? graceMs
       : Math.min(graceMs, PROVIDER_SHUTDOWN_STOP_GRACE_MS);
     if (stopGraceMs <= 0) active.escalateStop?.();
-    active.stopLadder ??= this.stopLadder(conversationId, active, stopGraceMs);
+    active.stopLadder ??= this.stopLadder(conversationId, active, stopGraceMs, hooks);
     return await active.stopLadder;
   }
 
@@ -1035,6 +1034,7 @@ export class ProviderRunCoordinator {
     conversationId: string,
     active: ActiveRun,
     graceMs: number,
+    hooks?: { escalated?(): void },
   ): Promise<OwnedProviderStopResult> {
     const escalated = new Promise<void>((resolve) => {
       active.escalateStop = resolve;
@@ -1047,6 +1047,7 @@ export class ProviderRunCoordinator {
       clearTimeout(active.hardKillTimer);
       active.hardKillTimer = undefined;
     }
+    hooks?.escalated?.();
     try {
       active.harnessRun?.cancel(true);
     } catch {

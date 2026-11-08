@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
+import { removeOrchestratorV2FromFixture } from "../support/legacy-project-settings-schema";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 import {
   TODO_SOURCE_CONVERSATION_SCHEMA_VERSION,
@@ -61,6 +62,7 @@ describe("PersistTodoSourceConversation migration", () => {
       DROP INDEX todos_source_conversation_idx;
       ALTER TABLE todos DROP COLUMN source_conversation_id;
     `);
+    removeOrchestratorV2FromFixture(legacy);
     legacy.prepare("DELETE FROM schema_migrations WHERE version >= ?").run(TODO_SOURCE_CONVERSATION_SCHEMA_VERSION);
     expect(columns(legacy)).not.toContain("source_conversation_id");
     const at = "2026-10-20T09:00:00.000Z";

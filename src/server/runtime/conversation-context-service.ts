@@ -6,6 +6,8 @@ import type {
 import type { RuntimeStore } from "../database";
 import type { ConversationContextReplay } from "../persistence/conversation-context-packet-repository";
 import type { ConversationContextDelivery } from "../persistence/conversation-context-transport";
+import { MergeBackError } from "../orchestration-v2/merge-back-repository";
+import { RuntimeRequestError } from "../runtime-errors";
 import type {
   ConversationContextAuthorizationScope,
   ConversationContextSelection,
@@ -120,6 +122,8 @@ export class ConversationContextService {
 
   assertSendable(targetConversationId: string, packetIds: readonly string[]): void {
     this.store.contextPackets.assertSendable(targetConversationId, packetIds);
+    try { this.store.orchestration.mergeBacks.assertDeliverable(targetConversationId, packetIds); }
+    catch (error) { if (error instanceof MergeBackError) throw new RuntimeRequestError(error.message); throw error; }
   }
 
   replayAcceptance(

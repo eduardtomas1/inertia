@@ -18,6 +18,8 @@ import {
 } from "../../src/renderer/src/utils/conversationDetail";
 import { mergeConversationHistory } from "../../src/renderer/src/utils/conversationHistory";
 import { mergeProjectionPlans } from "../../src/renderer/src/utils/terminalTurnProjection";
+import { delegationTaskRows } from "../../src/renderer/src/components/orchestration/delegation-model";
+import { PARENT_ID, finished, parentDelegation, summary, taskId } from "./delegation-fixtures";
 
 const conversation: Conversation = {
   id: "conversation-1",
@@ -254,6 +256,32 @@ describe("paged history reconciliation", () => {
     const dropped = mergeConversationHistory(refreshed, page("live", "done"), "refresh");
     expect(dropped.watcherWakes).toEqual([oldWake]);
     expect(mergeConversationHistory(page("live", "live"), page("old", "old"), "older").watcherWakes).toBeUndefined();
+  });
+
+  it("replaces delegated work after a sync gap or new generation without duplicating tasks or wake messages", () => {
+    const wake = (generation: number, ids: string[]) => ({ ...detail.messages[0]!, id: `wake-${generation}`, turnId: "live",
+      content: "Delegated tasks finished.", delegatedCompletion: { parentConversationId: PARENT_ID, generation, taskIds: ids } });
+    const before = parentDelegation([summary(1)], { generation: 1, phase: "queued", taskIds: [taskId(1)] });
+    const current = { ...page("live", "live"), delegation: before,
+      messages: [...page("live", "live").messages, wake(1, [taskId(1)])] };
+    const stale = parentDelegation([summary(1), summary(1)]);
+    const older = mergeConversationHistory(current, { ...page("old", "old"), delegation: stale }, "older");
+    expect(older.delegation).toBe(before);
+    expect(delegationTaskRows(older.delegation).map(({ taskId: id }) => id)).toEqual([taskId(1)]);
+    const after = parentDelegation([finished(1, { updatedAt: "2026-10-31T11:00:00.000Z" }), finished(2), finished(1)],
+      { generation: 2, phase: "dispatched", taskIds: [taskId(1), taskId(2)] });
+    const refreshed = mergeConversationHistory(older, { ...page("live", "done"), delegation: after,
+      messages: [...page("live", "done").messages, wake(1, [taskId(1)]), wake(2, [taskId(1), taskId(2)])] }, "refresh");
+    expect(refreshed.delegation).toBe(after);
+    const rows = delegationTaskRows(refreshed.delegation);
+    expect(rows.map(({ taskId: id }) => id)).toEqual([taskId(2), taskId(1)]);
+    expect(rows[1]?.updatedAt).toBe("2026-10-31T11:00:00.000Z");
+    expect(refreshed.messages.filter(({ delegatedCompletion }) => delegatedCompletion).map(({ id }) => id))
+      .toEqual(["wake-1", "wake-2"]);
+    const replayed = mergeConversationHistory(refreshed, { ...page("live", "done"), delegation: after,
+      messages: [...page("live", "done").messages, wake(2, [taskId(1), taskId(2)]), wake(1, [taskId(1)])] }, "refresh");
+    expect(replayed.messages.filter(({ delegatedCompletion }) => delegatedCompletion)).toHaveLength(2);
+    expect(delegationTaskRows(replayed.delegation)).toHaveLength(2);
   });
 
   it("resets a disconnected latest window to avoid silently skipping offline turns", () => {

@@ -1,5 +1,6 @@
 import { createIncidentReporter, type IncidentSink } from "../node/application-incidents.js";
 import type { DiagnosticIncident } from "../shared/application-diagnostics.js";
+import type { RuntimeStartupBlockerCode } from "../shared/runtime-startup-diagnostics.js";
 import type { RuntimeSupervisorPhase } from "./runtime-supervisor-types.js";
 
 export function isRuntimeIncidentMessage(value: unknown): boolean {
@@ -23,6 +24,11 @@ export class RuntimeIncidentObserver {
       code: wasReady ? "runtime.exited" : "runtime.start-failed", outcome: "unknown",
       metadata: Number.isInteger(exitCode) && exitCode >= -255 && exitCode <= 255 ? { exitCode } : {},
     });
+  }
+
+  startupBlocked(generation: string, blockerCode: RuntimeStartupBlockerCode): void {
+    if (blockerCode !== "orchestration-projection-invalid") return;
+    createIncidentReporter(this.sink, generation)({ code: "runtime.orchestration-projection-invalid", outcome: "failed" });
   }
 
   state(phase: RuntimeSupervisorPhase, generation: string | null): void {

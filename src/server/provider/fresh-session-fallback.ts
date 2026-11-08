@@ -69,10 +69,12 @@ export function startHarnessWithFreshSessionFallback(
         sessionId: _sessionId,
         performanceModeTransition: _performanceModeTransition,
         goalContinuationExpected: _goalContinuationExpected,
+        nativeContinuation: _nativeContinuation,
         ...input
       } = options.input;
+      const { nativeContinuation: _startContinuation, ...fresh } = options;
       const next = harness.start({
-        ...options,
+        ...fresh,
         environment,
         input: { ...input, prompt: replacement.prompt },
         callbacks: {

@@ -236,7 +236,7 @@ export function AddProviderMenu({
                 onClick={() => { if (!disabled) goToStep(index as AddProviderMenuStep); }}
               >
                 <span className="add-provider-step-index" aria-hidden="true">
-                  {complete ? <Check size={12} strokeWidth={2.75} /> : index + 1}
+                  {complete ? <Check size={14} /> : index + 1}
                 </span>
                 <span className="add-provider-step-label">{label}</span>
               </button>
@@ -280,14 +280,14 @@ export function AddProviderMenu({
                       <span className="add-provider-card-state" aria-hidden="true">{item.stateLabel}</span>
                     )}
                     <span className="add-provider-card-check" aria-hidden="true">
-                      <Check size={12} strokeWidth={2.75} />
+                      <Check size={14} />
                     </span>
                   </button>
                 );
               })}
             </div>
             <div className="add-provider-note">
-              <Info size={15} aria-hidden="true" />
+              <Info size={16} aria-hidden="true" />
               <p>
                 {note.text}
                 {note.more && (
@@ -317,7 +317,7 @@ export function AddProviderMenu({
               onClick={() => setFactsOpen((open) => !open)}
             >
               {factsOpen ? "Show less" : "Show more"}
-              <ChevronDown size={13} aria-hidden="true" />
+              <ChevronDown size={14} aria-hidden="true" />
             </button>
             {factsOpen && (
               <dl id={factsId} className="add-provider-facts">

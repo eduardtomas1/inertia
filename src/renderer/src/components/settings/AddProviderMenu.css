@@ -205,8 +205,8 @@
 
 .add-provider-card-check {
   display: none;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 999px;
@@ -238,7 +238,7 @@
 
 .add-provider-note > svg {
   flex: 0 0 auto;
-  margin-top: 1px;
+  margin-top: 0;
   color: var(--blue);
 }
 

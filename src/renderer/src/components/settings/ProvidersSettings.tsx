@@ -230,7 +230,7 @@ export function ProvidersSettings({
             aria-disabled={disabled || undefined}
             onClick={() => { if (!disabled) setAddProviderOpen(true); }}
           >
-            <Plus size={15} aria-hidden="true" />
+            <Plus size={14} aria-hidden="true" />
           </IconButton>
         </span>
         <IconButton

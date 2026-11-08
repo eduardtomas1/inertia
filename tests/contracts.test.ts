@@ -539,6 +539,27 @@ describe("client command contract", () => {
     }
   });
 
+  it("accepts Stop with an optional expected turn UUID only", () => {
+    const base = {
+      type: "agent.stop",
+      requestId: crypto.randomUUID(),
+      payload: { conversationId: crypto.randomUUID() },
+    } as const;
+    expect(clientCommandSchema.safeParse(base).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, expectedTurnId: crypto.randomUUID() },
+    }).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, expectedTurnId: "older turn" },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, runId: crypto.randomUUID() },
+    }).success).toBe(false);
+  });
+
   it("accepts only a scoped thread UUID for selection-question cancellation", () => {
     const base = {
       type: "review.selection.cancel",

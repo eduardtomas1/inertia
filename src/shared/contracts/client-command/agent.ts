@@ -130,7 +130,10 @@ export const agentCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("agent.stop"),
-      payload: z.object({ conversationId: z.string().uuid() }).strict(),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        expectedTurnId: z.string().uuid().optional(),
+      }).strict(),
     })
     .strict(),
   z

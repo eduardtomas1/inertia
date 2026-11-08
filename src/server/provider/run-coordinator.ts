@@ -1003,6 +1003,7 @@ export class ProviderRunCoordinator {
     conversationId: string,
     identity: { runId: string; turnId: string },
     graceMs = this.options.cancelGraceMs,
+    hooks?: { escalated?(): void },
   ): Promise<OwnedProviderStopResult> {
     const active = this.activeRuns.get(conversationId);
     if (!active || active.settled) {
@@ -1024,7 +1025,7 @@ export class ProviderRunCoordinator {
       ? graceMs
       : Math.min(graceMs, PROVIDER_SHUTDOWN_STOP_GRACE_MS);
     if (stopGraceMs <= 0) active.escalateStop?.();
-    active.stopLadder ??= this.stopLadder(conversationId, active, stopGraceMs);
+    active.stopLadder ??= this.stopLadder(conversationId, active, stopGraceMs, hooks);
     return await active.stopLadder;
   }
 
@@ -1032,6 +1033,7 @@ export class ProviderRunCoordinator {
     conversationId: string,
     active: ActiveRun,
     graceMs: number,
+    hooks?: { escalated?(): void },
   ): Promise<OwnedProviderStopResult> {
     const escalated = new Promise<void>((resolve) => {
       active.escalateStop = resolve;
@@ -1044,6 +1046,7 @@ export class ProviderRunCoordinator {
       clearTimeout(active.hardKillTimer);
       active.hardKillTimer = undefined;
     }
+    hooks?.escalated?.();
     try {
       active.harnessRun?.cancel(true);
     } catch {

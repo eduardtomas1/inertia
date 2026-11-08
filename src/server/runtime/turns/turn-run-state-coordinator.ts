@@ -194,6 +194,7 @@ export class TurnRunStateCoordinator {
     const stopUnconfirmed = this.providerStopNotes.has(active);
     const settled = this.options.settlement.retryTerminalPersistence(active, stopUnconfirmed);
     if (settled && stopUnconfirmed && active.turn.status === "completed") this.noteUnconfirmedStop(active);
+    if (settled) this.settleInterrupt(active, "settled");
     return settled;
   }
 
@@ -242,7 +243,10 @@ export class TurnRunStateCoordinator {
     );
     if (stopUnconfirmed) this.providerStopNotes.add(active);
     if (settled && stopUnconfirmed && pending.status === "completed") this.noteUnconfirmedStop(active);
-    if (settled) active.deferredSettlement = null;
+    if (settled) {
+      active.deferredSettlement = null;
+      this.settleInterrupt(active, "settled");
+    }
     if (releaseMode === "tracked") {
       this.options.track(this.options.release(active));
     }
@@ -338,6 +342,22 @@ export class TurnRunStateCoordinator {
     }
   }
 
+  private recordUnresponsive(active: ActiveTurn): void {
+    try {
+      this.options.store.orchestration.runControl.escalateAfterGrace(active.turn.runId);
+    } catch {
+      return;
+    }
+  }
+
+  private settleInterrupt(active: ActiveTurn, outcome: OwnedProviderStopResult | "expired" | "failed"): void {
+    try {
+      this.options.store.orchestration.runControl.settleInterrupt(active.turn.runId, outcome);
+    } catch {
+      return;
+    }
+  }
+
   private stopOwnedProviderAndRelease(active: ActiveTurn): void {
     if (active.providerStopStarted) return;
     active.providerStopStarted = true;
@@ -357,7 +377,7 @@ export class TurnRunStateCoordinator {
           this.options.providers.stopOwned(conversationId, {
             runId: active.turn.runId,
             turnId: active.turn.id,
-          }),
+          }, undefined, { escalated: () => this.recordUnresponsive(active) }),
           expired,
         ]);
       } catch {
@@ -371,6 +391,7 @@ export class TurnRunStateCoordinator {
         this.unconfirmedProviderStops.add(active);
         this.releaseUnconfirmedCleanup(active, outcome);
       }
+      this.settleInterrupt(active, outcome);
       this.finalizeDeferredSettlement(
         active,
         "joined",

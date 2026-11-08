@@ -99,7 +99,7 @@ describe("TurnController cancellation persistence and cleanup", () => {
 
         expect(stop).toHaveBeenCalledExactlyOnceWith(runtime.conversationId, {
           runId: queued.turn.runId, turnId: queued.turn.id,
-        });
+        }, undefined, { escalated: expect.any(Function) });
         expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
         expect(runtime.store.agentTurn(queued.turn.id).status).not.toBe(initialStatus);
         expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({

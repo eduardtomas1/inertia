@@ -33,13 +33,12 @@ refuse it through `awaitsCleanupProof` (`turn-repository.ts:177-179`). Restart
 retires old process-bound effects and reconciles run projections before
 admission; persisted questions, expiring approvals and crash or shutdown
 continuation are not part of that reconciliation (recovery phase).
-A human `message.send` that creates a new turn replays its accepted result
-after a lost acknowledgement, including after restart, without becoming a
-follow-up (`turn-repository.ts:84-88`). Steer and follow-up dispositions carry
-no receipt (`src/server/runtime/commands/turn-interaction-commands.ts:349-411`),
-and the desktop renderer mints a fresh `requestId` for every command
-(`src/renderer/src/lib/runtimeCommands.ts:11-13`), so replay helps only a
-caller that resends the same request id.
+A human `message.send` replays its accepted result after a lost
+acknowledgement, including after restart, whatever its disposition: a new
+turn, a steer into the running turn or a follow-up queued for after the turn
+(G5, 2026-11-02, below). The desktop renderer mints a fresh `requestId` for
+every command (`src/renderer/src/lib/runtimeCommands.ts:11-13`), so replay
+helps only a caller that resends the same request id.
 
 The event store also offers bounded reads (`readEvents`), projection rebuild
 (`rebuildProjections`), a revision check and actor-scoped command collision
@@ -587,8 +586,8 @@ automatically: an unanswered Stop leaves the run `running` and flagged
 (`apps/server/src/orchestration-v2/EffectWorker.ts:180-201`;
 `ThreadStop.test.ts:1556`). Inertia keeps its stop ladder (bounded automatic
 escalation after the platform budget, immediate force on a second Stop press)
-as a documented difference; flagging the attempt unresponsive while escalation
-runs is planned with the Stop command work (G5). The stop ladder's terminal
+as a documented difference; since G5 the attempt is flagged unresponsive while
+escalation runs (G5 entry, 2026-11-02). The stop ladder's terminal
 release is authoritative evidence that the runtime handed the unconfirmed tree
 to the process guardian and no longer owns it. The attempt records
 `attempt.cleanup-released` with cleanup `unconfirmed-released` and the handoff
@@ -697,18 +696,21 @@ Decisions (coordinator, 2026-10-31):
   the platform budget, immediate force on a second Stop press) as a documented
   difference from T3's explicit Force stop. The ladder's release resolves
   admission as `unconfirmed-released` and never counts as cleanup proof. The
-  attempt will be flagged unresponsive while escalation runs, and Stop becomes
-  a receipted durable command with a process-bound interrupt effect, in G5.
+  attempt is flagged unresponsive while escalation runs, and Stop is a
+  receipted durable command with a process-bound interrupt effect (G5).
 - **File restore.** T3's isolation rule is adopted in addition to the
   time-bounded check (landed in G3).
 - **Crash and shutdown continuation.** Decided in the recovery phase; recorded
   as a tracked gap, not a deliberate difference.
 
-Authoritative V2 commands today: new-turn `message.send`,
+Authoritative V2 commands since G5 (2026-11-02, below): every `message.send`
+disposition, `agent.stop`, `conversation.update`, the queue edits
+(`message.queue.enqueue`, `remove`, `send`, `stop-and-send`),
 `conversation.fork`, `conversation.rollback` and `conversation.merge-back` are
-receipted; `checkpoint.revert` and first-send fork preparation are ordered on
-the conversation lane without a receipt. Stop, steer and follow-up sends,
-configuration, queue edits and approvals bypass V2.
+receipted on the conversation lane; `checkpoint.revert` and first-send fork
+preparation are ordered on the lane without a receipt. Approvals, input
+answers, `activity.stop`, `agent.subagent.stop` and delegated cancels still
+bypass V2.
 
 Differences from T3 recorded here but not yet decided (each is either a
 deliberate difference or a gap once its owning package decides): actor-scoped,
@@ -1522,3 +1524,163 @@ and native children; Pi skills stay on the chat's own capability, while
 new-chat skill previews remain Codex and Claude only; the orchestration tool
 definitions move to `src/server/runtime/agent-thread-tool-definitions.ts`. The
 agent surface budget is exactly the sum of both sides' additions.
+
+## G5: command authority for sends, Stop, configuration and queue edits — 2026-11-02
+
+**Lanes.** `OrchestrationCommandLanes`
+(`src/server/orchestration-v2/command-lanes.ts`) marks a lane as held in the
+caller's async context while one of its sections runs. A `run()` for a thread
+whose lane that context already holds rejects with `OrchestrationLaneReentry`
+at once instead of queueing behind itself. A synchronous section releases the
+mark as soon as it returns, so work it starts without awaiting (queue
+scheduling, settlement hooks that take the parent's lane) still takes the lane
+afterwards. The new sections are synchronous: they read projections and commit,
+and never await provider, attachment, fork-preparation or delegation work.
+
+**Authority.** `OrchestrationCommandAuthority`
+(`src/server/orchestration-v2/command-authority.ts`, `store.orchestration.authority`)
+runs the receipt check inside `lanes.run(conversationId)`. In one section it
+joins a duplicate of the same `(actor, command id)` that is still in flight in
+this process (a different payload is `command-conflict`), replays an accepted
+receipt, returns a rejected one, or leads: it hands out a ticket and runs the
+caller's synchronous intake in the same section. The ticket commits under the
+command's identity, takes later sections with `inLane`, and resolves joiners
+with `finish` or `fail`. `fail` records a rejected receipt only for commands
+the user sent directly and only when `commandRejection`
+(`src/server/runtime/commands/command-rejection.ts`) classifies the error as a
+deterministic refusal: a `RuntimeRequestError` that is not ambiguous, not
+`message-admission-unavailable`, not a preparation timeout, not an
+unexpected-stage error and not a refusal the user clears by correcting input
+or a setting (`userCorrectableRuntimeError`), as T3 leaves its mode and
+policy-ceiling refusals unrecorded so the retry is not blocked. The renderer
+gives every action a new request id, so a recorded refusal only answers an
+exact replay. Internal dispatchers (the queue, limit reset, restart
+continuation, watcher and delegation deliveries) never record a refusal and
+now use the actor `runtime` with origin-prefixed ids (`queue:<entry id>` and so
+on), because the queue re-dispatches an entry under the request id of the
+direct send that queued it.
+
+**Sends** (`src/server/runtime/commands/message-send-command.ts`,
+`message-follow-up-command.ts`). The intake section checks the receipt, runs
+the existing preflight and routes the send. A follow-up admission is taken in
+that section, so it is ordered against Stop: once a Stop has committed its
+interrupt, a later send takes the after-turn path instead of steering the
+stopping run. New-turn preparation (up to 120 s) runs outside the lane and
+admission keeps its receipt in the admitting transaction, so two concurrent
+identical sends prepare and import attachments once. A steer resolves and
+retains its attachments outside the lane, then commits
+`run-control.steer-requested` under the send's receipt with a process-bound
+`provider.steer` effect, claimed at once with `claimControl`; the provider
+steer runs outside the lane and its outcome commits `run-control.steer-settled`
+(`accepted`, `refused`, `turn-ended`, `unconfirmed` or `unavailable`) and
+settles the effect on every path. A follow-up queued for after the turn
+commits a receipt with the queued disposition, in the same transaction as the
+queue row when it was never offered to the provider. A replay rebuilds the
+original answer from the receipt and the `run-steer` projection; a steer whose
+process was lost answers the existing ambiguous "did not confirm" error.
+
+**Stop** (`src/server/runtime/commands/agent-stop-command.ts`). `agent.stop` is
+a receipted command with an optional `expectedTurnId`, which the composer
+Stop and the Tasks card fill with the latest turn they show. A Stop whose
+expected turn is no longer the active one is refused as `superseded` before
+anything is stopped, as T3 refuses Force stop once a newer run has started.
+The first Stop of an attempt commits `attempt.interrupt-requested` and
+`run-control.interrupt-recorded` with a process-bound `provider.interrupt`
+effect; a start that was never dispatched is retired in the same transaction,
+so no provider starts. The effect is claimed with `claimControl`, which takes
+an exact pending row without waiting behind earlier effects in the thread, so
+Stop never waits behind a checkpoint-capture retry. Stop does wait, up to the
+platform stop budget, for steer effects committed before it, so a follow-up
+accepted first reaches the provider before the interrupt, as T3's ordered
+outbox does. The controller's existing cancel then starts the ladder outside
+the lane. A later Stop commits `run-control.interrupt-escalated` with cause
+`user` and the ladder forces at once. When the ladder's grace wait expires,
+`stopOwned` calls an `escalated` hook just before the forced cancel, and the
+run state coordinator commits `interrupt-escalated` with cause `grace-expired`
+unless the user already escalated. Only that cause stamps `unresponsiveAt` on
+the `run-interrupt` projection, keyed by attempt
+(`store.orchestration.runControl.attemptInterrupt(attemptId)`); a second press
+counts as an escalation without claiming the provider stopped answering, as
+T3 stamps it only when the interrupt goes unanswered. When the ladder ends,
+the coordinator settles the interrupt: a confirmed stop settles the effect as
+succeeded; any other outcome settles it as failed with `stop-<outcome>` and
+records that outcome. `unresponsiveAt` stays, as T3 never clears it. The
+release still records `unconfirmed-released` and is never cleanup proof. A
+run that ends without a ladder settles its interrupt as `settled`. A restart
+retires a running interrupt or steer effect as `runtime-lost` and never
+replays it. Stop with nothing to stop is accepted as a receipt-only commit, as
+in T3 (`ThreadStop.test.ts:800`), so its replay is accepted too and never stops
+a later run. The command is accepted once it commits: its ticket finishes as
+soon as the cancel has started, and the handler's bounded wait for provider
+cleanup only shapes when the answer arrives, so the first answer and a replay
+agree.
+
+**Configuration and queue edits.** `conversation.update` runs its whole
+validation in one lane section. A provider or model change on a chat that has
+a V2 thread commits `thread.configured` with the conversation update as the
+compatibility projection; the projector's refusal while a run is active maps to
+the existing "Stop the active run or review…" error, recorded as rejected.
+Title, pin and snooze changes commit only a receipt, so renaming a running chat
+still works. Queue edits are receipted: `enqueue` inserts its row in the same
+transaction as its receipt, `remove` cancels inside its section (a delegated
+delivery is dismissed outside the lane because the dismissal takes the same
+lane), and a replayed `send` or `stop-and-send` re-kicks the queue without a
+second dispatch. `stop-and-send` stops through the Stop command with the id
+`<request id>:stop` and the expected turn.
+
+Deliberate differences from T3 Code:
+
+- Inertia keeps its stop ladder: automatic escalation after the grace period,
+  immediate force on a second press and `unconfirmed-released` at the end of
+  the budget. T3 leaves an unanswered run open until the user's Force stop
+  (`apps/server/src/orchestration-v2/EffectWorker.ts:180-201`,
+  `ThreadStop.test.ts:1556`). Inertia records T3's unresponsive flag on a
+  per-attempt `run-interrupt` projection (T3 keeps `unresponsiveAt` on the
+  `run_interrupt_request` item) but releases automatically; the release settles
+  the interrupt effect as failed and is never cleanup proof.
+- A user Stop settles the turn `cancelled`; T3 settles `interrupted`.
+- Rejected receipts are recorded only for refusals of commands the user sent
+  directly, never for internal dispatch; T3 records every dispatch failure
+  except mode and policy-ceiling refusals, and Inertia exempts its
+  user-correctable refusals the same way.
+- Stop during new-turn preparation is accepted with nothing to stop, because
+  Inertia admits a run only after preparation; T3 interrupts a `preparing`
+  run. Tracked for the client-parity phase.
+- Stop calls the controller's cancel inline after its commit; T3's effect
+  worker executes `provider-turn.interrupt`. The effect row records the
+  attempt and the outcome either way.
+- T3 stops a chat's app-owned delegated tasks on every Stop
+  (`Orchestrator.ts` `dispatchThreadStop` at `6f413648`). Inertia keeps Phase
+  4's exact-target rule: only the child runs the stopped turn dispatched are
+  stopped, so an idle Stop stops no children
+  (`docs/orchestrator-v2/phase4-verification.md`).
+- T3's fix for a run left open after its attempt completed (`5f2c27e7`) has no
+  counterpart here: a run and its current attempt change status in one event.
+- Interrupt and steer effects are claimed by their own command, past earlier
+  effects in the thread. In their place Stop waits explicitly for earlier
+  steers, bounded by the platform stop budget; T3's worker waits behind a
+  running steer without a bound.
+- Internal dispatchers commit under the `runtime` actor with origin-prefixed
+  ids; T3 dispatches each queued run as its own command.
+- Delegated cancels stay non-command stops, and delegated deliveries steered
+  into a running parent still call the controller's steer directly; the
+  queue claim keeps them idempotent. Routing them through `provider.steer` is
+  a follow-up.
+
+Design deviation: the design put the ladder's outcome behind a new
+`TurnController.stopOutcome()` read by the Stop handler. The run state
+coordinator, which owns the ladder, settles the interrupt instead, so the
+settlement is tracked with the ladder (`drainSettlementTasks` covers it) and
+also happens when the Stop handler has already answered or when another path
+started the ladder.
+
+Verification (2026-11-08, after the corrections and on top of the main sync):
+`check:quality` and the renderer bundle budgets passed; the full unit suite
+passed apart from this machine's known Windows noise (symlink `EPERM`, the
+Windows guardian and Job Object helpers, and the PDF worker and Cursor SDK
+resolution through a linked `node_modules`), each confirmed by rerunning the
+file alone. Four existing suites needed updates for G5: three assert the new
+escalation hook on `stopOwned`, and two gave two different commands one
+request id or omitted the command authority from their mocks. The Electron
+scenarios for Send and Stop, Stop and send, grace escalation, immediate force
+and natural completion passed; `stop-ladder.spec.ts` is POSIX-only.

@@ -32,6 +32,8 @@ import { HistoryRollbackRepository } from "./history-rollback-repository";
 import { MergeBackRepository, type MergeBackAccess } from "./merge-back-repository";
 import { DelegationRepository } from "./delegation-repository";
 import { OrchestrationCommandLanes } from "./command-lanes";
+import { OrchestrationCommandAuthority } from "./command-authority";
+import { RunControlRepository } from "./run-control-repository";
 import { providerInstanceId } from "./provider-instance";
 import {
   OrchestrationConflict,
@@ -76,6 +78,8 @@ export class OrchestratedTurnRepository {
   readonly mergeBacks: MergeBackRepository;
   readonly delegation: DelegationRepository;
   readonly lanes = new OrchestrationCommandLanes();
+  readonly authority: OrchestrationCommandAuthority;
+  readonly runControl: RunControlRepository;
   #effectRuntime: OrchestrationEffectRuntime | null = null;
 
   constructor(
@@ -95,6 +99,8 @@ export class OrchestratedTurnRepository {
     this.forks = new ForkRepository(database, this.events, this.nativeBoundaries, this.history, access);
     this.mergeBacks = new MergeBackRepository(database, this.events, this.forks, this.history, access);
     this.delegation = new DelegationRepository(database, this.events, access);
+    this.authority = new OrchestrationCommandAuthority(this.events, this.lanes);
+    this.runControl = new RunControlRepository(this.events, this.effects, (runId) => this.startIntent(runId));
   }
 
   maintainProjections(): ProjectionMaintenance {

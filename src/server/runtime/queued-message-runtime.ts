@@ -8,6 +8,11 @@ import { QueuedMessageLimitError, queuedIntentDigest, queuedRouteIdentity } from
 import { MESSAGE_ADMISSION_UNAVAILABLE, publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { defineRuntimeCommandHandler } from "./commands/command-router";
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "./commands/turn-interaction-commands";
+import type { QueuedMessagePersistence } from "./commands/turn-interaction-types";
+import { commandRejection } from "./commands/command-rejection";
+import { requestAgentStop, SUPERSEDED_STOP_CODE } from "./commands/agent-stop-command";
+import type { CommandTicket } from "../orchestration-v2/command-authority";
+import type { JsonValue } from "../orchestration-v2/types";
 import {
   awaitMessageSendPreparation, MessageSendPreparationTimeoutError, messageSendPreparationDeadline,
 } from "./commands/message-send-preparation";
@@ -18,6 +23,12 @@ import { watcherNoteDelivery, watcherSteerContent } from "./watcher/watcher-note
 import { delegatedDelivery, delegatedSteerContent } from "./delegation/delivery-instruction";
 
 const ADMISSION_RETRY_MS = 1_000;
+
+type QueueCommand = Extract<ClientCommand, { type: `message.queue.${string}` }>;
+type QueueIntake =
+  | { kind: "accepted" }
+  | { kind: "removed"; removed: QueuedMessage }
+  | { kind: "delegated"; hooks: DelegatedQueueHooks; target: QueuedMessage & { delegatedCompletion: DelegatedCompletionAttribution } };
 
 function releasesQueue(turn: Pick<AgentTurn, "status" | "terminalReason"> | null): boolean {
   return turn?.status === "completed" || (turn?.status === "interrupted" && turn.terminalReason === "app-update");
@@ -204,7 +215,9 @@ export function createQueuedMessageRuntime(
     return task;
   }
 
-  async function enqueue(input: { conversationId: string; id: string; content: string; attachments: ChatAttachment[] }, handoffId: string): Promise<void> {
+  const insertNow: QueuedMessagePersistence = async (insert) => { insert(); };
+  async function enqueue(input: { conversationId: string; id: string; content: string; attachments: ChatAttachment[] }, handoffId: string,
+    persist: QueuedMessagePersistence = insertNow): Promise<void> {
     const previous = enqueueing.get(input.id);
     if (previous) {
       await previous;
@@ -243,11 +256,13 @@ export function createQueuedMessageRuntime(
           throw error;
         }
         options.signal.throwIfAborted();
-        const current = requireConversation(conversation.id);
-        if (queuedRouteIdentity(current) !== queuedRouteIdentity(conversation)) {
-          throw new RuntimeRequestError("The chat changed while preparing this queued message.");
-        }
-        store.queuedMessages.add({ ...input, conversation, attachments, digest });
+        await persist(() => {
+          const current = requireConversation(conversation.id);
+          if (queuedRouteIdentity(current) !== queuedRouteIdentity(conversation)) {
+            throw new RuntimeRequestError("The chat changed while preparing this queued message.");
+          }
+          store.queuedMessages.add({ ...input, conversation, attachments, digest });
+        });
         persisted = true;
         conversationAttachments.acceptRetention(retentionId);
         await dependencies.attachmentResolver?.releaseAll(sourceIds);
@@ -270,9 +285,9 @@ export function createQueuedMessageRuntime(
     if (store.queuedMessages.cappedCount(conversationId) >= MAX_QUEUED_MESSAGES) throw undeliveredQueueFull();
   };
   const undeliveredFollowUps: NonNullable<TurnInteractionCommandDependencies["undeliveredFollowUps"]> = {
-    async enqueue(input, handoffId) {
+    async enqueue(input, handoffId, persist) {
       assertRoomForUndelivered(input.conversationId);
-      await enqueue(input, handoffId).catch((error: unknown) => {
+      await enqueue(input, handoffId, persist).catch((error: unknown) => {
         throw error instanceof QueuedMessageLimitError ? undeliveredQueueFull() : error;
       });
       void schedule(input.conversationId).catch(() => undefined);
@@ -291,6 +306,7 @@ export function createQueuedMessageRuntime(
       void schedule(conversation.id).catch(() => undefined);
       return result(conversation.id, input.id);
     },
+    result,
   };
 
   function enqueueWatcherNote(input: { conversationId: string; id: string; content: string; watcherNote: WatcherNoteAttribution }): MessageQueueResult {
@@ -323,17 +339,34 @@ export function createQueuedMessageRuntime(
     return removed !== null;
   }
 
-  async function stopAndSend(input: { conversationId: string; id: string; turnId: string; content: string; attachments: ChatAttachment[] }, handoffId: string): Promise<void> {
-    const { conversationId, id, turnId } = input;
+  const assertStopAndSendHead = (conversationId: string, id: string): void => {
     requireConversation(conversationId);
     if (store.queuedMessages.list(conversationId).some((entry) => entry.id !== id && !entry.watcherNote && !entry.delegatedCompletion)) {
       throw new RuntimeRequestError("Send or remove the queued message first.");
     }
-    await enqueue({ conversationId, id, content: input.content, attachments: input.attachments }, handoffId);
-    const owner = turns.activeIdentity(conversationId);
-    if (owner && !(owner.turnId === turnId && turns.cancelOwned(conversationId, owner))) {
-      void schedule(conversationId).catch(() => undefined);
-      return;
+  };
+
+  async function stopAndSend(input: { conversationId: string; id: string; turnId: string; content: string; attachments: ChatAttachment[] },
+    handoffId: string, ticket: CommandTicket): Promise<void> {
+    const { conversationId, id, turnId } = input;
+    let recorded = false;
+    const receipt = (insert?: () => void) => ticket.inLane(() => {
+      ticket.commit({ events: [], result: { stopAndSend: id } }, insert);
+      recorded = true;
+    });
+    await enqueue({ conversationId, id, content: input.content, attachments: input.attachments }, handoffId, receipt);
+    if (!recorded) await receipt();
+    const stopId = `${handoffId}:stop`;
+    const stopCommand = { type: "agent.stop", requestId: stopId, payload: { conversationId, expectedTurnId: turnId } };
+    try {
+      await requestAgentStop(dependencies, { conversationId, expectedTurnId: turnId, rejection: commandRejection,
+        source: { actorId: "human", commandId: stopId, command: stopCommand } });
+    } catch (error) {
+      if (!(error instanceof RuntimeRequestError)) throw error;
+      if (error.code === SUPERSEDED_STOP_CODE) {
+        void schedule(conversationId).catch(() => undefined);
+        return;
+      }
     }
     retryAfterCleanup(conversationId, id);
   }
@@ -421,7 +454,7 @@ export function createQueuedMessageRuntime(
     if (command.type !== "message.queue.get" && command.type !== "message.queue.enqueue" && command.type !== "message.queue.remove"
       && command.type !== "message.queue.send" && command.type !== "message.queue.stop-and-send") return "not-handled";
     const { conversationId } = command.payload;
-    store.conversation(conversationId);
+    const conversation = store.conversation(conversationId);
     if ((command.type === "message.queue.send" || command.type === "message.queue.stop-and-send") && isHeld()) {
       throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
     }
@@ -429,44 +462,92 @@ export function createQueuedMessageRuntime(
       && store.conversationWork.restoreBlocksConversation(conversationId)) {
       throw new RuntimeRequestError(CHECKOUT_RESTORE_IN_PROGRESS);
     }
-    if (command.type === "message.queue.enqueue") {
-      await enqueue(command.payload, command.requestId);
-      void schedule(conversationId).catch(() => undefined);
-    } else if (command.type === "message.queue.remove") {
+    const reply = (id?: string): "handled" => {
+      const event: ServerEvent = { type: "request.result", requestId: command.requestId, result: result(conversationId, id) };
+      dependencies.send(socket, event);
+      return "handled";
+    };
+    if (command.type === "message.queue.get") return reply(command.payload.id);
+    const start = await store.orchestration.authority.begin<QueueIntake>({
+      source: { actorId: "human", commandId: command.requestId, command: JSON.parse(JSON.stringify(command)) as JsonValue },
+      threadId: conversation.id, projectId: conversation.projectId, commandType: command.type, rejection: commandRejection,
+    }, (ticket) => queueIntake(command, ticket));
+    if (start.kind === "rejected") throw new RuntimeRequestError(start.detail);
+    if (start.kind === "joined") {
+      await start.result;
+      return reply(command.payload.id);
+    }
+    if (start.kind === "replay") {
+      if (command.type === "message.queue.stop-and-send") retryAfterCleanup(conversationId, command.payload.id);
+      else void schedule(conversationId).catch(() => undefined);
+      return reply(command.payload.id);
+    }
+    const { ticket, intake } = start;
+    try {
+      if (command.type === "message.queue.enqueue") {
+        let recorded = false;
+        await enqueue(command.payload, command.requestId, (insert) => ticket.inLane(() => {
+          ticket.commit({ events: [], result: { queued: command.payload.id } }, insert);
+          recorded = true;
+        }));
+        if (!recorded) await ticket.inLane(() => ticket.commit({ events: [], result: { queued: command.payload.id } }));
+        void schedule(conversationId).catch(() => undefined);
+      } else if (intake.kind === "delegated") {
+        const target = intake.target;
+        await intake.hooks.dismiss(target, command.requestId);
+        if (store.queuedMessages.list(conversationId).some(({ id }) => id === target.id)) {
+          throw new RuntimeRequestError("These delegated results have already been sent.");
+        }
+        await ticket.inLane(() => ticket.commit({ events: [], result: { removed: target.id } }));
+        changed(conversationId);
+        void schedule(conversationId).catch(() => undefined);
+      } else if (intake.kind === "removed") {
+        const removed = intake.removed;
+        undelivered(removed, WATCHER_NOTE_REMOVED_REASON);
+        const candidates = removed.attachments.map(({ id }) => id);
+        const referenced = store.referencedAttachmentIds(candidates);
+        await conversationAttachments.release(candidates.filter((id) => !referenced.has(id)));
+        changed(conversationId);
+        void schedule(conversationId).catch(() => undefined);
+      } else if (command.type === "message.queue.send") {
+        await running.get(conversationId);
+        if (turns.isActive(conversationId)) await sendDuringTurn(conversationId, command.payload.id);
+        else await dispatch(conversationId, command.payload.id);
+      } else if (command.type === "message.queue.stop-and-send") {
+        await stopAndSend(command.payload, command.requestId, ticket);
+      }
+    } catch (error) {
+      ticket.fail(error);
+      throw error;
+    }
+    ticket.finish(null);
+    return reply(command.payload.id);
+  });
+
+  function queueIntake(command: Exclude<QueueCommand, { type: "message.queue.get" }>, ticket: CommandTicket): QueueIntake {
+    const { conversationId } = command.payload;
+    if (command.type === "message.queue.remove") {
       requireConversation(conversationId);
       const target = store.queuedMessages.get(conversationId, command.payload.id);
       const hooks = options.delegated?.();
       if (target?.delegatedCompletion && hooks) {
-        await hooks.dismiss({ ...target, delegatedCompletion: target.delegatedCompletion }, command.requestId);
-        if (store.queuedMessages.list(conversationId).some(({ id }) => id === target.id)) {
-          throw new RuntimeRequestError("These delegated results have already been sent.");
-        }
-        changed(conversationId);
-        void schedule(conversationId).catch(() => undefined);
-        dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: result(conversationId, target.id) });
-        return "handled";
+        return { kind: "delegated", hooks, target: { ...target, delegatedCompletion: target.delegatedCompletion } };
       }
-      const removed = store.queuedMessages.cancel(conversationId, command.payload.id);
-      if (!removed) throw new RuntimeRequestError("This queued message has already been dispatched.");
-      undelivered(removed, WATCHER_NOTE_REMOVED_REASON);
-      const candidates = removed.attachments.map(({ id }) => id);
-      const referenced = store.referencedAttachmentIds(candidates);
-      await conversationAttachments.release(candidates.filter((id) => !referenced.has(id)));
-      changed(conversationId);
-      void schedule(conversationId).catch(() => undefined);
-    } else if (command.type === "message.queue.send") {
-      requireConversation(conversationId);
-      await running.get(conversationId);
-      if (turns.isActive(conversationId)) await sendDuringTurn(conversationId, command.payload.id);
-      else await dispatch(conversationId, command.payload.id);
-    } else if (command.type === "message.queue.stop-and-send") {
-      await stopAndSend(command.payload, command.requestId);
+      let removed: QueuedMessage | null = null;
+      ticket.commit({ events: [], result: { removed: command.payload.id } }, () => {
+        removed = store.queuedMessages.cancel(conversationId, command.payload.id);
+        if (!removed) throw new RuntimeRequestError("This queued message has already been dispatched.");
+      });
+      return { kind: "removed", removed: removed! };
     }
-    const event: ServerEvent = { type: "request.result", requestId: command.requestId,
-      result: result(conversationId, command.payload.id) };
-    dependencies.send(socket, event);
-    return "handled";
-  });
+    if (command.type === "message.queue.send") {
+      requireConversation(conversationId);
+      ticket.commit({ events: [], result: { send: command.payload.id } });
+    } else if (command.type === "message.queue.stop-and-send") {
+      assertStopAndSendHead(conversationId, command.payload.id);
+    }
+    return { kind: "accepted" };
+  }
   async function steerDelegated(conversationId: string): Promise<boolean> {
     const hooks = options.delegated?.();
     const entry = store.queuedMessages.activeDelegatedDelivery(conversationId);

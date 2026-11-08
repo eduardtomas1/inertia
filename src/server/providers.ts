@@ -1172,8 +1172,9 @@ export class ProviderManager {
     conversationId: string,
     identity: { runId: string; turnId: string },
     graceMs = this.cancelGraceMs,
+    hooks?: { escalated?(): void },
   ): Promise<OwnedProviderStopResult> {
-    return this.runCoordinator.stopOwned(conversationId, identity, graceMs);
+    return this.runCoordinator.stopOwned(conversationId, identity, graceMs, hooks);
   }
 
   beginShutdown(deadlineAt: number): void {

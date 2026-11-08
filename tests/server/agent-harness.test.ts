@@ -719,11 +719,14 @@ describe("agent harness architecture", () => {
     )).resolves.toBe("identity-mismatch");
     expect(cancelCalls.get("isolated-conversation")).toEqual([false]);
 
+    const escalatedBefore: boolean[][] = [];
     await expect(manager.stopOwned(
       "isolated-conversation",
       { runId: "isolated-run", turnId: "isolated-turn" },
       1,
+      { escalated: () => escalatedBefore.push([...cancelCalls.get("isolated-conversation")!]) },
     )).resolves.toBe("force-detached");
+    expect(escalatedBefore).toEqual([[false]]);
     expect(cancelCalls.get("isolated-conversation")).toEqual([false, true]);
     expect(manager.isRunning("isolated-conversation")).toBe(false);
     expect(manager.isRunning("ordinary-conversation")).toBe(true);

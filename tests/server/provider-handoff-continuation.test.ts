@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -133,7 +134,7 @@ async function fixture() {
     },
   } as unknown as ConversationCommandDependencies)({} as never, {
     type: "conversation.update",
-    requestId: "11111111-1111-4111-8111-111111111111",
+    requestId: randomUUID(),
     payload: {
       conversationId: conversation.id,
       modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId })),
@@ -173,7 +174,7 @@ async function fixture() {
     },
   } as unknown as ConversationCommandDependencies)({} as never, {
     type: "conversation.update",
-    requestId: "11111111-1111-4111-8111-111111111111",
+    requestId: randomUUID(),
     payload: { conversationId: conversation.id, ...payload },
   } as never);
   const clearSession = () => {

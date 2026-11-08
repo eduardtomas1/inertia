@@ -32,6 +32,7 @@ import { hold as holdForUpdate, release as releaseUpdateHold } from "../../src/s
 import { MESSAGE_SEND_PREPARATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import { CONVERSATION_ATTACHMENT_STORAGE_FULL_MESSAGE } from "../../src/node/conversation-attachment-store-capacity";
+import { acceptedReceipt, mockCommandOrchestration } from "../support/orchestration-command-mocks";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const execFileAsync = promisify(execFile);
@@ -172,10 +173,11 @@ function dependencies(options: {
   } as unknown as ProviderInfo;
   return {
     store: {
-      orchestration: { acceptedRequest: vi.fn(() => null) },
+      orchestration: mockCommandOrchestration(),
       conversationWork: { restoreBlocksConversation: vi.fn(() => false) },
       conversation: vi.fn(() => ({
         id: conversationId,
+        projectId: "77777777-7777-4777-8777-777777777777",
         title: "Existing conversation",
         providerId,
         model: null,
@@ -217,6 +219,11 @@ function dependencies(options: {
     } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
     turns: {
       isActive: vi.fn(() => false),
+      activeIdentity: vi.fn(() => ({
+        runId: "66666666-6666-4666-8666-666666666666",
+        turnId: "88888888-8888-4888-8888-888888888888",
+      })),
+      isReleasing: vi.fn(() => false),
       acquireTurnAdmission: vi.fn(async () => ({
         conversationId,
         token: Symbol("test-turn-admission"),
@@ -390,10 +397,7 @@ describe("turn stop cleanup", () => {
 });
 
 describe("stop racing settlement", () => {
-  it.each([
-    [true, "mutation"],
-    [false, "This thread does not have an active run."],
-  ] as const)("acknowledges a Stop that races its turn's own settlement only while that run is releasing (%s)", async (releasing, expected) => {
+  it.each([true, false])("acknowledges a Stop that races its turn's own settlement and waits for cleanup only while that run is releasing (%s)", async (releasing) => {
     const runtime = dependencies({
       queue: vi.fn(),
       relinquishAll: vi.fn(async () => undefined),
@@ -401,6 +405,7 @@ describe("stop racing settlement", () => {
     const waitForProviderCleanup = vi.fn(async () => undefined);
     Object.assign(runtime.turns, {
       cancel: vi.fn(() => false),
+      activeIdentity: vi.fn(() => null),
       isReleasing: vi.fn(() => releasing),
       waitForProviderCleanup,
     });
@@ -412,11 +417,10 @@ describe("stop racing settlement", () => {
       requestId: "33333333-3333-4333-8333-333333333333",
       payload: { conversationId },
     });
+    await expect(stop).resolves.toBe("mutation");
     if (releasing) {
-      await expect(stop).resolves.toBe(expected);
       expect(waitForProviderCleanup).toHaveBeenCalledWith([conversationId], expect.any(Number));
     } else {
-      await expect(stop).rejects.toThrow(expected);
       expect(waitForProviderCleanup).not.toHaveBeenCalled();
     }
   });
@@ -428,6 +432,9 @@ describe("new-turn admission recovery", () => {
     const runtime = dependencies({ queue, relinquishAll: vi.fn(async () => undefined) });
     const accepted = queuedTurn();
     vi.mocked(runtime.store.orchestration.acceptedRequest).mockReturnValue(accepted as never);
+    vi.mocked(runtime.store.orchestration.events.receipt).mockReturnValue(acceptedReceipt({
+      turnId: accepted.turn.id, runId: "run", messageId: accepted.message.id, attemptId: "attempt",
+    }));
     const socket = {} as never;
     await expect(createTurnInteractionCommandHandler(runtime)(socket, messageCommand())).resolves.toBe("handled");
     expect(queue).not.toHaveBeenCalled();

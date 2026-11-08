@@ -26,7 +26,7 @@ function providerTurnStarted(active: ActiveTurn, signal?: AbortSignal): Promise<
   });
 }
 
-const UNKNOWN_DELIVERY = "The provider did not confirm whether it received this follow-up. Check this chat before retrying.";
+export const UNKNOWN_FOLLOW_UP_DELIVERY = "The provider did not confirm whether it received this follow-up. Check this chat before retrying.";
 
 interface TurnFollowUpCoordinatorOptions {
   store: RuntimeStore;
@@ -144,9 +144,9 @@ export class TurnFollowUpCoordinator {
       }
       onProviderAcknowledged?.();
       if (error.turnEnded || !this.ownsLiveTurn(active, lease)) {
-        return { kind: "unconfirmed", message: UNKNOWN_DELIVERY };
+        return { kind: "unconfirmed", message: UNKNOWN_FOLLOW_UP_DELIVERY };
       }
-      throw new RuntimeRequestError(UNKNOWN_DELIVERY, undefined, "ambiguous");
+      throw new RuntimeRequestError(UNKNOWN_FOLLOW_UP_DELIVERY, undefined, "ambiguous");
     }
     if (!accepted) {
       active.freshSessionRequest ??= freshSessionRequest;

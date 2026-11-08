@@ -104,7 +104,7 @@ describe("TurnController terminal result persistence", () => {
         expect(update.mock.results[0]?.type).toBe("throw");
         expect(stopOwned).toHaveBeenCalledWith(runtime.conversationId, {
           runId: queued.turn.runId, turnId: queued.turn.id,
-        });
+        }, undefined, { escalated: expect.any(Function) });
         expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
           status: "failed", terminalReason: "stream-persistence-failed",
         });

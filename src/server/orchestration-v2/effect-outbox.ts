@@ -108,6 +108,23 @@ export class OrchestrationEffectOutbox {
     return this.claimWhere(id ?? null, null, passing === "[]" ? null : passing);
   }
 
+  claimControl(id: string): OrchestrationEffect | null {
+    durableId(id);
+    return this.database.transaction(() => {
+      const now = durableTimestamp(this.clock());
+      const row = this.database.prepare(`SELECT * FROM orchestration_v2_effects
+        WHERE id = ? AND state = 'pending' AND runtime_id = ?`).get(id, this.runtimeId) as EffectRow | undefined;
+      if (!row) return null;
+      const claimId = randomUUID();
+      const changed = this.database.prepare(`UPDATE orchestration_v2_effects
+        SET state = 'running', claim_id = ?, claimed_at = ?, attempts = attempts + 1
+        WHERE id = ? AND state = 'pending' AND runtime_id = ?`)
+        .run(claimId, now, row.id, this.runtimeId).changes;
+      if (changed !== 1) return null;
+      return fromRow({ ...row, state: "running", claim_id: claimId, claimed_at: now, attempts: row.attempts + 1 });
+    }).immediate();
+  }
+
   claimNext(kinds: Iterable<string>): OrchestrationEffect | null {
     const list = kindList(kinds);
     return list === "[]" ? null : this.claimWhere(null, list, null);

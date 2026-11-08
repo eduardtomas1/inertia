@@ -67,6 +67,7 @@ export interface TurnProviderRuntime {
     conversationId: string,
     identity: { runId: string; turnId: string },
     graceMs?: number,
+    hooks?: { escalated?(): void },
   ): Promise<"missing" | "identity-mismatch" | "settled" | "force-detached">;
   isRunning(conversationId: string): boolean;
   ownsRun(

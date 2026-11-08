@@ -38,6 +38,16 @@ export const ORCHESTRATION_EFFECT_KINDS = {
     retry: "never",
     rationale: "Native rollback mutates provider-owned history; an interrupted rollback becomes uncertain and is resolved only by exact cleanup evidence.",
   },
+  "provider.interrupt": {
+    replayPolicy: "process-bound",
+    retry: "never",
+    rationale: "Stop targets one live provider process; after process loss there is nothing to interrupt, so a restart retires the claim instead of replaying it.",
+  },
+  "provider.steer": {
+    replayPolicy: "process-bound",
+    retry: "never",
+    rationale: "A steer may already have reached the provider; replaying it could deliver the follow-up twice, so an interrupted steer is reported as unconfirmed instead.",
+  },
   "checkpoint.capture-requested": {
     replayPolicy: "replay-safe",
     retry: "bounded",

@@ -151,11 +151,13 @@ export class AppUpdateInstallCoordinator {
     this.normalShutdownPending = true;
     const pendingInstall = this.installPromise;
     const stopping = Promise.resolve()
-      .then(async () => await this.options.service.abortInstall?.())
-      .then(async () => await pendingInstall?.catch(() => undefined))
-      .then(() => this.releasePreparation())
       .then(async () => {
         await finishNormalShutdownWithinDeadline({
+          prepare: async () => {
+            await this.options.service.abortInstall?.();
+            await pendingInstall?.catch(() => undefined);
+            await this.releasePreparation();
+          },
           cleanup: () => this.options.cleanup(),
           deadlineMs: this.options.normalShutdownDeadlineMs
             ?? normalShutdownDeadlineMs(this.options.platform ?? process.platform),

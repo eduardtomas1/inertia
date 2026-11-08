@@ -26,10 +26,13 @@ export interface LinuxGuardianOrphanOptions {
   readonly reusedHolderStartTimeTicks?: string | null;
   readonly kill?: (pid: number, signal: NodeJS.Signals) => void;
   readonly wait?: (durationMs: number) => Promise<void>;
+  readonly uid?: number | null;
+  readonly readEnviron?: (path: string) => string;
 }
 
 interface LinuxProcessStat {
   readonly parentPid: number;
+  readonly processGroupId: number;
   readonly sessionId: number;
   readonly startTimeTicks: string;
   readonly command: string;
@@ -51,12 +54,14 @@ function readProcessStat(procRoot: string, pid: number): LinuxProcessStat | null
     if (open < 0 || close < open) return null;
     const fields = stat.slice(close + 2).trim().split(/\s+/u);
     const parentPid = Number(fields[1]);
+    const processGroupId = Number(fields[2]);
     const sessionId = Number(fields[3]);
     const startTimeTicks = fields[19];
-    if (!fields[0] || !Number.isSafeInteger(parentPid) || !Number.isSafeInteger(sessionId)
-      || !startTimeTicks || !/^[0-9]+$/u.test(startTimeTicks)) return null;
+    if (!fields[0] || !Number.isSafeInteger(parentPid) || !Number.isSafeInteger(processGroupId)
+      || !Number.isSafeInteger(sessionId) || !startTimeTicks || !/^[0-9]+$/u.test(startTimeTicks)) return null;
     return {
       parentPid,
+      processGroupId,
       sessionId,
       startTimeTicks,
       command: stat.slice(open + 1, close).slice(0, 64),
@@ -67,11 +72,28 @@ function readProcessStat(procRoot: string, pid: number): LinuxProcessStat | null
   }
 }
 
-function carriesMarker(procRoot: string, pid: number, entry: string): boolean {
+type MarkerState = "present" | "absent" | "unreadable";
+
+function markerState(
+  procRoot: string,
+  pid: number,
+  entry: string,
+  readEnviron: (path: string) => string,
+): MarkerState {
   try {
-    return readFileSync(`${procRoot}/${pid}/environ`, "latin1").split("\0").includes(entry);
+    return readEnviron(`${procRoot}/${pid}/environ`).split("\0").includes(entry) ? "present" : "absent";
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : null;
+    return code === "EACCES" || code === "EPERM" ? "unreadable" : "absent";
+  }
+}
+
+function processRealUid(procRoot: string, pid: number): number | null {
+  try {
+    const match = /^Uid:\s+([0-9]+)\s/mu.exec(readFileSync(`${procRoot}/${pid}/status`, "utf8"));
+    return match ? Number(match[1]) : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -85,12 +107,36 @@ function ancestors(procRoot: string, pid: number): Set<number> {
   return found;
 }
 
+function belongsToGuardian(
+  procRoot: string,
+  guardian: { readonly pid: number; readonly startTimeTicks: string },
+  stat: LinuxProcessStat,
+): boolean {
+  if (stat.sessionId === guardian.pid || stat.processGroupId === guardian.pid) return true;
+  let current = stat.parentPid;
+  for (let depth = 0; depth < MAX_ANCESTRY_DEPTH && current > 1; depth += 1) {
+    const parent = readProcessStat(procRoot, current);
+    if (!parent) return false;
+    if (current === guardian.pid) return parent.startTimeTicks === guardian.startTimeTicks;
+    current = parent.parentPid;
+  }
+  return false;
+}
+
 export function scanLinuxGuardianOrphans(
   guardian: { readonly pid: number; readonly startTimeTicks: string },
   options: LinuxGuardianOrphanOptions,
-): { readonly complete: boolean; readonly orphans: readonly LinuxGuardianOrphan[] } {
+): {
+  readonly complete: boolean;
+  readonly orphans: readonly LinuxGuardianOrphan[];
+  readonly unreadable?: readonly LinuxGuardianOrphan[];
+  readonly interrupted?: true;
+} {
   const procRoot = options.procRoot ?? "/proc";
   const selfPid = options.selfPid ?? process.pid;
+  const reusedHolder = options.reusedHolderStartTimeTicks ?? null;
+  const uid = options.uid === undefined ? process.getuid?.() ?? null : options.uid;
+  const readEnviron = options.readEnviron ?? ((path: string) => readFileSync(path, "latin1"));
   const entry = `${LINUX_RUNTIME_OWNED_GUARDIAN_MARKER}=${linuxGuardianMarkerValue(guardian)}`;
   let names: string[];
   try {
@@ -103,15 +149,29 @@ export function scanLinuxGuardianOrphans(
   }
   const protectedAncestors = ancestors(procRoot, selfPid);
   const orphans: LinuxGuardianOrphan[] = [];
+  const unreadable: LinuxGuardianOrphan[] = [];
+  const blocked = () => unreadable.length > 0 ? { unreadable } : {};
   for (const name of names) {
-    if (Date.now() >= options.deadlineAt) return { complete: false, orphans };
+    if (Date.now() >= options.deadlineAt) return { complete: false, orphans, ...blocked(), interrupted: true };
     const pid = Number(name);
-    if (pid === selfPid || protectedAncestors.has(pid) || !carriesMarker(procRoot, pid, entry)) continue;
+    if (pid === selfPid || protectedAncestors.has(pid)) continue;
+    const marker = markerState(procRoot, pid, entry, readEnviron);
+    if (marker === "absent") continue;
     const stat = readProcessStat(procRoot, pid);
     if (!stat?.executable || ancestors(procRoot, pid).has(selfPid)) continue;
+    if (marker === "unreadable") {
+      if (reusedHolder !== null && BigInt(stat.startTimeTicks) >= BigInt(reusedHolder)) continue;
+      if (
+        uid !== null
+        && processRealUid(procRoot, pid) === uid
+        && BigInt(stat.startTimeTicks) >= BigInt(guardian.startTimeTicks)
+        && belongsToGuardian(procRoot, guardian, stat)
+      ) unreadable.push({ pid, startTimeTicks: stat.startTimeTicks, command: stat.command });
+      continue;
+    }
     orphans.push({ pid, startTimeTicks: stat.startTimeTicks, command: stat.command });
   }
-  return { complete: true, orphans };
+  return unreadable.length > 0 ? { complete: false, orphans, unreadable } : { complete: true, orphans };
 }
 
 function guardianSessionMembers(
@@ -185,10 +245,15 @@ export async function reapLinuxGuardianOrphans(
   const wait = options.wait ?? ((durationMs: number) => new Promise<void>((resolve) => {
     setTimeout(resolve, durationMs);
   }));
+  let blockers: readonly LinuxGuardianOrphan[] = [];
   for (let round = 0; round <= ORPHAN_REAP_ROUNDS; round += 1) {
     const scan = scanLinuxGuardianOrphans(guardian, options);
-    if (!scan.complete) return { recovered: false, unsignalled: [] };
+    blockers = scan.unreadable ?? [];
+    if (!scan.complete && (scan.interrupted || blockers.length === 0)) {
+      return { recovered: false, unsignalled: [...blockers] };
+    }
     if (scan.orphans.length === 0) {
+      if (blockers.length > 0) return { recovered: false, unsignalled: [...blockers] };
       const members = guardianSessionMembers(guardian, options);
       return { recovered: members?.length === 0, unsignalled: members ?? [] };
     }
@@ -203,7 +268,9 @@ export async function reapLinuxGuardianOrphans(
     );
     unsignalled.push(...survivors.filter((orphan) => !signalOrphan(procRoot, orphan, "SIGKILL", kill)));
     const remaining = await waitUntilGone(procRoot, survivors, options.deadlineAt, wait);
-    if (unsignalled.length > 0 || remaining.length > 0) return { recovered: false, unsignalled };
+    if (unsignalled.length > 0 || remaining.length > 0) {
+      return { recovered: false, unsignalled: [...blockers, ...unsignalled] };
+    }
   }
-  return { recovered: false, unsignalled: [] };
+  return { recovered: false, unsignalled: [...blockers] };
 }

@@ -140,6 +140,7 @@ function resources(): DetachedChatRuntimePolicyResources {
       [TURN]: CONVERSATION,
       [OTHER_TURN]: OTHER_CONVERSATION,
     })[turnId] ?? null,
+    savedAnswerConversationId: () => null,
     duoLaunchConversationIds: (launchId) => ({
       [LAUNCH]: [CONVERSATION, OTHER_CONVERSATION],
       [JUDGED_LAUNCH]: [OTHER_CONVERSATION, "99999999-9999-4999-8999-999999999999", CONVERSATION],
@@ -380,6 +381,20 @@ describe("detached chat runtime authority", () => {
     expect(project("55555555-5555-4555-8555-555555555555")).toEqual({ type: "runtime.cursor", sync });
   });
 
+  it("keeps draft skill previews in the main window", () => {
+    const command = {
+      type: "agent.skills.preview",
+      requestId: REQUEST,
+      payload: {
+        draftConversationId: CONVERSATION,
+        projectId: CONVERSATION,
+        harnessId: "codex-app-server",
+      },
+    } as ClientCommand;
+    expect(rejection(command)).not.toBeNull();
+    expect(mainRejection(command)).toBeNull();
+  });
+
   it("requires detached messages to target the owner without activation", () => {
     type MessageCommand = Extract<ClientCommand, { type: "message.send" }>;
     const message = (activate?: boolean): MessageCommand => ({
@@ -587,6 +602,7 @@ describe("detached chat runtime authority", () => {
         subagentTrace: () => { throw new Error("Not found."); },
         checkpoint: () => { throw new Error("Not found."); },
         agentTurn: () => { throw new Error("Not found."); },
+        library: { savedAnswerConversationId: () => null },
         findPairedLaunch: () => null,
       },
       snapshot,
@@ -660,6 +676,26 @@ describe("detached chat runtime authority", () => {
       type: "agent.subagent.stop",
       requestId: REQUEST,
       payload: { conversationId: CONVERSATION, traceId: OTHER_CONVERSATION },
+    })).not.toBeNull();
+    expect(rejection({
+      type: "agent.subagent.background",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, traceId: REQUEST },
+    })).toBeNull();
+    expect(detachedChatCommandRejection(authority, {
+      type: "agent.subagent.background",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, traceId: REQUEST },
+    }, { ...resources(), subagentConversationId: () => OTHER_CONVERSATION })).not.toBeNull();
+    expect(rejection({
+      type: "agent.subagent.background",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, traceId: OTHER_CONVERSATION },
+    })).not.toBeNull();
+    expect(rejection({
+      type: "agent.subagent.background",
+      requestId: REQUEST,
+      payload: { conversationId: OTHER_CONVERSATION, traceId: REQUEST },
     })).not.toBeNull();
     expect(rejection({
       type: "activity.mark-seen",
@@ -1109,7 +1145,7 @@ describe("detached chat projection for chat surfaces", () => {
     compactOnReturn: "never",
     desktopNotifications: false,
     quotaWarnings: { enabled: false, firstThreshold: 15 },
-    keybindings: { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t" },
+    keybindings: { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t", "open-surface": "j" },
     newThreadMode: "worktree",
     defaultAccessMode: "full",
     codexBinaryPath: "/Users/someone/bin/codex",
@@ -1136,7 +1172,7 @@ describe("detached chat projection for chat surfaces", () => {
       compactOnReturn: "never",
       desktopNotifications: false,
       quotaWarnings: { enabled: false, firstThreshold: 15 },
-      keybindings: { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t" },
+      keybindings: { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t", "open-surface": "j" },
       newThreadMode: "worktree",
       defaultAccessMode: "full",
     });
@@ -1195,6 +1231,34 @@ describe("global message search authority", () => {
     for (const command of commands) {
       expect(rejection(command)).not.toBeNull();
       expect(mainRejection(command)).toBeNull();
+    }
+  });
+});
+
+describe("detached chat workspace tools", () => {
+  it("opens history, blame, staging, content search and path resolution to the window's own workspace only", () => {
+    const commandsFor = (scope: { projectId: string; conversationId?: string }): ClientCommand[] => [
+      { type: "git.log", requestId: REQUEST, payload: scope },
+      { type: "git.commit.show", requestId: REQUEST, payload: { ...scope, sha: "abc1234" } },
+      { type: "git.blame", requestId: REQUEST, payload: { ...scope, path: "a.txt" } },
+      { type: "git.stage", requestId: REQUEST, payload: { ...scope, repositoryPath: ".", authorityRef: REQUEST, paths: ["a.txt"] } },
+      { type: "git.unstage", requestId: REQUEST, payload: { ...scope, repositoryPath: ".", authorityRef: REQUEST, paths: ["a.txt"] } },
+      { type: "workspace.search.content", requestId: REQUEST, payload: { ...scope, query: "needle" } },
+      { type: "workspace.path.resolve", requestId: REQUEST, payload: { ...scope, text: "src/a.ts:3" } },
+    ] as ClientCommand[];
+    for (const command of commandsFor({ projectId: PROJECT, conversationId: CONVERSATION })) {
+      expect(rejection(command), command.type).toBeNull();
+      expect(mainRejection(command), command.type).toBeNull();
+    }
+    for (const scope of [
+      { projectId: PROJECT, conversationId: OTHER_CONVERSATION },
+      { projectId: OTHER_PROJECT, conversationId: CONVERSATION },
+      { projectId: PROJECT },
+    ]) {
+      for (const command of commandsFor(scope)) {
+        expect(rejection(command), command.type).toBe("That request is unavailable in a detached chat.");
+        expect(mainRejection(command), command.type).toBeNull();
+      }
     }
   });
 });

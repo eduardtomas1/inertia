@@ -427,7 +427,7 @@ describe("inertia_render_html handler", () => {
       expect(JSON.parse(result.text)).toEqual({
         error: {
           code: "render_limit_reached",
-          message: "This turn already has 8 rendered pages. Update one of them in your reply instead of adding more.",
+          message: "This turn already holds its maximum of 8 rendered pages, and pages cannot be changed after they are shown. Describe anything else in your written reply.",
         },
       });
       expect(renderCount()).toBe(HTML_RENDER_MAX_PER_TURN);

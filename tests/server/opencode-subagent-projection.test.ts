@@ -231,6 +231,67 @@ describe("OpenCode delegated-agent projection", () => {
     });
   });
 
+  it("names the agent, model and task call and turns child tool parts into steps", () => {
+    const { observe, latest } = harness({ limits: { "anthropic/claude-sonnet-4-5": 200_000 } });
+    observe(
+      event({
+        type: "session.created",
+        properties: {
+          sessionID: CHILD,
+          info: { id: CHILD, parentID: ROOT, title: "Review", agent: "reviewer", model: { id: "claude-sonnet-4-5", providerID: "anthropic" } },
+        },
+      }),
+      part(ROOT, {
+        id: "root-task",
+        messageID: "root-assistant",
+        type: "tool",
+        callID: "call-review",
+        tool: "task",
+        state: { status: "running", input: { description: "Review", prompt: "Review it", subagent_type: "general" }, metadata: { sessionId: CHILD } },
+      }),
+      assistant(CHILD, "child-msg", { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } }, { providerID: "fake", modelID: "other" }),
+      toolPart(CHILD, "p1", "running", "Read", { tool: "read", input: { filePath: "src/a.ts", content: "SECRET" } }),
+      toolPart(CHILD, "p1", "completed", "Read src/a.ts", { tool: "read", input: { filePath: "src/a.ts" } }),
+      toolPart(CHILD, "p2", "pending", "bash", { tool: "bash", input: { command: "npm test\nrm -rf x" } }),
+      toolPart(CHILD, "p3", "error", "grep", { tool: "grep", input: { pattern: "TODO" } }),
+    );
+    expect(latest(CHILD)).toMatchObject({
+      providerRole: "reviewer",
+      providerToolUseId: "call-review",
+      model: "anthropic/claude-sonnet-4-5",
+      modelSource: "observed",
+      steps: [
+        { label: "read · src/a.ts", status: "completed" },
+        { label: "bash · npm test", status: "running" },
+        { label: "grep · TODO", status: "failed" },
+      ],
+    });
+    expect(latest(CHILD)?.usage?.maxContextTokens).toBe(200_000);
+    expect(JSON.stringify(latest(CHILD))).not.toMatch(/SECRET|rm -rf/u);
+  });
+
+  it("falls back to the assistant's agent, then the task's subagent type, and the first assistant model", () => {
+    const { observe, latest } = harness();
+    observe(created(CHILD, ROOT), assistant(CHILD, "m1", undefined, { providerID: "fake", modelID: "first" }));
+    observe(event({
+      type: "message.updated",
+      properties: { sessionID: CHILD, info: { id: "m2", sessionID: CHILD, role: "assistant", parentID: "p", providerID: "fake", modelID: "second", agent: "explore" } },
+    }));
+    expect(latest(CHILD)).toMatchObject({ model: "fake/first", providerRole: "explore" });
+    const other = harness();
+    other.observe(
+      created(CHILD, ROOT),
+      part(ROOT, {
+        id: "root-task",
+        messageID: "root-assistant",
+        type: "tool",
+        tool: "task",
+        state: { status: "running", input: { subagent_type: "general" }, metadata: { sessionId: CHILD } },
+      }),
+    );
+    expect(other.latest(CHILD)).toMatchObject({ providerRole: "general", providerToolUseId: "root-task" });
+  });
+
   it("does not reuse an earlier assistant result when the latest assistant has no text", () => {
     const { projection, observe, latest } = harness();
     observe(

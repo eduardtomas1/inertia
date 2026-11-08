@@ -303,6 +303,6 @@ describe("Claude provider-native Fast mode", { concurrent: false }, () => {
 
     await expect(manager.run(input(root)))
       .resolves.toMatchObject({ status: "completed" });
-    expect(capturedOptions?.settings).toBeUndefined();
+    expect(capturedOptions?.settings).toEqual({ useAutoModeDuringPlan: false });
   });
 });

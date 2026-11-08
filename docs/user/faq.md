@@ -22,7 +22,7 @@ The route you choose in the model chooser. Rows that run on an API key read *‹
 
 ## Can I use Kimi with an API key?
 
-Yes. The Kimi Code card has a built-in Kimi key route: choose **Add key** on its row. It runs through Claude Code, so Claude Code must be installed.
+Yes. The Kimi Code card has a built-in Kimi key route: choose **Add key** on its row. It runs through Claude Code, so Claude Code 2.1.309 or newer must be installed.
 
 ## Is Full Access safe?
 

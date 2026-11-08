@@ -112,6 +112,18 @@ export const agentCommandSchemas = [
   z
     .object({
       ...requestBase,
+      type: z.literal("agent.skills.preview"),
+      payload: z.object({
+        draftConversationId: z.string().uuid(),
+        projectId: z.string().uuid(),
+        harnessId: z.enum(["codex-app-server", "claude-agent-sdk"]),
+        forceReload: z.boolean().optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("agent.stop"),
       payload: z.object({ conversationId: z.string().uuid() }).strict(),
     })
@@ -120,6 +132,16 @@ export const agentCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("agent.subagent.stop"),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        traceId: z.string().uuid(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("agent.subagent.background"),
       payload: z.object({
         conversationId: z.string().uuid(),
         traceId: z.string().uuid(),

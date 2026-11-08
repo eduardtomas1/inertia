@@ -54,30 +54,28 @@ describe("window appearance", () => {
     expect(MAC_TRAFFIC_LIGHT_POSITION.y + 7).toBe(WINDOW_HEADER_HEIGHT / 2);
   });
 
-  it("draws a transparent Windows title bar overlay sized to the header with themed symbols", () => {
-    expect(windowChromeOptions("win32", "dark")).toEqual({
+  it.each(["win32", "linux"] as const)("draws a transparent %s title bar overlay sized to the header with themed symbols", (platform) => {
+    expect(windowChromeOptions(platform, "dark")).toEqual({
       backgroundColor: "#18181b",
       titleBarStyle: "hidden",
-      titleBarOverlay: { color: "#00000000", symbolColor: "#ededf7", height: 48 },
+      titleBarOverlay: { color: platform === "linux" ? "#01000000" : "#00000000", symbolColor: "#ededf7", height: 48 },
     });
-    expect(windowChromeOptions("linux", "light")).toEqual({ backgroundColor: "#fafafd" });
   });
 
-  it("repaints the background and Windows overlay symbols when the theme changes", () => {
+  it.each(["win32", "linux"] as const)("repaints the background and %s overlay symbols when the theme changes", (platform) => {
     const calls: unknown[] = [];
     const window = {
       setBackgroundColor: (color: string) => calls.push(["background", color]),
       setTitleBarOverlay: (options: unknown) => calls.push(["overlay", options]),
     };
-    applyWindowTheme(window, "win32", "light");
+    applyWindowTheme(window, platform, "light");
     expect(calls).toEqual([
       ["background", "#fafafd"],
-      ["overlay", { color: "#00000000", symbolColor: "#212126", height: 48 }],
+      ["overlay", { color: platform === "linux" ? "#01000000" : "#00000000", symbolColor: "#212126", height: 48 }],
     ]);
     calls.length = 0;
     applyWindowTheme(window, "darwin", "dark");
-    applyWindowTheme(window, "linux", "dark");
-    expect(calls).toEqual([["background", "#18181b"], ["background", "#18181b"]]);
+    expect(calls).toEqual([["background", "#18181b"]]);
   });
 
   it("paints the overlay symbols in the text colour of each theme", () => {

@@ -576,6 +576,7 @@ describe("detached chat main-process boundary", () => {
         DETACHED_CHAT_IPC.persistDraft,
         persistenceEvent,
         "latest popup draft",
+        [],
       );
 
       expect(persistenceEvent.returnValue).toBe(true);
@@ -606,6 +607,7 @@ describe("detached chat main-process boundary", () => {
         DETACHED_CHAT_IPC.persistDraft,
         persistenceEvent,
         "newer popup draft",
+        [],
       );
       const [newerPending] = await value.ipc.invoke(
         DETACHED_CHAT_IPC.getPendingDrafts,
@@ -648,6 +650,7 @@ describe("detached chat main-process boundary", () => {
         DETACHED_CHAT_IPC.persistDraft,
         rejectedEvent,
         "foreign draft",
+        [],
       );
       expect(rejectedEvent.returnValue).toBe(false);
 
@@ -659,6 +662,7 @@ describe("detached chat main-process boundary", () => {
         DETACHED_CHAT_IPC.persistDraft,
         subframeEvent,
         "subframe draft",
+        [],
       );
       expect(subframeEvent.returnValue).toBe(false);
     } finally {
@@ -680,6 +684,7 @@ describe("detached chat main-process boundary", () => {
         DETACHED_CHAT_IPC.mirrorDraft,
         mirrorEvent,
         "latest mirrored draft",
+        [],
       );
 
       expect(mirrorEvent.returnValue).toBe(true);
@@ -1016,6 +1021,106 @@ describe("detached chat terminal handoff", () => {
       .map(({ args }) => args);
   }
 
+  function expectHandoffBeforeWindowRemoval(value: Fixture): void {
+    const channels = value.main.webContents.sent.map(({ channel, args }) => (
+      channel === DETACHED_CHAT_IPC.windowsChanged
+        ? `${channel}:${(args[0] as unknown[]).length}`
+        : channel
+    ));
+    const handoff = channels.indexOf(DETACHED_CHAT_IPC.terminalHandoff);
+    expect(handoff).toBeGreaterThanOrEqual(0);
+    expect(handoff).toBeLessThan(channels.lastIndexOf(`${DETACHED_CHAT_IPC.windowsChanged}:0`));
+  }
+
+  function persistBeforeUnload(
+    value: Fixture,
+    popup: FakeBrowserWindow,
+    terminalIds: readonly string[],
+  ): IpcMainEvent {
+    const event = eventFor(popup.webContents) as unknown as IpcMainEvent;
+    value.ipc.emit(DETACHED_CHAT_IPC.persistDraft, event, "native draft", terminalIds);
+    return event;
+  }
+
+  it("hands terminal ids back when the window closes natively", async () => {
+    const value = fixture();
+    try {
+      const popup = await openFirst(value);
+      expect(persistBeforeUnload(value, popup, NEWER_TERMINAL_IDS).returnValue).toBe(true);
+      expect(terminalHandoffs(value)).toEqual([]);
+      popup.close();
+      expect(terminalHandoffs(value)).toEqual([[{
+        conversationId: FIRST_ID,
+        terminalIds: NEWER_TERMINAL_IDS,
+        dock: false,
+      }]]);
+      expectHandoffBeforeWindowRemoval(value);
+      expect(value.docked).not.toHaveBeenCalled();
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("keeps a window whose native close was cancelled fully usable", async () => {
+    const value = fixture();
+    try {
+      const popup = await openFirst(value);
+      persistBeforeUnload(value, popup, TERMINAL_IDS);
+      popup.webContents.emit("will-prevent-unload");
+      expect(terminalHandoffs(value)).toEqual([]);
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.dock,
+        eventFor(popup.webContents),
+        "docked draft",
+        NEWER_TERMINAL_IDS,
+      );
+      await afterIpcReply();
+      expect(value.docked).toHaveBeenCalledWith(FIRST_ID);
+      expect(terminalHandoffs(value)).toEqual([[{
+        conversationId: FIRST_ID,
+        terminalIds: NEWER_TERMINAL_IDS,
+        dock: true,
+      }]]);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("hands the last reported terminal ids back after a renderer crash", async () => {
+    const value = fixture();
+    try {
+      const popup = await openFirst(value);
+      const mirrorEvent = eventFor(popup.webContents) as unknown as IpcMainEvent;
+      value.ipc.emit(DETACHED_CHAT_IPC.mirrorDraft, mirrorEvent, "mirrored", NEWER_TERMINAL_IDS);
+      expect(mirrorEvent.returnValue).toBe(true);
+      value.ipc.emit(DETACHED_CHAT_IPC.mirrorDraft, mirrorEvent, "mirrored", ["not-a-terminal"]);
+      expect(mirrorEvent.returnValue).toBe(false);
+      popup.webContents.emit("render-process-gone");
+      expect(popup.destroyed).toBe(true);
+      expect(terminalHandoffs(value)).toEqual([[{
+        conversationId: FIRST_ID,
+        terminalIds: NEWER_TERMINAL_IDS,
+        dock: false,
+      }]]);
+      expectHandoffBeforeWindowRemoval(value);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("does not hand terminals to the main window while detached chats shut down", async () => {
+    const value = fixture();
+    try {
+      const popup = await openFirst(value);
+      persistBeforeUnload(value, popup, TERMINAL_IDS);
+      await value.coordinator.shutdown();
+      expect(popup.destroyed).toBe(true);
+      expect(terminalHandoffs(value)).toEqual([]);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
   it("relays the main window's terminal ids to the new window only once", async () => {
     const value = fixture();
     try {
@@ -1083,15 +1188,17 @@ describe("detached chat terminal handoff", () => {
         "docked draft",
         NEWER_TERMINAL_IDS,
       );
-      expect(terminalHandoffs(value)).toEqual([]);
-      await afterIpcReply();
-      await afterIpcReply();
       const handoff = [{
         conversationId: FIRST_ID,
         terminalIds: NEWER_TERMINAL_IDS,
         dock: true,
       }];
+      expect(popup.destroyed).toBe(false);
+      expect(terminalHandoffs(value)).toEqual([handoff]);
+      await afterIpcReply();
+      await afterIpcReply();
       expect(popup.destroyed).toBe(true);
+      expectHandoffBeforeWindowRemoval(value);
       expect(value.docked).toHaveBeenCalledWith(FIRST_ID);
       expect(sentBeforeDock).toEqual([handoff]);
       expect(terminalHandoffs(value)).toEqual([handoff]);
@@ -1167,9 +1274,21 @@ describe("detached chat terminal handoff", () => {
         DETACHED_CHAT_IPC.persistDraft,
         persistenceEvent,
         "native close draft",
-        TERMINAL_IDS,
       );
       expect(persistenceEvent.returnValue).toBe(false);
+      value.ipc.emit(
+        DETACHED_CHAT_IPC.persistDraft,
+        persistenceEvent,
+        "native close draft",
+        ["not-a-terminal"],
+      );
+      expect(persistenceEvent.returnValue).toBe(true);
+      popup.close();
+      expect(terminalHandoffs(value)).toEqual([[{
+        conversationId: FIRST_ID,
+        terminalIds: [],
+        dock: false,
+      }]]);
     } finally {
       await cleanup(value);
     }

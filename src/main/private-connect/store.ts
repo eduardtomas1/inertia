@@ -197,13 +197,13 @@ export type PrivateConnectDeliveryReceipt =
 
 export interface PrivateConnectStoreEncryption {
   available(): boolean;
-  encrypt(value: string): Uint8Array;
-  decrypt(value: Uint8Array): string;
+  encrypt(value: string): Promise<Uint8Array>;
+  decrypt(value: Uint8Array): Promise<string>;
 }
 
 type PrivateConnectSafeStorage = Pick<
   SafeStorage,
-  "decryptString" | "decryptStringAsync" | "encryptString" | "encryptStringAsync" | "getSelectedStorageBackend" | "isAsyncEncryptionAvailable"
+  "decryptStringAsync" | "encryptStringAsync" | "getSelectedStorageBackend" | "isAsyncEncryptionAvailable"
 >;
 
 export async function createPrivateConnectStoreEncryption(
@@ -221,13 +221,13 @@ export async function createPrivateConnectStoreEncryption(
   ]);
   return {
     available: () => available.available,
-    encrypt: (value) => {
+    encrypt: async (value) => {
       if (!available.available) throw new Error("Secure platform storage is unavailable.");
-      return storage.encryptString(value);
+      return await backend.encrypt(value);
     },
-    decrypt: (value) => {
+    decrypt: async (value) => {
       if (!available.available) throw new Error("Secure platform storage is unavailable.");
-      return storage.decryptString(Buffer.from(value));
+      return (await backend.decrypt(Buffer.from(value))).plainText;
     },
   };
 }
@@ -248,7 +248,7 @@ export class PrivateConnectStore {
   ) {
     this.persistence = persistence ?? new FileCredentialVaultPersistence(filePath, {
       temporaryPrefix: ".private-connect-vault-",
-      validateStage: (value) => canonicalBase64(value) && (!this.available() || this.opens(value)),
+      validateStage: async (value) => canonicalBase64(value) && (!this.available() || await this.opens(value)),
     });
   }
 
@@ -258,10 +258,10 @@ export class PrivateConnectStore {
     if (!this.available()) return null;
     const encoded = await this.persistence.read();
     if (encoded === null) return null;
-    return this.decode(encoded);
+    return await this.decode(encoded);
   }
 
-  private decode(encoded: string): PersistedPrivateConnect {
+  private async decode(encoded: string): Promise<PersistedPrivateConnect> {
     if (
       Buffer.byteLength(encoded, "utf8") > MAX_CREDENTIAL_VAULT_BYTES
       || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)
@@ -269,16 +269,16 @@ export class PrivateConnectStore {
       throw new Error("The encrypted Private Connect store is invalid.");
     }
     try {
-      const decoded = this.encryption.decrypt(Buffer.from(encoded, "base64"));
+      const decoded = await this.encryption.decrypt(Buffer.from(encoded, "base64"));
       return privateConnectStoreSchema.parse(JSON.parse(decoded) as unknown);
     } catch {
       throw new Error("The encrypted Private Connect store could not be opened.");
     }
   }
 
-  private opens(encoded: string): boolean {
+  private async opens(encoded: string): Promise<boolean> {
     try {
-      this.decode(encoded);
+      await this.decode(encoded);
       return true;
     } catch {
       return false;
@@ -287,7 +287,7 @@ export class PrivateConnectStore {
 
   async save(value: PersistedPrivateConnect): Promise<void> {
     if (!this.available()) throw new Error("Secure platform storage is unavailable.");
-    const encoded = Buffer.from(this.encryption.encrypt(JSON.stringify(privateConnectStoreSchema.parse(value)))).toString("base64");
+    const encoded = Buffer.from(await this.encryption.encrypt(JSON.stringify(privateConnectStoreSchema.parse(value)))).toString("base64");
     if (Buffer.byteLength(encoded, "utf8") > MAX_CREDENTIAL_VAULT_BYTES) {
       throw new Error("The encrypted Private Connect store is too large.");
     }

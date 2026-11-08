@@ -22,6 +22,10 @@ import type {
   InteractionMode,
   ModelSelection,
   ProviderId,
+  SubagentModelSource,
+  SubagentTaskEffort,
+  SubagentTaskKind,
+  SubagentTaskStep,
   SubagentTaskUsage,
   SubagentTrace,
   SubagentTraceStatus,
@@ -274,6 +278,13 @@ export interface UpsertSubagentTraceInput {
   usage?: SubagentTaskUsage | null;
   toolUseCount?: number | null;
   durationMs?: number | null;
+  modelSource?: SubagentModelSource | null;
+  taskKind?: SubagentTaskKind | null;
+  background?: boolean | null;
+  command?: string | null;
+  effort?: SubagentTaskEffort | null;
+  activityId?: string | null;
+  steps?: readonly SubagentTaskStep[] | null;
   sequence: number;
   updatedAt?: string;
 }

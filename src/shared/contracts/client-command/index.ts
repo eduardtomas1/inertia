@@ -7,13 +7,16 @@ import {
   appCommandSchemas,
   configurationCommandSchemas,
 } from "./app";
-import { gitCommandSchemas } from "./git";
+import { gitCommandSchemas, gitHistoryCommandSchemas } from "./git";
 import { workspaceCommandSchemas } from "./workspace";
+import { terminalLinkCommandSchemas } from "./terminal-links";
 import { promptPresetCommandSchema } from "./prompt-presets";
 import { customAgentCommandSchemas } from "./custom-agents";
 import { todoCommandSchemas } from "./todos";
+import { libraryCommandSchemas } from "./library";
 import { updatesCommandSchemas } from "./updates";
 import { watcherCommandSchemas } from "./watcher";
+import { worktreeCommandSchemas } from "./worktrees";
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   ...appCommandSchemas,
@@ -24,10 +27,14 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...promptPresetCommandSchema.options,
   ...customAgentCommandSchemas,
   ...todoCommandSchemas,
+  ...libraryCommandSchemas,
   ...updatesCommandSchemas,
   ...watcherCommandSchemas,
   ...gitCommandSchemas,
+  ...gitHistoryCommandSchemas,
   ...workspaceCommandSchemas,
+  ...terminalLinkCommandSchemas,
+  ...worktreeCommandSchemas,
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;

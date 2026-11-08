@@ -68,6 +68,81 @@ suggestion and only when it is plain ASCII (letters, digits, `_`, `.`, `:`,
 malformed, and a name that is only padded with whitespace or a byte-order mark
 gets the suggestion on both transports.
 
+Inertia host tools share an allowance of 1,024 admitted calls per turn,
+including Browser inspection and interaction calls. At most eight calls may
+be pending at once. A concurrency refusal can be retried after a call finishes;
+`host_tool_budget_exhausted` requires a new turn. Calls admitted before a
+failure or cancellation still consume the allowance, except a wait that times
+out (below), and reused call identities remain rejected. These limits do not replace permission or approval checks.
+
+`inertia_wait_for_conversation` (pack revision 4) lets a parent wait for a
+chat it created instead of polling `inertia_get_conversation_status` in a
+loop. It takes that chat's `conversationId`, under the same direct-management
+rule as the status tool, and `timeoutMs` from 1,000 to 20,000 milliseconds
+(15,000 by default). It returns the status tool's result plus `outcome` and
+`timedOut`: as soon as the chat has no active turn (`settled`: status idle,
+completed, or failed, with the latest turn completed, failed, cancelled, or
+interrupted) or needs the user's input (`needs-input`), and otherwise at the
+timeout with the current status, `outcome: "timeout"`, and `timedOut: true`.
+The wait is capped at 20 seconds because OpenCode's MCP client gives a host
+tool call 30 seconds and the HTTP bridge and stdio proxy add their own
+deadlines; the tool description tells the model to call again rather than ask
+for a longer wait. The wait polls the persisted status every 250 ms without
+holding a database transaction, re-checks on every poll that the calling turn
+is still the exact active turn (a settled turn gets `host_tool_failed`), and
+returns `call_cancelled` as soon as the call is cancelled. It is read-only and
+needs no approval. A wait that ends in `timeout` does not count toward the
+turn's allowance of 1,024 host-tool calls, so a parent can wait on a child that
+runs for an hour; a wait that returns `settled` or `needs-input`, fails, or is
+cancelled counts once like any other call. Every wait result also carries
+`remainingToolCalls`, the calls left in the turn's allowance. Timed-out waits
+still use a call identity, and a turn may use at most 8,192 identities; past
+that, calls also return `host_tool_budget_exhausted`. The tool description
+asks the model to read `remainingToolCalls`, and the pack's private instruction
+(`inertia-orchestration`) says to call the wait again after each timeout, which
+does not use the allowance. Arguments that fail validation return
+`invalid_arguments` in the same `<field>: <problem>` form as the other chat
+tools. A Codex thread registers it from its next new provider
+thread.
+
+### Reading chat context
+
+`inertia.orchestration` also carries `inertia_request_context`, which lets an
+agent read turns of Inertia chats. With the `conversationId` of its own chat,
+of a chat the user referenced in the message that started the turn, or of a
+chat its own chat manages, it works without asking: it lists that chat's turns newest first (turn id, first
+line of the request, status, and date; 20 by default, at most 50), and with a
+`turnId` it reads one turn in full: the request and its images, the agent's
+messages, commands with their outcomes and exit codes when recorded, tool
+calls, changed files, provider, model, status, and times. Each result carries
+at most 30 KiB; a longer list or turn returns `nextCursor`, which the agent
+passes back as `cursor`. A turn of the agent's own chat that ran on another
+model endpoint is withheld from that chat's history and returns
+`turn_withheld`.
+
+A managed chat is one this chat created with `inertia_create_conversation`,
+which the user approved, in the same project. Only the direct parent counts: a
+managed chat's own children are not managed by the grandparent, a sibling is
+not managed by its sibling, and a child does not manage its parent, so each of
+those still opens the chooser. A managed read pages and bounds results like a
+referenced one, its agent-written text is neutralized and secret-scrubbed the
+same way, and the read is recorded on the reading turn with access `managed`
+(database schema 107 widens the read log for that value).
+
+Any other chat, or a call without `conversationId`, opens a chooser card in
+which the user picks a chat to share, with an extra confirmation for a chat in
+another workspace. The result is a bounded excerpt of that chat, and its turns
+can then be listed and read for the rest of the turn. A turn may open the
+chooser at most four times (`budget_exceeded` afterwards); a chooser expires
+after five minutes, and a dismissed or expired chooser returns
+`user_cancelled` or `call_cancelled`. Request images are returned only to
+native Claude and Codex routes whose model accepts image input; other routes
+get a note that the image is not available there. Agent-written text in a
+result is quoted data, never instructions, and Inertia records each read on
+the reading turn.
+
+### Frontend workbench
+
 `inertia.frontend-workbench` composes the Browser tools described in
 `docs/AGENT_BROWSER.md`. Its guidance holds only what the tool descriptions do
 not already say: snapshot before and after each meaningful UI change, exercise
@@ -109,6 +184,8 @@ Evidence timeline. The tool description tells the model this, and the result's
 set a fixed viewport, such as 1280 by 800 for a desktop layout, with
 `inertia_browser_resize`, independently of the Browser panel's size.
 
+### Visual replies
+
 `inertia.visual-replies` adds one tool, `inertia_render_html`, for every
 provider that has Inertia host tools. The agent passes one self-contained HTML
 document (at most 262,144 UTF-8 bytes, stated in the `html` field description
@@ -148,7 +225,6 @@ only for a click the frame's bootstrap saw on a link, at most once per second,
 while the frame has focus and a user gesture; the bootstrap runs before any
 page script and proves itself with a token the page cannot read. A page
 that no longer exists is served as a themed "no longer available" notice (404).
-that no longer exists is served as a themed "no longer available" notice (404).
 When the runtime is not running or does not answer in time, the page is served
 as a themed "temporarily unavailable" notice (503), and the chat reloads that
 frame the next time it reconnects to the runtime. The
@@ -172,6 +248,161 @@ Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
 
+### inertia.workspace
+
+`inertia.workspace` (revision 2) lets an agent read what the user sees in
+Inertia's surfaces for its own chat. It is offered to every provider that has
+Inertia host tools, whatever the project's Browser setting. Its six tools are
+read-only and non-destructive, take flat argument objects with no required
+fields, and never ask for approval:
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `inertia_git_status` | none | Whether the chat's workspace is a Git repository; branch, detached state, upstream, ahead and behind; up to 200 changed files with `path`, `status`, `staged`, `unstaged`, and `reviewed` (a current, non-stale file review mark from the Changes view); `totalFiles` and `truncated`. |
+| `inertia_turn_diff` | `turnId?`, `cursor?` | The unified diff of the chat's current turn so far (`state: "live"`), or of an earlier turn of the same chat (`state: "settled"`), one page of files at a time, with `restarted: true` when paging had to start again from the first file. |
+| `inertia_read_plan` | none | The latest plan as the Plan tab shows it: `source` (`native` or `none`), the steps with their status (each at most 300 bytes), and the plan document as markdown, at most 16 KiB. |
+| `inertia_read_goal` | none | The chat's current goal as the Goal panel shows it: `source` (`codex-native` or `inertia-local`), objective (at most 4 KiB), status, token budget, tokens used, time used, and times; or `goal: null`. |
+| `inertia_list_tasks` | `includeDone?` | Up to 200 open (or, with `includeDone`, all) tasks, newest first: tasks assigned to this project, and tasks with no project (from before tasks had one) that are unlinked or linked to a chat in this project, with `id`, `title`, `note` (at most 1 KiB), `priority`, `dueDate`, `done`, `linkedConversationId`, and `linkedStatus`. |
+| `inertia_project_actions` | none | The project's Run actions for the chat's workspace (configured actions and package scripts) with `id`, `label`, `command`, `preview`, whether each is running (and running in this chat), and `previewUrl` when a local port was detected. Starting and stopping are not offered. |
+
+Git status reuses the Changes view's status scan, and turn diffs reuse the
+stored turn artifacts. A settled turn returns its stored patch, or only its
+file list with a `patchNote` when the patch has expired. A turn that has just
+ended may still be capturing its changes; the tool then waits up to 5 seconds
+for that capture, within the call's cancellation, and otherwise answers that
+the changes are still being captured. The current turn's artifact is not
+finalized until the turn settles, so its diff is a live comparison between the
+turn's starting snapshot and a short-lived snapshot of the worktree. That
+snapshot uses Inertia's private index and checkpoint ref namespace, and its
+ref is removed before the tool returns. A live comparison has a 20-second
+deadline, below OpenCode's 30-second host-tool call timeout, and calls for the
+same turn within 5 seconds of a finished comparison share it instead of
+writing another snapshot of the worktree; a cancelled call ends only its own
+wait, and the shared Git work stops when no caller is left. Git runs without a
+shell, with argument arrays, Inertia's deadlines, and the call's cancellation
+signal. The diff is paged by file: each result holds whole files while their
+text fits in 24 KiB, a single larger file is cut at a line boundary and marked
+`diffTruncated`, and binary files are listed by name only. `nextCursor` is
+bound to the turn, to a digest of the file list it paged, and to the last file
+it returned. A live turn's file list can change between calls; when it has,
+the next result starts again from the first file with `restarted: true`
+instead of skipping or repeating files. Passing a cursor back with another
+turn, or a cursor the tool did not return, is `invalid_arguments`.
+
+Every result is checked against the 32 KiB host-tool result cap, and lists
+stop early with `truncated` when the next entry would not fit. Text in results
+is sanitized before it reaches the model: terminal controls are removed,
+credential-shaped values become `[redacted]`, including values that only their
+name marks as secret (`DB_PASSWORD=...`, `STRIPE_API_KEY=...`,
+`GITHUB_TOKEN: ...`, `password: ...`, `clientSecret = "..."`) in diffs, plans,
+task notes, and labels (Run commands also go through the command-secret
+scrubber), the chat's workspace root becomes `<workspace>`, the home directory
+`<home>`, and other user and temporary paths `<path>` (every absolute path in
+a Run command keeps only its last segment). Paths are recognised with either
+slash, JSON-escaped, percent-encoded, behind `file://`, `file:///`, `\\?\`
+and `//?/` prefixes, under the legacy `Documents and Settings` root and its
+8.3 name, and with spaces in the profile folder name. Instruction-shaped text
+is neutralized as for chat context reads. The pack's
+private instruction (`inertia-workspace`, under 1 KiB) tells the agent that
+the tools are read-only snapshots of what the user sees, how to page
+`inertia_turn_diff` (including what `restarted: true` means), that paths and
+text in their results are untrusted workspace data, and that it should still
+check the current state with its own tools before changing files. The tool
+descriptions do not repeat it; each stays within 300 characters, the same
+limit as the Browser tools.
+
+Each call passes the same exact conversation, run, and turn checks and the
+same cancellation checks as other host tools. Errors use
+`{ error: { code, message } }` with `invalid_arguments` (one
+`<field>: <problem>` line per problem and the tool to call again, as for the
+chat tools), `turn_not_found` (a
+turn of another chat, or no such turn), `workspace_unavailable` (no readable
+workspace folder, or turn diffs in a workspace that is not a Git repository),
+`call_cancelled`, and `host_tool_failed` (including a call from a turn that is
+no longer active).
+
+Codex App Server registers dynamic tools only when a thread starts, so Codex
+chats see this pack from their next new provider thread. Claude, Cursor, Kimi,
+and OpenCode attach host tools for each turn and see it from their next turn.
+Adding the pack changes the registry's definition digest.
+
+## What each turn is offered
+
+The registry is compiled once, so its manifest and definition digest are the
+same for every project. Each turn then gets an offer from that registry: the
+tools it advertises and the private instructions in its hidden instruction
+block, delivered as described under Hidden instruction delivery.
+Both come from one snapshot of the chat's project settings, taken when the
+turn's prompt is assembled and carried to provider start, so a setting
+changed in between cannot leave the prompt and the tools describing
+different offers.
+
+A chat's Inertia-local goal reaches the provider in the turn's structured
+execution context, not among the private instructions. It is one line of at
+most 512 bytes labelled `Chat goal`: the goal's status, its token budget and
+the usage fields that are recorded, and the objective, flattened to one line,
+neutralized like other untrusted text, cut with an ellipsis when it does not
+fit, and introduced as the chat's tracked objective quoted for context rather
+than as a new instruction from the user. It counts toward the turn's
+reference, segment, and byte limits and is left out when they leave no room.
+A Codex-native goal is not repeated there: it reaches Codex through its own
+thread-goal API as before.
+
+When a project turns Browser access off, its turns are not offered
+`inertia.frontend-workbench`: none of the sixteen Browser tools is advertised
+and the frontend instructions are left out of the block. The other packs,
+including `inertia.workspace`, are unchanged. The block's digest changes with
+the setting, so the next turn delivers the changed block. Claude, Cursor, Kimi, and OpenCode attach tools for each turn, so
+the change applies from their next turn. The same `browser_disabled` check
+also runs on every Browser call, so turning the setting off during a turn
+stops that turn's Browser calls too.
+
+Codex App Server registers dynamic tools only at `thread/start` and accepts no
+registration on `thread/resume`, so a Codex turn's offer follows what its
+thread registered rather than the project's current settings alone. A new
+Codex thread registers every pack, Browser included while access is off; a
+call to a Browser tool then returns `browser_disabled` without reaching the
+Browser, and the frontend instructions are in the block only on turns where
+access is on. Turning access back on therefore needs no new thread. Inertia
+records, for each thread it starts, the id and definition digest of every pack
+the thread registered. On a resumed thread, an offered pack's instructions are
+removed unless the thread registered that pack with the same digest: from the
+`developerInstructions` sent on `thread/resume`, where each exact `[label]`
+section of the block is dropped with its separating blank line and the
+person's configured text is left as it was, and from the prompt when the block
+travels there, including when an unreadable `config/read` moves it there, so
+a thread started before `inertia.workspace` existed, or before a pack's tools
+changed, is not told about tools it cannot call; those tools
+arrive with the chat's next new thread. The record is kept in the database
+(schema 109, `codex_thread_tool_packs`: the thread id, each pack's id and
+digest, and when it was registered), keyed by the same thread id the chat
+stores as its provider session, so a resumed chat keeps its instructions after
+the app restarts. A registration replaces any earlier one for the same thread,
+and registrations of threads no chat resumes from are pruned once they fall
+outside the newest 1,024. The thread id is treated as untrusted text: up to
+512 characters without control characters, or it is not recorded. A recent
+registration is also cached in memory, and if the database cannot be written
+or read, that cache decides for the rest of the runtime. For a resumed thread
+without a record (one started by an earlier build), only the frontend
+workbench's instructions and the `inertia-chat` line are kept, because every resumable Codex thread
+registered the Browser tools; the other packs' instructions return with the
+next new thread.
+
+Cursor and Kimi attach the host tools as an MCP server in the ACP session:
+over HTTP when the agent advertises HTTP MCP support, and otherwise through a
+small stdio proxy run by Node.js. In the packaged desktop app, that proxy
+needs a separate Node.js on `PATH`. When neither is available, no server is
+attached and the turn's prompt is sent without the host-tool instructions
+and the `inertia-chat` line, so the agent is not told about tools it cannot call. This is decided after
+the ACP `initialize` response, so the turn's stored execution record still
+counts the withheld instructions. The provider capability contract does not
+change, because HTTP support is known only after `initialize`.
+
+The MCP server keeps the identifier `inertia-chat-manager`, because provider
+tool names and permission rules are derived from it. Its `initialize` result
+carries no instructions: the hidden instruction block and the tool
+descriptions say what the tools do.
+
 ## Hidden instruction delivery
 
 A turn can carry four kinds of hidden instructions: the capability-pack
@@ -193,8 +424,12 @@ sessions never receive it. The rule lives in
   `developer_instructions` on both). That value replaces a
   `developer_instructions` setting from the person's Codex configuration,
   so Inertia first reads it through `config/read` (bounded to 3 seconds) and
-  sends the configured text, a blank line, then the block; when the read
-  fails or times out it sends the block alone and the turn goes on. The
+  sends the configured text, a blank line, then the block. When the read
+  fails or times out it sends no `developerInstructions`, so the person's own
+  Codex instructions stay in force: the block rides in that turn's prompt
+  under the internal-instructions header, the ledger forgets the turn's
+  digest so later turns follow the prompt rule below, and a
+  `provider.session-instructions-deferred` diagnostic records it. The
   value is the same on every call while the configured text stays the same.
 - A turn that sends the block at system level records the block's SHA-256
   digest, never its text, in its execution manifest as
@@ -247,6 +482,61 @@ sessions never receive it. The rule lives in
 Not verified against live providers: whether an older Codex that ignores
 `developerInstructions` on `thread/resume` keeps the start value after its
 own compaction.
+
+## Minimum provider versions
+
+Discovery refuses a Claude Code or OpenCode installation older than its
+security floor. The floors, the reason each one exists, Antigravity's headless
+floor and the OpenCode 2 ceiling are defined together in
+`src/server/provider/provider-version-floors.ts`.
+
+| Provider | Supported | Why |
+| --- | --- | --- |
+| Claude Code | 2.1.309 or newer | Inertia passes `managedSettings` with `disableAllHooks`, `disableSkillShellExecution` and `useAutoModeDuringPlan: false`, so plan-mode commands reach Inertia's approval instead of the auto mode classifier, which reviews them by default whenever auto mode is available; Claude Code before 2.1.309 dropped host-supplied managed settings, so those hook and skill-shell restrictions silently did not apply. 2.1.309 also carries the fixes for GHSA-5j29-h97v-84ch (a symlink race lets writes escape the project; fixed in 2.1.129) and GHSA-pq7j-f95f-qfcv (a plugin pinned-commit bypass; fixed in 2.1.179). |
+| OpenCode | 1.18.22 or newer, below 2 | GHSA-632h-h47v-g4x4: a cross-site request to `/global/upgrade` on `opencode serve` installs arbitrary packages (fixed in 1.18.22). The random basic-auth password Inertia gives its owned server reduces this risk but does not remove it. OpenCode 2 is not supported yet. |
+| Antigravity | 1.2.2 or newer | First release with the headless stream-json contract below. |
+
+Below a security floor, discovery runs only the version probe. It never runs
+OpenCode's `serve --help` probe, never checks sign-in and never starts the
+OpenCode isolation-proof server. The detection reports the executable and
+version with `installState: "installed"`, `authState: "unknown"`,
+`canRun: false`, `updateRequired: { installedVersion, minimumVersion }` and a
+status message naming both versions, the reason and the fix, for example
+*Claude Code 2.1.150 is installed. Inertia needs 2.1.309 or newer because
+older versions ignore the restrictions Inertia sets and can write outside the
+project. Update Claude Code and refresh.*
+Antigravity below 1.2.2 reports `updateRequired` too when its version is
+known, for the newest identified `agy` install, the same one whose executable
+and version the detection reports, and its message ends *Run 'agy update' and
+refresh.*
+
+The provider manager refuses again at each later use of that installation,
+with the same message and before anything is spawned: sign-in launch, model
+and usage discovery (OpenCode's starts `opencode serve`), Claude skill
+discovery and terminal resume. Provider maintenance does not go through these
+paths, so it can still update the installation.
+
+`updateRequired` travels in the provider snapshot. Settings → Agents shows
+*Update required* and Refresh instead of a sign-in. The composer refuses every
+route on that harness, API-key and custom backends included, with *Update
+needed* and the discovery message. Backend readiness refuses external routes
+with the same message, so watcher routes and Private Connect prompts, which
+reuse native `canRun` and backend readiness, refuse with it as well.
+Maintenance still offers Update for the identified installation.
+
+Claude Code and OpenCode versions compare as semantic versions on the token
+read from the version line of `--version` stdout, such as `2.1.309` from
+`2.1.309 (Claude Code)`, `1.18.26` from `opencode 1.18.26` or `1.19.3` from
+`1.19.3 (abc123)`. A warning printed before that line, such as a Node
+deprecation naming `v22.1.0`, is ignored; only output with no such line falls
+back to the first dotted number. A missing
+patch counts as 0 and build metadata is ignored. A prerelease sorts below its
+release, so `2.1.309-beta.1` is below the Claude Code floor and
+`2.1.310-beta.1` is above it. A version Inertia cannot parse keeps today's
+behaviour and is not blocked by a floor: a development build that prints
+`local`, a pattern such as `2.1.x`, or a snapshot that reports `0.0.0-…`,
+such as an OpenCode snapshot build. Antigravity keeps its original comparison,
+which blocks an unknown version and `0.0.0` builds.
 
 ## Antigravity headless contract
 
@@ -841,6 +1131,13 @@ At launch the resolver reads the key for exactly one child process:
   exclusions, read through `config/read`), so tool shells never inherit it.
   When the person's policy uses `filters`, which cannot be mixed with
   `exclude`, Codex's default `*TOKEN*` exclusion keeps it out instead.
+  The same provider is also selected when `codex app-server` starts, through
+  `-c model_provider=…` and `-c model_providers.<id>.…` overrides. Codex 0.166
+  admits resume and input only when the chat's saved provider matches the
+  launch configuration and ignores the provider named in the request. The
+  values are written without quotes, which Codex reads as plain strings, so
+  they pass the Windows command-shim quoting rules; the launch entry is named
+  after the provider id and the thread configuration supplies the display name.
 
 Both resolvers drop the key from the launch environment once the process has
 started.
@@ -852,10 +1149,7 @@ three layers that the account route does not need:
 - **Redaction.** Every SDK message of the turn passes through a redactor before
   the projector, the transcript or the failure path sees it. It masks the
   exact key and these forms of it: URL and JSON escaping, base64 and base64url
-  of the key alone and followed by `
-` or `
-
-` (what `echo $KEY | base64`
+  of the key alone and followed by `\n` or `\r\n` (what `echo $KEY | base64`
   prints), and lower- and upper-case hex. Spaces, tabs and line breaks
   between characters are ignored, so wrapped base64 (`base64` wraps at 76
   columns), `xxd -p` output and a key split across lines each become one
@@ -867,7 +1161,8 @@ three layers that the account route does not need:
   offsets, `od`, compression, encryption or a key reversed, are not
   recognised.
 - **Command refusal.** A `PreToolUse` hook passed through the SDK `hooks`
-  option (matcher `Bash|PowerShell`) declines commands that mention
+  option (matcher `Bash|PowerShell|Monitor`; Monitor runs a shell command
+  whose output lines become events) declines commands that mention
   `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, read `/proc/*/environ`, or
   dump the environment (`env` without a command, `printenv` without names,
   `set` without arguments, `export`, `export -p`, `declare -x`,
@@ -1044,6 +1339,61 @@ Code honours `settings.promptCacheTtl` on an API key, the real expiry of the
 OpenAI cache, whether Codex requests extended cache retention, and that Claude
 Code limits its own idle compaction to the 1-hour cache (read from the binary,
 not documented) have not been observed.
+
+## Delegated agents and background tasks
+
+Each harness reports delegated work as bounded traces. A trace records what
+the provider says about one task: its kind, description, role or name, model,
+effort, state, recent steps, usage, and, for background commands, the scrubbed
+command. It links to the timeline row of the tool call that started it, so the
+transcript shows the task in place of that row. Provider strings stay
+untrusted: the adapter bounds them, the persistence boundary scrubs secrets
+and paths again, and the renderer shows them as plain text. Traces never enter
+the watcher digest or shared chat context.
+
+A trace's model is either *observed* (reported by the subagent itself or by
+the provider's result) or *requested* (only what the parent asked for). A
+requested model never replaces an observed one, and the panel marks a model
+that was only requested.
+
+Steps are the eight most recent tool calls of a delegated agent, each labelled
+by tool name and one key input: the first line of a command, a path, a search
+pattern, a URL or a query. File contents, diffs and tool output are never
+part of a step.
+
+| Harness | What it reports |
+| --- | --- |
+| `claude-agent-sdk` | Agents, workflows and remote agents from Claude's typed task events and Agent tool results. The model comes from the result's `resolvedModel` (or the last of `modelsUsed`), else the subagent's first forwarded frame, else the requested alias; a fork never reports the alias or effort Claude ignores for it, and the `<synthetic>` placeholder is never a model. Effort and `run_in_background` come from the Agent call. Steps come from the subagent frames Claude forwards. Background shells (`local_bash`), monitors and MCP tasks are traces of their own kind once Claude runs them in the background; foreground shells stay private until moved there (including by a timeout that backgrounds them), are forgotten when their tool result arrives, and never count toward the 256 background commands shown at once. A remote launch keeps only its task id, never the session link, output file or content. Stop and Move to background act on one task through the SDK; a Stop that arrives before Claude issued the task id is held and sent when `task_started` names the tool call; until Claude accepts that Stop or reports the task stopped, the task stays live and shows that a stop was requested, and a Stop Claude refuses or does not answer leaves the task running and says so. Move to background has its own ten-second bound and says whether Claude declined the move or did not confirm it in time. |
+| `codex-app-server` | Child threads from collaboration items and thread sources, with the model the spawn requested. Each child item (commands, file changes, MCP and dynamic tools, web searches, image views) becomes a step; thinking and messages do not. Collaboration items have no timeline row, so these traces show as compact rows under the turn. |
+| `opencode-sdk` | Child sessions, named by `Session.agent`, then the assistant message's `agent`, then the task's `subagent_type`. The model comes from `Session.model`, else the first assistant message. The trace links to the parent's task call by its `callID`, and child tool parts become steps. |
+| `cursor-acp` | One trace per `cursor/task` extension notification with its subagent type, description, model, result and duration. Cursor sends no live progress, steps, effort or background state, and its tasks cannot be stopped or moved. |
+| `kimi-acp`, `antigravity-cli` | No delegated-task traces: neither protocol reports subagents or background tasks to the host. |
+
+Background commands, monitors and MCP tasks never hold a turn open or count as
+delegated work in the run state, so a provider that ends its turn while a dev
+server keeps running completes normally. When a turn ends with one still
+running, the provider process ends with it and the trace is settled as
+stopped; when Inertia could not confirm that the provider's process tree
+ended, the trace is settled as possibly still running instead, under the same
+condition that adds the "may still be running" note to the turn. The next turn
+is told which background commands ended only after a restart (below), not
+after a normal turn end. Remote agents launched into a cloud session are shown but never make
+the turn delegated, whether Claude reports them by `remote_launched` or by
+`task_started`. A remote agent still running when the turn ends keeps running
+in its cloud session, so its trace is settled as running in the cloud with an
+unknown outcome, never as lost or stopped. Background commands use at most
+half of a turn's 128-trace budget, and the panel lists live agents before live
+commands.
+
+After Inertia restarts during a turn, the next turn's interruption note lists
+the delegated agents and background commands that ended with it, so the agent
+does not wait for or report on them.
+
+What could only be checked against fixtures, not a live Claude Code: whether
+Claude forwards every subagent frame with its model, whether `task_started`
+for a remote agent arrives before or after `remote_launched`, the wording of
+the error `backgroundTasks` throws when background tasks are disabled, and
+how often foreground shells are registered as tasks at all.
 
 ## What the open-source review changed
 

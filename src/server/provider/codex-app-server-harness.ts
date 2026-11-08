@@ -2,9 +2,12 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { startCodexAppServerRun } from "../codex-app-server";
 import { withCodexControlClient } from "../codex/control-client";
-import { codexModelProviderThreadConfig } from "../codex/model-provider-config";
 import {
-  codexDeveloperInstructions,
+  codexModelProviderLaunchArguments,
+  codexModelProviderThreadConfig,
+} from "../codex/model-provider-config";
+import {
+  codexSessionDeveloperInstructions,
   configuredDeveloperInstructions,
   readConfiguredDeveloperInstructions,
 } from "../codex/developer-instructions";
@@ -377,6 +380,7 @@ function startCodexCompaction(
   const result = (async (): Promise<ProviderRunResult> => {
     let completionTimer: NodeJS.Timeout | undefined;
     let candidateFailure: Error | undefined;
+    let sessionInstructionApplied = true;
     const failureAbort = new AbortController();
     const persistenceSignal = AbortSignal.any([abortController.signal, failureAbort.signal]);
     try {
@@ -444,6 +448,9 @@ function startCodexCompaction(
         executable: options.executable,
         environment: options.environment,
         cwd: options.input.cwd,
+        ...(modelProvider
+          ? { launchArguments: codexModelProviderLaunchArguments(modelProvider) }
+          : {}),
         timeoutMs: 30_000,
         processLabel: "Codex compaction process tree",
         signal: abortController.signal,
@@ -536,14 +543,16 @@ function startCodexCompaction(
         });
         const readConfig = () => client.request("config/read", { includeLayers: false, cwd: options.input.cwd });
         const effectiveConfig = modelProvider?.credentialEnvironmentKey ? await readConfig() : null;
-        const developerInstructions = codexDeveloperInstructions([
+        const instructions = codexSessionDeveloperInstructions(
           options.input.sessionInstruction === undefined
             ? undefined
             : effectiveConfig
               ? configuredDeveloperInstructions(effectiveConfig)
               : await readConfiguredDeveloperInstructions(readConfig),
           options.input.sessionInstruction,
-        ]);
+        );
+        const developerInstructions = instructions.developerInstructions;
+        sessionInstructionApplied = instructions.sessionInstructionApplied;
         const threadConfig: JsonObject = {
           cwd: options.input.cwd,
           approvalPolicy: accessPolicy.approvalPolicy,
@@ -644,6 +653,7 @@ function startCodexCompaction(
         textTruncated: false,
         exitCode: null,
         signal: null,
+        ...(sessionInstructionApplied ? {} : { sessionInstructionApplied: false as const }),
         cleanupConfirmed: true,
       };
     } catch (error) {
@@ -666,6 +676,7 @@ function startCodexCompaction(
         exitCode: null,
         signal: null,
         ...(status === "failed" ? { error: message } : {}),
+        ...(sessionInstructionApplied ? {} : { sessionInstructionApplied: false as const }),
         cleanupConfirmed,
       };
     } finally {

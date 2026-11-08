@@ -209,6 +209,7 @@ test.beforeAll(async () => {
           providerId: "claude",
           modelSelection: CLAUDE_SELECTION,
           model: "",
+          providerSessionId: "compact-on-return-session",
         });
         const requestedAt = new Date(Date.now() - 52 * MINUTE_MS).toISOString();
         const completedAt = new Date(Date.now() - 48 * MINUTE_MS).toISOString();

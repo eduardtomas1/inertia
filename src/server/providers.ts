@@ -34,6 +34,8 @@ import type {
 import type {
   AgentHarnessCapabilities,
   AgentHarnessId,
+  SubagentBackgroundResult,
+  SubagentStopOutcome,
 } from "./provider/agent-harness";
 import { prepareProviderAuthLaunch } from "./provider/auth-launch";
 import { PROVIDERS, PROVIDER_INFO } from "./provider/catalog";
@@ -133,6 +135,7 @@ export type ProductionProviderManagerOptions =
 export class ProviderManager {
   private readonly commands: Partial<Record<ProviderId, string>>;
   private readonly resolvedCommands = new Map<ProviderId, string>();
+  private readonly updateRequirements = new Map<ProviderId, string>();
   private readonly cancelGraceMs: number;
   private readonly harnessRegistry: AgentHarnessRegistry;
   private readonly metadataCache: ProviderMetadataCache;
@@ -677,6 +680,8 @@ export class ProviderManager {
     } else {
       this.resolvedCommands.delete(providerId);
     }
+    if (detection.updateRequired) this.updateRequirements.set(providerId, detection.statusMessage ?? `${PROVIDER_INFO[providerId].name} needs an update.`);
+    else this.updateRequirements.delete(providerId);
     this.metadataCache.correlate(providerId, {
       executable: detection.executable ?? null,
       version: detection.cleanupConfirmed
@@ -819,6 +824,7 @@ export class ProviderManager {
       let executable = this.resolvedCommands.get(providerId);
       if (!executable) executable = (await this.detect(providerId, { cwd, refreshEnvironment: true })).executable;
       if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name.replace(/ CLI$/u, "")} CLI is not installed.`);
+      this.assertVersionSupported(providerId);
       const environment = await providerEnvironment();
       this.processEnvironment = environment.env;
       return await prepareProviderAuthLaunch({
@@ -847,6 +853,7 @@ export class ProviderManager {
         `${PROVIDER_INFO[providerId].name.replace(/ CLI$/u, "")} CLI is not installed.`,
       );
     }
+    this.assertVersionSupported(providerId);
     if (
       providerId === "cursor"
       && !cursorVersionHasVerifiedAcpTerminalResume(detection.version)
@@ -948,6 +955,7 @@ export class ProviderManager {
         : {}),
     })).executable;
     if (!executable) return this.metadataCache.current(providerId);
+    this.assertVersionSupported(providerId);
     const environment = await providerEnvironment();
     if (signal.aborted) return this.metadataCache.current(providerId);
     this.processEnvironment = environment.env;
@@ -1003,11 +1011,22 @@ export class ProviderManager {
   }
 
   claudeUsage(cwd: string): ReturnType<typeof readManagedClaudeUsage> {
-    return this.trackAuxiliary(() => readManagedClaudeUsage(this.resolvedCommands.get("claude"), cwd, this.installationAuthority, this.lifetimeSignal));
+    return this.trackAuxiliary(async () => {
+      this.assertVersionSupported("claude");
+      return await readManagedClaudeUsage(this.resolvedCommands.get("claude"), cwd, this.installationAuthority, this.lifetimeSignal);
+    });
   }
 
   openCodeUsageAccount(cwd: string, model: string | undefined, signal: AbortSignal): ReturnType<typeof readManagedOpenCodeAccount> {
-    return this.trackAuxiliary(() => readManagedOpenCodeAccount(this.resolvedCommands.get("opencode"), cwd, model, this.installationAuthority, AbortSignal.any([signal, this.lifetimeSignal])));
+    return this.trackAuxiliary(async () => {
+      this.assertVersionSupported("opencode");
+      return await readManagedOpenCodeAccount(this.resolvedCommands.get("opencode"), cwd, model, this.installationAuthority, AbortSignal.any([signal, this.lifetimeSignal]));
+    });
+  }
+
+  private assertVersionSupported(providerId: ProviderId): void {
+    const updateRequired = this.updateRequirements.get(providerId);
+    if (updateRequired) throw new ProviderRuntimeError("invalid_input", updateRequired);
   }
 
   codexControlContext(cwd: string): Promise<CodexControlContext> {
@@ -1023,12 +1042,8 @@ export class ProviderManager {
     if (!context.installationVerificationAuthority) this.installationAuthority.assertRecoveryComplete("claude");
     let executable = this.resolvedCommands.get("claude");
     if (!executable) executable = (await this.detect("claude", { ...context, cwd })).executable;
-    if (!executable) {
-      throw new ProviderRuntimeError(
-        "invalid_input",
-        "Claude CLI is not installed.",
-      );
-    }
+    if (!executable) throw new ProviderRuntimeError("invalid_input", "Claude CLI is not installed.");
+    this.assertVersionSupported("claude");
     const environment = await providerEnvironment();
     this.processEnvironment = environment.env;
     const authority = context.installationVerificationAuthority;
@@ -1114,16 +1129,12 @@ export class ProviderManager {
     return this.runCoordinator.clearGoal(conversationId, identity);
   }
 
-  stopSubagent(
-    conversationId: string,
-    providerTaskId: string,
-    identity: { runId: string; turnId: string },
-  ): Promise<boolean> {
-    return this.runCoordinator.stopSubagent(
-      conversationId,
-      providerTaskId,
-      identity,
-    );
+  stopSubagent(conversationId: string, providerTaskId: string | null, identity: { runId: string; turnId: string }, providerToolUseId: string | null = null): Promise<SubagentStopOutcome> {
+    return this.runCoordinator.stopSubagent(conversationId, providerTaskId, identity, providerToolUseId);
+  }
+
+  backgroundSubagent(conversationId: string, providerToolUseId: string, identity: { runId: string; turnId: string }): Promise<SubagentBackgroundResult> {
+    return this.runCoordinator.backgroundSubagent(conversationId, providerToolUseId, identity);
   }
 
   stopOwned(

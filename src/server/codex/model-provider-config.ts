@@ -23,6 +23,20 @@ function credentialShellPolicy(
   };
 }
 
+export function codexModelProviderLaunchArguments(modelProvider: CodexModelProvider): string[] {
+  const table = `model_providers.${modelProvider.providerId}`;
+  return [
+    `model_provider=${modelProvider.providerId}`,
+    `${table}.name=${modelProvider.providerId}`,
+    `${table}.base_url=${modelProvider.baseUrl}`,
+    `${table}.wire_api=responses`,
+    `${table}.requires_openai_auth=false`,
+    ...(modelProvider.credentialEnvironmentKey
+      ? [`${table}.env_key=${modelProvider.credentialEnvironmentKey}`]
+      : []),
+  ].flatMap((override) => ["-c", override]);
+}
+
 export function codexModelProviderThreadConfig(
   modelProvider: CodexModelProvider,
   effectiveConfig: JsonObject | null,

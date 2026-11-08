@@ -16,6 +16,7 @@ export function providerStateLabel(provider: ProviderInfo): string {
   if (provider.installState === "not-installed") return "Not installed";
   if (provider.installState === "unresponsive") return "Not responding";
   if (provider.installState === "error") return "Detection failed";
+  if (provider.updateRequired) return "Update required";
   if (verifiesSignInOnRun(provider) && provider.authState === "unknown" && !provider.canRun) return "Update required";
   if ((provider.authState === "authenticated" || provider.authState === "configured") && !provider.canRun) return "Update required";
   if (provider.authState === "authenticated") return "Connected";
@@ -27,7 +28,11 @@ export function providerStateLabel(provider: ProviderInfo): string {
 }
 
 export function providerStateDetail(provider: ProviderInfo): string {
-  if (provider.statusMessage) return provider.version ? `${provider.statusMessage} · ${provider.version}` : provider.statusMessage;
+  if (provider.statusMessage) {
+    return provider.version && !provider.statusMessage.includes(provider.version)
+      ? `${provider.statusMessage} · ${provider.version}`
+      : provider.statusMessage;
+  }
   if (provider.installState === "checking" || provider.authState === "checking") return "Checking the local CLI and account…";
   if (provider.installState === "not-installed") return `${provider.label.replace(/ CLI$/u, "")} CLI was not found on this device.`;
   if (provider.installState === "unresponsive") return `${provider.label} did not respond in time.`;
@@ -44,6 +49,7 @@ export function providerSetupAction(provider: ProviderInfo): ProviderSetupAction
   if (provider.installState === "recovery-required") return null;
   if (provider.installState === "checking" || provider.authState === "checking") return null;
   if (provider.installState !== "installed") return "refresh";
+  if (provider.updateRequired) return "refresh";
   if (
     verifiesSignInOnRun(provider)
     && provider.authState === "unknown"

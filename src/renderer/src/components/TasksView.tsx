@@ -735,6 +735,15 @@ export function TasksView({
             projectName={detailTodo.projectId
               ? snapshot.projects.find(({ id }) => id === detailTodo.projectId)?.name ?? null
               : null}
+            sourceChatTitle={detailTodo.sourceConversationId
+              ? conversationsById.get(detailTodo.sourceConversationId)?.title ?? null
+              : null}
+            onOpenSourceChat={() => {
+              const source = detailTodo.sourceConversationId
+                ? conversationsById.get(detailTodo.sourceConversationId)
+                : undefined;
+              if (source) onOpenConversation(source);
+            }}
             focusTarget={focusRequest?.id === detailTodo.id ? focusRequest.target : null}
             openMenu={detailMenu}
             onFocusHandled={focusHandled}

@@ -133,6 +133,9 @@ export interface ProjectPathMenuTarget {
   projectRoot: string;
   relativePath: string;
   open?: () => void;
+  /** Changes-panel index actions offered on a `diff-file` menu. */
+  stage?: () => void;
+  unstage?: () => void;
 }
 
 function performProjectPathAction(
@@ -153,6 +156,10 @@ function performProjectPathAction(
     void copyFromMenu(absoluteProjectPath(target.projectRoot, target.relativePath));
   } else if (action === "copy-relative-path") {
     void copyFromMenu(target.relativePath);
+  } else if (action === "git-stage") {
+    target.stage?.();
+  } else if (action === "git-unstage") {
+    target.unstage?.();
   }
 }
 
@@ -165,10 +172,18 @@ export function projectPathContextMenu<Surface extends HTMLElement>(
     ? { conversationId: target.conversationId }
     : {};
   const identity = { projectId: target.projectId, ...conversation, relativePath: target.relativePath };
+  const staging = kind === "diff-file"
+    ? {
+        ...(target.stage ? { stageable: true } : {}),
+        ...(target.unstage ? { unstageable: true } : {}),
+      }
+    : {};
   return contextMenuHandlers<Surface>(
     () => kind === "file"
       ? { kind, ...identity, directory: target.directory === true }
-      : { kind, ...identity },
+      : kind === "diff-file"
+        ? { kind, ...identity, ...staging }
+        : { kind, ...identity },
     (action) => performProjectPathAction(action, target),
   );
 }

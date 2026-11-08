@@ -36,6 +36,7 @@ export function finishNormalShutdownAfterCleanup(options: {
 }
 
 export async function finishNormalShutdownWithinDeadline(options: {
+  prepare?(): Promise<void>;
   cleanup(): Promise<boolean>;
   deadlineMs: number;
   finish(): void;
@@ -44,14 +45,16 @@ export async function finishNormalShutdownWithinDeadline(options: {
 }): Promise<void> {
   let deadline: ReturnType<typeof setTimeout> | undefined;
   const cleanupConfirmed = await Promise.race([
-    Promise.resolve().then(() => options.cleanup()),
+    Promise.resolve()
+      .then(() => options.prepare?.())
+      .then(() => Promise.resolve().then(() => options.cleanup()).catch((error: unknown) => {
+        options.reportCleanupFailure(error);
+        return false;
+      })),
     new Promise<boolean>((resolve) => {
       deadline = setTimeout(() => resolve(false), options.deadlineMs);
     }),
-  ]).catch((error: unknown) => {
-    options.reportCleanupFailure(error);
-    return false;
-  }).finally(() => clearTimeout(deadline));
+  ]).finally(() => clearTimeout(deadline));
   finishNormalShutdownAfterCleanup({
     cleanupConfirmed,
     finish: options.finish,

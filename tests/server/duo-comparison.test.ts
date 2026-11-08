@@ -1475,7 +1475,7 @@ describe("Duo third-model comparison", () => {
 
     // Simulate process loss after the durable request and terminal turn writes,
     // but before the provider-cleanup barriers let cancel() finalize the launch.
-    void launches.cancel(prepared.launchId);
+    const abandonedCancellation = launches.cancel(prepared.launchId);
     for (const { conversationId } of prepared.sides) {
       expect(runtime.provider.ownedStopResolvers.has(conversationId)).toBe(true);
     }
@@ -1509,6 +1509,12 @@ describe("Duo third-model comparison", () => {
     expect(() => reopened.assertProjectDeletionAllowed(runtime.projectId))
       .not.toThrow();
     reopened.close();
+
+    for (const { conversationId } of prepared.sides) {
+      runtime.provider.resolveOwnedStop(conversationId);
+    }
+    await expect(abandonedCancellation).rejects
+      .toThrow(/database connection is not open/u);
   });
 
   it("releases the comparison lock when an interrupted launch is acknowledged", async () => {

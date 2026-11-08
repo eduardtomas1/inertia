@@ -1183,20 +1183,25 @@ describe("Claude Agent SDK harness", () => {
     expect(existsSync(staged!.path)).toBe(false);
   });
 
-  it("rejects an oversized selected-skill supporting file before spawning Claude", async () => {
+  it("links an oversized selected-skill supporting file instead of refusing the skill", async () => {
     const root = portableFixtureRoot("Claude oversized skill resource");
     roots.push(root);
     const skillPath = writeClaudeSkill(root, "review");
-    writeFileSync(
-      join(dirname(skillPath), "oversized.bin"),
-      Buffer.alloc(1024 * 1024 + 1),
-    );
+    const oversized = join(dirname(skillPath), "oversized.bin");
+    writeFileSync(oversized, Buffer.alloc(1024 * 1024 + 1));
 
-    await expect(stageClaudeSkillPlugin([{
+    const staged = await stageClaudeSkillPlugin([{
       source: "claude-native",
       name: "review",
       path: skillPath,
-    }], root, {})).rejects.toThrow("could not be revalidated");
+    }], root, {});
+    try {
+      expect(statSync(join(staged!.path, "skills", "review", "oversized.bin")).size)
+        .toBe(1024 * 1024 + 1);
+    } finally {
+      await staged!.cleanup();
+    }
+    expect(statSync(oversized).size).toBe(1024 * 1024 + 1);
   });
 
   it("preserves local Claude interactions for Kimi without reading native Claude metadata", async () => {
@@ -1766,7 +1771,7 @@ describe("Claude Agent SDK harness", () => {
       new AgentHarnessRegistry([harness]),
     );
     let followUpAccepted: Promise<boolean> | null = null;
-    let stopAccepted: Promise<boolean> | null = null;
+    let stopAccepted: Promise<boolean | "queued"> | null = null;
     const traceStatuses: string[] = [];
     const result = manager.run(nativeProviderRunInput({
       providerId: "claude",
@@ -1957,7 +1962,7 @@ describe("Claude Agent SDK harness", () => {
       new AgentHarnessRegistry([harness]),
     );
     const traceStatuses: string[] = [];
-    let stopAccepted: Promise<boolean> | null = null;
+    let stopAccepted: Promise<boolean | "queued"> | null = null;
     const result = manager.run(nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-bounded-task-stop",

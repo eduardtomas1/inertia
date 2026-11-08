@@ -33,6 +33,7 @@ export function commandRefreshesConversationDetail(
     "conversation.context.create",
     "conversation.context.remove",
     "agent.subagent.stop",
+    "agent.subagent.background",
     "agent.approval.respond",
     "agent.input.respond",
     "review.state.set",

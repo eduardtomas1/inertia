@@ -6,6 +6,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -103,7 +104,8 @@ function noticeFiles(entry, manifest, license) {
   }
   const names = new Set(
     readdirSync(entry.path)
-      .filter((name) => /^(licen[cs]e|copying|notice)(\.|$)/iu.test(name)),
+      .filter((name) => /^(licen[cs]e|copying|notice)([._-]|$)/iu.test(name)
+        && statSync(join(entry.path, name), { throwIfNoEntry: false })?.isDirectory() !== true),
   );
   const referenced = license?.match(/^SEE LICEN[CS]E IN\s+(.+)$/iu)?.[1]?.trim();
   if (referenced) names.add(referenced);

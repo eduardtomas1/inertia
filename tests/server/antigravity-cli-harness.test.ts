@@ -407,6 +407,10 @@ describe("Antigravity stream parsing", () => {
     expect(antigravityResultFailure(result("SUCCESS"), "/workspace")).toBeNull();
     expect(antigravityResultFailure(result("ERROR", "authentication failed or timed out"), "/workspace"))
       .toMatchObject({ phase: "auth", message: ANTIGRAVITY_AUTH_REQUIRED_MESSAGE, terminalEvent: "result:auth" });
+    expect(antigravityResultFailure(result("ERROR", "Authentication expired. Please log back in."), "/workspace"))
+      .toMatchObject({ phase: "auth", message: ANTIGRAVITY_AUTH_REQUIRED_MESSAGE, terminalEvent: "result:auth" });
+    expect(antigravityResultFailure(result("ERROR", "The session token expired; please log back in to the dashboard."), "/workspace"))
+      .toMatchObject({ phase: "turn", reason: "provider-error", terminalEvent: "result:error" });
     expect(antigravityResultFailure(result("ERROR", "Model quota is exhausted."), "/workspace"))
       .toMatchObject({ phase: "turn", reason: "provider-error", terminalEvent: "result:error" });
     expect(antigravityResultFailure(result("WAITING"), "/workspace"))

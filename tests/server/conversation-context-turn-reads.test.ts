@@ -170,6 +170,58 @@ describe("ConversationContextTurnReads", () => {
     }
   });
 
+  it("grants managed access only to a direct child in the same project", async () => {
+    const { begin, databasePath, store, target, turn, workspace } = await fixture();
+    try {
+      const attach = (child: string, parent: string, parentTurn: { id: string; runId: string }) =>
+        store.agentThreadManagement.attachManaged({
+          childConversationId: child,
+          sourceConversationId: parent,
+          sourceTurnId: parentTurn.id,
+          sourceRunId: parentTurn.runId,
+          sourceHarnessId: target.modelSelection.harnessId,
+          now: new Date().toISOString(),
+        });
+      const child = store.createConversation(target.projectId, "Child", { activate: false });
+      attach(child.id, target.id, turn);
+      const childTurn = begin(child, "Delegate further.");
+      const grandchild = store.createConversation(target.projectId, "Grandchild", { activate: false });
+      attach(grandchild.id, child.id, childTurn);
+      const elsewhere = store.createProject("Elsewhere", join(workspace, ".."));
+      const foreign = store.createConversation(elsewhere.id, "Foreign child", { activate: false });
+      attach(foreign.id, target.id, turn);
+      const { database, reads } = readsWithPaths(databasePath, () => workspace);
+      const access = (conversationId: string, sourceConversationId: string, readingTurn = turn) => reads.access({
+        targetConversationId: conversationId,
+        targetTurnId: readingTurn.id,
+        targetUserMessageId: readingTurn.userMessageId,
+        sourceConversationId,
+      });
+      try {
+        expect(access(target.id, child.id)).toBe("managed");
+        expect(access(target.id, grandchild.id)).toBeNull();
+        expect(access(target.id, foreign.id)).toBeNull();
+        expect(access(child.id, target.id, childTurn)).toBeNull();
+        expect(access(child.id, grandchild.id, childTurn)).toBe("managed");
+      } finally {
+        database.close();
+      }
+      expect(store.contextPackets.turnReads.recordRead({
+        targetConversationId: target.id,
+        targetTurnId: turn.id,
+        targetUserMessageId: turn.userMessageId,
+        sourceConversationId: child.id,
+        sourceTurnId: null,
+        access: "managed",
+        now: new Date().toISOString(),
+      })).toBe(true);
+      expect(store.conversationDetail(target.id)?.contextReads)
+        .toContainEqual(expect.objectContaining({ sourceConversationId: child.id, access: "managed" }));
+    } finally {
+      store.close();
+    }
+  });
+
   it("bounds the records one turn read loads and says when later ones were left out", async () => {
     const { source, store } = await fixture();
     try {

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { WorkspaceChangesPanel } from "../../src/renderer/src/components/WorkspaceChangesPanel";
 import { ChangesPanel } from "../../src/renderer/src/components/ChangesPanel";
 import type { ChangedFile, ServerEvent, WorkspaceGitSnapshot } from "../../src/shared/contracts";
+import { diffLineText } from "../helpers/diff-line-text";
 
 const reviewReceipt = {
   authorityRef: "33333333-3333-4333-8333-333333333333",
@@ -668,14 +669,14 @@ describe("WorkspaceChangesPanel repository scope", () => {
 
     await waitFor(() => expect(pending.has(".")).toBe(true));
     await act(async () => pending.get(".")!.resolve(diff(".", "root")));
-    expect(await screen.findByText(/root after/u)).toBeInTheDocument();
+    expect(await screen.findByText(diffLineText(/root after/u))).toBeInTheDocument();
 
     const repositoryScope = screen.getByRole("combobox", {
       name: "Repository scope",
     });
     fireEvent.change(repositoryScope, { target: { value: "modules/alpha" } });
     await waitFor(() => expect(pending.has("modules/alpha")).toBe(true));
-    expect(screen.queryByText(/root after/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(diffLineText(/root after/u))).not.toBeInTheDocument();
 
     fireEvent.change(repositoryScope, { target: { value: "modules/clean" } });
     await waitFor(() => {
@@ -685,7 +686,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
     await act(async () => {
       pending.get("modules/alpha")!.resolve(diff("modules/alpha", "alpha"));
     });
-    expect(screen.queryByText(/alpha after/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(diffLineText(/alpha after/u))).not.toBeInTheDocument();
     expect(screen.getByText("modules/clean is clean", { exact: true }))
       .toBeInTheDocument();
   });

@@ -31,20 +31,21 @@ import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases
 import type { RuntimeUpdatePreparationCoordinator, RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
 import type { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
 import type { RuntimeHtmlRenderCoordinator } from "./runtime-html-render-coordinator.js";
+import type { RuntimeSupervisorQueries } from "./runtime-supervisor-queries.js";
 import type { RuntimeHtmlRenderDocument } from "../node/runtime-html-render-protocol.js";
 import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
 import type { ModernDarwinRecoveryAuthorityDescriptor } from "../node/runtime-modern-recovery-authorities.js";
 import {
   claimStartupRecoveryDeadlineExtension, createRuntimeProcessRecord,
-  drainRuntimeRecordRequests, recordRuntimeRestartRequested, recordRuntimeShutdownFailure, recoverUnconfirmedRuntimeCleanup, runtimeRecordAcceptsBrokerRequests, shouldRecoverUnconfirmedWindowsTree,
+  recordRuntimeRestartRequested, recordRuntimeShutdownFailure, recoverUnconfirmedRuntimeCleanup, runtimeRecordAcceptsBrokerRequests, shouldRecoverUnconfirmedWindowsTree,
 } from "./runtime-supervisor-process-record.js";
 import { runtimeSupervisorRecoveryWaitMs } from "../node/runtime-shutdown-deadline.js";
 import type { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js"; import { RuntimeSupervisorRecoveryAdmission } from "./runtime-supervisor-recovery-admission.js";
 import { createRuntimeProcessContainmentAdmission,
   createRuntimeSupervisorProcessSafety } from "./runtime-supervisor-process-safety.js";
 import type {
-  PendingProjectPath, RuntimeProcessRecord,
+  RuntimeProcessRecord,
   RuntimeSupervisorOptions, RuntimeSupervisorPhase, RuntimeSupervisorSnapshot,
   RuntimeSupervisorTimer,
 } from "./runtime-supervisor-types.js";
@@ -103,7 +104,7 @@ export class RuntimeSupervisor {
   private shutdownTimer: RuntimeSupervisorTimer | null = null;
   private shutdownDeadlineTimer: RuntimeSupervisorTimer | null = null;
   private readonly startupRecovery: RuntimeSupervisorStartupRecovery;
-  private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
+  private readonly queries: RuntimeSupervisorQueries;
   private readonly htmlRenders: RuntimeHtmlRenderCoordinator;
   private readonly privateConnectRequests: RuntimePrivateConnectRequestCoordinator;
   private readonly databaseRecoveryRequests: RuntimeDatabaseRecoveryCoordinator;
@@ -208,6 +209,7 @@ export class RuntimeSupervisor {
     this.databaseRecoveryRequests = coordinators.databaseRecoveryRequests;
     this.privateConnectRequests = coordinators.privateConnectRequests;
     this.htmlRenders = coordinators.htmlRenders;
+    this.queries = coordinators.queries;
     this.updatePreparation = coordinators.updatePreparation;
     this.onRestartRequested = options.onRestartRequested;
     this.requestExplicitRecovery = options.requestExplicitRecovery;
@@ -234,7 +236,7 @@ export class RuntimeSupervisor {
     this.phase = "starting";
     this.emitState();
     if (this.priorGenerationsUnrecovered) this.recoverPriorGenerationsThenSpawn();
-    else this.spawnAfterReconciliation();
+    else this.spawnAfterReconciliation(true);
     return true;
   }
   private recoverPriorGenerationsThenSpawn(): void {
@@ -255,7 +257,6 @@ export class RuntimeSupervisor {
     this.lifecycle = "started";
     this.restartBlocked = false;
     this.liveModernDarwinRecoveryEligible = false;
-    this.unconfirmedRestarts = 0;
     this.restartAttempt = 0;
     this.lastError = null;
     this.startupBlockerCode = null;
@@ -282,6 +283,7 @@ export class RuntimeSupervisor {
     // admission may the supervisor forget its in-memory quarantine and let the
     // replacement worker retire the durable records transactionally.
     this.quarantined.clear();
+    this.unconfirmedRestarts = 0;
     this.resetForRestart();
     this.spawnNext();
     return this.current !== null;
@@ -308,21 +310,9 @@ export class RuntimeSupervisor {
     const record = this.phase === "ready" ? this.current : null;
     return Boolean(record?.ready && this.post(record.child, { type: "runtime.record-system-suspend", interval }));
   }
-  resolveProjectPath(request: OpenProjectPathRequest): Promise<string> {
-    const record = this.current;
-    if (this.phase !== "ready" || !record?.ready) {
-      return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
-    }
-    const requestId = randomUUID();
-    return new Promise<string>((resolve, reject) => {
-      const timer = this.setTimer(() => {
-        this.pendingProjectPaths.delete(requestId);
-        reject(new Error("The project path request timed out."));
-      }, runtimeSupervisorDefaults.requestTimeoutMs);
-      this.pendingProjectPaths.set(requestId, { record, timer, resolve, reject });
-      this.post(record.child, { type: "runtime.resolve-project-path", requestId, request });
-    });
-  }
+  resolveProjectPath(request: OpenProjectPathRequest): Promise<string> { return this.queries.resolveProjectPath(request); }
+  /** The chats whose sent messages carry a stored attachment, read from the runtime. */
+  attachmentConversations(attachmentId: string): Promise<readonly string[]> { return this.queries.attachmentConversations(attachmentId); }
   /** Reads one stored visual reply for the protocol route; `null` when the runtime has no such render. */
   readHtmlRender(renderId: string): Promise<RuntimeHtmlRenderDocument | null> {
     return this.htmlRenders.read(renderId);
@@ -661,15 +651,7 @@ export class RuntimeSupervisor {
       this.updatePreparation.handle(record, event);
       return;
     }
-    if (event.type === "runtime.project-path-resolved" || event.type === "runtime.project-path-rejected") {
-      const pending = this.pendingProjectPaths.get(event.requestId);
-      if (!pending || pending.record !== record) return;
-      this.pendingProjectPaths.delete(event.requestId);
-      this.clearTimer(pending.timer);
-      if (event.type === "runtime.project-path-resolved") pending.resolve(event.path);
-      else pending.reject(new Error(event.message));
-      return;
-    }
+    if (this.queries.handle(record, event)) return;
     if (this.htmlRenders.handle(record, event)) return;
     if (event.type === "runtime.private-connect-response") {
       this.privateConnectRequests.handle(record, event);
@@ -1079,9 +1061,19 @@ export class RuntimeSupervisor {
     }, delay);
     this.emitState();
   }
-  private spawnAfterReconciliation(): void {
+  private spawnAfterReconciliation(userStarted = false): void {
     if (this.quarantined.size === 0) { this.spawnNext(); return; }
-    void this.quarantineReconciliation.reconcile().then(() => this.spawnNext());
+    void this.quarantineReconciliation.reconcile().then((reconciled) => {
+      if (!this.desiredRunning) return;
+      if (reconciled) this.unconfirmedRestarts = 0;
+      else if (userStarted && this.unconfirmedRestarts >= runtimeSupervisorDefaults.maxUnconfirmedRestarts) {
+        this.desiredRunning = false; this.restartBlocked = true; this.phase = "stopped";
+        this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
+          "Earlier runtime generations still have unconfirmed process cleanup.");
+        this.emitState(); return;
+      }
+      this.spawnNext();
+    });
   }
   private post(child: UtilityProcess, message: RuntimeWorkerCommand): boolean {
     const failure = postRuntimeWorkerCommand(child, message);
@@ -1171,10 +1163,7 @@ export class RuntimeSupervisor {
     this.clearTimerValue("shutdownDeadlineTimer");
   }
   private rejectProjectPaths(record: RuntimeProcessRecord | null, message: string): void {
-    drainRuntimeRecordRequests(this.pendingProjectPaths, record, (pending) => {
-      this.clearTimer(pending.timer);
-      pending.reject(new Error(message));
-    });
+    this.queries.reject(record, message);
     this.htmlRenders.reject(record, message);
   }
   private rejectPrivateConnectRuntimeRequests(

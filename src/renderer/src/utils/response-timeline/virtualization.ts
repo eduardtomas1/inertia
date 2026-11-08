@@ -4,6 +4,7 @@ import type {
   AgentInputRequest,
   InterfaceScale,
   ResponseDensity,
+  SubagentTrace,
 } from "@shared/contracts";
 import {
   buildTurnExecutionStream,
@@ -23,6 +24,12 @@ import {
   shouldCollapseUserRequest,
 } from "../userRequestPresentation";
 import { watcherCheckTitle } from "../watcherLinks";
+import {
+  isBackgroundCommandTrace,
+  linkedSubagentTraces,
+  subagentCurrentStep,
+  unlinkedSubagentTraces,
+} from "../subagentTraceRows";
 
 export const TIMELINE_VIRTUALIZATION_MIN_ROWS = 14;
 export const TIMELINE_VIRTUALIZATION_MIN_WEIGHTED_ROWS = 10;
@@ -187,6 +194,66 @@ export interface TimelineRowEstimateOptions {
   runDetailsExpanded?: boolean;
   /** Used when an already-expanded changed-file disclosure must be re-estimated. */
   changedFilesExpanded?: boolean;
+  /** The turn's delegated tasks: their rows are taller than the tool rows they replace. */
+  subagents?: readonly SubagentTrace[];
+}
+
+const SUBAGENT_ROW_HEIGHT = 30;
+const SUBAGENT_LINE_HEIGHT = 18;
+
+/** Lines a delegated task row adds below its ledger row: meta, command, doing. */
+function estimateSubagentRowExtraHeight(trace: SubagentTrace): number {
+  const command = isBackgroundCommandTrace(trace);
+  const doing = subagentCurrentStep(trace) ?? (command && !trace.isLive ? trace.result : null);
+  return 4 + SUBAGENT_LINE_HEIGHT
+    + (command && trace.description && trace.command ? SUBAGENT_LINE_HEIGHT : 0)
+    + (doing ? SUBAGENT_LINE_HEIGHT : 0);
+}
+
+/** Changes whenever a turn's delegated task rows change their estimated height. */
+export function subagentEstimateSignature(traces: readonly SubagentTrace[] | undefined): string {
+  return (traces ?? []).map((trace) =>
+    `${trace.activityId ?? "-"}:${estimateSubagentRowExtraHeight(trace)}`).join(",");
+}
+
+export function groupSubagentsByTurn(
+  traces: readonly SubagentTrace[],
+  previous: ReadonlyMap<string, SubagentTrace[]>,
+): Map<string, SubagentTrace[]> {
+  const grouped = new Map<string, SubagentTrace[]>();
+  for (const trace of traces) {
+    const current = grouped.get(trace.turnId);
+    if (current) current.push(trace);
+    else grouped.set(trace.turnId, [trace]);
+  }
+  for (const [turnId, turnTraces] of grouped) {
+    const kept = previous.get(turnId);
+    if (kept?.length === turnTraces.length && kept.every((trace, index) => trace === turnTraces[index])) {
+      grouped.set(turnId, kept);
+    }
+  }
+  return grouped;
+}
+
+function estimateSubagentRowsHeight(
+  turn: ResponseTurn,
+  subagents: readonly SubagentTrace[] | undefined,
+  visibleActivityIds: ReadonlySet<string>,
+): number {
+  if (!subagents || subagents.length === 0) return 0;
+  let height = 0;
+  for (const [activityId, trace] of linkedSubagentTraces(subagents)) {
+    if (visibleActivityIds.has(activityId)) height += estimateSubagentRowExtraHeight(trace);
+  }
+  const compact = unlinkedSubagentTraces(
+    subagents,
+    new Set([...turn.activities, ...turn.importantActivities].map(({ id }) => id)),
+  );
+  if (compact.length > 0) {
+    height += 6 + compact.reduce((total, trace) =>
+      total + SUBAGENT_ROW_HEIGHT + estimateSubagentRowExtraHeight(trace), 0);
+  }
+  return height;
 }
 
 function boundedEstimateWidth(value: number | undefined): number {
@@ -604,6 +671,15 @@ function estimateTurnRowSize(
         options.activityGroupsExpanded === true,
       )
     : 0;
+  const visibleActivities = [
+    ...(turn.isActive || expandedWorkHeight > 0 ? transcriptActivities : []),
+    ...(settledFailureFolded ? [] : turn.importantActivities),
+  ];
+  const subagentRowsHeight = estimateSubagentRowsHeight(
+    turn,
+    options.subagents,
+    new Set(visibleActivities.map(({ id }) => id)),
+  );
   const exceptionalHeight = turn.approvals.reduce((total, approval) =>
     total + estimateApprovalHeight(approval, answerColumns), 0)
     + turn.inputRequests.reduce((total, request) =>
@@ -653,6 +729,7 @@ function estimateTurnRowSize(
     ? expandedWorkHeight
     : 0;
   const executionSectionHeight = executionHeight
+    + subagentRowsHeight
     + (consolidatesSettledWork ? 0 : expandedWorkHeight)
     + exceptionalHeight
     + systemHeight;
@@ -685,6 +762,7 @@ function estimateTurnRowSize(
 
   const contentHeight = requestHeight
     + executionHeight
+    + subagentRowsHeight
     + expandedWorkHeight
     + exceptionalHeight
     + systemHeight
@@ -783,6 +861,44 @@ export function resolveTimelineKeyboardIntent(
   if (event.key === "End") return { index: current, target: "final" };
   if (event.key.toLowerCase() === "g") return { index: current, target: "artifact" };
   return null;
+}
+
+const READER_AT_LATEST_THRESHOLD = 2;
+const READER_LIVE_REJOIN_THRESHOLD = 32;
+
+export function readerScrollReachesLatest(input: {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  previousScrollTop: number | null;
+  live: boolean;
+  aimedAtLatest?: boolean;
+}): boolean {
+  const movedUp = input.previousScrollTop !== null && input.scrollTop < input.previousScrollTop;
+  if (input.aimedAtLatest && !movedUp) return true;
+  return shouldFollowTimeline(
+    input.scrollTop,
+    input.clientHeight,
+    input.scrollHeight,
+    input.live && !movedUp ? READER_LIVE_REJOIN_THRESHOLD : READER_AT_LATEST_THRESHOLD,
+  );
+}
+
+export function readerScrollFollow(input: {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  previousScrollTop: number | null;
+  live: boolean;
+  intentional: boolean;
+  aimedAtLatest: boolean;
+}): { follows: boolean; movedUp: boolean } {
+  return {
+    movedUp: input.previousScrollTop !== null && input.scrollTop < input.previousScrollTop,
+    follows: input.intentional
+      ? readerScrollReachesLatest(input)
+      : shouldFollowTimeline(input.scrollTop, input.clientHeight, input.scrollHeight),
+  };
 }
 
 export function shouldFollowTimeline(scrollTop: number, clientHeight: number, scrollHeight: number, threshold = 120): boolean {

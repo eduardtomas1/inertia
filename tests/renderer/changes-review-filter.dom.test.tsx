@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 
 import { ChangesPanel } from "../../src/renderer/src/components/ChangesPanel";
 import type { ChangedFile, DiffReviewState } from "../../src/shared/contracts";
+import { diffLineText } from "../helpers/diff-line-text";
 
 const file: ChangedFile = {
   path: "README.md",
@@ -62,7 +63,7 @@ function ReviewedChanges(): React.JSX.Element {
 
 it("filters hunks through counted review-state chips instead of a passive select", async () => {
   const view = render(<ReviewedChanges />);
-  await screen.findByText("first after");
+  await screen.findByText(diffLineText("first after"));
   const filter = screen.getByRole("group", { name: "Filter review state" });
   const chip = (name: string) => within(filter).getByRole("button", { name: new RegExp(`^${name} \\d+$`, "u") });
   const rows = () => [...view.container.querySelectorAll(".diff-filter-row")];

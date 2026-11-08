@@ -47,6 +47,7 @@ import type {
 } from "./app";
 import type { ConversationDetailResult } from "./conversation-detail";
 import type { MessageSearchResult, MessageSearchTarget } from "../message-search";
+import type { TerminalPathResolveResult } from "./terminal-links";
 import type {
   DuoPendingResult,
   DuoPreparedResult,
@@ -64,13 +65,16 @@ import type {
   WorkspaceGitDiffSnapshot,
   WorkspaceGitSnapshot,
 } from "./git";
+import type { GitBlamePage, GitCommitDetail, GitLogPage } from "./git-history";
 import type {
   GitBranchInfo,
   ProjectAction,
+  WorkspaceContentSearchPage,
   WorkspaceEntriesPage,
   WorkspaceFilePreview,
 } from "./workspace";
 import type { Todo } from "../todos";
+import type { LibraryCategory, LibraryPage, LibrarySnapshot, SavedAnswer } from "../library";
 import type { UsageDashboard } from "./usage-dashboard";
 import type { DailyWorkDashboard } from "./daily-work";
 import type {
@@ -105,6 +109,7 @@ export type RuntimeMutationEvent =
     }
   | { type: "conversation.detail.invalidated"; conversationId: string }
   | { type: "todos.updated"; todos: Todo[] }
+  | { type: "library.updated"; library: LibrarySnapshot }
   | { type: "conversation.message.persisted"; message: ChatMessage }
   | { type: "provider.maintenance.updated"; providers: ProviderMaintenanceStatus[] }
   | { type: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
@@ -219,7 +224,11 @@ export type ServerEvent =
         | { kind: "review.summary"; summary: DiffReviewSummary }
         | { kind: "git.branches"; branches: GitBranchInfo[] }
         | { kind: "git.pr.confidence"; confidence: GitPreMergeConfidence }
+        | { kind: "git.log"; page: GitLogPage }
+        | { kind: "git.commit.show"; commit: GitCommitDetail }
+        | { kind: "git.blame"; blame: GitBlamePage }
         | ({ kind: "workspace.entries" } & WorkspaceEntriesPage)
+        | ({ kind: "workspace.search.content" } & WorkspaceContentSearchPage)
         | {
             kind: "workspace.file";
             file: WorkspaceFilePreview;
@@ -229,6 +238,9 @@ export type ServerEvent =
         | { kind: "project.created"; projectId: string }
         | { kind: "conversation.created"; conversationId: string }
         | { kind: "todo.started"; conversationId: string }
+        | { kind: "library.category"; category: LibraryCategory }
+        | { kind: "library.answer"; savedAnswer: SavedAnswer }
+        | { kind: "library.pages"; pages: LibraryPage[] }
         | { kind: "conversation.cli.scan"; scan: CliConversationScan }
         | { kind: "conversation.cli.preview"; preview: CliConversationPreview }
         | { kind: "conversation.cli.imported"; conversationId: string }
@@ -271,6 +283,8 @@ export type ServerEvent =
         | { kind: "usage.reset.outcome"; outcome: UsageResetOutcome }
         | { kind: "usage.dashboard"; dashboard: UsageDashboard }
         | { kind: "daily.work"; dashboard: DailyWorkDashboard }
+        | { kind: "worktree.list"; list: import("../worktrees").WorktreeList }
+        | { kind: "worktree.action"; outcome: import("../worktrees").WorktreeActionOutcome }
         | { kind: "agent.workflow"; workflow: AgentWorkflowState }
         | {
             kind: "agent.skills";
@@ -281,7 +295,8 @@ export type ServerEvent =
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }
         | ConversationDetailResult
-        | MessageSearchResult;
+        | MessageSearchResult
+        | TerminalPathResolveResult;
     }
   | RuntimeMutationEvent
   | ({

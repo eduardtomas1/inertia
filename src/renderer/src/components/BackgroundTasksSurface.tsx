@@ -18,7 +18,8 @@ import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { canStopSubagentTrace } from "../utils/subagentDisclosure";
 import { useBackgroundTaskFeed, type BackgroundTasksLoader } from "../hooks/useBackgroundTaskFeed";
 import { removeLegacyDisclosurePreferences } from "../utils/legacyDisclosurePreferences";
-import { AgentCard, CommandCard } from "./BackgroundTaskCards";
+import { AgentCard, CommandCard, CommandTaskCard } from "./BackgroundTaskCards";
+import { isBackgroundCommandTrace } from "../utils/subagentTaskPresentation";
 import { TooltipButton } from "./TooltipButton";
 import "./WorkspaceSurfaces.css";
 import "./BackgroundTasksSurface.css";
@@ -36,6 +37,8 @@ export interface BackgroundTasksSurfaceProps {
   onOpenSubagent?: (trace: SubagentTrace) => void;
   canStopSubagent?: (trace: SubagentTrace) => boolean;
   onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
+  canBackgroundSubagent?: (trace: SubagentTrace) => boolean;
+  onBackgroundSubagent?: (trace: SubagentTrace) => Promise<void>;
   onStopCommand?: (run: WorkspaceRun) => void;
   onDismissCommand?: (run: WorkspaceRun) => void;
 }
@@ -178,6 +181,8 @@ export function BackgroundTasksSurface({
   onOpenSubagent,
   canStopSubagent,
   onStopSubagent,
+  canBackgroundSubagent,
+  onBackgroundSubagent,
   onStopCommand,
   onDismissCommand,
 }: BackgroundTasksSurfaceProps): React.JSX.Element {
@@ -190,6 +195,7 @@ export function BackgroundTasksSurface({
   }, []);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [stopping, setStopping] = useState<ReadonlySet<string>>(() => new Set());
+  const [moving, setMoving] = useState<ReadonlySet<string>>(() => new Set());
   const [finishedOpen, setFinishedOpen] = useState(false);
   const [showAllFinished, setShowAllFinished] = useState(false);
   const feed = useBackgroundTaskFeed(conversationId, loadTasks, subagents, runs, turns);
@@ -204,10 +210,19 @@ export function BackgroundTasksSurface({
     if (showAll) setShowAllFinished(true);
   }, []);
   useTurnReveal(conversationId, focus.regionRef, items, turns, finishedOpen, showAllFinished, openFinished, feed);
-  const latest = useRef({ subagents: traces, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent });
+  const latest = useRef({ subagents: traces, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent, onBackgroundSubagent });
   useLayoutEffect(() => {
-    latest.current = { subagents: traces, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent };
+    latest.current = { subagents: traces, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent, onBackgroundSubagent };
   });
+  const moveToBackground = useCallback((id: string) => {
+    const trace = traceById(latest.current.subagents, id);
+    const onBackground = latest.current.onBackgroundSubagent;
+    if (!trace || !onBackground) return;
+    setMoving((current) => toggled(current, id, true));
+    void onBackground(trace).catch(() => undefined).finally(() => {
+      setMoving((current) => toggled(current, id, false));
+    });
+  }, []);
   const toggleDetails = useCallback((id: string) => setExpanded((current) => toggled(current, id)), []);
   const open = useCallback((id: string) => {
     const trace = traceById(latest.current.subagents, id);
@@ -232,6 +247,24 @@ export function BackgroundTasksSurface({
     }
     const { trace } = item;
     const parent = trace.parentTraceId ? traceById(traces, trace.parentTraceId) : undefined;
+    const canStop = Boolean(
+      onStopSubagent
+      && canStopSubagentTrace(trace, turns)
+      && (canStopSubagent?.(trace) ?? true),
+    );
+    if (isBackgroundCommandTrace(trace)) {
+      return (
+        <CommandTaskCard
+          key={item.key}
+          trace={trace}
+          parentTitle={parent ? backgroundTaskTitle(parent) : null}
+          stopping={stopping.has(trace.id)}
+          now={now}
+          canStop={canStop}
+          onStop={stop}
+        />
+      );
+    }
     return (
       <AgentCard
         key={item.key}
@@ -244,11 +277,10 @@ export function BackgroundTasksSurface({
         now={now}
         canOpen={Boolean(onOpenSubagent && turns.some(({ id }) => id === trace.turnId))}
         canFollowUp={Boolean(onFollowUpSubagent && canFollowUpSubagent?.(trace))}
-        canStop={Boolean(
-          onStopSubagent
-          && canStopSubagentTrace(trace, turns)
-          && (canStopSubagent?.(trace) ?? true),
-        )}
+        canStop={canStop}
+        canMoveToBackground={Boolean(onBackgroundSubagent && canBackgroundSubagent?.(trace))}
+        moving={moving.has(trace.id)}
+        onMoveToBackground={moveToBackground}
         onToggle={toggleDetails}
         onOpen={open}
         onFollowUp={followUp}

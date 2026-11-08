@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AgentTurn, SubagentTrace } from "../../src/shared/contracts";
 import {
   COMPOSER_PREFILL_EVENT,
+  registerComposerPrefillTarget,
   type ComposerPrefillDetail,
 } from "../../src/renderer/src/utils/composerPrefill";
 import { requestSubagentFollowUp } from "../../src/renderer/src/utils/subagentFollowUp";
@@ -60,10 +61,27 @@ describe("subagent follow-up", () => {
   });
 
   it("ignores traces that cannot take a follow-up", () => {
-    requestSubagentFollowUp("conversation-1", trace({ isLive: false }), [liveTurn]);
-    requestSubagentFollowUp("conversation-1", trace(), [{ ...liveTurn, status: "completed" }]);
-    requestSubagentFollowUp("conversation-1", trace({ turnId: "turn-2" }), [liveTurn]);
+    expect(requestSubagentFollowUp("conversation-1", trace({ isLive: false }), [liveTurn])).toBe("not-applicable");
+    expect(requestSubagentFollowUp("conversation-1", trace(), [{ ...liveTurn, status: "completed" }])).toBe("not-applicable");
+    expect(requestSubagentFollowUp("conversation-1", trace({ turnId: "turn-2" }), [liveTurn])).toBe("not-applicable");
 
     expect(details).toEqual([]);
+  });
+
+  it("reports whether the chat's message box received the follow-up", () => {
+    expect(requestSubagentFollowUp("conversation-1", trace(), [liveTurn])).toBe("unavailable");
+    const received: string[] = [];
+    const unregister = registerComposerPrefillTarget({
+      conversationId: () => "conversation-1",
+      receive: (text) => received.push(text),
+    });
+    try {
+      expect(requestSubagentFollowUp("conversation-1", trace(), [liveTurn])).toBe("delivered");
+    } finally {
+      unregister();
+    }
+    expect(received).toEqual([
+      "Please follow up on the delegated task “Inspect the repository.” and incorporate its latest result.",
+    ]);
   });
 });

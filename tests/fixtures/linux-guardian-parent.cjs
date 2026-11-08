@@ -1,5 +1,5 @@
 const { spawn, spawnSync } = require("node:child_process");
-const { existsSync, writeFileSync } = require("node:fs");
+const { existsSync, renameSync, writeFileSync } = require("node:fs");
 const { statSync } = require("node:fs");
 
 const [guardian, payload, descendantPidPath, guardianPidPath] = process.argv.slice(2);
@@ -15,7 +15,8 @@ const child = spawn(
   ],
   { detached: true, stdio: "ignore" },
 );
-writeFileSync(guardianPidPath, String(child.pid));
+writeFileSync(`${guardianPidPath}.tmp`, String(child.pid));
+renameSync(`${guardianPidPath}.tmp`, guardianPidPath);
 const timer = setInterval(() => {
   const ready = spawnSync(guardian, ["ready", String(child.pid)], {
     stdio: "ignore",

@@ -75,7 +75,7 @@ export interface CredentialVaultPersistence {
 export interface FileCredentialVaultPersistenceOptions {
   platform?: NodeJS.Platform;
   temporaryPrefix?: `.${string}-`;
-  validateStage?: (value: string) => boolean;
+  validateStage?: (value: string) => boolean | Promise<boolean>;
 }
 
 interface PersistedCredentialEntry {
@@ -187,7 +187,7 @@ export class ElectronSafeStorageBackend implements CredentialEncryptionBackend {
 export class FileCredentialVaultPersistence implements CredentialVaultPersistence {
   private readonly platform: NodeJS.Platform;
   private readonly temporaryPrefix: string;
-  private readonly validateStage: (value: string) => boolean;
+  private readonly validateStage: (value: string) => boolean | Promise<boolean>;
 
   constructor(
     private readonly path: string,
@@ -471,7 +471,7 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
       file = await open(path, fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW);
       const metadata = await file.stat();
       if (!metadata.isFile() || metadata.size > MAX_CREDENTIAL_VAULT_BYTES) return false;
-      return this.validateStage((await readOpenedFile(file, metadata.size)).toString("utf8"));
+      return await this.validateStage((await readOpenedFile(file, metadata.size)).toString("utf8"));
     } catch {
       return false;
     } finally {

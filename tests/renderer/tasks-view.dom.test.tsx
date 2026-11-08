@@ -496,6 +496,31 @@ describe("Tasks view", () => {
     expect(within(agent).getByRole("button", { name: "Folder…" })).toBeEnabled();
   });
 
+  it("shows the chat state for several tasks created from the same chat without a handoff", async () => {
+    const user = userEvent.setup();
+    const fromMessage = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const fromPlan = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const tasks = [
+      todo(fromMessage, "Fix the export", { conversationId, note: "Fix the export\nIt drops rows." }),
+      todo(fromPlan, "Add the migration", { conversationId, note: "From the plan in Clean the downloads folder" }),
+    ];
+    const chat = conversation({ status: "needs-input", attentionKind: "approval" });
+    const view = harness(snapshot(tasks, { conversations: [chat] }));
+    expect(row("Fix the export")).toHaveTextContent("Needs your OK");
+    expect(row("Add the migration")).toHaveTextContent("Needs your OK");
+
+    await user.click(screen.getByRole("button", { name: /^Add the migration/u }));
+    const detail = screen.getByRole("complementary", { name: "Task details" });
+    expect(within(detail).queryByRole("group", { name: "Hand it to an agent" })).toBeNull();
+    expect(within(detail).getByRole("textbox", { name: "Note" })).toHaveValue("From the plan in Clean the downloads folder");
+    await user.click(within(detail).getByRole("button", { name: "Open chat" }));
+    expect(view.onOpenConversation).toHaveBeenCalledWith(chat);
+
+    view.update(snapshot(tasks, { conversations: [conversation({ status: "completed", completedAt: NOW.toISOString() })] }));
+    expect(row("Fix the export").querySelector(".task-status")).toHaveTextContent("Ready for you");
+    expect(row("Add the migration").querySelector(".task-status")).toHaveTextContent("Ready for you");
+  });
+
   it("offers Open chat instead of Hand to agent in a linked task's row menu", async () => {
     const user = userEvent.setup();
     const chat = conversation();

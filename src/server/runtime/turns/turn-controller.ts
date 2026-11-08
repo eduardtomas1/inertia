@@ -63,7 +63,7 @@ import { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
 import { trackTurnSettlementTask } from "./turn-settlement-tasks";
 import { TurnProviderEventProjector } from "./turn-provider-event-projector";
 import { recordTurnCheckpointUnavailable } from "./turn-checkpoint-notice";
-import { stopActiveSubagent } from "./turn-subagent-stop";
+import { backgroundActiveSubagent, stopActiveSubagent, type TurnSubagentStopOptions } from "./turn-subagent-stop";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
 import { quarantineActiveDuoTurn } from "../duo/duo-active-turn-quarantine";
@@ -71,7 +71,7 @@ import { exitedProviderTurns, hasActiveTurnCheckout, hasLiveProviderRun, livePro
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
-import { PromptInstructionDeliveries } from "./turn-instruction-delivery";
+import { PromptInstructionDeliveries, recordDeferredSessionInstruction } from "./turn-instruction-delivery";
 import {
   providerEventMatchesActiveTurn,
   providerFailureCause,
@@ -983,18 +983,20 @@ export class TurnController {
     );
   }
 
-  stopSubagent(
-    conversationId: string,
-    traceId: string,
-  ): Promise<boolean> {
-    return stopActiveSubagent({
-      store: this.store,
-      providers: this.providers,
-      hooks: this.hooks,
-      activeForConversation: (id) => this.activeByConversation.get(id),
-      now: () => this.now(),
+  private subagentControls(): TurnSubagentStopOptions {
+    return {
+      store: this.store, providers: this.providers, hooks: this.hooks,
+      activeForConversation: (id) => this.activeByConversation.get(id), now: () => this.now(),
       observeSubagent: (active, trace) => this.observeSubagent(active, trace),
-    }, conversationId, traceId);
+    };
+  }
+
+  stopSubagent(conversationId: string, traceId: string): Promise<boolean> {
+    return stopActiveSubagent(this.subagentControls(), conversationId, traceId);
+  }
+
+  backgroundSubagent(conversationId: string, traceId: string): Promise<{ moved: boolean; error: string }> {
+    return backgroundActiveSubagent(this.subagentControls(), conversationId, traceId);
   }
 
   respondToApproval(
@@ -1127,6 +1129,7 @@ export class TurnController {
       });
       return;
     }
+    if (result.sessionInstructionApplied === false) recordDeferredSessionInstruction(this.store, result, this.hooks.reportIncident);
     if (rootAlreadyTerminal) return;
     if (result.status === "completed") {
       this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");

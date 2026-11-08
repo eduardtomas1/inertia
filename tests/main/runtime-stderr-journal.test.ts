@@ -119,15 +119,50 @@ describe("runtime stderr capture", () => {
     expect(record).toHaveBeenCalledExactlyOnceWith("other", 1);
   });
 
-  it("caps records per minute and reports the excess as omitted in the next window", () => {
+  it("caps records per minute and reports the excess as omitted after the short delay", () => {
     const h = journal({ maxRecordsPerWindow: 5 });
     h.journal.write("The scheduled database backup failed.\n".repeat(12));
     expect(h.record).toHaveBeenCalledTimes(5);
-    vi.advanceTimersByTime(5_000);
+    vi.advanceTimersByTime(4_999);
     expect(h.record).toHaveBeenCalledTimes(5);
-    vi.advanceTimersByTime(55_000);
+    vi.advanceTimersByTime(1);
     expect(h.record).toHaveBeenLastCalledWith("omitted", 7);
     expect(h.record).toHaveBeenCalledTimes(6);
+  });
+
+  it("caps summaries per minute on their own budget and writes each flush as one admission", () => {
+    const h = journal({ maxRecordsPerWindow: 2, omittedDelayMs: 1_000 });
+    for (let flush = 0; flush < 4; flush++) {
+      h.journal.write("plain provider chatter\n    at open (node:fs:1:1)\n");
+      vi.advanceTimersByTime(1_000);
+    }
+    expect(h.record.mock.calls).toEqual([["other", 1], ["stack-frame", 1], ["other", 1], ["stack-frame", 1]]);
+    h.journal.write("The scheduled database backup failed.\n");
+    expect(h.record).toHaveBeenLastCalledWith("database-backup-failed", 1);
+    vi.advanceTimersByTime(57_000);
+    expect(h.record.mock.calls.slice(5)).toEqual([["other", 2], ["stack-frame", 2]]);
+  });
+
+  it("keeps every classified failure while noisy unclassified stderr is summarized", () => {
+    const h = journal();
+    const noise = [
+      "    at Query.start (/Users/someone/project/harness.js:212:7)",
+      "{\"level\":\"debug\"}",
+      "plain provider chatter",
+      "SDK debug logs: /Users/someone/.claude/debug/7c9e.txt",
+      "(node:48213) DeprecationWarning: The `punycode` module is deprecated.",
+      "[1025/104512.654321:WARNING:sandbox_linux.cc(400)] InitializeSandbox() called with multiple threads",
+    ].join("\n");
+    for (let second = 0; second < 300; second++) {
+      h.journal.write(`${noise}\n`);
+      if (second % 30 === 15) h.journal.write("The scheduled database backup failed.\n");
+      vi.advanceTimersByTime(1_000);
+    }
+    h.journal.end();
+    expect(h.record.mock.calls.filter(([code]) => code === "database-backup-failed")).toHaveLength(10);
+    expect(h.record.mock.calls.some(([code]) => code === "omitted")).toBe(false);
+    const summarized = h.record.mock.calls.filter(([code]) => code === "stack-frame").reduce((total, [, count]) => total + count, 0);
+    expect(summarized).toBe(300);
   });
 
   it("persists only allowlisted shape codes in the runtime diagnostics journal", () => {

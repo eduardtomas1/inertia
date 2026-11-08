@@ -156,6 +156,21 @@ describe("Claude permission broker", () => {
     expect(events).toEqual([]);
   });
 
+  it("shows the exact command on a Monitor approval", async () => {
+    const events: AgentHarnessEvent[] = [];
+    const permissions = broker(true, "build", events);
+    const result = permissions.canUseTool(
+      "Monitor",
+      { command: "tail -f build.log", description: "Watch the build", timeout_ms: 60_000 },
+      callbackOptions(),
+    );
+    await expect.poll(() => approvalRequests(events).length).toBe(1);
+    const [request] = approvalRequests(events);
+    expect(request).toMatchObject({ command: "tail -f build.log" });
+    expect(permissions.settleApproval(request!.requestId, "approve")).toBe(true);
+    await expect(result).resolves.toMatchObject({ behavior: "allow" });
+  });
+
   async function declinedThroughRuntime(
     toolName: string,
     input: Record<string, unknown>,

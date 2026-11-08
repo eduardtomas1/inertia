@@ -1768,12 +1768,12 @@ describe("transcript following motion", () => {
       vi.useRealTimers();
     });
 
-    async function guardedFollow() {
+    async function guardedFollow(extra: Partial<ComponentProps<typeof ChatWorkspace>> = {}) {
       vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
         callback(0);
         return 1;
       });
-      const props = workspaceProps(conversation("guarded-follow"), async () => null);
+      const props = { ...workspaceProps(conversation("guarded-follow"), async () => null), ...extra };
       const view = render(<ChatWorkspace {...props} />);
       await screen.findByTestId("turn-anchor-projection");
       const transcript = screen.getByLabelText("Thread transcript");
@@ -1842,6 +1842,133 @@ describe("transcript following motion", () => {
       expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
     });
 
+    it.each([
+      { input: "wheel", scrollTop: 360 },
+      { input: "keyboard", scrollTop: 380 },
+    ])("leaves the latest content for a small $input movement and keeps it when the guard expires", async ({ input, scrollTop }) => {
+      const { transcript, scrollTo, grow } = await guardedFollow();
+      await act(async () => vi.advanceTimersByTime(750));
+      scrollTo.mockClear();
+      if (input === "wheel") fireEvent.wheel(transcript, { deltaY: -40 });
+      else fireEvent.keyDown(transcript, { key: "ArrowUp" });
+      transcript.scrollTop = scrollTop;
+      fireEvent.scroll(transcript);
+      expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+      grow(true);
+      await act(async () => vi.advanceTimersByTime(1_000));
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(transcript.scrollTop).toBe(scrollTop);
+    });
+
+    it.each([
+      { altKey: true, follows: false },
+      { altKey: false, follows: true },
+    ])("treats End as heading for the latest content only without Alt (Alt: $altKey)", async ({ altKey, follows }) => {
+      const { transcript, scrollTo, grow } = await guardedFollow();
+      await act(async () => vi.advanceTimersByTime(750));
+      fireEvent.wheel(transcript, { deltaY: -400 });
+      transcript.scrollTop = 0;
+      fireEvent.scroll(transcript);
+      await act(async () => vi.advanceTimersByTime(750));
+      fireEvent.keyDown(transcript, { key: "End", altKey });
+      transcript.scrollTop = 200;
+      fireEvent.scroll(transcript);
+      expect(screen.queryByRole("button", { name: "Jump to latest" }) === null).toBe(follows);
+      scrollTo.mockClear();
+      grow(true);
+      await act(async () => vi.advanceTimersByTime(1_000));
+      if (follows) {
+        expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: "auto" });
+      } else {
+        expect(scrollTo).not.toHaveBeenCalled();
+        expect(transcript.scrollTop).toBe(200);
+      }
+    });
+
+    it("keeps a reader who stops just above the latest content and follows once they reach it", async () => {
+      const { transcript, scrollTo, grow } = await guardedFollow();
+      await act(async () => vi.advanceTimersByTime(750));
+      fireEvent.wheel(transcript, { deltaY: -400 });
+      transcript.scrollTop = 0;
+      fireEvent.scroll(transcript);
+      await act(async () => vi.advanceTimersByTime(750));
+      fireEvent.wheel(transcript, { deltaY: 340 });
+      transcript.scrollTop = 340;
+      fireEvent.scroll(transcript);
+      await act(async () => vi.advanceTimersByTime(1_000));
+      expect(transcript.scrollTop).toBe(340);
+      expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+
+      fireEvent.wheel(transcript, { deltaY: 60 });
+      transcript.scrollTop = 400;
+      fireEvent.scroll(transcript);
+      expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+      scrollTo.mockClear();
+      grow(true);
+      await act(async () => vi.advanceTimersByTime(750));
+      expect(transcript.scrollTop).toBe(700);
+      expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: "auto" });
+    });
+
+    async function readHistoryAtTop(transcript: HTMLElement): Promise<void> {
+      await act(async () => vi.advanceTimersByTime(750));
+      fireEvent.wheel(transcript, { deltaY: -400 });
+      transcript.scrollTop = 0;
+      fireEvent.scroll(transcript);
+      await act(async () => vi.advanceTimersByTime(750));
+    }
+
+    it.each(["scrollbar", "earlier messages"] as const)("forgets End when the reader then navigates with the %s", async (input) => {
+      const history = { hasOlder: true, loading: false, error: null, loadOlder: vi.fn(), online: true };
+      const { transcript, scrollTo, grow } = await guardedFollow({ history });
+      await readHistoryAtTop(transcript);
+      fireEvent.keyDown(transcript, { key: "End" });
+      if (input === "scrollbar") fireEvent.pointerDown(transcript);
+      else fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+      transcript.scrollTop = 150;
+      fireEvent.scroll(transcript);
+      expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+      scrollTo.mockClear();
+      grow(true);
+      await act(async () => vi.advanceTimersByTime(1_000));
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(transcript.scrollTop).toBe(150);
+    });
+
+    it("spends End once the reader moves back up from the latest content", async () => {
+      const { transcript, scrollTo, grow } = await guardedFollow();
+      await readHistoryAtTop(transcript);
+      fireEvent.keyDown(transcript, { key: "End" });
+      transcript.scrollTop = 400;
+      fireEvent.scroll(transcript);
+      expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+      transcript.scrollTop = 300;
+      fireEvent.scroll(transcript);
+      transcript.scrollTop = 350;
+      fireEvent.scroll(transcript);
+      expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+      scrollTo.mockClear();
+      grow(true);
+      await act(async () => vi.advanceTimersByTime(1_000));
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(transcript.scrollTop).toBe(350);
+    });
+
+    it("keeps following after End when the latest content grows before the End scroll settles", async () => {
+      const { transcript, scrollTo, grow } = await guardedFollow();
+      await readHistoryAtTop(transcript);
+      fireEvent.keyDown(transcript, { key: "End" });
+      transcript.scrollTop = 400;
+      fireEvent.scroll(transcript);
+      grow(true);
+      transcript.scrollTop = 410;
+      fireEvent.scroll(transcript);
+      expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+      scrollTo.mockClear();
+      await act(async () => vi.advanceTimersByTime(750));
+      expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: "auto" });
+    });
+
     it.each(["started", "positioned"] as const)("respects %s final-answer ownership when the guard expires", async (status) => {
       const { props, scrollTo, grow } = await guardedFollow();
       grow(false);
@@ -1879,7 +2006,7 @@ describe("transcript following motion", () => {
     });
   });
 
-  it.each([null, 0, -40])("keeps fresh reader intent through an early scroll event (offset: %s)", async (earlyScrollOffset) => {
+  it.each([null, 0])("keeps fresh reader intent through an early scroll event (offset: %s)", async (earlyScrollOffset) => {
     const activeConversation = conversation("conversation-delayed-measurement");
     const scheduled = new Map<number, FrameRequestCallback>();
     let nextFrameId = 0;
@@ -1937,8 +2064,8 @@ describe("transcript following motion", () => {
     expect(scheduled.size).toBe(1);
 
     fireEvent.wheel(transcript);
-    // A queued correction or a small upward movement can still fall within
-    // the 120px follow tolerance after the reader has started navigating.
+    // A queued correction can still report the bottom after the reader has
+    // started navigating.
     const readerScrollTop = 550 + (earlyScrollOffset ?? 0);
     if (earlyScrollOffset !== null) {
       scrollTop = readerScrollTop;

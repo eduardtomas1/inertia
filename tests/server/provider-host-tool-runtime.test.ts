@@ -2,7 +2,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
-import { ProviderHostToolRuntime } from "../../src/server/provider/host-tool-runtime";
+import {
+  MAX_HOST_TOOL_CALL_IDENTITIES,
+  MAX_HOST_TOOL_CALLS,
+  ProviderHostToolRuntime,
+  withHostToolAllowance,
+} from "../../src/server/provider/host-tool-runtime";
 import type { AgentApprovalRequest } from "../../src/server/provider/interactions";
 
 const owners: ProviderHostToolRuntime[] = [];
@@ -137,6 +142,68 @@ describe("provider host-tool cancellation authority", () => {
   });
 });
 
+describe("provider host-tool call allowance", () => {
+  it("charges every call once, and refuses calls past the allowance", async () => {
+    const { invoke } = fixture(async () => ({ success: true, text: "{}" }));
+    for (let index = 0; index < MAX_HOST_TOOL_CALLS; index += 1) {
+      expect(await invoke(`call-${index}`)).toEqual({ success: true, text: "{}" });
+    }
+    expect(await invoke("one-more")).toMatchObject({
+      success: false, text: expect.stringContaining("limit for one turn"),
+    });
+  });
+
+  it("gives back the allowance of an uncharged result and reports the remainder on marked results", async () => {
+    let charge: "charged" | "uncharged" | null = "uncharged";
+    const { invoke } = fixture(async () => {
+      const result = { success: true, text: JSON.stringify({ outcome: "timeout" }) };
+      return charge === null ? result : withHostToolAllowance(result, charge);
+    });
+    for (let index = 0; index < MAX_HOST_TOOL_CALLS * 2; index += 1) {
+      expect(JSON.parse((await invoke(`wait-${index}`)).text)).toEqual({
+        outcome: "timeout", remainingToolCalls: MAX_HOST_TOOL_CALLS,
+      });
+    }
+    charge = "charged";
+    expect(JSON.parse((await invoke("settled")).text)).toEqual({
+      outcome: "timeout", remainingToolCalls: MAX_HOST_TOOL_CALLS - 1,
+    });
+    charge = null;
+    expect(JSON.parse((await invoke("unmarked")).text)).toEqual({ outcome: "timeout" });
+    for (let index = 2; index < MAX_HOST_TOOL_CALLS; index += 1) await invoke(`more-${index}`);
+    expect(await invoke("past-limit")).toMatchObject({ success: false, text: expect.stringContaining("limit for one turn") });
+    charge = "uncharged";
+    expect(await invoke("uncharged-past-limit")).toMatchObject({ success: false });
+  });
+
+  it("keeps charging an uncharged call that was cancelled, and leaves non-object text unchanged", async () => {
+    const release = deferred();
+    let text = "plain";
+    const { invoke } = fixture(async () => {
+      await release.promise;
+      return withHostToolAllowance({ success: true, text }, "uncharged");
+    });
+    const controller = new AbortController();
+    const cancelled = invoke("cancelled", controller.signal);
+    controller.abort();
+    release.resolve();
+    expect(await cancelled).toMatchObject({ success: false });
+    expect(await invoke("plain")).toEqual({ success: true, text: "plain" });
+    text = "[1]";
+    expect(await invoke("array")).toEqual({ success: true, text: "[1]" });
+    text = JSON.stringify({ probe: true });
+    expect(JSON.parse((await invoke("probe")).text)).toEqual({ probe: true, remainingToolCalls: MAX_HOST_TOOL_CALLS - 1 });
+  });
+
+  it("bounds the identities a turn may use even when calls are uncharged", async () => {
+    const { invoke } = fixture(async () => withHostToolAllowance({ success: true, text: "{}" }, "uncharged"));
+    for (let index = 0; index < MAX_HOST_TOOL_CALL_IDENTITIES; index += 1) await invoke(`identity-${index}`);
+    expect(await invoke("identity-over")).toMatchObject({
+      success: false, text: expect.stringContaining("limit for one turn"),
+    });
+  });
+});
+
 describe("provider host-tool call admission", () => {
   function owner(invoke: ProviderHostToolBridge["invoke"], approvalTimeoutMs?: number) {
     const resolved: Array<[string, string]> = [];
@@ -156,6 +223,72 @@ describe("provider host-tool call admission", () => {
     owners.push(runtime);
     return { runtime, resolved };
   }
+
+  it("admits 1024 calls across tools and rejects further calls without dispatching", async () => {
+    const dispatch = vi.fn(async () => ({ success: true, text: "ok" }));
+    const { runtime } = owner(dispatch);
+    for (let index = 0; index < 1_024; index += 1) {
+      expect(await runtime.invoke({
+        callId: `call-${index}`,
+        tool: index % 2 === 0 ? "inertia_list_conversations" : "inertia_create_conversation",
+        arguments: {},
+      })).toEqual({ success: true, text: "ok" });
+    }
+    for (const callId of ["over-budget", "retry-over-budget"]) {
+      const result = await runtime.invoke({
+        callId, tool: "inertia_list_conversations", arguments: {},
+      });
+      expect(result.success).toBe(false);
+      expect(JSON.parse(result.text)).toEqual({
+        error: {
+          code: "host_tool_budget_exhausted",
+          message: expect.stringContaining("1024 Inertia tool calls"),
+        },
+      });
+      expect(result.text).toContain("Retrying in this turn will not restore the allowance");
+    }
+    expect(dispatch).toHaveBeenCalledTimes(1_024);
+    expect(await runtime.invoke({
+      callId: "call-0", tool: "inertia_create_conversation", arguments: {},
+    })).toMatchObject({ success: false, text: expect.stringContaining("reused") });
+    runtime.settle();
+    expect(await runtime.invoke({
+      callId: "after-settlement", tool: "inertia_list_conversations", arguments: {},
+    })).toMatchObject({ success: false, text: expect.stringContaining("no longer owns") });
+    const nextTurn = owner(dispatch);
+    expect(await nextTurn.runtime.invoke({
+      callId: "call-0", tool: "inertia_list_conversations", arguments: {},
+    })).toEqual({ success: true, text: "ok" });
+    expect(dispatch).toHaveBeenCalledTimes(1_025);
+  });
+
+  it("does not charge concurrency refusals against the turn allowance", async () => {
+    const pending = deferred();
+    const dispatch = vi.fn(async () => {
+      await pending.promise;
+      return { success: true, text: "ok" };
+    });
+    const { runtime } = owner(dispatch);
+    const invoke = (callId: string) => runtime.invoke({
+      callId, tool: "inertia_list_conversations", arguments: {},
+    });
+    const calls = Array.from({ length: 8 }, (_, index) => invoke(`pending-${index}`));
+    try {
+      for (let index = 0; index < 1_024; index += 1) {
+        expect(await invoke(`refused-${index}`)).toMatchObject({
+          success: false, text: expect.stringContaining("8 Inertia tool calls are already running"),
+        });
+      }
+      expect(dispatch).toHaveBeenCalledTimes(8);
+      pending.resolve();
+      expect((await Promise.all(calls)).every(({ success }) => success)).toBe(true);
+      expect(await invoke("refused-0")).toEqual({ success: true, text: "ok" });
+      expect(dispatch).toHaveBeenCalledTimes(9);
+    } finally {
+      pending.resolve();
+      await Promise.all(calls);
+    }
+  });
 
   it("names the available tools and the closest one when a provider calls an unknown tool", async () => {
     const { runtime } = owner(async () => ({ success: true, text: "ok" }));

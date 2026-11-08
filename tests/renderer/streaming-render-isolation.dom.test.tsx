@@ -412,6 +412,78 @@ describe("streamed agent text", () => {
     vi.useRealTimers();
   });
 
+  it("keeps the composer and sidebar still while a delegated agent's steps stream", async () => {
+    vi.useFakeTimers({ toFake: [...STREAMING_TIMERS] });
+    const { counter } = await mountQuietApp();
+    act(() => {
+      emit({
+        type: "agent.activity",
+        activity: {
+          id: "activity-agent",
+          conversationId,
+          runId: turn.runId,
+          turnId: turn.id,
+          kind: "tool",
+          title: "Agent",
+          detail: null,
+          status: "running",
+          createdAt: now,
+        },
+      });
+    });
+    const steps: Array<{ label: string; status: "running" | "completed" | "failed" }> = [];
+    for (let index = 0; index < 12; index += 1) {
+      steps.push({ label: `Read · file-${index}.ts`, status: "running" });
+      act(() => {
+        emit({
+          type: "agent.subagent.updated",
+          trace: {
+            id: "trace-agent",
+            conversationId,
+            runId: turn.runId,
+            turnId: turn.id,
+            providerId: "claude",
+            providerTaskId: "task-agent",
+            providerAgentId: null,
+            parentTraceId: null,
+            parentProviderAgentId: null,
+            parentProviderToolUseId: null,
+            providerToolUseId: "tool-agent",
+            providerRole: "general-purpose",
+            providerName: null,
+            providerStatus: null,
+            status: "running",
+            isLive: true,
+            description: "Survey the repository",
+            progress: null,
+            result: null,
+            model: "claude-haiku-4-5",
+            activity: steps.at(-1)!.label,
+            usage: null,
+            toolUseCount: null,
+            durationMs: null,
+            modelSource: "observed",
+            taskKind: "agent",
+            background: false,
+            command: null,
+            effort: null,
+            activityId: "activity-agent",
+            steps: steps.slice(-8),
+            sequence: index + 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      });
+    }
+    expect(counter.commits).toBeGreaterThan(0);
+    expect({ Sidebar: counting.renders.Sidebar ?? 0, Composer: counting.renders.Composer ?? 0 })
+      .toEqual({ Sidebar: 0, Composer: 0 });
+    vi.useRealTimers();
+    await waitFor(() => expect(document.querySelector('[data-subagent-trace="trace-agent"]')?.textContent)
+      .toContain("Read · file-11.ts"));
+  });
+
   it("keeps the chat workspace still while transcript scrolls leave navigation unchanged", async () => {
     vi.useFakeTimers({ toFake: [...STREAMING_TIMERS] });
     const { view } = await mountQuietApp();

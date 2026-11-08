@@ -154,6 +154,8 @@ export function recordingConnection(
 export interface DetachedBridge {
   openedInMain: MainWindowTarget[];
   docked: unknown[][];
+  persisted: unknown[][];
+  mirrored: unknown[][];
   copied: string[];
   install(): void;
 }
@@ -162,6 +164,8 @@ export function detachedBridge(): DetachedBridge {
   const bridge: DetachedBridge = {
     openedInMain: [],
     docked: [],
+    persisted: [],
+    mirrored: [],
     copied: [],
     install: () => {
       Object.defineProperty(window, "inertia", {
@@ -179,6 +183,12 @@ export function detachedBridge(): DetachedBridge {
               return (...args: unknown[]) => {
                 bridge.docked.push(args);
                 return Promise.resolve();
+              };
+            }
+            if (key === "persistDetachedChatDraft" || key === "mirrorDetachedChatDraft") {
+              return (...args: unknown[]) => {
+                (key === "persistDetachedChatDraft" ? bridge.persisted : bridge.mirrored).push(args);
+                return true;
               };
             }
             if (key === "copyText") {

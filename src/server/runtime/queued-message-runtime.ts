@@ -84,7 +84,10 @@ export function createQueuedMessageRuntime(
       return;
     }
     if (options.signal.aborted || turns.isClosing() || turns.isActive(conversationId)) return;
-    if (options.compacting?.(conversationId)) return;
+    if (options.compacting?.(conversationId)) {
+      if (manual) manualRetries.set(conversationId, manual);
+      return;
+    }
     const conversation = store.conversation(conversationId);
     if (conversation.archivedAt !== null) return;
     if (!manual && !releasesQueue(store.latestAgentTurnForConversation(conversationId))) return;

@@ -196,7 +196,7 @@ if ((hangs[stage] ?? 0) !== 0) {
     });
 
     await expect(detect("claude", (args) => (
-      args[0] === "--version" ? answered("2.1.0 (Claude Code)") : timedOut
+      args[0] === "--version" ? answered("2.1.320 (Claude Code)") : timedOut
     ))).resolves.toMatchObject({
       installState: "installed",
       authState: "error",
@@ -232,7 +232,7 @@ if ((hangs[stage] ?? 0) !== 0) {
       probeProcess: async (_candidate, args, _environment, _cwd, timeoutMs) => {
         if (args[0] === "--version") {
           clockMs += 1_250;
-          return { started: true, timedOut: false, cleanupConfirmed: true, exitCode: 0, output: "2.1.200 (Claude Code)" };
+          return { started: true, timedOut: false, cleanupConfirmed: true, exitCode: 0, output: "2.1.320 (Claude Code)" };
         }
         authDeadlines.push(timeoutMs);
         const answersAfterMs = 600;
@@ -258,7 +258,7 @@ if ((hangs[stage] ?? 0) !== 0) {
       probeProcess: async (_candidate, args, _environment, _cwd, timeoutMs) => {
         if (args[0] !== "--version") authDeadlines.push(timeoutMs);
         return { started: true, timedOut: false, cleanupConfirmed: true, exitCode: 0,
-          output: args[0] === "--version" ? "2.1.200 (Claude Code)" : '{"loggedIn":true}' };
+          output: args[0] === "--version" ? "2.1.320 (Claude Code)" : '{"loggedIn":true}' };
       },
     });
 

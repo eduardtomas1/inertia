@@ -44,12 +44,12 @@ function temporaryRoot(): string {
 }
 
 function statLine(
-  pid: number, parentPid: number, startTimeTicks: string, state = "S", name = "agent", session = 1,
+  pid: number, parentPid: number, startTimeTicks: string, state = "S", name = "agent", session = 1, group = pid,
 ): string {
   const fields = Array.from({ length: 20 }, () => "1");
   fields[0] = state;
   fields[1] = String(parentPid);
-  fields[2] = String(pid);
+  fields[2] = String(group);
   fields[3] = String(session);
   fields[19] = startTimeTicks;
   return `${pid} (${name}) ${fields.join(" ")}\n`;
@@ -59,11 +59,12 @@ function fakeProc() {
   const procRoot = join(temporaryRoot(), "proc");
   const add = (pid: number, parentPid: number, environ: string[] | null, options: {
     readonly startTimeTicks?: string; readonly state?: string; readonly name?: string;
-    readonly session?: number;
+    readonly session?: number; readonly group?: number;
   } = {}): void => {
     mkdirSync(join(procRoot, String(pid)), { recursive: true });
     writeFileSync(join(procRoot, String(pid), "stat"), statLine(
       pid, parentPid, options.startTimeTicks ?? String(1_000 + pid), options.state, options.name, options.session,
+      options.group,
     ));
     if (environ) writeFileSync(join(procRoot, String(pid), "environ"), `${environ.join("\0")}\0`);
   };
@@ -97,6 +98,98 @@ describe("Linux orphan scan", () => {
     expect(scanLinuxGuardianOrphans(guardian, {
       deadlineAt: Date.now() + 1_000, procRoot: proc.procRoot, selfPid,
     }).orphans).toEqual([]);
+  });
+
+  it.each([
+    { label: "keeps", uid: 1000, startTimeTicks: "1600", code: "EACCES", tree: "session", complete: false },
+    { label: "keeps", uid: 1000, startTimeTicks: "777", code: "EPERM", tree: "session", complete: false },
+    { label: "keeps", uid: 1000, startTimeTicks: "1600", code: "EACCES", tree: "group", complete: false },
+    { label: "keeps", uid: 1000, startTimeTicks: "1600", code: "EACCES", tree: "live guardian parent", complete: false },
+    { label: "ignores", uid: 1000, startTimeTicks: "1600", code: "EACCES", tree: "foreign session", complete: true },
+    { label: "ignores", uid: 1000, startTimeTicks: "1600", code: "EACCES", tree: "reused guardian pid", complete: true },
+    { label: "ignores", uid: 0, startTimeTicks: "1600", code: "EACCES", tree: "session", complete: true },
+    { label: "ignores", uid: 1000, startTimeTicks: "776", code: "EACCES", tree: "session", complete: true },
+    { label: "ignores", uid: 1000, startTimeTicks: "1600", code: "ENOENT", tree: "session", complete: true },
+    { label: "ignores", uid: 1000, startTimeTicks: "1600", code: "EACCES", tree: "session", reusedHolder: "1500", complete: true },
+    { label: "ignores", uid: 1000, startTimeTicks: "1600", code: "EACCES", tree: "group", reusedHolder: "1600", complete: true },
+    { label: "keeps", uid: 1000, startTimeTicks: "1600", code: "EACCES", tree: "session", reusedHolder: "1700", complete: false },
+  ])("$label an unreadable environment ($code, uid $uid, started $startTimeTicks, $tree)", ({
+    uid, startTimeTicks, code, tree, complete, reusedHolder,
+  }: {
+    uid: number; startTimeTicks: string; code: string; tree: string; complete: boolean; reusedHolder?: string;
+  }) => {
+    const proc = fakeProc();
+    const foreign = { session: 7_000, group: 7_000 };
+    if (tree === "live guardian parent") proc.add(guardian.pid, 1, null, { startTimeTicks: guardian.startTimeTicks, session: guardian.pid });
+    if (tree === "reused guardian pid") proc.add(guardian.pid, 1, null, { startTimeTicks: "9999", session: 9_000 });
+    proc.add(600, tree.includes("guardian") ? guardian.pid : 1, [], {
+      startTimeTicks,
+      name: "ssh-agent",
+      ...(tree === "session" ? { session: guardian.pid, group: 600 }
+        : tree === "group" ? { session: 600, group: guardian.pid }
+          : foreign),
+    });
+    writeFileSync(join(proc.procRoot, "600", "status"), `Name:\tssh-agent\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\n`);
+    const readEnviron = (path: string): string => {
+      if (path.endsWith("/600/environ")) throw Object.assign(new Error("unreadable"), { code });
+      return readFileSync(path, "latin1");
+    };
+    expect(scanLinuxGuardianOrphans(guardian, {
+      deadlineAt: Date.now() + 1_000, procRoot: proc.procRoot, selfPid, uid: 1000, readEnviron,
+      reusedHolderStartTimeTicks: reusedHolder ?? null,
+    })).toEqual(complete
+      ? { complete, orphans: [] }
+      : { complete, orphans: [], unreadable: [{ pid: 600, startTimeTicks, command: "ssh-agent" }] });
+  });
+
+  it("still reaps readable marked orphans when an unreadable process blocks recovery", async () => {
+    const proc = fakeProc();
+    proc.add(500, 1, [marker], { name: "agent" });
+    proc.add(600, 1, [], { startTimeTicks: "1600", name: "ssh-agent", session: guardian.pid });
+    writeFileSync(join(proc.procRoot, "600", "status"), "Name:\tssh-agent\nUid:\t1000\t1000\t1000\t1000\n");
+    const kill = vi.fn((pid: number) => {
+      if (pid === 500) proc.remove(500);
+    });
+    await expect(reapLinuxGuardianOrphans(guardian, {
+      deadlineAt: Date.now() + 1_000,
+      procRoot: proc.procRoot,
+      selfPid,
+      uid: 1000,
+      kill,
+      wait: async () => undefined,
+      readEnviron: (path) => {
+        if (path.endsWith("/600/environ")) throw Object.assign(new Error("unreadable"), { code: "EACCES" });
+        return readFileSync(path, "latin1");
+      },
+    })).resolves.toEqual({
+      recovered: false,
+      unsignalled: [{ pid: 600, startTimeTicks: "1600", command: "ssh-agent" }],
+    });
+    expect(kill).toHaveBeenCalledWith(500, "SIGTERM");
+    expect(kill).not.toHaveBeenCalledWith(600, expect.anything());
+  });
+
+  it("reports a same-session process with an unreadable environment as the one blocking recovery", async () => {
+    const proc = fakeProc();
+    proc.add(600, 1, [], { startTimeTicks: "1600", name: "ssh-agent", session: guardian.pid });
+    writeFileSync(join(proc.procRoot, "600", "status"), "Name:\tssh-agent\nUid:\t1000\t1000\t1000\t1000\n");
+    const kill = vi.fn();
+    await expect(reapLinuxGuardianOrphans(guardian, {
+      deadlineAt: Date.now() + 1_000,
+      procRoot: proc.procRoot,
+      selfPid,
+      uid: 1000,
+      kill,
+      wait: async () => undefined,
+      readEnviron: (path) => {
+        if (path.endsWith("/600/environ")) throw Object.assign(new Error("unreadable"), { code: "EACCES" });
+        return readFileSync(path, "latin1");
+      },
+    })).resolves.toEqual({
+      recovered: false,
+      unsignalled: [{ pid: 600, startTimeTicks: "1600", command: "ssh-agent" }],
+    });
+    expect(kill).not.toHaveBeenCalled();
   });
 
   it("reports an incomplete scan when the process count or deadline bound is exceeded", () => {

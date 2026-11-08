@@ -53,6 +53,8 @@ export {
   estimateTimelineRenderWeight,
   estimateTimelineRowSize,
   isTurnGitArtifactWithoutChanges,
+  readerScrollFollow,
+  readerScrollReachesLatest,
   resolveTimelineKeyboardIntent,
   shouldAdjustTimelineScrollPosition,
   shouldFollowTimeline,

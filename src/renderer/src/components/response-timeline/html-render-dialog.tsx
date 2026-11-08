@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   clampHtmlRenderHeight,
@@ -17,9 +17,11 @@ import "./HtmlRenderDialog.css";
 /** Full-size view of a visual reply: a second frame of the same page. */
 export function HtmlRenderDialog({
   reference,
+  headerActions,
   onClose,
 }: {
   reference: HtmlRenderReference;
+  headerActions?: ReactNode;
   onClose: () => void;
 }): React.JSX.Element {
   const titleId = useId();
@@ -70,6 +72,7 @@ export function HtmlRenderDialog({
       tabIndex={-1}
       titleId={titleId}
       title={reference.title}
+      headerActions={headerActions}
       closeLabel="Close"
       closeRef={closeRef}
       onClose={onClose}

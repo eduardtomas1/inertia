@@ -5,7 +5,7 @@
   margin-top: 24px;
 }
 
-:root[data-platform="win32"] .multi-spawn-dialog {
+:root:is([data-platform="win32"], [data-platform="linux"]) .multi-spawn-dialog {
   margin-top: 0;
 }
 

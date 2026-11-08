@@ -182,7 +182,7 @@ describe("detached chat keyboard", () => {
 
   it("toggles the terminal with the user's terminal shortcut", async () => {
     await renderWindow(recordingConnection(detachedSnapshot({
-      keybindings: { search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "y", tasks: "t" },
+      keybindings: { search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "y", tasks: "t", "open-surface": "g" },
     })));
     const terminal = screen.getByRole("button", { name: "Toggle terminal" });
     expect(terminal).toHaveAttribute("aria-pressed", "false");

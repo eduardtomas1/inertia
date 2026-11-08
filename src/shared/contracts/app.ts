@@ -36,6 +36,7 @@ import type { AgentTurnStatus } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
 import type { Todo } from "../todos";
+import type { LibrarySnapshot } from "../library";
 import type { WatcherLinkView } from "../watcher";
 
 export type { ProviderId } from "../provider";
@@ -80,6 +81,8 @@ export interface ConversationLatestTurnSummary {
   updatedAt: string;
   usageLimited?: boolean;
   failureKind?: import("../turn-lifecycle").TurnFailureKind;
+  /** The mode the turn was sent in. Optional only for legacy snapshots. */
+  interactionMode?: InteractionMode;
   providerActivityAt?: string;
 }
 
@@ -156,6 +159,11 @@ export interface ProviderCapabilityContractView {
   }>;
 }
 
+export interface ProviderUpdateRequirement {
+  installedVersion: string;
+  minimumVersion: string;
+}
+
 export interface ProviderInfo {
   id: ProviderId;
   label: string;
@@ -168,6 +176,7 @@ export interface ProviderInfo {
   authState: ProviderAuthState;
   accountKind?: import("../provider").ProviderAccountKind;
   canRun: boolean;
+  updateRequired?: ProviderUpdateRequirement;
   statusMessage: string | null;
   models: ProviderModel[];
   rateLimits: ProviderRateLimit[];
@@ -348,6 +357,7 @@ export interface AppSnapshot {
   promptPresets?: PromptPreset[];
   customAgents?: import("../custom-agents").CustomAgent[];
   todos?: Todo[];
+  library?: LibrarySnapshot;
   watchers?: WatcherLinkView[];
   activeProjectId: string | null;
   activeConversationId: string | null;

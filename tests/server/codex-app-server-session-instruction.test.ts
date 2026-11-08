@@ -6,6 +6,7 @@ import {
   createCodexAppServerHarness,
   type CodexAppServerHarnessDependencies,
 } from "../../src/server/provider/codex-app-server-harness";
+import { INTERNAL_PROVIDER_INSTRUCTIONS_HEADER } from "../../src/server/internal-provider-instructions";
 import { removePortableFixture } from "../helpers/portable-provider-fixture";
 import { captured, fakeAppServer } from "../helpers/codex-app-server-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
@@ -34,6 +35,7 @@ describe("Codex session instructions", { concurrent: false }, () => {
       }),
     });
     managers.push(manager);
+    const results: unknown[] = [];
     const run = (sessionId?: string) => manager.run({
       ...nativeProviderRunInput({
         providerId: "codex",
@@ -49,10 +51,17 @@ describe("Codex session instructions", { concurrent: false }, () => {
       onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve", { runId: event.runId, turnId: event.turnId })).toBe(true),
       onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] }, { runId: event.runId, turnId: event.turnId })).toBe(true),
     });
-    await expect(run()).resolves.toMatchObject({ status: "completed" });
-    await expect(run("thread-existing")).resolves.toMatchObject({ status: "completed" });
+    results.push(await run());
+    results.push(await run("thread-existing"));
     const messages = captured(fake.capturePath);
+    const turnText = (index: number): unknown => {
+      const params = messages.filter(({ method }) => method === "turn/start")[index]?.params as
+        { input?: Array<{ text?: unknown }> } | undefined;
+      return params?.input?.[0]?.text;
+    };
     return {
+      results,
+      turnTexts: [turnText(0), turnText(1)],
       root: fake.root,
       configReads: messages.filter(({ method }) => method === "config/read").map(({ params }) => params),
       start: messages.find(({ method }) => method === "thread/start")?.params as Record<string, unknown>,
@@ -69,23 +78,38 @@ describe("Codex session instructions", { concurrent: false }, () => {
     ]);
     expect(opened.start.developerInstructions).toBe(`USER_DEVELOPER_RULES\n\n${SESSION_INSTRUCTION}`);
     expect(opened.resume.developerInstructions).toBe(opened.start.developerInstructions);
+    expect(opened.turnTexts).toEqual(["Hello", "Hello"]);
+    for (const result of opened.results) expect(result).not.toHaveProperty("sessionInstructionApplied");
   });
 
-  it.each([undefined, "config-read-error", "config-read-silent"])(
-    "sends the session instruction alone when no configured value is read (%s)",
+  it("sends the session instruction alone when the person configured none", async () => {
+    const opened = await startAndResume();
+
+    expect(opened.configReads).toHaveLength(2);
+    expect(opened.start.developerInstructions).toBe(SESSION_INSTRUCTION);
+    expect(opened.resume.developerInstructions).toBe(SESSION_INSTRUCTION);
+    expect(opened.turnTexts).toEqual(["Hello", "Hello"]);
+  });
+
+  it.each(["config-read-error", "config-read-silent"])(
+    "keeps the person's own developer instructions and moves the session instruction into the prompt when config cannot be read (%s)",
     async (scenario) => {
       const opened = await startAndResume(scenario);
 
       expect(opened.configReads).toHaveLength(2);
-      expect(opened.start.developerInstructions).toBe(SESSION_INSTRUCTION);
-      expect(opened.resume.developerInstructions).toBe(SESSION_INSTRUCTION);
+      expect(opened.start).not.toHaveProperty("developerInstructions");
+      expect(opened.resume).not.toHaveProperty("developerInstructions");
+      expect(opened.turnTexts).toEqual([0, 1].map(() => `Hello\n\n${INTERNAL_PROVIDER_INSTRUCTIONS_HEADER}\n${SESSION_INSTRUCTION}`));
+      for (const result of opened.results) {
+        expect(result).toMatchObject({ status: "completed", sessionInstructionApplied: false });
+      }
     },
     20_000,
   );
 
   it.each([
     [{ config: { developer_instructions: "USER_DEVELOPER_RULES" } }, `USER_DEVELOPER_RULES\n\n${SESSION_INSTRUCTION}`],
-    [new Error("config unreadable"), SESSION_INSTRUCTION],
+    [new Error("config unreadable"), undefined],
   ] as const)("resumes a thread for compaction with the same developer instructions", async (config, expected) => {
     const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
     const withControlClient: NonNullable<
@@ -127,7 +151,7 @@ describe("Codex session instructions", { concurrent: false }, () => {
     );
     managers.push(manager);
 
-    await expect(manager.compact({
+    const compacted = manager.compact({
       ...nativeProviderRunInput({
         providerId: "codex",
         conversationId: "codex-compact-session-instruction",
@@ -138,7 +162,11 @@ describe("Codex session instructions", { concurrent: false }, () => {
         sessionId: "thread-existing",
       }),
       sessionInstruction: SESSION_INSTRUCTION,
-    })).resolves.toMatchObject({ status: "completed" });
+    });
+    const result = await compacted;
+    expect(result).toMatchObject({ status: "completed" });
+    if (expected === undefined) expect(result).toMatchObject({ sessionInstructionApplied: false });
+    else expect(result).not.toHaveProperty("sessionInstructionApplied");
     expect(requests.map(({ method }) => method)).toEqual([
       "config/read",
       "thread/resume",

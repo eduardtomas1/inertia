@@ -1,6 +1,7 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { AppSnapshot, Conversation, ServerEvent } from "@shared/contracts";
-import type { MessageSearchHit } from "@shared/message-search";
+import type { MessageSearchTarget } from "@shared/message-search";
+import type { MessageNavigationCopy } from "../utils/openMessageSearchResult";
 import type { DetachedChatWindowsController } from "./useDetachedChatWindows";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { splitConversationAfterPrimaryChange } from "../utils/splitConversation";
@@ -126,11 +127,16 @@ export function useConversationNavigation({
       if (generation === conversationSelectionGenerationRef.current) void selectConversationInMain(nextConversation);
     });
   }, [conversationSelectionGenerationRef, detachedChats, selectConversationInMain]);
-  const selectMessage = useCallback((hit: MessageSearchHit, onReady?: () => void, signal?: AbortSignal): Promise<boolean> => {
+  const selectMessage = useCallback((
+    hit: MessageSearchTarget,
+    onReady?: () => void,
+    signal?: AbortSignal,
+    copy?: MessageNavigationCopy,
+  ): Promise<boolean> => {
     const intent = ++conversationSelectionGenerationRef.current;
     return import("../utils/openMessageSearchResult").then(({ openMessageSearchResult }) => {
       return openMessageSearchResult(hit, { snapshot, conversationSelectionGenerationRef, intent,
-        detachedChats, request, selectConversationInMain, setActionError, onReady, signal });
+        detachedChats, request, selectConversationInMain, setActionError, onReady, signal, copy });
     }).catch(() => {
       if (!signal?.aborted && intent === conversationSelectionGenerationRef.current) setActionError("Search navigation is unavailable. Try again.");
       return false;

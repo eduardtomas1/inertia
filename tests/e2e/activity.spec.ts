@@ -505,18 +505,18 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
     await expect(agentsTab).toHaveAttribute("aria-selected", "true");
     await expect(agentsTab).toBeFocused();
     const backgroundTasks = page.getByRole("region", { name: "Background tasks" });
-    await expect(backgroundTasks.getByText("Evidence Scout", { exact: true }))
+    await expect(backgroundTasks.getByText("Checking the provider lifecycle and exact task identity.", { exact: true }))
       .toBeVisible();
     await expect(backgroundTasks.getByRole("button", {
-      name: "Stop Evidence Scout",
+      name: "Stop Researcher",
     })).toBeVisible();
     await expect(backgroundTasks.getByRole("button", { name: /^Stop /u }))
       .toHaveCount(1);
     await expect(backgroundTasks.getByRole("button", { name: /^Finished/u }))
       .toHaveAttribute("aria-expanded", "true");
-    await expect(backgroundTasks.getByText("Policy Reader", { exact: true }))
+    await expect(backgroundTasks.getByText("Read the typed lifecycle contract.", { exact: true }))
       .toBeVisible();
-    await expect(backgroundTasks.getByText("Build Verifier", { exact: true }))
+    await expect(backgroundTasks.getByText("Run the optional provider check.", { exact: true }))
       .toBeVisible();
     await expect(backgroundTasks.getByText("Failed", { exact: true }))
       .toBeVisible();
@@ -529,10 +529,10 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
       "Enter sends · Tab queues",
     );
     await backgroundTasks.getByRole("button", {
-      name: "View transcript for Evidence Scout",
+      name: "View transcript for Researcher",
     }).click();
     await backgroundTasks.getByRole("button", {
-      name: "Guide parent about Evidence Scout",
+      name: "Guide parent about Researcher",
     }).click();
     await expect(textbox).toHaveValue(
       "Please follow up on the delegated task “Checking the provider lifecycle and exact task identity.” and incorporate its latest result.",

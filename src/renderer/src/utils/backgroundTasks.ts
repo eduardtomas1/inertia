@@ -8,10 +8,15 @@ import { formatCompact } from "../lib/compactFormat";
 import {
   isLiveSubagentTrace,
   subagentElapsedMs,
-  subagentMissionSummary,
-  subagentTraceLabel,
 } from "./subagentDisclosure";
 import { backgroundCommandIsLive } from "./backgroundTaskRuns";
+import {
+  isBackgroundCommandTrace,
+  subagentIdentityLabel,
+  subagentKindLabel,
+  subagentTaskStateWord,
+  subagentTaskTitle,
+} from "./subagentTaskPresentation";
 
 const PROVIDERS_WITHOUT_TASK_TOKENS: Readonly<Record<string, string>> = {
   "cursor-acp": "Cursor",
@@ -25,17 +30,6 @@ export interface BackgroundTaskStateWord {
   word: string;
   danger: boolean;
 }
-
-const TASK_STATE_WORDS: Partial<Record<SubagentTrace["status"], BackgroundTaskStateWord>> = {
-  queued: { word: "Queued", danger: false },
-  spawned: { word: "Starting", danger: false },
-  waiting: { word: "Waiting", danger: false },
-  failed: { word: "Failed", danger: true },
-  cancelled: { word: "Stopped", danger: false },
-  interrupted: { word: "Interrupted", danger: true },
-  lost: { word: "Lost", danger: true },
-  unknown: { word: "Unknown", danger: false },
-};
 
 const COMMAND_STATE_WORDS: Partial<Record<WorkspaceRun["status"], BackgroundTaskStateWord>> = {
   waiting: { word: "Waiting", danger: false },
@@ -88,8 +82,24 @@ export function backgroundTaskItems(
   };
 }
 
+/**
+ * The timeline's state word, except where an agent card already says it: a
+ * running agent shows its live line, and a finished one sits under Finished.
+ */
 export function backgroundTaskStateWord(trace: SubagentTrace): BackgroundTaskStateWord | null {
-  return TASK_STATE_WORDS[trace.status] ?? null;
+  if (!isBackgroundCommandTrace(trace) && (trace.status === "running" || trace.status === "completed")) {
+    return null;
+  }
+  return subagentTaskStateWord(trace);
+}
+
+/** "Agent · General purpose · from Reviewer": kind, then who, then its parent. */
+export function backgroundTaskKind(trace: SubagentTrace, parentTitle: string | null): string {
+  return [
+    subagentKindLabel(trace),
+    isBackgroundCommandTrace(trace) ? null : subagentIdentityLabel(trace),
+    parentTitle ? `from ${parentTitle}` : null,
+  ].filter((part): part is string => Boolean(part)).join(" · ");
 }
 
 export function backgroundCommandStateWord(run: WorkspaceRun): BackgroundTaskStateWord | null {
@@ -107,13 +117,12 @@ export function backgroundTaskTokensNotReported(
 }
 
 export function backgroundTaskTitle(trace: SubagentTrace): string {
-  if (trace.providerName || trace.providerRole) return subagentTraceLabel(trace);
-  return subagentMissionSummary(trace) ?? subagentTraceLabel(trace);
+  return subagentTaskTitle(trace);
 }
 
 export function backgroundTaskCurrentActivity(trace: SubagentTrace): string | null {
   return isLiveSubagentTrace(trace) && (trace.status === "running" || trace.status === "spawned")
-    ? trace.activity
+    ? trace.steps?.at(-1)?.label ?? trace.activity
     : null;
 }
 

@@ -85,6 +85,24 @@ describe("terminal commitment survives downstream faults", () => {
       .map((activity) => activity.title)).toEqual(["Claude reached an account rate limit. Your follow-up was not answered."]);
   });
 
+  it.each([
+    ["provider.auth-failed", { reason: "provider-error" as const, phase: "auth" as const }],
+    ["provider.connection-failed", { reason: "transport-closed" as const, phase: "turn" as const }],
+  ])("still reports %s when a usage limit was seen before the turn failed", async (code, failure) => {
+    const reportIncident = vi.fn();
+    const runtime = await createTurnControllerTestRuntime({ reportIncident });
+    runtimes.push(runtime);
+    const queued = start(runtime);
+    runtime.provider.resolve({
+      status: "failed",
+      error: "Claude stopped.",
+      failure: { ...failure, message: "Claude stopped.", terminalEvent: "session/prompt", usageLimited: true },
+    });
+    await expect.poll(() => runtime.store.agentTurn(queued.turn.id).status).toBe("failed");
+    await runtime.controller.drainSettlementTasks();
+    expect(reportIncident.mock.calls.map(([observation]) => observation.code)).toEqual([code]);
+  });
+
   it("reports a provider authentication failure as an auth incident", async () => {
     const reportIncident = vi.fn();
     const runtime = await createTurnControllerTestRuntime({ reportIncident });

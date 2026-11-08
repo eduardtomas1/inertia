@@ -4,13 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
-import { forgetTranscriptPosition, rememberTranscriptPosition } from "../../src/renderer/src/utils/transcriptPosition";
+import { forgetTranscriptPosition, readTranscriptPosition, rememberTranscriptPosition } from "../../src/renderer/src/utils/transcriptPosition";
 import { requestTimelineFocus } from "../../src/renderer/src/utils/timelineFocus";
 import type {
   AgentTurn,
   ChatMessage,
   ConversationLatestTurnSummary,
+  SubagentTrace,
 } from "../../src/shared/contracts";
+import { taskTrace } from "./background-task-fixtures";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 
@@ -79,6 +81,22 @@ function message(index: number): ChatMessage {
   };
 }
 
+/** Codex child agents have no tool row, so every turn also carries a compact delegated row. */
+function childAgent(index: number, live: boolean): SubagentTrace {
+  return taskTrace({
+    id: `trace-${index}`,
+    conversationId,
+    runId: `run-${index}`,
+    turnId: `turn-${index}`,
+    providerId: "codex",
+    providerToolUseId: `collab-${index}`,
+    description: `Child review ${index}`,
+    status: live ? "running" : "completed",
+    isLive: live,
+    steps: [{ label: `Command · npm test ${index}`, status: live ? "running" : "completed" }],
+  });
+}
+
 function rect(top: number, height: number): DOMRect {
   return {
     x: 0,
@@ -113,11 +131,11 @@ describe("accepted turn viewport anchoring", () => {
     onTurnAnchorSettled: (turnId: string) => void,
     onTurnAnchorCancelled: (turnId: string) => void,
     count = 2,
-    turnAnchorId = `turn-${count}`,
+    turnAnchorId: string | null = `turn-${count}`,
   ) {
     const scrollElementRef = createRef<HTMLDivElement>();
     const timelineElementRef = createRef<HTMLDivElement>();
-    const view = (followsLatest: boolean): React.JSX.Element => (
+    const view = (followsLatest: boolean, anchorId = turnAnchorId): React.JSX.Element => (
       <div ref={scrollElementRef} className="anchor-test-scroll">
         <div ref={timelineElementRef}>
           <ResponseTimeline
@@ -140,7 +158,8 @@ describe("accepted turn viewport anchoring", () => {
             autoCollapseWorkLog
             showChangedFileSummaries={false}
             checkpointRestoreDisabled={false}
-            turnAnchorId={turnAnchorId}
+            subagents={Array.from({ length: count }, (_, index) => childAgent(index + 1, index + 1 === count))}
+            turnAnchorId={anchorId}
             followsLatest={followsLatest}
             scrollElementRef={scrollElementRef}
             timelineElementRef={timelineElementRef}
@@ -162,6 +181,7 @@ describe("accepted turn viewport anchoring", () => {
       scrollElementRef,
       timelineElementRef,
       followLatest: () => rerender(view(true)),
+      followArrivedTurn: () => rerender(view(true, null)),
     };
   }
 
@@ -189,6 +209,21 @@ describe("accepted turn viewport anchoring", () => {
     }
   });
 
+  it("refreshes the remembered position when the reader returns to following without another scroll", () => {
+    const view = renderTimeline(vi.fn(), vi.fn(), 2, null);
+    rememberTranscriptPosition(conversationId, { rowId: null, viewportOffset: 0, scrollTop: 420, wasFollowing: false });
+    view.followLatest();
+    expect(readTranscriptPosition(conversationId)).toMatchObject({ wasFollowing: true });
+  });
+
+  it("does not remember a reading position while an accepted turn is still arriving", () => {
+    const view = renderTimeline(vi.fn(), vi.fn(), 2, "turn-3");
+    fireEvent.scroll(view.scrollElementRef.current!);
+    expect(readTranscriptPosition(conversationId)).toBeUndefined();
+    view.followArrivedTurn();
+    expect(readTranscriptPosition(conversationId)).toMatchObject({ wasFollowing: true });
+  });
+
   it("places the exact accepted turn at a stable viewport offset", async () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -213,6 +248,7 @@ describe("accepted turn viewport anchoring", () => {
       while (frames.length > 0) frames.shift()!(performance.now());
     });
 
+    expect(acceptedTurn.querySelector('[data-subagent-trace="trace-2"]')).not.toBeNull();
     expect(scroll.scrollTop).toBe(400);
     expect(acceptedTurn.getBoundingClientRect().top).toBe(8);
     expect(settled).toHaveBeenCalledOnce();

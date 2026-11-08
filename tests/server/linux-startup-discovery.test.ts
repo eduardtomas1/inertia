@@ -72,11 +72,12 @@ linuxIt("retires concurrent startup discovery before returning under delayed nat
   const guardian = join(process.cwd(), "resources/generated/runtime-process-guardian/runtime-process-guardian");
   const generation = "61000000-0000-4000-8000-000000000061:1";
   const fixture = join(root, "provider");
+  const claudeFixture = join(root, "claude");
   const env = { PATH: "/usr/bin:/bin", HOME: root };
   execFileSync("git", ["init", "--quiet", root], { env });
-  writeFileSync(fixture, `#!${process.execPath}
+  const providerScript = (versionLine: string): string => `#!${process.execPath}
 const args = process.argv.slice(2);
-if (args.includes('--version')) console.log('fixture 0.153.4');
+if (args.includes('--version')) console.log('${versionLine}');
 else if (args.includes('--help')) console.log('Codex app-server');
 else if (args[0] === 'login') console.log('Logged in using ChatGPT');
 else if (args[0] === 'auth') console.log(JSON.stringify({ loggedIn: true }));
@@ -97,7 +98,9 @@ else {
     }
   });
 }
-`, { mode: 0o700 });
+`;
+  writeFileSync(fixture, providerScript("fixture 0.153.4"), { mode: 0o700 });
+  writeFileSync(claudeFixture, providerScript("2.1.320 (Claude Code)"), { mode: 0o700 });
   vi.spyOn(environment, "providerEnvironment").mockResolvedValue({ env, pathEntries: ["/usr/bin", "/bin"] });
   const children: ChildProcess[] = [];
   const closes = new Map<number, Promise<void>>();
@@ -131,7 +134,7 @@ else {
     const results = await Promise.allSettled([
       detectProviders({
         codex: { command: fixture, cwd: root },
-        claude: { command: fixture, cwd: root },
+        claude: { command: claudeFixture, cwd: root },
         cursor: { command: join(root, "absent-cursor"), cwd: root },
         kimi: { command: join(root, "absent-kimi"), cwd: root },
         opencode: { command: join(root, "absent-opencode"), cwd: root },

@@ -1,22 +1,51 @@
 import type { Input, KeyboardInputEvent } from "electron";
 
-const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n", "t", "w"]);
+import {
+  APP_SHORTCUT_KEYS,
+  DEFAULT_APP_KEYBINDINGS,
+  type AppShortcutKey,
+} from "../shared/keybindings.js";
+
+const CLOSE_PANEL_KEY = "w";
+
+/**
+ * The keys a focused page hands back to the app: the keys the app shortcuts
+ * are currently bound to, as the renderer last reported them, plus the fixed
+ * close-panel key. Every other chord stays with the page.
+ */
+let boundShortcutKeys: ReadonlySet<string> = new Set(Object.values(DEFAULT_APP_KEYBINDINGS));
+
+/** Validates a renderer's bound-key report: unique bindable keys only. */
+export function parsePreviewAppShortcutKeys(value: unknown): readonly AppShortcutKey[] | null {
+  if (!Array.isArray(value) || value.length > APP_SHORTCUT_KEYS.length) return null;
+  if (!value.every((key) => APP_SHORTCUT_KEYS.includes(key as AppShortcutKey))) return null;
+  return new Set(value).size === value.length ? value as AppShortcutKey[] : null;
+}
+
+export function setPreviewAppShortcutKeys(keys: readonly AppShortcutKey[]): void {
+  boundShortcutKeys = new Set(keys);
+}
+
+function primaryModifier(
+  input: Pick<Input, "control" | "meta">,
+  platform: NodeJS.Platform | string,
+): boolean {
+  return platform === "darwin"
+    ? input.meta && !input.control
+    : input.control && !input.meta;
+}
 
 export function previewAppShortcutKey(
   input: Pick<Input, "alt" | "control" | "key" | "meta" | "shift" | "type">,
   platform: NodeJS.Platform | string,
+  boundKeys: ReadonlySet<string> = boundShortcutKeys,
 ): string | null {
   const key = input.key.toLowerCase();
-  const modified = key === "w"
-    ? platform === "darwin"
-      ? input.meta && !input.control
-      : input.control && !input.meta
-    : input.meta || input.control;
   return input.type === "keyDown"
-      && modified
+      && primaryModifier(input, platform)
       && !input.alt
       && !input.shift
-      && APP_SHORTCUT_KEYS.has(key)
+      && (key === CLOSE_PANEL_KEY || boundKeys.has(key))
     ? key
     : null;
 }
@@ -25,11 +54,8 @@ export function previewReloadShortcut(
   input: Pick<Input, "alt" | "control" | "key" | "meta" | "shift" | "type">,
   platform: NodeJS.Platform | string,
 ): boolean {
-  const primary = platform === "darwin"
-    ? input.meta && !input.control
-    : input.control && !input.meta;
   return input.type === "keyDown"
-    && primary
+    && primaryModifier(input, platform)
     && !input.alt
     && input.key.toLowerCase() === "r";
 }
@@ -51,8 +77,5 @@ export function closesSecondaryWindow(
 ): boolean {
   if (input.type !== "keyDown" || input.alt || input.shift) return false;
   if (input.key === "Escape") return !input.meta && !input.control;
-  const primary = platform === "darwin"
-    ? input.meta && !input.control
-    : input.control && !input.meta;
-  return primary && input.key.toLowerCase() === "w";
+  return primaryModifier(input, platform) && input.key.toLowerCase() === CLOSE_PANEL_KEY;
 }

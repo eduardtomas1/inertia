@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -127,7 +127,7 @@ function fixture(options: {
       accessMode: "auto-edit",
     },
   });
-  return { store, project, creation, turns, dependencies, handler, run, startPayload, incidentSink };
+  return { root, store, project, creation, turns, dependencies, handler, run, startPayload, incidentSink };
 }
 
 describe("todo command handler", () => {
@@ -193,6 +193,86 @@ describe("todo command handler", () => {
     const project = await run("todo.update", { id, patch: { projectId: randomUUID() } });
     expect(project.events).toEqual([{ type: "request.error", requestId: project.command.requestId, message: "That project no longer exists." }]);
     expect(incidentSink).not.toHaveBeenCalled();
+  });
+
+  it("remembers the chat a task was written from without handing the task to it", async () => {
+    const { store, project, run, startPayload } = fixture();
+    const chat = store.createConversation(project.id, "Release prep", { activate: false });
+    const id = randomUUID();
+
+    const created = await run("todo.create", {
+      id, title: "Fix the build", note: "From the chat.", sourceConversationId: chat.id, projectId: project.id,
+    });
+
+    expect(created.order).toEqual(["todos.updated", "request.ok"]);
+    expect(created.broadcasts).toEqual([{ type: "todos.updated", todos: store.todos.list() }]);
+    expect(store.todos.get(id)).toMatchObject({
+      title: "Fix the build",
+      note: "From the chat.",
+      sourceConversationId: chat.id,
+      conversationId: null,
+      linkedAt: null,
+      projectId: project.id,
+      completedAt: null,
+    });
+
+    const started = await run("todo.start", startPayload(id));
+    expect(started.events).toEqual([expect.objectContaining({ type: "request.result" })]);
+    const handedTo = store.todos.get(id)?.conversationId;
+    expect(handedTo).toBeTruthy();
+    expect(handedTo).not.toBe(chat.id);
+    expect(store.todos.get(id)).toMatchObject({ sourceConversationId: chat.id });
+
+    store.deleteConversation(chat.id);
+    expect(store.todos.get(id)).toMatchObject({ sourceConversationId: null, conversationId: handedTo });
+  });
+
+  it("refuses a source chat from another project or a source chat that does not exist", async () => {
+    const { root, store, project, run } = fixture();
+    mkdirSync(join(root, "other"));
+    const other = store.createProject("Other", join(root, "other"));
+    const foreign = store.createConversation(other.id, "Elsewhere", { activate: false });
+
+    const wrongProject = await run("todo.create", {
+      id: randomUUID(), title: "Task", sourceConversationId: foreign.id, projectId: project.id,
+    });
+    expect(wrongProject.events).toEqual([expect.objectContaining({
+      type: "request.error", message: "The chat does not belong to this project.",
+    })]);
+
+    const unknown = await run("todo.create", {
+      id: randomUUID(), title: "Task", sourceConversationId: randomUUID(), projectId: project.id,
+    });
+    expect(unknown.events).toEqual([expect.objectContaining({
+      type: "request.error", message: "That chat no longer exists.",
+    })]);
+
+    expect(() => clientCommandSchema.parse({
+      type: "todo.create",
+      requestId: randomUUID(),
+      payload: { id: randomUUID(), title: "Task", sourceConversationId: foreign.id },
+    })).toThrow(/must name the chat's project/u);
+    expect(() => clientCommandSchema.parse({
+      type: "todo.create",
+      requestId: randomUUID(),
+      payload: { id: randomUUID(), title: "Task", conversationId: foreign.id, projectId: other.id },
+    })).toThrow();
+    expect(store.snapshot().todos).toEqual([]);
+  });
+
+  it("checks the source chat in the repository too", () => {
+    const { root, store, project } = fixture();
+    mkdirSync(join(root, "elsewhere"));
+    const other = store.createProject("Elsewhere", join(root, "elsewhere"));
+    const foreign = store.createConversation(other.id, "Elsewhere", { activate: false });
+    expect(() => store.todos.create({
+      id: randomUUID(), title: "Task", projectId: project.id, sourceConversationId: foreign.id,
+    })).toThrow("The chat does not belong to this project.");
+    expect(() => store.todos.create({
+      id: randomUUID(), title: "Task", projectId: project.id, sourceConversationId: randomUUID(),
+    })).toThrow("That chat no longer exists.");
+    const plain = store.todos.create({ id: randomUUID(), title: "Plain" });
+    expect(plain).toMatchObject({ sourceConversationId: null, conversationId: null });
   });
 
   it("starts a chat for the task, links it and dispatches the task as the first turn", async () => {

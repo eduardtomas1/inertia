@@ -18,7 +18,7 @@ function finishedTrace(index: number, update: Partial<SubagentTrace> = {}): Suba
     turnId: "turn-old",
     runId: "run-old",
     providerTaskId: `task-old-${index}`,
-    providerName: `Old ${index}`,
+    providerName: `Old ${index}`, description: `Old ${index}`,
     status: "completed",
     createdAt: `2030-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
     ...update,
@@ -26,7 +26,7 @@ function finishedTrace(index: number, update: Partial<SubagentTrace> = {}): Suba
 }
 
 const old = Array.from({ length: 45 }, (_, index) => finishedTrace(index));
-const live = taskTrace({ id: "live", turnId: "turn-new", runId: "run-new", providerName: "Live helper", createdAt: "2030-01-01T01:00:01.000Z" });
+const live = taskTrace({ id: "live", turnId: "turn-new", runId: "run-new", providerName: "Live helper", description: "Live helper", createdAt: "2030-01-01T01:00:01.000Z" });
 
 function page(before: BackgroundTaskCursor | null, update: Partial<BackgroundTasksResult> = {}): BackgroundTasksResult {
   const sorted = [...old].sort((left, right) => right.createdAt.localeCompare(left.createdAt));

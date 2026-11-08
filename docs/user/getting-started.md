@@ -47,7 +47,7 @@ What each provider supports:
 |---|---|---|
 | Claude Code | **Sign in through Claude Code** offers your Claude account or **Sign in for API billing through Claude Code**, which uses your Anthropic Console credits. Once you are signed in, **Sign in for API billing through Claude Code** sits beside **Refresh**. | **Add API key** for an Anthropic API key. |
 | Codex | **Sign in through Codex** runs Codex's own sign-in. | **Add API key** for an OpenAI API key. |
-| Kimi Code | **Sign in through Kimi Code** runs Kimi Code's own sign-in. Usage is not reported. | A built-in Kimi key route. Choose **Add key** on its row. It runs on the Claude Code harness, so Claude Code must be installed. |
+| Kimi Code | **Sign in through Kimi Code** runs Kimi Code's own sign-in. Usage is not reported. | A built-in Kimi key route. Choose **Add key** on its row. It runs on the Claude Code harness, so Claude Code 2.1.309 or newer must be installed. |
 | OpenCode | **Sign in through OpenCode** runs `opencode auth login`. | OpenCode keeps its own keys; add them with `opencode auth login`. |
 | Cursor | **Sign in through Cursor** runs Cursor's own sign-in. Usage is not reported. | Account only. |
 | Antigravity | Sign in with Antigravity's own prompt; see the note above. | Account only. |

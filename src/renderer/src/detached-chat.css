@@ -11,7 +11,7 @@
   background: var(--bg);
 }
 
-.detached-chat-shell.platform-win32 {
+.detached-chat-shell:is(.platform-win32, .platform-linux) {
   --titlebar-overlay-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
 }
 

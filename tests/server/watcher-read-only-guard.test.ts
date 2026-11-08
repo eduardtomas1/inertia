@@ -19,6 +19,7 @@ import {
   READ_ONLY_WATCHER_STOP_MESSAGE,
 } from "../../src/server/runtime/turns/turn-read-only-watcher";
 import { WATCHER_READ_ONLY_REFUSAL } from "../../src/server/persistence/watcher-link-repository";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "../../src/server/runtime/harness-capabilities";
 import {
   cleanupTurnControllerTestDirectories,
   createTurnControllerTestRuntime,
@@ -47,7 +48,10 @@ async function watcherRuntime(
       return { checkpointId: null, failure: null };
     },
     captureGitBefore: ({ turn }) => { gitBefore.push(turn.id); },
-    harnessInstructionsForTurn: () => [{ label: "inertia-orchestration", text: "Capability pack." }],
+    capabilityOfferForTurn: () => ({
+      instructions: [{ label: "inertia-orchestration", text: "Capability pack." }],
+      offer: FULL_HARNESS_CAPABILITY_OFFER,
+    }),
     ...hooks,
   });
   const { store } = runtime;

@@ -15,6 +15,11 @@ import type {
   ProviderModel,
   ProviderRateLimit,
   ProviderSkillInput,
+  ProviderUpdateRequirement,
+  SubagentModelSource,
+  SubagentTaskEffort,
+  SubagentTaskKind,
+  SubagentTaskStep,
   SubagentTaskUsage,
   SubagentTraceStatus,
   ThreadUsageSnapshot,
@@ -60,6 +65,7 @@ export interface ProviderDetection {
   authState: ProviderAuthState;
   accountKind?: ProviderAccountKind;
   canRun: boolean;
+  updateRequired?: ProviderUpdateRequirement;
   /** Exact executable/version protocol probes succeeded independently of auth. */
   protocolVerified?: boolean;
   /** Fixed probe owner completion; false poisons clean runtime shutdown. */
@@ -134,10 +140,10 @@ interface ProviderRunRequest {
   goalContinuationExpected?: boolean;
   /**
    * Optional user-configured spend ceiling for this run, in USD (finite,
-   * > 0, <= 10,000). Only the native Claude Agent SDK route on the built-in
-   * Anthropic backend honors it, as the SDK `maxBudgetUsd` query option, and
-   * subagent usage counts toward it. Every other harness ignores it. Absent
-   * means no limit.
+   * > 0, <= 10,000). Only Claude Agent SDK routes to Anthropic honor it (the
+   * built-in Anthropic backend and the official Anthropic API key endpoint),
+   * as the SDK `maxBudgetUsd` query option, and subagent usage counts toward
+   * it. Every other harness or backend ignores it. Absent means no limit.
    */
   maxBudgetUsd?: number;
   readOnlyProfile?: "watcher";
@@ -397,6 +403,21 @@ export interface ProviderSubagentEvent extends ProviderEventBase {
   usage?: SubagentTaskUsage;
   toolUseCount?: number;
   durationMs?: number;
+  /** Absent leaves the source unknown; a requested hint never replaces an observed model. */
+  modelSource?: SubagentModelSource;
+  /** Absent means a delegated agent. */
+  taskKind?: SubagentTaskKind;
+  background?: boolean;
+  /** Raw shell command; scrubbed and bounded at the persistence boundary. */
+  command?: string;
+  effort?: SubagentTaskEffort;
+  /** The most recent tool steps; replaces any earlier snapshot. */
+  steps?: SubagentTaskStep[];
+  /**
+   * Resolved by the turn runtime from providerToolUseId; adapters never set
+   * this because they do not know Inertia's timeline row identities.
+   */
+  activityId?: string;
 }
 
 export type ProviderEvent =
@@ -494,6 +515,11 @@ export interface ProviderHostToolResult {
 export interface ProviderHostToolBridge {
   readonly definitions: readonly ProviderHostToolDefinition[];
   readonly retiredToolNames?: ReadonlySet<string>;
+  /**
+   * The hidden prompt instructions this turn carries only because the bridge
+   * is offered. A harness that cannot attach the bridge withholds them.
+   */
+  readonly instructions?: readonly { readonly label: string; readonly text: string }[];
   invoke(call: ProviderHostToolCall): Promise<ProviderHostToolResult>;
 }
 
@@ -566,6 +592,7 @@ export interface ProviderRunResult extends ProviderRunIdentity {
   signal: NodeJS.Signals | null;
   error?: string;
   failure?: ProviderRunFailure;
+  sessionInstructionApplied?: false;
   /** True only after authoritative complete process-tree cleanup. */
   cleanupConfirmed: boolean;
   cleanupConfirmation?: Promise<boolean>;
@@ -666,6 +693,7 @@ export interface ProviderCompactionResult {
   instructionForwarded: boolean;
   message: string;
   error?: string;
+  sessionInstructionApplied?: false;
   cleanupConfirmed: boolean;
 }
 

@@ -12,6 +12,7 @@ import {
 } from "react";
 import { resolveMessageSearchDestination, useMessageSearchFocus } from "./useMessageSearchFocus";
 import { useViewportSyncedVirtualizer } from "./useViewportSyncedVirtualizer";
+import { groupSubagentsByTurn, subagentEstimateSignature } from "../../utils/response-timeline/virtualization";
 import type {
   InterfaceScale,
   ResponseDensity,
@@ -29,6 +30,7 @@ import {
   resolveTimelineKeyboardIntent,
   shouldAdjustTimelineScrollPosition,
   shouldConsolidateSettledWorkIntoRunDetails,
+  shouldFollowTimeline,
   shouldShowTimelineMinimap,
   shouldShowTurnGitArtifactSummary,
   shouldVirtualizeTimeline,
@@ -453,6 +455,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     props.showThinking ? "thinking" : "hidden-thinking",
     props.showChangedFileSummaries ? "files" : "hidden-files",
   ].join(":");
+  const subagentsByTurn = useMemo(() => {
+    const grouped = groupSubagentsByTurn(props.subagents ?? [], previousSubagentsByTurn.current);
+    previousSubagentsByTurn.current = grouped;
+    return grouped;
+  }, [props.subagents]);
   const getItemKey = useCallback(
     (index: number) => timelineRef.current[index]?.id ?? `missing-${index}`,
     [],
@@ -460,8 +467,10 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const estimateSize = useCallback((index: number) => {
     const item = timeline[index];
     if (!item) return 280;
+    const subagents = item.kind === "turn" ? subagentsByTurn.get(item.turn.id) : undefined;
+    const layoutKey = subagents ? `${estimateKey}:${subagentEstimateSignature(subagents)}` : estimateKey;
     const cachedByLayout = rowEstimateCache.current.get(item);
-    const cached = cachedByLayout?.get(estimateKey);
+    const cached = cachedByLayout?.get(layoutKey);
     if (cached !== undefined) return cached;
     const artifact = item.kind === "turn" ? item.turn.gitArtifact : null;
     const expandsConsolidatedWork = item.kind === "turn"
@@ -475,13 +484,14 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       showChangedFiles: props.showChangedFileSummaries
         && artifact !== null
         && shouldShowTurnGitArtifactSummary(artifact),
+      subagents,
     });
     const nextCache = cachedByLayout ?? new Map<string, number>();
-    if (!nextCache.has(estimateKey) && nextCache.size >= 12) {
+    if (!nextCache.has(layoutKey) && nextCache.size >= 12) {
       const oldestKey = nextCache.keys().next().value;
       if (oldestKey !== undefined) nextCache.delete(oldestKey);
     }
-    nextCache.set(estimateKey, estimate);
+    nextCache.set(layoutKey, estimate);
     rowEstimateCache.current.set(item, nextCache);
     return estimate;
   }, [
@@ -490,6 +500,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     props.showThinking,
     estimateLayout,
     estimateKey,
+    subagentsByTurn,
     timeline,
   ]);
   const [virtualizer, measureVirtualRow] = useViewportSyncedVirtualizer({
@@ -553,9 +564,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     cancelAnchor?.();
   }, []);
   const onTurnAnchorSettledRef = useRef(props.onTurnAnchorSettled);
+  const followsLatestRef = useRef(props.followsLatest);
   const onTurnAnchorCancelledRef = useRef(props.onTurnAnchorCancelled);
   const onFinalAnswerAutoScroll = props.onFinalAnswerAutoScroll;
   onTurnAnchorSettledRef.current = props.onTurnAnchorSettled;
+  followsLatestRef.current = props.followsLatest;
   onTurnAnchorCancelledRef.current = props.onTurnAnchorCancelled;
   const cancelLayoutAnchorRestoration = useRef<(() => void) | null>(null);
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
@@ -815,7 +828,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     const scrollElement = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root) return;
-    pendingLayoutAnchor.current = captureTranscriptPosition(root, scrollElement);
+    pendingLayoutAnchor.current = captureTranscriptPosition(root, scrollElement, props.followsLatest);
   };
   restoreLayoutAnchorRef.current = () => {
     const layoutAnchor = pendingLayoutAnchor.current;
@@ -924,18 +937,30 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     pendingLayoutAnchor.current = null;
   }, [props.followsLatest]);
 
+  const rememberedFollowMode = useRef<{ conversationId: string; followsLatest?: boolean } | null>(null);
   useEffect(() => {
     if (props.detailLoading || timeline.length === 0) return;
     const scroll = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
     if (!scroll || !root) return;
     const remember = (): void => {
-      if (layoutAnchorActive.current || turnAnchorActive.current) return;
-      rememberTranscriptPosition(props.conversationId, captureTranscriptPosition(root, scroll));
+      if (layoutAnchorActive.current || turnAnchorActive.current || props.turnAnchorId) return;
+      rememberTranscriptPosition(props.conversationId, captureTranscriptPosition(root, scroll, props.followsLatest));
     };
+    const previous = rememberedFollowMode.current;
+    rememberedFollowMode.current = { conversationId: props.conversationId, followsLatest: props.followsLatest };
+    if (previous?.conversationId === props.conversationId && previous.followsLatest !== props.followsLatest) remember();
     scroll.addEventListener("scroll", remember, { passive: true });
     return () => scroll.removeEventListener("scroll", remember);
-  }, [props.conversationId, props.detailLoading, props.scrollElementRef, props.timelineElementRef, timeline.length]);
+  }, [
+    props.conversationId,
+    props.detailLoading,
+    props.followsLatest,
+    props.scrollElementRef,
+    props.timelineElementRef,
+    props.turnAnchorId,
+    timeline.length,
+  ]);
 
   const beginReaderTimelineNavigation = useCallback((): void => {
     cancelLayoutAnchorRestoration.current?.();
@@ -945,10 +970,10 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);
 
   const captureExpansionAnchor = useCallback((sourceTurnId: string): void => {
-    // Disclosures are deliberate history navigation. Claim it before their
-    // resize can let the parent follow-latest observer reclaim the viewport.
-    beginReaderTimelineNavigation();
     const scrollElement = props.scrollElementRef?.current;
+    if (followsLatestRef.current && scrollElement
+      && shouldFollowTimeline(scrollElement.scrollTop, scrollElement.clientHeight, scrollElement.scrollHeight)) return;
+    beginReaderTimelineNavigation();
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root) return;
     const viewport = scrollElement.getBoundingClientRect();
@@ -1056,26 +1081,6 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       number: turnItems[marker.index]!.turn.index,
       timelineIndex: turnItems[marker.index]!.timelineIndex,
     })), [turnItems]);
-  const subagentsByTurn = useMemo(() => {
-    const grouped = new Map<string, SubagentTrace[]>();
-    for (const trace of props.subagents ?? []) {
-      const current = grouped.get(trace.turnId);
-      if (current) current.push(trace);
-      else grouped.set(trace.turnId, [trace]);
-    }
-    for (const [turnId, traces] of grouped) {
-      const previous = previousSubagentsByTurn.current.get(turnId);
-      if (
-        previous
-        && previous.length === traces.length
-        && previous.every((trace, index) => trace === traces[index])
-      ) {
-        grouped.set(turnId, previous);
-      }
-    }
-    previousSubagentsByTurn.current = grouped;
-    return grouped;
-  }, [props.subagents]);
 
   const cancelTimelineItemFocus = useRef<(() => void) | null>(null);
   useLayoutEffect(() => () => {

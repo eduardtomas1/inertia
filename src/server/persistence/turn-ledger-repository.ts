@@ -360,15 +360,26 @@ export class TurnLedgerRepository {
       FROM agent_turns AS turn JOIN messages AS message ON message.id = turn.user_message_id
       WHERE turn.id = ?
     `).get(turnId) as { content: string | null } | undefined;
+    // Background commands end with the provider process, so a restart leaves
+    // them stopped rather than lost; they will not report back either.
+    const lostWork = `turn_id = ? AND (status = 'lost' OR (
+      task_kind IN ('shell', 'monitor', 'mcp')
+      AND status = 'cancelled'
+      AND progress = 'Stopped when the turn ended.'
+    ))`;
     const lost = this.context.database.prepare(`
-      SELECT substr(COALESCE(NULLIF(trim(description), ''), provider_name, provider_role, 'delegated task'), 1, 1000) AS label
+      SELECT substr(CASE
+        WHEN task_kind IN ('shell', 'monitor', 'mcp')
+          THEN 'background command: ' || COALESCE(NULLIF(trim(description), ''), command, 'command')
+        ELSE COALESCE(NULLIF(trim(description), ''), provider_name, provider_role, 'delegated task')
+      END, 1, 1000) AS label
       FROM subagent_traces
-      WHERE turn_id = ? AND status = 'lost'
+      WHERE ${lostWork}
       ORDER BY created_at ASC, id ASC
       LIMIT ?
     `).all(turnId, MAX_RUNTIME_INTERRUPTION_ENTRIES) as Array<{ label: string }>;
     const { count } = this.context.database.prepare(
-      "SELECT COUNT(*) AS count FROM subagent_traces WHERE turn_id = ? AND status = 'lost'",
+      `SELECT COUNT(*) AS count FROM subagent_traces WHERE ${lostWork}`,
     ).get(turnId) as { count: number };
     return { request: request?.content ?? null, lostTasks: lost.map(({ label }) => label), lostTaskCount: count };
   }
@@ -502,6 +513,14 @@ export class TurnLedgerRepository {
       LIMIT 1
     `).get(conversationId, row.turn_id, row.turn_id, row.created_at) as { digest: unknown } | undefined;
     return { sessionInstructionDigest: isSessionInstructionDigest(digest?.digest) ? digest!.digest : null };
+  }
+
+  forgetSessionInstruction(turnId: string): void {
+    this.context.database.prepare(`
+      UPDATE turn_execution_manifests
+      SET manifest_json = json_remove(manifest_json, '$.sessionInstructionDigest')
+      WHERE turn_id = ? AND json_valid(manifest_json)
+    `).run(turnId);
   }
 
   promptWithheld(turnId: string): boolean {

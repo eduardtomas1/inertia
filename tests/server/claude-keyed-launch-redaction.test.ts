@@ -292,7 +292,9 @@ describe("keyed Claude launch redaction", () => {
       for (const [toolName, command] of [
         ["Bash", "printenv"],
         ["PowerShell", "Get-ChildItem Env:"],
+        ["Monitor", "printenv"],
         ["Bash", "ls -la"],
+        ["Monitor", "tail -f app.log"],
         ["Read", "printenv"],
       ] as const) {
         hookOutputs.push(await matcher!.hooks[0]!({
@@ -306,8 +308,12 @@ describe("keyed Claude launch redaction", () => {
         } as never, `hook-${hookOutputs.length}`, { signal: new AbortController().signal }));
       }
       const canUseTool = options?.canUseTool as CanUseTool;
-      for (const command of ["echo $ANTHROPIC_AUTH_TOKEN", "npm test"]) {
-        decisions.push((await canUseTool("Bash", { command }, {
+      for (const [toolName, command] of [
+        ["Bash", "echo $ANTHROPIC_AUTH_TOKEN"],
+        ["Monitor", "printenv"],
+        ["Bash", "npm test"],
+      ] as const) {
+        decisions.push((await canUseTool(toolName, { command }, {
           signal: new AbortController().signal,
           toolUseID: `tool-${decisions.length}`,
           requestId: `permission-${decisions.length}`,
@@ -319,6 +325,9 @@ describe("keyed Claude launch redaction", () => {
     expect(options?.permissionMode).toBe("bypassPermissions");
     expect(options?.hooks?.PreToolUse).toHaveLength(1);
     expect(options?.hooks?.PreToolUse?.[0]?.matcher).toBe(CLAUDE_CREDENTIAL_COMMAND_HOOK_MATCHER);
+    expect(["Bash", "PowerShell", "Monitor", "Read"].filter((toolName) =>
+      new RegExp(`^(?:${CLAUDE_CREDENTIAL_COMMAND_HOOK_MATCHER})$`, "u").test(toolName)))
+      .toEqual(["Bash", "PowerShell", "Monitor"]);
     const refusal = {
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
@@ -326,9 +335,10 @@ describe("keyed Claude launch redaction", () => {
         permissionDecisionReason: CLAUDE_KEYED_LAUNCH_COMMAND_REFUSAL,
       },
     };
-    expect(hookOutputs).toEqual([refusal, refusal, {}, {}]);
-    expect(decisions.map((decision) => decision.behavior)).toEqual(["deny", "allow"]);
+    expect(hookOutputs).toEqual([refusal, refusal, refusal, {}, {}, {}]);
+    expect(decisions.map((decision) => decision.behavior)).toEqual(["deny", "deny", "allow"]);
     expect(decisions[0]).toMatchObject({ message: CLAUDE_KEYED_LAUNCH_COMMAND_REFUSAL });
+    expect(decisions[1]).toMatchObject({ message: CLAUDE_KEYED_LAUNCH_COMMAND_REFUSAL });
     expectNoSecret(events);
   });
 

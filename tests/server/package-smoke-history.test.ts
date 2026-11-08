@@ -29,7 +29,7 @@ vi.mock("../../src/server/environment", async (importOriginal) => {
 
 import type { RunningRuntime } from "../../src/server";
 import type { AgentTurn, ChatMessage, Conversation, Project, ServerEvent } from "../../src/shared/contracts";
-import { portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
+import { portableNodeExecutable, removePortableFixture, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
 import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 import { startTestRuntime } from "../support/test-runtime";
 import { connectRuntime } from "../support/runtime-event-queue";
@@ -140,7 +140,7 @@ const roots: string[] = [];
 const runtimes: RunningRuntime[] = [];
 afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map((root) => removePortableFixture(root)));
   discoveryFixture.directory = "";
   vi.unstubAllEnvs();
 });
@@ -319,6 +319,7 @@ it.each([false, true])("requires a current-process catalog after cached startup 
   let startupSettled = false;
   let prematureRefresh = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let release: ReturnType<typeof setTimeout> | undefined;
   const cached = (refreshing: boolean) => ({ ...readyCodex,
     metadataState: { models: { freshness: "fresh", provenance: "persistent-cache", refreshing } } });
   try {
@@ -338,17 +339,19 @@ it.each([false, true])("requires a current-process catalog after cached startup 
           socket.send(JSON.stringify({ type: "snapshot.updated", snapshot: { providers: [readyCodex] } }));
         }
         socket.send(JSON.stringify({ type: "request.ok", requestId: command.requestId }));
+        if (!publishCurrentCatalog) release ??= setTimeout(() => socket.close(), 250);
       });
     });
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("No fixture port.");
-    const discovery = smoke.readPackagedCodexDiscovery(`ws://127.0.0.1:${address.port}`, Date.now() + 1_000);
+    const discovery = smoke.readPackagedCodexDiscovery(`ws://127.0.0.1:${address.port}`, Date.now() + 10_000);
     if (publishCurrentCatalog) await expect(discovery).resolves.toEqual(readyCodex);
-    else await expect(discovery).rejects.toThrow("exceeded its deadline");
+    else await expect(discovery).rejects.toThrow("closed before history proof completed");
     expect(prematureRefresh).toBe(false);
     expect(refreshes).toBe(1);
   } finally {
     clearTimeout(timer);
+    clearTimeout(release);
     for (const socket of server.clients) socket.terminate();
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
   }

@@ -4,6 +4,7 @@ import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntime
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import { RUNTIME_QUEUE_CHANGED } from "../../src/renderer/src/components/composer/runtimeQueueClient";
+import { readSourceText } from "../helpers/source-text";
 
 const command: CommandWithoutId = {
   type: "git.branch.switch",
@@ -100,4 +101,28 @@ it("treats a follow-up the runtime queued for the next turn as sent and refreshe
     expect(setActionError).toHaveBeenCalledWith(null);
     expect(queueChanged).toHaveBeenCalledWith(expect.objectContaining({ detail: conversationId }));
   } finally { window.removeEventListener(RUNTIME_QUEUE_CHANGED, queueChanged); }
+});
+
+it("leaves a failed usage refresh to the Usage panel instead of the global toast", async () => {
+  const error = new Error("Claude usage could not be read.");
+  const setActionError = vi.fn();
+  const sendCommand = vi.fn().mockRejectedValue(error);
+  const { result } = renderHook(() => useAppRuntimeActions({
+    sendCommand, refreshDetail: vi.fn(), setActionError, setBusyAction: vi.fn(),
+  }));
+  await act(async () => {
+    await expect(result.current.refreshUsage("claude")).rejects.toBe(error);
+  });
+  expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({
+    type: "provider.refresh", payload: { providerId: "claude", scope: "usage" },
+  }));
+  expect(setActionError).not.toHaveBeenCalled();
+});
+
+it("refreshes usage through that action in the main window and in a chat's own window", () => {
+  for (const path of ["src/renderer/src/App.tsx", "src/renderer/src/components/detached/useDetachedWorkspaceScene.ts"]) {
+    expect(readSourceText(path)).not.toContain('scope: "usage"');
+  }
+  expect(readSourceText("src/renderer/src/components/detached/useDetachedWorkspaceScene.ts"))
+    .toContain("refreshUsage: runtimeActions.refreshUsage");
 });

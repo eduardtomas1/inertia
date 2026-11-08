@@ -285,7 +285,7 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     harnessId: "claude-agent-sdk",
     implementationRevision: 1,
     protocolRevision: "claude-agent-sdk/messages-v1",
-    bundledSdkVersion: "0.3.309",
+    bundledSdkVersion: "0.3.314",
     requiresConfiguration: ["custom-backend", "endpoint-selection"],
     support: {
       ...CORE_NATIVE,
@@ -304,8 +304,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "cursor",
     harnessId: "cursor-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-2.0.1/cursor",
-    bundledSdkVersion: "2.0.1",
+    protocolRevision: "acp-v1/sdk-2.1.0/cursor",
+    bundledSdkVersion: "2.1.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",
@@ -321,8 +321,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "kimi",
     harnessId: "kimi-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-2.0.1/kimi",
-    bundledSdkVersion: "2.0.1",
+    protocolRevision: "acp-v1/sdk-2.1.0/kimi",
+    bundledSdkVersion: "2.1.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",
@@ -336,8 +336,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "opencode",
     harnessId: "opencode-sdk",
     implementationRevision: 2,
-    protocolRevision: "opencode-owned-server/sdk-1.19.4",
-    bundledSdkVersion: "1.19.4",
+    protocolRevision: "opencode-owned-server/sdk-1.19.5",
+    bundledSdkVersion: "1.19.5",
     support: {
       ...CORE_NATIVE,
       "follow-up-steer": "native",

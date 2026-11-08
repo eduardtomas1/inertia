@@ -2,6 +2,267 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Chats
+
+- Choosing Build or Plan right after a chat's first reply is no longer
+  refused with *Stop the active run*, leaving the old mode in place.
+- Pressing End while an answer is still arriving keeps following it, instead
+  of sometimes stopping just short and leaving **Jump to latest** showing.
+
+### Chat windows
+
+- A chat's own window also has the new Git, blame and search commands for
+  its workspace. Worktree management and creating tasks stay in the main
+  window.
+
+### Subagents and background commands
+
+- When an agent hands work to a subagent, its row shows what the subagent is
+  doing: its name or role, the model that actually runs it (marked
+  *requested* when the provider has not reported one), its state, how long
+  it has run and the step it is on. **Steps** lists its last eight tool calls
+  and **Result** shows what it returned. Codex child agents appear as compact
+  rows under the turn.
+- Commands an agent runs in the background appear in the chat and in
+  **Background tasks** with their command and state, and no longer keep a
+  turn from finishing.
+- **Stop** ends one Claude task or background command, even one that has
+  only just started, and says so when Claude refuses or does not answer.
+  **Move to background** lets a Claude agent keep working while the chat
+  goes on.
+- After Inertia restarts in the middle of a turn, its note lists the agents
+  and background commands that ended with it.
+
+### Agent tools
+
+- Agents with Inertia's tools can read their own workspace: Git status, the
+  turn's diff, the plan, the chat's goal, and the project's tasks and
+  actions. Every read is limited in size, and secrets and local paths are
+  removed before the agent sees it.
+- A chat can wait up to 20 seconds at a time for a chat it started and read
+  that chat's turns without asking you first. Waiting does not use up the
+  turn's tool allowance.
+- An agent is told only about the tools it can call on that turn. A resumed
+  Codex chat that started before a tool existed is not told about it until
+  its next new session, also after Inertia restarts. With Browser access
+  off, the Browser tools answer that access is off.
+
+### Plan
+
+- Steps read from a reply appear only for replies in Plan mode, are marked
+  as read from the reply and are never ticked off. **Implement** sends the
+  plan's own text, and **Implement in a new chat** opens a new chat on the
+  same worktree with the plan as its first draft.
+
+### Terminal and Files
+
+- The terminal opens web links, including OSC 8 links, through Inertia's
+  link rules, opens printed file paths at their line and column, has a find
+  bar (Ctrl+Shift+F, or Cmd+F on macOS) and **Add selection to prompt**.
+- Files lets you select lines to **Ask about** or **Add to prompt**, and
+  searches file names or contents.
+- Files a chat's own messages carry can be attached again.
+
+### Tasks
+
+- **Create task from message**, and **Create task** on a plan step, make a
+  task that links back to its chat without handing it to an agent.
+
+### Git
+
+- Diffs are syntax-highlighted, show which words changed, and switch between
+  **Unified** and **Split** per chat.
+- **Stage** and **Unstage** work per file in Changes and touch only the
+  index.
+- The commit message box has room for several lines and starts from a draft
+  based on the review summary of the same changes.
+- **History…** lists commits and opens any of them, and Files has a
+  **Blame** gutter.
+- **Settings → Projects → Worktrees** lists worktrees and removes one only
+  when it is clean, unlocked, not in use and created by Inertia. Removal is
+  never forced.
+
+### Palette and keyboard
+
+- Cmd/Ctrl+K has Surfaces, Git and Window groups, and Cmd/Ctrl+G opens a
+  surface from anywhere.
+- A focused Browser page keeps the keys Inertia does not use, such as
+  Ctrl+Y, Ctrl+U and Ctrl+H.
+
+## 0.0.82 — 2026-11-03
+
+A Library for the answers worth keeping and the pages your agents drew.
+
+### Library
+
+- A new **Library** in the sidebar, below Tasks, and in the command palette,
+  keeps the answers you save. Choose the bookmark beside Copy under a finished
+  reply to save it. It goes to the category you used last, and the menu that
+  opens lets you move it, make a new category or remove it again.
+- Name your own categories, rename them or delete them; deleting one moves its
+  answers to *Unsorted*. Search finds saved answers by title, text, chat,
+  project or category, and you can rename a saved answer.
+- **Open in chat** takes you back to the chat and lands on that reply with a
+  brief highlight, even far back in a long history or in a chat open in its
+  own window. An answer in an archived chat offers **Restore and open**.
+- **Pages** shows every page an agent drew for you, across all chats, as live
+  previews. Open one full size, then **Go to answer** to read the turn it came
+  from.
+- A search result you open gets the same brief highlight.
+- Deleting a chat also removes its saved answers.
+
+## 0.0.81 — 2026-11-03
+
+Large Claude skills that work, a reader who stays where they stop, Linux
+window controls inside the app, a larger allowance for Inertia's own tools,
+and minimum versions for Claude Code and OpenCode.
+
+### Skills
+
+- Claude skills too large to copy, such as a skill installed with
+  `git clone` or one bundling its own documentation, no longer fail every
+  turn with *A selected Claude skill file could not be revalidated*. Small
+  skills are still copied for each turn; larger ones keep their checked
+  `SKILL.md` and link to their folders, so the agent reads files such as
+  `./wiki/` from where you installed them. Version-control folders like
+  `.git` are never included.
+- Large skills Inertia finds on its own are offered to Claude too, instead of
+  being left out silently.
+
+### Security
+
+- Chats no longer start on Claude Code older than 2.1.309 or OpenCode older
+  than 1.18.22. Older Claude Code ignores the restrictions Inertia sets and
+  can write outside the project; older OpenCode lets a website install
+  packages through its local server.
+  **Settings → Agents** shows *Update required* with the installed and
+  required versions, and the composer shows *Update needed* on every route
+  for that agent, API keys included, until you update it and refresh.
+  Inertia never starts the old version for sign-in, models, usage, skills or
+  terminal resume, and still offers its update.
+
+### Chats
+
+- Scrolling up through an answer, while it streams or after it finishes,
+  leaves you where you stop. Before, stopping anywhere near the end pulled you
+  back to the bottom less than a second later. Scrolling back to the very end,
+  **Jump to latest**, End or sending a message follows new messages again, and
+  coming back to a chat restores the row you were reading.
+- Opening or closing a tool's output or an agent's steps at the bottom of a
+  chat keeps following new messages instead of showing **Jump to latest**.
+- **Compact and send** is offered only once the chat has a provider session
+  to compact. When the chat cannot be compacted, for example because its next
+  turn starts a new session after you changed the model backend, the draft
+  stays with **Send without compacting** instead of Enter failing every time.
+- **Send now** on a queued message waits while the chat compacts. One pressed
+  just as compacting started is sent when it ends, instead of being dropped.
+- After you press End, dragging the scrollbar, a search result, the minimap,
+  **Load earlier messages** or another chat no longer hides **Jump to latest**
+  or pulls the chat back to the bottom while you read.
+- Switching away right after sending no longer brings you back to an older
+  reading position instead of your new message.
+
+### Chat windows
+
+- Closing a chat's own window with its title-bar button, Alt+F4, the taskbar
+  or Ctrl+Shift+W (Cmd+Shift+W on macOS) hands its terminals back to the main
+  window, as **Return** and **Close** do, instead of stopping them about 30
+  seconds later, as long as the main window has room for them. The same
+  applies to a chat window whose page crashed.
+- The main window takes back a closed chat window's terminals before it
+  updates its window list, so no stale terminal tabs are left behind. When it
+  has room for them it keeps them running in the background until you open
+  that chat's terminal. If it is already at its terminal limit (four per
+  window) or the local service is offline, they stop after 30 seconds unless
+  you open that terminal, and Diagnostics records it.
+
+### Linux
+
+- Minimize, maximize and close sit inside Inertia's header, in the main
+  window and in a chat's own window, instead of in a separate system title
+  bar above it. They follow the app theme, and buttons placed on the left by
+  your desktop keep clear of the sidebar.
+- A Linux app update no longer reports a failed stop when Inertia's process
+  guardian had already exited cleanly.
+
+### Agents and Inertia tools
+
+- An agent can make up to 1,024 calls to Inertia's own tools (Browser, chats)
+  in one turn, up from 128, which long Browser checks used up. When the
+  allowance does run out, the agent is told a retry won't help until the next
+  turn.
+
+### Accounts and API keys
+
+- A project's spend limit now also caps Claude chats on an Anthropic API key.
+  Since 0.0.79 those chats ran without the limit.
+
+### Agent instructions
+
+- When reading Codex's configuration fails or takes over three seconds,
+  Inertia leaves your own Codex developer instructions in place and sends its
+  chat instructions with that message instead of replacing yours for the
+  session. Diagnostics notes when this happens.
+
+### Stop, restart and providers
+
+- A turn that ends on its own or fails while its agent process can't be
+  confirmed stopped now says in the chat that the process may still be
+  running, as a stopped turn already did.
+- When the local service has repeatedly stopped without its processes being
+  confirmed stopped, **Restart** retries that cleanup first and starts a new
+  one only once it succeeds, instead of starting another beside them.
+
+### Usage
+
+- A failed **Refresh usage** is reported once, in the Usage panel, instead of
+  also as an app-wide error. The usage clock stops while the window is hidden
+  and catches up when you come back.
+
+### Updates
+
+- A finished update in the sidebar strip, such as *Codex updated* or
+  *downloaded · Restart*, stays for its full five seconds with reduced motion
+  on or after the window was hidden, and waits while you point at it or focus
+  it.
+- The refresh icon no longer jumps when its wind-up turns into a spin or stops
+  abruptly when it coasts to rest.
+- Quitting while an update is being prepared no longer hangs. Inertia exits
+  when the shutdown deadline passes and records that cleanup wasn't confirmed.
+
+### Dependencies
+
+- Updated the Claude Agent SDK to 0.3.314 to match Claude Code 2.1.314. The
+  hook and skill-shell restrictions Inertia sets for every Claude turn are
+  honoured by Claude Code 2.1.309 or newer, which is now the minimum. When
+  your organization requires Claude Code's sandbox and it can't run on your
+  computer, the chat now says so instead of showing a generic failure.
+- Private Connect saves its encrypted state with Electron's asynchronous
+  secure storage, ahead of Electron 46 removing the synchronous one. Existing
+  pairings keep working.
+- Updated Electron to 45.1.0, with Chromium 156.0.8078.49 and Node 24.22.1.
+- Updated the Agent Client Protocol SDK used by Cursor and Kimi to 2.1.0. A
+  usage update with a negative or fractional token count is now skipped
+  instead of failing the turn.
+- Updated the Anthropic SDK to 1.3.0, now licensed Apache-2.0; the
+  third-party notices include both its Apache-2.0 and earlier MIT terms.
+- Claude chats in Plan mode ask before running commands again. Claude Code
+  lets its auto mode classifier approve planning commands by default whenever
+  auto mode is available, which skipped Inertia's approval.
+- On an API-key backend, Claude's Monitor tool can no longer run commands that
+  print the key, as Bash and PowerShell already could not.
+- Codex chats on a custom or API-key backend keep working with Codex 0.166,
+  which refuses a chat whose backend was not chosen when Codex started.
+- OpenCode installed with Homebrew no longer shows an update to OpenCode 2,
+  which Inertia does not support yet; Homebrew only offers 2.x now.
+- An expired Antigravity sign-in now shows the Connect prompt instead of a
+  generic error.
+- Updated the OpenCode SDK to 1.19.5, the MCP SDK to 1.32.2, lucide-react to
+  1.64.0, morphicons to 2.0.2, the virtual list to 3.14.24, the accessibility
+  reader to 0.15.4, oxlint to 1.90.0 and the Babel parser to 7.29.12.
+
 ## 0.0.80 — 2026-10-28
 
 A chat's own window with the main window's tools, an agent Browser with its
@@ -81,7 +342,8 @@ mode, and a composer with room at the bottom.
   mode, images, file tools, skills, goals, **Compact and send**, and
   follow-ups that continue the same session, also after the agent updates.
   Account-only features such as quota windows and fast mode stay with your
-  subscription.
+  subscription. Inertia's own tools (the Browser, chat orchestration and HTML
+  pages) are not available on a key.
 - Third-party compatible backends keep the stricter rule: only what their
   model test confirmed.
 

@@ -190,7 +190,7 @@ describe("Claude Windows shim discovery", () => {
         cleanupConfirmed: true,
         exitCode: args[0] === "--version" || signedIn ? 0 : 1,
         output: args[0] === "--version"
-          ? "2.1.0 (Claude Code)"
+          ? "2.1.320 (Claude Code)"
           : JSON.stringify({ loggedIn: signedIn }),
       }),
       claudeLaunchTarget: { platform: "win32", fileSystem },

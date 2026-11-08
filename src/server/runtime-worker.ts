@@ -35,11 +35,13 @@ import {
 } from "./runtime-worker-startup-preflight.js";
 import { observeRuntimeStartup } from "./runtime-worker-startup-failure.js";
 import { answerRuntimeHtmlRenderRead } from "./runtime-html-render-reads.js";
+import { answerRuntimeAttachmentConversations } from "./runtime-attachment-conversation-reads.js";
 import {
   installRuntimeWorkerFaultHandlers,
   runtimeOwnedProcessFaultIncidentCode,
 } from "./runtime-worker-process-faults.js";
 import { createIncidentReporter } from "../node/application-incidents.js";
+import { runtimeSupervisorShutdownGraceMs } from "../node/runtime-shutdown-deadline.js";
 import type { DiagnosticCode, DiagnosticOutcome } from "../shared/application-diagnostics.js";
 
 let runtime: RunningRuntime | null = null;
@@ -176,6 +178,8 @@ installRuntimeWorkerFaultHandlers(process, {
   started: () => runtimeGenerationId !== null,
   recordIncident: (code) => recordWorkerIncident(code, code === "runtime.uncaught-exception" ? "failed" : "unknown"),
   requestRestart: () => requestRuntimeRestart("uncaught-exception"),
+  forceExit: () => process.exit(1),
+  forceExitAfterMs: runtimeSupervisorShutdownGraceMs(),
 });
 
 parentPort.on("message", (messageEvent) => {
@@ -388,6 +392,10 @@ parentPort.on("message", (messageEvent) => {
   }
   if (command.type === "runtime.read-html-render") {
     post(answerRuntimeHtmlRenderRead(stopping ? null : runtime, command));
+    return;
+  }
+  if (command.type === "runtime.attachment-conversations") {
+    post(answerRuntimeAttachmentConversations(stopping ? null : runtime, command));
     return;
   }
   if (command.type === "runtime.database-recovery-cancel") {

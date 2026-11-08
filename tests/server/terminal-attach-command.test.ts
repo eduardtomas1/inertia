@@ -52,6 +52,7 @@ describe("terminal.attach command", () => {
       91,
       31,
       undefined,
+      false,
     );
     expect(send).toHaveBeenCalledWith(socket, {
       type: "terminal.created",
@@ -89,7 +90,51 @@ describe("terminal.attach command", () => {
       80,
       24,
       undefined,
+      false,
     );
+  });
+
+  it("takes a handed-back terminal in the background only without a replacement", async () => {
+    const attach = vi.fn(() => ({ terminalId }));
+    const handler = createProjectWorkspaceCommandHandler({
+      workspacePath: vi.fn(() => "/workspace/project"),
+      terminals: { attach },
+      send: vi.fn(),
+    } as unknown as ProjectWorkspaceCommandDependencies);
+    const socket = { readyState: WebSocket.OPEN } as WebSocket;
+
+    await handler(socket, {
+      type: "terminal.attach",
+      requestId: "55555555-5555-4555-8555-555555555555",
+      payload: { projectId, conversationId, terminalId, background: true, cols: 80, rows: 24 },
+    });
+    await handler(socket, {
+      type: "terminal.attach",
+      requestId: "88888888-8888-4888-8888-888888888888",
+      payload: {
+        projectId,
+        conversationId,
+        terminalId,
+        background: true,
+        replacementRequestId: "77777777-7777-4777-8777-777777777777",
+        cols: 80,
+        rows: 24,
+      },
+    });
+
+    expect(attach.mock.calls).toEqual([
+      [socket, terminalId, "/workspace/project", { projectId, conversationId }, 80, 24, undefined, true],
+      [
+        socket,
+        terminalId,
+        "/workspace/project",
+        { projectId, conversationId },
+        80,
+        24,
+        "77777777-7777-4777-8777-777777777777",
+        false,
+      ],
+    ]);
   });
 
   it("requests authoritative replacement reconciliation after ambiguous delivery", async () => {
@@ -124,6 +169,7 @@ describe("terminal.attach command", () => {
       80,
       24,
       "77777777-7777-4777-8777-777777777777",
+      false,
     );
     expect(send).toHaveBeenCalledWith(socket, expect.objectContaining({
       type: "terminal.created",

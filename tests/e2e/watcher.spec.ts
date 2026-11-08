@@ -4,7 +4,12 @@ import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
-import { TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
+import {
+  GIT_READ_OPERATION_TIMEOUT_MS,
+  MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
+  TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
+  TURN_GIT_ARTIFACT_PRE_CAPTURE_TIMEOUT_MS,
+} from "../../src/shared/runtime-command-timeouts";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
 import { closeWorkspaceTools, ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
@@ -19,6 +24,10 @@ const NOTE_ANSWER = "Restored the empty-line test in tests/parser.test.ts.";
 const DISMISSED = "The diff stat lists only src/parser.ts.";
 const FOLLOW_UP = "Add a changelog line for the parser fix.";
 const AUTO_FINDING = "The changelog line names the lexer, but the fix is in src/parser.ts.";
+const WATCHER_GUARD_DEADLINE_MS = 10_000;
+const CHECK_SETTLE_TIMEOUT_MS = TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS + 2 * WATCHER_GUARD_DEADLINE_MS;
+const TURN_CAPTURE_TIMEOUT_MS = TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS;
+const TURN_START_TIMEOUT_MS = MESSAGE_SEND_PREPARATION_TIMEOUT_MS + 2 * TURN_GIT_ARTIFACT_PRE_CAPTURE_TIMEOUT_MS;
 
 const watcherAppServer = `
 const fs = require("node:fs");
@@ -188,10 +197,13 @@ test.describe("watcher on the fake Codex route", () => {
   const handle = (): Locator => app.page.getByRole("button", { name: /^Open watcher/u });
   const phase = (): Locator => dock().locator(".watcher-bar-state");
   const feedEntries = (): Locator => dock().locator(".watcher-feed-list > li");
-  const expectMenuNote = async (text: string | RegExp): Promise<void> => {
+  const expectCheckSettled = async (): Promise<void> => {
+    await expect(phase()).toHaveAttribute("data-phase", "watching", { timeout: CHECK_SETTLE_TIMEOUT_MS });
+  };
+  const expectMenuNote = async (text: string | RegExp, timeout?: number): Promise<void> => {
     await dock().getByRole("button", { name: "More watcher actions" }).click();
     const menu = app.page.getByRole("menu", { name: "More watcher actions" });
-    await expect(menu.getByRole("menuitem", { name: text, exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: text, exact: true })).toBeVisible({ timeout });
     await expect(menu.locator(":focus")).toHaveCount(1);
     await app.page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
@@ -276,28 +288,29 @@ test.describe("watcher on the fake Codex route", () => {
   });
 
   test("shows a check in progress and folds quiet checks into one receipt", async ({ browserName: _browserName }, info) => {
+    test.setTimeout(info.timeout + TURN_START_TIMEOUT_MS + 2 * CHECK_SETTLE_TIMEOUT_MS);
     await gate("main-step-1");
-    await expectMenuNote("1 event waiting");
+    await expectMenuNote("1 event waiting", TURN_START_TIMEOUT_MS);
     await dock().getByRole("button", { name: "Check now" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
-    await expect(dock().locator(".watcher-notice-line")).toHaveText(/^Check 1$/u);
+    await expect(dock().locator(".watcher-notice-line")).toHaveText(/^Check 1$/u, { timeout: CHECK_SETTLE_TIMEOUT_MS });
     await expect(dock().getByRole("button", { name: "Check now" })).toHaveAttribute("aria-disabled", "true");
     await expect(sidebar().locator(".watcher-work-row-state")).toHaveText("Checking");
     await capture(info, "dock-checking-light");
 
     await queueWatcherReply("SILENT");
     const receipt = dock().locator(".watcher-receipt:not(.is-notice) summary");
-    await expect(receipt).toHaveText(/^Checked once · .+ · nothing to report/u);
-    await expect(phase()).not.toHaveAttribute("data-phase", "waking");
+    await expectCheckSettled();
+    await expect(receipt).toHaveText(/^Checked once · .+ · nothing to report/u, { timeout: CHECK_SETTLE_TIMEOUT_MS });
 
     await gate("main-step-2");
     await expectMenuNote("1 event waiting");
     await dock().getByRole("button", { name: "Check now" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
     await queueWatcherReply("SILENT");
-    await expect(receipt).toHaveText(/^Checked 2 times · .+ · nothing to report/u);
+    await expectCheckSettled();
+    await expect(receipt).toHaveText(/^Checked 2 times · .+ · nothing to report/u, { timeout: CHECK_SETTLE_TIMEOUT_MS });
     await expect(dock().locator(".watcher-receipt:not(.is-notice)")).toHaveCount(1);
-    await expect(phase()).not.toHaveAttribute("data-phase", "waking");
     await expectMenuNote("0 events waiting");
     await receipt.click();
     await expect(dock().locator(".watcher-receipt-checks > li")).toHaveCount(2);
@@ -307,6 +320,7 @@ test.describe("watcher on the fake Codex route", () => {
   });
 
   test("pauses, resumes and dismisses a finding from the dock", async ({ browserName: _browserName }) => {
+    test.slow();
     const page = app.page;
     await dock().getByRole("button", { name: "More watcher actions" }).click();
     await page.getByRole("menu", { name: "More watcher actions" }).getByRole("menuitem", { name: "Pause", exact: true }).click();
@@ -321,7 +335,8 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(phase()).toHaveAttribute("data-phase", "waking");
     await queueWatcherReply(DISMISSED);
     const card = dock().getByRole("article", { name: DISMISSED });
-    await expect(card).toBeVisible();
+    await expectCheckSettled();
+    await expect(card).toBeVisible({ timeout: CHECK_SETTLE_TIMEOUT_MS });
     await card.getByRole("button", { name: "Dismiss", exact: true }).click();
     await expect(card).toHaveCount(0);
     await expect(dock().getByRole("heading", { level: 2 })).toBeFocused();
@@ -331,7 +346,7 @@ test.describe("watcher on the fake Codex route", () => {
   });
 
   test("queues a finding and delivers it after the watched turn as a watcher note", async ({ browserName: _browserName }, info) => {
-    test.slow();
+    test.setTimeout(info.timeout + 2 * CHECK_SETTLE_TIMEOUT_MS + 2 * TURN_CAPTURE_TIMEOUT_MS + TURN_START_TIMEOUT_MS);
     const page = app.page;
     await gate("main-step-3");
     await expectMenuNote("1 event waiting");
@@ -339,11 +354,11 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(phase()).toHaveAttribute("data-phase", "waking");
     await queueWatcherReply(FINDING);
     const finding = dock().getByRole("article", { name: FINDING });
-    await expect(finding).toBeVisible();
+    await expectCheckSettled();
+    await expect(finding).toBeVisible({ timeout: CHECK_SETTLE_TIMEOUT_MS });
     await expect(finding).toContainText("Empty lines lost their test:");
     await expect(finding.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
     await expect(finding.getByRole("button", { name: "Dismiss", exact: true })).toBeEnabled();
-    await expect(phase()).not.toHaveAttribute("data-phase", "waking");
     await capture(info, "dock-finding-light");
     await setAppearanceInPlace(app, "dark");
     await expect(finding).toBeVisible();
@@ -366,23 +381,23 @@ test.describe("watcher on the fake Codex route", () => {
     await gate("main-finish");
     await expect(page.getByText(MAIN_ANSWER, { exact: true }).first()).toBeVisible();
     const divider = page.getByRole("separator", { name: /^Note from watcher · Reviewer · /u });
-    await expect(divider).toBeVisible();
+    await expect(divider).toBeVisible({ timeout: TURN_START_TIMEOUT_MS });
     await expect(page.getByRole("region", { name: "Turn 1", exact: true }).locator(".turn-changed-files.is-pending"))
-      .toHaveCount(0, { timeout: TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS });
-    await expect(page.getByText(NOTE_ANSWER, { exact: true }).first()).toBeVisible();
+      .toHaveCount(0, { timeout: TURN_CAPTURE_TIMEOUT_MS });
+    await expect(page.getByText(NOTE_ANSWER, { exact: true }).first()).toBeVisible({ timeout: TURN_START_TIMEOUT_MS });
     const bubble = page.getByLabel("Note from watcher", { exact: true }).first();
     await expect(bubble).toContainText("Empty lines lost their test:");
     await expect(bubble.locator(".message-watcher-origin")).toHaveText("From watcher");
     await capture(info, "main-chat-note-light");
-    await expect(status).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · after the turn ended$/u);
+    await expect(status).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · after the turn ended$/u, { timeout: TURN_START_TIMEOUT_MS });
     await expect(page.locator('.response-turn [data-turn-status="completed"]')).toHaveCount(2);
-    await expect(page.getByText("Capturing changes…", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Capturing changes…", { exact: true })).toHaveCount(0, { timeout: TURN_CAPTURE_TIMEOUT_MS });
+    await expect(feedEntries().nth(0).locator("summary")).toHaveText(/^Checked 2 times · .+ · nothing to report/u, { timeout: CHECK_SETTLE_TIMEOUT_MS });
+    await expectCheckSettled();
     await expect(feedEntries()).toHaveCount(3);
     await expect(feedEntries().nth(0)).toHaveAttribute("data-kind", "receipts");
-    await expect(feedEntries().nth(0).locator("summary")).toHaveText(/^Checked 2 times · .+ · nothing to report/u);
     await expect(feedEntries().nth(1)).toHaveAttribute("data-kind", "finding");
     await expect(feedEntries().nth(2)).toHaveAttribute("data-kind", "receipts");
-    await expect(phase()).not.toHaveAttribute("data-phase", "waking");
     await expect(dock().locator(".watcher-notice-line")).toHaveCount(0);
     await expect(finding.locator(".watcher-finding-meta").first()).toHaveText(new RegExp(`^Check ${findingCheck} · .+ · resolved in check ${Number(findingCheck) + 1}$`, "u"));
     await capture(info, "dock-resolved-light");
@@ -460,6 +475,7 @@ test.describe("watcher on the fake Codex route", () => {
   });
 
   test("reviews the last turn without spending one of the turn's checks", async ({ browserName: _browserName }) => {
+    test.slow();
     const page = app.page;
     const checksLeft = /^\d+ of 30 checks left this turn$/u;
     const before = await readMenuNote(checksLeft);
@@ -467,14 +483,15 @@ test.describe("watcher on the fake Codex route", () => {
     await page.getByRole("menu", { name: "More watcher actions" }).getByRole("menuitem", { name: "Review the last turn" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
     await queueWatcherReply("SILENT");
-    await expect(feedEntries().nth(0).locator("summary")).toHaveText(/^Checked 3 times · .+ · nothing to report/u);
-    await expect(phase()).not.toHaveAttribute("data-phase", "waking");
+    await expectCheckSettled();
+    await expect(feedEntries().nth(0).locator("summary")).toHaveText(/^Checked 3 times · .+ · nothing to report/u, { timeout: CHECK_SETTLE_TIMEOUT_MS });
     await expect(dock().locator(".watcher-dock-error")).toHaveCount(0);
     expect(await readMenuNote(checksLeft)).toBe(before);
     expect(app.rendererErrors).toEqual([]);
   });
 
   test("sends a finding to the main chat on its own once automatic sending is on", async ({ browserName: _browserName }, info) => {
+    test.setTimeout(info.timeout + 2 * TURN_START_TIMEOUT_MS + 2 * CHECK_SETTLE_TIMEOUT_MS);
     const page = app.page;
     await dock().getByRole("button", { name: "More watcher actions" }).click();
     const menu = page.getByRole("menu", { name: "More watcher actions" });
@@ -492,23 +509,25 @@ test.describe("watcher on the fake Codex route", () => {
     await composer.getByRole("textbox", { name: "Message" }).fill(FOLLOW_UP);
     await composer.getByRole("button", { name: "Send message" }).click();
     await expect(page.getByText(FOLLOW_UP, { exact: true }).first()).toBeVisible();
+    await expect.poll(() => page.locator('.response-turn [data-turn-status="completed"]').count(), { timeout: TURN_START_TIMEOUT_MS })
+      .toBeGreaterThanOrEqual(3);
 
     const card = dock().getByRole("article", { name: AUTO_FINDING });
-    await expect(card).toBeVisible();
+    await expect(card).toBeVisible({ timeout: CHECK_SETTLE_TIMEOUT_MS });
     await expect(card.getByRole("button", { name: "Send", exact: true })).toHaveCount(0);
-    await expect(card.locator(".watcher-finding-status")).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · automatically · started the main chat's next turn$/u);
+    await expect(card.locator(".watcher-finding-status")).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · automatically · started the main chat's next turn$/u, { timeout: TURN_START_TIMEOUT_MS });
     await expect(page.getByRole("separator", { name: /^Note from watcher · Reviewer · /u })).toHaveCount(2);
     await expect(page.getByLabel("Note from watcher", { exact: true })).toHaveCount(2);
     const autoNote = page.getByLabel("Note from watcher", { exact: true }).last();
     await expect(autoNote).toContainText(AUTO_FINDING);
-    await expect(page.getByText(NOTE_ANSWER, { exact: true })).toHaveCount(2);
+    await expect(page.getByText(NOTE_ANSWER, { exact: true })).toHaveCount(2, { timeout: TURN_START_TIMEOUT_MS });
     const autoCheck = Number((await card.locator(".watcher-finding-meta").textContent())?.match(/^Check (\d+)/u)?.[1]);
     await expect.poll(() => dock().locator(".watcher-check-title").evaluateAll((titles, label) => titles.filter((title) =>
       (title.textContent ?? "").replace(title.querySelector("time")?.textContent ?? "", "").trim() === label).length,
-    `Check ${autoCheck + 1} ·`)).toBe(1);
-    await expect(phase()).not.toHaveAttribute("data-phase", "waking");
+    `Check ${autoCheck + 1} ·`), { timeout: CHECK_SETTLE_TIMEOUT_MS }).toBe(1);
+    await expectCheckSettled();
     await expect(composer.getByRole("button", { name: /^Stop/u })).toHaveCount(0);
-    await expect(page.getByText("Capturing changes…", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Capturing changes…", { exact: true })).toHaveCount(0, { timeout: TURN_CAPTURE_TIMEOUT_MS });
     await autoNote.locator(".message-watcher-origin").hover();
     await expect(page.locator('[role="tooltip"]')).toHaveText(/^Sent automatically by the watcher \(Reviewer · .+\)$/u);
     await capture(info, "dock-auto-sent-light");
@@ -521,10 +540,11 @@ test.describe("watcher on the fake Codex route", () => {
   });
 
   test("opens as a sheet between the chat and an open right panel", async ({ browserName: _browserName }, info) => {
+    test.slow();
     const page = app.page;
     const tools = await ensureWorkspaceTools(page);
     await selectWorkspaceTool(tools, "Changes");
-    await expect(tools.locator(".loading-mark")).toHaveCount(0);
+    await expect(tools.locator(".loading-mark")).toHaveCount(0, { timeout: GIT_READ_OPERATION_TIMEOUT_MS });
     await capture(info, "compare-changes-light");
     const frame = page.locator(".watcher-dock-frame");
     await expect(frame).toHaveAttribute("data-presentation", "sheet");

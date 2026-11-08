@@ -33,7 +33,9 @@ import type {
   ProviderRunResult,
   ProviderSteerInput,
 } from "../../provider/contracts";
+import type { SubagentBackgroundResult, SubagentStopOutcome } from "../../provider/agent-harness";
 import type { AssembledTurnRequest, HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
+import type { HarnessCapabilityTurnOffer } from "../harness-capabilities";
 import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
 import type { DeltaTimerScheduler } from "./turn-stream-coalescer";
 import type { TurnStreamChannel } from "./turn-stream-channel";
@@ -101,9 +103,15 @@ export interface TurnProviderRuntime {
   ): Promise<boolean | "superseded">;
   stopSubagent?(
     conversationId: string,
-    providerTaskId: string,
+    providerTaskId: string | null,
     identity: { runId: string; turnId: string },
-  ): Promise<boolean>;
+    providerToolUseId?: string | null,
+  ): Promise<SubagentStopOutcome>;
+  backgroundSubagent?(
+    conversationId: string,
+    providerToolUseId: string,
+    identity: { runId: string; turnId: string },
+  ): Promise<SubagentBackgroundResult>;
   disposeAll(): Promise<void>;
 }
 
@@ -148,6 +156,12 @@ export interface TurnAttachmentReleaseHookInput {
   attachmentIds: readonly string[];
 }
 
+/** One turn's capability offer and the private instructions it implies. */
+export interface TurnCapabilityOffer {
+  instructions: readonly HiddenProviderInstruction[];
+  offer: HarnessCapabilityTurnOffer;
+}
+
 export interface TurnControllerHooks {
   reportIncident?(observation: import("../../../node/application-incidents").IncidentObservation): unknown;
   broadcast(event: RuntimeMutationEvent): void;
@@ -158,18 +172,26 @@ export interface TurnControllerHooks {
    */
   broadcastConversationShell?(conversationId: string): void;
   providerInfo(): readonly ProviderInfo[];
-  /** Reviewed Inertia capability instructions, delivered once per provider session. */
-  harnessInstructionsForTurn?(input: {
+  /**
+   * Reviewed Inertia capability offer for the turn being prepared, read once.
+   * Its instructions feed the once-per-provider-session instruction delivery,
+   * and its offer is carried on the active turn to `hostToolsForTurn`.
+   */
+  capabilityOfferForTurn?(input: {
     conversation: Conversation;
-  }): readonly HiddenProviderInstruction[];
+  }): TurnCapabilityOffer;
   watcherInstructionsForTurn?(input: {
     conversation: Conversation;
     hostTools: boolean;
   }): readonly HiddenProviderInstruction[];
-  /** Exact-turn host authority; absent means the selected harness gets no tools. */
+  /**
+   * Exact-turn host authority for the offer snapshotted when the turn's prompt
+   * was assembled; absent means the selected harness gets no tools.
+   */
   hostToolsForTurn?(input: {
     conversation: Conversation;
     turn: AgentTurn;
+    offer: HarnessCapabilityTurnOffer;
   }): ProviderHostToolBridge | undefined;
   applyProviderMetadata?(event: ProviderMetadataEvent): void;
   onNativeGoalSynchronized?(input: {
@@ -336,6 +358,12 @@ export interface ActiveTurn {
   turn: AgentTurn;
   conversation: Conversation;
   providerInput: ProviderRunInput;
+  /**
+   * The capability offer snapshotted when this turn's prompt was assembled.
+   * Absent when the prompt was assembled without a trusted host bridge, in
+   * which case the turn gets no host tools.
+   */
+  capabilityOffer?: HarnessCapabilityTurnOffer;
   attachmentIds: readonly string[];
   generatedAttachmentPaths: readonly string[];
   checkpointId: string | null;
@@ -384,6 +412,12 @@ export interface ActiveTurn {
   lifetimeTimer: unknown;
   runningActivities: Map<ProviderActivityEvent["kind"], AgentActivity[]>;
   providerActivitiesById: Map<string, AgentActivity>;
+  /**
+   * Provider activity id to Inertia timeline row id, kept after the row
+   * settles so delegated-task traces can link to the tool call that began
+   * them. Bounded first-in first-out.
+   */
+  providerActivityLinks?: Map<string, string>;
   providerActivityDetailChars: number;
   providerCommandRuns: Map<string, { id: string; label: string }>;
   providerOutputActivityIds: Set<string>;

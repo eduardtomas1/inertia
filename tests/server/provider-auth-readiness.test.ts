@@ -21,7 +21,7 @@ async function detection(
       cleanupConfirmed: true,
       exitCode: args[0] === "--version" || args.includes("--help") ? 0 : exitCode,
       output: args[0] === "--version"
-        ? `${providerId} 1.2.3`
+        ? providerId === "claude" ? "2.1.320 (Claude Code)" : `${providerId} 1.2.3`
         : args.includes("--help") ? "app-server acp" : output,
     }),
   });

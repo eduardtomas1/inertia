@@ -70,6 +70,7 @@ import {
 } from "./claude-identity";
 import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
+import { createClaudeTaskControls } from "./claude-task-controls";
 import {
   CLAUDE_STARTUP_FAILURE_RESULTS,
   CLAUDE_TRANSCRIPT_FLUSH,
@@ -224,6 +225,12 @@ function startClaudeRun(
   const delegateLifecycle = new ClaudeDelegateLifecycle();
   const promptChannel = new ClaudePromptChannel();
   const subagentTracker = new ClaudeSubagentTraceTracker(emitter.subagent);
+  const taskControls = createClaudeTaskControls({
+    query: () => query,
+    cancelled: () => cancelRequested,
+    tracker: subagentTracker,
+    timeoutMs: stopTaskTimeoutMs,
+  });
   let query: Query | undefined;
   let messageIterator: AsyncIterator<SDKMessage> | undefined;
   let cancelRequested = false;
@@ -252,6 +259,7 @@ function startClaudeRun(
     ? options.harnessConfiguration.promptCacheTtl
     : null;
   const launchSettings = {
+    useAutoModeDuringPlan: false,
     ...(supportsFastMode
       ? { fastMode: requestedFastMode === "fast", fastModePerSessionOptIn: true }
       : {}),
@@ -394,7 +402,7 @@ function startClaudeRun(
           settingSources: [],
           ...claudeIdentityOptions(identity, options.input.systemInstruction, options.input.sessionInstruction),
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
-          ...(Object.keys(launchSettings).length > 0 ? { settings: launchSettings } : {}),
+          settings: launchSettings,
           permissionMode: options.input.readOnlyProfile === "watcher"
             ? "default"
             : options.input.interactionMode === "plan"
@@ -542,6 +550,7 @@ function startClaudeRun(
         if (message.type === "result") parentResumedAfterProvisional = false;
         const lifecycle = delegateLifecycle.observe(message, hadLiveTaskTrace);
         subagentTracker.observe(message);
+        taskControls.releaseQueuedStops();
         const hasLiveTaskTrace = subagentTracker.hasLiveTasks();
         messageProjector.observe(message, provesRequestedCompaction);
         if (message.type === "conversation_reset") {
@@ -957,29 +966,8 @@ function startClaudeRun(
         }
         return accepted;
       },
-      stopSubagent: async (providerTaskId) => {
-        if (
-          !query
-          || cancelRequested
-          || !subagentTracker.isLiveTask(providerTaskId)
-        ) return false;
-        let timer: NodeJS.Timeout | undefined;
-        try {
-          const deadline = new Promise<false>((resolve) => {
-            timer = setTimeout(() => resolve(false), stopTaskTimeoutMs);
-            timer.unref();
-          });
-          return await Promise.race([
-            query.stopTask(providerTaskId).then(
-              () => true as const,
-              () => false as const,
-            ),
-            deadline,
-          ]);
-        } finally {
-          if (timer) clearTimeout(timer);
-        }
-      },
+      stopSubagent: taskControls.stop,
+      backgroundSubagent: taskControls.background,
     },
   };
 }

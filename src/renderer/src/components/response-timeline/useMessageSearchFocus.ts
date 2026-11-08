@@ -4,6 +4,8 @@ import type { ResponseTimelineProps } from "./types";
 import type { ResponseTimelineItem } from "../../utils/responseTimeline";
 import { MESSAGE_SEARCH_FOCUS_EVENT, clearMessageSearchFocus, pendingMessageSearchFocus } from "../../utils/messageSearchFocus";
 import { CONVERSATION_HISTORY_PREPEND_EVENT } from "../../utils/conversationHistoryNavigation";
+import { highlightArrivalOnFocus } from "../../utils/arrivalHighlight";
+import "./MessageArrival.css";
 
 export function resolveMessageSearchDestination(row: HTMLElement, messageId: string, turnId?: string): HTMLElement | null {
   if (turnId && row.dataset.turnId !== turnId) {
@@ -79,6 +81,7 @@ export function useMessageSearchFocus(
       if (index < 0) return;
       clearMessageSearchFocus();
       beginReaderTimelineNavigation();
+      highlightArrivalOnFocus(message.id);
       focusTimelineItem(index, { messageId: message.id, turnId: ownerId });
     };
     window.addEventListener(MESSAGE_SEARCH_FOCUS_EVENT, focusSearchResult);

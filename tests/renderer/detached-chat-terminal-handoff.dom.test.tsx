@@ -28,6 +28,14 @@ vi.mock("@xterm/xterm", () => ({
     rows = 24;
     options = { fontSize: 13, theme: {} };
     loadAddon(): void {}
+    registerLinkProvider(): { dispose: () => void } {
+      return { dispose: () => undefined };
+    }
+    onSelectionChange(): { dispose: () => void } {
+      return { dispose: () => undefined };
+    }
+    hasSelection(): boolean { return false; }
+    getSelection(): string { return ""; }
     attachCustomKeyEventHandler(): void {}
     open(container: HTMLElement): void {
       container.append(document.createElement("textarea"));
@@ -156,6 +164,22 @@ describe("terminal handoff between windows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Return chat to main window" }));
     await waitFor(() => expect(bridge.docked).toEqual([["", terminalIds]]));
+  });
+
+  it("hands the live terminals over when the window closes natively", async () => {
+    const live = attachingConnection();
+    await renderWindow(live, terminalIds);
+    await waitFor(() => expect(liveTerminalIdsForHandoff(projectId, conversationId)).toEqual(terminalIds));
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+    expect(bridge.persisted).toEqual([["", terminalIds]]);
+  });
+
+  it("reports its live terminals so a renderer crash can hand them back", async () => {
+    const live = attachingConnection();
+    await renderWindow(live, terminalIds);
+    await waitFor(() => expect(bridge.mirrored.at(-1)).toEqual(["", terminalIds]));
   });
 
   it("neither re-seeds nor re-opens the terminal after a reload", async () => {

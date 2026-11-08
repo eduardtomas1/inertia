@@ -40,7 +40,7 @@ async function measureVariant(browser: boolean) {
       cursorKimi: await httpMcpAdvertisedSurface(runtime.bridge, {}),
       opencode: await httpMcpAdvertisedSurface(runtime.bridge, { destructiveHints: true }),
     };
-    return { surfaces, hidden: runtime.manager.capabilityInstructions() };
+    return { surfaces, hidden: runtime.manager.capabilityOfferForTurn(runtime.source).instructions };
   } finally {
     await runtime.close();
   }

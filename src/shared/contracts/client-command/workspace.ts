@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 import {
+  isWorkspaceContentSearchQuery,
+  WORKSPACE_CONTENT_SEARCH_LIMITS,
+} from "../workspace";
+import {
   requestBase,
   workspaceDirectoryPathSchema,
   workspaceFilePathSchema,
@@ -24,6 +28,32 @@ export const workspaceCommandSchemas = [
           ({ directory, query }) => !(directory && query),
           "Choose either a folder listing or a project search.",
         ),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("workspace.search.content"),
+      payload: z
+        .object({
+          projectId: z.string().uuid(),
+          conversationId: z.string().uuid().optional(),
+          query: z
+            .string()
+            .min(1)
+            .max(WORKSPACE_CONTENT_SEARCH_LIMITS.queryCharacters)
+            .refine(
+              isWorkspaceContentSearchQuery,
+              "Enter search text without control characters.",
+            ),
+          maxResults: z
+            .number()
+            .int()
+            .min(1)
+            .max(WORKSPACE_CONTENT_SEARCH_LIMITS.maxResults)
+            .optional(),
+        })
+        .strict(),
     })
     .strict(),
   z
@@ -99,6 +129,7 @@ export const workspaceCommandSchemas = [
           conversationId: z.string().uuid().optional(),
           terminalId: z.string().uuid(),
           replacementRequestId: z.string().uuid().optional(),
+          background: z.literal(true).optional(),
           cols: z.number().int().min(20).max(400),
           rows: z.number().int().min(4).max(200),
         })

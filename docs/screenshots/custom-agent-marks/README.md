@@ -1,7 +1,8 @@
 # Custom agents: characters and inline calls
 
-All ten screenshot categories from PR #684 are restored with fresh captures.
-The earlier four filenames are retained as aliases to the new full-app views.
+All ten screenshot categories from PR #684, recaptured from the Windows x64
+build after merging main 852fd18b. The earlier four filenames are retained as
+aliases to the new full-app views.
 
 | Capture | Scenario |
 | --- | --- |

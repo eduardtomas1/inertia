@@ -80,6 +80,10 @@ export class AcpSecretRedactor {
     return this.assistant.finish("significant");
   }
 
+  flushAssistant(): string {
+    return this.assistant.flush("significant");
+  }
+
   finishReasoning(): string {
     return this.reasoning.finish("significant");
   }
@@ -122,6 +126,10 @@ class BoundarySecretRedactor {
     if (this.finished) return "";
     this.finished = true;
     return this.drain(true, redactPartial);
+  }
+
+  flush(redactPartial: PartialSecretRedaction): string {
+    return this.finished ? "" : this.drain(true, redactPartial);
   }
 
   discard(): void {

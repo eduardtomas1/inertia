@@ -54,7 +54,7 @@ try {
   );
   assert(
     JSON.stringify(report.providers?.map((provider) => provider.id))
-      === JSON.stringify(["codex", "claude", "cursor", "kimi", "opencode", "antigravity"]),
+      === JSON.stringify(["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"]),
     "readiness report did not exercise every provider route",
   );
 

@@ -394,7 +394,7 @@ describe("provider continuation policy", () => {
   });
 
   it.each([
-    "codex", "claude", "cursor", "kimi", "opencode", "antigravity",
+    "codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok",
   ] as const)("keeps a native %s session across an installation change", (providerId) => {
     const selection = providerNativeModelSelection({ providerId, modelId: "provider-default" });
     const identity = versionedContinuationIdentityForSelection(

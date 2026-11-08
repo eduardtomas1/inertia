@@ -52,6 +52,7 @@ const INSTRUCTIONS_URLS: Readonly<
   kimi: "https://moonshotai.github.io/kimi-code/en/guides/getting-started.html",
   opencode: "https://opencode.ai/docs/cli/#upgrade",
   antigravity: "https://antigravity.google/docs/cli/install/",
+  grok: "https://docs.x.ai/build/overview",
 };
 
 export async function resolveProviderMaintenanceCapabilities(

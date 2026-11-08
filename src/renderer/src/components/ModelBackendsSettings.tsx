@@ -38,6 +38,8 @@ export type ModelBackendsSettingsProps = BackendProfileActions & {
   disabled: boolean;
   onConnectProvider: (providerId: ProviderId, method?: ProviderAuthMethod) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
+  requestedKeyPreset?: ApiKeyBackendPresetId | null;
+  onRequestedKeyPresetConsumed?: () => void;
 };
 
 function keyListNote(providerId: ProviderId): string | null {
@@ -164,6 +166,8 @@ export function ModelBackendsSettings({
   disabled,
   onConnectProvider,
   onRefreshProvider,
+  requestedKeyPreset = null,
+  onRequestedKeyPresetConsumed,
   onLoadDetail,
   onCreate,
   onUpdate,
@@ -217,6 +221,12 @@ export function ModelBackendsSettings({
     restoreCustomFocusRef.current = false;
     customButtonRef.current?.focus();
   }, [customOpen]);
+  useEffect(() => {
+    if (!requestedKeyPreset) return;
+    setDialogPreset(requestedKeyPreset);
+    setDialogResume(null);
+    onRequestedKeyPresetConsumed?.();
+  }, [onRequestedKeyPresetConsumed, requestedKeyPreset]);
   useEffect(() => {
     if (!initialProfileId) return;
     const target = [...(sectionRef.current?.querySelectorAll<HTMLElement>("[data-profile-id]") ?? [])]

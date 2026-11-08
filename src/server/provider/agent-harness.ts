@@ -174,6 +174,21 @@ export interface KimiAcpHarnessCapabilities extends AgentHarnessCoreCapabilities
   };
 }
 
+export interface GrokAcpHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: {
+    kind: "grok-acp";
+    protocol: "acp-v1-json-rpc";
+    approvals: "native";
+    questions: "xai-extension";
+    plans: "xai-extension";
+    reasoning: "native";
+    usage: "optional-acp-v1";
+    images: "capability-negotiated";
+    authentication: "grok-cli";
+    modelMetadata: "session-config-options";
+  };
+}
+
 export interface OpenCodeSdkHarnessCapabilities extends AgentHarnessCoreCapabilities {
   extension: {
     kind: "opencode-sdk";
@@ -213,6 +228,7 @@ export type AgentHarnessCapabilities =
   | ClaudeAgentSdkHarnessCapabilities
   | CursorAcpHarnessCapabilities
   | KimiAcpHarnessCapabilities
+  | GrokAcpHarnessCapabilities
   | OpenCodeSdkHarnessCapabilities
   | AntigravityCliHarnessCapabilities;
 
@@ -276,6 +292,7 @@ export type ProviderInteractiveHarnessExtensionEvent =
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "claude"; extension: "claude-agent-sdk" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "cursor"; extension: "cursor-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "kimi"; extension: "kimi-acp" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "grok"; extension: "grok-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "opencode"; extension: "opencode-sdk" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "antigravity"; extension: "antigravity-cli" });
 
@@ -320,7 +337,7 @@ export interface CodexAppServerRunExtension {
 }
 
 export interface ProviderInteractiveRunExtension {
-  kind: "claude-agent-sdk" | "cursor-acp" | "kimi-acp" | "opencode-sdk" | "antigravity-cli";
+  kind: "claude-agent-sdk" | "cursor-acp" | "kimi-acp" | "grok-acp" | "opencode-sdk" | "antigravity-cli";
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Present only for transports with a persistent parent-session input stream. */
@@ -508,6 +525,7 @@ export function createAgentHarnessEmitter(
       if (providerId === "claude") emit({ ...base, providerId, type: "extension", extension: "claude-agent-sdk", event });
       else if (providerId === "cursor") emit({ ...base, providerId, type: "extension", extension: "cursor-acp", event });
       else if (providerId === "kimi") emit({ ...base, providerId, type: "extension", extension: "kimi-acp", event });
+      else if (providerId === "grok") emit({ ...base, providerId, type: "extension", extension: "grok-acp", event });
       else if (providerId === "opencode") emit({ ...base, providerId, type: "extension", extension: "opencode-sdk", event });
       else if (providerId === "antigravity") emit({ ...base, providerId, type: "extension", extension: "antigravity-cli", event });
     },

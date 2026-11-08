@@ -2171,6 +2171,7 @@ describe("runtime migration catalog", () => {
       { version: 109 },
       { version: 110 },
       { version: 111 },
+      { version: 112 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2413,10 +2414,10 @@ describe("subagent task shape migration", () => {
     try {
       migrateRuntimeDatabase(reference, 110);
       for (const column of shapeColumns) database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
-      database.prepare("DELETE FROM schema_migrations WHERE version = 111").run();
+      database.prepare("DELETE FROM schema_migrations WHERE version >= 111").run();
       expect(database.pragma("table_info(subagent_traces)")).toEqual(reference.pragma("table_info(subagent_traces)"));
       const before = database.prepare("SELECT * FROM subagent_traces ORDER BY id").all();
-      const history = database.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
+      const history = database.prepare("SELECT * FROM schema_migrations WHERE version <= 110 ORDER BY version").all();
 
       migrateRuntimeDatabase(database);
 

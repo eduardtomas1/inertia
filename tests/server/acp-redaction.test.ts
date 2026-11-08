@@ -21,6 +21,19 @@ describe("ACP diagnostic stream redaction", () => {
     expect(capped.toString()).not.toContain(secret);
   });
 
+  it("flushes a held assistant credential prefix at a segment break and keeps streaming", () => {
+    const secret = "terminal-secret-value";
+    const redactor = new AcpSecretRedactor({ KIMI_API_KEY: secret });
+
+    const first = redactor.assistantChunk(`before:${secret.slice(0, 11)}`);
+    const flushed = redactor.flushAssistant();
+    const second = redactor.assistantChunk(`after:${secret}`) + redactor.finishAssistant();
+
+    expect(first).toBe("before:");
+    expect(flushed).toBe("[redacted]");
+    expect(second).toBe("after:[redacted]");
+  });
+
   it("does not flush a terminal credential prefix into diagnostics", () => {
     const secret = "terminal-secret-value";
     const prefix = secret.slice(0, 11);

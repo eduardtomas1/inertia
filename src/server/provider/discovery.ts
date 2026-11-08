@@ -26,6 +26,7 @@ import {
 import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
 import type { ProviderAccountKind } from "../../shared/provider";
 import { providerAuthStatusArgs } from "./auth";
+import { grokCredentialPresence } from "./grok-acp-auth";
 import { PROVIDER_INFO } from "./catalog";
 import {
   PROVIDER_IDS,
@@ -87,6 +88,19 @@ function kimiCandidateIsIdentified(
 ): boolean {
   const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
   return name === "kimi" || /\bkimi(?:[ -]code)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
+}
+
+function grokCandidateIsIdentified(
+  executable: string,
+  versionOutput: string,
+  acpOutput: string,
+): boolean {
+  const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
+  return name === "grok" || /\bgrok\b/iu.test(`${versionOutput}\n${acpOutput}`);
+}
+
+function grokAgentModeReady(output: string): boolean {
+  return /(?:\bagent\b|\bstdio\b|\bacp\b|\bgrok\b)/iu.test(output);
 }
 
 function providerShortName(name: string): string {
@@ -543,7 +557,10 @@ async function detectProviderRecordingCleanup(
   requireActive();
   const probeAuthentication = options.probeAuthentication !== false;
   const probeEnvironment: ProviderEnvironment = {
-    env: credentialFreeProviderEnvironment(discoveredEnvironment.env),
+    env: {
+      ...credentialFreeProviderEnvironment(discoveredEnvironment.env),
+      ...(providerId === "grok" ? { GROK_DISABLE_AUTOUPDATER: "1" } : {}),
+    },
     pathEntries: discoveredEnvironment.pathEntries,
   };
   const candidateEnvironment: ProviderEnvironment = providerId === "codex"
@@ -601,13 +618,15 @@ async function detectProviderRecordingCleanup(
     const version = versionFromOutput(providerId, probe);
     const belowFloor = versionFloor !== null
       && providerVersionBelowFloor(version, versionFloor.minimumVersion);
-    const acpProbe = (providerId === "cursor" || providerId === "kimi")
+    const acpProbe = (providerId === "cursor" || providerId === "kimi" || providerId === "grok")
       && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(
           executable,
           providerId === "cursor"
             ? cursorAgentCommandArgs(executable, ["acp", "--help"])
-            : ["acp", "--help"],
+            : providerId === "grok"
+              ? ["agent", "--help"]
+              : ["acp", "--help"],
           probeEnvironment,
           cwd,
           followUpTimeoutMs,
@@ -617,11 +636,14 @@ async function detectProviderRecordingCleanup(
       acpProbe.started
       && !acpProbe.timedOut
       && acpProbe.exitCode === 0
-      && /(?:agent client protocol|\bacp\b|cursor|kimi)/iu.test(acpProbe.output)
-      && (providerId === "cursor"
-        ? cursorCandidateIsIdentified(executable, probe.output, acpProbe.output)
-        : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output)
-          && !KIMI_LEGACY_CLI.test(`${probe.output}\n${acpProbe.output}`))
+      && (providerId === "grok"
+        ? grokAgentModeReady(acpProbe.output)
+          && grokCandidateIsIdentified(executable, probe.output, acpProbe.output)
+        : /(?:agent client protocol|\bacp\b|cursor|kimi)/iu.test(acpProbe.output)
+          && (providerId === "cursor"
+            ? cursorCandidateIsIdentified(executable, probe.output, acpProbe.output)
+            : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output)
+              && !KIMI_LEGACY_CLI.test(`${probe.output}\n${acpProbe.output}`)))
     );
     const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(executable, ["app-server", "--help"], probeEnvironment, cwd, followUpTimeoutMs)
@@ -652,6 +674,8 @@ async function detectProviderRecordingCleanup(
           ? cursorCandidateIsIdentified(executable, probe.output, acpProbe?.output ?? "")
           : providerId === "kimi"
             ? kimiCandidateIsIdentified(executable, probe.output, acpProbe?.output ?? "")
+            : providerId === "grok"
+              ? grokCandidateIsIdentified(executable, probe.output, acpProbe?.output ?? "")
             : providerId === "antigravity"
               ? antigravityCandidateIsIdentified(executable)
               : providerId === "opencode"
@@ -720,7 +744,7 @@ async function detectProviderRecordingCleanup(
       return unresponsive();
     }
     const providerWithoutAcp =
-      (providerId === "cursor" || providerId === "kimi") &&
+      (providerId === "cursor" || providerId === "kimi" || providerId === "grok") &&
       versionProbes.some(
         ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
       );
@@ -897,18 +921,24 @@ async function detectProviderRecordingCleanup(
 
   const providerAuthArgs = providerAuthStatusArgs(providerId);
   if (providerAuthArgs === null) {
+    const grokSignedIn = providerId === "grok"
+      && grokCredentialPresence(providerChildEnvironment(providerId, discoveredEnvironment.env)) === "present";
     return {
       provider,
       available: true,
       executable: selected.executable,
       ...(selected.version ? { version: selected.version } : {}),
       installState: "installed",
-      authState: "unknown",
+      authState: grokSignedIn ? "authenticated" : "unknown",
       canRun: true,
       cleanupConfirmed: true,
-      statusMessage: providerId === "antigravity"
-        ? "Installed; Antigravity checks your sign-in when a turn starts"
-        : `Installed; ${providerShortName(provider.name)} ACP will verify authentication when a session starts`,
+      statusMessage: providerId === "grok"
+        ? grokSignedIn
+          ? "Installed. Chats use the saved Grok account."
+          : "Installed. Sign in with grok login before the first chat."
+        : providerId === "antigravity"
+          ? "Installed; Antigravity checks your sign-in when a turn starts"
+          : `Installed; ${providerShortName(provider.name)} ACP will verify authentication when a session starts`,
     };
   }
   const authArgs =

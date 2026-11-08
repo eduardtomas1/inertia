@@ -760,7 +760,7 @@ describe("ProviderMaintenanceController", () => {
 
     await waitForTerminal(operations, started.id);
     const diagnosticStates = controller.diagnosticStates();
-    expect(diagnosticStates).toHaveLength(6);
+    expect(diagnosticStates).toHaveLength(7);
     expect(diagnosticStates).toContainEqual({
       providerId: "claude",
       state: "quarantined",
@@ -799,7 +799,7 @@ describe("ProviderMaintenanceController unreadable journal diagnostics", () => {
 
     const states = controller.diagnosticStates();
 
-    expect(states).toHaveLength(6);
+    expect(states).toHaveLength(7);
     expect(states.every(({ state }) => state === "quarantined")).toBe(true);
     expect(controller.hasBlockingAuthority("claude")).toBe(true);
   });

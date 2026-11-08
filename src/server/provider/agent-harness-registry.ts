@@ -2,6 +2,7 @@ import { createAntigravityCliHarness } from "./antigravity-cli-harness";
 import { createClaudeAgentSdkHarness } from "./claude-agent-sdk-harness";
 import { createCodexAppServerHarness } from "./codex-app-server-harness";
 import { createCursorAcpHarness } from "./cursor-acp-harness";
+import { createGrokAcpHarness } from "./grok-acp-harness";
 import { createKimiAcpHarness } from "./kimi-acp-harness";
 import { createOpenCodeSdkHarness } from "./opencode-sdk-harness";
 import {
@@ -26,6 +27,7 @@ const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "claude-agent-sdk": "claude",
   "cursor-acp": "cursor",
   "kimi-acp": "kimi",
+  "grok-acp": "grok",
   "opencode-sdk": "opencode",
   "antigravity-cli": "antigravity",
 };
@@ -80,6 +82,7 @@ export class AgentHarnessRegistry {
         || input.providerId === "kimi"
         || input.providerId === "antigravity"
         || input.providerId === "opencode"
+        || input.providerId === "grok"
       ) {
         throw new ProviderRuntimeError(
           "invalid_input",
@@ -89,6 +92,8 @@ export class AgentHarnessRegistry {
               ? "Kimi Code controls its backend; external backend profiles cannot be injected."
             : input.providerId === "antigravity"
               ? "Antigravity controls its backend; external backend profiles cannot be injected."
+            : input.providerId === "grok"
+              ? "Grok controls its backend; external backend profiles cannot be injected."
               : "OpenCode backends must come from OpenCode's native provider catalog.",
         );
       }
@@ -142,6 +147,7 @@ export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
     createKimiAcpHarness(),
     createOpenCodeSdkHarness(),
     createAntigravityCliHarness(),
+    createGrokAcpHarness(),
   ]);
   const registered = registry.list().map((harness) =>
     `${harness.providerId}\0${harness.id}`);

@@ -812,6 +812,11 @@
       "version": 111,
       "name": "PersistSubagentTaskShape",
       "digest": "9041b5d6781eedf16c2394123872a6e6a908b7654c6e7bd18df72b1e08ca306b"
+    },
+    {
+      "version": 112,
+      "name": "SupportNativeGrokProvider",
+      "digest": "71b43b366ace5ddb61918ba39368d24dccfc044e69a77f848fe3f668fbd9b74e"
     }
   ]
 }

@@ -85,6 +85,7 @@ export const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   kimi: "Kimi Code",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  grok: "Grok",
 };
 
 const COST_UNAVAILABLE_REASON =

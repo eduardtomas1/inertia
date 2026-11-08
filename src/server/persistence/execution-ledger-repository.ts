@@ -9,11 +9,13 @@ import type {
   AgentReasoning,
   AgentTurn,
   CheckpointSummary,
+  SubagentTaskKind,
   SubagentTaskUsage,
   SubagentTrace,
   SubagentTraceStatus,
   ThreadUsageSnapshot,
 } from "../../shared/contracts";
+import { SERVER_EVENT_OPTIONS } from "../../shared/contracts/server-event-discriminants";
 import {
   mergeSubagentTaskUsage,
   validateProviderUsage,
@@ -23,14 +25,19 @@ import {
   boundedSubagentCount,
   boundedSubagentIdentifier,
   boundedSubagentLabel,
+  boundedSubagentSteps,
   isTerminalSubagentStatus,
+  MAX_SUBAGENT_ACTIVITY_ID_CHARS,
+  MAX_SUBAGENT_COMMAND_CHARS,
   MAX_SUBAGENT_DESCRIPTION_CHARS,
   MAX_SUBAGENT_DURATION_MS,
+  MAX_SUBAGENT_NON_AGENT_TRACES_PER_TURN,
   MAX_SUBAGENT_PROGRESS_CHARS,
   MAX_SUBAGENT_RESULT_CHARS,
   MAX_SUBAGENT_TOOL_USE_COUNT,
   MAX_SUBAGENT_TRACES_PER_TURN,
 } from "../provider/subagent-trace";
+import { scrubCommandSecrets } from "../provider/command-secrets";
 import {
   activityFromRow,
   agentTurnFromRow,
@@ -93,6 +100,19 @@ function safeSubagentTelemetryLabel(
   })?.replace(/\s+/gu, " "));
 }
 
+/**
+ * A step label or current activity can carry a command line or URL, so it is
+ * scrubbed as a command before the label bound cuts it.
+ */
+function safeSubagentStepLabel(
+  value: unknown,
+  workspaceRoot: string,
+): string | null {
+  return typeof value === "string"
+    ? safeSubagentTelemetryLabel(scrubCommandSecrets(value), workspaceRoot)
+    : null;
+}
+
 function safeSubagentProviderStatus(
   value: unknown,
   workspaceRoot: string,
@@ -107,6 +127,37 @@ function safeSubagentProviderStatus(
 
 function subagentTaskUsageJson(usage: SubagentTaskUsage | null): string | null {
   return usage ? JSON.stringify(usage) : null;
+}
+
+const NON_AGENT_TASK_KINDS: readonly SubagentTaskKind[] = ["shell", "monitor", "mcp"];
+export const SUBAGENT_STOP_REQUESTED_PROGRESS = "Stop requested.";
+/** What a background command still live at turn end is doing when cleanup was not confirmed. */
+export const UNCONFIRMED_BACKGROUND_PROGRESS = "May still be running: the provider did not confirm it stopped.";
+/** What a remote agent still live at turn end is doing, as far as Inertia knows. */
+export const REMOTE_SETTLED_PROGRESS = "Running in the cloud.";
+
+function subagentTaskKind(value: unknown): SubagentTaskKind | null {
+  return SERVER_EVENT_OPTIONS.subagentTaskKinds.includes(value as SubagentTaskKind)
+    ? value as SubagentTaskKind
+    : null;
+}
+
+function safeSubagentCommand(
+  value: unknown,
+  workspaceRoot: string,
+): string | null {
+  if (typeof value !== "string") return null;
+  return sanitizeProviderActivityDetail(scrubCommandSecrets(value), {
+    workspaceRoot,
+    maxChars: MAX_SUBAGENT_COMMAND_CHARS,
+  });
+}
+
+function safeSubagentActivityId(value: unknown): string | null {
+  const identifier = boundedSubagentIdentifier(value, MAX_SUBAGENT_ACTIVITY_ID_CHARS + 1);
+  return identifier && identifier.length <= MAX_SUBAGENT_ACTIVITY_ID_CHARS
+    ? identifier
+    : null;
 }
 
 export class ExecutionLedgerRepository {
@@ -196,6 +247,26 @@ export class ExecutionLedgerRepository {
     return trace.status === "cancelled" && !trace.isLive
       ? { trace, changed: false }
       : null;
+  }
+
+  /**
+   * Marks a live task whose Stop is held until the provider issues its task
+   * id. The task stays live: only the provider's answer settles it.
+   */
+  requestSubagentStop(
+    traceId: string,
+    updatedAt = new Date().toISOString(),
+  ): UpsertSubagentTraceResult | null {
+    const now = requireTimestamp(updatedAt, "Delegated task stop request time");
+    const result = this.context.database.prepare(`
+      UPDATE subagent_traces
+      SET progress = @progress,
+          updated_at = MAX(updated_at, @updatedAt)
+      WHERE id = @id AND is_live = 1 AND progress IS NOT @progress
+    `).run({ id: traceId, progress: SUBAGENT_STOP_REQUESTED_PROGRESS, updatedAt: now });
+    const trace = this.subagentTrace(traceId);
+    if (result.changes > 0) return { trace, changed: true };
+    return trace.isLive ? { trace, changed: false } : null;
   }
 
   upsertSubagentTrace(
@@ -320,9 +391,11 @@ export class ExecutionLedgerRepository {
         workspaceRoot,
         maxChars: MAX_SUBAGENT_RESULT_CHARS,
       }),
-      model: safeSubagentTelemetryLabel(input.model, workspaceRoot),
+      model: input.model === "<synthetic>"
+        ? null
+        : safeSubagentTelemetryLabel(input.model, workspaceRoot),
       activity: input.isLive
-        ? safeSubagentTelemetryLabel(input.activity, workspaceRoot)
+        ? safeSubagentStepLabel(input.activity, workspaceRoot)
         : null,
       toolUseCount: boundedSubagentCount(
         input.toolUseCount,
@@ -334,10 +407,34 @@ export class ExecutionLedgerRepository {
       ),
     };
     const usage = validateSubagentTaskUsage(input.usage);
-    const customAgentId = typeof input.customAgentId === "string"
-      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(input.customAgentId)
-      ? input.customAgentId
-      : null;
+    const reportedTaskKind = subagentTaskKind(input.taskKind);
+    const taskKind = reportedTaskKind ?? existing?.task_kind ?? "agent";
+    const steps = boundedSubagentSteps(
+      input.steps,
+      (text) => safeSubagentStepLabel(text, workspaceRoot),
+    );
+    const shape = {
+      modelSource: normalized.model
+        && SERVER_EVENT_OPTIONS.subagentModelSources.includes(
+          input.modelSource as NonNullable<SubagentTrace["modelSource"]>,
+        )
+        ? input.modelSource as NonNullable<SubagentTrace["modelSource"]>
+        : null,
+      taskKind: reportedTaskKind,
+      background: typeof input.background === "boolean"
+        ? input.background ? 1 : 0
+        : null,
+      command: NON_AGENT_TASK_KINDS.includes(taskKind)
+        ? safeSubagentCommand(input.command, workspaceRoot)
+        : null,
+      effort: SERVER_EVENT_OPTIONS.subagentTaskEfforts.includes(
+        input.effort as NonNullable<SubagentTrace["effort"]>,
+      )
+        ? input.effort as NonNullable<SubagentTrace["effort"]>
+        : null,
+      activityId: safeSubagentActivityId(input.activityId),
+      stepsJson: steps ? JSON.stringify(steps) : null,
+    };
 
     if (existing) {
       this.context.database.prepare(`
@@ -359,14 +456,22 @@ export class ExecutionLedgerRepository {
             ),
             provider_role = COALESCE(@providerRole, provider_role),
             provider_name = COALESCE(@providerName, provider_name),
-            custom_agent_id = COALESCE(@customAgentId, custom_agent_id),
             provider_status = COALESCE(@providerStatus, provider_status),
             status = @status,
             is_live = @isLive,
             description = COALESCE(@description, description),
             progress = CASE WHEN @revived = 1 THEN @progress ELSE COALESCE(@progress, progress) END,
             result = CASE WHEN @revived = 1 THEN @result ELSE COALESCE(@result, result) END,
-            model = COALESCE(@model, model),
+            model = CASE
+              WHEN @model IS NULL THEN model
+              WHEN @modelSource IS NOT 'observed' AND model_source = 'observed' THEN model
+              ELSE @model
+            END,
+            model_source = CASE
+              WHEN @model IS NULL THEN model_source
+              WHEN @modelSource IS NOT 'observed' AND model_source = 'observed' THEN model_source
+              ELSE @modelSource
+            END,
             activity = CASE
               WHEN @isLive = 1 AND @status = status THEN COALESCE(@activity, activity)
               WHEN @isLive = 1 THEN @activity
@@ -375,13 +480,23 @@ export class ExecutionLedgerRepository {
             usage_json = @usageJson,
             tool_use_count = COALESCE(@toolUseCount, tool_use_count),
             duration_ms = COALESCE(@durationMs, duration_ms),
+            task_kind = COALESCE(@taskKind, task_kind),
+            background = COALESCE(@background, background),
+            command = CASE
+              WHEN COALESCE(@taskKind, task_kind) IN ('shell', 'monitor', 'mcp')
+                THEN COALESCE(@command, command)
+              ELSE NULL
+            END,
+            effort = COALESCE(@effort, effort),
+            activity_id = COALESCE(@activityId, activity_id),
+            steps_json = COALESCE(@stepsJson, steps_json),
             sequence = @sequence,
             updated_at = @updatedAt
         WHERE id = @id
       `).run({
         id: existing.id,
         ...normalized,
-        customAgentId,
+        ...shape,
         usageJson: subagentTaskUsageJson(mergeSubagentTaskUsage(
           subagentTraceFromRow(existing).usage,
           usage,
@@ -405,6 +520,14 @@ export class ExecutionLedgerRepository {
       WHERE turn_id = ?
     `).get(input.turnId) as { count: number }).count;
     if (count >= MAX_SUBAGENT_TRACES_PER_TURN) return null;
+    if (NON_AGENT_TASK_KINDS.includes(taskKind)) {
+      const nonAgentCount = (this.context.database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM subagent_traces
+        WHERE turn_id = ? AND task_kind IN ('shell', 'monitor', 'mcp')
+      `).get(input.turnId) as { count: number }).count;
+      if (nonAgentCount >= MAX_SUBAGENT_NON_AGENT_TRACES_PER_TURN) return null;
+    }
     const trace: SubagentTrace = {
       id: randomUUID(),
       conversationId: input.conversationId,
@@ -412,8 +535,14 @@ export class ExecutionLedgerRepository {
       turnId: input.turnId,
       providerId: input.providerId,
       ...normalized,
-      ...(customAgentId ? { customAgentId } : {}),
       usage,
+      modelSource: shape.modelSource,
+      taskKind,
+      background: shape.background === null ? null : shape.background === 1,
+      command: shape.command,
+      effort: shape.effort,
+      activityId: shape.activityId,
+      steps,
       status: input.status,
       isLive: input.isLive,
       sequence: input.sequence,
@@ -428,8 +557,9 @@ export class ExecutionLedgerRepository {
         provider_tool_use_id, provider_role,
         provider_name, provider_status, status, is_live,
         description, progress, result, model, activity,
-        usage_json, tool_use_count, duration_ms, sequence,
-        created_at, updated_at, custom_agent_id
+        usage_json, tool_use_count, duration_ms,
+        task_kind, background, command, effort, activity_id, model_source,
+        steps_json, sequence, created_at, updated_at
       ) VALUES (
         @id, @conversationId, @runId, @turnId, @providerId,
         @providerTaskId, @providerAgentId, @parentTraceId,
@@ -437,12 +567,14 @@ export class ExecutionLedgerRepository {
         @providerToolUseId, @providerRole,
         @providerName, @providerStatus, @status, @isLive,
         @description, @progress, @result, @model, @activity,
-        @usageJson, @toolUseCount, @durationMs, @sequence,
-        @createdAt, @updatedAt, @customAgentId
+        @usageJson, @toolUseCount, @durationMs,
+        @taskKind, @background, @command, @effort, @activityId, @modelSource,
+        @stepsJson, @sequence, @createdAt, @updatedAt
       )
     `).run({
       ...normalized,
-      customAgentId,
+      ...shape,
+      taskKind,
       id: trace.id,
       conversationId: trace.conversationId,
       runId: trace.runId,
@@ -463,6 +595,7 @@ export class ExecutionLedgerRepository {
     turnId: string,
     status: Extract<SubagentTraceStatus, "cancelled" | "lost">,
     updatedAt = new Date().toISOString(),
+    providerCleanupUnconfirmed = false,
   ): SubagentTrace[] {
     const now = requireTimestamp(updatedAt, "Delegated task settlement time");
     const rows = this.context.database.prepare(`
@@ -472,15 +605,42 @@ export class ExecutionLedgerRepository {
       ORDER BY created_at ASC, sequence ASC, id ASC
     `).all(turnId) as SubagentTraceRow[];
     if (rows.length === 0) return [];
+    // The provider process ends with the turn, and background commands,
+    // monitors and MCP tasks end with it: they were stopped, not lost. When
+    // the provider's process tree was not confirmed gone, they may still be
+    // running, so their outcome is unknown. A remote agent keeps running in
+    // its cloud session, so its outcome is unknown here rather than lost.
     const update = this.context.database.prepare(`
       UPDATE subagent_traces
-      SET status = ?, is_live = 0, activity = NULL,
-          sequence = sequence + 1, updated_at = ?
-      WHERE id = ?
+      SET status = CASE
+            WHEN task_kind = 'remote' THEN 'unknown'
+            WHEN task_kind IN ('shell', 'monitor', 'mcp') AND @unconfirmed = 1 THEN 'unknown'
+            WHEN task_kind IN ('shell', 'monitor', 'mcp') THEN 'cancelled'
+            ELSE @status
+          END,
+          progress = CASE
+            WHEN task_kind = 'remote' THEN @remoteProgress
+            WHEN task_kind IN ('shell', 'monitor', 'mcp') AND @unconfirmed = 1 THEN @unconfirmedProgress
+            WHEN task_kind IN ('shell', 'monitor', 'mcp') AND @status = 'lost'
+              THEN 'Stopped when the turn ended.'
+            ELSE progress
+          END,
+          is_live = 0, activity = NULL,
+          sequence = sequence + 1, updated_at = @updatedAt
+      WHERE id = @id
         AND is_live = 1
     `);
     this.context.database.transaction(() => {
-      for (const row of rows) update.run(status, now, row.id);
+      for (const row of rows) {
+        update.run({
+          status,
+          remoteProgress: REMOTE_SETTLED_PROGRESS,
+          unconfirmed: providerCleanupUnconfirmed ? 1 : 0,
+          unconfirmedProgress: UNCONFIRMED_BACKGROUND_PROGRESS,
+          updatedAt: now,
+          id: row.id,
+        });
+      }
     })();
     return rows.map(({ id }) => this.subagentTrace(id));
   }

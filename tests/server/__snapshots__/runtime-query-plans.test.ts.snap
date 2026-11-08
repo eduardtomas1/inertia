@@ -67,18 +67,41 @@ exports[`hot query plans on a seeded runtime database > snapshots every app snap
     ],
   },
   {
-    "query": "SELECT id, name, handle, description, icon_json, accent, blocks_json, skills_json, position, revision, created_at, updated_at FROM custom_agents ORDER BY positi…",
-    "withStatistics": "same",
-    "withoutStatistics": [
-      "SCAN custom_agents USING INDEX custom_agents_position_idx",
-    ],
-  },
-  {
-    "query": "SELECT id, title, note, priority, due_date, due_time, project_id, completed_at, conversation_id, linked_at, created_at, updated_at FROM todos ORDER BY created_a…",
+    "query": "SELECT id, title, note, priority, due_date, due_time, project_id, completed_at, conversation_id, linked_at, source_conversation_id, created_at, updated_at FROM …",
     "withStatistics": "same",
     "withoutStatistics": [
       "SCAN todos",
       "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT (SELECT COUNT(*) FROM saved_answers) AS answers, (SELECT MAX(updated_at) FROM saved_answers) AS answers_updated, (SELECT COUNT(*) FROM library_categories…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN CONSTANT ROW",
+      "SCALAR SUBQUERY 1",
+      "SCAN saved_answers USING COVERING INDEX saved_answers_category_idx",
+      "SCALAR SUBQUERY 2",
+      "SEARCH saved_answers",
+      "SCALAR SUBQUERY 3",
+      "SCAN library_categories USING COVERING INDEX library_categories_name_idx",
+      "SCALAR SUBQUERY 4",
+      "SEARCH library_categories",
+    ],
+  },
+  {
+    "query": "SELECT id, name, created_at, updated_at FROM library_categories ORDER BY name COLLATE NOCASE ASC, id ASC LIMIT ?",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN library_categories USING INDEX library_categories_name_idx",
+    ],
+  },
+  {
+    "query": "SELECT saved_answers.id, saved_answers.conversation_id, conversations.project_id, saved_answers.turn_id, saved_answers.message_id, saved_answers.category_id, sa…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN saved_answers USING INDEX saved_answers_created_idx",
+      "SEARCH conversations USING INDEX sqlite_autoindex_conversations_1 (id=?)",
     ],
   },
   {

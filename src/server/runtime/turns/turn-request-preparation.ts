@@ -11,8 +11,10 @@ import {
   providerNativeBackendProfile,
   providerNativeModelSelection,
   routeSupportsNativeFastModeIdentity,
+  type ModelBackendProfile,
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
+import { officialPresetEndpoint } from "../backends/backend-profile-presets";
 import { importedFollowUpNote, importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
@@ -26,6 +28,7 @@ import {
   type ConversationContextMaterialization,
 } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
+import { trackedGoalContextLine, trackedLocalGoal } from "./turn-goal-context";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import { RuntimeRequestError } from "../../runtime-errors";
 import {
@@ -41,7 +44,7 @@ import {
   type PromptInstructionDeliveries,
 } from "./turn-instruction-delivery";
 import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
-import { rejectGoalCustomAgentCall, resolveCustomAgentCall } from "./custom-agent-call";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "../harness-capabilities";
 import type {
   ActiveTurn,
   QueuedTurn,
@@ -182,8 +185,21 @@ export function compactionSessionInstruction(
   ) return undefined;
   return sessionInstructionText(
     route.harnessId,
-    instructionPack(conversation.id, dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []),
+    instructionPack(conversation.id, dependencies.hooks.capabilityOfferForTurn?.({ conversation }).instructions ?? []),
   );
+}
+
+export function claudeSpendLimitApplies(route: {
+  providerId: string;
+  harnessId: string;
+  backendProfile: Pick<ModelBackendProfile, "id" | "protocol" | "source" | "endpointIdentity">;
+}): boolean {
+  return route.providerId === "claude"
+    && route.harnessId === "claude-agent-sdk"
+    && (
+      route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
+      || officialPresetEndpoint(route.backendProfile)
+    );
 }
 
 export function resolveTurnRequest(
@@ -225,16 +241,15 @@ export function resolveTurnRequest(
   dependencies.store.assertConversationProvider(conversation.id, route.providerId);
   const watcherTurn = watcherTurnPolicy(dependencies.store, conversation, route.harnessId, request);
   const readOnlyWatcher = watcherTurn?.readOnly;
-  const calledAgent = request.context?.calledAgent;
-  if (calledAgent && request.goalStart !== undefined) rejectGoalCustomAgentCall();
-  const customAgentCall = calledAgent
-    ? resolveCustomAgentCall({ calledAgent, store: dependencies.store, providerId: route.providerId })
-    : null;
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const hostToolBridgeAttested = routeHostBridgeAttested(providerInfo, route);
-  const capabilityInstructions = hostToolBridgeAttested && !watcherTurn
-    ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
-    : [];
+  // Read once: the prompt's instructions and the tools attached at provider
+  // start must describe the same offer even if project settings change.
+  const capabilityOffer = hostToolBridgeAttested
+    ? dependencies.hooks.capabilityOfferForTurn?.({ conversation })
+      ?? { instructions: [], offer: FULL_HARNESS_CAPABILITY_OFFER }
+    : undefined;
+  const capabilityInstructions = watcherTurn ? [] : capabilityOffer?.instructions ?? [];
   const roleInstructions = request.systemInstructions
     ?? (watcherTurn?.wakeId === null
       ? dependencies.hooks.watcherInstructionsForTurn?.({ conversation, hostTools: hostToolBridgeAttested }) ?? []
@@ -350,8 +365,10 @@ export function resolveTurnRequest(
         : null,
     )]),
     ...(request.internalInstructions ?? []),
-    ...(customAgentCall ? [customAgentCall.instructionBlock] : []),
   ];
+  // Codex-native goals reach the provider through its own thread-goal API;
+  // only an Inertia-local goal is described here, as visible context.
+  const localGoal = trackedLocalGoal(dependencies.store.agentGoals(conversation.id));
   const assemblyInput = {
     ...(contextPacketIds.length > 0
       ? {
@@ -372,6 +389,7 @@ export function resolveTurnRequest(
       ? {}
       : { sessionInstructionDigest: instructionDelivery.sessionInstructionDigest }),
     ...(request.goalStart === undefined ? {} : { promptWithheld: true as const }),
+    ...(localGoal ? { trackedGoalLine: trackedGoalContextLine(localGoal) } : {}),
   } satisfies AssembleTurnRequestInput;
   const ownChatPacketId = dependencies.store.contextPackets
     .ownConversationPacketId(conversation.id, contextPacketIds);
@@ -463,9 +481,7 @@ export function resolveTurnRequest(
       goal.source === "codex-native"
       && goal.providerSessionId === conversation.providerSessionId
       && goal.status === "active"));
-  const maxBudgetUsd = route.providerId === "claude"
-    && route.harnessId === "claude-agent-sdk"
-    && route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
+  const maxBudgetUsd = claudeSpendLimitApplies(route)
     ? dependencies.store.project(conversation.projectId).preferences
       ?.claudeMaxBudgetUsd ?? null
     : null;
@@ -507,7 +523,6 @@ export function resolveTurnRequest(
       attachmentIds: attachments.map(({ id }) => id),
     }) ?? [],
     skills: request.skills,
-    ...(customAgentCall ? customAgentCall.providerInput : {}),
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
@@ -541,7 +556,6 @@ export function resolveTurnRequest(
     activateConversation: request.activateConversation,
     privateConnectDeviceId: request.privateConnectDeviceId,
     ...(request.watcherNote ? { watcherNote: request.watcherNote } : {}),
-    ...(customAgentCall ? { customAgentCall: customAgentCall.attribution } : {}),
     ...(request.duoComparison && request.duoComparison.launchId === request.authorizedDuoComparisonLaunchId
       ? { duoComparison: request.duoComparison }
       : {}),
@@ -595,6 +609,7 @@ export function resolveTurnRequest(
           turn: queued.turn,
           conversation: activeConversation,
           providerInput,
+          ...(capabilityOffer ? { capabilityOffer: capabilityOffer.offer } : {}),
           attachmentIds: attachments.map(({ id }) => id),
           generatedAttachmentPaths: [...(request.generatedAttachmentPaths ?? [])],
           checkpointId: readOnlyWatcher ? null : request.checkpointId ?? null,
@@ -605,7 +620,6 @@ export function resolveTurnRequest(
             ? { turnCheckpoint: true }
             : {}),
           ...(readOnlyWatcher ? { readOnlyWatcher } : {}),
-          ...(customAgentCall ? { customAgentCall: customAgentCall.attribution } : {}),
           rendererOwnerId: request.rendererOwnerId ?? null,
           structuredContext,
           gitBeforeCapture: null,

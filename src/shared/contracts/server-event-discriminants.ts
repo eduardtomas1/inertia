@@ -1,6 +1,10 @@
 import type {
   AgentActivity,
   AgentApprovalRequest,
+  SubagentModelSource,
+  SubagentTaskEffort,
+  SubagentTaskKind,
+  SubagentTaskStep,
   SubagentTraceStatus,
 } from "./agent";
 import type { AgentGoal } from "./agent-workflows";
@@ -39,7 +43,12 @@ import {
   todoSchema,
   todosSerializedBytes,
 } from "../todos";
-import { customAgentSchema, MAX_CUSTOM_AGENTS } from "../custom-agents";
+import {
+  MAX_LIBRARY_SERIALIZED_BYTES,
+  libraryCategoryNameKey,
+  librarySerializedBytes,
+  librarySnapshotSchema,
+} from "../library";
 import { watcherLinkCollectionCoherent } from "./watcher-schema";
 
 function exhaustiveOptions<T extends string>(
@@ -81,6 +90,18 @@ export const SERVER_EVENT_OPTIONS = Object.freeze({
     queued: true, spawned: true, running: true, waiting: true,
     completed: true, failed: true, cancelled: true, interrupted: true,
     unknown: true, lost: true,
+  }),
+  subagentTaskKinds: exhaustiveOptions<SubagentTaskKind>({
+    agent: true, workflow: true, shell: true, monitor: true, remote: true, mcp: true,
+  }),
+  subagentTaskEfforts: exhaustiveOptions<SubagentTaskEffort>({
+    low: true, medium: true, high: true, xhigh: true, max: true,
+  }),
+  subagentModelSources: exhaustiveOptions<SubagentModelSource>({
+    observed: true, requested: true,
+  }),
+  subagentStepStatuses: exhaustiveOptions<SubagentTaskStep["status"]>({
+    running: true, completed: true, failed: true,
   }),
   approvalKinds: exhaustiveOptions<AgentApprovalRequest["kind"]>({
     command: true, "file-change": true, permissions: true,
@@ -152,18 +173,24 @@ export function todoCollectionCoherent(value: unknown): boolean {
     && todosSerializedBytes(todos) <= MAX_TODOS_SERIALIZED_BYTES;
 }
 
-export function customAgentCollectionCoherent(value: unknown): boolean {
+export function libraryCoherent(
+  value: unknown,
+  conversationProjects?: ReadonlyMap<unknown, unknown>,
+): boolean {
   if (value === undefined) return true;
-  if (!Array.isArray(value) || value.length > MAX_CUSTOM_AGENTS) return false;
-  const parsed = value.map((entry) => customAgentSchema.safeParse(entry));
-  if (parsed.some((result) => !result.success)) return false;
-  const agents = parsed.flatMap((result) => result.success
-    ? [result.data]
-    : []);
-  return new Set(agents.map(({ id }) => id)).size === agents.length
-    && new Set(agents.map(({ handle }) => handle)).size === agents.length
-    && agents.every(({ position }, index) =>
-      index === 0 || position > (agents[index - 1]?.position ?? -1));
+  const parsed = librarySnapshotSchema.safeParse(value);
+  if (!parsed.success) return false;
+  const { categories, savedAnswers } = parsed.data;
+  const categoryIds = new Set(categories.map(({ id }) => id));
+  return categoryIds.size === categories.length
+    && new Set(categories.map(({ name }) => libraryCategoryNameKey(name))).size === categories.length
+    && new Set(savedAnswers.map(({ id }) => id)).size === savedAnswers.length
+    && new Set(savedAnswers.map(({ messageId }) => messageId)).size === savedAnswers.length
+    && savedAnswers.every((answer) =>
+      (answer.categoryId === null || categoryIds.has(answer.categoryId))
+      && (conversationProjects === undefined
+        || conversationProjects.get(answer.conversationId) === answer.projectId))
+    && librarySerializedBytes(value) <= MAX_LIBRARY_SERIALIZED_BYTES;
 }
 
 const CONVERSATION_DETAIL_SCOPED_COLLECTIONS = [
@@ -275,7 +302,7 @@ export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): bool
       || conversationProjects.get(value.activeConversationId) === value.activeProjectId)
     && promptPresetCollectionCoherent(value.promptPresets)
     && todoCollectionCoherent(value.todos)
-    && customAgentCollectionCoherent(value.customAgents)
+    && libraryCoherent(value.library, conversationProjects)
     && watcherLinkCollectionCoherent(value.watchers, conversationProjects, projectIds);
 }
 
@@ -355,6 +382,7 @@ function mutationConversationId(event: RuntimeMutationEvent): string | null {
     case "snapshot.updated":
     case "conversation.shell.updated":
     case "todos.updated":
+    case "library.updated":
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":

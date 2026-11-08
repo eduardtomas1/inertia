@@ -27,6 +27,7 @@ import {
 } from "../../utils/responseTimeline";
 import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
 import { messageContextMenu } from "./messageContextMenu";
+import { useTaskCreator } from "../tasks/taskCreation";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { TooltipButton } from "../TooltipButton";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
@@ -41,9 +42,12 @@ import {
 } from "../working-indicator/orbMotion";
 import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
 import { TurnAgentsLine } from "./TurnAgentsLine";
-import { MessageAgentCall } from "./MessageAgentCall";
-import { SubagentCallList } from "./SubagentCallBlock";
-import { customAgentsById, partitionSubagentCalls } from "../../utils/response-timeline/subagentCalls";
+import { UnlinkedSubagentRows } from "./SubagentActivityRow";
+import {
+  createSubagentActivityStore,
+  SubagentActivityContext,
+} from "./subagentActivityContext";
+import { unlinkedSubagentTraces } from "../../utils/subagentTraceRows";
 import { useFreshRequest } from "./useFreshRequest";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
@@ -65,6 +69,19 @@ import { TooltipText } from "../TooltipText";
 const SentContextPreview = lazy(async () => ({
   default: (await import("../composer/ComposerConversationContextCards")).ConversationContextPreviewCard,
 }));
+
+/** Lets each tool row of this turn find the delegated task it started. */
+export function TurnSubagentActivities({
+  subagents,
+  children,
+}: {
+  subagents: readonly SubagentTrace[];
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const [store] = useState(() => createSubagentActivityStore(subagents));
+  useLayoutEffect(() => store.publish(subagents), [store, subagents]);
+  return <SubagentActivityContext.Provider value={store}>{children}</SubagentActivityContext.Provider>;
+}
 
 export function AgentPixelLoader({
   animated,
@@ -102,6 +119,7 @@ export function UserRequestLayer({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
+  const taskCreator = useTaskCreator();
   const isDocumentLike = turn.userMessage.content.length >= 280;
   const collapsible = shouldCollapseUserRequest(turn.userMessage.content);
   const [expanded, setExpanded] = useState(false);
@@ -157,10 +175,9 @@ export function UserRequestLayer({
       data-turn-jump-target="request"
       data-message-search-id={turn.userMessage.id}
       tabIndex={-1}
-      {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
+      {...messageContextMenu(turn.userMessage, turn.userMessage.content, taskCreator)}
     >
       {requestMeta}
-      {turn.userMessage.customAgentCall && <MessageAgentCall attribution={turn.userMessage.customAgentCall} />}
       <div
         className={clsx("message-body", collapsible && !expanded && "is-collapsed")}
         data-request-content={collapsible ? "collapsible" : "complete"}
@@ -287,6 +304,10 @@ export function AgentExecutionLayer({
         .flatMap((entry) => entry.kind === "compaction" ? [entry] : []),
     [turn],
   );
+  const unlinkedSubagents = useMemo(() => unlinkedSubagentTraces(
+    subagents,
+    new Set([...turn.activities, ...turn.importantActivities].map(({ id }) => id)),
+  ), [subagents, turn.activities, turn.importantActivities]);
   const activePresentation = activeAgentPresentation({
     turn,
     providerLabel,
@@ -295,12 +316,6 @@ export function AgentExecutionLayer({
   usePublishLiveAgentPhase(turn.isActive
     ? { conversationId: props.conversationId, turnId: turn.id, phase: activePresentation.phase }
     : null);
-  const agentsById = useMemo(() => customAgentsById(props.customAgents), [props.customAgents]);
-  const callAttribution = turn.userMessage.customAgentCall;
-  const subagentCalls = useMemo(
-    () => partitionSubagentCalls(subagents, agentsById, callAttribution, props.turns),
-    [agentsById, callAttribution, props.turns, subagents],
-  );
   return (
     <section
       className={clsx(
@@ -363,7 +378,6 @@ export function AgentExecutionLayer({
             liveContent={liveContent}
             liveContentStreaming={props.streamingChannel === "text"}
             heldFollowUpIds={heldFollowUpIds}
-            subagentCalls={subagentCalls.entries}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}
@@ -384,7 +398,6 @@ export function AgentExecutionLayer({
             reasoningStreaming={false}
             liveContent=""
             liveContentStreaming={false}
-            subagentCalls={subagentCalls.entries}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}
@@ -399,13 +412,15 @@ export function AgentExecutionLayer({
       {settledCompactions.map((entry) => (
         <ContextCompactionActivityMarker key={entry.id} activities={entry.activities} />
       ))}
-      {!turn.isActive && consolidatesSettledWork && (
-        <SubagentCallList entries={subagentCalls.entries} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />
-      )}
+      <UnlinkedSubagentRows
+        traces={unlinkedSubagents}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
       <TurnAgentsLine
         conversationId={props.conversationId}
         turnId={turn.id}
-        subagents={subagentCalls.remaining}
+        subagents={subagents}
         onOpenSurface={props.onOpenSurface}
       />
       <span
@@ -463,6 +478,7 @@ export function FinalAnswerDocument({
   props: ResponseTimelineProps;
 }): React.JSX.Element | null {
   const presentation = resolveFinalAnswerPresentation(turn);
+  const taskCreator = useTaskCreator();
   useLayoutEffect(() => {
     if (presentation?.content.includes("STREAM_PROVIDER_COMPLETE_")) {
       const sampleNumber = presentation.content.match(
@@ -484,7 +500,7 @@ export function FinalAnswerDocument({
       data-turn-jump-target="final"
       data-turn-layer="final-answer"
       tabIndex={-1}
-      {...messageContextMenu(presentation.terminalAnswer, presentation.content)}
+      {...messageContextMenu(presentation.terminalAnswer, presentation.content, taskCreator)}
     >
       {turn.providerChanged && (
         <header

@@ -1,6 +1,8 @@
+import { LIBRARY_SCHEMA_VERSION } from "./migrations/library";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
-import { CUSTOM_AGENTS_SCHEMA_VERSION } from "./migrations/custom-agents";
-import { CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS } from "./custom-agents-schema";
+import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "./migrations/todo-source-conversation";
+import { CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION } from "./migrations/codex-thread-tool-packs";
+import { SUBAGENT_TASK_SHAPE_SCHEMA_VERSION } from "./migrations/subagent-task-shape";
 
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
@@ -135,22 +137,28 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "prompt_cache_source",
   ]],
   [106, "messages", ["duo_comparison_json"]],
-  [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents", [
+  [LIBRARY_SCHEMA_VERSION, "library_categories", ["id", "name", "created_at", "updated_at"]],
+  [LIBRARY_SCHEMA_VERSION, "saved_answers", [
     "id",
-    "name",
-    "handle",
-    "description",
-    "icon_json",
-    "accent",
-    "blocks_json",
-    "skills_json",
-    "position",
-    "revision",
+    "conversation_id",
+    "turn_id",
+    "message_id",
+    "category_id",
+    "title",
+    "excerpt",
     "created_at",
     "updated_at",
   ]],
-  [CUSTOM_AGENTS_SCHEMA_VERSION, "messages", ["custom_agent_call_json"]],
-  [CUSTOM_AGENTS_SCHEMA_VERSION, "subagent_traces", ["custom_agent_id"]],
+  [TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, "todos", ["source_conversation_id"]],
+  [SUBAGENT_TASK_SHAPE_SCHEMA_VERSION, "subagent_traces", [
+    "task_kind",
+    "background",
+    "command",
+    "effort",
+    "activity_id",
+    "model_source",
+    "steps_json",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -197,7 +205,8 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [98, ["conversation_title_locks"]],
   [99, ["watcher_links", "watcher_wakes"]],
   [103, ["turn_failure_kinds"]],
-  [CUSTOM_AGENTS_SCHEMA_VERSION, ["custom_agents"]],
+  [LIBRARY_SCHEMA_VERSION, ["library_categories", "saved_answers"]],
+  [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, ["codex_thread_tool_packs"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -222,7 +231,15 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "messages_conversation_created_idx"],
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "activities_conversation_created_idx"],
     [TURN_SCOPED_INDEXES_SCHEMA_VERSION, "reasonings_conversation_created_idx"],
-    [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_position_idx"],
+    [LIBRARY_SCHEMA_VERSION, "library_categories_name_idx"],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_message_idx"],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_conversation_idx"],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_turn_idx"],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_category_idx"],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_created_idx"],
+    [LIBRARY_SCHEMA_VERSION, "html_renders_created_idx"],
+    [TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, "todos_source_conversation_idx"],
+    [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, "codex_thread_tool_packs_registered_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [
@@ -249,6 +266,15 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
       "(select count(*) from todos where completed_at is null) >= 200",
       "raise(abort,",
     ]],
-    [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_count_limit", CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS],
+    [LIBRARY_SCHEMA_VERSION, "library_categories_count_limit", [
+      "before insert on library_categories",
+      "(select count(*) from library_categories) >= 100",
+      "raise(abort,",
+    ]],
+    [LIBRARY_SCHEMA_VERSION, "saved_answers_count_limit", [
+      "before insert on saved_answers",
+      "(select count(*) from saved_answers) >= 1000",
+      "raise(abort,",
+    ]],
   ],
 };

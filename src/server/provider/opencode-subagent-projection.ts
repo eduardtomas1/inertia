@@ -9,6 +9,12 @@ import {
 } from "./opencode-event-projection";
 import type { OpenCodeEventSessionScope } from "./opencode-session-ownership";
 import {
+  SubagentStepRing,
+  subagentActivityLabel,
+  subagentStepKeyInput,
+  subagentStepLabel,
+} from "./subagent-steps";
+import {
   errorMessage,
   objectValue,
   openCodeEventSessionId,
@@ -40,12 +46,16 @@ interface OpenCodeChildTrace {
   parentSessionId: string;
   name: string | null;
   role: string | null;
+  toolUseId: string | null;
   description: string | null;
   status: SubagentTraceStatus;
   providerStatus: "busy" | "idle" | null;
   model: string | null;
+  /** Session.model is authoritative; otherwise the first assistant message names it. */
+  modelFromSession: boolean;
   maxContextTokens: number | null;
   activity: string | null;
+  steps: SubagentStepRing;
   messageTotals: Map<string, number | null | undefined>;
   uncountedMessages: boolean;
   totalTokens: number;
@@ -167,16 +177,28 @@ export class OpenCodeSubagentProjection {
     );
     const parentSessionId = stringValue(info?.parentID);
     if (!parentSessionId) return;
+    const sessionModel = objectValue(info?.model);
+    const sessionProviderId = stringValue(sessionModel?.providerID);
+    const sessionModelId = stringValue(sessionModel?.id);
+    const model = boundedSubagentText(
+      [sessionProviderId, sessionModelId].filter(Boolean).join("/"),
+      MAX_SUBAGENT_LABEL_CHARS,
+    );
     const child: OpenCodeChildTrace = {
       parentSessionId,
       name: boundedSubagentText(info?.title, MAX_SUBAGENT_LABEL_CHARS),
-      role: null,
+      role: boundedSubagentText(info?.agent, MAX_SUBAGENT_LABEL_CHARS),
+      toolUseId: null,
       description: null,
       status: "spawned",
       providerStatus: null,
-      model: null,
-      maxContextTokens: null,
+      model: sessionModelId ? model : null,
+      modelFromSession: Boolean(sessionModelId && model),
+      maxContextTokens: sessionProviderId && sessionModelId
+        ? this.options.contextLimit(sessionProviderId, sessionModelId)
+        : null,
       activity: null,
+      steps: new SubagentStepRing(),
       messageTotals: new Map(),
       uncountedMessages: false,
       totalTokens: 0,
@@ -234,14 +256,15 @@ export class OpenCodeSubagentProjection {
       }
     }
     const counted = child.messageTotals.has(messageId);
+    child.role ??= boundedSubagentText(info.agent, MAX_SUBAGENT_LABEL_CHARS);
     const providerId = stringValue(info.providerID);
     const modelId = stringValue(info.modelID);
-    child.model = boundedSubagentText(
-      [providerId, modelId].filter(Boolean).join("/"),
-      MAX_SUBAGENT_LABEL_CHARS,
-    ) ?? child.model;
-    if (providerId && modelId) {
-      child.maxContextTokens = this.options.contextLimit(providerId, modelId);
+    if (!child.modelFromSession && !child.model && modelId) {
+      child.model = boundedSubagentText(
+        [providerId, modelId].filter(Boolean).join("/"),
+        MAX_SUBAGENT_LABEL_CHARS,
+      );
+      if (providerId) child.maxContextTokens = this.options.contextLimit(providerId, modelId);
     }
     const tokens = objectValue(info.tokens);
     if (!tokens) return;
@@ -280,12 +303,19 @@ export class OpenCodeSubagentProjection {
         if (child.toolParts.size < MAX_CHILD_TOOL_PARTS) child.toolParts.add(partId);
         else child.uncountedToolParts = true;
       }
-      const status = objectValue(part.state)?.status;
+      const state = objectValue(part.state);
+      const status = state?.status;
       if (status === "pending" || status === "running") {
-        child.activity = boundedSubagentText(
-          openCodeToolPartLabel(part),
-          MAX_SUBAGENT_LABEL_CHARS,
-        ) ?? child.activity;
+        child.activity = subagentActivityLabel(openCodeToolPartLabel(part)) ?? child.activity;
+      }
+      const label = subagentStepLabel(part.tool, subagentStepKeyInput(state?.input));
+      if (label) {
+        if (status === "completed" || status === "error") {
+          if (!child.steps.has(partId)) child.steps.start(partId, label);
+          child.steps.settle(partId, status === "error");
+        } else {
+          child.steps.start(partId, label);
+        }
       }
       this.attributeTask(sessionId, part);
       return;
@@ -325,7 +355,8 @@ export class OpenCodeSubagentProjection {
       || isTerminalSubagentStatus(child.status)
     ) return;
     const input = objectValue(state?.input);
-    child.role = boundedSubagentText(input?.subagent_type, MAX_SUBAGENT_LABEL_CHARS) ?? child.role;
+    child.toolUseId ??= stringValue(part.callID) ?? stringValue(part.id) ?? null;
+    child.role ??= boundedSubagentText(input?.subagent_type, MAX_SUBAGENT_LABEL_CHARS);
     child.description = boundedSubagentText(
       input?.prompt,
       MAX_SUBAGENT_DESCRIPTION_CHARS,
@@ -374,7 +405,7 @@ export class OpenCodeSubagentProjection {
         ? null
         : child.parentSessionId,
       parentProviderToolUseId: null,
-      providerToolUseId: null,
+      providerToolUseId: child.toolUseId,
       providerRole: child.role,
       providerName: child.name,
       ...(child.providerStatus ? { providerStatus: child.providerStatus } : {}),
@@ -383,8 +414,9 @@ export class OpenCodeSubagentProjection {
       description: child.description,
       progress: null,
       result: live ? null : child.result,
-      ...(child.model ? { model: child.model } : {}),
+      ...(child.model ? { model: child.model, modelSource: "observed" as const } : {}),
       ...(live && child.activity ? { activity: child.activity } : {}),
+      ...(child.steps.size > 0 ? { steps: child.steps.snapshot() } : {}),
       ...(child.usage ? { usage: child.usage } : {}),
       ...(child.toolParts.size > 0 && !child.uncountedToolParts
         ? { toolUseCount: child.toolParts.size }

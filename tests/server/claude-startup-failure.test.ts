@@ -139,6 +139,18 @@ describe("Claude startup failures", () => {
     expect(claudeSessionUnavailable(result)).toBe(false);
   });
 
+  it("explains a required sandbox that cannot run", () => {
+    const result = failedResult({
+      startup_failure_reason: "sandbox_required_unavailable",
+      errors: ["Sandbox is required but bubblewrap is not installed."],
+    }) as Extract<SDKMessage, { type: "result" }>;
+    expect(claudeStartupFailure(result)).toEqual({
+      reason: "sandbox_required_unavailable",
+      message: "Claude Code requires its sandbox, which can't run on this computer. Install what it needs, such as bubblewrap on Linux, or ask your administrator.",
+    });
+    expect(claudeSessionUnavailable(result)).toBe(false);
+  });
+
   it.each([
     [savedSessionId, true],
     [undefined, false],

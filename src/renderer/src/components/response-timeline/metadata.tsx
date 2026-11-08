@@ -30,6 +30,7 @@ import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import { checkMorphIcon, copyMorphIcon } from "../motion/lucideMorphData";
 import { TooltipButton } from "../TooltipButton";
 import { TooltipText } from "../TooltipText";
+import { LibrarySaveButton } from "../library/LibrarySaveButton";
 
 export function CopyAnswerButton({
   content,
@@ -254,6 +255,7 @@ export function TurnMetadata({
         {terminalAnswer && (
           <CopyAnswerButton content={terminalAnswer.content} answerId={terminalAnswer.id} ariaLabel="Copy final answer" />
         )}
+        {terminalAnswer && <LibrarySaveButton answer={terminalAnswer} turnId={turn.id} />}
         {showTimestamp && (
           <TooltipText tooltip={formatFullDateTime(time)}><time dateTime={time}>{formatMessageTime(time)}</time></TooltipText>
         )}

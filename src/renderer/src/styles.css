@@ -4967,7 +4967,7 @@ button.turn-agents-line:hover {
 }
 
 .usage-surface-loading,
-.tasks-view-loading { flex: 1; }
+.tasks-view-loading, .library-view-loading { flex: 1; }
 
 .workspace-panel-launcher {
   display: flex;
@@ -6526,6 +6526,7 @@ button.turn-agents-line:hover {
 @keyframes view-swap-settings { from { opacity: 0; transform: translateY(9px); } }
 @keyframes view-swap-usage { from { opacity: 0; transform: translateY(9px); } }
 @keyframes view-swap-tasks { from { opacity: 0; transform: translateY(9px); } }
+@keyframes view-swap-library { from { opacity: 0; transform: translateY(9px); } }
 @keyframes view-swap-home { from { opacity: 0; transform: translateY(9px); } }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -6543,6 +6544,10 @@ button.turn-agents-line:hover {
 
   #workspace-content[data-view="tasks"] {
     animation: view-swap-tasks var(--dur) var(--ease) backwards;
+  }
+
+  #workspace-content[data-view="library"] {
+    animation: view-swap-library var(--dur) var(--ease) backwards;
   }
 
   #workspace-content[data-view="home"] {

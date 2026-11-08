@@ -40,7 +40,9 @@ import { paletteWorkspaceCommands } from "../utils/paletteWorkspaceCommands";
 import { requestHeaderBranchMenu } from "../utils/checkoutBranchMenu";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import type { CommandPaletteView } from "./CommandPalette";
-import type { MessageSearchHit } from "@shared/message-search";
+import type { MessageSearchHit, MessageSearchTarget } from "@shared/message-search";
+import type { LibraryTurnTarget } from "./LibraryView";
+import { requestTimelineFocus } from "../utils/timelineFocus";
 import { AppStatusOverlays, StatusToastStack } from "./AppStatusOverlays";
 import { DialogPresence } from "./DialogPresence";
 import type { CommitDialogProps } from "./CommitDialog";
@@ -73,6 +75,7 @@ import {
   loadDailyWorkDialog,
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
+  loadLibraryView,
   loadTasksView,
   loadUsageView,
 } from "./lazySurfaceLoaders";
@@ -114,6 +117,7 @@ interface AppLayoutActions {
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
   selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
+  openLibraryAnswer: (target: MessageSearchTarget) => Promise<boolean>;
   openConversationInSplit: (conversation: Conversation) => void;
   openConversationInWindow: (conversation: Conversation) => void;
   closeConversationSplit: (conversation: Conversation) => void;
@@ -349,6 +353,7 @@ export const AppLayout = memo(function AppLayout({
   });
   const UsageView = useLoadedSurface(loadUsageView, view === "usage");
   const TasksView = useLoadedSurface(loadTasksView, view === "tasks");
+  const LibraryView = useLoadedSurface(loadLibraryView, view === "library");
   const DailyWorkDialog = useLoadedSurface(loadDailyWorkDialog, dailyWorkOpen);
   const [cornerControlsWidth, setCornerControlsWidth] = useState(0);
   const [projectScopeId, setProjectScopeId] = useProjectScope(connection.snapshot);
@@ -532,6 +537,23 @@ export const AppLayout = memo(function AppLayout({
     addTask: () => {
       setTasksFocusAddRequest?.((request) => request + 1);
       setView("tasks");
+    },
+  });
+  const libraryActions = useStableActions({
+    request: (command: CommandWithoutId) => actions.run(command.type, command, { passive: true, reportError: false }),
+    open: () => setView("library"),
+    openAnswer: (target: MessageSearchTarget) => {
+      void actions.openLibraryAnswer(target);
+    },
+    openTurn: ({ conversationId, turnId }: LibraryTurnTarget) => {
+      const target = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
+      if (!target) {
+        setActionError("This chat is no longer available.");
+        return;
+      }
+      actions.selectConversation(target);
+      setView("workspace");
+      requestTimelineFocus({ conversationId, turnId });
     },
   });
   const notificationActions = useStableActions({
@@ -934,6 +956,21 @@ export const AppLayout = memo(function AppLayout({
                   <LoadingMark label="Loading tasks" />
                 </div>
               )
+            ) : view === "library" ? (
+              LibraryView ? (
+                <LibraryView
+                  snapshot={connection.snapshot}
+                  status={connection.status}
+                  request={libraryActions.request}
+                  onOpenAnswer={libraryActions.openAnswer}
+                  onOpenTurn={libraryActions.openTurn}
+                  onError={setActionError}
+                />
+              ) : (
+                <div className="workspace-tool-loading library-view-loading">
+                  <LoadingMark label="Loading the Library" />
+                </div>
+              )
             ) : (
               <TaskCreationContext.Provider value={taskCreation.creator}>
                 <WorkspaceScene {...scene} />
@@ -1097,6 +1134,7 @@ export const AppLayout = memo(function AppLayout({
         importProject={actions.importProject}
         openSettings={actions.openSettings}
         openTasks={tasksActions.open}
+        openLibrary={libraryActions.open}
         addTask={tasksActions.addTask}
         {...(workspaceCommands ? { workspaceCommands } : {})}
       />
@@ -1128,6 +1166,7 @@ export const AppLayout = memo(function AppLayout({
           usage: () => setView("usage"),
           "daily-work": () => setDailyWorkOpen(true),
           tasks: tasksActions.open,
+          library: libraryActions.open,
           "welcome-guide": openWelcomeGuide,
         }}
         projects={connection.snapshot?.projects ?? []}

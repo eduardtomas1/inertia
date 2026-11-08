@@ -19,4 +19,15 @@ export class ConversationProviderContact {
     this.store.assertConversationProvider(conversationId, "claude");
     return await this.providers.claudeSkills(this.store.conversationPath(conversationId), forceReload);
   }
+
+  async codexControlAt(cwd: string): ReturnType<ProviderManager["codexControlContext"]> {
+    return await this.providers.codexControlContext(cwd);
+  }
+
+  async claudeSkillsAt(
+    cwd: string,
+    forceReload: boolean,
+  ): ReturnType<ProviderManager["claudeSkills"]> {
+    return await this.providers.claudeSkills(cwd, forceReload);
+  }
 }

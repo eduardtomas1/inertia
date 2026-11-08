@@ -140,6 +140,7 @@ function resources(): DetachedChatRuntimePolicyResources {
       [TURN]: CONVERSATION,
       [OTHER_TURN]: OTHER_CONVERSATION,
     })[turnId] ?? null,
+    savedAnswerConversationId: () => null,
     duoLaunchConversationIds: (launchId) => ({
       [LAUNCH]: [CONVERSATION, OTHER_CONVERSATION],
       [JUDGED_LAUNCH]: [OTHER_CONVERSATION, "99999999-9999-4999-8999-999999999999", CONVERSATION],
@@ -380,6 +381,20 @@ describe("detached chat runtime authority", () => {
     expect(project("55555555-5555-4555-8555-555555555555")).toEqual({ type: "runtime.cursor", sync });
   });
 
+  it("keeps draft skill previews in the main window", () => {
+    const command = {
+      type: "agent.skills.preview",
+      requestId: REQUEST,
+      payload: {
+        draftConversationId: CONVERSATION,
+        projectId: CONVERSATION,
+        harnessId: "codex-app-server",
+      },
+    } as ClientCommand;
+    expect(rejection(command)).not.toBeNull();
+    expect(mainRejection(command)).toBeNull();
+  });
+
   it("requires detached messages to target the owner without activation", () => {
     type MessageCommand = Extract<ClientCommand, { type: "message.send" }>;
     const message = (activate?: boolean): MessageCommand => ({
@@ -587,6 +602,7 @@ describe("detached chat runtime authority", () => {
         subagentTrace: () => { throw new Error("Not found."); },
         checkpoint: () => { throw new Error("Not found."); },
         agentTurn: () => { throw new Error("Not found."); },
+        library: { savedAnswerConversationId: () => null },
         findPairedLaunch: () => null,
       },
       snapshot,

@@ -492,7 +492,7 @@ floor and the OpenCode 2 ceiling are defined together in
 
 | Provider | Supported | Why |
 | --- | --- | --- |
-| Claude Code | 2.1.309 or newer | Inertia passes `managedSettings` with `disableAllHooks` and `disableSkillShellExecution`; Claude Code before 2.1.309 dropped host-supplied managed settings, so those hook and skill-shell restrictions silently did not apply. 2.1.309 also carries the fixes for GHSA-5j29-h97v-84ch (a symlink race lets writes escape the project; fixed in 2.1.129) and GHSA-pq7j-f95f-qfcv (a plugin pinned-commit bypass; fixed in 2.1.179). |
+| Claude Code | 2.1.309 or newer | Inertia passes `managedSettings` with `disableAllHooks`, `disableSkillShellExecution` and `useAutoModeDuringPlan: false`, so plan-mode commands reach Inertia's approval instead of the auto mode classifier, which reviews them by default whenever auto mode is available; Claude Code before 2.1.309 dropped host-supplied managed settings, so those hook and skill-shell restrictions silently did not apply. 2.1.309 also carries the fixes for GHSA-5j29-h97v-84ch (a symlink race lets writes escape the project; fixed in 2.1.129) and GHSA-pq7j-f95f-qfcv (a plugin pinned-commit bypass; fixed in 2.1.179). |
 | OpenCode | 1.18.22 or newer, below 2 | GHSA-632h-h47v-g4x4: a cross-site request to `/global/upgrade` on `opencode serve` installs arbitrary packages (fixed in 1.18.22). The random basic-auth password Inertia gives its owned server reduces this risk but does not remove it. OpenCode 2 is not supported yet. |
 | Antigravity | 1.2.2 or newer | First release with the headless stream-json contract below. |
 
@@ -1131,6 +1131,13 @@ At launch the resolver reads the key for exactly one child process:
   exclusions, read through `config/read`), so tool shells never inherit it.
   When the person's policy uses `filters`, which cannot be mixed with
   `exclude`, Codex's default `*TOKEN*` exclusion keeps it out instead.
+  The same provider is also selected when `codex app-server` starts, through
+  `-c model_provider=…` and `-c model_providers.<id>.…` overrides. Codex 0.166
+  admits resume and input only when the chat's saved provider matches the
+  launch configuration and ignores the provider named in the request. The
+  values are written without quotes, which Codex reads as plain strings, so
+  they pass the Windows command-shim quoting rules; the launch entry is named
+  after the provider id and the thread configuration supplies the display name.
 
 Both resolvers drop the key from the launch environment once the process has
 started.
@@ -1154,7 +1161,8 @@ three layers that the account route does not need:
   offsets, `od`, compression, encryption or a key reversed, are not
   recognised.
 - **Command refusal.** A `PreToolUse` hook passed through the SDK `hooks`
-  option (matcher `Bash|PowerShell`) declines commands that mention
+  option (matcher `Bash|PowerShell|Monitor`; Monitor runs a shell command
+  whose output lines become events) declines commands that mention
   `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, read `/proc/*/environ`, or
   dump the environment (`env` without a command, `printenv` without names,
   `set` without arguments, `export`, `export -p`, `declare -x`,

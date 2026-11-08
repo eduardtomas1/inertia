@@ -1,4 +1,5 @@
 import type { ConversationBackgroundTasksLoader } from "../../hooks/useAppRuntimeActions";
+import type { DraftSkillsProjection } from "../../hooks/useDraftSkills";
 import type { LimitResetCommandRunner } from "../composer/limitResetClient";
 import type { ComponentProps, Dispatch, SetStateAction } from "react";
 import type {
@@ -298,6 +299,7 @@ export interface WorkspaceSceneModelInput {
   busyAction: string | null;
   project: Project | null;
   draftConversation: Conversation | null;
+  draftSkills?: DraftSkillsProjection;
   globalChatActive: boolean;
   workspaceToolsUnavailable: boolean;
   connection: Connection;
@@ -360,6 +362,7 @@ export function createWorkspaceSceneModel({
   busyAction,
   project,
   draftConversation,
+  draftSkills,
   globalChatActive,
   workspaceToolsUnavailable,
   connection,
@@ -691,10 +694,10 @@ export function createWorkspaceSceneModel({
       streaming: chatProjection.streaming,
       terminalProjections: chatProjection.terminalProjections,
       usage: chatProjection.usage,
-      skills: currentWorkflow?.skills ?? EMPTY_LIST,
-      skillsCapability: currentWorkflow?.skillsCapability ?? null,
-      skillsLoading: workflow.loading,
-      skillsError: workflow.error,
+      skills: draftConversation && draftSkills ? [...draftSkills.skills] : currentWorkflow?.skills ?? EMPTY_LIST,
+      skillsCapability: draftConversation && draftSkills ? draftSkills.capability : currentWorkflow?.skillsCapability ?? null,
+      skillsLoading: draftConversation && draftSkills ? draftSkills.loading : workflow.loading,
+      skillsError: draftConversation && draftSkills ? draftSkills.error : workflow.error,
       promptPresets: connection.snapshot?.promptPresets ?? EMPTY_LIST,
       goal: persistedConversation && !globalChatActive ? {
         workflow: currentWorkflow,
@@ -750,7 +753,7 @@ export function createWorkspaceSceneModel({
         && !compactOnReturnState.watcherChat
         ? { onCompactAndSendMessage: actions.compactAndSendMessage }
         : {}),
-      onListSkills: actions.listSkills,
+      onListSkills: draftConversation && draftSkills ? draftSkills.list : actions.listSkills,
       onPromptPresetCommand: actions.run,
       onRespondToApproval: actions.respondToApproval,
       onRespondToInput: actions.respondToInput,

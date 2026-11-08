@@ -7,6 +7,7 @@ import { isSafeApprovalDisplayText } from "./approval-display";
 import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
 import {
   CLAUDE_KEYED_LAUNCH_COMMAND_REFUSAL,
+  CLAUDE_SHELL_COMMAND_TOOLS,
   claudeCommandExposesLaunchCredentials,
 } from "./claude-credential-commands";
 import type { ClaudeLaunchRedactor } from "./claude-launch-redaction";
@@ -71,7 +72,7 @@ export class ClaudePermissionBroker {
     if (
       this.options.launchRedaction
       && !mcpServer
-      && (toolName === "Bash" || toolName === "PowerShell")
+      && CLAUDE_SHELL_COMMAND_TOOLS.has(toolName)
       && typeof toolInput.command === "string"
       && claudeCommandExposesLaunchCredentials(toolInput.command)
     ) {
@@ -164,7 +165,7 @@ export class ClaudePermissionBroker {
       ?? `Claude wants to use ${toolName}`;
     const approvalDetail = callbackOptions.description
       ?? summarizeInput(toolInput);
-    const approvalCommand = (toolName === "Bash" || toolName === "PowerShell")
+    const approvalCommand = CLAUDE_SHELL_COMMAND_TOOLS.has(toolName)
       && typeof toolInput.command === "string"
       ? toolInput.command
       : undefined;

@@ -90,6 +90,7 @@ export function TurnHtmlRenders({
         <HtmlRenderFrame
           key={`${message.id}:${message.htmlRender.renderId}`}
           reference={message.htmlRender}
+          messageId={message.id}
         />
       ))}
     </div>
@@ -98,6 +99,7 @@ export function TurnHtmlRenders({
 
 interface HtmlRenderFrameProps {
   reference: HtmlRenderReference;
+  messageId?: string;
 }
 
 export function HtmlRenderFrame(props: HtmlRenderFrameProps): React.JSX.Element {
@@ -127,6 +129,7 @@ export function HtmlRenderFrame(props: HtmlRenderFrameProps): React.JSX.Element 
 
 function HtmlRenderDocumentFrame({
   reference,
+  messageId,
   onUnavailable,
   onReload,
 }: HtmlRenderFrameProps & { onUnavailable: () => void; onReload: () => void }): React.JSX.Element {
@@ -172,6 +175,8 @@ function HtmlRenderDocumentFrame({
       aria-label={reference.title}
       data-testid="html-render"
       data-render-id={reference.renderId}
+      data-message-search-id={messageId}
+      tabIndex={messageId ? -1 : undefined}
       data-html-render-state={revealed ? "ready" : "pending"}
     >
       <IconButton

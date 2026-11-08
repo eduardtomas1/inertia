@@ -148,7 +148,7 @@ function renderSidebar(
     splitConversationId?: string | null;
     detachedConversationIds?: ReadonlySet<string>;
     dailyWorkOpen?: boolean;
-    view?: "workspace" | "settings" | "usage" | "tasks" | "home";
+    view?: "workspace" | "settings" | "usage" | "tasks" | "library" | "home";
     onRender?: () => void;
   } = {},
 ) {
@@ -383,11 +383,15 @@ describe("compact Work sidebar", () => {
     expect(tasks.querySelector("span")).toHaveTextContent(/^Tasks$/u);
     expect(tasks.querySelector(".lucide-list-todo")).toHaveAttribute("aria-hidden", "true");
     expect(tasks.previousElementSibling).toBe(primaryRow);
-    expect(tasks.nextElementSibling).toHaveClass("sidebar-search-wrap");
+    const library = screen.getByRole("button", { name: "Library" });
+    expect(tasks.nextElementSibling).toBe(library);
+    expect(library).toHaveClass("sidebar-primary-action");
+    expect(library.querySelector(".lucide-bookmark")).toHaveAttribute("aria-hidden", "true");
+    expect(library.nextElementSibling).toHaveClass("sidebar-search-wrap");
     const order = [...view.container.querySelectorAll<HTMLElement>("button, input")]
       .map((element) => element.getAttribute("aria-label") ?? element.textContent?.trim());
     const start = order.indexOf("New chat");
-    expect(order.slice(start, start + 4)).toEqual(["New chat", "New duo", "Tasks", "Search projects and conversations"]);
+    expect(order.slice(start, start + 5)).toEqual(["New chat", "New duo", "Tasks", "Library", "Search projects and conversations"]);
     expect(tasks).not.toHaveAttribute("aria-current");
     expect(tasks).not.toHaveClass("is-active");
     fireEvent.click(tasks);
@@ -397,6 +401,21 @@ describe("compact Work sidebar", () => {
 
     renderSidebar([], vi.fn(), [], { view: "tasks" });
     const active = screen.getByRole("button", { name: "Tasks" });
+    expect(active).toHaveAttribute("aria-current", "page");
+    expect(active).toHaveClass("is-active");
+  });
+
+  it("opens the Library from its row below Tasks", () => {
+    const view = renderSidebar([]);
+    const library = screen.getByRole("button", { name: "Library" });
+    expect(library).not.toHaveAttribute("aria-current");
+    fireEvent.click(library);
+    expect(view.onViewChange).toHaveBeenCalledWith("library");
+    expect(view.onClose).toHaveBeenCalledTimes(1);
+    view.unmount();
+
+    renderSidebar([], vi.fn(), [], { view: "library" });
+    const active = screen.getByRole("button", { name: "Library" });
     expect(active).toHaveAttribute("aria-current", "page");
     expect(active).toHaveClass("is-active");
   });

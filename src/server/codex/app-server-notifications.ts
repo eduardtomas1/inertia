@@ -21,6 +21,7 @@ export const CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS = {
   "thread/prediction/updated": "ignored",
   "thread/goal/cleared": "projected",
   "thread/queue/changed": "ignored",
+  "thread/readState/changed": "ignored",
   "project/changed": "ignored",
   "thread/project/updated": "ignored",
   "thread/environment/connected": "projected",

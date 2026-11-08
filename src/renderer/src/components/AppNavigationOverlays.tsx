@@ -41,6 +41,7 @@ interface AppNavigationOverlaysProps {
   importProject: () => Promise<void>;
   openSettings: (target?: SettingsTarget) => void;
   openTasks: () => void;
+  openLibrary?: () => void;
   addTask: () => void;
   workspaceCommands?: readonly PaletteWorkspaceCommand[];
 }
@@ -63,6 +64,7 @@ export function AppNavigationOverlays({
   importProject,
   openSettings,
   openTasks,
+  openLibrary,
   addTask,
   workspaceCommands,
 }: AppNavigationOverlaysProps): React.JSX.Element {
@@ -101,6 +103,7 @@ export function AppNavigationOverlays({
             onAddProject={() => void importProject()}
             onOpenSettings={openSettings}
             onOpenTasks={openTasks}
+            onOpenLibrary={openLibrary}
             onAddTask={addTask}
             {...(workspaceCommands ? { workspaceCommands } : {})}
           />

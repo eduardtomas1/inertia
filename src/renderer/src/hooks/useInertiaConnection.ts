@@ -21,8 +21,10 @@ import {
 } from "../utils/connectionMessages";
 import {
   applyConversationShellEvent,
+  applyLibraryEvent,
   applyTodosEvent,
   applyWatcherLinkEvent,
+  withStableLibrary,
 } from "../utils/runtimeSnapshotProjection";
 import { clearWatcherLive, publishWatcherLive, retainWatcherLive } from "../utils/watcherLiveStore";
 import {
@@ -205,7 +207,8 @@ export function useInertiaConnection(
                   setStatus("online");
                 }
                 retainWatcherLive(event.snapshot.watchers);
-                setSnapshot(event.snapshot);
+                const welcomeSnapshot = event.snapshot;
+                setSnapshot((current) => withStableLibrary(current, welcomeSnapshot));
               } else if (event.type === "runtime.resumed") {
                 if (projectionRef.current.beginResume(event.sync) !== "resume") {
                   requireAuthoritativeRefresh();
@@ -226,7 +229,8 @@ export function useInertiaConnection(
                 event = event.event;
                 if (event.type === "snapshot.updated") {
                   retainWatcherLive(event.snapshot.watchers);
-                  setSnapshot(event.snapshot);
+                  const nextSnapshot = event.snapshot;
+                  setSnapshot((current) => withStableLibrary(current, nextSnapshot));
                 } else if (event.type === "conversation.shell.updated") {
                   const shellEvent = event;
                   setSnapshot((current) => current
@@ -236,6 +240,11 @@ export function useInertiaConnection(
                   const todosEvent = event;
                   setSnapshot((current) => current
                     ? applyTodosEvent(current, todosEvent)
+                    : current);
+                } else if (event.type === "library.updated") {
+                  const libraryEvent = event;
+                  setSnapshot((current) => current
+                    ? applyLibraryEvent(current, libraryEvent)
                     : current);
                 } else if (
                   event.type === "watcher.link.updated"
@@ -263,7 +272,8 @@ export function useInertiaConnection(
                 }
               } else if (event.type === "snapshot.updated") {
                 retainWatcherLive(event.snapshot.watchers);
-                setSnapshot(event.snapshot);
+                const nextSnapshot = event.snapshot;
+                setSnapshot((current) => withStableLibrary(current, nextSnapshot));
               } else if (event.type === "conversation.shell.updated") {
                 const shellEvent = event;
                 setSnapshot((current) => current
@@ -273,6 +283,11 @@ export function useInertiaConnection(
                 const todosEvent = event;
                 setSnapshot((current) => current
                   ? applyTodosEvent(current, todosEvent)
+                  : current);
+              } else if (event.type === "library.updated") {
+                const libraryEvent = event;
+                setSnapshot((current) => current
+                  ? applyLibraryEvent(current, libraryEvent)
                   : current);
               }
 

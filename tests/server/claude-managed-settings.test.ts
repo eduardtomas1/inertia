@@ -36,6 +36,7 @@ const EXPECTED_MANAGED_SETTINGS = {
   syncClaudeAiSkills: false,
   allowedMcpServers: [],
   strictPluginOnlyCustomization: ["skills", "agents", "hooks", "mcp"],
+  useAutoModeDuringPlan: false,
 };
 
 async function managedSettingsSentToCli(options: ClaudeOptions): Promise<unknown> {

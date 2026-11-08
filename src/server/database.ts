@@ -362,6 +362,7 @@ export class RuntimeStore {
 
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
+  get library() { return this.snapshotRepository.library; }
   get restartContinuations() { return RestartContinuationRepository.for(this.database); }
   get workspaceToolReads() { return new WorkspaceToolReads(this.database); }
 

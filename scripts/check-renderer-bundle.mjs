@@ -98,8 +98,8 @@ const budgets = {
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
   colorThemesCss: 8 * kibibyte + 120 + 552,
   detachedChatCss: 1.5 * kibibyte + 55 + 21,
-  // The Add provider menu and Grok sign-in state measure 99,470 bytes. Keep 256 bytes.
-  settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114 + 17_959 + 256,
+  // The Add provider menu and Grok sign-in state measure 99,933 bytes. Keep 256 bytes.
+  settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114 + 18_422 + 256,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6 + 1 + 242 + 2,
@@ -206,8 +206,8 @@ const budgets = {
   // (foundation) and 5,734 bytes of eager renderer wiring, after subtracting
   // the separately capped deferred dock and attach dialog closures. The review
   // fixes add 1,078 core bytes.
-  // Grok's shared contracts add 18,990 core bytes (2,480,554 measured). Keep 256 bytes.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 18_990 + 256,
+  // Grok's shared contracts and the provider menu add 19,254 core bytes (2,480,818 measured). Keep 256 bytes.
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 19_254 + 256,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

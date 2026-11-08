@@ -15,6 +15,7 @@ import { providerAuthLaunchEnvironment } from "../../src/server/provider/auth";
 import { selectGrokAcpAuthMethod } from "../../src/server/provider/grok-acp-auth";
 import {
   createGrokAcpHarness,
+  grokAcpLaunchArguments,
   grokAcpProcessInvocation,
 } from "../../src/server/provider/grok-acp-harness";
 import { BoundedGrokJsonLineTransform } from "../../src/server/provider/grok-acp-support";
@@ -27,6 +28,7 @@ import {
   portableNodeExecutable,
   removePortableFixture,
   waitFor,
+  writeNodeFlagExecutable,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
@@ -69,6 +71,7 @@ const messages = [];
 const observed = {
   autoupdater: process.env.GROK_DISABLE_AUTOUPDATER ?? null,
   random: Object.prototype.hasOwnProperty.call(process.env, "RANDOM_SECRET"),
+  argv: process.argv.slice(2),
 };
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 ${save}
@@ -141,41 +144,40 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     );
   }
 
-  async function runTurn(
-    name: string,
-    source: string,
-    input: Parameters<typeof nativeProviderRunInput>[0],
-  ) {
-    const root = portableFixtureRoot(name);
-    roots.push(root);
-    const capturePath = join(root, "capture.json");
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", source);
-    const manager = managerFor(root, command);
-    const result = await manager.run(nativeProviderRunInput(input));
-    return { capturePath, manager, result };
-  }
-
   it("resolves the grok executable without a shell", () => {
-    expect(grokAcpProcessInvocation("/usr/local/bin/grok", {}, "linux")).toEqual({
+    const args = ["--permission-mode", "default", "agent", "stdio"];
+    expect(grokAcpProcessInvocation("/usr/local/bin/grok", {}, args, "linux")).toEqual({
       command: "/usr/local/bin/grok",
-      args: ["agent", "stdio"],
+      args,
     });
     const windows = grokAcpProcessInvocation(
       "C:\\Tools\\grok.cmd",
       { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+      args,
       "win32",
     );
     expect(windows.command).toBe("C:\\Windows\\System32\\cmd.exe");
     expect(windows.windowsVerbatimArguments).toBe(true);
     expect(windows.args.slice(0, 4)).toEqual(["/d", "/s", "/v:off", "/c"]);
     expect(windows.args[4]).toContain("grok.cmd");
-    expect(windows.args[4]).toContain("agent");
-    expect(windows.args[4]).toContain("stdio");
-    expect(grokAcpProcessInvocation("C:\\Tools\\grok.exe", {}, "win32")).toEqual({
+    for (const arg of args) expect(windows.args[4]).toContain(arg);
+    expect(grokAcpProcessInvocation("C:\\Tools\\grok.exe", {}, args, "win32")).toEqual({
       command: "C:\\Tools\\grok.exe",
-      args: ["agent", "stdio"],
+      args,
     });
+  });
+
+  it("puts the permission mode on the command line because Grok has no ACP modes", () => {
+    expect(grokAcpLaunchArguments({ interactionMode: "build", access: "supervised" }))
+      .toEqual(["--permission-mode", "default", "agent", "stdio"]);
+    expect(grokAcpLaunchArguments({ interactionMode: "build", access: "auto-edit" }))
+      .toEqual(["--permission-mode", "default", "agent", "stdio"]);
+    expect(grokAcpLaunchArguments({ interactionMode: "build", access: "full" }))
+      .toEqual(["agent", "--always-approve", "stdio"]);
+    expect(grokAcpLaunchArguments({ interactionMode: "build", access: "full", readOnlyProfile: "watcher" }))
+      .toEqual(["--permission-mode", "default", "agent", "stdio"]);
+    expect(grokAcpLaunchArguments({ interactionMode: "plan", access: "full" }))
+      .toEqual(["--permission-mode", "plan", "agent", "stdio"]);
   });
 
   it("keeps Grok credentials and disables the autoupdater without forwarding Inertia secrets", () => {
@@ -196,18 +198,19 @@ describe("Grok ACP harness", { concurrent: false }, () => {
       .toMatchObject({ GROK_DISABLE_AUTOUPDATER: "1", TERM: "xterm" });
   });
 
-  it("prefers cached_token, then an advertised API key, and otherwise stays unauthenticated", () => {
+  it("uses the saved Grok login unless only an API key can authenticate", () => {
     expect(selectGrokAcpAuthMethod(
       [{ id: "xai.api_key" }, { id: "cached_token" }, { id: 4 }, {}],
       { XAI_API_KEY: "present" },
-    )).toEqual({ id: "cached_token" });
+    )).toBe("cached_token");
     expect(selectGrokAcpAuthMethod(
       [{ id: "xai.api_key" }],
       { GROK_CODE_XAI_API_KEY: " present " },
-    )).toEqual({ id: "xai.api_key" });
-    expect(selectGrokAcpAuthMethod([{ id: "xai.api_key" }], {})).toBeNull();
-    expect(selectGrokAcpAuthMethod([{ id: "login" }], { XAI_API_KEY: "present" })).toBeNull();
-    expect(selectGrokAcpAuthMethod(undefined, {})).toBeNull();
+    )).toBe("xai.api_key");
+    expect(selectGrokAcpAuthMethod([{ id: "grok.com" }], { XAI_API_KEY: "present" })).toBe("xai.api_key");
+    expect(selectGrokAcpAuthMethod([{ id: "xai.api_key" }], {})).toBe("cached_token");
+    expect(selectGrokAcpAuthMethod([{ id: "grok.com" }], {})).toBe("cached_token");
+    expect(selectGrokAcpAuthMethod(undefined, {})).toBe("cached_token");
   });
 
   it("authenticates with cached_token before an advertised API key", async () => {
@@ -216,8 +219,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     const root = portableFixtureRoot("grok ACP cached auth");
     roots.push(root);
     const capturePath = join(root, "capture.json");
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", grokAgent(capturePath, `
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(capturePath, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "xai.api_key" }, { id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
@@ -257,8 +259,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     const root = portableFixtureRoot("grok ACP api key auth");
     roots.push(root);
     const capturePath = join(root, "capture.json");
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", grokAgent(capturePath, `
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(capturePath, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "xai.api_key" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
@@ -291,13 +292,13 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     });
   });
 
-  it("fails the turn when neither advertised auth method can be used", async () => {
+  it("reports a refused saved login as an authentication failure before any session starts", async () => {
     const root = portableFixtureRoot("grok ACP unauthenticated");
     roots.push(root);
     const capturePath = join(root, "capture.json");
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", grokAgent(capturePath, `
-      if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", "[]")} });
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(capturePath, `
+      if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "grok.com" }]`)} });
+      if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "No cached credentials" } });
     `));
     const result = await managerFor(root, command).run(nativeProviderRunInput({
       providerId: "grok",
@@ -313,29 +314,33 @@ describe("Grok ACP harness", { concurrent: false }, () => {
       failure: { reason: "provider-error", phase: "auth" },
     });
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
-      messages: Array<{ method?: string }>;
+      messages: Array<{ method?: string; params?: { methodId?: string } }>;
     };
-    expect(captured.messages.some(({ method }) => method === "authenticate")).toBe(false);
+    expect(captured.messages.find(({ method }) => method === "authenticate")?.params?.methodId)
+      .toBe("cached_token");
     expect(captured.messages.some(({ method }) => method === "session/new")).toBe(false);
   });
 
-  it("sets yoloMode only for a new full-access session", async () => {
-    const modes = `{ currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }`;
+  it("launches each turn with the permission mode for its access and sends no session overrides", async () => {
     const source = (capturePath: string) => grokAgent(capturePath, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
-      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "grok-access", modes: ${modes}, configOptions: [] } });
+      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "grok-access", configOptions: [] } });
       if (message.method === "session/prompt") {
         send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "grok-access", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done" } } } });
         return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
       }
     `);
-    for (const access of ["full", "supervised", "auto-edit"] as const) {
+    const cases = [
+      ["supervised", ["--permission-mode", "default", "agent", "stdio"]],
+      ["auto-edit", ["--permission-mode", "default", "agent", "stdio"]],
+      ["full", ["agent", "--always-approve", "stdio"]],
+    ] as const;
+    for (const [access, argv] of cases) {
       const root = portableFixtureRoot(`grok ACP ${access}`);
       roots.push(root);
       const capturePath = join(root, "capture.json");
-      const command = portableNodeExecutable(root, "grok");
-      writeNodeSubcommand(root, "agent", source(capturePath));
+      const command = writeNodeFlagExecutable(root, "grok", source(capturePath));
       const result = await managerFor(root, command).run(nativeProviderRunInput({
         providerId: "grok",
         conversationId: `grok-${access}`,
@@ -346,153 +351,225 @@ describe("Grok ACP harness", { concurrent: false }, () => {
       }));
       expect(result.status).toBe("completed");
       const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
-        messages: Array<{ method?: string; params?: { _meta?: { yoloMode?: boolean } } }>;
+        observed: { argv: string[] };
+        messages: Array<{ method?: string; params?: Record<string, unknown> }>;
       };
-      const created = captured.messages.find(({ method }) => method === "session/new");
-      if (access === "full") expect(created?.params?._meta).toEqual({ yoloMode: true });
-      else expect(created?.params).not.toHaveProperty("_meta");
+      expect(captured.observed.argv).toEqual(argv);
+      expect(captured.messages.find(({ method }) => method === "session/new")?.params)
+        .not.toHaveProperty("_meta");
       expect(captured.messages.some(({ method }) => method === "session/set_mode")).toBe(false);
     }
   });
 
-  it("does not send yoloMode when loading a full-access session", async () => {
-    const root = portableFixtureRoot("grok ACP load");
-    roots.push(root);
-    const capturePath = join(root, "capture.json");
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", grokAgent(capturePath, `
-      if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{ loadSession: true }", `[{ id: "cached_token" }]`)} });
+  it("resumes a saved session without replaying it, and loads it only when resume is missing", async () => {
+    const source = (capturePath: string, capabilities: string) => grokAgent(capturePath, `
+      if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult(capabilities, `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
-      if (message.method === "session/load") return send({ jsonrpc: "2.0", id: message.id, result: {
-        modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] },
-        configOptions: [],
-      } });
+      if (message.method === "session/resume" || message.method === "session/load") {
+        send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "saved-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Old answer" } } } });
+        return send({ jsonrpc: "2.0", id: message.id, result: { configOptions: [] } });
+      }
       if (message.method === "session/prompt") {
         send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "saved-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Resumed" } } } });
         return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
       }
-    `));
-    const result = await managerFor(root, command).run(nativeProviderRunInput({
-      providerId: "grok",
-      conversationId: "grok-load",
-      cwd: root,
-      prompt: "Continue",
-      interactionMode: "build",
-      access: "full",
-      sessionId: "saved-session",
-    }));
-    expect(result).toMatchObject({ status: "completed", sessionId: "saved-session", text: "Resumed" });
-    const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
-      messages: Array<{ method?: string; params?: Record<string, unknown> }>;
-    };
-    const loaded = captured.messages.find(({ method }) => method === "session/load");
-    expect(loaded?.params).toMatchObject({ sessionId: "saved-session", cwd: root });
-    expect(loaded?.params).not.toHaveProperty("_meta");
-    expect(captured.messages.some(({ method }) => method === "session/new")).toBe(false);
+    `);
+    const cases = [
+      ["{ loadSession: true, sessionCapabilities: { resume: {} } }", "session/resume"],
+      ["{ loadSession: true }", "session/load"],
+    ] as const;
+    for (const [capabilities, restoreMethod] of cases) {
+      const root = portableFixtureRoot(`grok ACP ${restoreMethod.replace("/", " ")}`);
+      roots.push(root);
+      const capturePath = join(root, "capture.json");
+      const command = writeNodeFlagExecutable(root, "grok", source(capturePath, capabilities));
+      const result = await managerFor(root, command).run(nativeProviderRunInput({
+        providerId: "grok",
+        conversationId: `grok-${restoreMethod.replace("/", "-")}`,
+        cwd: root,
+        prompt: "Continue",
+        interactionMode: "build",
+        access: "full",
+        sessionId: "saved-session",
+      }));
+      expect(result).toMatchObject({ status: "completed", sessionId: "saved-session", text: "Resumed" });
+      const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
+        messages: Array<{ method?: string; params?: Record<string, unknown> }>;
+      };
+      const methods = captured.messages.map(({ method }) => method);
+      expect(methods).toContain(restoreMethod);
+      expect(methods).not.toContain(restoreMethod === "session/resume" ? "session/load" : "session/resume");
+      expect(methods).not.toContain("session/new");
+      expect(captured.messages.find(({ method }) => method === restoreMethod)?.params)
+        .toEqual({ sessionId: "saved-session", cwd: root, mcpServers: [] });
+    }
   });
 
-  it("selects an advertised plan mode and fails when none is advertised", async () => {
+  it("launches plan turns in Grok's plan mode and hands the proposed plan to the user", async () => {
     const root = portableFixtureRoot("grok ACP plan");
     roots.push(root);
     const capturePath = join(root, "capture.json");
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", grokAgent(capturePath, `
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(capturePath, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
-      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
-        sessionId: "grok-plan",
-        modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }, { id: "plan", name: "Plan" }] },
-        configOptions: [],
-      } });
-      if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
+      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "grok-plan", configOptions: [] } });
       if (message.method === "session/prompt") {
-        send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "grok-plan", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Planned" } } } });
-        return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+        globalThis.promptId = message.id;
+        return send({ jsonrpc: "2.0", id: 900, method: "_x.ai/exit_plan_mode", params: {
+          sessionId: "grok-plan",
+          toolCallId: "call-exit-plan",
+          planContent: "# Add a README\\n\\n1. Create README.md\\n2. Describe the folder",
+        } });
+      }
+      if (message.id === 900 && !message.method) {
+        return send({ jsonrpc: "2.0", id: globalThis.promptId, result: { stopReason: "end_turn" } });
       }
     `));
-    const planned = await managerFor(root, command).run(nativeProviderRunInput({
+    const plans: Array<{ explanation: string | null; steps: Array<{ step: string }>; handoff?: true }> = [];
+    const result = await managerFor(root, command).run(nativeProviderRunInput({
       providerId: "grok",
       conversationId: "grok-plan",
       cwd: root,
-      prompt: "Plan",
+      prompt: "Plan a README",
       interactionMode: "plan",
-      access: "supervised",
-    }));
-    expect(planned.status).toBe("completed");
+      access: "full",
+    }), { onPlan: (event) => plans.push(event) });
+    expect(result.status).toBe("completed");
+    expect(plans).toEqual([{
+      explanation: "# Add a README\n\n1. Create README.md\n2. Describe the folder",
+      steps: [
+        { step: "Create README.md", status: "pending" },
+        { step: "Describe the folder", status: "pending" },
+      ],
+      handoff: true,
+    }].map((plan) => expect.objectContaining(plan)));
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
-      messages: Array<{ method?: string; params?: { modeId?: string } }>;
+      observed: { argv: string[] };
+      messages: Array<{ id?: number; method?: string; result?: { outcome?: string } }>;
     };
-    expect(captured.messages.find(({ method }) => method === "session/set_mode")?.params).toEqual({
-      sessionId: "grok-plan",
-      modeId: "plan",
-    });
+    expect(captured.observed.argv).toEqual(["--permission-mode", "plan", "agent", "stdio"]);
+    expect(captured.messages.find(({ id, method }) => id === 900 && !method)?.result?.outcome)
+      .toBe("abandoned");
+    expect(captured.messages.some(({ method }) => method === "session/set_mode")).toBe(false);
+  });
 
-    const missingRoot = portableFixtureRoot("grok ACP missing plan");
-    roots.push(missingRoot);
-    const missingCommand = portableNodeExecutable(missingRoot, "grok");
-    writeNodeSubcommand(missingRoot, "agent", grokAgent(null, `
+  it("asks Grok's questions in Inertia and returns the chosen labels and free-text notes", async () => {
+    const root = portableFixtureRoot("grok ACP questions");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(capturePath, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
-      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
-        sessionId: "grok-no-plan",
-        modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] },
-        configOptions: [],
-      } });
+      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "grok-questions", configOptions: [] } });
+      if (message.method === "session/prompt") {
+        globalThis.promptId = message.id;
+        send({ jsonrpc: "2.0", id: 800, method: "_x.ai/ask_user_question", params: { sessionId: "grok-questions", toolCallId: "call-bad", questions: [], mode: "default" } });
+        return send({ jsonrpc: "2.0", id: 801, method: "_x.ai/ask_user_question", params: {
+          sessionId: "grok-questions",
+          toolCallId: "call-ask",
+          mode: "default",
+          questions: [
+            { question: "Tabs or spaces?", options: [{ label: "Tabs", description: "Indent with tabs." }, { label: "Spaces" }], multiSelect: null },
+            { question: "Indent width?", options: [{ label: "Two" }, { label: "Four" }], multiSelect: false },
+          ],
+        } });
+      }
+      if (message.id === 801 && !message.method) {
+        send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "grok-questions", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Noted" } } } });
+        return send({ jsonrpc: "2.0", id: globalThis.promptId, result: { stopReason: "end_turn" } });
+      }
     `));
-    await expect(managerFor(missingRoot, missingCommand).run(nativeProviderRunInput({
+    const manager = managerFor(root, command);
+    const asked: Array<{ questions: Array<{ id: string; question: string; isOther: boolean; options: Array<{ id: string; label: string; description: string }> }> }> = [];
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "grok",
-      conversationId: "grok-no-plan",
-      cwd: missingRoot,
-      prompt: "Plan",
-      interactionMode: "plan",
+      conversationId: "grok-questions",
+      cwd: root,
+      prompt: "Ask me",
+      interactionMode: "build",
       access: "supervised",
-    }))).resolves.toMatchObject({
-      status: "failed",
-      error: "This Grok ACP server does not advertise a plan mode.",
+    }), {
+      onInput: ({ request }) => {
+        asked.push(request);
+        manager.respondToInput("grok-questions", request.requestId, {
+          "question-1": ["option-2"],
+          "question-2": ["Three, please"],
+        }, { runId: "run-grok-questions", turnId: "turn-grok-questions" });
+      },
+    });
+    expect(result).toMatchObject({ status: "completed", text: "Noted" });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.questions.map(({ id, question, isOther, options }) => ({ id, question, isOther, options })))
+      .toEqual([
+        {
+          id: "question-1",
+          question: "Tabs or spaces?",
+          isOther: true,
+          options: [
+            { id: "option-1", label: "Tabs", description: "Indent with tabs." },
+            { id: "option-2", label: "Spaces", description: "" },
+          ],
+        },
+        {
+          id: "question-2",
+          question: "Indent width?",
+          isOther: true,
+          options: [
+            { id: "option-1", label: "Two", description: "" },
+            { id: "option-2", label: "Four", description: "" },
+          ],
+        },
+      ]);
+    const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      messages: Array<{ id?: number; method?: string; result?: unknown; error?: unknown }>;
+    };
+    expect(captured.messages.find(({ id, method }) => id === 800 && !method)?.error).toBeDefined();
+    expect(captured.messages.find(({ id, method }) => id === 801 && !method)?.result).toEqual({
+      outcome: "accepted",
+      answers: { "Tabs or spaces?": ["Spaces"], "Indent width?": ["Other"] },
+      annotations: { "Indent width?": { notes: "Three, please" } },
     });
   });
 
-  it("selects accept-edits when advertised and does not turn auto-edit into yoloMode", async () => {
-    const root = portableFixtureRoot("grok ACP accept edits");
+  it("starts a new answer segment when Grok writes again after a tool call", async () => {
+    const root = portableFixtureRoot("grok ACP segments");
     roots.push(root);
-    const capturePath = join(root, "capture.json");
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", grokAgent(capturePath, `
+    const chunk = (text: string) => `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "grok-segments", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: ${JSON.stringify(text)} } } } });`;
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(null, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
-      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
-        sessionId: "grok-edits",
-        modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }, { id: "acceptEdits", name: "Accept edits" }] },
-        configOptions: [],
-      } });
-      if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
+      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "grok-segments", configOptions: [] } });
       if (message.method === "session/prompt") {
-        send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "grok-edits", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Edited" } } } });
+        ${chunk("Checking")}
+        ${chunk(" now.")}
+        send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "grok-segments", update: { sessionUpdate: "tool_call", toolCallId: "call-1", title: "List files", kind: "read", status: "completed" } } });
+        ${chunk("Done.")}
         return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
       }
     `));
+    const events: string[] = [];
     const result = await managerFor(root, command).run(nativeProviderRunInput({
       providerId: "grok",
-      conversationId: "grok-edits",
+      conversationId: "grok-segments",
       cwd: root,
-      prompt: "Edit",
+      prompt: "Check",
       interactionMode: "build",
-      access: "auto-edit",
-    }));
-    expect(result.status).toBe("completed");
-    const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
-      messages: Array<{ method?: string; params?: { modeId?: string; _meta?: unknown } }>;
-    };
-    expect(captured.messages.find(({ method }) => method === "session/new")?.params).not.toHaveProperty("_meta");
-    expect(captured.messages.find(({ method }) => method === "session/set_mode")?.params?.modeId).toBe("acceptEdits");
+      access: "supervised",
+    }), {
+      onEvent: (event) => {
+        if (event.type === "text") events.push(`text:${event.text}`);
+        else if (event.type === "text-boundary") events.push("boundary");
+      },
+    });
+    expect(result).toMatchObject({ status: "completed", text: "Checking now.\n\nDone." });
+    expect(events.join("")).toBe("text:Checkingtext: now.boundarytext:Done.");
   });
 
   it("sets only advertised model and reasoning effort values", async () => {
     const root = portableFixtureRoot("grok ACP config");
     roots.push(root);
     const capturePath = join(root, "capture.json");
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", grokAgent(capturePath, `
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(capturePath, `
       if (!globalThis.grokConfigOptions) {
         globalThis.grokConfigOptions = [
           { id: "model", name: "Model", category: "model", type: "select", currentValue: "grok-4.7", options: [{ value: "grok-4.7", name: "Grok 4.7" }, { value: "grok-4.6", name: "Grok 4.6" }] },
@@ -541,8 +618,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
 
     const missingRoot = portableFixtureRoot("grok ACP missing model");
     roots.push(missingRoot);
-    const missingCommand = portableNodeExecutable(missingRoot, "grok");
-    writeNodeSubcommand(missingRoot, "agent", grokAgent(null, `
+    const missingCommand = writeNodeFlagExecutable(missingRoot, "grok", grokAgent(null, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
@@ -566,8 +642,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
 
     const effortRoot = portableFixtureRoot("grok ACP missing effort");
     roots.push(effortRoot);
-    const effortCommand = portableNodeExecutable(effortRoot, "grok");
-    writeNodeSubcommand(effortRoot, "agent", grokAgent(null, `
+    const effortCommand = writeNodeFlagExecutable(effortRoot, "grok", grokAgent(null, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
@@ -593,8 +668,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
   it("refuses image attachments when image prompts are not advertised", async () => {
     const root = portableFixtureRoot("grok ACP images");
     roots.push(root);
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", grokAgent(null, `
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(null, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
@@ -620,8 +694,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
   it("rejects malformed session updates and oversized frames", async () => {
     const malformedRoot = portableFixtureRoot("grok ACP malformed update");
     roots.push(malformedRoot);
-    const malformedCommand = portableNodeExecutable(malformedRoot, "grok");
-    writeNodeSubcommand(malformedRoot, "agent", grokAgent(null, `
+    const malformedCommand = writeNodeFlagExecutable(malformedRoot, "grok", grokAgent(null, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
@@ -648,8 +721,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
 
     const overflowRoot = portableFixtureRoot("grok ACP overflow");
     roots.push(overflowRoot);
-    const overflowCommand = portableNodeExecutable(overflowRoot, "grok");
-    writeNodeSubcommand(overflowRoot, "agent", `process.stdout.write("x".repeat(1024 * 1024 + 1)); setInterval(() => {}, 1000);`);
+    const overflowCommand = writeNodeFlagExecutable(overflowRoot, "grok", `process.stdout.write("x".repeat(1024 * 1024 + 1)); setInterval(() => {}, 1000);`);
     await expect(managerFor(overflowRoot, overflowCommand).run(nativeProviderRunInput({
       providerId: "grok",
       conversationId: "grok-overflow",
@@ -667,8 +739,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     const root = portableFixtureRoot("grok ACP compaction");
     roots.push(root);
     const capturePath = join(root, "capture.json");
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", grokAgent(capturePath, `process.exit(0);`));
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(capturePath, `process.exit(0);`));
     const manager = managerFor(root, command);
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "grok",
@@ -708,8 +779,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     if (deactivate) registryDeactivators.push(deactivate);
     const journal = new RuntimeOwnedProcessJournal(registryRoot);
     const capturePath = join(root, "capture.json");
-    const command = portableNodeExecutable(root, "grok");
-    writeNodeSubcommand(root, "agent", `
+    const command = writeNodeFlagExecutable(root, "grok", `
 const fs = require("node:fs");
 const net = require("node:net");
 const readline = require("node:readline");
@@ -803,7 +873,12 @@ setInterval(() => {}, 1000);
     try {
       await waitFor("the fixture's inherited stdout pipe to close", () => stdoutEnded);
       expect(Buffer.concat(output).toString("utf8")).toBe("ready\n");
-      if (child.exitCode === null && child.signalCode === null) {
+      if (process.platform === "win32") {
+        await waitFor("the flushed Windows fixture to exit", () => child.exitCode !== null);
+        expect(child.exitCode).toBe(0);
+      } else {
+        expect(child.exitCode).toBeNull();
+        expect(child.signalCode).toBeNull();
         expect(await terminateProcessTreeAndWait(child, true)).toBe(true);
       }
     } finally {

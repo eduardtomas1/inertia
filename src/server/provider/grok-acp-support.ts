@@ -165,7 +165,8 @@ export function grokRuntimeFailure(
   ].filter(Boolean).join("\n");
   const transportFailure = /stream (?:was )?closed|connection (?:was )?closed|transport|end of (?:file|stream)|\beof\b|epipe|econnreset|broken pipe/iu;
   const isAuth = /auth_required|not authenticated|authentication required|login required|unauthorized/iu
-    .test(detail);
+    .test(detail)
+    || (context.phase === "auth" && !/timed out|timeout|deadline/iu.test(detail));
   const unsupportedTerminalAuth = /advertised terminal authentication without client terminal support/iu
     .test(detail);
   const invalidTerminalAuth = /unsupported or invalid terminal authentication descriptor/iu.test(detail);

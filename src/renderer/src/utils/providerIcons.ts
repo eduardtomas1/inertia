@@ -2,8 +2,7 @@ import anthropicIcon from "../assets/provider-icons/anthropic.svg?no-inline";
 import antigravityIcon from "../assets/provider-icons/antigravity.svg?no-inline";
 import cursorDarkIcon from "../assets/provider-icons/cursor-dark.svg?no-inline";
 import cursorLightIcon from "../assets/provider-icons/cursor-light.svg?no-inline";
-import grokDarkIcon from "../assets/provider-icons/grok-dark.svg?no-inline";
-import grokLightIcon from "../assets/provider-icons/grok-light.svg?no-inline";
+import grokIcon from "../assets/provider-icons/grok.svg?no-inline";
 import kimiDarkIcon from "../assets/provider-icons/kimi-dark.svg?no-inline";
 import kimiLightIcon from "../assets/provider-icons/kimi-light.svg?no-inline";
 import openaiIcon from "../assets/provider-icons/openai.svg?no-inline";
@@ -67,8 +66,8 @@ const providerIconDefinitions: Readonly<Record<ProviderId, ProviderIconDefinitio
     providerId: "grok",
     brand: "grok",
     label: "Grok",
-    lightSrc: grokLightIcon,
-    darkSrc: grokDarkIcon,
+    lightSrc: grokIcon,
+    invertInDark: true,
   },
 };
 

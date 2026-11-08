@@ -11,7 +11,6 @@ import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
   SessionConfigOption,
-  SessionModeState,
   SessionNotification,
   ToolCallStatus,
   ToolKind,
@@ -42,10 +41,7 @@ import {
   type ProviderRunInput,
   type ProviderRunResult,
 } from "./contracts";
-import type {
-  AgentApprovalDecision,
-  AgentInputRequest,
-} from "./interactions";
+import type { AgentApprovalDecision } from "./interactions";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import {
@@ -88,13 +84,16 @@ import {
 import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED, acpFileMutation, acpReadOnlyWatcher } from "./acp-watcher";
 import { GROK_EXPLICIT_COMPACTION_UNAVAILABLE_REASON } from "../../shared/provider";
 import {
-  grokInputOptions,
-  grokPermissionContentText,
-  grokPlanReviseOptionId,
-  type GrokInputOptions,
-} from "./grok-input-options";
-
-export { grokInputOptions };
+  GROK_EXIT_PLAN_METHODS,
+  GROK_PLAN_CAPTURED_RESPONSE,
+  GROK_QUESTION_CANCELLED_RESPONSE,
+  GROK_QUESTION_METHODS,
+  grokInputRequest,
+  grokQuestionResponse,
+  parseGrokExitPlanRequest,
+  parseGrokQuestionRequest,
+} from "./grok-acp-extensions";
+import { markdownPlanSteps } from "./markdown-plan-steps";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -115,8 +114,8 @@ export const GROK_ACP_CAPABILITIES = {
     kind: "grok-acp",
     protocol: "acp-v1-json-rpc",
     approvals: "native",
-    questions: "native-over-permission",
-    plans: "native",
+    questions: "xai-extension",
+    plans: "xai-extension",
     reasoning: "native",
     usage: "optional-acp-v1",
     images: "capability-negotiated",
@@ -147,6 +146,11 @@ interface TurnEvidence {
   seen: boolean;
 }
 
+interface AssistantSegment {
+  open: boolean;
+  afterTool: boolean;
+}
+
 interface ToolActivity {
   kind: "command" | "tool";
   label: string;
@@ -155,13 +159,23 @@ interface ToolActivity {
   toolKind?: ToolKind | null;
 }
 
+export function grokAcpLaunchArguments(
+  input: Pick<ProviderRunInput, "interactionMode" | "access" | "readOnlyProfile">,
+): string[] {
+  if (input.interactionMode === "plan") return ["--permission-mode", "plan", "agent", "stdio"];
+  if (input.access === "full" && !acpReadOnlyWatcher(input)) {
+    return ["agent", "--always-approve", "stdio"];
+  }
+  return ["--permission-mode", "default", "agent", "stdio"];
+}
+
 export function grokAcpProcessInvocation(
   executable: string,
   environment: NodeJS.ProcessEnv,
+  args: readonly string[],
   platform: NodeJS.Platform = process.platform,
-  extraArgs: readonly string[] = [],
 ) {
-  return providerProcessInvocation(executable, ["agent", "stdio", ...extraArgs], environment, platform);
+  return providerProcessInvocation(executable, args, environment, platform);
 }
 
 export function createGrokAcpHarness(
@@ -208,6 +222,7 @@ function startGrokRun(
     maxTokens: null,
   };
   const turnEvidence: TurnEvidence = { seen: false };
+  const assistantSegment: AssistantSegment = { open: false, afterTool: false };
   const compactions = new AcpCompactionProjection(
     "Grok",
     "grok",
@@ -278,17 +293,18 @@ function startGrokRun(
     }
   };
 
+  const ownsActivePrompt = (requestSessionId: string): boolean =>
+    !cancelRequested
+    && Boolean(sessionId)
+    && sessionReady
+    && promptInFlight
+    && requestSessionId === sessionId;
+
   const client = acp.client({ name: "Inertia" })
     .onRequest(
       acp.methods.client.session.requestPermission,
       async ({ params, signal }) => {
-        if (
-          cancelRequested
-          || !sessionId
-          || !sessionReady
-          || !promptInFlight
-          || params.sessionId !== sessionId
-        ) return { outcome: { outcome: "cancelled" } };
+        if (!ownsActivePrompt(params.sessionId)) return { outcome: { outcome: "cancelled" } };
         return grokPermission(
           params,
           redactHostMcpPayload(params),
@@ -296,8 +312,6 @@ function startGrokRun(
           options,
           emitter.rich,
           approvals,
-          inputs,
-          emitter.activity,
         );
       },
     )
@@ -331,6 +345,7 @@ function startGrokRun(
           contextUsage,
           toolActivities,
           turnEvidence,
+          assistantSegment,
           compactions,
           secretRedactor,
         );
@@ -341,6 +356,53 @@ function startGrokRun(
         requestProcessTermination(true);
       }
     });
+
+  for (const method of GROK_QUESTION_METHODS) {
+    client.onRequest(method, (value) => value, async ({ params: rawParams, signal }) => {
+      const providerRequest = parseGrokQuestionRequest(rawParams);
+      if (!ownsActivePrompt(providerRequest.sessionId)) return GROK_QUESTION_CANCELLED_RESPONSE;
+      if (acpReadOnlyWatcher(options.input)) {
+        emitter.activity("system", "info", ACP_WATCHER_QUESTION_DECLINED);
+        return GROK_QUESTION_CANCELLED_RESPONSE;
+      }
+      const displayRequest = parseGrokQuestionRequest(redactHostMcpPayload(rawParams));
+      const requestId = randomUUID();
+      const answers = await new Promise<Record<string, string[]>>((resolve) => {
+        if (inputs.size >= MAX_PENDING_INTERACTIONS) {
+          throw new Error("Grok exceeded the bounded input budget.");
+        }
+        inputs.set(requestId, { resolve, settled: false });
+        signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
+        emitter.capability("structured-input", true);
+        emitter.rich({ type: "input", request: grokInputRequest(requestId, displayRequest) });
+      });
+      if (signal.aborted || !ownsActivePrompt(providerRequest.sessionId)) {
+        return GROK_QUESTION_CANCELLED_RESPONSE;
+      }
+      const response = grokQuestionResponse(providerRequest, answers);
+      return Object.keys(response.answers).length > 0 ? response : GROK_QUESTION_CANCELLED_RESPONSE;
+    });
+  }
+
+  for (const method of GROK_EXIT_PLAN_METHODS) {
+    client.onRequest(method, (value) => value, async ({ params: rawParams }) => {
+      const request = parseGrokExitPlanRequest(redactHostMcpPayload(rawParams));
+      if (!ownsActivePrompt(request.sessionId)) return GROK_PLAN_CAPTURED_RESPONSE;
+      if (request.plan) {
+        turnEvidence.seen = true;
+        emitter.rich({
+          type: "plan",
+          explanation: request.plan,
+          steps: markdownPlanSteps(request.plan, MAX_TOOL_STATE_TEXT_CHARS),
+          handoff: true,
+        });
+      }
+      if (acpReadOnlyWatcher(options.input)) {
+        emitter.activity("system", "info", ACP_WATCHER_PLAN_DECLINED);
+      }
+      return GROK_PLAN_CAPTURED_RESPONSE;
+    });
+  }
 
   emitter.status("starting");
   if (options.input.operation?.kind === "compact") {
@@ -355,6 +417,7 @@ function startGrokRun(
     const invocation = grokAcpProcessInvocation(
       options.executable,
       options.environment,
+      grokAcpLaunchArguments(options.input),
     );
     const ownedInvocation = runtimeOwnedProcessInvocation(
       invocation.command,
@@ -435,24 +498,17 @@ function startGrokRun(
       validateGrokInitialize(initialized);
       supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
       emitter.capability("images", supportsImages);
-      const login = selectGrokAcpAuthMethod(
-        initialized.authMethods,
-        options.environment,
-      );
       activeFailurePhase = "auth";
       activeTerminalEvent = "authenticate";
-      if (!login) {
-        throw new Error(
-          "Grok is not authenticated. Connect Grok in provider settings, then try again.",
-        );
-      }
       await requestControl(
         context.request(acp.methods.agent.authenticate, {
-          methodId: login.id,
+          methodId: selectGrokAcpAuthMethod(initialized.authMethods, options.environment),
           _meta: { headless: true },
         }),
         "authenticate",
       );
+      activeFailurePhase = "session";
+      activeTerminalEvent = "host-tools/start";
       hostMcpConnection = await hostMcpSession?.start();
       if (hostMcpConnection) {
         secretRedactor.addSecrets([hostMcpConnection.bearerToken, hostMcpConnection.url]);
@@ -465,28 +521,32 @@ function startGrokRun(
           )
         : [];
 
-      let modes: SessionModeState | null | undefined;
-      let configOptions: SessionConfigOption[] | null | undefined;
+      let session: { configOptions?: SessionConfigOption[] | null };
       if (options.input.sessionId) {
-        const supportsLoad = initialized.agentCapabilities?.loadSession === true;
-        emitter.capability("session-resume", supportsLoad);
+        const canResume = Boolean(initialized.agentCapabilities?.sessionCapabilities?.resume);
+        const canLoad = initialized.agentCapabilities?.loadSession === true;
+        emitter.capability("session-resume", canResume || canLoad);
         activeFailurePhase = "session";
-        activeTerminalEvent = "session/load";
-        if (!supportsLoad) {
+        activeTerminalEvent = canResume ? "session/resume" : "session/load";
+        if (!canResume && !canLoad) {
           throw new Error(
-            "This Grok ACP server does not advertise session/load.",
+            "This Grok ACP server does not advertise session resume support.",
           );
         }
-        const loaded = await requestControl(
-          context.request(acp.methods.agent.session.load, {
-            sessionId: options.input.sessionId,
-            cwd: options.input.cwd,
-            mcpServers: hostMcpServers,
-          }),
-          "session/load",
-        );
-        modes = loaded.modes;
-        configOptions = loaded.configOptions;
+        const restore = {
+          sessionId: options.input.sessionId,
+          cwd: options.input.cwd,
+          mcpServers: hostMcpServers,
+        };
+        session = canResume
+          ? await requestControl(
+              context.request(acp.methods.agent.session.resume, restore),
+              "session/resume",
+            )
+          : await requestControl(
+              context.request(acp.methods.agent.session.load, restore),
+              "session/load",
+            );
       } else {
         activeFailurePhase = "session";
         activeTerminalEvent = "session/new";
@@ -494,16 +554,12 @@ function startGrokRun(
           context.request(acp.methods.agent.session.new, {
             cwd: options.input.cwd,
             mcpServers: hostMcpServers,
-            ...(options.input.access === "full"
-              ? { _meta: { yoloMode: true } }
-              : {}),
           }),
           "session/new",
         );
         sessionId = created.sessionId;
         emitter.session(sessionId);
-        modes = created.modes;
-        configOptions = created.configOptions;
+        session = created;
       }
       if (!sessionId) throw new Error("Grok ACP did not return a session ID.");
 
@@ -512,10 +568,7 @@ function startGrokRun(
       const configuredOptions = await configureGrokSession(
         context,
         sessionId,
-        modes,
-        configOptions ?? [],
-        options.input.interactionMode,
-        options.input.access,
+        session.configOptions ?? [],
         options.input.model,
         options.input.reasoningEffort,
         requestControl,
@@ -738,27 +791,7 @@ async function grokPermission(
   options: AgentHarnessStartOptions,
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
   approvals: Map<string, PendingApproval>,
-  inputs: Map<string, PendingInput>,
-  emitActivity: ReturnType<typeof createAgentHarnessEmitter>["activity"],
 ): Promise<RequestPermissionResponse> {
-  const inputOptions = grokInputOptions(displayParams);
-  if (inputOptions && acpReadOnlyWatcher(options.input)) {
-    const plan = inputOptions.kind === "plan" ? grokPermissionContentText(displayParams)?.trim() : undefined;
-    if (plan) emit({ type: "plan", explanation: plan, steps: [], handoff: true });
-    emitActivity("system", "info", inputOptions.kind === "plan" ? ACP_WATCHER_PLAN_DECLINED : ACP_WATCHER_QUESTION_DECLINED);
-    const revise = inputOptions.kind === "plan" ? grokPlanReviseOptionId(params) : undefined;
-    return revise ? { outcome: { outcome: "selected", optionId: revise } } : { outcome: { outcome: "cancelled" } };
-  }
-  if (inputOptions) {
-    return grokInputPermission(
-      params,
-      inputOptions,
-      signal,
-      emit,
-      inputs,
-    );
-  }
-
   const allow = oneShotPermissionOption(params.options, true);
   if (allow && acpAttachmentReadAllowed(params, options.input.attachmentReadRoots)) {
     return { outcome: { outcome: "selected", optionId: allow.optionId } };
@@ -804,7 +837,7 @@ async function grokPermission(
         title: bounded(
           displayParams.toolCall.title || "Grok requested permission",
         ),
-        detail: bounded(acpPermissionDetail(displayParams, "Grok requested permission.")),
+        ...grokApprovalBody(displayParams),
         cwd: options.input.cwd,
         permissionRoots: [],
         availableDecisions: ["approve", "deny", "cancel"],
@@ -821,58 +854,18 @@ async function grokPermission(
     : { outcome: { outcome: "cancelled" } };
 }
 
-async function grokInputPermission(
+function grokApprovalBody(
   params: RequestPermissionRequest,
-  input: GrokInputOptions,
-  signal: AbortSignal,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
-  inputs: Map<string, PendingInput>,
-): Promise<RequestPermissionResponse> {
-  const requestId = randomUUID();
-  const questionId = "selection";
-  const request: AgentInputRequest = {
-    requestId,
-    autoResolutionMs: null,
-    questions: [{
-      id: questionId,
-      header: "Grok permission",
-      question: input.prompt,
-      isOther: false,
-      isSecret: false,
-      allowMultiple: false,
-      options: input.options.map((option) => ({
-        ...option,
-        description: "Selecting this option authorizes the Grok request.",
-      })),
-    }],
-  };
-  const answers = await new Promise<Record<string, string[]>>((resolve) => {
-    if (inputs.size >= MAX_PENDING_INTERACTIONS) {
-      throw new Error("Grok exceeded the bounded input budget.");
-    }
-    inputs.set(requestId, { resolve, settled: false });
-    signal.addEventListener("abort", () => {
-      const pending = inputs.get(requestId);
-      if (!pending || pending.settled) return;
-      pending.settled = true;
-      inputs.delete(requestId);
-      emit({ type: "input-resolved", requestId });
-      resolve({});
-    }, { once: true });
-    emit({ type: "input", request });
-  });
-  if (signal.aborted) return { outcome: { outcome: "cancelled" } };
-  const answer = answers[questionId]?.[0];
-  const selected = input.options.find((option) =>
-    option.id === answer || option.label === answer,
-  );
-  const sourceInput = grokInputOptions(params);
-  const sourceOption = sourceInput?.kind === input.kind && selected
-    ? sourceInput.options.find(({ id }) => id === selected.id)
-    : undefined;
-  return sourceOption
-    ? { outcome: { outcome: "selected", optionId: sourceOption.id } }
-    : { outcome: { outcome: "cancelled" } };
+): { command?: string; detail?: string } {
+  const rawInput = objectValue(params.toolCall.rawInput);
+  if (params.toolCall.kind === "execute" && typeof rawInput?.command === "string") {
+    const description = typeof rawInput.description === "string" ? rawInput.description.trim() : "";
+    return {
+      command: bounded(rawInput.command),
+      ...(description ? { detail: bounded(description) } : {}),
+    };
+  }
+  return { detail: bounded(acpPermissionDetail(params, "Grok requested permission.")) };
 }
 
 export function permissionDisplayIsSafe(
@@ -904,6 +897,7 @@ function handleGrokUpdate(
   contextUsage: GrokContextUsage,
   toolActivities: Map<string, ToolActivity>,
   turnEvidence: TurnEvidence,
+  assistantSegment: AssistantSegment,
   compactions: AcpCompactionProjection,
   secretRedactor: AcpSecretRedactor,
 ): void {
@@ -914,7 +908,20 @@ function handleGrokUpdate(
     case "agent_message_chunk":
       if (update.content.type === "text") {
         const text = bounded(update.content.text);
-        if (text.trim()) turnEvidence.seen = true;
+        if (text.trim()) {
+          turnEvidence.seen = true;
+          if (assistantSegment.afterTool) {
+            const tail = secretRedactor.flushAssistant();
+            if (tail) {
+              resultText.append(tail);
+              emitter.text(tail);
+            }
+            emitter.textBoundary();
+            resultText.append("\n\n");
+            assistantSegment.afterTool = false;
+          }
+          assistantSegment.open = true;
+        }
         const value = secretRedactor.assistantChunk(text);
         if (value) {
           resultText.append(value);
@@ -931,6 +938,7 @@ function handleGrokUpdate(
       return;
     case "tool_call": {
       turnEvidence.seen = true;
+      if (assistantSegment.open) assistantSegment.afterTool = true;
       const activityId = boundedId(update.toolCallId, "tool call");
       if (
         !toolActivities.has(activityId)
@@ -968,6 +976,7 @@ function handleGrokUpdate(
     }
     case "tool_call_update": {
       turnEvidence.seen = true;
+      if (assistantSegment.open) assistantSegment.afterTool = true;
       const activityId = boundedId(update.toolCallId, "tool call");
       const existing = toolActivities.get(activityId);
       if (

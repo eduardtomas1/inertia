@@ -179,8 +179,8 @@ export interface GrokAcpHarnessCapabilities extends AgentHarnessCoreCapabilities
     kind: "grok-acp";
     protocol: "acp-v1-json-rpc";
     approvals: "native";
-    questions: "native-over-permission";
-    plans: "native";
+    questions: "xai-extension";
+    plans: "xai-extension";
     reasoning: "native";
     usage: "optional-acp-v1";
     images: "capability-negotiated";

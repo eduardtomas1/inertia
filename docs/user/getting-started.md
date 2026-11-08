@@ -39,7 +39,7 @@ A chat uses one route at a time: the account, or an API key you choose in the mo
 
 **Antigravity.** Google says wrapping agy in another app isn't supported on consumer plans and points to a Gemini API key. Inertia doesn't offer a Gemini API key route yet, so Antigravity runs on its own sign-in.
 
-**Usage for Cursor and Kimi.** Cursor and Kimi Code don't report usage to Inertia, so **Usage → Limits** shows *Usage is not reported by this agent.* for them.
+**Usage for Cursor, Kimi and Grok.** Cursor, Kimi Code and Grok don't report usage to Inertia, so **Usage → Limits** shows *Usage is not reported by this agent.* for them.
 
 What each provider supports:
 
@@ -50,6 +50,7 @@ What each provider supports:
 | Kimi Code | **Sign in through Kimi Code** runs Kimi Code's own sign-in. Usage is not reported. | A built-in Kimi key route. Choose **Add key** on its row. It runs on the Claude Code harness, so Claude Code 2.1.309 or newer must be installed. |
 | OpenCode | **Sign in through OpenCode** runs `opencode auth login`. | OpenCode keeps its own keys; add them with `opencode auth login`. |
 | Cursor | **Sign in through Cursor** runs Cursor's own sign-in. Usage is not reported. | Account only. |
+| Grok | **Sign in through Grok** runs `grok login`. Usage is not reported. | Account only. |
 | Antigravity | Sign in with Antigravity's own prompt; see the note above. | Account only. |
 
 ### Add an API key

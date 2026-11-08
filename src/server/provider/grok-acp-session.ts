@@ -5,16 +5,12 @@ import type {
   ContentBlock,
   InitializeResponse,
   SessionConfigOption,
-  SessionModeState,
 } from "@agentclientprotocol/sdk/unstable";
 
 import { imageMediaType, readBoundedProviderImage } from "./provider-image-read";
 import { acpConfigSelected, assertAcpConfigSelection } from "./acp-config-options";
-import type { ProviderAccessMode } from "./contracts";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
-const ACCEPT_EDITS = /^accept[-_ ]?edits?$/iu;
-const BUILD_MODE = /^(?:build|agent|code|default)$/iu;
 
 export type GrokControlRequest = <T>(
   request: Promise<T>,
@@ -49,73 +45,30 @@ export async function withGrokRpcDeadline<T>(
 export async function configureGrokSession(
   context: acp.ClientContext,
   sessionId: string,
-  modes: SessionModeState | null | undefined,
   configOptions: SessionConfigOption[],
-  interactionMode: "build" | "plan",
-  access: ProviderAccessMode,
   model?: string,
   effort?: string,
   requestControl: GrokControlRequest = (request) => request,
   restored = false,
 ): Promise<SessionConfigOption[]> {
   let authoritativeConfigOptions = configOptions;
-  const requestedSelections: Array<{ id: string; value: string }> = [];
-  if (interactionMode === "plan") {
-    authoritativeConfigOptions = await selectPlanMode(
-      context,
-      sessionId,
-      modes,
-      authoritativeConfigOptions,
-      requestControl,
-    );
-  } else if (access === "auto-edit") {
-    authoritativeConfigOptions = await selectAcceptEdits(
-      context,
-      sessionId,
-      modes,
-      authoritativeConfigOptions,
-      requestControl,
-    );
-  } else {
-    await leavePlanMode(context, sessionId, modes, requestControl);
-  }
-
+  const requested: Array<{ ids: string[]; categories: string[]; value: string; label: string }> = [];
   if (model && model !== "provider-default") {
-    const selected = findAdvertisedChoice(
-      authoritativeConfigOptions,
-      ["model"],
-      ["model"],
-      model,
-    );
-    if (!selected) {
-      throw new Error(
-        `Grok ACP does not advertise the selected model '${bounded(model)}'.`,
-      );
-    }
-    if (restored || !acpConfigSelected(authoritativeConfigOptions, selected)) {
-      const response = await requestControl(
-        context.request(
-          acp.methods.agent.session.setConfigOption,
-          { sessionId, configId: selected.id, value: selected.value },
-        ),
-        "session/set_config_option",
-      );
-      authoritativeConfigOptions = response.configOptions;
-      assertAcpConfigSelection("Grok", authoritativeConfigOptions, selected);
-    }
-    requestedSelections.push(selected);
+    requested.push({ ids: ["model"], categories: ["model"], value: model, label: "model" });
   }
   if (effort) {
-    const selected = findAdvertisedChoice(
-      authoritativeConfigOptions,
-      ["reasoning_effort"],
-      ["thought_level"],
-      effort,
-    );
+    requested.push({
+      ids: ["reasoning_effort"],
+      categories: ["thought_level"],
+      value: effort,
+      label: "reasoning effort",
+    });
+  }
+  const selections: Array<{ id: string; value: string }> = [];
+  for (const { ids, categories, value, label } of requested) {
+    const selected = findAdvertisedChoice(authoritativeConfigOptions, ids, categories, value);
     if (!selected) {
-      throw new Error(
-        `Grok ACP does not advertise the selected reasoning effort '${bounded(effort)}'.`,
-      );
+      throw new Error(`Grok ACP does not advertise the selected ${label} '${bounded(value)}'.`);
     }
     if (restored || !acpConfigSelected(authoritativeConfigOptions, selected)) {
       const response = await requestControl(
@@ -126,161 +79,13 @@ export async function configureGrokSession(
         "session/set_config_option",
       );
       authoritativeConfigOptions = response.configOptions;
-      assertAcpConfigSelection("Grok", authoritativeConfigOptions, selected);
     }
-    requestedSelections.push(selected);
+    selections.push(selected);
   }
-  for (const selected of requestedSelections) {
+  for (const selected of selections) {
     assertAcpConfigSelection("Grok", authoritativeConfigOptions, selected);
   }
   return authoritativeConfigOptions;
-}
-
-async function selectPlanMode(
-  context: acp.ClientContext,
-  sessionId: string,
-  modes: SessionModeState | null | undefined,
-  configOptions: SessionConfigOption[],
-  requestControl: GrokControlRequest,
-): Promise<SessionConfigOption[]> {
-  const nativeMode = modes?.availableModes.find((mode) =>
-    mode.id.toLowerCase() === "plan" || mode.name.toLowerCase() === "plan",
-  );
-  if (nativeMode) {
-    if (modes?.currentModeId !== nativeMode.id) {
-      await requestControl(
-        context.request(acp.methods.agent.session.setMode, {
-          sessionId,
-          modeId: nativeMode.id,
-        }),
-        "session/set_mode",
-      ).catch((error: unknown) => {
-        if (!grokModeAlreadySelected(error)) throw error;
-      });
-    }
-    return configOptions;
-  }
-  const configMode = findPlanConfig(configOptions);
-  if (!configMode) {
-    throw new Error("This Grok ACP server does not advertise a plan mode.");
-  }
-  const response = await requestControl(
-    context.request(
-      acp.methods.agent.session.setConfigOption,
-      { sessionId, configId: configMode.id, value: configMode.value },
-    ),
-    "session/set_config_option",
-  );
-  assertAcpConfigSelection("Grok", response.configOptions, configMode);
-  return response.configOptions;
-}
-
-async function selectAcceptEdits(
-  context: acp.ClientContext,
-  sessionId: string,
-  modes: SessionModeState | null | undefined,
-  configOptions: SessionConfigOption[],
-  requestControl: GrokControlRequest,
-): Promise<SessionConfigOption[]> {
-  const nativeMode = modes?.availableModes.find((mode) =>
-    ACCEPT_EDITS.test(mode.id) || ACCEPT_EDITS.test(mode.name),
-  );
-  if (nativeMode) {
-    if (modes?.currentModeId !== nativeMode.id) {
-      await requestControl(
-        context.request(acp.methods.agent.session.setMode, {
-          sessionId,
-          modeId: nativeMode.id,
-        }),
-        "session/set_mode",
-      ).catch((error: unknown) => {
-        if (!grokModeAlreadySelected(error)) throw error;
-      });
-    }
-    return configOptions;
-  }
-  const configMode = findAcceptEditsConfig(configOptions);
-  if (!configMode) return configOptions;
-  if (acpConfigSelected(configOptions, configMode)) return configOptions;
-  const response = await requestControl(
-    context.request(
-      acp.methods.agent.session.setConfigOption,
-      { sessionId, configId: configMode.id, value: configMode.value },
-    ),
-    "session/set_config_option",
-  );
-  assertAcpConfigSelection("Grok", response.configOptions, configMode);
-  return response.configOptions;
-}
-
-async function leavePlanMode(
-  context: acp.ClientContext,
-  sessionId: string,
-  modes: SessionModeState | null | undefined,
-  requestControl: GrokControlRequest,
-): Promise<void> {
-  if (!isPlanId(modes?.currentModeId)) return;
-  const available = modes?.availableModes ?? [];
-  const nativeMode = available.find((mode) =>
-    BUILD_MODE.test(mode.id) || BUILD_MODE.test(mode.name),
-  ) ?? available.find((mode) =>
-    !isPlanId(mode.id) && !isPlanId(mode.name),
-  );
-  if (!nativeMode || nativeMode.id === modes?.currentModeId) return;
-  await requestControl(
-    context.request(acp.methods.agent.session.setMode, {
-      sessionId,
-      modeId: nativeMode.id,
-    }),
-    "session/set_mode",
-  ).catch((error: unknown) => {
-    if (!grokModeAlreadySelected(error)) throw error;
-  });
-}
-
-function isPlanId(value: string | null | undefined): boolean {
-  return value?.toLowerCase() === "plan";
-}
-
-function grokModeAlreadySelected(error: unknown): boolean {
-  if (!(error instanceof acp.RequestError) || error.code !== -32603) return false;
-  const details = (error.data as { details?: unknown } | null | undefined)?.details;
-  return typeof details === "string" && /^already in [\w-]+ mode$/iu.test(details.trim());
-}
-
-function findPlanConfig(
-  configOptions: SessionConfigOption[],
-): { id: string; value: string } | undefined {
-  const selects = configOptions.filter((option) => option.type === "select");
-  const ordered = [
-    ...selects.filter((option) => option.id === "mode"),
-    ...selects.filter((option) => option.category === "mode" && option.id !== "mode"),
-    ...selects.filter((option) =>
-      option.id !== "mode"
-      && option.category !== "mode"
-      && /mode|permission/iu.test(option.id),
-    ),
-  ];
-  for (const option of ordered) {
-    const selected = selectChoices(option).find((choice) =>
-      choice.value.toLowerCase() === "plan" || choice.name.toLowerCase() === "plan",
-    );
-    if (selected) return { id: option.id, value: selected.value };
-  }
-  return undefined;
-}
-
-function findAcceptEditsConfig(
-  configOptions: SessionConfigOption[],
-): { id: string; value: string } | undefined {
-  for (const option of configOptions) {
-    if (option.type !== "select") continue;
-    const selected = selectChoices(option).find((choice) =>
-      ACCEPT_EDITS.test(choice.value) || ACCEPT_EDITS.test(choice.name),
-    );
-    if (selected) return { id: option.id, value: selected.value };
-  }
-  return undefined;
 }
 
 function findAdvertisedChoice(

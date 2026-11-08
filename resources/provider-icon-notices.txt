@@ -1,11 +1,9 @@
 VENDORED PROVIDER ICONS
 
-The OpenAI, Anthropic, Cursor, Antigravity, Kimi Code, and OpenCode marks are
-used only to identify the corresponding provider in Inertia. The marks remain the property of their
+The OpenAI, Anthropic, Cursor, Antigravity, Grok, Kimi Code, and OpenCode marks
+are used only to identify the corresponding provider in Inertia. The marks remain the property of their
 respective owners. Source URLs, pinned revisions, and asset hashes are recorded
-in src/renderer/src/assets/provider-icons/README.md. The Grok mark is an
-original letter-G monogram drawn for Inertia. No licensed xAI or Grok logo is
-recorded for that asset.
+in src/renderer/src/assets/provider-icons/README.md.
 
 OpenAI mark
 Source repository license: MIT
@@ -256,10 +254,15 @@ guidance. The Kimi name and mark belong to Moonshot AI. They are used only to
 identify the Kimi provider in Inertia and do not imply any affiliation with,
 sponsorship by, or endorsement by Moonshot AI.
 
-Grok monogram
-Original letter-G artwork drawn for Inertia. No licensed xAI or Grok logo is
-recorded. The monogram identifies the Grok provider and does not imply any
-affiliation with, sponsorship by, or endorsement by xAI.
+Grok mark
+Source: agentclientprotocol/registry at commit
+85f5518ced505fdbb044ba9daafa79b43c37a625, file grok-build/icon.svg, from
+xAI's official Grok Build registry entry (PRs #307 and #342). Registry license:
+Apache License 2.0 (text reproduced above). The Grok Build entry declares a
+proprietary license: https://x.ai/legal/terms-of-service
+The Grok name and mark belong to xAI. They are used only to identify the Grok
+provider in Inertia and do not imply any affiliation with, sponsorship by, or
+endorsement by xAI.
 
 OpenCode mark
 Source repository license: MIT

@@ -37,6 +37,15 @@ function tableSql(database: Database.Database, table: string): string {
   return (database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql;
 }
 
+function runMigrationAgain(database: Database.Database): void {
+  if (typeof nativeGrokProviderMigration.up !== "function") throw new Error("Expected a code migration.");
+  nativeGrokProviderMigration.up(database, {
+    sourceSchemaVersion: CURRENT_DATABASE_SCHEMA_VERSION,
+    sourceReleases: [],
+    setLegacyBackfillDiagnostics: () => undefined,
+  });
+}
+
 function rows(database: Database.Database, table: string): unknown[] {
   return database.prepare(`SELECT * FROM "${table.replaceAll("\"", "\"\"")}"`).all();
 }
@@ -89,6 +98,8 @@ describe("native Grok provider migration", () => {
       expect(database.pragma("quick_check", { simple: true })).toBe("ok");
       const schemaVersion = database.pragma("schema_version", { simple: true });
       migrateRuntimeDatabase(database);
+      expect(database.pragma("schema_version", { simple: true })).toBe(schemaVersion);
+      runMigrationAgain(database);
       expect(database.pragma("schema_version", { simple: true })).toBe(schemaVersion);
     } finally {
       database.close();

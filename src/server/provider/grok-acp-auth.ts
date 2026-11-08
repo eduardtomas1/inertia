@@ -6,21 +6,14 @@ const CACHED_TOKEN_METHOD = "cached_token";
 const API_KEY_METHOD = "xai.api_key";
 const MAX_AUTH_FILE_BYTES = 1024 * 1024;
 
-export interface GrokAcpAuthMethod {
-  id: string;
-}
-
 export function selectGrokAcpAuthMethod(
   methods: readonly { id?: unknown }[] | null | undefined,
   environment: NodeJS.ProcessEnv,
-): GrokAcpAuthMethod | null {
-  const ids = new Set<string>();
-  for (const method of methods ?? []) {
-    if (typeof method?.id === "string" && method.id.length > 0) ids.add(method.id);
-  }
-  if (ids.has(CACHED_TOKEN_METHOD)) return { id: CACHED_TOKEN_METHOD };
-  if (ids.has(API_KEY_METHOD) && grokApiKey(environment)) return { id: API_KEY_METHOD };
-  return null;
+): string {
+  const ids = new Set((methods ?? []).map((method) => method?.id));
+  return !ids.has(CACHED_TOKEN_METHOD) && grokApiKey(environment)
+    ? API_KEY_METHOD
+    : CACHED_TOKEN_METHOD;
 }
 
 export function grokCredentialPresence(

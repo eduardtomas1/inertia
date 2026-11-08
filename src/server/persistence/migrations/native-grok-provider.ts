@@ -15,8 +15,8 @@ const REQUIRED_TABLES = [
 
 const CONSTRAINT_REWRITES: readonly (readonly [RegExp, string])[] = [
   [/'kimi',\s*'opencode',\s*'antigravity'\)/gu, "'kimi', 'opencode', 'antigravity', 'grok')"],
-  [/'kimi-acp',\s*'antigravity-cli',/gu, "'kimi-acp', 'antigravity-cli', 'grok-acp',"],
-  [/'kimi-managed',\s*'antigravity-managed',/gu, "'kimi-managed', 'antigravity-managed', 'grok-managed',"],
+  [/'kimi-acp',\s*'antigravity-cli',(?!\s*'grok-acp')/gu, "'kimi-acp', 'antigravity-cli', 'grok-acp',"],
+  [/'kimi-managed',\s*'antigravity-managed',(?!\s*'grok-managed')/gu, "'kimi-managed', 'antigravity-managed', 'grok-managed',"],
 ];
 
 function quoted(identifier: string): string {
@@ -90,19 +90,22 @@ export const nativeGrokProviderMigration: DatabaseMigrationDefinition = {
         throw new Error(`The ${table} provider constraints were not found.`);
       }
     }
-    for (const { name, sql } of tables) {
+    const pending = tables.filter(({ name, sql }) => {
       const matches = CONSTRAINT_REWRITES.some(([pattern]) => {
         pattern.lastIndex = 0;
         return pattern.test(sql);
       });
-      if (!matches) throw new Error(`The ${name} schema has an unexpected shape.`);
-    }
+      if (!matches && !sql.includes("'grok")) {
+        throw new Error(`The ${name} schema has an unexpected shape.`);
+      }
+      return matches;
+    });
     const dependentTriggers = (database
       .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND sql IS NOT NULL ORDER BY name")
       .all() as { name: string; sql: string }[])
-      .filter(({ sql }) => tables.some(({ name }) => new RegExp(`\\b${name}\\b`, "u").test(sql)));
+      .filter(({ sql }) => pending.some(({ name }) => new RegExp(`\\b${name}\\b`, "u").test(sql)));
     for (const { name } of dependentTriggers) database.exec(`DROP TRIGGER ${quoted(name)}`);
-    for (const { name } of tables) rebuildTable(database, name);
+    for (const { name } of pending) rebuildTable(database, name);
     for (const { sql } of dependentTriggers) database.exec(sql);
   },
 };

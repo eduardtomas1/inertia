@@ -1,6 +1,6 @@
 import type { DatabaseMigrationDefinition } from "./catalog";
 
-export const ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION = 113;
+export const ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION = 117;
 
 export const orchestrationV2ReceiptStatusMigration: DatabaseMigrationDefinition = {
   name: "OrchestrationV2ReceiptStatusAndProjectionMetadata",

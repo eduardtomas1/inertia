@@ -34,6 +34,9 @@ import { createReadCommandHandlers } from "./read-commands";
 import { createSettingsBackendCommandHandler } from "./settings-backend-commands";
 import { createSourceControlCommandHandler } from "./source-control-commands";
 import { createTodoCommandHandler } from "./todo-commands";
+import { createLibraryCommandHandler } from "./library-commands";
+import { createWorktreeCommandHandler } from "./worktree-commands";
+import { createTerminalLinkCommandHandler } from "./terminal-link-commands";
 import type { TurnInteractionCommandDependencies } from "./turn-interaction-commands";
 
 type IsolatedReviewDependencies = Parameters<typeof createIsolatedReviewCommandHandler>[0];
@@ -130,6 +133,7 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
     createObservedChildCommandHandler({ observedChildren: store.observedChildren, send,
       activeTurn: (conversationId) => turns.activeIdentity(conversationId) }),
     createTodoCommandHandler({ ...services.turnInteraction, creation: services.agentThreads.creation, broadcastSnapshot: flushSnapshot }),
+    createLibraryCommandHandler({ store, broadcast, send }),
     createAgentWorkflowCommandHandler({
       workflows: services.agentWorkflows,
       providerTerminalResumes,
@@ -180,6 +184,7 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
         ? (input) => rollbackConversationHistory({ store, providers, turns, providerTerminalResumes, terminals: services.terminals }, input, lifetimeSignal)
         : undefined,
     }),
+    createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
     services.queuedMessages.turnInteractionHandler,
     createConversationCompactionCommandHandler({
       store,
@@ -261,5 +266,6 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       reportIncident: services.reportIncident,
       send,
     }),
+    createTerminalLinkCommandHandler({ workspacePath, send }),
   ];
 }

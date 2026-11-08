@@ -347,9 +347,9 @@ describe("ProviderMaintenanceController", () => {
     expect(runAction).not.toHaveBeenCalled();
   });
 
-  it("does not report OpenCode 2 as an update for a Homebrew install Inertia cannot update", async () => {
+  it("does not report OpenCode 3 as an update for a Homebrew install Inertia cannot update", async () => {
     const homebrewInfo = vi.fn(async () => JSON.stringify({
-      formulae: [{ versions: { stable: "2.2.5" } }],
+      formulae: [{ versions: { stable: "3.0.2" } }],
       casks: [],
     }));
     const controller = new ProviderMaintenanceController({
@@ -370,9 +370,9 @@ describe("ProviderMaintenanceController", () => {
 
     const [status] = await controller.refresh(["opencode"]);
     expect(status).toMatchObject({
-      latestVersion: "2.2.5",
+      latestVersion: "3.0.2",
       versionStatus: "unknown",
-      message: "Version 2.2.5 is a new major version that Inertia does not support yet. Your account cannot write this Homebrew installation.",
+      message: "Version 3.0.2 is a new major version that Inertia does not support yet. Your account cannot write this Homebrew installation.",
     });
   });
 

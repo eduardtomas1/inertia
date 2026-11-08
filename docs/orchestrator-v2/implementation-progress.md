@@ -1493,3 +1493,32 @@ a 15 s timeout in `orchestration-portable-history`, and `EBUSY` SQLite
 cleanup with Git-artifact waits in `orchestration-rollback-restore`. After the
 last source edit, six core files passed 64 of 64. `typecheck`, `lint` and
 `check:architecture` passed. The full `npm run check` was not run.
+
+## Main sync onto 6d8ab80f — 2026-11-08
+
+Main released migrations 107 to 110 (`PersistLibrary`,
+`RecordManagedAgentContextReads`, `PersistTodoSourceConversation`,
+`PersistCodexThreadToolPacks`), so the branch's unreleased migrations move up
+by four. Earlier entries in this file use the old numbers:
+
+| Before | After | Migration |
+| --- | --- | --- |
+| 107 | 111 | `OrchestrationV2EventStore` |
+| 108 | 112 | `SupportNativePiProvider` |
+| 109 | 113 | `SupportCursorSdkHarness` |
+| 110 | 114 | `RaiseConversationContextSupplementBound` |
+| 111 | 115 | `PersistDelegatedTasks` |
+| 112 | 116 | `PersistDelegationAutomaticWakes` |
+| 113 | 117 | `OrchestrationV2ReceiptStatusAndProjectionMetadata` |
+
+Lineage entries 1 to 110 are byte-identical to main's. A database that already
+ran the branch's old numbering is development data only and does not upgrade
+in place.
+
+Integration points with main's work: the Library, Worktrees and Terminal links
+command handlers join the branch's handler module; a managed chat's status
+keeps main's shared `managedConversationStatus` and adds the delegated task
+and native children; Pi skills stay on the chat's own capability, while
+new-chat skill previews remain Codex and Claude only; the orchestration tool
+definitions move to `src/server/runtime/agent-thread-tool-definitions.ts`. The
+agent surface budget is exactly the sum of both sides' additions.

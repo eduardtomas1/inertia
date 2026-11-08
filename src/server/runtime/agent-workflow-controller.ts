@@ -154,6 +154,10 @@ function isNativeClaudeConversation(
     && conversation.modelSelection.harnessId === "claude-agent-sdk";
 }
 
+function isNativePiConversation(conversation: Conversation): boolean {
+  return conversation.providerId === "pi" && conversation.modelSelection.harnessId === "pi-rpc";
+}
+
 function assertRecoverableGoalBudget(
   existing: AgentGoal | undefined,
   input: { status: AgentGoalStatus; tokenBudget?: number | null },
@@ -263,10 +267,9 @@ export class AgentWorkflowController {
         .filter(({ routeKey }) => routeKey === currentSkillRouteKey)
         .map(({ summary }) => summary)
         .sort(compareSkills),
-      skillsCapability: agentSkillsCapability(
-        conversation.providerId,
-        conversation.modelSelection.harnessId,
-      ),
+      skillsCapability: isNativePiConversation(conversation)
+        ? { kind: "pi-native", available: true, label: "Pi skills" }
+        : agentSkillsCapability(conversation.providerId, conversation.modelSelection.harnessId),
       goalRefreshWarning: native
         && nativeGoalRefreshWarning?.providerSessionId
           === conversation.providerSessionId
@@ -764,6 +767,7 @@ export class AgentWorkflowController {
     if (
       !isNativeCodexConversation(conversation)
       && !isNativeClaudeConversation(conversation)
+      && !isNativePiConversation(conversation)
     ) {
       throw new RuntimeRequestError(
         "This route does not expose safe structured skill invocation.",
@@ -814,15 +818,17 @@ export class AgentWorkflowController {
     forceReload: boolean,
     routeKey: string,
   ): Promise<AgentSkillSummary[]> {
-    if (isNativeClaudeConversation(conversation)) {
-      const rawSkills = await this.contact.claudeSkills(conversationId, forceReload);
+    if (isNativeClaudeConversation(conversation) || isNativePiConversation(conversation)) {
+      const pi = isNativePiConversation(conversation);
+      const source = pi ? "pi-native" as const : "claude-native" as const;
+      const rawSkills = pi ? await this.contact.piSkills(conversationId) : await this.contact.claudeSkills(conversationId, forceReload);
       this.requireCurrentSkillRoute(conversationId, routeKey);
       return this.replaceSkills(
         conversationId,
         rawSkills,
         rawSkills.length > MAX_SKILLS,
         0,
-        (raw) => this.claudeSkillCandidate(conversationId, routeKey, raw),
+        (raw) => this.nativeSkillCandidate(conversationId, routeKey, raw, source),
         routeKey,
       );
     }
@@ -885,7 +891,7 @@ export class AgentWorkflowController {
       return preview(
         await this.contact.claudeSkillsAt(cwd, input.forceReload),
         0,
-        (raw) => this.claudeSkillCandidate(owner, routeKey, raw),
+        (raw) => this.nativeSkillCandidate(owner, routeKey, raw, "claude-native"),
       );
     }
     const { rawSkills, warningCount } = codexSkillListing(
@@ -905,10 +911,12 @@ export class AgentWorkflowController {
     );
   }
 
-  private claudeSkillCandidate(
+  private nativeSkillCandidate(
     conversationId: string,
     routeKey: string,
-    raw: Awaited<ReturnType<ConversationProviderContact["claudeSkillsAt"]>>[number],
+    raw: Awaited<ReturnType<ConversationProviderContact["claudeSkillsAt"]>>[number]
+      | Awaited<ReturnType<ConversationProviderContact["piSkills"]>>[number],
+    source: "claude-native" | "pi-native",
   ): SkillCandidate | null {
     const name = boundedDisplayString(raw.name, 160);
     const description = boundedDisplayString(raw.description, 1_000);
@@ -916,7 +924,7 @@ export class AgentWorkflowController {
       return null;
     }
     const identityKey =
-      `${conversationId}\0${routeKey}\0claude\0${name}`;
+      `${conversationId}\0${routeKey}\0${source}\0${name}`;
     return {
       identityKey,
       summary: {
@@ -928,10 +936,10 @@ export class AgentWorkflowController {
           boundedDisplayString(raw.argumentHint, 240) ?? null,
         scope: raw.scope,
         enabled: true,
-        source: "claude-native",
+        source,
       },
       providerInput: {
-        source: "claude-native",
+        source,
         name,
         path: raw.path,
       },

@@ -1,6 +1,6 @@
 import type { DatabaseMigrationDefinition } from "./catalog";
 
-export const ORCHESTRATION_V2_SCHEMA_VERSION = 107;
+export const ORCHESTRATION_V2_SCHEMA_VERSION = 111;
 
 export const orchestrationV2Migration: DatabaseMigrationDefinition = {
   name: "OrchestrationV2EventStore",

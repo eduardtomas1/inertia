@@ -441,7 +441,9 @@ describe("library migration", () => {
         "SELECT name FROM sqlite_master WHERE name LIKE 'library%' OR name LIKE 'saved_answers%' OR name = 'html_renders_created_idx' ORDER BY name",
       ).pluck().all() as string[]);
       expect(objects()).toEqual([]);
-      const messages = database.prepare("SELECT * FROM messages ORDER BY rowid").all();
+      const messageColumns = (database.pragma("table_info(messages)") as Array<{ name: string }>)
+        .map(({ name }) => `"${name}"`).join(", ");
+      const messages = database.prepare(`SELECT ${messageColumns} FROM messages ORDER BY rowid`).all();
       expect(messages).not.toHaveLength(0);
       const history = database.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
 
@@ -460,7 +462,7 @@ describe("library migration", () => {
         "saved_answers_message_idx",
         "saved_answers_turn_idx",
       ]);
-      expect(database.prepare("SELECT * FROM messages ORDER BY rowid").all()).toEqual(messages);
+      expect(database.prepare(`SELECT ${messageColumns} FROM messages ORDER BY rowid`).all()).toEqual(messages);
       expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 106 ORDER BY version").all()).toEqual(history);
       expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
       const now = new Date().toISOString();

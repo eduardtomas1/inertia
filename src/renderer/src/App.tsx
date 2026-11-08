@@ -74,10 +74,7 @@ import { type NewConversationLocation } from "./lib/newConversation";
 import { useLaunchRequests } from "./hooks/useLaunchRequests";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
-import {
-  cacheColorTheme,
-  cacheThemePreference,
-} from "./utils/theme";
+import { cacheColorTheme, cacheThemePreference } from "./utils/theme";
 import { cachedAppSettings } from "./utils/cachedSettings";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";

@@ -392,11 +392,11 @@ describe("Orchestrator V2 boot-time projection maintenance", () => {
 });
 
 describe("Orchestrator V2 receipt status migration", () => {
-  async function databaseAt(version: 110 | 112) {
+  async function databaseAt(version: 114 | 116) {
     const runtime = await completedRuntime();
     const orchestration = runtime.store.orchestration;
     const conversation = runtime.store.conversation(runtime.conversationId);
-    orchestration.events.commit({ actorId: "human", commandId: "request-before-113", projectId: conversation.projectId,
+    orchestration.events.commit({ actorId: "human", commandId: "request-before-117", projectId: conversation.projectId,
       threadId: conversation.id, command: { type: "conversation.noop" }, expectedRevision: orchestration.events.revision(conversation.id),
       events: [], result: { kept: true } });
     const path = join(runtime.directory, "inertia.sqlite");
@@ -410,14 +410,14 @@ describe("Orchestrator V2 receipt status migration", () => {
       ALTER TABLE orchestration_v2_receipts DROP COLUMN error;
       ALTER TABLE orchestration_v2_receipts DROP COLUMN status;
     `);
-    db.prepare("DELETE FROM schema_migrations WHERE version > 112").run();
-    if (version === 110) removeDelegatedTasksFromFixture(db);
+    db.prepare("DELETE FROM schema_migrations WHERE version > 116").run();
+    if (version === 114) removeDelegatedTasksFromFixture(db);
     expect((db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version)
       .toBe(version);
     return { runtime, db, path, entities: entities(db), receipts: receipts(db) };
   }
 
-  it.each([112, 110] as const)("upgrades a schema %i database and preserves its receipts", async (version) => {
+  it.each([116, 114] as const)("upgrades a schema %i database and preserves its receipts", async (version) => {
     const { runtime, db, path, entities: beforeEntities, receipts: beforeReceipts } = await databaseAt(version);
     expect(beforeReceipts.length).toBeGreaterThanOrEqual(2);
     migrateRuntimeDatabase(db);
@@ -444,7 +444,7 @@ describe("Orchestrator V2 receipt status migration", () => {
       expect(entities(reopenedDb)).toEqual(beforeEntities);
       expect(reopened.orchestration.maintainProjections().rebuilt).toBe(false);
       const conversation = reopened.conversation(runtime.conversationId);
-      const identity = { actorId: "human", commandId: "request-before-113", projectId: conversation.projectId,
+      const identity = { actorId: "human", commandId: "request-before-117", projectId: conversation.projectId,
         threadId: conversation.id };
       expect(reopened.orchestration.events.receipt(identity, { type: "conversation.noop" })).toMatchObject({
         status: "accepted", error: null, commandType: null, result: { kept: true } });
@@ -454,7 +454,7 @@ describe("Orchestrator V2 receipt status migration", () => {
     }
   });
 
-  it("is a no-op when migration 113 runs again", async () => {
+  it("is a no-op when migration 117 runs again", async () => {
     const runtime = await completedRuntime();
     const path = join(runtime.directory, "inertia.sqlite");
     runtime.store.close();
@@ -466,7 +466,7 @@ describe("Orchestrator V2 receipt status migration", () => {
     const beforeMetadata = metadata(db);
     const beforeReceipts = db.prepare("SELECT * FROM orchestration_v2_receipts ORDER BY actor_id, command_id").all();
     migrateReceiptStatus(db);
-    db.prepare("DELETE FROM schema_migrations WHERE version = 113").run();
+    db.prepare("DELETE FROM schema_migrations WHERE version = 117").run();
     migrateRuntimeDatabase(db);
     expect(schema()).toEqual(beforeSchema);
     expect(metadata(db)).toEqual(beforeMetadata);

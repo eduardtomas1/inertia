@@ -31,14 +31,14 @@ describe("native Pi provider append-only upgrade", () => {
     const database = new Database(path);
     try {
       database.pragma("foreign_keys = ON");
-      migrateRuntimeDatabase(database, 107);
+      migrateRuntimeDatabase(database, 111);
       database.prepare("INSERT OR REPLACE INTO provider_metadata_cache (provider_id, executable, version, auth_state) VALUES ('codex', 'codex-test', '1', 'authenticated')").run();
       expect(() => database.prepare("INSERT INTO provider_metadata_cache (provider_id) VALUES ('pi')").run()).toThrow();
       const rows = tableData(database);
       const objects = schemaObjects(database);
       const foreignKeys = database.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
         .map((row) => { const { name } = row as { name: string }; return [name, database.pragma(`foreign_key_list("${name.replaceAll('"', '""')}")`)]; });
-      migrateRuntimeDatabase(database, 108);
+      migrateRuntimeDatabase(database, 112);
       expect(tableData(database)).toEqual(rows);
       expect(schemaObjects(database)).toEqual(objects);
       for (const [name, keys] of foreignKeys) expect(database.pragma(`foreign_key_list("${String(name).replaceAll('"', '""')}")`)).toEqual(keys);
@@ -64,11 +64,11 @@ describe("native Pi provider append-only upgrade", () => {
   it("rolls back rebuilt tables and schema history if a later constraint cannot be widened", () => {
     const database = new Database(":memory:");
     try {
-      migrateRuntimeDatabase(database, 107);
+      migrateRuntimeDatabase(database, 111);
       database.exec("ALTER TABLE subagent_traces RENAME TO unexpected_subagents");
       const objects = schemaObjects(database);
-      expect(() => migrateRuntimeDatabase(database, 108)).toThrow();
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 107 });
+      expect(() => migrateRuntimeDatabase(database, 112)).toThrow();
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 111 });
       expect(schemaObjects(database)).toEqual(objects);
       expect(database.prepare("SELECT name FROM sqlite_master WHERE name LIKE '%_v108'").all()).toEqual([]);
       expect(() => database.prepare("INSERT INTO provider_metadata_cache (provider_id) VALUES ('pi')").run()).toThrow();

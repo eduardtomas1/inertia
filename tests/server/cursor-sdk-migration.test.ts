@@ -13,11 +13,11 @@ describe("Cursor SDK append-only migration", () => {
   it("preserves all historical rows, indexes, triggers and foreign keys", () => {
     const db = new Database(":memory:");
     try {
-      db.pragma("foreign_keys=ON"); migrateRuntimeDatabase(db, 108);
+      db.pragma("foreign_keys=ON"); migrateRuntimeDatabase(db, 112);
       const beforeRows = rows(db); const beforeObjects = objects(db);
       const keys = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[])
         .map(({ name }) => [name, db.pragma(`foreign_key_list("${name}")`)] as const);
-      migrateRuntimeDatabase(db, 109);
+      migrateRuntimeDatabase(db, 113);
       expect(rows(db)).toEqual(beforeRows); expect(objects(db)).toEqual(beforeObjects);
       for (const [name, values] of keys) expect(db.pragma(`foreign_key_list("${name}")`)).toEqual(values);
       expect(db.pragma("foreign_key_check")).toEqual([]); expect(db.pragma("integrity_check", { simple: true })).toBe("ok");

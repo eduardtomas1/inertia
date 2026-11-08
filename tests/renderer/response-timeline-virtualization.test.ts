@@ -33,6 +33,10 @@ import {
   type ResponseTimelineItem,
   type ResponseTurn,
 } from "../../src/renderer/src/utils/responseTimeline";
+import {
+  groupSubagentsByTurn,
+  subagentEstimateSignature,
+} from "../../src/renderer/src/utils/response-timeline/virtualization";
 
 const conversationId = "22222222-2222-4222-8222-222222222222";
 const requestedAt = "2026-07-26T10:00:00.000Z";
@@ -753,6 +757,52 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       .toBeGreaterThan(quietEstimate + 50);
   });
 
+  it("counts delegated task rows, linked or compact, in a turn's estimate", () => {
+    const owner = "turn-delegated";
+    const running = buildItem({
+      id: owner,
+      status: "running",
+      answer: "",
+      activities: [activity("agent-call", owner, { title: "Agent", status: "running" })],
+    });
+    const linked = taskTrace({
+      id: "trace-linked",
+      turnId: owner,
+      activityId: "agent-call",
+      steps: [{ label: "Read · src/index.ts", status: "running" }],
+    });
+    const plain = estimateTimelineRowSize(running);
+    const withLinked = estimateTimelineRowSize(running, { subagents: [linked] });
+    expect(withLinked - plain).toBeGreaterThanOrEqual(36);
+    const settledLinked = { ...linked, isLive: false, status: "completed" as const };
+    expect(estimateTimelineRowSize(running, { subagents: [settledLinked] })).toBeLessThan(withLinked);
+    expect(subagentEstimateSignature([linked])).not.toBe(subagentEstimateSignature([settledLinked]));
+    expect(subagentEstimateSignature([linked])).toBe(subagentEstimateSignature([{ ...linked, sequence: 9 }]));
+
+    const settled = buildItem({ id: "turn-codex" });
+    const codex = taskTrace({ id: "trace-codex", turnId: "turn-codex", providerId: "codex", status: "completed" });
+    expect(estimateTimelineRowSize(settled, { subagents: [codex] }) - estimateTimelineRowSize(settled))
+      .toBeGreaterThanOrEqual(50);
+    const legacy = taskTrace({ id: "trace-legacy", turnId: "turn-codex", activityId: null, status: "completed" });
+    expect(estimateTimelineRowSize(settled, { subagents: [legacy] })).toBe(estimateTimelineRowSize(settled));
+  });
+
+  it("groups delegated tasks by turn and keeps an unchanged turn's array", () => {
+    const first = taskTrace({ id: "trace-a", turnId: "turn-a" });
+    const second = taskTrace({ id: "trace-b", turnId: "turn-b" });
+    const third = taskTrace({ id: "trace-c", turnId: "turn-a" });
+    const grouped = groupSubagentsByTurn([first, second, third], new Map());
+    expect(grouped.get("turn-a")).toEqual([first, third]);
+    expect(grouped.get("turn-b")).toEqual([second]);
+
+    const updated = { ...second, status: "completed" as const };
+    const regrouped = groupSubagentsByTurn([first, updated, third], grouped);
+    expect(regrouped.get("turn-a")).toBe(grouped.get("turn-a"));
+    expect(regrouped.get("turn-b")).not.toBe(grouped.get("turn-b"));
+    expect(regrouped.get("turn-b")).toEqual([updated]);
+    expect(groupSubagentsByTurn([first], regrouped).get("turn-a")).toEqual([first]);
+  });
+
   it("models commentary growth without inflating collapsed settled history", () => {
     const shortActive = buildItem({
       id: "commentary-short",
@@ -1121,15 +1171,19 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     const waiting = { ...settledTrace, id: "waiting", status: "waiting" as const, isLive: true };
     expect(sameTurnTimelineProps(
       memoInput(settled, baseProps, [working, settledTrace]),
-      memoInput(settled, baseProps, [{ ...working, activity: "Editing", toolUseCount: 4, sequence: 9 }, settledTrace]),
+      memoInput(settled, baseProps, [{ ...working }, { ...settledTrace }]),
     )).toBe(true);
     expect(sameTurnTimelineProps(
       memoInput(settled, baseProps, [working, settledTrace]),
-      memoInput(settled, baseProps, [working, { ...settledTrace, status: "failed" }]),
+      memoInput(settled, baseProps, [{ ...working, activity: "Editing", toolUseCount: 4, sequence: 9 }, settledTrace]),
     )).toBe(false);
     expect(sameTurnTimelineProps(
       memoInput(settled, baseProps, [working, settledTrace]),
-      memoInput(settled, baseProps, [waiting, settledTrace]),
+      memoInput(settled, baseProps, [working, { ...settledTrace, status: "failed", sequence: 2 }]),
+    )).toBe(false);
+    expect(sameTurnTimelineProps(
+      memoInput(settled, baseProps, [working, settledTrace]),
+      memoInput(settled, baseProps, [{ ...waiting, id: "working", sequence: 2 }, settledTrace]),
     )).toBe(false);
     expect(sameTurnTimelineProps(
       memoInput(settled, baseProps, [working]),

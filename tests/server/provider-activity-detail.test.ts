@@ -102,6 +102,12 @@ describe("provider activity detail boundary", () => {
     ].join("\n"));
   });
 
+  it("cuts only to the caller's bound after scrubbing, even when scrubbing lengthens the text", () => {
+    const detail = "psql postgres://admin:pw@db.internal/app --tail-marker";
+    expect(sanitizeProviderActivityDetail(detail)).toBe("psql postgres://admin:[redacted]@db.internal/app --tail-marker");
+    expect(sanitizeProviderActivityDetail(detail, { maxChars: 20 })).toHaveLength(20);
+  });
+
   it("extracts only official text-shaped results and never stringifies arbitrary payloads", () => {
     expect(officialToolResultText([
       { type: "text", text: "first" },

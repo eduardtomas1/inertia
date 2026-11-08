@@ -38,6 +38,13 @@ function trace(overrides: Partial<SubagentTrace>): SubagentTrace {
     usage: null,
     toolUseCount: null,
     durationMs: null,
+    modelSource: null,
+    taskKind: "agent",
+    background: null,
+    command: null,
+    effort: null,
+    activityId: null,
+    steps: null,
     sequence: 1,
     createdAt: "2030-01-01T00:00:00.000Z",
     updatedAt: "2030-01-01T00:00:00.000Z",
@@ -46,6 +53,45 @@ function trace(overrides: Partial<SubagentTrace>): SubagentTrace {
 }
 
 describe("TurnRunStateCoordinator descendant identity", () => {
+  it("never treats live background commands, monitors, MCP tasks or remote sessions as delegated work", () => {
+    const active = {
+      conversation: { id: "conversation-1", title: "Background work" },
+      turn: { id: "turn-1", runId: "run-1", providerId: "claude", status: "running" },
+      runState: new AuthoritativeRunStateEngine({
+        conversationId: "conversation-1",
+        runId: "run-1",
+        turnId: "turn-1",
+        providerId: "claude",
+      }),
+      workspaceRunCreated: false,
+    } as unknown as ActiveTurn;
+    active.runState.setTransport("running", "root/running");
+    const coordinator = new TurnRunStateCoordinator({
+      store: {
+        updateAgentTurnLifecycle: vi.fn((_turnId: string, update: object) => ({ ...active.turn, ...update }) as AgentTurn),
+        updateConversation: vi.fn(),
+      } as unknown as RuntimeStore,
+      providers: {} as never,
+      hooks: { broadcastSnapshot: vi.fn() } as unknown as TurnControllerHooks,
+      scheduler: {} as never,
+      pendingApprovals: new Map(),
+      pendingInputs: new Map(),
+      settlement: {} as never,
+      providerRunOwnershipBarriers: new Map(),
+      now: () => "2030-01-01T00:00:01.000Z",
+      activity: vi.fn(),
+      release: vi.fn(async () => undefined),
+      track: vi.fn(),
+    });
+    for (const [index, taskKind] of (["shell", "monitor", "mcp", "remote"] as const).entries()) {
+      coordinator.observeSubagent(active, trace({ id: `trace-${taskKind}`, providerTaskId: `task-${index}`, taskKind }));
+    }
+    expect(active.runState.hasLiveDescendants()).toBe(false);
+    expect(active.runState.snapshot().state).toBe("running");
+    coordinator.observeSubagent(active, trace({ id: "trace-workflow", taskKind: "workflow" }));
+    expect(active.runState.snapshot().state).toBe("delegated");
+  });
+
   it("keeps one stable descendant when provider identifiers are enriched", () => {
     const active = {
       conversation: {

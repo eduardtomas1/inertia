@@ -12,7 +12,8 @@ function trace(overrides: Partial<SubagentTrace> & { id: string }): SubagentTrac
     providerTaskId: `task-${overrides.id}`, providerAgentId: null, parentTraceId: null, parentProviderAgentId: null,
     parentProviderToolUseId: null, providerToolUseId: null, providerRole: null, providerName: null, providerStatus: null,
     status: "running", isLive: true, description: null, progress: null, result: null, model: null, activity: null,
-    usage: null, toolUseCount: null, durationMs: null, sequence: 1,
+    usage: null, toolUseCount: null, durationMs: null, modelSource: null, taskKind: "agent", background: null,
+    command: null, effort: null, activityId: null, steps: null, sequence: 1,
     createdAt: "2026-10-31T10:00:00.000Z", updatedAt: "2026-10-31T10:00:00.000Z",
     ...overrides,
   };
@@ -66,7 +67,7 @@ describe("observed child stop", () => {
     expect(providerStop).not.toHaveBeenCalled();
 
     await expect(stopActiveSubagent(options, CONVERSATION, "live")).resolves.toBe(true);
-    expect(providerStop).toHaveBeenCalledExactlyOnceWith(CONVERSATION, "task-live", ACTIVE);
+    expect(providerStop).toHaveBeenCalledExactlyOnceWith(CONVERSATION, "task-live", ACTIVE, null);
   });
 
   it("refuses without an active turn even for a trace that was live when it was read", async () => {

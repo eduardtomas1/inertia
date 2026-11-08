@@ -2,11 +2,7 @@ import type { PosixCleanupFailureReason } from "../posix-cleanup-diagnostics";
 import type { AgentApprovalDecision } from "./interactions";
 import type { AgentHarnessRun, SubagentBackgroundResult, SubagentStopOutcome } from "./agent-harness";
 import type { AgentHarnessRegistry } from "./agent-harness-registry";
-import {
-  PROVIDER_CAPABILITY_IDS,
-  providerCapabilityManifest,
-  type ProviderCapabilityId,
-} from "./capability-manifest";
+import { PROVIDER_CAPABILITY_IDS, providerCapabilityManifest, type ProviderCapabilityId } from "./capability-manifest";
 import { validateProviderRunInput } from "./adapters";
 import { PROVIDER_INFO } from "./catalog";
 import {
@@ -33,10 +29,7 @@ import {
   ProviderSteerDeliveryUnknownError,
   type ProviderSteerInput,
 } from "./contracts";
-import {
-  createProviderEmitter,
-  providerCallbacksFromHarness,
-} from "./emitter";
+import { createProviderEmitter, providerCallbacksFromHarness } from "./emitter";
 import { startHarnessWithFreshSessionFallback } from "./fresh-session-fallback";
 import type { ProviderMetadataCache } from "./metadata";
 import { ProviderInstallationAdmissionError } from "./installation-lease";

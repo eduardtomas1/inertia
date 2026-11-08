@@ -1496,24 +1496,25 @@ cleanup with Git-artifact waits in `orchestration-rollback-restore`. After the
 last source edit, six core files passed 64 of 64. `typecheck`, `lint` and
 `check:architecture` passed. The full `npm run check` was not run.
 
-## Main sync onto 6d8ab80f — 2026-11-08
+## Main syncs onto 6d8ab80f and 852fd18b — 2026-11-08
 
-Main released migrations 107 to 110 (`PersistLibrary`,
+Main released migrations 107 to 111 (`PersistLibrary`,
 `RecordManagedAgentContextReads`, `PersistTodoSourceConversation`,
-`PersistCodexThreadToolPacks`), so the branch's unreleased migrations move up
-by four. Earlier entries in this file use the old numbers:
+`PersistCodexThreadToolPacks`, `PersistSubagentTaskShape`), so the branch's
+unreleased migrations move up by five. Earlier entries in this file use the
+old numbers:
 
 | Before | After | Migration |
 | --- | --- | --- |
-| 107 | 111 | `OrchestrationV2EventStore` |
-| 108 | 112 | `SupportNativePiProvider` |
-| 109 | 113 | `SupportCursorSdkHarness` |
-| 110 | 114 | `RaiseConversationContextSupplementBound` |
-| 111 | 115 | `PersistDelegatedTasks` |
-| 112 | 116 | `PersistDelegationAutomaticWakes` |
-| 113 | 117 | `OrchestrationV2ReceiptStatusAndProjectionMetadata` |
+| 107 | 112 | `OrchestrationV2EventStore` |
+| 108 | 113 | `SupportNativePiProvider` |
+| 109 | 114 | `SupportCursorSdkHarness` |
+| 110 | 115 | `RaiseConversationContextSupplementBound` |
+| 111 | 116 | `PersistDelegatedTasks` |
+| 112 | 117 | `PersistDelegationAutomaticWakes` |
+| 113 | 118 | `OrchestrationV2ReceiptStatusAndProjectionMetadata` |
 
-Lineage entries 1 to 110 are byte-identical to main's. A database that already
+Lineage entries 1 to 111 are byte-identical to main's. A database that already
 ran the branch's old numbering is development data only and does not upgrade
 in place.
 

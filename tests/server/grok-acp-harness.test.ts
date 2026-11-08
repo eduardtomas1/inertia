@@ -361,7 +361,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     }
   });
 
-  it("resumes a saved session without replaying it, and loads it only when resume is missing", async () => {
+  it("resumes a saved session without replaying it, loads it only when resume is missing, and sets the turn's mode", async () => {
     const source = (capturePath: string, capabilities: string) => grokAgent(capturePath, `
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult(capabilities, `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
@@ -369,26 +369,28 @@ describe("Grok ACP harness", { concurrent: false }, () => {
         send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "saved-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Old answer" } } } });
         return send({ jsonrpc: "2.0", id: message.id, result: { configOptions: [] } });
       }
+      if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/prompt") {
         send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "saved-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Resumed" } } } });
         return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
       }
     `);
     const cases = [
-      ["{ loadSession: true, sessionCapabilities: { resume: {} } }", "session/resume"],
-      ["{ loadSession: true }", "session/load"],
+      ["{ loadSession: true, sessionCapabilities: { resume: {} } }", "session/resume", "build", "default"],
+      ["{ loadSession: true }", "session/load", "build", "default"],
+      ["{ loadSession: true, sessionCapabilities: { resume: {} } }", "session/resume", "plan", "plan"],
     ] as const;
-    for (const [capabilities, restoreMethod] of cases) {
-      const root = portableFixtureRoot(`grok ACP ${restoreMethod.replace("/", " ")}`);
+    for (const [capabilities, restoreMethod, interactionMode, modeId] of cases) {
+      const root = portableFixtureRoot(`grok ACP ${restoreMethod.replace("/", " ")} ${interactionMode}`);
       roots.push(root);
       const capturePath = join(root, "capture.json");
       const command = writeNodeFlagExecutable(root, "grok", source(capturePath, capabilities));
       const result = await managerFor(root, command).run(nativeProviderRunInput({
         providerId: "grok",
-        conversationId: `grok-${restoreMethod.replace("/", "-")}`,
+        conversationId: `grok-${restoreMethod.replace("/", "-")}-${interactionMode}`,
         cwd: root,
         prompt: "Continue",
-        interactionMode: "build",
+        interactionMode,
         access: "full",
         sessionId: "saved-session",
       }));
@@ -402,6 +404,10 @@ describe("Grok ACP harness", { concurrent: false }, () => {
       expect(methods).not.toContain("session/new");
       expect(captured.messages.find(({ method }) => method === restoreMethod)?.params)
         .toEqual({ sessionId: "saved-session", cwd: root, mcpServers: [] });
+      expect(methods.indexOf("session/set_mode")).toBeGreaterThan(methods.indexOf(restoreMethod));
+      expect(methods.indexOf("session/set_mode")).toBeLessThan(methods.indexOf("session/prompt"));
+      expect(captured.messages.find(({ method }) => method === "session/set_mode")?.params)
+        .toEqual({ sessionId: "saved-session", modeId });
     }
   });
 

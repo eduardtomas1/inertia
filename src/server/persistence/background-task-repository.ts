@@ -70,7 +70,8 @@ export function backgroundTasks(
         AND (id IN (SELECT value FROM json_each(@ids))
           OR id IN (SELECT id FROM subagent_traces
             WHERE conversation_id = @conversationId AND is_live = 1
-            ORDER BY created_at ASC, sequence ASC, id ASC LIMIT @liveLimit))
+            ORDER BY task_kind IN ('shell', 'monitor', 'mcp') ASC,
+              created_at ASC, sequence ASC, id ASC LIMIT @liveLimit))
     `).all({ conversationId, ids: ids("agent"), liveLimit: MAX_LIVE_BACKGROUND_TASKS }) as SubagentTraceRow[];
     const runs = database.prepare(`
       SELECT * FROM workspace_runs

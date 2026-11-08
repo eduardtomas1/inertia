@@ -66,7 +66,7 @@ export interface ProviderEmitter {
   reasoning: (text: string) => void;
   usage: (usage: ProviderUsageEvent["usage"]) => void;
   metadata: (metadata: ProviderMetadataEvent["metadata"], source: ProviderMetadataEvent["source"], complete: boolean) => void;
-  subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type">) => void;
+  subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type" | "activityId">) => void;
 }
 
 export interface ProviderEmitterPolicy {

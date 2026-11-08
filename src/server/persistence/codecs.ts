@@ -68,9 +68,16 @@ import { COMPACT_ON_RETURN_SETTINGS, DEFAULT_COMPACT_ON_RETURN, type CompactOnRe
 import {
   boundedSubagentCount,
   boundedSubagentLabel,
+  MAX_SUBAGENT_ACTIVITY_ID_CHARS,
+  MAX_SUBAGENT_COMMAND_CHARS,
+  MAX_SUBAGENT_DESCRIPTION_CHARS,
   MAX_SUBAGENT_DURATION_MS,
+  MAX_SUBAGENT_PROGRESS_CHARS,
+  MAX_SUBAGENT_RESULT_CHARS,
   MAX_SUBAGENT_TOOL_USE_COUNT,
+  subagentTaskStepsFromJson,
 } from "../provider/subagent-trace";
+import { SERVER_EVENT_OPTIONS } from "../../shared/contracts/server-event-discriminants";
 import { parseWorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
 import type {
   ActivityRow,
@@ -838,14 +845,23 @@ export function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
     providerStatus: row.provider_status,
     status: row.status,
     isLive: row.is_live === 1,
-    description: row.description,
-    progress: row.progress,
-    result: row.result,
+    description: boundedSubagentLabel(row.description, MAX_SUBAGENT_DESCRIPTION_CHARS),
+    progress: boundedSubagentLabel(row.progress, MAX_SUBAGENT_PROGRESS_CHARS),
+    result: boundedSubagentLabel(row.result, MAX_SUBAGENT_RESULT_CHARS),
     model: boundedSubagentLabel(row.model),
     activity: boundedSubagentLabel(row.activity),
     usage: subagentTaskUsageFromJson(row.usage_json),
     toolUseCount: boundedSubagentCount(row.tool_use_count, MAX_SUBAGENT_TOOL_USE_COUNT),
     durationMs: boundedSubagentCount(row.duration_ms, MAX_SUBAGENT_DURATION_MS),
+    modelSource: row.model_source && SERVER_EVENT_OPTIONS.subagentModelSources.includes(row.model_source)
+      ? row.model_source
+      : null,
+    taskKind: SERVER_EVENT_OPTIONS.subagentTaskKinds.includes(row.task_kind) ? row.task_kind : "agent",
+    background: row.background === null || row.background === undefined ? null : row.background === 1,
+    command: boundedSubagentLabel(row.command, MAX_SUBAGENT_COMMAND_CHARS),
+    effort: row.effort && SERVER_EVENT_OPTIONS.subagentTaskEfforts.includes(row.effort) ? row.effort : null,
+    activityId: row.activity_id && row.activity_id.length <= MAX_SUBAGENT_ACTIVITY_ID_CHARS ? row.activity_id : null,
+    steps: subagentTaskStepsFromJson(row.steps_json),
     sequence: row.sequence,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

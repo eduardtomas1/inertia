@@ -25,6 +25,12 @@ const LIFECYCLE_FIELDS = [
   "progress",
   "result",
   "model",
+  "modelSource",
+  "taskKind",
+  "background",
+  "command",
+  "effort",
+  "activityId",
 ] as const satisfies readonly (keyof ProviderSubagentEvent)[];
 
 type LifecycleField = typeof LIFECYCLE_FIELDS[number];
@@ -38,7 +44,7 @@ interface TraceTelemetry {
   status: SubagentTraceStatus;
   isLive: boolean;
   sequence: number;
-  reported: Partial<Record<LifecycleField, string>>;
+  reported: Partial<Record<LifecycleField, string | boolean>>;
   writtenAt: number;
   pending: PendingTelemetry | null;
   timer: unknown;
@@ -60,6 +66,7 @@ function withEarlierTelemetry(
   return {
     ...event,
     activity: event.activity ?? earlier.activity,
+    steps: event.steps ?? earlier.steps,
     usage: mergeSubagentTaskUsage(
       validateSubagentTaskUsage(earlier.usage),
       validateSubagentTaskUsage(event.usage),
@@ -198,7 +205,9 @@ export class TurnSubagentTelemetry {
     state.writtenAt = this.options.nowMs();
     for (const field of LIFECYCLE_FIELDS) {
       const value = event[field];
-      if (typeof value === "string") state.reported[field] = value;
+      if (typeof value === "string" || typeof value === "boolean") {
+        state.reported[field] = value;
+      }
     }
   }
 }

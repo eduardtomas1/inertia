@@ -21,6 +21,7 @@ import {
   backgroundTaskCurrentActivity,
   backgroundTaskDoingNow,
   backgroundTaskElapsedMs,
+  backgroundTaskKind,
   backgroundTaskStateWord,
   backgroundTaskTitle,
   backgroundTaskTranscriptMeta,
@@ -28,6 +29,7 @@ import {
 } from "../utils/backgroundTasks";
 import { formatElapsed } from "../utils/responseTimeline";
 import { isLiveSubagentTrace } from "../utils/subagentDisclosure";
+import { subagentAccessibleName, subagentModelLabel } from "../utils/subagentTaskPresentation";
 import { SubagentElapsed, subscribeLiveElapsed } from "./SubagentElapsed";
 import { TooltipButton } from "./TooltipButton";
 
@@ -57,11 +59,11 @@ function KindLine({
 }
 
 function StopButton({
-  title,
+  name,
   stopping = false,
   onStop,
 }: {
-  title: string;
+  name: string;
   stopping?: boolean;
   onStop: () => void;
 }): React.JSX.Element {
@@ -71,7 +73,7 @@ function StopButton({
       data-focus-key="stop"
       tooltip={stopping ? "Stopping" : "Stop"}
       describeTooltip={false}
-      aria-label={`${stopping ? "Stopping" : "Stop"} ${title}`}
+      aria-label={`${stopping ? "Stopping" : "Stop"} ${name}`}
       disabled={stopping}
       onClick={onStop}
     >
@@ -151,6 +153,7 @@ function Transcript({
   trace,
   turns,
   title,
+  name,
   line,
   canOpen,
   canFollowUp,
@@ -161,6 +164,7 @@ function Transcript({
   trace: SubagentTrace;
   turns: readonly AgentTurn[];
   title: string;
+  name: string;
   line: string | null;
   canOpen: boolean;
   canFollowUp: boolean;
@@ -170,14 +174,15 @@ function Transcript({
   const live = isLiveSubagentTrace(trace);
   const reported = live ? trace.progress : trace.result;
   const update = reported === line ? null : reported;
+  const task = trace.description?.trim() === title ? null : trace.description;
   const texts = live
-    ? [[trace.description, 4, "the task"], [update, 6, "the progress"]] as const
-    : [[update, 6, "the outcome"], [trace.description, 4, "the task"]] as const;
+    ? [[task, 4, "the task"], [update, 6, "the progress"]] as const
+    : [[update, 6, "the outcome"], [task, 4, "the task"]] as const;
   const meta = backgroundTaskTranscriptMeta(trace, turns);
   return (
     <div id={id} className="background-task-transcript">
       {texts.map(([text, lines, label]) => text && (
-        <ClampedText key={label} text={text} lines={lines} label={`${label} for ${title}`} />
+        <ClampedText key={label} text={text} lines={lines} label={`${label} for ${name}`} />
       ))}
       {meta && <p>{meta}</p>}
       {(canOpen || canFollowUp) && (
@@ -187,7 +192,7 @@ function Transcript({
               type="button"
               className="background-task-link"
               data-focus-key="open"
-              aria-label={`View turn for ${title}`}
+              aria-label={`View turn for ${name}`}
               onClick={onOpen}
             >
               View turn
@@ -198,7 +203,7 @@ function Transcript({
               type="button"
               className="background-task-link"
               data-focus-key="guide"
-              aria-label={`Guide parent about ${title}`}
+              aria-label={`Guide parent about ${name}`}
               onClick={onFollowUp}
             >
               Guide parent
@@ -221,10 +226,13 @@ export interface AgentCardProps {
   canOpen: boolean;
   canFollowUp: boolean;
   canStop: boolean;
+  canMoveToBackground?: boolean;
+  moving?: boolean;
   onToggle: (traceId: string) => void;
   onOpen: (traceId: string) => void;
   onFollowUp: (traceId: string) => void;
   onStop: (traceId: string) => void;
+  onMoveToBackground?: (traceId: string) => void;
 }
 
 export const AgentCard = memo(function AgentCard({
@@ -238,12 +246,25 @@ export const AgentCard = memo(function AgentCard({
   canOpen,
   canFollowUp,
   canStop,
+  canMoveToBackground = false,
+  moving = false,
   onToggle,
   onOpen,
   onFollowUp,
   onStop,
+  onMoveToBackground,
 }: AgentCardProps): React.JSX.Element {
   const title = backgroundTaskTitle(trace);
+  const name = subagentAccessibleName(trace);
+  const cardRef = useRef<HTMLLIElement>(null);
+  const moveHadFocus = useRef(false);
+  const showsMove = canMoveToBackground && Boolean(onMoveToBackground);
+  useLayoutEffect(() => {
+    if (showsMove || !moveHadFocus.current) return;
+    moveHadFocus.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body || !active.isConnected) cardRef.current?.focus();
+  }, [showsMove]);
   const doing = backgroundTaskDoingNow(trace);
   const live = isLiveSubagentTrace(trace);
   const running = live && (trace.status === "running" || trace.status === "spawned");
@@ -252,13 +273,14 @@ export const AgentCard = memo(function AgentCard({
   const line = expanded && current === null && doing === (live ? trace.progress : trace.result) ? null : doing;
   const elapsed = live ? 0 : backgroundTaskElapsedMs(trace, now ?? Date.now());
   const total = trace.usage?.totalTokens ?? null;
-  const facts = trace.model !== null || total !== null || trace.toolUseCount !== null;
+  const model = subagentModelLabel(trace);
+  const facts = model !== null || total !== null || trace.toolUseCount !== null;
   return (
-    <li className="background-task-card" data-focus-row={`agent:${trace.id}`} data-reveal-turn={trace.turnId}>
+    <li ref={cardRef} className="background-task-card" tabIndex={-1} data-focus-row={`agent:${trace.id}`} data-reveal-turn={trace.turnId}>
       <div className="background-task-body">
         <span className="background-task-title">{title}</span>
         <KindLine
-          kind={parentTitle ? `Agent · from ${parentTitle}` : "Agent"}
+          kind={backgroundTaskKind(trace, parentTitle)}
           state={backgroundTaskStateWord(trace)}
         >
           {live
@@ -267,7 +289,7 @@ export const AgentCard = memo(function AgentCard({
         </KindLine>
         {facts && (
           <span className="background-task-meta">
-            {trace.model && <span className="background-task-value">{trace.model}</span>}
+            {model && <span className="background-task-value">{model}</span>}
             {total !== null && (
               <span><span className="background-task-value">{formatCompact(total)}</span> tokens</span>
             )}
@@ -280,7 +302,7 @@ export const AgentCard = memo(function AgentCard({
           </span>
         )}
       </div>
-      {canStop && <StopButton title={title} stopping={stopping} onStop={() => onStop(trace.id)} />}
+      {canStop && <StopButton name={name} stopping={stopping} onStop={() => onStop(trace.id)} />}
       <p className="background-task-doing">
         {line && <span ref={liveLineRef} className={running ? "background-task-line background-task-live" : "background-task-line"}>{line}</span>}
         <button
@@ -289,12 +311,28 @@ export const AgentCard = memo(function AgentCard({
           data-focus-key="transcript"
           aria-expanded={expanded}
           aria-controls={expanded ? transcriptId : undefined}
-          aria-label={`View transcript for ${title}`}
+          aria-label={`View transcript for ${name}`}
           onClick={() => onToggle(trace.id)}
         >
           View transcript
           <ChevronDown size={14} aria-hidden="true" />
         </button>
+        {showsMove && (
+          <button
+            type="button"
+            className="background-task-link"
+            data-focus-key="background"
+            disabled={moving || stopping}
+            aria-label={`Move ${name} to the background`}
+            onFocus={() => { moveHadFocus.current = true; }}
+            onBlur={(event) => {
+              if (event.relatedTarget instanceof Element && event.relatedTarget.isConnected) moveHadFocus.current = false;
+            }}
+            onClick={() => onMoveToBackground?.(trace.id)}
+          >
+            Move to background
+          </button>
+        )}
       </p>
       {expanded && (
         <Transcript
@@ -302,6 +340,7 @@ export const AgentCard = memo(function AgentCard({
           trace={trace}
           turns={turns}
           title={title}
+          name={name}
           line={line}
           canOpen={canOpen}
           canFollowUp={canFollowUp}
@@ -309,6 +348,47 @@ export const AgentCard = memo(function AgentCard({
           onFollowUp={() => onFollowUp(trace.id)}
         />
       )}
+    </li>
+  );
+});
+
+export interface CommandTaskCardProps {
+  trace: SubagentTrace;
+  parentTitle: string | null;
+  stopping: boolean;
+  now?: number;
+  canStop: boolean;
+  onStop: (traceId: string) => void;
+}
+
+/** A background command, monitor or MCP task the agent started. */
+export const CommandTaskCard = memo(function CommandTaskCard({
+  trace,
+  parentTitle,
+  stopping,
+  now,
+  canStop,
+  onStop,
+}: CommandTaskCardProps): React.JSX.Element {
+  const title = backgroundTaskTitle(trace);
+  const name = subagentAccessibleName(trace);
+  const live = isLiveSubagentTrace(trace);
+  const elapsed = live ? 0 : backgroundTaskElapsedMs(trace, now ?? Date.now());
+  const showCommand = Boolean(trace.command && trace.description);
+  const notice = live ? trace.progress : trace.result;
+  return (
+    <li className="background-task-card" data-focus-row={`agent:${trace.id}`} data-reveal-turn={trace.turnId} data-task-kind={trace.taskKind}>
+      <div className="background-task-body">
+        <span className={trace.description ? "background-task-title" : "background-task-title background-task-command"}>{title}</span>
+        <KindLine kind={backgroundTaskKind(trace, parentTitle)} state={backgroundTaskStateWord(trace)}>
+          {live
+            ? <SubagentElapsed trace={trace} now={now} />
+            : elapsed !== null && <span className="subagent-elapsed">{formatElapsed(elapsed)}</span>}
+        </KindLine>
+      </div>
+      {canStop && <StopButton name={name} stopping={stopping} onStop={() => onStop(trace.id)} />}
+      {showCommand && <p className="background-task-doing"><code className="background-task-command">{trace.command}</code></p>}
+      {notice && <p className="background-task-doing"><span>{notice}</span></p>}
     </li>
   );
 });
@@ -353,7 +433,7 @@ export const CommandCard = memo(function CommandCard({
         </KindLine>
       </div>
       {onStop && run.canStop && backgroundCommandIsLive(run) && (
-        <StopButton title={run.label} onStop={() => onStop(run)} />
+        <StopButton name={run.label} onStop={() => onStop(run)} />
       )}
       {run.detail && <p className="background-task-doing"><span>{run.detail}</span></p>}
     </li>

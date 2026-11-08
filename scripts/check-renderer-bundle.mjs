@@ -111,7 +111,10 @@ const budgets = {
   // bar, diff split view, commit, history, blame and worktree rules add 11,205
   // bytes over main's cap (254,616 measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351 + 190 + 11_205,
+  // Custom agents: the composer chip and called-agent row styles add 201
+  // bytes over main's cap (254,817 measured on Windows x64). See
+  // docs/pr-evidence/custom-agents/renderer-bundle.json.
+  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351 + 190 + 11_205 + 201,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
@@ -154,6 +157,9 @@ const budgets = {
   // (24,050 measured on Windows x64). See
   // docs/pr-evidence/subagent-task-visibility/renderer-bundle.json.
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 6_387 + 5,
+  // Role labels for the themed marks: 40,166 deferred bytes (+5).
+  // Larger unframed gallery labels and preview sizes: 40,313 bytes (+147).
+  deferredCustomAgentsSettingsJavaScript: 29_962 + 8_423 + 1_353 + 423 + 5 + 147,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
   deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43,
@@ -210,7 +216,10 @@ const budgets = {
   // alias from the grown shared chunks add 22 bytes over main's cap (22,149
   // measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184 + 34 + 56 + 232 + 22,
+  // Custom agents lengthen a minified import alias by 11 bytes (22,160
+  // measured on Windows x64). See
+  // docs/pr-evidence/custom-agents/renderer-bundle.json.
+  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184 + 34 + 56 + 232 + 22 + 11,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte + 205 + 47,
   deferredIconRegionJavaScript: 12_995,
@@ -701,6 +710,12 @@ const deferredCliConversationImportJavaScriptBytes = await assetBytes(`assets/${
 const deferredProjectSettingsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[0]}`);
 const deferredThreadActionsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[1]}`);
 const deferredReviewNoteJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[2]}`);
+const customAgentsSettingsEntry = assetNames.find((name) => /^CustomAgentsSettings-.*\.js$/u.test(name));
+if (!customAgentsSettingsEntry) throw new Error("Missing deferred Custom agents settings");
+if (entryJavaScriptClosure.has(customAgentsSettingsEntry) || mainWorkbenchJavaScriptClosure.has(customAgentsSettingsEntry) || detachedChatJavaScriptClosure.has(customAgentsSettingsEntry)) {
+  throw new Error("Custom agents settings must stay deferred from the initial chat routes");
+}
+const deferredCustomAgentsSettingsJavaScriptBytes = await assetBytes(`assets/${customAgentsSettingsEntry}`);
 const [projectCustomizeEntry, projectColorContrastEntry] = ["ProjectCustomizePanel", "project-color-contrast"].map((prefix) => {
   const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
   if (!entry) throw new Error(`Missing deferred project appearance surface: ${prefix}`);
@@ -820,6 +835,7 @@ const coreJavaScriptBytes =
   - deferredLibraryViewJavaScriptBytes
   - deferredIconRegionJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
+  - deferredCustomAgentsSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
   - deferredProjectCustomizeJavaScriptBytes
@@ -866,6 +882,7 @@ const measurements = {
   deferredLibraryViewJavaScript: deferredLibraryViewJavaScriptBytes,
   deferredIconRegionJavaScript: deferredIconRegionJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
+  deferredCustomAgentsSettingsJavaScript: deferredCustomAgentsSettingsJavaScriptBytes,
   deferredCliConversationImportJavaScript: deferredCliConversationImportJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,

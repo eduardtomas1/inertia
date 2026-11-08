@@ -812,6 +812,11 @@
       "version": 111,
       "name": "PersistSubagentTaskShape",
       "digest": "9041b5d6781eedf16c2394123872a6e6a908b7654c6e7bd18df72b1e08ca306b"
+    },
+    {
+      "version": 112,
+      "name": "PersistCustomAgents",
+      "digest": "47d3133d68b6300889bb40fcdf97a942b52fca8c16f7bf21662214eb0690596e"
     }
   ]
 }

@@ -565,7 +565,7 @@ test("builds, duplicates, deletes, exports and imports custom agents from Settin
   const auditEditor = seeded.getByRole("form", { name: "Edit Security auditor" });
   await expect(auditEditor.getByRole("heading", { name: "Identity", level: 4 })).toBeVisible();
   await expect(auditEditor.getByRole("heading", { name: "Instructions", level: 4 })).toBeAttached();
-  await expect(auditEditor.getByRole("radio", { name: "Guard" })).toHaveAttribute("aria-checked", "true");
+  await expect(auditEditor.getByRole("radio", { name: "Marketing" })).toHaveAttribute("aria-checked", "true");
   await expect(auditEditor.getByRole("radio", { name: "Red" })).toHaveAttribute("aria-checked", "true");
   await expect(auditEditor.locator(".custom-agent-block-body").first()).toHaveValue(
     CUSTOM_AGENT_PRESETS.find(({ id }) => id === "security-auditor")!.blocks[0]!.body,
@@ -691,7 +691,7 @@ test("shows a called agent's live and finished subagent work in the transcript",
   await expect(avatar).toHaveAttribute("data-live", "true");
   await expect(avatar).toHaveAttribute("data-icon-kind", "mark");
   await expect(avatar).toHaveAttribute("data-mark", "scout");
-  await expect(live.locator(".subagent-call-task")).toHaveText(LIVE_TITLE);
+  await expect(live.locator(".subagent-call-line")).toHaveText(LIVE_TITLE);
   await expect(live.locator('.subagent-call-activity[data-tone="live"]')).toHaveText(LIVE_ACTIVITY);
   const children = live.getByRole("list", { name: "Agents started by Code reviewer" });
   await expect(children.getByRole("listitem")).toHaveCount(1);
@@ -708,7 +708,7 @@ test("shows a called agent's live and finished subagent work in the transcript",
   await expect(live.locator(".subagent-call-body")).toHaveAttribute("aria-hidden", "true");
   await header.click();
   await expect(live).toHaveAttribute("data-expanded", "true");
-  await expect(live.locator(".subagent-call-line")).toHaveCount(0);
+  await expect(live.locator(".subagent-call-line")).toHaveText(LIVE_TITLE);
 
   await showConversation(seeded.done, DONE_TITLE);
   const badges = page.locator(".message-agent-call");
@@ -737,8 +737,7 @@ test("shows a called agent's live and finished subagent work in the transcript",
 
   await done.locator(".subagent-call-header").click();
   await expect(done).toHaveAttribute("data-expanded", "true");
-  await expect(done.locator(".subagent-call-line")).toHaveCount(0);
-  await expect(done.locator(".subagent-call-task")).toHaveText(LIVE_TITLE);
+  await expect(done.locator(".subagent-call-line")).toHaveText(LIVE_TITLE);
   await expect(done.locator(".subagent-call-result")).toContainText("freezes the agent identity before the provider starts");
   await expect(done.locator(".subagent-call-meta small")).toHaveText("claude-sonnet-4-5 · 48.2K tokens · 12 tool uses · 1m 34s");
   await expect(done.getByRole("button", { name: "Stop Code reviewer" })).toHaveCount(0);

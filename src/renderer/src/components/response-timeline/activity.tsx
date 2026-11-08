@@ -365,8 +365,9 @@ export const ActivityRow = memo(function ActivityRow({
 });
 
 /** A tool row, or the delegated task it started when the provider linked one. */
-function TimelineActivityRow(props: React.ComponentProps<typeof ActivityRow>): React.JSX.Element {
+function TimelineActivityRow(props: React.ComponentProps<typeof ActivityRow>): React.JSX.Element | null {
   const trace = useLinkedSubagent(props.activity.id);
+  if (trace?.customAgentId) return null;
   return trace
     ? <SubagentActivityRow trace={trace} activity={props.activity} onBeforeToggle={props.onBeforeToggle} onAfterToggle={props.onAfterToggle} />
     : <ActivityRow {...props} />;

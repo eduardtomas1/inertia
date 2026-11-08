@@ -109,18 +109,19 @@ describe("subagent call partition", () => {
     expect(withSubagentCalls(stream, [], new Map(), undefined)).toBe(stream);
   });
 
-  it("repaints a turn only when its traces change identity", () => {
+  it("repaints a turn when a trace revision or a called agent changes", () => {
     const traces = [call()];
     const agents = [reviewer];
     expect(sameSubagentCallsForTurn(traces, traces, agents, agents)).toBe(true);
-    expect(sameSubagentCallsForTurn(traces, [...traces], agents, agents)).toBe(false);
+    expect(sameSubagentCallsForTurn(traces, [...traces], agents, agents)).toBe(true);
+    expect(sameSubagentCallsForTurn(traces, [{ ...traces[0]!, sequence: 9 }], agents, agents)).toBe(false);
     expect(sameSubagentCallsForTurn([], undefined, [reviewer], [])).toBe(true);
     expect(sameSubagentCallsForTurn(traces, traces, [reviewer], [{ ...reviewer, name: "Renamed" }])).toBe(false);
     const plain = [taskTrace()];
     expect(sameSubagentCallsForTurn(plain, plain, [reviewer], [])).toBe(true);
     const working = taskTrace({ id: "working", status: "running", isLive: true });
-    expect(sameSubagentCallsForTurn([working], [{ ...working, activity: "Editing", sequence: 9 }], [reviewer], [reviewer])).toBe(true);
-    expect(sameSubagentCallsForTurn([working], [{ ...working, status: "completed", isLive: false }], [reviewer], [reviewer])).toBe(false);
+    expect(sameSubagentCallsForTurn([working], [{ ...working, activity: "Editing", sequence: 9 }], [reviewer], [reviewer])).toBe(false);
+    expect(sameSubagentCallsForTurn([working], [{ ...working, status: "completed", isLive: false, sequence: 10 }], [reviewer], [reviewer])).toBe(false);
   });
 
   it("keeps the stop and custom agent settings callbacks stable across scene rebuilds", async () => {

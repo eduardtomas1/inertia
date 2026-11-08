@@ -12,6 +12,7 @@ import { ProviderMaintenanceError } from "./provider/maintenance-controller";
 import { WorkspacePathAuthorityError } from "./workspace-path-authority";
 import { PromptPresetRepositoryError } from "./persistence/prompt-preset-repository";
 import { TodoRepositoryError } from "./persistence/todo-repository";
+import { CustomAgentRepositoryError } from "./persistence/custom-agent-repository";
 import { LibraryRepositoryError } from "./persistence/library-repository";
 import { ConversationAttachmentDiskFullError, ConversationAttachmentStorageFullError } from "../node/conversation-attachment-store-capacity";
 import {
@@ -34,6 +35,7 @@ export class RuntimeRequestError extends Error {
 
 export function userCorrectableRuntimeError(error: unknown): boolean {
   return error instanceof TodoRepositoryError
+    || error instanceof CustomAgentRepositoryError
     || error instanceof LibraryRepositoryError
     || (error instanceof RuntimeRequestError && error.code === USER_CORRECTABLE_REQUEST);
 }
@@ -59,6 +61,7 @@ export function publicRuntimeError(error: unknown): string {
     || error instanceof WorkspacePathAuthorityError
     || error instanceof PromptPresetRepositoryError
     || error instanceof TodoRepositoryError
+    || error instanceof CustomAgentRepositoryError
     || error instanceof LibraryRepositoryError
     || error instanceof ConversationAttachmentDiskFullError
     || error instanceof ConversationAttachmentStorageFullError

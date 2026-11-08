@@ -247,23 +247,7 @@ export class RuntimeStore {
       database: this.database,
     });
     this.turnLedgerRepository = new TurnLedgerRepository({
-      createMessage: (
-        conversationId,
-        content,
-        role,
-        attachments,
-        turnId,
-        createdAt,
-        options,
-      ) => this.createMessage(
-        conversationId,
-        content,
-        role,
-        attachments,
-        turnId,
-        createdAt,
-        options,
-      ),
+      createMessage: (...message) => this.createMessage(...message),
       database: this.database,
       requireAgentTurn: (turnId) => this.requireAgentTurn(turnId),
       requireConversation: (conversationId) => this.requireConversation(conversationId),
@@ -361,6 +345,7 @@ export class RuntimeStore {
 
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
+  customAgents() { return this.snapshotRepository.customAgents; }
   get library() { return this.snapshotRepository.library; }
   get restartContinuations() { return RestartContinuationRepository.for(this.database); }
   get workspaceToolReads() { return new WorkspaceToolReads(this.database); }

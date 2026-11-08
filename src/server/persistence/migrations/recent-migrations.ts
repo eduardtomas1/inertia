@@ -35,6 +35,7 @@ import { agentContextReadManagedAccessMigration } from "./agent-context-read-man
 import { todoSourceConversationMigration } from "./todo-source-conversation";
 import { codexThreadToolPacksMigration } from "./codex-thread-tool-packs";
 import { subagentTaskShapeMigration } from "./subagent-task-shape";
+import { customAgentsMigration } from "./custom-agents";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -73,4 +74,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   todoSourceConversationMigration,
   codexThreadToolPacksMigration,
   subagentTaskShapeMigration,
+  customAgentsMigration,
 ];

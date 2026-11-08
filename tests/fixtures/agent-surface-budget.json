@@ -203,27 +203,27 @@
   },
   "instructions": {
     "inertia-frontend-workbench": 541,
-    "inertia-orchestration": 468,
+    "inertia-orchestration": 623,
     "inertia-workspace": 482,
     "mcp-initialize:claude": 0,
     "mcp-initialize:http": 0
   },
   "totals": {
     "claude": {
-      "withBrowser": 24503,
-      "withoutBrowser": 12474
+      "withBrowser": 24658,
+      "withoutBrowser": 12629
     },
     "codex": {
-      "withBrowser": 19793,
-      "withoutBrowser": 10049
+      "withBrowser": 19948,
+      "withoutBrowser": 10204
     },
     "cursorKimi": {
-      "withBrowser": 23258,
-      "withoutBrowser": 11828
+      "withBrowser": 23413,
+      "withoutBrowser": 11983
     },
     "opencode": {
-      "withBrowser": 23249,
-      "withoutBrowser": 11828
+      "withBrowser": 23404,
+      "withoutBrowser": 11983
     }
   }
 }

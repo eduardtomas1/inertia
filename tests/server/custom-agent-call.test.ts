@@ -29,10 +29,25 @@ import {
   createTurnControllerTestRuntime,
   flushTurnControllerTestPromises,
   turnControllerTestIdentity,
+  type TurnControllerTestRuntime,
 } from "../support/turn-controller-runtime";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-afterEach(cleanupTurnControllerTestDirectories);
+const runtimes: TurnControllerTestRuntime[] = [];
+
+afterEach(async () => {
+  for (const runtime of runtimes.splice(0)) {
+    await runtime.controller.dispose();
+    runtime.store.close();
+  }
+  await cleanupTurnControllerTestDirectories();
+});
+
+async function trackedRuntime(...args: Parameters<typeof createTurnControllerTestRuntime>): Promise<TurnControllerTestRuntime> {
+  const runtime = await createTurnControllerTestRuntime(...args);
+  runtimes.push(runtime);
+  return runtime;
+}
 
 const PROVIDERS: readonly ProviderId[] = ["claude", "codex", "opencode", "cursor", "kimi", "antigravity"];
 
@@ -293,7 +308,7 @@ describe("orchestration capability text", () => {
 
 describe("custom agent calls through the turn controller", () => {
   it("delivers the block, the native definition, the message attribution and trace identity", async () => {
-    const runtime = await createTurnControllerTestRuntime({}, {
+    const runtime = await trackedRuntime({}, {
       modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test" }),
     });
     const agent = runtime.store.customAgents().create(draft(), { onHandleConflict: "reject" });
@@ -344,7 +359,7 @@ describe("custom agent calls through the turn controller", () => {
   });
 
   it("fails the request cleanly when the called agent was deleted", async () => {
-    const runtime = await createTurnControllerTestRuntime();
+    const runtime = await trackedRuntime();
     const agent = runtime.store.customAgents().create(draft(), { onHandleConflict: "reject" });
     runtime.store.customAgents().delete(agent.id, agent.revision);
     expect(() => runtime.controller.queue({
@@ -357,7 +372,7 @@ describe("custom agent calls through the turn controller", () => {
   });
 
   it("refuses a native goal start that calls a custom agent", async () => {
-    const runtime = await createTurnControllerTestRuntime();
+    const runtime = await trackedRuntime();
     const agent = runtime.store.customAgents().create(draft(), { onHandleConflict: "reject" });
     expect(() => runtime.controller.queue({
       conversationId: runtime.conversationId,

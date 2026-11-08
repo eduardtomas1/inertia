@@ -1,5 +1,7 @@
 import { LIBRARY_SCHEMA_VERSION } from "./migrations/library";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
+import { CUSTOM_AGENTS_SCHEMA_VERSION } from "./migrations/custom-agents";
+import { CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS } from "./custom-agents-schema";
 import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "./migrations/todo-source-conversation";
 import { CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION } from "./migrations/codex-thread-tool-packs";
 import { SUBAGENT_TASK_SHAPE_SCHEMA_VERSION } from "./migrations/subagent-task-shape";
@@ -159,6 +161,22 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "model_source",
     "steps_json",
   ]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents", [
+    "id",
+    "name",
+    "handle",
+    "description",
+    "icon_json",
+    "accent",
+    "blocks_json",
+    "skills_json",
+    "position",
+    "revision",
+    "created_at",
+    "updated_at",
+  ]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, "messages", ["custom_agent_call_json"]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, "subagent_traces", ["custom_agent_id"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -207,6 +225,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [103, ["turn_failure_kinds"]],
   [LIBRARY_SCHEMA_VERSION, ["library_categories", "saved_answers"]],
   [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, ["codex_thread_tool_packs"]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, ["custom_agents"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -240,6 +259,7 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [LIBRARY_SCHEMA_VERSION, "html_renders_created_idx"],
     [TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, "todos_source_conversation_idx"],
     [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, "codex_thread_tool_packs_registered_idx"],
+    [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_position_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [
@@ -276,5 +296,6 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
       "(select count(*) from saved_answers) >= 1000",
       "raise(abort,",
     ]],
+    [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_count_limit", CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS],
   ],
 };

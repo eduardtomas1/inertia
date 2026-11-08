@@ -1,5 +1,4 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { readFileSync } from "node:fs";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -47,16 +46,6 @@ function profile(overrides: Partial<ModelBackendProfileDetail> = {}): ModelBacke
     canDisable: true,
     ...overrides,
   });
-}
-
-function stackedRule(path: string, query: string, selector: string): string {
-  const source = readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/gu, "\n");
-  const block = source.indexOf(`@container ${query} (max-width: 760px) {`);
-  expect(block).toBeGreaterThanOrEqual(0);
-  const start = source.indexOf(`  ${selector} {`, block);
-  expect(start).toBeGreaterThan(block);
-  expect(start).toBeLessThan(source.indexOf(`@container ${query} (max-width: 520px)`, block));
-  return source.slice(start, source.indexOf("}", start));
 }
 
 function backendProps(
@@ -190,22 +179,23 @@ describe("Agents providers layout", () => {
       onChooseCodexBinary,
     })} />);
     for (const name of ["Add provider", "Refresh all providers", "Refresh", "Browse"]) {
-      const button = await screen.findByRole("button", { name });
-      expect(button).toHaveAttribute("aria-disabled", "true");
-      expect(button).not.toBeDisabled();
-      fireEvent.click(button);
+      for (const button of await screen.findAllByRole("button", { name })) {
+        expect(button).toHaveAttribute("aria-disabled", "true");
+        expect(button).not.toBeDisabled();
+        fireEvent.click(button);
+      }
     }
+    expect(screen.queryByRole("dialog", { name: "Add provider" })).toBeNull();
     expect(onRefreshProvider).not.toHaveBeenCalled();
     expect(onChooseCodexBinary).not.toHaveBeenCalled();
   });
 });
 
 describe("Agents empty lists", () => {
-  it("leaves an empty stacked list without a border of its own under the frame's top edge", async () => {
+  it("keeps the Add provider row in an empty provider list", async () => {
     render(<SettingsView {...settingsViewProps({ target: { section: "agents" }, providers: [] })} />);
-    expect(await screen.findByRole("group", { name: "Provider accounts" })).toBeEmptyDOMElement();
-    expect(stackedRule("../../src/renderer/src/components/settings/ProvidersSettings.css", "providers", ".provider-settings-rail:empty"))
-      .toContain("border-bottom: 0");
+    const rail = await screen.findByRole("group", { name: "Provider accounts" });
+    expect(within(rail).getAllByRole("button").map((button) => button.textContent)).toEqual(["Add provider"]);
     const codex = await screen.findByRole("region", { name: "Codex" });
     expect(within(codex).queryByRole("list")).toBeNull();
     expect(within(codex).getByText("No API keys yet. Add an OpenAI API key to use your API credits.")).toBeVisible();

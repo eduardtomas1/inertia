@@ -1,5 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronUp, Info } from "lucide-react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
+import { Check, ChevronDown, FolderOpen, Info } from "lucide-react";
 import clsx from "clsx";
 
 import type { AppSettings, ProviderId, ProviderInfo } from "@shared/contracts";
@@ -8,6 +8,7 @@ import { focusModalOnAnimationFrame } from "../../utils/modalFocus";
 import { providerStateDetail } from "../../utils/providerStatus";
 import { DialogShell } from "../DialogShell";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
+import { SettingCopy } from "./SettingsLayout";
 import {
   ADD_PROVIDER_MENU_LABELS,
   ADD_PROVIDER_MENU_STEPS,
@@ -39,9 +40,26 @@ export interface AddProviderMenuProps {
   onAddApiKey: (providerId: ProviderId) => void;
 }
 
-function measuredColumns(value: string): number {
-  const count = value.split(" ").filter((part) => part.length > 0 && part !== "none").length;
-  return count === 1 ? 1 : 2;
+const NAVIGATION_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]);
+
+function renderedColumns(grid: HTMLElement): number {
+  const cards = [...grid.children] as HTMLElement[];
+  const top = cards[0]?.offsetTop;
+  const columns = cards.filter((card) => card.offsetTop === top).length;
+  return columns > 0 && columns < cards.length ? columns : 1;
+}
+
+function connectCopy(
+  providerId: ProviderId,
+  label: string,
+  command: AddProviderCommand | undefined,
+): string {
+  if (command?.type === "done") return `${label} is ready. New chats use the account stored on this computer.`;
+  if (command?.type === "refresh") return `Refresh checks whether ${label} is installed and signed in.`;
+  if (providerId === "codex") return "Continuing opens Codex's own sign-in. The password stays with Codex.";
+  if (providerId === "grok") return "Continuing runs grok login in Grok's own terminal. The password stays with Grok.";
+  if (providerId === "opencode") return "Continuing runs opencode auth login in a terminal.";
+  return `Continuing opens ${label}'s own sign-in.`;
 }
 
 export function AddProviderMenu({
@@ -61,8 +79,9 @@ export function AddProviderMenu({
   const titleId = useId();
   const descriptionId = useId();
   const gridLabelId = useId();
-  const nameId = useId();
   const nameHintId = useId();
+  const noteMoreId = useId();
+  const factsId = useId();
   const [step, setStep] = useState<AddProviderMenuStep>(0);
   const [selectedId, setSelectedId] = useState<ProviderId>("codex");
   const [route, setRoute] = useState<AddProviderRoute>("account");
@@ -70,11 +89,11 @@ export function AddProviderMenu({
   const [nameOverrides, setNameOverrides] = useState<Partial<Record<ProviderId, string>>>({});
   const [factsOpen, setFactsOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [columns, setColumns] = useState(2);
-  const gridRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
-  const pendingFocus = useRef<ProviderId | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const previousPanelHeight = useRef<number | null>(null);
   const items = addProviderMenuItems(providers);
   const selected = providers.find((provider) => provider.id === selectedId);
   const selectedLabel = ADD_PROVIDER_MENU_LABELS[selectedId];
@@ -91,70 +110,51 @@ export function AddProviderMenu({
     claudeMethod,
   });
   const primaryCommand = footer.find((button) => button.emphasis === "primary")?.command;
-  const binaryValue = selectedId === "codex"
-    ? codexBinaryPath || selected?.executable || ""
-    : selected?.executable ?? "";
+  const binaryValue = codexBinaryPath || selected?.executable || "";
 
   useLayoutEffect(() => focusModalOnAnimationFrame(() => {
-    document.getElementById("add-provider-card-codex")?.focus();
+    gridRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
   }), []);
 
   useLayoutEffect(() => {
-    if (step === 1) {
-      nameRef.current?.focus();
-      return;
+    const panel = panelRef.current;
+    const from = previousPanelHeight.current;
+    previousPanelHeight.current = null;
+    if (panel && from !== null && typeof panel.animate === "function"
+      && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const to = panel.offsetHeight;
+      if (Math.abs(to - from) > 1) {
+        panel.animate(
+          [{ height: `${from}px`, overflow: "hidden" }, { height: `${to}px`, overflow: "hidden" }],
+          { duration: 200, easing: "cubic-bezier(0.32, 0.72, 0, 1)" },
+        );
+      }
     }
-    if (step === 2) {
-      dialogRef.current?.querySelector<HTMLButtonElement>(".dialog-shell-footer .primary-button")?.focus();
-      return;
-    }
-    document.getElementById(`add-provider-card-${selectedId}`)?.focus();
-  }, [step, selectedId]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || event.isComposing) return;
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
-
-  useLayoutEffect(() => {
-    const providerId = pendingFocus.current;
-    if (!providerId) return;
-    pendingFocus.current = null;
-    document.getElementById(`add-provider-card-${providerId}`)?.focus();
-  }, [selectedId]);
-
-  useLayoutEffect(() => {
-    const node = gridRef.current;
-    if (!node || typeof ResizeObserver === "undefined") return undefined;
-    const measure = (): void => {
-      setColumns(measuredColumns(getComputedStyle(node).gridTemplateColumns));
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
+    if (step === 1) nameRef.current?.focus();
+    else if (step === 2) dialogRef.current?.querySelector<HTMLElement>(".dialog-shell-footer .primary-button")?.focus();
+    else gridRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
   }, [step]);
+
+  const goToStep = (next: AddProviderMenuStep): void => {
+    if (next === step) return;
+    previousPanelHeight.current = panelRef.current?.offsetHeight ?? null;
+    setStep(next);
+  };
 
   const chooseProvider = (providerId: ProviderId): void => {
     setSelectedId(providerId);
     setMoreOpen(false);
-    if (!addProviderRoutes(providerId).some((choice) => choice.id === route)) setRoute("account");
   };
 
   const moveSelection = (key: string): void => {
+    const grid = gridRef.current;
+    if (!grid) return;
     const current = items.findIndex((item) => item.id === selectedId);
-    const next = nextAddProviderMenuIndex(current, key, items.length, columns);
+    const next = nextAddProviderMenuIndex(current, key, items.length, renderedColumns(grid));
     const item = next === null ? undefined : items[next];
     if (!item || item.id === selectedId) return;
-    pendingFocus.current = item.id;
     chooseProvider(item.id);
+    grid.querySelector<HTMLElement>(`[data-provider-id="${item.id}"]`)?.focus();
   };
 
   const runCommand = (command: AddProviderCommand): void => {
@@ -164,15 +164,16 @@ export function AddProviderMenu({
       return;
     }
     if (command.type === "back") {
-      setStep((current) => current === 0 ? 0 : (current - 1) as AddProviderMenuStep);
+      goToStep(step === 0 ? 0 : (step - 1) as AddProviderMenuStep);
       return;
     }
     if (command.type === "step") {
-      setStep(command.step);
+      goToStep(command.step);
       return;
     }
     onSelectProvider(selectedId);
-    if (step === 2) onCommitIdentityLabel(selectedId, accountName);
+    const name = nameOverrides[selectedId];
+    if (name !== undefined) onCommitIdentityLabel(selectedId, name);
     if (command.type === "connect") onConnectProvider(selectedId, command.method);
     else if (command.type === "refresh") onRefreshProvider(selectedId);
     else if (command.type === "api-key") onAddApiKey(selectedId);
@@ -183,6 +184,7 @@ export function AddProviderMenu({
     <DialogShell
       ref={dialogRef}
       className="add-provider-menu"
+      tabIndex={-1}
       title="Add provider"
       titleId={titleId}
       description="Add an account or configure a provider on this computer."
@@ -190,6 +192,12 @@ export function AddProviderMenu({
       closeLabel="Close"
       onClose={onClose}
       onDismiss={onClose}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
       footer={footer.map((button) => (
         <button
           key={button.label}
@@ -223,12 +231,12 @@ export function AddProviderMenu({
                   complete && "is-complete",
                 )}
                 aria-current={current ? "step" : undefined}
-                aria-label={`${label}, step ${index + 1}`}
+                aria-label={`${label}, step ${index + 1}${complete && index === 0 ? `, ${selectedLabel}` : ""}`}
                 aria-disabled={disabled || undefined}
-                onClick={() => { if (!disabled) setStep(index as AddProviderMenuStep); }}
+                onClick={() => { if (!disabled) goToStep(index as AddProviderMenuStep); }}
               >
                 <span className="add-provider-step-index" aria-hidden="true">
-                  {complete ? <Check size={12} /> : index + 1}
+                  {complete ? <Check size={12} strokeWidth={2.75} /> : index + 1}
                 </span>
                 <span className="add-provider-step-label">{label}</span>
               </button>
@@ -237,17 +245,17 @@ export function AddProviderMenu({
         })}
       </ol>
 
-      <div className="add-provider-panel">
+      <div ref={panelRef} className="add-provider-panel" data-step={step}>
         {step === 0 && (
           <>
-            <p id={gridLabelId} className="add-provider-grid-label">Provider</p>
+            <p id={gridLabelId} className="add-provider-label">Provider</p>
             <div
               ref={gridRef}
               className="add-provider-grid"
               role="radiogroup"
               aria-labelledby={gridLabelId}
               onKeyDown={(event) => {
-                if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+                if (!NAVIGATION_KEYS.has(event.key)) return;
                 event.preventDefault();
                 moveSelection(event.key);
               }}
@@ -257,7 +265,6 @@ export function AddProviderMenu({
                 return (
                   <button
                     key={item.id}
-                    id={`add-provider-card-${item.id}`}
                     type="button"
                     role="radio"
                     className={clsx("add-provider-card", checked && "is-selected")}
@@ -268,52 +275,52 @@ export function AddProviderMenu({
                     onClick={() => chooseProvider(item.id)}
                   >
                     <ProviderBrandIcon providerId={item.id} decorative size={16} />
-                    <span className="add-provider-card-copy">
-                      <strong>{item.label}</strong>
-                      <small>{item.stateLabel}</small>
-                    </span>
-                    {checked && (
-                      <span className="add-provider-card-check" aria-hidden="true">
-                        <Check size={14} strokeWidth={2.5} />
-                      </span>
+                    <span className="add-provider-card-name">{item.label}</span>
+                    {!item.ready && (
+                      <span className="add-provider-card-state" aria-hidden="true">{item.stateLabel}</span>
                     )}
+                    <span className="add-provider-card-check" aria-hidden="true">
+                      <Check size={12} strokeWidth={2.75} />
+                    </span>
                   </button>
                 );
               })}
             </div>
             <div className="add-provider-note">
-              <Info size={16} aria-hidden="true" />
-              <div>
-                <p>
-                  {note.text}
-                  {note.more && (
-                    <>
-                      {" "}
-                      <button
-                        type="button"
-                        className="add-provider-more-info"
-                        aria-expanded={moreOpen}
-                        onClick={() => setMoreOpen((open) => !open)}
-                      >
-                        {moreOpen ? "Hide info" : "More info"}
-                      </button>
-                    </>
-                  )}
-                </p>
-                {moreOpen && note.more && <p className="add-provider-note-more">{note.more}</p>}
-              </div>
+              <Info size={15} aria-hidden="true" />
+              <p>
+                {note.text}
+                {note.more && (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="add-provider-inline-link"
+                      aria-expanded={moreOpen}
+                      aria-controls={noteMoreId}
+                      onClick={() => setMoreOpen((open) => !open)}
+                    >
+                      {moreOpen ? "Less info" : "More info"}
+                    </button>
+                  </>
+                )}
+                {moreOpen && note.more && (
+                  <span id={noteMoreId} className="add-provider-note-more">{note.more}</span>
+                )}
+              </p>
             </div>
             <button
               type="button"
-              className="add-provider-show-more"
+              className={clsx("add-provider-show-more", factsOpen && "is-open")}
               aria-expanded={factsOpen}
+              aria-controls={factsId}
               onClick={() => setFactsOpen((open) => !open)}
             >
               {factsOpen ? "Show less" : "Show more"}
-              {factsOpen ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+              <ChevronDown size={13} aria-hidden="true" />
             </button>
             {factsOpen && (
-              <dl className="add-provider-facts">
+              <dl id={factsId} className="add-provider-facts">
                 {facts.map((fact) => (
                   <div key={fact.label}>
                     <dt>{fact.label}</dt>
@@ -326,89 +333,78 @@ export function AddProviderMenu({
         )}
 
         {step === 1 && (
-          <>
-            <p className="add-provider-lead">
-              {routes.length > 1
-                ? `Name this account, then choose how chats reach ${selectedLabel}.`
-                : `Name this account. Chats use the ${selectedLabel} sign-in on this computer.`}
-            </p>
-            <div className="add-provider-field">
-              <label htmlFor={nameId}>Account name</label>
-              <input
-                ref={nameRef}
-                id={nameId}
-                className="setting-input"
-                aria-describedby={nameHintId}
-                value={accountName}
-                maxLength={48}
-                placeholder={`${selectedLabel} account`}
-                disabled={disabled}
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  setNameOverrides((current) => ({ ...current, [selectedId]: value }));
-                }}
+          <div className="add-provider-rows">
+            <div className="setting-row setting-text-field" data-setting-id="add-provider-name">
+              <SettingCopy
+                title={<label htmlFor={`${titleId}-name`}>Account name</label>}
+                description={<span id={nameHintId}>Shown in the provider list. Leave blank to use {selectedLabel}.</span>}
               />
-              <small id={nameHintId}>Shown in the provider list. Leave blank to use {selectedLabel}.</small>
+              <span className="setting-field-control">
+                <input
+                  ref={nameRef}
+                  id={`${titleId}-name`}
+                  className="setting-input"
+                  aria-describedby={nameHintId}
+                  value={accountName}
+                  maxLength={48}
+                  placeholder={`${selectedLabel} account`}
+                  disabled={disabled}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setNameOverrides((current) => ({ ...current, [selectedId]: value }));
+                  }}
+                />
+              </span>
             </div>
-            {routes.length > 1 && (
-              <ChoiceGroup
-                label="Route"
-                disabled={disabled}
-                selected={activeRoute}
-                choices={routes.map((choice) => ({
-                  id: choice.id,
-                  title: choice.title,
-                  description: choice.description,
-                }))}
-                onSelect={(id) => setRoute(id as AddProviderRoute)}
+            <div className="setting-row" data-setting-id="add-provider-identity">
+              <SettingCopy
+                title="Provider"
+                description={selected ? providerStateDetail(selected) : `${selectedLabel} was not detected on this computer.`}
               />
-            )}
-            {selectedId === "claude" && activeRoute === "account" && (
-              <ChoiceGroup
-                label="Sign-in"
-                disabled={disabled}
-                selected={claudeMethod}
-                choices={addProviderClaudeMethods().map((choice) => ({
-                  id: choice.method,
-                  title: choice.title,
-                  description: choice.description,
-                }))}
-                onSelect={(id) => setClaudeMethod(id as ProviderAuthMethod)}
-              />
-            )}
-          </>
+              <span className="add-provider-identity-chip">
+                <ProviderBrandIcon providerId={selectedId} decorative size={14} />
+                {accountName.trim() || selectedLabel}
+              </span>
+            </div>
+          </div>
         )}
 
         {step === 2 && (
-          <>
-            <p className="add-provider-config-copy">
-              {selected
-                ? providerStateDetail(selected)
-                : `${selectedLabel} was not detected on this computer.`}
-            </p>
-            {activeRoute === "api-key" ? (
-              <p className="add-provider-config-copy">
-                The next dialog asks for the key name, the key, and which models to offer. Inertia stores the key in your system credential vault.
-              </p>
-            ) : (
-              <p className="add-provider-config-copy">
-                {selectedId === "grok"
-                  ? primaryCommand?.type === "connect"
-                    ? "Continuing runs grok login in Grok's own terminal. The password stays with Grok."
-                    : primaryCommand?.type === "done"
-                      ? "Grok is ready. New chats use the account stored on this computer."
-                      : "Refresh checks whether Grok is installed and signed in."
-                  : selectedId === "codex"
-                    ? "Continuing opens Codex's own sign-in. The password stays with Codex."
-                    : selectedId === "opencode"
-                      ? "Continuing runs opencode auth login in a terminal."
-                      : `Continuing opens ${selectedLabel}'s own sign-in.`}
-              </p>
+          <div className="add-provider-rows">
+            {routes.length > 1 && (
+              <div className="setting-row" data-setting-id="add-provider-route">
+                <SettingCopy
+                  title="Connect with"
+                  description={routes.find((choice) => choice.id === activeRoute)?.description}
+                />
+                <Segmented
+                  label="Connect with"
+                  disabled={disabled}
+                  selected={activeRoute}
+                  choices={routes.map((choice) => ({ id: choice.id, title: choice.title }))}
+                  onSelect={(id) => setRoute(id as AddProviderRoute)}
+                />
+              </div>
+            )}
+            {selectedId === "claude" && activeRoute === "account" && (
+              <div className="setting-row" data-setting-id="add-provider-claude-method">
+                <SettingCopy
+                  title="Billing"
+                  description={addProviderClaudeMethods().find((choice) => choice.method === claudeMethod)?.description}
+                />
+                <Segmented
+                  label="Billing"
+                  disabled={disabled}
+                  selected={claudeMethod}
+                  choices={addProviderClaudeMethods().map((choice) => ({ id: choice.method, title: choice.title }))}
+                  onSelect={(id) => setClaudeMethod(id as ProviderAuthMethod)}
+                />
+              </div>
             )}
             {selectedId === "codex" && activeRoute === "account" && (
-              <div className="add-provider-field">
-                <span>Executable</span>
-                <span className="add-provider-binary">
+              <div className="setting-row provider-settings-binary" data-setting-id="add-provider-binary">
+                <SettingCopy title="Executable" description="Inertia finds Codex automatically unless you choose one." />
+                <span className="provider-settings-binary-control">
                   <input
                     className="setting-input"
                     aria-label="Codex executable path"
@@ -417,13 +413,14 @@ export function AddProviderMenu({
                     readOnly
                     title={binaryValue || undefined}
                   />
-                  <span className="add-provider-binary-actions">
+                  <span className="provider-settings-binary-actions">
                     <button
                       type="button"
                       className="secondary-button"
                       aria-disabled={disabled || undefined}
                       onClick={() => { if (!disabled) onChooseCodexBinary(); }}
                     >
+                      <FolderOpen size={14} aria-hidden="true" />
                       Browse
                     </button>
                     {codexBinaryPath && (
@@ -440,14 +437,19 @@ export function AddProviderMenu({
                 </span>
               </div>
             )}
-          </>
+            <p className="add-provider-hint">
+              {activeRoute === "api-key"
+                ? "The next dialog asks for the key name, the key, and which models to offer. Inertia keeps the key in your system credential vault."
+                : connectCopy(selectedId, selectedLabel, primaryCommand)}
+            </p>
+          </div>
         )}
       </div>
     </DialogShell>
   );
 }
 
-function ChoiceGroup({
+function Segmented({
   label,
   disabled,
   selected,
@@ -457,55 +459,43 @@ function ChoiceGroup({
   label: string;
   disabled: boolean;
   selected: string;
-  choices: readonly { id: string; title: string; description: string }[];
+  choices: readonly { id: string; title: string }[];
   onSelect: (id: string) => void;
 }): React.JSX.Element {
-  const labelId = useId();
   return (
-    <div className="add-provider-choices">
-      <p id={labelId} className="add-provider-choice-label">{label}</p>
-      <div
-        className="add-provider-choice-list"
-        role="radiogroup"
-        aria-labelledby={labelId}
-        onKeyDown={(event) => {
-          if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
-          event.preventDefault();
-          const index = choices.findIndex((choice) => choice.id === selected);
-          const next = nextAddProviderMenuIndex(index, event.key, choices.length, 1);
-          const choice = next === null ? undefined : choices[next];
-          if (!choice || disabled || choice.id === selected) return;
-          onSelect(choice.id);
-          event.currentTarget.querySelector<HTMLButtonElement>(`[data-choice-id="${choice.id}"]`)?.focus();
-        }}
-      >
-        {choices.map((choice) => {
-          const checked = choice.id === selected;
-          return (
-            <button
-              key={choice.id}
-              type="button"
-              role="radio"
-              className={clsx("add-provider-choice", checked && "is-selected")}
-              aria-checked={checked}
-              aria-disabled={disabled || undefined}
-              data-choice-id={choice.id}
-              tabIndex={checked ? 0 : -1}
-              onClick={() => { if (!disabled) onSelect(choice.id); }}
-            >
-              <span className="add-provider-choice-copy">
-                <strong>{choice.title}</strong>
-                <small>{choice.description}</small>
-              </span>
-              {checked && (
-                <span className="add-provider-card-check" aria-hidden="true">
-                  <Check size={14} strokeWidth={2.5} />
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+    <div
+      className="add-provider-segmented"
+      role="radiogroup"
+      aria-label={label}
+      onKeyDown={(event) => {
+        if (!NAVIGATION_KEYS.has(event.key)) return;
+        event.preventDefault();
+        const index = choices.findIndex((choice) => choice.id === selected);
+        const next = nextAddProviderMenuIndex(index, event.key, choices.length, 1);
+        const choice = next === null ? undefined : choices[next];
+        if (!choice || disabled || choice.id === selected) return;
+        onSelect(choice.id);
+        event.currentTarget.querySelector<HTMLElement>(`[data-choice-id="${choice.id}"]`)?.focus();
+      }}
+    >
+      {choices.map((choice) => {
+        const checked = choice.id === selected;
+        return (
+          <button
+            key={choice.id}
+            type="button"
+            role="radio"
+            className={clsx(checked && "is-active")}
+            aria-checked={checked}
+            aria-disabled={disabled || undefined}
+            data-choice-id={choice.id}
+            tabIndex={checked ? 0 : -1}
+            onClick={() => { if (!disabled) onSelect(choice.id); }}
+          >
+            {choice.title}
+          </button>
+        );
+      })}
     </div>
   );
 }

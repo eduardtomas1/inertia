@@ -132,7 +132,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
   section("agents", "Agents", {
     Providers: [
       ["provider-accounts", "Providers", ["agents", "accounts", "connect", "sign in", "refresh", "codex", "claude", "model", "connections"]],
-      ["add-provider", "Add provider", ["add account", "provider menu", "chatgpt", "sign in", "api key", "codex", "claude", "cursor", "opencode", "grok"]],
+      ["add-provider", "Add provider", ["add account", "provider menu", "chatgpt", "sign in", "api key", "codex", "claude", "cursor", "grok", "opencode", "antigravity", "kimi"]],
       ["provider-display-name", "Account name", ["alias", "display name", "provider"]],
       ["provider-binary-path", "Executable", ["binary path", "codex path", "use automatic", "cli"]],
       ["provider-updates", "Provider updates", ["maintenance", "upgrade", "update", "version"]],

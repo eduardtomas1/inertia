@@ -95,8 +95,10 @@ describe("Add provider menu", () => {
     fireEvent.change(within(dialog).getByRole("textbox", { name: "Account name" }), {
       target: { value: "Work" },
     });
-    fireEvent.click(within(dialog).getByRole("radio", { name: /API key/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    expect(within(dialog).getByRole("button", { name: "Done" })).toHaveFocus();
+    fireEvent.click(within(dialog).getByRole("radio", { name: "API key" }));
+    expect(within(dialog).getByText(/OpenAI API key/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Add API key" }));
     expect(onCommitIdentityLabel).toHaveBeenCalledWith("codex", "Work");
     expect(onAddApiKey).toHaveBeenCalledWith("codex");
@@ -115,9 +117,10 @@ describe("Add provider menu", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Next" }));
     const name = within(dialog).getByRole("textbox", { name: "Account name" });
     expect(name).toHaveFocus();
-    expect(within(dialog).getByText(/Chats use the Grok sign-in/)).toBeInTheDocument();
-    name.blur();
-    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.change(name, { target: { value: "Personal" } });
+    expect(within(dialog).getByText("Personal", { selector: ".add-provider-identity-chip" })).toBeInTheDocument();
+    dialog.focus();
+    fireEvent.keyDown(dialog, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -129,17 +132,18 @@ describe("Add provider menu", () => {
       onConnectProvider,
     })} />);
     expect(await screen.findByRole("region", { name: "Codex" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    const [headingAdd, railAdd] = screen.getAllByRole("button", { name: "Add provider" });
+    fireEvent.click(headingAdd!);
     const dialog = screen.getByRole("dialog", { name: "Add provider" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Continue with ChatGPT" }));
     expect(onConnectProvider).toHaveBeenCalledWith("codex", "account");
     expect(screen.queryByRole("dialog", { name: "Add provider" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    fireEvent.click(railAdd!);
     const again = screen.getByRole("dialog", { name: "Add provider" });
     fireEvent.click(within(again).getByRole("button", { name: "Configure manually" }));
-    fireEvent.click(within(again).getByRole("radio", { name: /API key/ }));
     fireEvent.click(within(again).getByRole("button", { name: "Next" }));
+    fireEvent.click(within(again).getByRole("radio", { name: "API key" }));
     fireEvent.click(within(again).getByRole("button", { name: "Add API key" }));
     expect(await screen.findByRole("dialog", { name: "Add OpenAI API key" })).toBeInTheDocument();
   });

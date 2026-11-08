@@ -194,7 +194,7 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await expectHoverQuieterThanSelection(rail);
   await capture(testInfo, "provider-settings-configuration-light-wide");
 
-  await page.getByRole("button", { name: "Add provider", exact: true }).click();
+  await page.getByRole("button", { name: "Add provider", exact: true }).first().click();
   const addProvider = page.getByRole("dialog", { name: "Add provider" });
   await expect(addProvider.getByRole("radio", { name: /^Codex,/ })).toHaveAttribute("aria-checked", "true");
   await expect(addProvider.getByRole("button", { name: "Configure manually", exact: true })).toBeVisible();
@@ -203,8 +203,12 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await expect(addProvider.getByText("Sign-in")).toBeVisible();
   await captureAddProviderMenu(testInfo, "add-provider-menu-details-light");
   await addProvider.getByRole("button", { name: "Configure manually", exact: true }).click();
-  await expect(addProvider.getByRole("textbox", { name: "Account name" })).toBeVisible();
-  await captureAddProviderMenu(testInfo, "add-provider-account-light");
+  await expect(addProvider.getByRole("textbox", { name: "Account name" })).toBeFocused();
+  await captureAddProviderMenu(testInfo, "add-provider-identity-light");
+  await addProvider.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(addProvider.getByRole("radiogroup", { name: "Connect with" })).toBeVisible();
+  await captureAddProviderMenu(testInfo, "add-provider-config-light");
+  await addProvider.getByText("Executable", { exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(addProvider).toHaveCount(0);
 
@@ -244,9 +248,15 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await page.getByRole("radio", { name: "Dark" }).click();
   await page.getByRole("button", { name: "Agents", exact: true }).click();
   await expectHoverQuieterThanSelection(rail);
-  await page.getByRole("button", { name: "Add provider", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Add provider" })).toBeVisible();
+  await page.getByRole("button", { name: "Add provider", exact: true }).last().click();
+  const addProviderDark = page.getByRole("dialog", { name: "Add provider" });
+  await expect(addProviderDark).toBeVisible();
+  await addProviderDark.getByRole("radio", { name: /^Claude,/ }).click();
   await captureAddProviderMenu(testInfo, "add-provider-menu-dark");
+  await addProviderDark.getByRole("button", { name: "Next", exact: true }).click();
+  await addProviderDark.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(addProviderDark.getByRole("radiogroup", { name: "Billing" })).toBeVisible();
+  await captureAddProviderMenu(testInfo, "add-provider-config-dark");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Add provider" })).toHaveCount(0);
   await app.resizeWindow(760, 1100);

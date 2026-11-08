@@ -222,28 +222,24 @@ export function ProvidersSettings({
       data-setting-id="provider-accounts"
     >
       <div className="settings-card-heading provider-settings-heading">
-        <span>
+        <span className="provider-settings-title">
           <h3 id="providers-heading">Providers</h3>
-        </span>
-        <span className="provider-settings-heading-actions">
-          <button
-            type="button"
-            className="secondary-button"
+          <IconButton
+            label="Add provider"
             data-setting-id="add-provider"
             aria-disabled={disabled || undefined}
             onClick={() => { if (!disabled) setAddProviderOpen(true); }}
           >
-            <Plus size={14} aria-hidden="true" />
-            Add provider
-          </button>
-          <IconButton
-            label="Refresh all providers"
-            aria-disabled={disabled || undefined}
-            onClick={() => { if (!disabled) onRefreshProvider(); }}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
+            <Plus size={15} aria-hidden="true" />
           </IconButton>
         </span>
+        <IconButton
+          label="Refresh all providers"
+          aria-disabled={disabled || undefined}
+          onClick={() => { if (!disabled) onRefreshProvider(); }}
+        >
+          <RefreshCw size={14} aria-hidden="true" />
+        </IconButton>
       </div>
 
       <div className="provider-settings-shell">
@@ -277,6 +273,15 @@ export function ProvidersSettings({
               </button>
             );
           })}
+          <button
+            type="button"
+            className="provider-settings-add-row"
+            aria-disabled={disabled || undefined}
+            onClick={() => { if (!disabled) setAddProviderOpen(true); }}
+          >
+            <Plus size={16} aria-hidden="true" />
+            Add provider
+          </button>
         </div>
 
         <div className="provider-settings-editor">

@@ -33,6 +33,7 @@ export interface AddProviderMenuItem {
   id: ProviderId;
   label: string;
   stateLabel: string;
+  ready: boolean;
 }
 
 export interface AddProviderNote {
@@ -74,6 +75,14 @@ export interface AddProviderFooterButton {
 
 const CODEX_MORE = "Inertia keeps one Codex installation, so signing in again replaces the account Codex already stored. An OpenAI API key is a separate route for API credits. Each chat uses one route.";
 
+const READY_STATE_LABELS: ReadonlySet<string> = new Set(["Connected", "Configured", "Ready"]);
+
+const API_KEY_VENDORS: Readonly<Partial<Record<ProviderId, string>>> = {
+  codex: "OpenAI",
+  claude: "Anthropic",
+  antigravity: "Gemini",
+};
+
 const ANTIGRAVITY_POLICY = "Google says wrapping agy in another app isn't supported on consumer plans.";
 
 export function addProviderMenuItems(
@@ -82,10 +91,12 @@ export function addProviderMenuItems(
   const byId = new Map(providers.map((provider) => [provider.id, provider]));
   return ADD_PROVIDER_MENU_ORDER.map((id) => {
     const provider = byId.get(id);
+    const stateLabel = provider ? providerStateLabel(provider) : "Not detected";
     return {
       id,
       label: ADD_PROVIDER_MENU_LABELS[id],
-      stateLabel: provider ? providerStateLabel(provider) : "Not detected",
+      stateLabel,
+      ready: READY_STATE_LABELS.has(stateLabel),
     };
   });
 }
@@ -231,7 +242,7 @@ export function addProviderFacts(id: ProviderId): readonly AddProviderFact[] {
 
 function accountRouteDescription(id: ProviderId): string {
   if (id === "codex") return "Uses the ChatGPT account stored by Codex.";
-  if (id === "claude") return "Uses your Claude account, through Claude Code's own login.";
+  if (id === "claude") return "Signs in through Claude Code's own login.";
   if (id === "opencode") return "Runs opencode auth login. OpenCode keeps the keys.";
   if (id === "cursor") return "Uses the account stored by Cursor.";
   if (id === "antigravity") return "Uses the account stored by Antigravity.";
@@ -240,14 +251,14 @@ function accountRouteDescription(id: ProviderId): string {
 }
 
 function apiKeyRouteDescription(id: ProviderId): string {
-  if (id === "claude") return "Uses an Anthropic API key. Billed to your API credits and kept in the credential vault.";
-  return "Uses an OpenAI API key. Billed to your API credits and kept in the credential vault.";
+  const vendor = API_KEY_VENDORS[id] ?? ADD_PROVIDER_MENU_LABELS[id];
+  return `Uses ${/^[AEIOU]/u.test(vendor) ? "an" : "a"} ${vendor} API key, billed to your API credits and kept in the credential vault.`;
 }
 
 export function addProviderRoutes(id: ProviderId): readonly AddProviderRouteChoice[] {
   const account: AddProviderRouteChoice = {
     id: "account",
-    title: "Provider account",
+    title: "Account",
     description: accountRouteDescription(id),
   };
   if (!addProviderSupportsApiKey(id)) return [account];
@@ -266,12 +277,12 @@ export function addProviderClaudeMethods(): readonly AddProviderMethodChoice[] {
     {
       method: "account",
       title: "Claude account",
-      description: "Uses your Claude account, through Claude Code's own login.",
+      description: "Bills your Claude plan.",
     },
     {
       method: "console",
-      title: "Console API billing",
-      description: "Uses your Anthropic Console credits, still through Claude Code.",
+      title: "Console billing",
+      description: "Bills your Anthropic Console credits.",
     },
   ];
 }

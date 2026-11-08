@@ -41,14 +41,14 @@ function tableExists(database: Database.Database, type: "table" | "index", name:
 }
 
 describe("PersistCodexThreadToolPacks migration", () => {
-  it("is schema 109, appended after the task source chat column", () => {
-    expect(CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION).toBe(109);
+  it("is schema 110, appended after the task source chat column", () => {
+    expect(CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION).toBe(110);
     expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION);
     expect(codexThreadToolPacksMigration.name).toBe("PersistCodexThreadToolPacks");
     expect(codexThreadToolPacksMigration.foreignKeys).toBeUndefined();
   });
 
-  it("upgrades a schema 108 database in place, keeps its chats and session ids, and stays idempotent", async () => {
+  it("upgrades a schema 109 database in place, keeps its chats and session ids, and stays idempotent", async () => {
     const root = await directory();
     const databasePath = join(root, "inertia.sqlite");
     const store = new RuntimeStore(databasePath, root, { recoverInterruptedRuns: false });

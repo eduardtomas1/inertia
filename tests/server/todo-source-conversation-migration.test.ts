@@ -40,14 +40,14 @@ function runMigration(database: Database.Database): void {
 }
 
 describe("PersistTodoSourceConversation migration", () => {
-  it("is schema 108, appended after the managed context read rebuild", () => {
-    expect(TODO_SOURCE_CONVERSATION_SCHEMA_VERSION).toBe(108);
+  it("is schema 109, appended after the managed context read rebuild", () => {
+    expect(TODO_SOURCE_CONVERSATION_SCHEMA_VERSION).toBe(109);
     expect(CURRENT_DATABASE_SCHEMA_VERSION).toBeGreaterThanOrEqual(TODO_SOURCE_CONVERSATION_SCHEMA_VERSION);
     expect(todoSourceConversationMigration.name).toBe("PersistTodoSourceConversation");
     expect(todoSourceConversationMigration.foreignKeys).toBeUndefined();
   });
 
-  it("upgrades a schema 107 task table in place and keeps every row and hand-off link", async () => {
+  it("upgrades a schema 108 task table in place and keeps every row and hand-off link", async () => {
     const root = await directory();
     const databasePath = join(root, "inertia.sqlite");
     const store = new RuntimeStore(databasePath, root, { recoverInterruptedRuns: false });

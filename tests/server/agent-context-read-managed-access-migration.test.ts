@@ -62,7 +62,7 @@ function insertRead(database: Database.Database, row: {
 }
 
 describe("RecordManagedAgentContextReads migration", () => {
-  it("upgrades a schema 106 read log in place, keeps watched reads, and then accepts managed reads", async () => {
+  it("upgrades a schema 107 read log in place, keeps watched reads, and then accepts managed reads", async () => {
     const root = await mkdtemp(join(tmpdir(), "inertia-managed-read-migration-"));
     roots.push(root);
     const workspace = join(root, "workspace");
@@ -92,7 +92,7 @@ describe("RecordManagedAgentContextReads migration", () => {
     record(watched.id, null, "watched", "2030-01-01T00:00:05.000Z");
     store.close();
 
-    // Rebuild the read log exactly as schema 99 through 106 created it.
+    // Rebuild the read log exactly as schema 99 through 107 created it.
     const legacy = new Database(databasePath);
     legacy.pragma("foreign_keys = OFF");
     legacy.exec(`

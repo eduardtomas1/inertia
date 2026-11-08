@@ -1935,7 +1935,7 @@ describe("transcript following motion", () => {
       expect(transcript.scrollTop).toBe(150);
     });
 
-    it("spends End once the reader reaches the latest content", async () => {
+    it("spends End once the reader moves back up from the latest content", async () => {
       const { transcript, scrollTo, grow } = await guardedFollow();
       await readHistoryAtTop(transcript);
       fireEvent.keyDown(transcript, { key: "End" });
@@ -1952,6 +1952,21 @@ describe("transcript following motion", () => {
       await act(async () => vi.advanceTimersByTime(1_000));
       expect(scrollTo).not.toHaveBeenCalled();
       expect(transcript.scrollTop).toBe(350);
+    });
+
+    it("keeps following after End when the latest content grows before the End scroll settles", async () => {
+      const { transcript, scrollTo, grow } = await guardedFollow();
+      await readHistoryAtTop(transcript);
+      fireEvent.keyDown(transcript, { key: "End" });
+      transcript.scrollTop = 400;
+      fireEvent.scroll(transcript);
+      grow(true);
+      transcript.scrollTop = 410;
+      fireEvent.scroll(transcript);
+      expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+      scrollTo.mockClear();
+      await act(async () => vi.advanceTimersByTime(750));
+      expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: "auto" });
     });
 
     it.each(["started", "positioned"] as const)("respects %s final-answer ownership when the guard expires", async (status) => {

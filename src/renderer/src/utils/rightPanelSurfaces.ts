@@ -38,6 +38,12 @@ export const RIGHT_PANEL_SIBLING_MIN_WIDTH = 360;
 
 export const CLOSE_ACTIVE_PANEL_SURFACE_EVENT = "inertia:close-active-panel-surface";
 
+/**
+ * Asks a shown panel for its surface chooser: the launcher when no surface is
+ * active, otherwise the "Add panel surface" menu. Both accept the letter keys.
+ */
+export const OPEN_PANEL_SURFACE_CHOOSER_EVENT = "inertia:open-panel-surface-chooser";
+
 export interface RightPanelState {
   isOpen: boolean;
   activeSurfaceId: WorkspacePanelTab | null;

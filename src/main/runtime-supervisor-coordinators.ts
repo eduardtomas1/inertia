@@ -6,6 +6,7 @@ import { RuntimeHtmlRenderCoordinator } from "./runtime-html-render-coordinator.
 import { RuntimePrivateConnectPromptCoordinator } from "./runtime-private-connect-prompt-coordinator.js";
 import { RuntimePrivateConnectRequestCoordinator } from "./runtime-private-connect-request-coordinator.js";
 import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
+import { RuntimeSupervisorQueries } from "./runtime-supervisor-queries.js";
 import { RuntimeUpdatePreparationCoordinator } from "./runtime-update-preparation-coordinator.js";
 import type { RuntimeProcessRecord, RuntimeSupervisorOptions } from "./runtime-supervisor-types.js";
 import { boundedDuration, runtimeSupervisorDefaults } from "./runtime-supervisor-values.js";
@@ -86,6 +87,12 @@ export function createRuntimeSupervisorCoordinators(
       post,
     }),
     htmlRenders: new RuntimeHtmlRenderCoordinator({
+      requestTimeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
+      ...timers,
+      readyRecord: () => host.readyRecord(),
+      post,
+    }),
+    queries: new RuntimeSupervisorQueries({
       requestTimeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
       ...timers,
       readyRecord: () => host.readyRecord(),

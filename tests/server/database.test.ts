@@ -986,6 +986,14 @@ describe("RuntimeStore conversation lifecycle", () => {
       withProject: false,
     });
     expect(store.snapshot().settings.desktopNotifications).toBe(true);
+    const keybindings = {
+      search: "u",
+      "new-chat": "y",
+      "toggle-sidebar": "g",
+      "toggle-terminal": "h",
+      tasks: "k",
+      "open-surface": "b",
+    } as const;
     store.updateSettings({
       projectGrouping: "repository",
       codexBinaryPath: process.platform === "win32" ? "C:\\Tools\\Codex\\codex.exe" : "/opt/codex/bin/codex",
@@ -994,13 +1002,7 @@ describe("RuntimeStore conversation lifecycle", () => {
         codex: "Work account",
         claude: "Personal account",
       },
-      keybindings: {
-        search: "u",
-        "new-chat": "y",
-        "toggle-sidebar": "g",
-        "toggle-terminal": "h",
-        tasks: "k",
-      },
+      keybindings,
     });
     await mkdir(join(workspacePath, ".git"));
     const repositoryIdentity = `git:${join(workspacePath, ".git")}`;
@@ -1029,13 +1031,7 @@ describe("RuntimeStore conversation lifecycle", () => {
         codex: "Work account",
         claude: "Personal account",
       },
-      keybindings: {
-        search: "u",
-        "new-chat": "y",
-        "toggle-sidebar": "g",
-        "toggle-terminal": "h",
-        tasks: "k",
-      },
+      keybindings,
     });
     expect(reopened.project(project.id)).toMatchObject({
       name: "App package",

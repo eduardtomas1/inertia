@@ -14,6 +14,8 @@ vi.mock("@xterm/xterm", () => ({
     rows = 24;
     options = { fontSize: 13, theme: {} };
     loadAddon(): void {}
+    registerLinkProvider(): { dispose: () => void } { return { dispose: () => undefined }; }
+    onSelectionChange(): { dispose: () => void } { return { dispose: () => undefined }; }
     attachCustomKeyEventHandler(): void {}
     open(container: HTMLElement): void { container.append(document.createElement("textarea")); }
     focus(): void {}

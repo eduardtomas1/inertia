@@ -14,7 +14,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCheckpoint } from "../../src/server/checkpoints";
 import { RuntimeStore } from "../../src/server/database";
-import { TurnGitArtifactManager } from "../../src/server/turn-git-artifacts";
+import {
+  LIVE_TURN_DIFF_REUSE_MS,
+  LIVE_TURN_DIFF_TIMEOUT_MS,
+  TurnGitArtifactManager,
+} from "../../src/server/turn-git-artifacts";
 import { removePortableFixture } from "../helpers/portable-provider-fixture";
 
 const roots: string[] = [];
@@ -738,6 +742,101 @@ describe("turn Git artifacts", () => {
     await expect(manager.turnDiff(turn.id)).rejects.toThrow("unavailable");
     expect((await manager.settledTurnDiff(turn.id)).patch).toContain("+after");
     await finalization;
+    runtime.store.close();
+  });
+
+  it("waits for an in-flight finalization only as long as the caller allows", async () => {
+    const runtime = workspace();
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+    const turn = beginTurn(runtime.store, runtime.conversationId, "turn-bounded-settle");
+    const checkpoint = await checkpointFor(runtime.store, runtime.repository, runtime.data, runtime.conversationId, 1);
+    await manager.captureBefore({ turn, checkpointId: checkpoint.id });
+    writeFileSync(join(runtime.repository, "tracked.txt"), "before\nafter\n");
+
+    let release!: () => void;
+    const stalled = new Promise<void>((resolve) => { release = resolve; });
+    const capture = vi.spyOn(manager, "captureAfter").mockImplementationOnce(async (input, options) => {
+      await stalled;
+      capture.mockRestore();
+      return await manager.captureAfter(input, options);
+    });
+    const finalization = manager.finalize({ turn, checkpointId: checkpoint.id });
+
+    const started = performance.now();
+    await expect(manager.settledTurnDiffWithin(turn.id, { timeoutMs: 50 })).resolves.toBeNull();
+    expect(performance.now() - started).toBeLessThan(5_000);
+    const controller = new AbortController();
+    const aborted = manager.settledTurnDiffWithin(turn.id, { signal: controller.signal, timeoutMs: 60_000 });
+    controller.abort();
+    await expect(aborted).resolves.toBeNull();
+
+    const waiting = manager.settledTurnDiffWithin(turn.id, { timeoutMs: 60_000 });
+    release();
+    expect((await waiting)?.patch).toContain("+after");
+    await finalization;
+    runtime.store.close();
+  });
+
+  it("returns null at once for a pending artifact with no finalization under way", async () => {
+    const runtime = workspace();
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+    const turn = beginTurn(runtime.store, runtime.conversationId, "turn-unfinalized");
+    await manager.captureBefore({ turn, checkpointId: null });
+    expect(runtime.store.turnGitArtifact(turn.id)?.status).toBe("pending");
+    await expect(manager.settledTurnDiffWithin(turn.id, { timeoutMs: 60_000 })).resolves.toBeNull();
+    await expect(manager.settledTurnDiffWithin("missing-turn", { timeoutMs: 60_000 })).resolves.toBeNull();
+    runtime.store.close();
+  });
+
+  it("answers live diffs under a host-tool deadline and shares one comparison across close calls", async () => {
+    expect(LIVE_TURN_DIFF_TIMEOUT_MS).toBeLessThan(25_000);
+    const runtime = workspace();
+    let offset = 0;
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data, () => new Date(), {
+      clockMs: () => Date.now() + offset,
+    });
+    const turn = beginTurn(runtime.store, runtime.conversationId, "turn-live");
+    await manager.captureBefore({ turn, checkpointId: null });
+    const objects = () => git(runtime.repository, ["count-objects", "-v"]);
+    writeFileSync(join(runtime.repository, "tracked.txt"), "before\nfirst\n");
+
+    const [first, concurrent] = await Promise.all([
+      manager.liveTurnDiff(turn.id),
+      manager.liveTurnDiff(turn.id),
+    ]);
+    expect(first.patch).toContain("+first");
+    expect(concurrent).toEqual(first);
+    const afterFirst = objects();
+
+    writeFileSync(join(runtime.repository, "tracked.txt"), "before\nsecond\n");
+    const reused = await manager.liveTurnDiff(turn.id);
+    expect(reused.patch).toBe(first.patch);
+    expect(objects()).toBe(afterFirst);
+
+    offset += LIVE_TURN_DIFF_REUSE_MS;
+    const fresh = await manager.liveTurnDiff(turn.id);
+    expect(fresh.patch).toContain("+second");
+    expect(git(runtime.repository, ["for-each-ref", "--format=%(refname)", "refs/inertia/checkpoints/"]).split("\n")).toHaveLength(1);
+    runtime.store.close();
+  });
+
+  it("ends only the cancelled caller's wait for a shared live diff", async () => {
+    const runtime = workspace();
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+    const turn = beginTurn(runtime.store, runtime.conversationId, "turn-live-cancel");
+    await manager.captureBefore({ turn, checkpointId: null });
+    writeFileSync(join(runtime.repository, "tracked.txt"), "before\nshared\n");
+
+    const already = new AbortController();
+    already.abort();
+    await expect(manager.liveTurnDiff(turn.id, { signal: already.signal })).rejects.toThrow("cancelled");
+
+    const leaving = new AbortController();
+    const cancelled = manager.liveTurnDiff(turn.id, { signal: leaving.signal });
+    const staying = manager.liveTurnDiff(turn.id);
+    leaving.abort();
+    await expect(cancelled).rejects.toThrow("cancelled");
+    expect((await staying).patch).toContain("+shared");
     runtime.store.close();
   });
 

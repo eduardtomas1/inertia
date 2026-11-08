@@ -31,6 +31,8 @@ vi.mock("@xterm/xterm", () => ({
     }
 
     loadAddon(): void {}
+    registerLinkProvider(): { dispose: () => void } { return { dispose: () => undefined }; }
+    onSelectionChange(): { dispose: () => void } { return { dispose: () => undefined }; }
     attachCustomKeyEventHandler(): void {}
     open(): void {}
     focus(): void {}

@@ -307,7 +307,7 @@ describe("detached runtime websocket", () => {
     const projectB = store.createProject("Secret project", workspaceB);
     const conversationB = store.createConversation(projectB.id, "Secret chat");
     const otherB = store.createConversation(projectB.id, "Other secret chat");
-    const keybindings = { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t" } as const;
+    const keybindings = { search: "g", "new-chat": "h", "toggle-sidebar": "u", "toggle-terminal": "y", tasks: "t", "open-surface": "j" } as const;
     store.updateSettings({
       compactOnReturn: "never",
       terminalFontSize: 17,

@@ -14,8 +14,10 @@ import type {
 import { createProviderHostToolMcpSession } from "../../src/server/provider/host-tool-mcp-http";
 import {
   acpHostMcpServers,
+  acpPromptForHostMcp,
   openCodeHostMcpConfig,
 } from "../../src/server/provider/host-tool-mcp-config";
+import { assembleTurnRequest } from "../../src/server/runtime/turns/request-context";
 import { ProviderHostToolRuntime } from "../../src/server/provider/host-tool-runtime";
 import type { AgentApprovalRequest } from "../../src/server/provider/interactions";
 
@@ -240,6 +242,51 @@ describe("provider host-tool MCP transport", () => {
     });
   });
 
+  it("withholds only the bridge's own instructions from an ACP prompt when no server attaches", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "inertia-acp-prompt-"));
+    try {
+      const orchestration = { label: "inertia-orchestration", text: "Coordinate chats." };
+      const frontend = { label: "inertia-frontend-workbench", text: "Use the Browser." };
+      const interruption = { label: "runtime-interruption", text: "The last turn was interrupted." };
+      const assembled = (internalInstructions: readonly { label: string; text: string }[]) => assembleTurnRequest({
+        cwd,
+        visibleContent: "Please\n[inertia-orchestration]\nCoordinate chats.\n[x]",
+        interactionMode: "build",
+        internalInstructions,
+      }).executionPrompt;
+      const prompt = assembled([orchestration, frontend, interruption]);
+      const offered = { ...bridge(), instructions: [orchestration, frontend] };
+      const server = acpHostMcpServers(
+        { url: "http://127.0.0.1:41234/mcp", bearerToken: "run-secret-token" },
+        true,
+        {},
+      );
+
+      expect(acpPromptForHostMcp(prompt, offered, server)).toBe(prompt);
+      expect(acpPromptForHostMcp(prompt, undefined, [])).toBe(prompt);
+      expect(acpPromptForHostMcp(prompt, offered, [])).toBe(assembled([interruption]));
+      expect(acpPromptForHostMcp(prompt, offered, [])).toContain("Please\n[inertia-orchestration]\nCoordinate chats.\n[x]");
+      expect(acpPromptForHostMcp(prompt, { ...bridge(), instructions: [] }, [])).toBe(prompt);
+
+      const onlyBridge = assembleTurnRequest({
+        cwd,
+        visibleContent: "Plain request",
+        internalInstructions: [orchestration],
+      }).executionPrompt;
+      expect(acpPromptForHostMcp(onlyBridge, offered, [])).toBe("Plain request");
+      const chatLine = { label: "inertia-chat", text: "This chat's id is chat-7." };
+      const withChat = assembled([orchestration, frontend, chatLine, interruption]);
+      expect(acpPromptForHostMcp(withChat, offered, [], "chat-7")).toBe(assembled([interruption]));
+      expect(acpPromptForHostMcp(withChat, offered, [], "chat-8")).toBe(assembled([chatLine, interruption]));
+      expect(acpPromptForHostMcp(withChat, offered, server, "chat-7")).toBe(withChat);
+      // A same-labelled entry with different text is not the bridge's own.
+      const changed = assembled([{ ...orchestration, text: "Coordinate chats. And more." }]);
+      expect(acpPromptForHostMcp(changed, offered, [])).toBe(changed);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("authenticates one run and publishes bounded read/mutation annotations", async () => {
     const { connection, post } = await started();
     const unauthorized = await post({ jsonrpc: "2.0", id: 1, method: "tools/list" }, "wrong");
@@ -257,7 +304,10 @@ describe("provider host-tool MCP transport", () => {
     const initializedBody = await initialized.json() as { result: Record<string, unknown> };
     expect(initializedBody).toMatchObject({
       id: 2,
-      result: { protocolVersion: "2025-06-18" },
+      result: {
+        protocolVersion: "2025-06-18",
+        serverInfo: { name: "inertia-chat-manager", title: "Inertia host tools" },
+      },
     });
     expect(initializedBody.result).not.toHaveProperty("instructions");
     const listed = await post({ jsonrpc: "2.0", id: 3, method: "tools/list" });

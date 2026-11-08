@@ -742,7 +742,7 @@ describe("Settings composite updates", () => {
     onUpdate.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Keyboard" }));
     fireEvent.change(screen.getByLabelText("Search everything key"), {
-      target: { value: "g" },
+      target: { value: "u" },
     });
     fireEvent.change(screen.getByLabelText("New chat key"), {
       target: { value: "h" },
@@ -751,7 +751,7 @@ describe("Settings composite updates", () => {
     expect(onUpdate).toHaveBeenLastCalledWith({
       keybindings: {
         ...defaultSettings.keybindings,
-        search: "g",
+        search: "u",
         "new-chat": "h",
       },
     });

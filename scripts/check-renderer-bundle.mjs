@@ -80,17 +80,33 @@ const budgets = {
   // The review fixes and the collapsed dock handle add 863 workbench bytes;
   // removing the composer chip saves 873 detached bytes.
   // See docs/pr-evidence/watcher/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 841 + 8_439 + 2_660 + 863 + 35 + 34 + 211 - 28 + 166 + 21 + 7_368 + 551 + 257 + 1_576 + 1_634 + 1 + 9 + 115 + 249 + 7_757 + 315 + 396 + 8_666 + 341 + 548 + 6 + 115 + 171 + 379 + 155 + 7_168 + 558 + 470 + 61 + 41 + 114 + 1_267 + 23 + 316 + 6 + 1_891 + 240 + 1_130 + 328 + 152 + 248 + 289 + 335 + 2_489 + 1_657,
+  // Tools-offer integration onto main 2f470060 (#630): palette workspace
+  // commands, the open-surface shortcut, Files line selection and content
+  // search, task creation from chats, commit authoring, history, blame and the
+  // worktree list add 19,230 bytes over main's cap (971,790 measured on Windows
+  // x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 841 + 8_439 + 2_660 + 863 + 35 + 34 + 211 - 28 + 166 + 21 + 7_368 + 551 + 257 + 1_576 + 1_634 + 1 + 9 + 115 + 249 + 7_757 + 315 + 396 + 8_666 + 341 + 548 + 6 + 115 + 171 + 379 + 155 + 7_168 + 558 + 470 + 61 + 41 + 114 + 1_267 + 23 + 316 + 6 + 1_891 + 240 + 1_130 + 328 + 152 + 248 + 289 + 335 + 2_489 + 1_657 + 19_230,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127,
+  // Tools-offer integration onto main 2f470060 (#630): the open-surface
+  // keybinding, the shared path-resolve, task and Git history contracts, and
+  // the Changes, Files and terminal additions inside the workspace tools #675
+  // moved into this window add 8,415 bytes over main's cap (852,183 measured on
+  // Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127 + 8_415,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
-  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351 + 190,
+  // Tools-offer integration onto main 2f470060 (#630): the Files, terminal find
+  // bar, diff split view, commit, history, blame and worktree rules add 11,205
+  // bytes over main's cap (254,616 measured on Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351 + 190 + 11_205,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
@@ -105,7 +121,11 @@ const budgets = {
   // Measured 41,091 / 18,691 bytes after the last review round, no headroom.
   deferredWatcherDockJavaScript: 31.375 * kibibyte + 5_737 + 343 + 975 + 240 + 1_017 + 183 + 58 + 410 + 58 + 25 + 480 + 47,
   deferredWatcherAttachJavaScript: 18.5 * kibibyte + 761 - 2_037 + 372 + 536 + 55 + 22 + 38 + 76 - 76 + 34 + 23 + 66 + 3_691 + 5 + 669 + 11,
-  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539 + 197 + 89 + 39 + 198 + 785 + 125 + 202 + 750 + 281 + 8 + 169 + 63 + 69 + 1 + 1_066,
+  // Tools-offer integration onto main 2f470060 (#630): the Open a surface help
+  // topic beside the Tasks topic add 370 bytes over main's cap (41,135 measured
+  // on Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539 + 197 + 89 + 39 + 198 + 785 + 125 + 202 + 750 + 281 + 8 + 169 + 63 + 69 + 1 + 1_066 + 370,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte + 886,
@@ -120,7 +140,11 @@ const budgets = {
   deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 6 + 22 + 5 + 25_894 + 226,
   deferredLibraryViewJavaScript: 30_595,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
-  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
+  // Tools-offer integration onto main 2f470060 (#630): the worktree section in
+  // Project settings add 6,387 bytes over main's cap (24,045 measured on
+  // Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 6_387,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
   deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43,
@@ -128,7 +152,12 @@ const budgets = {
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte + 3_267,
-  filesFirstLoadJavaScript: 115 * kibibyte,
+  // Tools-offer integration onto main 2f470060 (#630): Files line selection and
+  // content search, attachment re-attach, diff readability, commit authoring,
+  // history and blame add 9,775 bytes over main's cap (127,535 measured on
+  // Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  filesFirstLoadJavaScript: 115 * kibibyte + 9_775,
   deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
@@ -159,11 +188,20 @@ const budgets = {
   // Roving terminal tabs and keyboard close add ~0.3 KiB (25.3 KiB measured).
   // Docking under the chat moves session controls into the tab row and adds
   // Hide: 494 bytes (26,456 measured).
-  deferredTerminalJavaScript: 25.5 * kibibyte + 494 + 106 + 159 + 198 + 160,
+  // Tools-offer integration onto main 2f470060 (#630): @xterm/addon-search
+  // 0.16.0, @xterm/addon-web-links 0.12.0, runtime-resolved file links, the
+  // find bar and Add selection to prompt add 41,322 bytes over main's cap
+  // (68,551 measured on Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  deferredTerminalJavaScript: 25.5 * kibibyte + 494 + 106 + 159 + 198 + 160 + 41_322,
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte + 245 + 50,
   deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850 + 32,
-  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184 + 34 + 56 + 232,
+  // Tools-offer integration onto main 2f470060 (#630): a longer minified import
+  // alias from the grown shared chunks add 22 bytes over main's cap (22,149
+  // measured on Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184 + 34 + 56 + 232 + 22,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte + 205 + 47,
   deferredIconRegionJavaScript: 12_995,
@@ -203,7 +241,12 @@ const budgets = {
   // (foundation) and 5,734 bytes of eager renderer wiring, after subtracting
   // the separately capped deferred dock and attach dialog closures. The review
   // fixes add 1,078 core bytes.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657,
+  // Tools-offer integration onto main 2f470060 (#630): the tools-offer
+  // contracts, validators and renderer wiring (palette, Files, terminal links,
+  // task creation, diff readability, commit, history, blame and worktrees) add
+  // 73,804 bytes over main's cap (2,535,368 measured on Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

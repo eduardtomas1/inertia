@@ -58,6 +58,7 @@ interface GitActionsControlProps {
   onOpenPullRequest: () => void;
   onPushAndCreatePullRequest: () => void;
   onOpenBranches: () => void;
+  onOpenHistory?: () => void;
   onRefreshStatus?: () => void;
   onRequestMenuClose?: () => void;
 }
@@ -74,6 +75,7 @@ export function GitActionsControl({
   onOpenPullRequest,
   onPushAndCreatePullRequest,
   onOpenBranches,
+  onOpenHistory,
   onRefreshStatus,
   onRequestMenuClose,
 }: GitActionsControlProps): React.JSX.Element {
@@ -138,6 +140,13 @@ export function GitActionsControl({
     onRequestMenuClose?.();
     onOpenBranches();
   };
+  const historyProps = onOpenHistory ? {
+    onOpenHistory: (): void => {
+      if (menu) dismissMenu("selection");
+      onRequestMenuClose?.();
+      onOpenHistory();
+    },
+  } : {};
 
   if (presentation === "menu") {
     return (
@@ -165,6 +174,7 @@ export function GitActionsControl({
               notice={notice}
               onAction={runAction}
               onOpenBranches={openBranches}
+              {...historyProps}
             />
           </Suspense>
         </HeaderMenuGroup>
@@ -228,6 +238,7 @@ export function GitActionsControl({
               notice={notice}
               onAction={runAction}
               onOpenBranches={openBranches}
+              {...historyProps}
             />
           </Suspense>
         </div>

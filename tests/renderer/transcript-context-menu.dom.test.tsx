@@ -3,8 +3,9 @@ import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import { TaskCreationContext, type TaskCreator } from "../../src/renderer/src/components/tasks/taskCreation";
 import type { ContextMenuAction, ContextMenuRequest } from "../../src/shared/context-menu";
-import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
+import type { AgentTurn, ChatMessage, Conversation } from "../../src/shared/contracts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const projectId = "33333333-3333-4333-8333-333333333333";
@@ -108,23 +109,25 @@ const bridge = {
   getPlatform: () => "darwin" as NodeJS.Platform,
 };
 
-function renderTimeline(onOpenTurnFile = vi.fn(), content = answer.content) {
+function renderTimeline(onOpenTurnFile = vi.fn(), content = answer.content, taskCreator: TaskCreator | null = null) {
   render(
-    <div ref={createRef<HTMLDivElement>()}>
-      <ResponseTimeline
-        turns={[turn]} messages={[request, { ...answer, content }]}
-        activities={[]} reasonings={[]} plans={[]} checkpoints={[]}
-        projectRoot="/workspace/app" projectId={projectId} conversationId={conversationId}
-        streamingText="" streamingReasoning="" approvals={[]} inputRequests={[]}
-        showTimestamps={false} showThinking={false} defaultCodeWrap={false}
-        autoCollapseWorkLog showChangedFileSummaries={false} checkpointRestoreDisabled={false}
-        scrollElementRef={createRef<HTMLDivElement>()} timelineElementRef={createRef<HTMLDivElement>()}
-        onRespondToApproval={async () => undefined} onRespondToInput={async () => undefined}
-        onRevertCheckpoint={() => undefined} onOpenTurnDiff={() => undefined}
-        onCompareTurnArtifacts={() => undefined} onOpenTurnFile={onOpenTurnFile}
-        onStop={() => undefined}
-      />
-    </div>,
+    <TaskCreationContext.Provider value={taskCreator}>
+      <div ref={createRef<HTMLDivElement>()}>
+        <ResponseTimeline
+          turns={[turn]} messages={[request, { ...answer, content }]}
+          activities={[]} reasonings={[]} plans={[]} checkpoints={[]}
+          projectRoot="/workspace/app" projectId={projectId} conversationId={conversationId}
+          streamingText="" streamingReasoning="" approvals={[]} inputRequests={[]}
+          showTimestamps={false} showThinking={false} defaultCodeWrap={false}
+          autoCollapseWorkLog showChangedFileSummaries={false} checkpointRestoreDisabled={false}
+          scrollElementRef={createRef<HTMLDivElement>()} timelineElementRef={createRef<HTMLDivElement>()}
+          onRespondToApproval={async () => undefined} onRespondToInput={async () => undefined}
+          onRevertCheckpoint={() => undefined} onOpenTurnDiff={() => undefined}
+          onCompareTurnArtifacts={() => undefined} onOpenTurnFile={onOpenTurnFile}
+          onStop={() => undefined}
+        />
+      </div>
+    </TaskCreationContext.Provider>,
   );
   return { onOpenTurnFile };
 }
@@ -147,6 +150,49 @@ afterEach(() => {
 });
 
 describe("transcript context menus", () => {
+  const chat = { id: conversationId, projectId, title: "Build help" } as Conversation;
+  const creator = () => ({ create: vi.fn<TaskCreator["create"]>() });
+
+  it("creates a task from the rendered answer, linked to its chat", async () => {
+    const taskCreator = creator();
+    renderTimeline(vi.fn(), answer.content, taskCreator);
+    bridge.showContextMenu.mockResolvedValueOnce("create-task");
+    fireEvent.contextMenu(finalAnswer().querySelector("p")!);
+    await settleMenu();
+    expect(taskCreator.create).toHaveBeenCalledOnce();
+    const [linked, compose] = taskCreator.create.mock.calls[0]!;
+    expect(linked).toBe(conversationId);
+    expect(compose(chat)).toEqual({
+      title: "The build passes.",
+      note: "The build passes.\n\nSee the entry point (src/index.ts) and the docs (https://example.com/docs).\n\nconst value = 1;",
+    });
+    expect(bridge.copyText).not.toHaveBeenCalled();
+  });
+
+  it("creates a task from the user's request from the keyboard menu", async () => {
+    const taskCreator = creator();
+    renderTimeline(vi.fn(), answer.content, taskCreator);
+    bridge.showContextMenu.mockResolvedValueOnce("create-task");
+    const article = userRequest();
+    article.focus();
+    fireEvent.keyDown(article, { key: "F10", shiftKey: true });
+    expect(lastRequest()).toMatchObject({ kind: "message", role: "user", conversationId });
+    await settleMenu();
+    const [linked, compose] = taskCreator.create.mock.calls[0]!;
+    expect(linked).toBe(conversationId);
+    expect(compose(chat)).toEqual({ title: request.content, note: "" });
+    expect(document.activeElement).toBe(article);
+  });
+
+  it("ignores Create task where no task surface is available", async () => {
+    renderTimeline();
+    bridge.showContextMenu.mockResolvedValueOnce("create-task");
+    fireEvent.contextMenu(finalAnswer().querySelector("p")!);
+    await settleMenu();
+    expect(bridge.copyText).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("asks main for the message menu with ids and flags only and copies the rendered answer", async () => {
     renderTimeline();
     bridge.showContextMenu.mockResolvedValueOnce("copy-message");

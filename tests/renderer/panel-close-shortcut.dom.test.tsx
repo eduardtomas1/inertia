@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   installGlobalShortcuts,
+  openPanelSurfaceChooser,
   type GlobalShortcutActions,
 } from "../../src/renderer/src/utils/globalShortcuts";
-import { CLOSE_ACTIVE_PANEL_SURFACE_EVENT } from "../../src/renderer/src/utils/rightPanelSurfaces";
+import {
+  CLOSE_ACTIVE_PANEL_SURFACE_EVENT,
+  OPEN_PANEL_SURFACE_CHOOSER_EVENT,
+} from "../../src/renderer/src/utils/rightPanelSurfaces";
 import { DEFAULT_APP_KEYBINDINGS } from "../../src/shared/keybindings";
 
 const actions = (): { current: GlobalShortcutActions } => ({
@@ -14,6 +18,7 @@ const actions = (): { current: GlobalShortcutActions } => ({
     mobileNavigation: false,
     suspended: false,
     toggleTerminal: vi.fn(),
+    openSurfaceChooser: vi.fn(),
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -169,5 +174,145 @@ describe("closing the active panel tab from the keyboard", () => {
     dispose = installGlobalShortcuts(window, current, "darwin");
     expect(press(primary.input, { metaKey: true }).defaultPrevented).toBe(false);
     expect(primary.closes).toEqual([]);
+  });
+});
+
+function chooserPane(owner: string, parent: HTMLElement = document.body): {
+  root: HTMLElement;
+  input: HTMLElement;
+  panel: HTMLElement;
+  requests: string[];
+} {
+  const requests: string[] = [];
+  const root = document.createElement("div");
+  root.className = "conversation-pane-workspace";
+  root.dataset.paneOwner = owner;
+  const input = document.createElement("textarea");
+  const panel = document.createElement("aside");
+  panel.className = "workspace-panel";
+  panel.addEventListener(OPEN_PANEL_SURFACE_CHOOSER_EVENT, (event) => {
+    if (panel.hidden) return;
+    requests.push(owner);
+    event.preventDefault();
+  });
+  root.append(input, panel);
+  parent.append(root);
+  return { root, input, panel, requests };
+}
+
+describe("opening the surface chooser from the keyboard", () => {
+  let dispose: (() => void) | null = null;
+
+  afterEach(() => {
+    dispose?.();
+    dispose = null;
+    vi.unstubAllGlobals();
+    document.body.replaceChildren();
+  });
+
+  it.each([
+    ["darwin", { metaKey: true }, { ctrlKey: true }],
+    ["linux", { ctrlKey: true }, { metaKey: true }],
+    ["win32", { ctrlKey: true }, { metaKey: true }],
+  ] as const)("runs the open-surface action with the primary modifier and G on %s", (platform, primary, other) => {
+    const current = actions();
+    dispose = installGlobalShortcuts(window, current, platform);
+    const composer = document.createElement("textarea");
+    document.body.append(composer);
+
+    expect(press(composer, { ...other, key: "g", code: "KeyG" }).defaultPrevented).toBe(false);
+    expect(current.current.openSurfaceChooser).not.toHaveBeenCalled();
+    expect(press(composer, { ...primary, key: "g", code: "KeyG" }).defaultPrevented).toBe(true);
+    expect(current.current.openSurfaceChooser).toHaveBeenCalledOnce();
+    expect(press(composer, { ...primary, shiftKey: true, key: "g", code: "KeyG" }).defaultPrevented).toBe(false);
+    expect(current.current.openSurfaceChooser).toHaveBeenCalledOnce();
+  });
+
+  it("follows a rebound key and stays out of terminals, modals and suspended overlays", () => {
+    const current = actions();
+    current.current.keybindings = { ...DEFAULT_APP_KEYBINDINGS, "open-surface": "y" };
+    dispose = installGlobalShortcuts(window, current, "linux");
+    const composer = document.createElement("textarea");
+    document.body.append(composer);
+
+    expect(press(composer, { ctrlKey: true, key: "g", code: "KeyG" }).defaultPrevented).toBe(false);
+    expect(press(composer, { ctrlKey: true, key: "y", code: "KeyY" }).defaultPrevented).toBe(true);
+    expect(current.current.openSurfaceChooser).toHaveBeenCalledOnce();
+
+    const terminal = document.createElement("div");
+    terminal.className = "xterm";
+    const terminalInput = document.createElement("textarea");
+    terminal.append(terminalInput);
+    document.body.append(terminal);
+    expect(press(terminalInput, { ctrlKey: true, key: "y", code: "KeyY" }).defaultPrevented).toBe(false);
+
+    const modal = document.createElement("div");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    document.body.append(modal);
+    press(composer, { ctrlKey: true, key: "y", code: "KeyY" });
+    modal.remove();
+    current.current.suspended = true;
+    press(composer, { ctrlKey: true, key: "y", code: "KeyY" });
+    expect(current.current.openSurfaceChooser).toHaveBeenCalledOnce();
+  });
+
+  it("asks the focused pane's open panel first, then the main chat's panel", () => {
+    const workspace = document.createElement("div");
+    workspace.className = "workspace-body";
+    document.body.append(workspace);
+    const primary = chooserPane("primary", workspace);
+    const secondary = chooserPane("secondary", workspace);
+    const show = vi.fn(() => true);
+
+    expect(openPanelSurfaceChooser(document, secondary.input, show)).toBe(true);
+    expect(secondary.requests).toEqual(["secondary"]);
+    expect(openPanelSurfaceChooser(document, null, show)).toBe(true);
+    expect(primary.requests).toEqual(["primary"]);
+
+    secondary.panel.hidden = true;
+    expect(openPanelSurfaceChooser(document, secondary.input, show)).toBe(true);
+    expect(primary.requests).toEqual(["primary", "primary"]);
+    expect(secondary.requests).toEqual(["secondary"]);
+    expect(show).not.toHaveBeenCalled();
+  });
+
+  it("asks the panel beside the chat when the window is not split", () => {
+    const workspace = document.createElement("div");
+    workspace.className = "workspace-body";
+    const composer = document.createElement("textarea");
+    const panel = document.createElement("aside");
+    panel.className = "workspace-panel";
+    const requests: Event[] = [];
+    panel.addEventListener(OPEN_PANEL_SURFACE_CHOOSER_EVENT, (event) => {
+      requests.push(event);
+      event.preventDefault();
+    });
+    workspace.append(composer, panel);
+    document.body.append(workspace);
+
+    expect(openPanelSurfaceChooser(document, composer, () => false)).toBe(true);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("opens a closed main panel and asks it for the chooser on the next frame", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+    const primary = chooserPane("primary");
+    primary.panel.hidden = true;
+    const show = vi.fn(() => {
+      primary.panel.hidden = false;
+      return true;
+    });
+
+    expect(openPanelSurfaceChooser(document, primary.input, show)).toBe(true);
+    expect(show).toHaveBeenCalledOnce();
+    expect(primary.requests).toEqual([]);
+    frames.splice(0).forEach((frame) => frame(0));
+    expect(primary.requests).toEqual(["primary"]);
+
+    primary.panel.hidden = true;
+    expect(openPanelSurfaceChooser(document, primary.input, () => false)).toBe(false);
+    expect(frames).toEqual([]);
   });
 });

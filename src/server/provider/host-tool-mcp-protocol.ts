@@ -106,7 +106,7 @@ function initializeResult(requested: unknown): Record<string, unknown> {
     capabilities: { tools: { listChanged: false } },
     serverInfo: {
       name: "inertia-chat-manager",
-      title: "Inertia chat manager",
+      title: "Inertia host tools",
       version: "1.0.0",
     },
   };

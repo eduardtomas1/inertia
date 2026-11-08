@@ -814,13 +814,12 @@ export function readerScrollFollow(input: {
   live: boolean;
   intentional: boolean;
   aimedAtLatest: boolean;
-}): { follows: boolean; arrived: boolean } {
-  const arrived = input.intentional
-    ? readerScrollReachesLatest({ ...input, aimedAtLatest: false })
-    : shouldFollowTimeline(input.scrollTop, input.clientHeight, input.scrollHeight);
+}): { follows: boolean; movedUp: boolean } {
   return {
-    arrived,
-    follows: arrived || (input.intentional && input.aimedAtLatest && readerScrollReachesLatest(input)),
+    movedUp: input.previousScrollTop !== null && input.scrollTop < input.previousScrollTop,
+    follows: input.intentional
+      ? readerScrollReachesLatest(input)
+      : shouldFollowTimeline(input.scrollTop, input.clientHeight, input.scrollHeight),
   };
 }
 

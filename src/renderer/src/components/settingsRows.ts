@@ -91,6 +91,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["shortcut-toggle-sidebar", "Toggle project navigation", ["sidebar", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
       ["shortcut-toggle-terminal", "Toggle terminal", ["terminal", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
       ["shortcut-tasks", "Open tasks", ["tasks", "to-do", "todo", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
+      ["shortcut-open-surface", "Open a surface", ["surface chooser", "right panel", "panel", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
       ["open-settings", "Open settings", ["preferences", "comma", "shortcut", "hotkey", "keybindings"]],
       ["reset-shortcuts", "Reset shortcuts", ["default shortcuts", "keyboard defaults", "keyboard shortcuts", "hotkey", "keybindings"]],
     ],
@@ -124,6 +125,9 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["project-auto-pull", "Automatically pull", ["git", "branch", "pull", "source control"]],
       ["project-actions", "Actions", ["commands", "scripts", "project actions"]],
       ["project-repository-limit", "Repository display limit", ["repositories", "nested", "sidebar", "limit", "advanced"]],
+    ],
+    Worktrees: [
+      ["project-worktrees", "Worktrees", ["worktree", "isolated", "checkout", "prune", "remove worktree", "cleanup", "git"]],
     ],
     "Danger zone": [
       ["project-remove", "Remove project", ["delete project"]],

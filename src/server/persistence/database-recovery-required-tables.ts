@@ -2,6 +2,7 @@ import { LIBRARY_SCHEMA_VERSION } from "./migrations/library";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
 import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "./migrations/todo-source-conversation";
 import { CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION } from "./migrations/codex-thread-tool-packs";
+import { SUBAGENT_TASK_SHAPE_SCHEMA_VERSION } from "./migrations/subagent-task-shape";
 
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
@@ -149,6 +150,15 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "updated_at",
   ]],
   [TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, "todos", ["source_conversation_id"]],
+  [SUBAGENT_TASK_SHAPE_SCHEMA_VERSION, "subagent_traces", [
+    "task_kind",
+    "background",
+    "command",
+    "effort",
+    "activity_id",
+    "model_source",
+    "steps_json",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [

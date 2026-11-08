@@ -1,6 +1,6 @@
 import type { PosixCleanupFailureReason } from "../posix-cleanup-diagnostics";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import type { ProviderRateLimit, SubagentTaskUsage } from "../../shared/contracts";
+import type { ProviderRateLimit, SubagentModelSource, SubagentTaskStep, SubagentTaskUsage } from "../../shared/contracts";
 import type { ProviderSkillInput } from "../../shared/contracts";
 import type {
   AgentApprovalDecision,
@@ -113,8 +113,10 @@ export interface CodexAppServerOptions {
     progress: string | null;
     result: string | null;
     model?: string;
+    modelSource?: SubagentModelSource;
     activity?: string;
     usage?: SubagentTaskUsage;
+    steps?: SubagentTaskStep[];
   }) => void;
   goalStart?: {
     objective?: string;

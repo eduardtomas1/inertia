@@ -143,6 +143,7 @@ export class TurnSettlementCoordinator {
         active.turn.id,
         subagentStatus,
         this.options.now(),
+        stopUnconfirmed,
       )) {
         this.options.hooks.broadcast({
           type: "agent.subagent.updated",

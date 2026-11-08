@@ -181,12 +181,28 @@ export class FakeTurnProvider implements TurnProviderRuntime {
     return this.steerSupported;
   }
 
+  /** What a Stop for a task without a provider task id answers. */
+  queuedStopOutcome: boolean | "queued" = true;
+
   async stopSubagent(
     _conversationId: string,
-    providerTaskId: string,
-  ): Promise<boolean> {
-    this.stoppedSubagentIds.push(providerTaskId);
-    return this.stopSubagentSupported;
+    providerTaskId: string | null,
+    _identity?: { runId: string; turnId: string },
+    providerToolUseId?: string | null,
+  ): Promise<boolean | "queued"> {
+    this.stoppedSubagentIds.push(providerTaskId ?? `tool:${providerToolUseId ?? ""}`);
+    return this.stopSubagentSupported && (providerTaskId ? true : this.queuedStopOutcome);
+  }
+
+  backgroundedToolUseIds: string[] = [];
+  backgroundResult: { moved: boolean; error?: string } = { moved: true };
+
+  async backgroundSubagent(
+    _conversationId: string,
+    providerToolUseId: string,
+  ): Promise<{ moved: boolean; error?: string }> {
+    this.backgroundedToolUseIds.push(providerToolUseId);
+    return this.backgroundResult;
   }
 
   async disposeAll(): Promise<void> {

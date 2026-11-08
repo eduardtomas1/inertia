@@ -17,6 +17,7 @@ import { LIBRARY_SCHEMA_VERSION } from "../../src/server/persistence/migrations/
 import { AGENT_CONTEXT_READ_MANAGED_ACCESS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/agent-context-read-managed-access";
 import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "../../src/server/persistence/migrations/todo-source-conversation";
 import { CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/codex-thread-tool-packs";
+import { SUBAGENT_TASK_SHAPE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/subagent-task-shape";
 
 const directories: string[] = [];
 
@@ -26,6 +27,7 @@ afterEach(() => {
 
 const notificationColumns = ["quota_warnings_enabled", "quota_warning_threshold", "notify_only_in_background"];
 const telemetryColumns = ["model", "activity", "usage_json", "tool_use_count", "duration_ms"];
+const taskShapeColumns = ["task_kind", "background", "command", "effort", "activity_id", "model_source", "steps_json"];
 const watcherTriggers = [
   "watcher_links_active_limit",
   "watcher_links_detached_final",
@@ -59,6 +61,9 @@ function narrowAgentContextReadAccess(database: Database.Database, version: numb
 }
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < SUBAGENT_TASK_SHAPE_SCHEMA_VERSION) {
+    for (const column of taskShapeColumns) database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
+  }
   if (version < CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION) database.exec("DROP TABLE codex_thread_tool_packs");
   if (version < TODO_SOURCE_CONVERSATION_SCHEMA_VERSION && version >= 96) {
     database.exec("DROP INDEX todos_source_conversation_idx; ALTER TABLE todos DROP COLUMN source_conversation_id");
@@ -215,13 +220,14 @@ describe("database health check for settings and subagent columns", () => {
     },
     { version: CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, sql: "DROP INDEX codex_thread_tool_packs_registered_idx" },
     { version: CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, sql: "DROP TABLE codex_thread_tool_packs" },
+    ...taskShapeColumns.map((column) => ({ version: SUBAGENT_TASK_SHAPE_SCHEMA_VERSION, sql: `ALTER TABLE subagent_traces DROP COLUMN ${column}` })),
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each(Array.from({ length: CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each(Array.from({ length: SUBAGENT_TASK_SHAPE_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

@@ -333,6 +333,7 @@ describe("Codex delegated-agent telemetry", () => {
     expect(updates.find(({ providerAgentId }) =>
       providerAgentId === "model-child")).toMatchObject({
       model: "gpt-5.5-codex",
+      modelSource: "requested",
       status: "queued",
     });
     expect(updates.find(({ providerAgentId }) =>
@@ -381,7 +382,7 @@ describe("Codex delegated-agent telemetry", () => {
       "Thinking",
       `MCP · ${"s".repeat(120)}/${"t".repeat(160)}`.slice(0, 200),
     ]);
-    expect(updates.slice(1)).toEqual(activities.map(() => expect.objectContaining({
+    expect(updates.slice(1, -1)).toEqual(activities.map(() => expect.objectContaining({
       providerAgentId: "busy-child",
       status: "running",
       isLive: true,
@@ -389,9 +390,72 @@ describe("Codex delegated-agent telemetry", () => {
       result: null,
     })));
     const serialized = JSON.stringify(updates);
-    for (const secret of ["SECRET_OUTPUT", ".env", "SECRET_ARGUMENT", "src/secret.ts", "SECRET_QUERY"]) {
+    for (const secret of ["SECRET_OUTPUT", "SECRET_ARGUMENT", "Not an activity."]) {
       expect(serialized).not.toContain(secret);
     }
+    expect(JSON.stringify(activities)).not.toMatch(/\.env|src\/secret\.ts|SECRET_QUERY/u);
+    expect(updates.at(-1)?.steps).toEqual([
+      { label: "Command · npm run check", status: "completed" },
+      { label: "Command · cat .env", status: "running" },
+      { label: "MCP · docs/search", status: "running" },
+      { label: "File change · src/secret.ts", status: "running" },
+      { label: "Tool · preview", status: "running" },
+      { label: "Search the web · SECRET_QUERY", status: "running" },
+      { label: `MCP · ${"s".repeat(120)}/${"t".repeat(160)}`.slice(0, 200), status: "running" },
+    ]);
+  });
+
+  it("turns child items into the eight most recent steps and marks failures", () => {
+    const { lifecycle, updates } = lifecycleHarness();
+    activity(lifecycle, "step-child");
+    for (let index = 0; index < 10; index += 1) {
+      childItem(lifecycle, "item/started", "step-child", {
+        id: `cmd-${index}`,
+        type: "commandExecution",
+        command: `npm run task-${index}\necho second line`,
+      });
+    }
+    childItem(lifecycle, "item/completed", "step-child", {
+      id: "cmd-9", type: "commandExecution", command: "npm run task-9", status: "failed", exitCode: 1,
+    });
+    childItem(lifecycle, "item/completed", "step-child", {
+      id: "cmd-8", type: "commandExecution", command: "npm run task-8", status: "completed", exitCode: 0,
+    });
+    childItem(lifecycle, "item/completed", "step-child", {
+      id: "files-late", type: "fileChange", status: "declined", changes: [{ path: "src/late.ts" }],
+    });
+    childItem(lifecycle, "item/completed", "step-child", { id: "msg", type: "agentMessage", text: "Done" });
+    const steps = updates.filter(({ steps: snapshot }) => snapshot).at(-1)?.steps;
+    expect(steps).toHaveLength(8);
+    expect(steps?.[0]).toEqual({ label: "Command · npm run task-3", status: "running" });
+    expect(steps?.slice(-3)).toEqual([
+      { label: "Command · npm run task-8", status: "completed" },
+      { label: "Command · npm run task-9", status: "failed" },
+      { label: "File change · src/late.ts", status: "failed" },
+    ]);
+    expect(JSON.stringify(updates)).not.toContain("second line");
+    childTurn(lifecycle, "turn/completed", "step-child", "step-child-turn", "completed");
+    const settledCount = updates.length;
+    childItem(lifecycle, "item/started", "step-child", { id: "after", type: "commandExecution", command: "npm test" });
+    expect(updates).toHaveLength(settledCount);
+  });
+
+  it("forgets a child's steps with its result when a child turn ends or another starts", () => {
+    const { lifecycle, updates } = lifecycleHarness();
+    activity(lifecycle, "revived-child");
+    childTurn(lifecycle, "turn/started", "revived-child", "first-turn", "inProgress");
+    childItem(lifecycle, "item/started", "revived-child", { id: "old-step", type: "commandExecution", command: "npm run first" });
+    childTurn(lifecycle, "turn/completed", "revived-child", "first-turn", "completed");
+    childTurn(lifecycle, "turn/started", "revived-child", "second-turn", "inProgress");
+    childItem(lifecycle, "item/started", "revived-child", { id: "new-step", type: "commandExecution", command: "npm run second" });
+    expect(updates.filter(({ steps }) => steps).at(-1)?.steps).toEqual([
+      { label: "Command · npm run second", status: "running" },
+    ]);
+    childTurn(lifecycle, "turn/started", "revived-child", "third-turn", "inProgress");
+    childItem(lifecycle, "item/started", "revived-child", { id: "third-step", type: "commandExecution", command: "npm run third" });
+    expect(updates.filter(({ steps }) => steps).at(-1)?.steps).toEqual([
+      { label: "Command · npm run third", status: "running" },
+    ]);
   });
 
   it("keeps the current status and authority for telemetry-only updates", () => {

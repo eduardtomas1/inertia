@@ -11,6 +11,12 @@ import { defaultTurnScheduler } from "../../src/server/runtime/turns/turn-contro
 import {
   TurnProviderEventProjector,
 } from "../../src/server/runtime/turns/turn-provider-event-projector";
+import {
+  linkedProviderActivity,
+  linkProviderActivity,
+  MAX_PROVIDER_ACTIVITY_LINKS,
+  TurnActivityProjection,
+} from "../../src/server/runtime/turns/turn-activity-projection";
 import type {
   ActiveTurn,
   TurnControllerHooks,
@@ -157,6 +163,107 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
 
     expect(broadcast).not.toHaveBeenCalled();
     expect(observeSubagent).not.toHaveBeenCalled();
+  });
+});
+
+describe("TurnProviderEventProjector delegated-task timeline link", () => {
+  function linkedProjector() {
+    const upsertSubagentTrace = vi.fn((
+      input: Parameters<RuntimeStore["upsertSubagentTrace"]>[0],
+    ) => ({
+      changed: true,
+      trace: {
+        ...input,
+        id: `trace-${input.providerToolUseId}`,
+        parentTraceId: null,
+        providerStatus: input.providerStatus ?? null,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:01.000Z",
+      } as SubagentTrace,
+    }));
+    const projector = new TurnProviderEventProjector({
+      store: { upsertSubagentTrace } as unknown as RuntimeStore,
+      hooks: { broadcast: vi.fn(), broadcastSnapshot: vi.fn() } as unknown as TurnControllerHooks,
+      agentPlans: new Map(),
+      streams: {} as never,
+      activities: {} as never,
+      interactions: {} as never,
+      scheduler: defaultTurnScheduler(),
+      now: () => "2030-01-01T00:00:01.000Z",
+      transition: () => false,
+      observeSubagent: () => false,
+    });
+    return { projector, upsertSubagentTrace };
+  }
+
+  it("resolves the row from the provider tool call and ignores an adapter-supplied row", () => {
+    const { projector, upsertSubagentTrace } = linkedProjector();
+    const active = {
+      conversation: { id: "conversation-1" },
+      turn: { id: "turn-1", runId: "run-1", providerId: "codex" },
+    } as ActiveTurn;
+    linkProviderActivity(active, "spawn-1", "activity-row-1");
+
+    projector.project(active, { ...event(1, "running", "running", true), activityId: "forged-row" });
+    projector.project(active, {
+      ...event(1, "running", "running", true),
+      providerAgentId: "child-2",
+      providerToolUseId: "spawn-unlinked",
+      activityId: "forged-row",
+    });
+
+    expect(upsertSubagentTrace).toHaveBeenNthCalledWith(1, expect.objectContaining({ activityId: "activity-row-1" }));
+    expect(upsertSubagentTrace).toHaveBeenNthCalledWith(2, expect.objectContaining({ activityId: null }));
+  });
+
+  it("keeps the link after the row settles and evicts the oldest link first", () => {
+    let created = 0;
+    const store = {
+      addActivity: vi.fn((activity: object) => ({ ...activity, id: `row-${created += 1}` })),
+      updateActivity: vi.fn((id: string, update: object) => ({ id, ...update })),
+    };
+    const activities = new TurnActivityProjection({
+      store: store as unknown as RuntimeStore,
+      hooks: { broadcast: vi.fn() } as unknown as TurnControllerHooks,
+      scheduler: defaultTurnScheduler(),
+      now: () => "2030-01-01T00:00:01.000Z",
+      onPersistenceFailure: vi.fn(),
+    });
+    const active = {
+      conversation: { id: "conversation-1", projectId: "project-1", title: "Chat" },
+      turn: { id: "turn-1", runId: "run-1", providerId: "claude" },
+      runningActivities: new Map(),
+      providerActivitiesById: new Map(),
+      providerActivityDetailChars: 0,
+      providerCommandRuns: new Map(),
+      providerOutputActivityIds: new Set(),
+      pendingActivityUpdates: new Map(),
+      activityFlushTimer: null,
+    } as unknown as ActiveTurn;
+    const activity = (phase: ProviderActivityEvent["phase"]): ProviderActivityEvent => ({
+      providerId: "claude",
+      conversationId: "conversation-1",
+      runId: "run-1",
+      turnId: "turn-1",
+      type: "activity",
+      kind: "tool",
+      phase,
+      label: "Agent",
+      activityId: "tool-agent",
+    });
+    activities.record(active, activity("started"), "tool", "running");
+    activities.record(active, activity("completed"), "tool", "completed");
+    expect(active.providerActivitiesById.size).toBe(0);
+    expect(linkedProviderActivity(active, "tool-agent")).toBe("row-1");
+    expect(linkedProviderActivity(active, null)).toBeNull();
+
+    for (let index = 0; index < MAX_PROVIDER_ACTIVITY_LINKS; index += 1) {
+      linkProviderActivity(active, `tool-${index}`, `row-filler-${index}`);
+    }
+    expect(active.providerActivityLinks?.size).toBe(MAX_PROVIDER_ACTIVITY_LINKS);
+    expect(linkedProviderActivity(active, "tool-agent")).toBeNull();
+    expect(linkedProviderActivity(active, `tool-${MAX_PROVIDER_ACTIVITY_LINKS - 1}`))
+      .toBe(`row-filler-${MAX_PROVIDER_ACTIVITY_LINKS - 1}`);
   });
 });
 

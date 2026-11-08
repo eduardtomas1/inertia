@@ -367,7 +367,7 @@ function card(region: Locator, title: string): Locator {
 }
 
 function toggle(region: Locator, title: string): Locator {
-  return card(region, title).getByRole("button", { name: `View transcript for ${title}` });
+  return card(region, title).getByRole("button", { name: /^View transcript for /u });
 }
 
 async function openFinished(region: Locator): Promise<Locator> {
@@ -449,18 +449,18 @@ test("lists a chat's running work as plain cards with keyboard access", async ({
     await expect(rightPanelToggle(page)).toHaveAttribute("aria-label", "Toggle right panel, 3 background tasks active");
     const running = region.getByRole("list", { name: "Running" });
     await expect(running.getByRole("listitem")).toHaveCount(3);
-    const explorer = card(region, "Explorer");
+    const explorer = card(region, "Map every place that parses provider token usage.");
     await expect(explorer).toContainText("Agent");
     await expect(explorer).toContainText("1m 35s");
     await expect(explorer).toContainText("gpt-5.3-codex");
     await expect(explorer).toContainText("128.4K tokens");
     await expect(explorer).toContainText("14 tool uses");
     await expect(explorer).toContainText("Searching src/server for usage parsers");
-    await expect(toggle(region, "Explorer")).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle(region, "Map every place that parses provider token usage.")).toHaveAttribute("aria-expanded", "false");
     await expect(explorer.getByText("Searching src/server for usage parsers", { exact: true })).toHaveClass(/background-task-live/u);
     await expect(explorer.locator(".background-task-title")).not.toHaveClass(/background-task-live/u);
     const collapsedHeight = await explorer.evaluate((element) => element.getBoundingClientRect().height);
-    await expect(card(region, "Fixture writer")).toContainText("Agent · from Explorer");
+    await expect(card(region, "Write fixtures for the parsers the explorer finds.")).toContainText("Agent · Fixture writer · from Map every place that parses provider token usage.");
     const devServer = card(region, "npm run dev");
     await expect(devServer).toContainText("Command");
     await expect(devServer).toContainText("1m 15s");
@@ -476,7 +476,7 @@ test("lists a chat's running work as plain cards with keyboard access", async ({
       await expect(button).toHaveAccessibleName(/\S/u);
     }
     await page.getByRole("tab", { name: "Background tasks, 3 active" }).focus();
-    const explorerToggle = toggle(region, "Explorer");
+    const explorerToggle = toggle(region, "Map every place that parses provider token usage.");
     for (let presses = 0; presses < 12; presses += 1) {
       if (await explorerToggle.evaluate((element) => element === document.activeElement)) break;
       await page.keyboard.press("Tab");
@@ -486,7 +486,6 @@ test("lists a chat's running work as plain cards with keyboard access", async ({
     await expect(explorerToggle).toHaveAttribute("aria-expanded", "true");
     const details = explorer.locator(".background-task-transcript");
     await expect(details.locator("p")).toHaveText([
-      "Map every place that parses provider token usage.",
       "Mapping the token usage pipeline",
       "Input 18.2K · Cached 12.8K · Output 1.9K · Reasoning 640 · 75% context left",
     ]);
@@ -523,8 +522,8 @@ test("lists a chat's running work as plain cards with keyboard access", async ({
 
     const finished = await openFinished(region);
     await expect(finished.getByRole("listitem")).toHaveCount(3);
-    const verifier = card(region, "Build verifier");
-    await expect(verifier).toContainText("Agent · Failed");
+    const verifier = card(region, "Typecheck the refactored usage module.");
+    await expect(verifier).toContainText("Agent · Build verifier · Failed");
     await expect(verifier.locator(".background-task-danger")).toHaveText("Failed");
     await expect(verifier).toContainText("42s");
     await expect(card(region, "npm test")).toContainText("Command · Failed");
@@ -545,30 +544,30 @@ test("shows what each harness reports and nothing more", async ({ browserName: _
     await app.resizeWindow(1440, 1100);
     const page = app.page;
     let region = await showChat(app, seed.claude);
-    const reviewer = card(region, "Code reviewer");
+    const reviewer = card(region, "Review the usage refactor for regressions.");
     await expect(reviewer.locator(".background-task-live")).toHaveText("Reading the provider adapters");
     await expect(reviewer).toContainText("18.6K tokens");
     await expect(reviewer).toContainText("9 tool uses");
     await expect(reviewer.getByRole("button", { name: "Stop Code reviewer" })).toBeVisible();
     await openFinished(region);
-    await toggle(region, "Test runner").click();
-    const runnerDetails = card(region, "Test runner").locator(".background-task-transcript");
-    await expect(runnerDetails.locator("p")).toHaveText(["All 214 tests passed.", "Run the focused unit tests."]);
-    await expect(card(region, "Test runner")).toContainText("1m 23s");
-    await expect(card(region, "Test runner")).toContainText("9K tokens");
+    await toggle(region, "Run the focused unit tests.").click();
+    const runnerDetails = card(region, "Run the focused unit tests.").locator(".background-task-transcript");
+    await expect(runnerDetails.locator("p")).toHaveText(["All 214 tests passed."]);
+    await expect(card(region, "Run the focused unit tests.")).toContainText("1m 23s");
+    await expect(card(region, "Run the focused unit tests.")).toContainText("9K tokens");
     await expectLayoutHolds(app, region);
     await capture(page, info, "background-tasks-claude-wide-dark");
 
     region = await showChat(app, seed.opencode);
-    const sweep = card(region, "Schema sweep");
+    const sweep = card(region, "Find schema drift in the usage records.");
     await expect(sweep).toContainText("read src/shared/contracts/agent.ts");
-    await toggle(region, "Schema sweep").click();
+    await toggle(region, "Find schema drift in the usage records.").click();
     await expect(sweep.locator(".background-task-transcript").getByText(
       "Input 4.8K · Cached 2.05K · Cache write 512 · Output 610 · Reasoning 120",
       { exact: true },
     )).toBeVisible();
     await openFinished(region);
-    await expect(card(region, "Schema checker")).toContainText("Agent · from Schema sweep");
+    await expect(card(region, "Schema checker")).toContainText("Agent · Schema checker · from Find schema drift in the usage records.");
     await expectLayoutHolds(app, region);
     await capture(page, info, "background-tasks-opencode-wide-dark");
 
@@ -617,8 +616,8 @@ test("shows each turn's agents as one line that opens Background tasks", async (
     await expect(agentsTab).toHaveAttribute("aria-selected", "true");
     await expect(agentsTab).toBeFocused();
     const region = page.getByRole("region", { name: "Background tasks" });
-    await expect(card(region, "Explorer")).toBeVisible();
-    await expect(card(region, "Fixture writer")).toBeVisible();
+    await expect(card(region, "Map every place that parses provider token usage.")).toBeVisible();
+    await expect(card(region, "Write fixtures for the parsers the explorer finds.")).toBeVisible();
     await expectLayoutHolds(app, region);
     await capture(page, info, "after-chat-agents-line-opened-dark");
 
@@ -678,7 +677,7 @@ test("shows each turn's agents as one line that opens Background tasks", async (
     await expect(agentsTab).toBeFocused();
     await expect(region.getByRole("button", { name: /^Finished/u })).toHaveAttribute("aria-expanded", "true");
     await expect(card(region, "Contract reader")).toBeInViewport();
-    await expect(card(region, "Migration verifier")).toContainText("Agent · Failed");
+    await expect(card(region, "Migration verifier")).toContainText("Agent · Migration verifier · Failed");
     await capture(page, info, "after-chat-agents-finished-opened-dark");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
@@ -732,7 +731,7 @@ test("keeps the whole chat's tasks in the panel when the transcript loads only i
 
     await region.getByRole("button", { name: "Show 18 more finished tasks" }).click();
     await expect(list.getByRole("listitem")).toHaveCount(38);
-    await expect(card(region, "Archived reader 0")).toContainText("Agent · Failed");
+    await expect(card(region, "Archived reader 0")).toContainText("Agent · Archived reader 0 · Failed");
     await toggle(region, "Archived reader 0").click();
     await expect(card(region, "Archived reader 0")).toContainText("Stopped early.");
     await expect(card(region, "Archived reader 0").getByRole("button", { name: /^View turn/u })).toHaveCount(0);
@@ -769,11 +768,11 @@ test("keeps the surface and reported tokens across a restart", async ({ browserN
     await expect(region).toBeVisible();
     await expect(region.getByRole("list", { name: "Running" })).toHaveCount(0);
     await openFinished(region);
-    const explorer = card(region, "Explorer");
-    await expect(explorer).toContainText("Agent · Lost");
+    const explorer = card(region, "Map every place that parses provider token usage.");
+    await expect(explorer).toContainText("Agent · Explorer · Lost");
     await expect(explorer).toContainText("128.4K tokens");
     await expect(explorer.locator(".subagent-elapsed")).toHaveCount(0);
-    await expect(card(region, "Docs reviewer")).toContainText("31.25K tokens");
+    await expect(card(region, "Check the usage documentation against the new contract.")).toContainText("31.25K tokens");
     await expect(card(region, "npm run dev")).toContainText("Command · Failed");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {

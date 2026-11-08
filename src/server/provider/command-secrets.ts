@@ -27,6 +27,9 @@ const AWS_CONFIGURE_SECRET = new RegExp(
 );
 const SECRET_HEADER =
   /((?:\b(?:Proxy-)?Authorization|Api-?Key|Auth-?Token|Access-?Token|Secret|Token)\s*:\s*)(?:(?:Bearer|Basic|Token|Digest|Bot)\s+)?[^\s'"]+/giu;
+/** URL query and fragment values whose name ends in a credential word. */
+const SECRET_URL_PARAMETER =
+  /([?&;#](?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f]{2})*?(?:key|token|secret|sig|signature|password|passwd|credential)=)[^&#\s'"<>]+/giu;
 
 export function scrubCommandSecrets(command: string): string {
   return scrubSubagentSecrets(command)
@@ -44,6 +47,7 @@ export function scrubCommandSecrets(command: string): string {
     .replace(AWS_CONFIGURE_SECRET, (setting: string, prefix: string, name: string, separator: string) =>
       SECRET_NAME.test(name) ? `${prefix}${name}${separator}[redacted]` : setting)
     .replace(SECRET_HEADER, "$1[redacted]")
+    .replace(SECRET_URL_PARAMETER, "$1[redacted]")
     .replace(QUOTED_SECRET_ASSIGNMENT, (assignment: string, name: string) =>
       SECRET_NAME.test(name) ? `${name}=[redacted]` : assignment)
     .replace(

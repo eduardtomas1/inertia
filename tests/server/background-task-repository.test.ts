@@ -176,6 +176,258 @@ describe("background tasks for a whole chat", () => {
     expect(() => store.backgroundTasks(conversation.id, null)).toThrow();
   });
 
+  it("keeps live agents ahead of background commands when the live list is full", async () => {
+    const { store, conversation, turn, task } = await fixture();
+    const owners = [turn(conversation.id, 0), turn(conversation.id, 1)];
+    for (let index = 0; index < 80; index += 1) {
+      task(conversation.id, owners[index % 2]!, `shell-${index}`, 1, {
+        status: "running",
+        isLive: true,
+        taskKind: "shell",
+        background: true,
+        command: `sleep ${index}`,
+      });
+    }
+    const agents = [0, 1, 2].map((index) => task(conversation.id, owners[0]!, `agent-${index}`, 2, {
+      status: "running",
+      isLive: true,
+    }).id);
+    const live = store.backgroundTasks(conversation.id, null).subagents.filter(({ isLive }) => isLive);
+    expect(live).toHaveLength(64);
+    expect(live.filter(({ taskKind }) => taskKind === "agent").map(({ id }) => id).sort()).toEqual([...agents].sort());
+  });
+
+  it("persists, coalesces and scrubs the delegated task shape", async () => {
+    const { store, conversation, turn, task } = await fixture();
+    const owner = turn(conversation.id, 0);
+    const workspace = store.conversationPath(conversation.id);
+    const steps = Array.from({ length: 12 }, (_, index) => ({
+      label: index === 11 ? "Bash · curl -H \"Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz0123\"" : `Read · step ${index}`,
+      status: index === 11 ? "running" as const : "completed" as const,
+    }));
+    const shell = task(conversation.id, owner, "shell", 1, {
+      status: "running",
+      isLive: true,
+      taskKind: "shell",
+      background: true,
+      command: `OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz0123 npm test --prefix ${workspace}/app\n`,
+      effort: "max",
+      activityId: "activity-shell",
+      steps,
+    });
+    expect(shell).toMatchObject({
+      taskKind: "shell",
+      background: true,
+      effort: "max",
+      activityId: "activity-shell",
+    });
+    expect(shell.command).toBe("[redacted] npm test --prefix <workspace>/app");
+    expect(shell.steps).toHaveLength(8);
+    expect(shell.steps?.[0]).toEqual({ label: "Read · step 4", status: "completed" });
+    expect(shell.steps?.at(-1)?.label).not.toContain("sk-abcdefghijklmnopqrstuvwxyz0123");
+    expect(shell.steps?.at(-1)?.status).toBe("running");
+
+    const coalesced = store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: owner.runId,
+      turnId: owner.id,
+      providerId: "codex",
+      providerTaskId: "task-shell",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: null,
+      providerRole: null,
+      providerName: null,
+      status: "running",
+      isLive: true,
+      description: null,
+      progress: null,
+      result: null,
+      sequence: 2,
+    })!.trace;
+    expect(coalesced).toMatchObject({
+      taskKind: "shell",
+      background: true,
+      command: shell.command,
+      effort: "max",
+      activityId: "activity-shell",
+      steps: shell.steps,
+    });
+
+    const completed = store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: owner.runId,
+      turnId: owner.id,
+      providerId: "codex",
+      providerTaskId: "task-shell",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: null,
+      providerRole: null,
+      providerName: null,
+      description: null,
+      progress: null,
+      status: "completed",
+      isLive: false,
+      result: "Exit code 0",
+      steps: [{ label: "Read · done", status: "completed" }],
+      sequence: 3,
+    })!.trace;
+    expect(completed).toMatchObject({ status: "completed", isLive: false, steps: [{ label: "Read · done", status: "completed" }] });
+    const revived = store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: owner.runId,
+      turnId: owner.id,
+      providerId: "codex",
+      providerTaskId: "task-shell",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: null,
+      providerRole: null,
+      providerName: null,
+      status: "running",
+      isLive: true,
+      description: null,
+      progress: null,
+      result: null,
+      command: "rm -rf /",
+      taskKind: "agent",
+      sequence: 4,
+    });
+    expect(revived).toEqual({ trace: completed, changed: false });
+
+    const agent = task(conversation.id, owner, "agent", 2, {
+      status: "running",
+      isLive: true,
+      command: "agents never carry commands",
+      effort: "extreme" as "max",
+      activityId: "a".repeat(201),
+      taskKind: "daemon" as "agent",
+    });
+    expect(agent).toMatchObject({ taskKind: "agent", command: null, effort: null, activityId: null, steps: null, background: null });
+  });
+
+  it("keeps an observed model over a later requested hint and skips the synthetic placeholder", async () => {
+    const { store, conversation, turn, task } = await fixture();
+    const owner = turn(conversation.id, 0);
+    const patch = (sequence: number, model: string, modelSource?: "observed" | "requested") => store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: owner.runId,
+      turnId: owner.id,
+      providerId: "codex",
+      providerTaskId: "task-model",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: null,
+      providerRole: null,
+      providerName: null,
+      status: "running",
+      isLive: true,
+      description: null,
+      progress: null,
+      result: null,
+      model,
+      ...(modelSource ? { modelSource } : {}),
+      sequence,
+    })!.trace;
+    expect(task(conversation.id, owner, "model", 1, { status: "running", isLive: true, model: "haiku", modelSource: "requested" }))
+      .toMatchObject({ model: "haiku", modelSource: "requested" });
+    expect(patch(2, "claude-haiku-4-5", "observed")).toMatchObject({ model: "claude-haiku-4-5", modelSource: "observed" });
+    expect(patch(3, "sonnet", "requested")).toMatchObject({ model: "claude-haiku-4-5", modelSource: "observed" });
+    expect(patch(4, "unknown-source")).toMatchObject({ model: "claude-haiku-4-5", modelSource: "observed" });
+    expect(patch(5, "<synthetic>", "observed")).toMatchObject({ model: "claude-haiku-4-5", modelSource: "observed" });
+    expect(patch(6, "claude-sonnet-4-5", "observed")).toMatchObject({ model: "claude-sonnet-4-5", modelSource: "observed" });
+    expect(task(conversation.id, owner, "plain", 1, { model: "gpt-5" })).toMatchObject({ model: "gpt-5", modelSource: null });
+  });
+
+  it("settles live background commands as stopped and live agents as lost when the turn ends", async () => {
+    const { store, conversation, turn, task } = await fixture();
+    const owner = turn(conversation.id, 0);
+    const shell = task(conversation.id, owner, "shell", 1, { status: "running", isLive: true, taskKind: "shell", background: true });
+    const agent = task(conversation.id, owner, "agent", 1, { status: "running", isLive: true, progress: "Reading" });
+    const settled = store.settleLiveSubagents(owner.id, "lost", at(2));
+    expect(settled.find(({ id }) => id === shell.id)).toMatchObject({
+      status: "cancelled",
+      isLive: false,
+      progress: "Stopped when the turn ended.",
+    });
+    expect(settled.find(({ id }) => id === agent.id)).toMatchObject({ status: "lost", isLive: false, progress: "Reading" });
+  });
+
+  it.each(["lost", "cancelled"] as const)("leaves a live remote agent running in the cloud when the turn ends as %s", async (status) => {
+    const { store, conversation, turn, task } = await fixture();
+    const owner = turn(conversation.id, 0);
+    const remote = task(conversation.id, owner, "remote", 1, {
+      status: "running", isLive: true, taskKind: "remote", background: true, progress: "Launched",
+    });
+    const [settled] = store.settleLiveSubagents(owner.id, status, at(2));
+    expect(settled).toMatchObject({
+      id: remote.id,
+      status: "unknown",
+      isLive: false,
+      progress: "Running in the cloud.",
+    });
+    expect(store.turnLedgerRepository.runtimeInterruption(owner.id)).toMatchObject({ lostTasks: [], lostTaskCount: 0 });
+  });
+
+  it("scrubs step labels and the current activity as commands before they are bounded", async () => {
+    const { conversation, turn, task } = await fixture();
+    const owner = turn(conversation.id, 0);
+    const long = `${"x".repeat(170)} sk_live1234567890abcdef`;
+    const trace = task(conversation.id, owner, "scrub", 1, {
+      status: "running",
+      isLive: true,
+      activity: "WebFetch · https://api.example.com/items?page=2&sig=AIzaSyA1234567890abcdef",
+      steps: [
+        { label: "Bash · deploy --client-secret s3cr3tvalue99 --region eu", status: "completed" },
+        { label: "Bash · MY_SERVICE_KEY=hunter2hunter2 node app.js", status: "failed" },
+        { label: "WebFetch · https://x.example/cb?refresh_token=abcdef1234567890XYZ", status: "completed" },
+        { label: long, status: "running" },
+      ],
+    });
+    const stored = JSON.stringify({ activity: trace.activity, steps: trace.steps });
+    for (const secret of ["AIzaSy", "s3cr3tvalue99", "hunter2hunter2", "abcdef1234567890XYZ", "live12"]) {
+      expect(stored).not.toContain(secret);
+    }
+    expect(trace.activity).toBe("WebFetch · https://api.example.com/items?page=2&sig=[redacted]");
+    expect(trace.steps?.slice(0, 3).map(({ label }) => label)).toEqual([
+      "Bash · deploy --client-secret [redacted] --region eu",
+      "Bash · MY_SERVICE_KEY=[redacted] node app.js",
+      "WebFetch · https://x.example/cb?refresh_token=[redacted]",
+    ]);
+  });
+
+  it("leaves background commands possibly running when the provider's cleanup was not confirmed", async () => {
+    const { store, conversation, turn, task } = await fixture();
+    const owner = turn(conversation.id, 0);
+    const shell = task(conversation.id, owner, "shell", 1, { status: "running", isLive: true, taskKind: "shell", background: true });
+    const agent = task(conversation.id, owner, "agent", 1, { status: "running", isLive: true, progress: "Reading" });
+    const remote = task(conversation.id, owner, "remote", 1, { status: "running", isLive: true, taskKind: "remote" });
+    const settled = store.settleLiveSubagents(owner.id, "cancelled", at(2), true);
+    expect(settled.find(({ id }) => id === shell.id)).toMatchObject({
+      status: "unknown",
+      isLive: false,
+      progress: "May still be running: the provider did not confirm it stopped.",
+    });
+    expect(settled.find(({ id }) => id === agent.id)).toMatchObject({ status: "cancelled", isLive: false, progress: "Reading" });
+    expect(settled.find(({ id }) => id === remote.id)).toMatchObject({ status: "unknown", progress: "Running in the cloud." });
+    expect(store.turnLedgerRepository.runtimeInterruption(owner.id).lostTasks).toEqual([]);
+  });
+
+  it("lets background commands use at most half of the per-turn trace budget", async () => {
+    const { conversation, turn, task } = await fixture();
+    const owner = turn(conversation.id, 0);
+    for (let index = 0; index < 64; index += 1) {
+      task(conversation.id, owner, `shell-${index}`, 1, { taskKind: index % 2 ? "monitor" : "shell" });
+    }
+    expect(() => task(conversation.id, owner, "shell-overflow", 1, { taskKind: "shell" })).toThrow();
+    expect(task(conversation.id, owner, "agent-after", 1).taskKind).toBe("agent");
+  });
+
   it("reads both tables through conversation indexes", async () => {
     const { store, databasePath } = await fixture();
     store.close();

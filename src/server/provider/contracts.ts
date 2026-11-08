@@ -16,6 +16,10 @@ import type {
   ProviderRateLimit,
   ProviderSkillInput,
   ProviderUpdateRequirement,
+  SubagentModelSource,
+  SubagentTaskEffort,
+  SubagentTaskKind,
+  SubagentTaskStep,
   SubagentTaskUsage,
   SubagentTraceStatus,
   ThreadUsageSnapshot,
@@ -391,6 +395,21 @@ export interface ProviderSubagentEvent extends ProviderEventBase {
   usage?: SubagentTaskUsage;
   toolUseCount?: number;
   durationMs?: number;
+  /** Absent leaves the source unknown; a requested hint never replaces an observed model. */
+  modelSource?: SubagentModelSource;
+  /** Absent means a delegated agent. */
+  taskKind?: SubagentTaskKind;
+  background?: boolean;
+  /** Raw shell command; scrubbed and bounded at the persistence boundary. */
+  command?: string;
+  effort?: SubagentTaskEffort;
+  /** The most recent tool steps; replaces any earlier snapshot. */
+  steps?: SubagentTaskStep[];
+  /**
+   * Resolved by the turn runtime from providerToolUseId; adapters never set
+   * this because they do not know Inertia's timeline row identities.
+   */
+  activityId?: string;
 }
 
 export type ProviderEvent =

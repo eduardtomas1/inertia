@@ -807,6 +807,11 @@
       "version": 110,
       "name": "PersistCodexThreadToolPacks",
       "digest": "f5d456e90892eae506655587faed66662f233aa45ad69672cce2197e43118eb3"
+    },
+    {
+      "version": 111,
+      "name": "PersistSubagentTaskShape",
+      "digest": "9041b5d6781eedf16c2394123872a6e6a908b7654c6e7bd18df72b1e08ca306b"
     }
   ]
 }

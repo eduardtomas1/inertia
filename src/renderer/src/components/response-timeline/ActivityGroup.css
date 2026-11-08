@@ -324,6 +324,95 @@
   white-space: pre-wrap;
 }
 
+.turn-activity-group .subagent-activity {
+  grid-template-rows: var(--ledger-row);
+  grid-auto-rows: auto;
+  row-gap: 1px;
+  padding-bottom: 3px;
+}
+
+.turn-activity-group .subagent-activity-title {
+  display: block;
+  color: var(--text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.turn-activity-group .subagent-activity-title.is-command,
+.turn-activity-group .subagent-activity-command {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+}
+
+.turn-activity-group .subagent-activity-meta,
+.turn-activity-group .subagent-activity-doing,
+.turn-activity-group .subagent-activity-command,
+.turn-activity-group .subagent-activity-steps {
+  grid-column: 2 / -1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}
+
+.turn-activity-group .subagent-activity-meta {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  column-gap: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-activity-group .subagent-activity-meta > * + *::before {
+  margin: 0 6px;
+  color: var(--text-faint);
+  content: "·";
+}
+
+.turn-activity-group .subagent-activity-danger {
+  color: var(--status-failed);
+}
+
+.turn-activity-group .subagent-activity-doing,
+.turn-activity-group .subagent-activity-command {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-activity-group .subagent-activity.is-running .subagent-activity-doing {
+  color: var(--text-muted);
+}
+
+.turn-activity-group .subagent-activity-steps {
+  max-height: 168px;
+  margin: 2px 0 4px;
+  padding: 2px 0 2px 10px;
+  overflow: auto;
+  border-inline-start: 1px solid var(--line-soft);
+  list-style: none;
+}
+
+.turn-activity-group .subagent-activity-steps > li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-activity-group .subagent-activity-steps > li[data-step-status="running"] {
+  color: var(--text);
+}
+
+.turn-activity-group .subagent-activity-steps > li[data-step-status="failed"] {
+  color: var(--status-failed);
+}
+
+.subagent-unlinked-rows {
+  max-width: var(--final-answer-max-width, 100%);
+  margin: 6px 0 0 max(0px, calc((100% - var(--final-answer-max-width, 100%)) / 2));
+}
+
 @container response-transcript (max-width: 440px) {
   .turn-activity-group-rows {
     margin-left: 7px;

@@ -7,6 +7,7 @@ import {
   type AgentTurnTerminalStatus,
   type SubagentTrace,
 } from "../../../shared/contracts";
+import { subagentTaskHoldsTurn } from "../../../shared/subagent-task-limits";
 import type { RuntimeStore } from "../../database";
 import type { ProviderRunFailure } from "../../provider/contracts";
 import { ownedProviderStopBudgetMs } from "../../provider/run-cleanup-settlement";
@@ -125,7 +126,7 @@ export class TurnRunStateCoordinator {
   ): boolean {
     if (!active.runState.observeDescendant(
       trace.id,
-      trace.isLive,
+      trace.isLive && subagentTaskHoldsTurn(trace.taskKind),
       trace.providerStatus,
     )) return false;
     this.persist(active);

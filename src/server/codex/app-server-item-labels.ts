@@ -65,3 +65,52 @@ export function codexItemActivityLabel(item: JsonObject): string | null {
       return null;
   }
 }
+
+function firstChangePath(item: JsonObject): string | null {
+  if (!Array.isArray(item.changes)) return null;
+  for (const entry of item.changes.slice(0, 16)) {
+    const path = boundedText(objectValue(entry)?.path, 2_000);
+    if (path) return path;
+  }
+  return null;
+}
+
+/**
+ * The step label of one delegated-agent item: what it does and one key input,
+ * never output, diffs or file contents. Thinking and messages are not steps.
+ */
+export function codexSubagentStep(item: JsonObject): { tool: string; keyInput: string | null } | null {
+  switch (stringValue(item.type)) {
+    case "commandExecution": {
+      const command = boundedText(item.command, 4_000)
+        ?? boundedText(item.cmd, 4_000)
+        ?? (Array.isArray(item.command)
+          ? item.command.filter((part): part is string => typeof part === "string").join(" ")
+          : null);
+      return { tool: "Command", keyInput: command || null };
+    }
+    case "fileChange":
+      return { tool: "File change", keyInput: firstChangePath(item) };
+    case "mcpToolCall":
+      return { tool: codexMcpToolLabel(item), keyInput: null };
+    case "dynamicToolCall":
+      return { tool: codexDynamicToolLabel(item), keyInput: null };
+    case "webSearch": {
+      const activity = codexWebSearchActivity(item);
+      return { tool: activity.label, keyInput: activity.detail?.split("\n")[1] ?? null };
+    }
+    case "imageView":
+      return { tool: "View image", keyInput: boundedText(item.path, 2_000) ?? null };
+    case "imageGeneration":
+      return { tool: "Generate image", keyInput: null };
+    default:
+      return null;
+  }
+}
+
+export function codexSubagentStepFailed(item: JsonObject): boolean {
+  const status = stringValue(item.status);
+  return status === "failed"
+    || status === "declined"
+    || (typeof item.exitCode === "number" && item.exitCode !== 0);
+}

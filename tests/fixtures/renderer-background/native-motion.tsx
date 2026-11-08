@@ -45,7 +45,7 @@ const trace: SubagentTrace = {
   providerToolUseId: null, providerRole: null, providerName: "Fixture worker",
   providerStatus: "running", status: "running", isLive: true,
   description: "Native motion", progress: null, result: null,
-  model: null, activity: null, usage: null, toolUseCount: null, durationMs: null, sequence: 1,
+  model: null, activity: null, usage: null, toolUseCount: null, durationMs: null, modelSource: null, taskKind: "agent", background: null, command: null, effort: null, activityId: null, steps: null, sequence: 1,
   createdAt: startedAt, updatedAt: startedAt,
 };
 

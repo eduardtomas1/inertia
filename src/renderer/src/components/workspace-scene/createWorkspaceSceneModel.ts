@@ -51,6 +51,7 @@ import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import type { SettingsViewProps } from "../settings/settingsTypes";
 import {
   canFollowUpSubagentTrace,
+  canBackgroundSubagentTrace,
   canStopSubagentTrace,
 } from "../../utils/subagentDisclosure";
 import { activeBackgroundTaskCount } from "../../utils/backgroundTaskRuns";
@@ -282,6 +283,7 @@ export interface WorkspaceSceneActions {
   ) => void;
   followUpSubagent: (trace: SubagentTrace) => void;
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
+  backgroundSubagent?: (trace: SubagentTrace) => Promise<void>;
   stopAgent: () => Promise<void>;
   run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
   runConversationContextCommand?: ConversationContextCommandRunner;
@@ -547,6 +549,16 @@ export function createWorkspaceSceneModel({
       setActionError(error instanceof Error
         ? error.message
         : "The delegated task could not be stopped.");
+      throw error;
+    }
+  };
+  const backgroundSubagent = async (trace: SubagentTrace): Promise<void> => {
+    try {
+      await actions.backgroundSubagent?.(trace);
+    } catch (error) {
+      setActionError(error instanceof Error
+        ? error.message
+        : "The agent could not be moved to the background.");
       throw error;
     }
   };
@@ -900,6 +912,10 @@ export function createWorkspaceSceneModel({
           Boolean(conversationIsRunning
             && canStopSubagentTrace(trace, projection.turns)),
         onStopSubagent: stopSubagent,
+        canBackgroundSubagent: (trace) =>
+          Boolean(actions.backgroundSubagent && conversationIsRunning
+            && canBackgroundSubagentTrace(trace, projection.turns)),
+        onBackgroundSubagent: backgroundSubagent,
       },
       gitNotice: environmentSummary.gitNotice,
       runs: {

@@ -977,10 +977,11 @@ export class RuntimeStore {
     traceId: string,
     updatedAt = new Date().toISOString(),
   ): UpsertSubagentTraceResult | null {
-    return this.executionLedgerRepository.acknowledgeSubagentStop(
-      traceId,
-      updatedAt,
-    );
+    return this.executionLedgerRepository.acknowledgeSubagentStop(traceId, updatedAt);
+  }
+
+  requestSubagentStop(traceId: string, updatedAt?: string): UpsertSubagentTraceResult | null {
+    return this.executionLedgerRepository.requestSubagentStop(traceId, updatedAt);
   }
 
   backgroundTasks(conversationId: string, before: BackgroundTaskCursor | null): BackgroundTasksResult {
@@ -998,12 +999,9 @@ export class RuntimeStore {
     turnId: string,
     status: Extract<SubagentTraceStatus, "cancelled" | "lost">,
     updatedAt = new Date().toISOString(),
+    providerCleanupUnconfirmed = false,
   ): SubagentTrace[] {
-    return this.executionLedgerRepository.settleLiveSubagents(
-      turnId,
-      status,
-      updatedAt,
-    );
+    return this.executionLedgerRepository.settleLiveSubagents(turnId, status, updatedAt, providerCleanupUnconfirmed);
   }
 
   createReasoning(

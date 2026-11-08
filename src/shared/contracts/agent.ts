@@ -280,6 +280,29 @@ export type SubagentTraceStatus =
   | "unknown"
   | "lost";
 
+/** What kind of delegated or background work a trace represents. */
+export type SubagentTaskKind =
+  | "agent"
+  | "workflow"
+  | "shell"
+  | "monitor"
+  | "remote"
+  | "mcp";
+
+export type SubagentTaskEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+/**
+ * Observed models come from the subagent's own output or the provider's
+ * result; requested models are only what the parent asked for.
+ */
+export type SubagentModelSource = "observed" | "requested";
+
+/** One recent tool step of a delegated agent, labelled without file contents or output. */
+export interface SubagentTaskStep {
+  label: string;
+  status: "running" | "completed" | "failed";
+}
+
 export interface SubagentTaskUsage {
   totalTokens: number | null;
   inputTokens: number | null;
@@ -327,6 +350,19 @@ export interface SubagentTrace {
   usage: SubagentTaskUsage | null;
   toolUseCount: number | null;
   durationMs: number | null;
+  /** Null for legacy traces and providers that do not say. */
+  modelSource: SubagentModelSource | null;
+  /** Legacy and imported traces are agents. */
+  taskKind: SubagentTaskKind;
+  /** Whether the provider ran this work in the background; null when unreported. */
+  background: boolean | null;
+  /** Scrubbed shell command for background commands; never set for agents. */
+  command: string | null;
+  effort: SubagentTaskEffort | null;
+  /** The Inertia timeline row of the tool call that started this work. */
+  activityId: string | null;
+  /** The most recent tool steps, oldest first; null when the provider reports none. */
+  steps: SubagentTaskStep[] | null;
   /** Monotonic within the provider run; stale/replayed patches are ignored. */
   sequence: number;
   createdAt: string;

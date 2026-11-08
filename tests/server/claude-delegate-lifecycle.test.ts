@@ -2,6 +2,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 
 import { ClaudeDelegateLifecycle } from "../../src/server/provider/claude-delegate-lifecycle";
+import { ClaudeSubagentTraceTracker } from "../../src/server/provider/claude-subagent-trace";
 import {
   claudeBackgroundTasks,
   claudeSessionState,
@@ -306,6 +307,42 @@ describe("Claude delegated lifecycle", () => {
       kind: "result",
       result: { result: "The update failed." },
     });
+  });
+
+  it("ends the turn on the parent result when only traced background shells are live", () => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+    const updates: unknown[] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => updates.push(event));
+    const observe = (message: SDKMessage) => {
+      const hadLiveTaskTrace = tracker.hasLiveTasks();
+      const lifecycleResult = lifecycle.observe(message, hadLiveTaskTrace);
+      tracker.observe(message);
+      return lifecycleResult;
+    };
+    observe(claudeSystem("task_started", {
+      task_id: "shell-dev",
+      task_type: "local_bash",
+      description: "Start the dev server",
+      is_backgrounded: true,
+    }));
+    observe(claudeSystem("task_started", {
+      task_id: "monitor-logs",
+      task_type: "monitor",
+      description: "Watch the logs",
+    }));
+    expect(updates).toHaveLength(2);
+    expect(tracker.hasLiveTasks()).toBe(false);
+    expect(observe(claudeSuccessResult("The server is starting.", "completed")))
+      .toEqual({ turnEnded: true });
+    expect(lifecycle.hasProvisionalResult()).toBe(false);
+
+    const agentLifecycle = new ClaudeDelegateLifecycle();
+    const agentTracker = new ClaudeSubagentTraceTracker(() => undefined);
+    agentTracker.observe(claudeSystem("task_started", { task_id: "agent-live", task_type: "local_agent" }));
+    expect(agentLifecycle.observe(
+      claudeSuccessResult("Waiting for the agent.", "completed"),
+      agentTracker.hasLiveTasks(),
+    )).toEqual({ turnEnded: false });
   });
 
   it("lets a newer authoritative empty roster override stale trace liveness", () => {

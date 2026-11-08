@@ -18,7 +18,7 @@ import {
 } from "../../src/server/persistence/migrations/runtime-catalog";
 
 const fixture = resolve(import.meta.dirname, "..", "fixtures", "database", "v0.0.6.sqlite");
-const PREVIOUS_SCHEMA_VERSION = 110;
+const PREVIOUS_SCHEMA_VERSION = 111;
 const REQUIRED_TABLES = [
   "provider_metadata_cache",
   "diff_review_summaries",
@@ -51,9 +51,9 @@ function rows(database: Database.Database, table: string): unknown[] {
 }
 
 describe("native Grok provider migration", () => {
-  it("is registered after the released Codex thread tool pack migration", () => {
-    expect(NATIVE_GROK_PROVIDER_SCHEMA_VERSION).toBe(111);
-    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(111);
+  it("is registered after the released subagent task shape migration", () => {
+    expect(NATIVE_GROK_PROVIDER_SCHEMA_VERSION).toBe(112);
+    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(112);
     expect(runtimeMigrationCatalog().at(-1)).toMatchObject({
       version: NATIVE_GROK_PROVIDER_SCHEMA_VERSION,
       name: nativeGrokProviderMigration.name,

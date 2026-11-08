@@ -91,6 +91,18 @@ describe("turn agents line", () => {
     expect(button.querySelectorAll(".background-task-live")).toHaveLength(1);
   });
 
+  it("counts background commands apart from agents", () => {
+    const traces = [
+      taskTrace({ id: "agent" }),
+      taskTrace({ id: "shell", taskKind: "shell", background: true }),
+      taskTrace({ id: "done-shell", taskKind: "shell", status: "completed" }),
+    ];
+    const view = render(<TurnAgentsLine {...line} subagents={traces} onOpenSurface={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Open Background tasks, 1 agent working · 1 background command running" })).toBeVisible();
+    view.rerender(<TurnAgentsLine {...line} subagents={[taskTrace({ id: "shell", taskKind: "shell", status: "completed" })]} onOpenSurface={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Open Background tasks, 1 background command" })).toBeVisible();
+  });
+
   it("sweeps only while an agent is running, like the panel's cards", () => {
     const view = render(<TurnAgentsLine {...line} subagents={[taskTrace({ id: "a", status: "waiting" }), taskTrace({ id: "b", status: "queued" })]} onOpenSurface={vi.fn()} />);
     expect(screen.getByText("2 agents working")).not.toHaveClass("background-task-live");
@@ -173,8 +185,8 @@ describe("turn agents line", () => {
     const current = taskTurn({ id: "turn-1", status: "completed" });
     const traces = [
       taskTrace({ id: "other", turnId: "turn-0", providerName: "Earlier helper", status: "completed" }),
-      taskTrace({ id: "done", providerName: "Contract reader", status: "completed" }),
-      taskTrace({ id: "broken", providerName: "Migration verifier", status: "failed" }),
+      taskTrace({ id: "done", providerName: "Contract reader", description: "Contract reader", status: "completed" }),
+      taskTrace({ id: "broken", providerName: "Migration verifier", description: "Migration verifier", status: "failed" }),
     ];
     render(
       <>
@@ -206,7 +218,7 @@ describe("turn agents line", () => {
   it("reveals a request made before the panel was mounted, once", async () => {
     const user = userEvent.setup();
     const scrolled = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => undefined);
-    const traces = [taskTrace({ id: "done", providerName: "Contract reader", status: "completed" })];
+    const traces = [taskTrace({ id: "done", providerName: "Contract reader", description: "Contract reader", status: "completed" })];
     render(<TurnAgentsLine {...line} subagents={traces} onOpenSurface={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Open Background tasks, 1 agent finished" }));
     const props = {

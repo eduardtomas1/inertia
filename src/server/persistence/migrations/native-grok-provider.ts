@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 
 import type { DatabaseMigrationDefinition } from "./catalog";
 
-export const NATIVE_GROK_PROVIDER_SCHEMA_VERSION = 111;
+export const NATIVE_GROK_PROVIDER_SCHEMA_VERSION = 112;
 
 const REQUIRED_TABLES = [
   "provider_metadata_cache",
@@ -34,7 +34,7 @@ function tableSql(database: Database.Database, table: string): string {
 function widenedSql(table: string, sql: string): string {
   const header = new RegExp(`^CREATE TABLE "?${table}"?\\s*\\(`, "u");
   if (!header.test(sql)) throw new Error(`The ${table} schema has an unexpected shape.`);
-  let next = sql.replace(header, `CREATE TABLE ${quoted(`${table}_v111`)} (`);
+  let next = sql.replace(header, `CREATE TABLE ${quoted(`${table}_v112`)} (`);
   let rewrote = false;
   for (const [pattern, replacement] of CONSTRAINT_REWRITES) {
     pattern.lastIndex = 0;
@@ -66,10 +66,10 @@ function rebuildTable(database: Database.Database, table: string): void {
   const before = countRows();
   database.exec(createSql);
   database.exec(
-    `INSERT INTO ${quoted(`${table}_v111`)} (${columns.join(", ")}) SELECT ${columns.join(", ")} FROM ${quoted(table)}`,
+    `INSERT INTO ${quoted(`${table}_v112`)} (${columns.join(", ")}) SELECT ${columns.join(", ")} FROM ${quoted(table)}`,
   );
   database.exec(`DROP TABLE ${quoted(table)}`);
-  database.exec(`ALTER TABLE ${quoted(`${table}_v111`)} RENAME TO ${quoted(table)}`);
+  database.exec(`ALTER TABLE ${quoted(`${table}_v112`)} RENAME TO ${quoted(table)}`);
   for (const sql of indexes) database.exec(sql);
   if (countRows() !== before) {
     throw new Error(`${table} changed while adding Grok provider constraints.`);

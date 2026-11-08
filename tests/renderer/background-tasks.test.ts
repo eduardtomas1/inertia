@@ -20,6 +20,10 @@ import {
   backgroundCommandRuns,
 } from "../../src/renderer/src/utils/backgroundTaskRuns";
 import {
+  subagentAccessibleName,
+  subagentTaskStateWord,
+} from "../../src/renderer/src/utils/subagentTaskPresentation";
+import {
   subagentTokensLabel,
   subagentHarnessLabel,
   subagentProviderLabel,
@@ -32,11 +36,19 @@ import {
 } from "./background-task-fixtures";
 
 describe("background task rows", () => {
-  it("titles a task by provider name, then role, then its mission", () => {
+  it("titles a task by its mission, then its role or name, then its provider", () => {
     expect(backgroundTaskTitle(taskTrace({ providerName: "code_reviewer" })))
+      .toBe("Inspect the provider lifecycle.");
+    expect(backgroundTaskTitle(taskTrace({ providerName: "code_reviewer", description: null })))
       .toBe("Code reviewer");
-    expect(backgroundTaskTitle(taskTrace({ providerName: null, providerRole: "explorer" })))
+    expect(backgroundTaskTitle(taskTrace({ providerName: null, providerRole: "explorer", description: "  \n" })))
       .toBe("Explorer");
+    expect(backgroundTaskTitle(taskTrace({ description: "First line\nsecond line" })))
+      .toBe("First line");
+    expect(backgroundTaskTitle(taskTrace({ taskKind: "shell", description: null, command: "npm test\nnpm run lint" })))
+      .toBe("npm test");
+    expect(backgroundTaskTitle(taskTrace({ taskKind: "monitor", description: null, command: null })))
+      .toBe("Monitor");
     expect(backgroundTaskTitle(taskTrace({
       providerName: null,
       providerRole: null,
@@ -199,6 +211,40 @@ describe("background task rows", () => {
     expect(backgroundCommandStateWord(workspaceRun({ status: "waiting" }))).toEqual({ word: "Waiting", danger: false });
     expect(backgroundCommandStateWord(workspaceRun({ status: "cancelled" }))).toEqual({ word: "Stopped", danger: false });
     expect(backgroundCommandStateWord(workspaceRun({ status: "failed" }))).toEqual({ word: "Failed", danger: true });
+  });
+
+  it("shows the timeline's state word in the panel wherever the card does not already say it", () => {
+    const statuses = ["queued", "spawned", "running", "waiting", "completed", "failed", "cancelled", "interrupted", "lost", "unknown"] as const;
+    for (const status of statuses) {
+      for (const live of [true, false]) {
+        for (const kind of ["agent", "remote", "shell"] as const) {
+          const trace = taskTrace({ status, isLive: live, taskKind: kind, background: kind === "agent" ? false : true });
+          const panel = backgroundTaskStateWord(trace);
+          if (kind !== "shell" && (status === "running" || status === "completed")) expect(panel).toBeNull();
+          else expect(panel).toEqual(subagentTaskStateWord(trace));
+        }
+      }
+    }
+    const cloud = taskTrace({ status: "unknown", isLive: false, taskKind: "remote", progress: "Running in the cloud." });
+    expect(backgroundTaskStateWord(cloud)).toEqual({ word: "Running in the cloud", danger: false });
+    expect(subagentTaskStateWord(taskTrace({ status: "unknown", isLive: true }))).toEqual({ word: "Running", danger: false });
+    expect(subagentTaskStateWord(taskTrace({ status: "unknown", isLive: false }))).toEqual({ word: "Unknown", danger: false });
+    const unconfirmed = taskTrace({ status: "unknown", isLive: false, taskKind: "shell", background: true });
+    expect(backgroundTaskStateWord(unconfirmed)).toEqual({ word: "May still be running", danger: true });
+    expect(subagentTaskStateWord(unconfirmed)).toEqual({ word: "May still be running", danger: true });
+  });
+
+  it("names a task's controls by who runs it, never by its long description", () => {
+    const description = "Audit every migration for idempotence and record the findings ".repeat(5);
+    expect(subagentAccessibleName(taskTrace({ providerRole: "general-purpose", providerName: null, description }))).toBe("General purpose");
+    expect(subagentAccessibleName(taskTrace({ providerRole: null, providerName: "Scout", description }))).toBe("Scout");
+    const unnamed = subagentAccessibleName(taskTrace({ providerRole: null, providerName: null, description }));
+    expect(unnamed.startsWith("Agent: Audit every migration")).toBe(true);
+    expect(unnamed.length).toBeLessThanOrEqual(48);
+    expect(subagentAccessibleName(taskTrace({ taskKind: "shell", providerName: "bash", description: null, command: "npm run dev" })))
+      .toBe("Background command: npm run dev");
+    expect(subagentAccessibleName(taskTrace({ taskKind: "monitor", providerName: null, description: null, command: null })))
+      .toBe("Monitor");
   });
 
   it("says a harness does not report tokens only when it never does", () => {

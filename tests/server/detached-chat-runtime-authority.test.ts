@@ -678,6 +678,26 @@ describe("detached chat runtime authority", () => {
       payload: { conversationId: CONVERSATION, traceId: OTHER_CONVERSATION },
     })).not.toBeNull();
     expect(rejection({
+      type: "agent.subagent.background",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, traceId: REQUEST },
+    })).toBeNull();
+    expect(detachedChatCommandRejection(authority, {
+      type: "agent.subagent.background",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, traceId: REQUEST },
+    }, { ...resources(), subagentConversationId: () => OTHER_CONVERSATION })).not.toBeNull();
+    expect(rejection({
+      type: "agent.subagent.background",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, traceId: OTHER_CONVERSATION },
+    })).not.toBeNull();
+    expect(rejection({
+      type: "agent.subagent.background",
+      requestId: REQUEST,
+      payload: { conversationId: OTHER_CONVERSATION, traceId: REQUEST },
+    })).not.toBeNull();
+    expect(rejection({
       type: "activity.mark-seen",
       requestId: REQUEST,
       payload: { runId: "22222222-2222-4222-8222-222222222222" },

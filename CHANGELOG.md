@@ -17,6 +17,24 @@ The useful changes in each Inertia release, in plain language.
   its workspace. Worktree management and creating tasks stay in the main
   window.
 
+### Subagents and background commands
+
+- When an agent hands work to a subagent, its row shows what the subagent is
+  doing: its name or role, the model that actually runs it (marked
+  *requested* when the provider has not reported one), its state, how long
+  it has run and the step it is on. **Steps** lists its last eight tool calls
+  and **Result** shows what it returned. Codex child agents appear as compact
+  rows under the turn.
+- Commands an agent runs in the background appear in the chat and in
+  **Background tasks** with their command and state, and no longer keep a
+  turn from finishing.
+- **Stop** ends one Claude task or background command, even one that has
+  only just started, and says so when Claude refuses or does not answer.
+  **Move to background** lets a Claude agent keep working while the chat
+  goes on.
+- After Inertia restarts in the middle of a turn, its note lists the agents
+  and background commands that ended with it.
+
 ### Agent tools
 
 - Agents with Inertia's tools can read their own workspace: Git status, the

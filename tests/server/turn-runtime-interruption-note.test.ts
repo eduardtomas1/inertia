@@ -122,6 +122,36 @@ describe("runtime interruption note", () => {
     } finally { await chat.close(); }
   });
 
+  it("lists background commands that ended with the interrupted turn beside lost agents", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Serve and audit." });
+    try {
+      runtime.controller.start(first.turn.id);
+      emitTurnControllerTestSubagent(runtime, {
+        sequence: 1, providerTaskId: "task-agent", status: "running", isLive: true,
+        description: "Audit the tokenizer edge cases",
+      });
+      emitTurnControllerTestSubagent(runtime, {
+        sequence: 2, providerTaskId: "task-shell", status: "running", isLive: true,
+        taskKind: "shell", background: true, command: "npm run dev -- --port 5173",
+      });
+      await flushTurnControllerTestPromises();
+      await runtime.controller.dispose();
+      const interruption = runtime.store.turnLedgerRepository.runtimeInterruption(first.turn.id);
+      expect(interruption).toEqual({
+        request: "Serve and audit.",
+        lostTasks: ["Audit the tokenizer edge cases", "background command: npm run dev -- --port 5173"],
+        lostTaskCount: 2,
+      });
+      const { text } = runtimeInterruptionInstruction(interruption);
+      expect(text.split("\n")[1]).toContain("background commands");
+      expect(text.split("\n")[1]).toContain("Do not wait for them.");
+      expect(noteData(text).lostTasks).toContain("background command: npm run dev -- --port 5173");
+    } finally {
+      runtime.store.close();
+    }
+  });
+
   it("tells the first turn after an app update interruption about it, once, without a restart", async () => {
     const runtime = await createTurnControllerTestRuntime();
     try {

@@ -1340,6 +1340,62 @@ OpenAI cache, whether Codex requests extended cache retention, and that Claude
 Code limits its own idle compaction to the 1-hour cache (read from the binary,
 not documented) have not been observed.
 
+## Delegated agents and background tasks
+
+Each harness reports delegated work as bounded traces. A trace records what
+the provider says about one task: its kind, description, role or name, model,
+effort, state, recent steps, usage, and, for background commands, the scrubbed
+command. It links to the timeline row of the tool call that started it, so the
+transcript shows the task in place of that row. Provider strings stay
+untrusted: the adapter bounds them, the persistence boundary scrubs secrets
+and paths again, and the renderer shows them as plain text. Traces never enter
+the watcher digest or shared chat context.
+
+A trace's model is either *observed* (reported by the subagent itself or by
+the provider's result) or *requested* (only what the parent asked for). A
+requested model never replaces an observed one, and the panel marks a model
+that was only requested.
+
+Steps are the eight most recent tool calls of a delegated agent, each labelled
+by tool name and one key input: the first line of a command, a path, a search
+pattern, a URL or a query. File contents, diffs and tool output are never
+part of a step.
+
+| Harness | What it reports |
+| --- | --- |
+| `claude-agent-sdk` | Agents, workflows and remote agents from Claude's typed task events and Agent tool results. The model comes from the result's `resolvedModel` (or the last of `modelsUsed`), else the subagent's first forwarded frame, else the requested alias; a fork never reports the alias or effort Claude ignores for it, and the `<synthetic>` placeholder is never a model. Effort and `run_in_background` come from the Agent call. Steps come from the subagent frames Claude forwards. Background shells (`local_bash`), monitors and MCP tasks are traces of their own kind once Claude runs them in the background; foreground shells stay private until moved there (including by a timeout that backgrounds them), are forgotten when their tool result arrives, and never count toward the 256 background commands shown at once. A remote launch keeps only its task id, never the session link, output file or content. Stop and Move to background act on one task through the SDK; a Stop that arrives before Claude issued the task id is held and sent when `task_started` names the tool call; until Claude accepts that Stop or reports the task stopped, the task stays live and shows that a stop was requested, and a Stop Claude refuses or does not answer leaves the task running and says so. Move to background has its own ten-second bound and says whether Claude declined the move or did not confirm it in time. |
+| `codex-app-server` | Child threads from collaboration items and thread sources, with the model the spawn requested. Each child item (commands, file changes, MCP and dynamic tools, web searches, image views) becomes a step; thinking and messages do not. Collaboration items have no timeline row, so these traces show as compact rows under the turn. |
+| `opencode-sdk` | Child sessions, named by `Session.agent`, then the assistant message's `agent`, then the task's `subagent_type`. The model comes from `Session.model`, else the first assistant message. The trace links to the parent's task call by its `callID`, and child tool parts become steps. |
+| `cursor-acp` | One trace per `cursor/task` extension notification with its subagent type, description, model, result and duration. Cursor sends no live progress, steps, effort or background state, and its tasks cannot be stopped or moved. |
+| `kimi-acp`, `antigravity-cli` | No delegated-task traces: neither protocol reports subagents or background tasks to the host. |
+| `grok-acp` | No delegated-task traces yet. Grok reports subagents and background commands through its own `x.ai` extensions, which Inertia does not read. |
+
+Background commands, monitors and MCP tasks never hold a turn open or count as
+delegated work in the run state, so a provider that ends its turn while a dev
+server keeps running completes normally. When a turn ends with one still
+running, the provider process ends with it and the trace is settled as
+stopped; when Inertia could not confirm that the provider's process tree
+ended, the trace is settled as possibly still running instead, under the same
+condition that adds the "may still be running" note to the turn. The next turn
+is told which background commands ended only after a restart (below), not
+after a normal turn end. Remote agents launched into a cloud session are shown but never make
+the turn delegated, whether Claude reports them by `remote_launched` or by
+`task_started`. A remote agent still running when the turn ends keeps running
+in its cloud session, so its trace is settled as running in the cloud with an
+unknown outcome, never as lost or stopped. Background commands use at most
+half of a turn's 128-trace budget, and the panel lists live agents before live
+commands.
+
+After Inertia restarts during a turn, the next turn's interruption note lists
+the delegated agents and background commands that ended with it, so the agent
+does not wait for or report on them.
+
+What could only be checked against fixtures, not a live Claude Code: whether
+Claude forwards every subagent frame with its model, whether `task_started`
+for a remote agent arrives before or after `remote_launched`, the wording of
+the error `backgroundTasks` throws when background tasks are disabled, and
+how often foreground shells are registered as tasks at all.
+
 ## What the open-source review changed
 
 The August 2026 review used other projects as evidence and adversarial test

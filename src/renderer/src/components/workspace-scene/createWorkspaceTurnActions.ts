@@ -62,6 +62,15 @@ export function createWorkspaceTurnActions({
         },
       }).then(() => undefined);
     },
+    backgroundSubagent(trace: SubagentTrace): Promise<void> {
+      return run(`agent.subagent.background:${trace.id}`, {
+        type: "agent.subagent.background",
+        payload: {
+          conversationId: trace.conversationId,
+          traceId: trace.id,
+        },
+      }).then(() => undefined);
+    },
     stopAgent(): Promise<void> {
       return conversation
         ? run("agent.stop", {

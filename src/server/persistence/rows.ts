@@ -14,6 +14,9 @@ import type {
   Project,
   ProjectGroupingMode,
   ProviderId,
+  SubagentModelSource,
+  SubagentTaskEffort,
+  SubagentTaskKind,
   SubagentTraceStatus,
   ThemePreference,
   ColorThemeId,
@@ -250,6 +253,13 @@ export interface SubagentTraceRow {
   usage_json: string | null;
   tool_use_count: number | null;
   duration_ms: number | null;
+  task_kind: SubagentTaskKind;
+  background: 0 | 1 | null;
+  command: string | null;
+  effort: SubagentTaskEffort | null;
+  activity_id: string | null;
+  model_source: SubagentModelSource | null;
+  steps_json: string | null;
   sequence: number;
   created_at: string;
   updated_at: string;

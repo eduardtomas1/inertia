@@ -28,6 +28,8 @@ import {
   type DatabaseMigrationDefinition,
 } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
+import type { SubagentTrace } from "../../src/shared/contracts";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const fixtureDirectory = join(repositoryRoot, "tests", "fixtures", "database");
@@ -2169,6 +2171,7 @@ describe("runtime migration catalog", () => {
       { version: 109 },
       { version: 110 },
       { version: 111 },
+      { version: 112 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2354,4 +2357,140 @@ it("upgrades schema 79 with preserving global attachment settings and persists a
   const restarted = new RuntimeStore(path, directory, { recoverInterruptedRuns: false });
   expect(restarted.shellSnapshot().settings).toMatchObject({ attachmentStorageGiB: 64, autoRemoveOldAttachments: true });
   restarted.close();
+});
+
+describe("subagent task shape migration", () => {
+  const shapeColumns = ["task_kind", "background", "command", "effort", "activity_id", "model_source", "steps_json"];
+
+  it("upgrades a schema 110 database, keeps delegated traces as agents and bounds every new column", async () => {
+    const directory = await temporaryDirectory("inertia-subagent-shape-");
+    const workspace = join(directory, "workspace");
+    await mkdir(workspace);
+    const path = join(directory, "inertia.sqlite");
+    const store = new RuntimeStore(path, workspace, { recoverInterruptedRuns: false });
+    let original: SubagentTrace;
+    try {
+      const project = store.createProject("Shape", workspace);
+      const conversation = store.createConversation(project.id, "Delegated", {
+        modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }),
+      });
+      const { turn } = store.beginAgentTurn({
+        conversationId: conversation.id,
+        runId: "run-shape",
+        content: "Delegate before the upgrade.",
+        providerId: "claude",
+        modelSelection: conversation.modelSelection,
+        reasoningEffort: "",
+        interactionMode: "build",
+        accessMode: "supervised",
+        configurationRevision: conversation.modelSelection.backendConfigurationRevision,
+        association: "authoritative",
+      });
+      original = store.upsertSubagentTrace({
+        conversationId: conversation.id,
+        runId: turn.runId,
+        turnId: turn.id,
+        providerId: "claude",
+        providerTaskId: "task-before",
+        providerAgentId: null,
+        parentProviderAgentId: null,
+        parentProviderToolUseId: null,
+        providerToolUseId: "tool-before",
+        providerRole: "reviewer",
+        providerName: null,
+        status: "completed",
+        isLive: false,
+        description: "Review the change.",
+        progress: null,
+        result: "Looks right.",
+        sequence: 1,
+      })!.trace;
+    } finally {
+      store.close();
+    }
+
+    const reference = new Database(":memory:");
+    const database = new Database(path);
+    try {
+      migrateRuntimeDatabase(reference, 110);
+      for (const column of shapeColumns) database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
+      database.prepare("DELETE FROM schema_migrations WHERE version >= 111").run();
+      expect(database.pragma("table_info(subagent_traces)")).toEqual(reference.pragma("table_info(subagent_traces)"));
+      const before = database.prepare("SELECT * FROM subagent_traces ORDER BY id").all();
+      const history = database.prepare("SELECT * FROM schema_migrations WHERE version <= 110 ORDER BY version").all();
+
+      migrateRuntimeDatabase(database);
+
+      expect(database.prepare("SELECT * FROM subagent_traces ORDER BY id").all()).toEqual(before.map((row) => ({
+        ...(row as object),
+        ...Object.fromEntries(shapeColumns.map((column) => [column, null])),
+        task_kind: "agent",
+      })));
+      expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 110 ORDER BY version").all()).toEqual(history);
+      expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+      const write = (column: string, value: unknown) => database
+        .prepare(`UPDATE subagent_traces SET ${column} = ? WHERE id = ?`).run(value, original.id);
+      expect(() => write("task_kind", "shell")).not.toThrow();
+      expect(() => write("task_kind", "daemon")).toThrow(/CHECK constraint failed/u);
+      expect(() => write("task_kind", null)).toThrow(/NOT NULL constraint failed/u);
+      expect(() => write("background", 1)).not.toThrow();
+      expect(() => write("background", 2)).toThrow(/CHECK constraint failed/u);
+      expect(() => write("command", "npm test")).not.toThrow();
+      expect(() => write("command", "")).toThrow(/CHECK constraint failed/u);
+      expect(() => write("command", "c".repeat(4_001))).toThrow(/CHECK constraint failed/u);
+      expect(() => write("effort", "xhigh")).not.toThrow();
+      expect(() => write("effort", "extreme")).toThrow(/CHECK constraint failed/u);
+      expect(() => write("activity_id", "a".repeat(200))).not.toThrow();
+      expect(() => write("activity_id", "a".repeat(201))).toThrow(/CHECK constraint failed/u);
+      expect(() => write("model_source", "observed")).not.toThrow();
+      expect(() => write("model_source", "guessed")).toThrow(/CHECK constraint failed/u);
+      expect(() => write("steps_json", JSON.stringify([{ label: "Read", status: "running" }]))).not.toThrow();
+      expect(() => write("steps_json", "{}")).toThrow(/CHECK constraint failed/u);
+      expect(() => write("steps_json", "not json")).toThrow(/CHECK constraint failed/u);
+      expect(() => write("steps_json", JSON.stringify(["x".repeat(4_100)]))).toThrow(/CHECK constraint failed/u);
+      expect(database.pragma("foreign_key_check")).toEqual([]);
+      expect(database.pragma("quick_check", { simple: true })).toBe("ok");
+      const schemaVersion = database.pragma("schema_version", { simple: true });
+      migrateRuntimeDatabase(database);
+      expect(database.pragma("schema_version", { simple: true })).toBe(schemaVersion);
+    } finally {
+      reference.close();
+      database.close();
+    }
+
+    const upgraded = new RuntimeStore(path, workspace, { recoverInterruptedRuns: false });
+    try {
+      const raw = new Database(path);
+      raw.prepare(`UPDATE subagent_traces SET task_kind = 'agent', background = NULL, command = NULL,
+        effort = NULL, activity_id = NULL, model_source = NULL, steps_json = NULL WHERE id = ?`).run(original.id);
+      raw.close();
+      expect(upgraded.subagentTrace(original.id)).toEqual({
+        ...original,
+        taskKind: "agent",
+        background: null,
+        command: null,
+        effort: null,
+        activityId: null,
+        modelSource: null,
+        steps: null,
+      });
+    } finally {
+      upgraded.close();
+    }
+  });
+
+  it("tolerates task shape columns that already exist", () => {
+    const database = new Database(":memory:");
+    try {
+      migrateRuntimeDatabase(database, 110);
+      database.exec("ALTER TABLE subagent_traces ADD COLUMN task_kind TEXT NOT NULL DEFAULT 'agent'");
+      database.exec("ALTER TABLE subagent_traces ADD COLUMN steps_json TEXT");
+      expect(() => migrateRuntimeDatabase(database)).not.toThrow();
+      const columns = (database.pragma("table_info(subagent_traces)") as Array<{ name: string }>).map(({ name }) => name);
+      for (const column of shapeColumns) expect(columns.filter((name) => name === column)).toHaveLength(1);
+      expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+    } finally {
+      database.close();
+    }
+  });
 });

@@ -10,7 +10,9 @@ import type {
   AgentTurn,
   ChatMessage,
   ConversationLatestTurnSummary,
+  SubagentTrace,
 } from "../../src/shared/contracts";
+import { taskTrace } from "./background-task-fixtures";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 
@@ -79,6 +81,22 @@ function message(index: number): ChatMessage {
   };
 }
 
+/** Codex child agents have no tool row, so every turn also carries a compact delegated row. */
+function childAgent(index: number, live: boolean): SubagentTrace {
+  return taskTrace({
+    id: `trace-${index}`,
+    conversationId,
+    runId: `run-${index}`,
+    turnId: `turn-${index}`,
+    providerId: "codex",
+    providerToolUseId: `collab-${index}`,
+    description: `Child review ${index}`,
+    status: live ? "running" : "completed",
+    isLive: live,
+    steps: [{ label: `Command · npm test ${index}`, status: live ? "running" : "completed" }],
+  });
+}
+
 function rect(top: number, height: number): DOMRect {
   return {
     x: 0,
@@ -140,6 +158,7 @@ describe("accepted turn viewport anchoring", () => {
             autoCollapseWorkLog
             showChangedFileSummaries={false}
             checkpointRestoreDisabled={false}
+            subagents={Array.from({ length: count }, (_, index) => childAgent(index + 1, index + 1 === count))}
             turnAnchorId={anchorId}
             followsLatest={followsLatest}
             scrollElementRef={scrollElementRef}
@@ -229,6 +248,7 @@ describe("accepted turn viewport anchoring", () => {
       while (frames.length > 0) frames.shift()!(performance.now());
     });
 
+    expect(acceptedTurn.querySelector('[data-subagent-trace="trace-2"]')).not.toBeNull();
     expect(scroll.scrollTop).toBe(400);
     expect(acceptedTurn.getBoundingClientRect().top).toBe(8);
     expect(settled).toHaveBeenCalledOnce();

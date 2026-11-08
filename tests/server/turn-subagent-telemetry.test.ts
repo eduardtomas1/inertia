@@ -168,6 +168,38 @@ describe("subagent telemetry coalescing", () => {
     });
   });
 
+  it("coalesces step snapshots like activity and keeps the latest one", async () => {
+    const { writes, emit, stored } = await projectorFixture();
+    emit(1);
+    emit(2, { steps: [{ label: "Read · a.ts", status: "running" }], activity: "Read · a.ts" });
+    emit(3, { steps: [{ label: "Read · a.ts", status: "completed" }, { label: "Bash · npm test", status: "running" }] });
+    emit(4, { usage: usage(30) });
+    expect(writes).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1_000);
+    expect(writes).toHaveBeenCalledTimes(2);
+    expect(stored()[0]).toMatchObject({
+      sequence: 4,
+      activity: "Read · a.ts",
+      steps: [{ label: "Read · a.ts", status: "completed" }, { label: "Bash · npm test", status: "running" }],
+      usage: usage(30),
+    });
+  });
+
+  it("writes a new task shape at once instead of holding it with telemetry", async () => {
+    const { writes, emit, stored } = await projectorFixture();
+    emit(1, { taskKind: "shell", background: false, command: "npm test" });
+    emit(2, { taskKind: "shell", background: false, command: "npm test", activity: "Running" });
+    expect(writes).toHaveBeenCalledTimes(1);
+    emit(3, { taskKind: "shell", background: true, command: "npm test" });
+    expect(writes.mock.calls.map(([input]) => input.sequence)).toEqual([1, 2, 3]);
+    emit(4, { taskKind: "shell", background: true, command: "npm run build" });
+    expect(writes.mock.calls.map(([input]) => input.sequence)).toEqual([1, 2, 3, 4]);
+    emit(5, { taskKind: "shell", background: true, command: "npm run build", effort: "low" });
+    expect(writes.mock.calls.map(([input]) => input.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(stored()[0]).toMatchObject({ taskKind: "shell", background: true, command: "npm run build", sequence: 5 });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("writes telemetry immediately once the window has elapsed", async () => {
     const { writes, emit } = await projectorFixture();
     emit(1);
@@ -343,6 +375,187 @@ describe("subagent telemetry settlement", () => {
       usage: usage(321),
     });
     expect(runtime.scheduler.callbacks.size).toBe(0);
+    runtime.store.close();
+  });
+});
+
+describe("remote agents at turn end", () => {
+  it("completes the turn normally and leaves a live remote agent running in the cloud", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Review in the cloud." });
+    runtime.controller.start(queued.turn.id);
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 1, providerTaskId: "cloud-task", providerToolUseId: "tool-cloud", status: "running", isLive: true,
+      providerStatus: "remote_launched", taskKind: "remote", background: true, description: "Review in the cloud",
+    });
+    await flushTurnControllerTestPromises();
+    expect(runtime.store.agentTurn(queued.turn.id).status).toBe("running");
+    runtime.provider.resolve({ status: "completed" });
+    await flushTurnControllerTestPromises();
+    await runtime.controller.drainSettlementTasks();
+    expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed");
+    expect(runtime.store.conversationDetail(runtime.conversationId)?.subagents).toEqual([
+      expect.objectContaining({ taskKind: "remote", status: "unknown", isLive: false, progress: "Running in the cloud." }),
+    ]);
+    runtime.store.close();
+  });
+});
+
+const STOP_UNCONFIRMED_NOTE = "The provider process could not be confirmed stopped; it may still be running.";
+
+function notedActivities(runtime: Awaited<ReturnType<typeof createTurnControllerTestRuntime>>, turnId: string) {
+  return (runtime.store.conversationDetail(runtime.conversationId)?.activities ?? []).filter((activity) =>
+    activity.turnId === turnId && `${activity.title}
+${activity.detail ?? ""}`.includes(STOP_UNCONFIRMED_NOTE));
+}
+
+describe("background commands at turn end", () => {
+  it.each([
+    ["confirmed", "settled", "Stopped", { status: "cancelled" }],
+    ["unconfirmed", "force-detached", `Stopped. ${STOP_UNCONFIRMED_NOTE}`, { status: "unknown", progress: "May still be running: the provider did not confirm it stopped." }],
+  ] as const)("settles a live background command by whether provider cleanup was %s", async (_label, outcome, detail, expected) => {
+    const runtime = await createTurnControllerTestRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Serve the app." });
+    runtime.controller.start(queued.turn.id);
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 1, providerTaskId: "shell-dev", status: "running", isLive: true,
+      taskKind: "shell", background: true, command: "npm run dev",
+    });
+    await flushTurnControllerTestPromises();
+    runtime.provider.deferOwnedStop(outcome);
+    expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
+    runtime.provider.resolveOwnedStop();
+    await runtime.controller.waitForProviderCleanup([runtime.conversationId]);
+    await flushTurnControllerTestPromises();
+    const [trace] = runtime.store.conversationDetail(runtime.conversationId)!.subagents;
+    expect(trace).toMatchObject({ taskKind: "shell", isLive: false, ...expected });
+    expect(runtime.store.workspaceRun(queued.turn.runId).detail).toBe(detail);
+    runtime.store.close();
+  });
+
+  it("notes a completed turn's unconfirmed cleanup once and leaves its live background command unknown", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Serve the app." });
+    runtime.controller.start(queued.turn.id);
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 1, providerTaskId: "shell-dev", status: "running", isLive: true,
+      taskKind: "shell", background: true, command: "npm run dev",
+    });
+    await flushTurnControllerTestPromises();
+    let released = false;
+    const isRunning = runtime.provider.isRunning.bind(runtime.provider);
+    vi.spyOn(runtime.provider, "isRunning").mockImplementation((id) => !released && isRunning(id));
+    vi.spyOn(runtime.provider, "stopOwned").mockImplementation(async () => {
+      released = true;
+      return "force-detached";
+    });
+    runtime.provider.resolve({ status: "completed", sessionId: "provider-session" });
+    await flushTurnControllerTestPromises();
+    await runtime.controller.drainSettlementTasks();
+    expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed");
+    expect(runtime.store.workspaceRun(queued.turn.runId).detail).toBe(STOP_UNCONFIRMED_NOTE);
+    expect(notedActivities(runtime, queued.turn.id)).toEqual([expect.objectContaining({
+      kind: "status", title: STOP_UNCONFIRMED_NOTE, status: "completed",
+    })]);
+    expect(runtime.store.conversationDetail(runtime.conversationId)?.subagents).toEqual([
+      expect.objectContaining({
+        taskKind: "shell", status: "unknown", isLive: false,
+        progress: "May still be running: the provider did not confirm it stopped.",
+      }),
+    ]);
+    vi.restoreAllMocks();
+    runtime.store.close();
+  });
+});
+
+describe("subagent controls", () => {
+  async function claudeRuntime() {
+    const runtime = await createTurnControllerTestRuntime({}, {
+      modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }),
+    });
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Delegate." });
+    runtime.controller.start(queued.turn.id);
+    const traceFor = (providerToolUseId: string) => runtime.store.conversationDetail(runtime.conversationId)!
+      .subagents.find((trace) => trace.providerToolUseId === providerToolUseId)!;
+    return { runtime, traceFor };
+  }
+
+  it("keeps an agent Claude has not given a task id yet live while its Stop is held", async () => {
+    const { runtime, traceFor } = await claudeRuntime();
+    runtime.provider.queuedStopOutcome = "queued";
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 1,
+      providerTaskId: null,
+      providerAgentId: "agent-early",
+      providerToolUseId: "tool-early",
+      status: "running",
+      isLive: true,
+      progress: "Reading",
+    });
+    const trace = traceFor("tool-early");
+    const broadcasts = runtime.events.length;
+    expect(await runtime.controller.stopSubagent(runtime.conversationId, trace.id)).toBe(true);
+    expect(runtime.provider.stoppedSubagentIds).toEqual(["tool:tool-early"]);
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({ status: "running", isLive: true, progress: "Stop requested." });
+    expect(runtime.events.slice(broadcasts)).toContainEqual(expect.objectContaining({
+      type: "agent.subagent.updated",
+      trace: expect.objectContaining({ id: trace.id, isLive: true, progress: "Stop requested." }),
+    }));
+    expect(await runtime.controller.stopSubagent(runtime.conversationId, trace.id)).toBe(true);
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({ isLive: true, progress: "Stop requested." });
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 2, providerTaskId: "task-early", providerAgentId: "agent-early", providerToolUseId: "tool-early",
+      status: "cancelled", isLive: false, providerStatus: "stopped", progress: "Stopped by the user.",
+    });
+    await flushTurnControllerTestPromises();
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({ status: "cancelled", isLive: false, progress: "Stopped by the user." });
+    expect(await runtime.controller.stopSubagent(runtime.conversationId, trace.id)).toBe(false);
+    runtime.provider.resolve();
+    await flushTurnControllerTestPromises();
+    runtime.store.close();
+  });
+
+  it("settles a held Stop's agent with the turn when Claude never starts its task", async () => {
+    const { runtime, traceFor } = await claudeRuntime();
+    runtime.provider.queuedStopOutcome = "queued";
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 1, providerTaskId: null, providerAgentId: "agent-never", providerToolUseId: "tool-never",
+      status: "running", isLive: true,
+    });
+    const trace = traceFor("tool-never");
+    expect(await runtime.controller.stopSubagent(runtime.conversationId, trace.id)).toBe(true);
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({ isLive: true, progress: "Stop requested." });
+    runtime.provider.resolve();
+    await flushTurnControllerTestPromises();
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({ status: "lost", isLive: false });
+    runtime.store.close();
+  });
+
+  it("moves only a live foreground Claude agent to the background and reports why it could not", async () => {
+    const { runtime, traceFor } = await claudeRuntime();
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 1, providerTaskId: "task-fg", providerToolUseId: "tool-fg", status: "running", isLive: true, background: false,
+    });
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 2, providerTaskId: "task-bg", providerToolUseId: "tool-bg", status: "running", isLive: true, background: true,
+    });
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 3, providerTaskId: "task-shell", providerToolUseId: "tool-shell", status: "running", isLive: true,
+      background: false, taskKind: "shell", command: "npm test",
+    });
+    expect(await runtime.controller.backgroundSubagent(runtime.conversationId, traceFor("tool-fg").id))
+      .toMatchObject({ moved: true });
+    expect(runtime.provider.backgroundedToolUseIds).toEqual(["tool-fg"]);
+    for (const toolUseId of ["tool-bg", "tool-shell"]) {
+      expect(await runtime.controller.backgroundSubagent(runtime.conversationId, traceFor(toolUseId).id))
+        .toEqual({ moved: false, error: "That Claude agent is no longer running in the foreground." });
+    }
+    runtime.provider.backgroundResult = { moved: false, error: "Background tasks are disabled for this session (CLAUDE_CODE_DISABLE_BACKGROUND_TASKS)" };
+    expect(await runtime.controller.backgroundSubagent(runtime.conversationId, traceFor("tool-fg").id))
+      .toEqual({ moved: false, error: "Background tasks are disabled for this session (CLAUDE_CODE_DISABLE_BACKGROUND_TASKS)" });
+    expect(runtime.provider.backgroundedToolUseIds).toEqual(["tool-fg", "tool-fg"]);
+    runtime.provider.resolve();
+    await flushTurnControllerTestPromises();
     runtime.store.close();
   });
 });

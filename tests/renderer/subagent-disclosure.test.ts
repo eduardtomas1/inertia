@@ -7,6 +7,7 @@ import type {
 import { compactSubagentDisclosureRows } from "../../src/renderer/src/utils/subagentCompactRows";
 import {
   canFollowUpSubagentTrace,
+  canBackgroundSubagentTrace,
   canStopSubagentTrace,
   subagentDisclosureRows,
   subagentDisclosureStats,
@@ -47,6 +48,13 @@ function trace(
     usage: null,
     toolUseCount: null,
     durationMs: null,
+    modelSource: null,
+    taskKind: "agent",
+    background: null,
+    command: null,
+    effort: null,
+    activityId: null,
+    steps: null,
     sequence: 1,
     createdAt: "2030-01-01T00:00:00.000Z",
     updatedAt: "2030-01-01T00:00:00.000Z",
@@ -133,9 +141,13 @@ describe("inline delegated-agent disclosure", () => {
       turn({ harnessId: "claude-cli" }),
     ])).toBe(false);
     expect(canStopSubagentTrace(
-      trace({ providerTaskId: null }),
+      trace({ providerTaskId: null, providerToolUseId: null }),
       [turn()],
     )).toBe(false);
+    expect(canStopSubagentTrace(
+      trace({ providerTaskId: null, providerToolUseId: "tool-queued" }),
+      [turn()],
+    )).toBe(true);
     expect(canStopSubagentTrace(
       trace({ status: "completed", isLive: false }),
       [turn()],
@@ -146,6 +158,16 @@ describe("inline delegated-agent disclosure", () => {
         completedAt: "2030-01-01T00:01:00.000Z",
       }),
     ])).toBe(false);
+  });
+
+  it("offers Move to background only for a live foreground Claude agent", () => {
+    const foreground = trace({ background: false, providerToolUseId: "tool-fg" });
+    expect(canBackgroundSubagentTrace(foreground, [turn()])).toBe(true);
+    expect(canBackgroundSubagentTrace({ ...foreground, background: true }, [turn()])).toBe(false);
+    expect(canBackgroundSubagentTrace({ ...foreground, background: null }, [turn()])).toBe(false);
+    expect(canBackgroundSubagentTrace({ ...foreground, taskKind: "shell" }, [turn()])).toBe(false);
+    expect(canBackgroundSubagentTrace({ ...foreground, providerToolUseId: null }, [turn()])).toBe(false);
+    expect(canBackgroundSubagentTrace(foreground, [turn({ harnessId: "claude-cli" })])).toBe(false);
   });
 
   it("derives parent guidance and route identity from the persisted owner turn", () => {

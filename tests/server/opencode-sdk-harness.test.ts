@@ -2052,6 +2052,13 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(latest("opencode-child-session")).toMatchObject({
       parentProviderAgentId: null,
       providerName: "Inspect parser (@explore subagent)",
+      providerRole: "explore",
+      providerToolUseId: "root-task-call",
+      modelSource: "observed",
+      steps: [
+        { label: "read · src/parser.ts", status: "completed" },
+        { label: "task · Check grammar", status: "running" },
+      ],
       description: "Read the parser and report",
       status: "completed",
       isLive: false,
@@ -2071,6 +2078,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     });
     expect(latest("opencode-grandchild-session")).toMatchObject({
       parentProviderAgentId: "opencode-child-session",
+      providerToolUseId: "child-task-call",
       providerName: "Check grammar (@general subagent)",
       description: "Validate the grammar file",
       status: "completed",

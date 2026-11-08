@@ -1,10 +1,29 @@
-import type { SubagentTraceStatus } from "../../shared/contracts";
+import type { SubagentTaskStep, SubagentTraceStatus } from "../../shared/contracts";
+import {
+  MAX_SUBAGENT_LABEL_CHARS,
+  MAX_SUBAGENT_STEP_LABEL_CHARS,
+  MAX_SUBAGENT_STEPS,
+  MAX_SUBAGENT_STEPS_JSON_CHARS,
+} from "../../shared/subagent-task-limits";
 
-export const MAX_SUBAGENT_DESCRIPTION_CHARS = 4_000;
-export const MAX_SUBAGENT_PROGRESS_CHARS = 4_000;
-export const MAX_SUBAGENT_RESULT_CHARS = 16_000;
+export {
+  MAX_SUBAGENT_ACTIVITY_ID_CHARS,
+  MAX_SUBAGENT_COMMAND_CHARS,
+  MAX_SUBAGENT_DESCRIPTION_CHARS,
+  MAX_SUBAGENT_LABEL_CHARS,
+  MAX_SUBAGENT_PROGRESS_CHARS,
+  MAX_SUBAGENT_RESULT_CHARS,
+  MAX_SUBAGENT_STEP_LABEL_CHARS,
+  MAX_SUBAGENT_STEPS,
+  MAX_SUBAGENT_STEPS_JSON_CHARS,
+} from "../../shared/subagent-task-limits";
+
 export const MAX_SUBAGENT_TRACES_PER_TURN = 128;
-export const MAX_SUBAGENT_LABEL_CHARS = 200;
+/**
+ * Background commands, monitors and MCP tasks share the per-turn trace cap
+ * with delegated agents but may never take more than half of it.
+ */
+export const MAX_SUBAGENT_NON_AGENT_TRACES_PER_TURN = 64;
 export const MAX_SUBAGENT_TOOL_USE_COUNT = 1_000_000;
 export const MAX_SUBAGENT_DURATION_MS = 31 * 24 * 60 * 60 * 1_000;
 
@@ -85,4 +104,42 @@ export function boundedSubagentLabel(
   const lastUnit = text.charCodeAt(maxChars - 1);
   const end = lastUnit >= 0xd800 && lastUnit <= 0xdbff ? maxChars - 1 : maxChars;
   return text.slice(0, end).trim() || null;
+}
+
+const SUBAGENT_STEP_STATUSES = new Set<SubagentTaskStep["status"]>([
+  "running",
+  "completed",
+  "failed",
+]);
+
+/**
+ * Keeps at most the most recent allowed steps whose labels survive the given
+ * scrubber, and drops the oldest until the serialized form fits its column.
+ */
+export function boundedSubagentSteps(
+  value: unknown,
+  label: (text: string) => string | null,
+): SubagentTaskStep[] | null {
+  if (!Array.isArray(value)) return null;
+  const steps: SubagentTaskStep[] = [];
+  for (const candidate of value.slice(-MAX_SUBAGENT_STEPS)) {
+    if (typeof candidate !== "object" || candidate === null) continue;
+    const { label: rawLabel, status } = candidate as Record<string, unknown>;
+    if (typeof rawLabel !== "string" || !SUBAGENT_STEP_STATUSES.has(status as SubagentTaskStep["status"])) continue;
+    const text = boundedSubagentLabel(label(rawLabel), MAX_SUBAGENT_STEP_LABEL_CHARS);
+    if (text) steps.push({ label: text, status: status as SubagentTaskStep["status"] });
+  }
+  while (steps.length > 0 && JSON.stringify(steps).length > MAX_SUBAGENT_STEPS_JSON_CHARS) {
+    steps.shift();
+  }
+  return steps.length > 0 ? steps : null;
+}
+
+export function subagentTaskStepsFromJson(value: string | null): SubagentTaskStep[] | null {
+  if (value === null) return null;
+  try {
+    return boundedSubagentSteps(JSON.parse(value), (text) => text);
+  } catch {
+    return null;
+  }
 }

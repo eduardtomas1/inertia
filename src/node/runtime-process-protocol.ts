@@ -1,7 +1,6 @@
 import type { RuntimeWorkerOptions } from "./runtime-worker-options";
 import { parseRuntimeDocumentPreparationEvent, parseRuntimeDocumentPreparationResult, type RuntimeDocumentPreparationEvent, type RuntimeDocumentPreparationResult } from "./runtime-document-preparation-protocol";
 import { parseWindowsTerminalAuthority } from "./windows-terminal-authority";
-import { snapshotSourceSchema } from "../shared/snapshots";
 import { parseDiagnosticIncident } from "../shared/application-diagnostics.js";
 import { parseRuntimeRestartRequestedEvent, type RuntimeRestartRequestedEvent } from "./runtime-owned-process-diagnostic.js";
 import { isMascotFocus } from "../shared/mascot.js";
@@ -10,19 +9,28 @@ import { isAbsolute } from "node:path";
 import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
 import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
 import { parseRuntimeIssueEvidenceRequest, parseRuntimeIssueEvidenceResult, type RuntimeIssueEvidenceRequest, type RuntimeIssueEvidenceResult } from "./runtime-issue-evidence-protocol";
+import {
+  parseRuntimeAttachmentConversationsEvent,
+  parseRuntimeAttachmentConversationsQuery,
+  parseRuntimeAttachmentReleaseResult,
+  parseRuntimeAttachmentRelinquishResult,
+  parseRuntimeAttachmentResult,
+  type RuntimeAttachmentConversationsEvent,
+  type RuntimeAttachmentConversationsQuery,
+  type RuntimeAttachmentReleaseResult,
+  type RuntimeAttachmentRelinquishResult,
+  type RuntimeAttachmentResult,
+} from "./runtime-attachment-protocol";
 import { parseRuntimeHtmlRenderEvent, parseRuntimeHtmlRenderReadCommand, type RuntimeHtmlRenderEvent, type RuntimeHtmlRenderReadCommand } from "./runtime-html-render-protocol";
-import { parseRuntimeCredentialRequest, parseRuntimeCredentialResult,
-  type RuntimeCredentialRequest, type RuntimeCredentialResult } from "./runtime-credential-protocol";
-export type { RuntimeCredentialOperation, RuntimeCredentialFailureCode, RuntimeCredentialResult } from "./runtime-credential-protocol";
+import {
+  isBackendCredentialGeneration,
+  isBackendCredentialSecret,
+  isBackendSecretReference,
+} from "../shared/backend-credentials";
 import {
   claudeCompatibleBackendProfileSchema,
   type ClaudeCompatibleBackendProfile,
 } from "../shared/claude-backend-profiles";
-import {
-  ACCEPTED_ATTACHMENT_MIME_TYPES,
-  MAX_ATTACHMENT_BYTES,
-} from "../shared/attachments";
-import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments";
 import {
   privateConnectRuntimeAuthorizationSchema,
   privateConnectRuntimeRequestSchema,
@@ -68,6 +76,12 @@ export type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } 
 export type { RuntimeConversationAttachmentStoreResult }
   from "./conversation-attachment-store-protocol";
 export type { RuntimeWorkerOptions } from "./runtime-worker-options";
+export type {
+  RuntimeAttachmentFailureCode,
+  RuntimeAttachmentReleaseResult,
+  RuntimeAttachmentRelinquishResult,
+  RuntimeAttachmentResult,
+} from "./runtime-attachment-protocol";
 export interface RuntimePrivateConnectPromptPreparation {
   preparationId: string;
 }
@@ -99,6 +113,7 @@ export type RuntimeWorkerCommand =
     }
   | RuntimeUpdateWorkerCommand
   | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
+  | RuntimeAttachmentConversationsQuery
   | RuntimeHtmlRenderReadCommand
   | {
       type: "runtime.private-connect-request";
@@ -143,50 +158,37 @@ export type RuntimeWorkerCommand =
   | RuntimeDocumentPreparationResult
   | RuntimeSecureFileResult | RuntimeAgentBrowserResult | RuntimeIssueEvidenceResult;
 
-export type RuntimeAttachmentFailureCode = "not-found" | "unavailable" | "invalid";
-
-export type RuntimeAttachmentResult =
+export type RuntimeCredentialOperation = "resolve" | "status" | "clear" | "forget";
+export type RuntimeCredentialFailureCode = "not-found" | "unavailable" | "invalid";
+export type RuntimeCredentialResult =
   | {
-      type: "runtime.attachment-result";
+      type: "runtime.credential-result";
       requestId: string;
+      operation: "resolve";
       ok: true;
-      attachment: TrustedRuntimeAttachment;
+      secret: string;
     }
   | {
-      type: "runtime.attachment-result";
+      type: "runtime.credential-result";
       requestId: string;
-      ok: false;
-      code: RuntimeAttachmentFailureCode;
-      message: string;
-    };
-
-export type RuntimeAttachmentReleaseResult =
-  | {
-      type: "runtime.attachment-release-result";
-      requestId: string;
+      operation: "status";
       ok: true;
-      released: boolean;
+      hasSecret: boolean;
+      credentialGeneration: string | null;
     }
   | {
-      type: "runtime.attachment-release-result";
+      type: "runtime.credential-result";
       requestId: string;
-      ok: false;
-      code: RuntimeAttachmentFailureCode;
-      message: string;
-    };
-
-export type RuntimeAttachmentRelinquishResult =
-  | {
-      type: "runtime.attachment-relinquish-result";
-      requestId: string;
+      operation: "clear" | "forget";
       ok: true;
-      relinquished: boolean;
+      removed: boolean;
     }
   | {
-      type: "runtime.attachment-relinquish-result";
+      type: "runtime.credential-result";
       requestId: string;
+      operation: RuntimeCredentialOperation;
       ok: false;
-      code: RuntimeAttachmentFailureCode;
+      code: RuntimeCredentialFailureCode;
       message: string;
     };
 
@@ -273,12 +275,17 @@ export type RuntimeWorkerEvent =
     }
   | RuntimeConversationAttachmentStoreEvent
   | RuntimeDocumentPreparationEvent
-  | RuntimeCredentialRequest
+  | {
+      type: "runtime.credential-request";
+      requestId: string;
+      operation: RuntimeCredentialOperation;
+      secretReference: string;
+    }
   | ({
       type: "runtime.secure-file-request";
       requestId: string;
     } & SecureFileRequest)
-  | RuntimeAgentBrowserEvent | RuntimeIssueEvidenceRequest | RuntimeHtmlRenderEvent;
+  | RuntimeAgentBrowserEvent | RuntimeIssueEvidenceRequest | RuntimeHtmlRenderEvent | RuntimeAttachmentConversationsEvent;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -349,6 +356,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const browserResult = parseRuntimeAgentBrowserResult(value); if (browserResult) return browserResult;
   if (value.type === "runtime.issue-evidence-result") return parseRuntimeIssueEvidenceResult(value);
   if (value.type === "runtime.read-html-render") return parseRuntimeHtmlRenderReadCommand(value);
+  if (value.type === "runtime.attachment-conversations") return parseRuntimeAttachmentConversationsQuery(value);
   if (
     value.type === "runtime.secure-file-result"
     && Object.keys(value).length === 3
@@ -672,6 +680,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   const browserEvent = parseRuntimeAgentBrowserEvent(value); if (browserEvent) return browserEvent;
   if (value.type === "runtime.issue-evidence-request") return parseRuntimeIssueEvidenceRequest(value);
   const htmlRenderEvent = parseRuntimeHtmlRenderEvent(value); if (htmlRenderEvent) return htmlRenderEvent;
+  const attachmentConversations = parseRuntimeAttachmentConversationsEvent(value); if (attachmentConversations) return attachmentConversations;
   const recoveryEvent = parseRuntimeRecoveryWorkerEvent(value);
   if (recoveryEvent) return recoveryEvent;
   const shutdownEvent = parseRuntimeShutdownUnconfirmedEvent(value);
@@ -781,7 +790,26 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       attachmentId: value.attachmentId,
     };
   }
-  if (value.type === "runtime.credential-request") return parseRuntimeCredentialRequest(value);
+  if (
+    value.type === "runtime.credential-request"
+    && Object.keys(value).length === 4
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+    && (
+      value.operation === "resolve"
+      || value.operation === "status"
+      || value.operation === "clear"
+      || value.operation === "forget"
+    )
+    && isBackendSecretReference(value.secretReference)
+  ) {
+    return {
+      type: "runtime.credential-request",
+      requestId: value.requestId,
+      operation: value.operation,
+      secretReference: value.secretReference,
+    };
+  }
   if (
     value.type === "runtime.secure-file-request"
     && typeof value.requestId === "string"
@@ -935,154 +963,87 @@ function parseRuntimePrivateConnectForgetScope(
   return null;
 }
 
-function parseRuntimeAttachmentRelinquishResult(
+function parseRuntimeCredentialResult(
   value: Record<string, unknown>,
-): RuntimeAttachmentRelinquishResult | null {
+): RuntimeCredentialResult | null {
   if (
     typeof value.requestId !== "string"
     || !UUID_PATTERN.test(value.requestId)
-    || typeof value.ok !== "boolean"
-  ) return null;
-  if (!value.ok) {
-    if (
-      Object.keys(value).length !== 5
-      || (
-        value.code !== "not-found"
-        && value.code !== "unavailable"
-        && value.code !== "invalid"
-      )
-      || typeof value.message !== "string"
-    ) return null;
-    const message = value.message.trim();
-    return message.length > 0 && message.length <= 300
-      ? {
-          type: "runtime.attachment-relinquish-result",
-          requestId: value.requestId,
-          ok: false,
-          code: value.code,
-          message,
-        }
-      : null;
-  }
-  return Object.keys(value).length === 4
-    && typeof value.relinquished === "boolean"
-    ? {
-        type: "runtime.attachment-relinquish-result",
-        requestId: value.requestId,
-        ok: true,
-        relinquished: value.relinquished,
-      }
-    : null;
-}
-
-function parseRuntimeAttachmentReleaseResult(
-  value: Record<string, unknown>,
-): RuntimeAttachmentReleaseResult | null {
-  if (
-    typeof value.requestId !== "string"
-    || !UUID_PATTERN.test(value.requestId)
-    || typeof value.ok !== "boolean"
-  ) return null;
-  if (!value.ok) {
-    if (
-      Object.keys(value).length !== 5
-      || (
-        value.code !== "not-found"
-        && value.code !== "unavailable"
-        && value.code !== "invalid"
-      )
-      || typeof value.message !== "string"
-    ) return null;
-    const message = value.message.trim();
-    return message.length > 0 && message.length <= 300
-      ? {
-          type: "runtime.attachment-release-result",
-          requestId: value.requestId,
-          ok: false,
-          code: value.code,
-          message,
-        }
-      : null;
-  }
-  return Object.keys(value).length === 4
-    && typeof value.released === "boolean"
-    ? {
-        type: "runtime.attachment-release-result",
-        requestId: value.requestId,
-        ok: true,
-        released: value.released,
-      }
-    : null;
-}
-
-function parseRuntimeAttachmentResult(
-  value: Record<string, unknown>,
-): RuntimeAttachmentResult | null {
-  if (
-    typeof value.requestId !== "string"
-    || !UUID_PATTERN.test(value.requestId)
-    || typeof value.ok !== "boolean"
-  ) return null;
-  if (!value.ok) {
-    if (
-      Object.keys(value).length !== 5
-      || (
-        value.code !== "not-found"
-        && value.code !== "unavailable"
-        && value.code !== "invalid"
-      )
-      || typeof value.message !== "string"
-    ) return null;
-    const message = value.message.trim();
-    return message.length > 0 && message.length <= 300
-      ? {
-          type: "runtime.attachment-result",
-          requestId: value.requestId,
-          ok: false,
-          code: value.code,
-          message,
-        }
-      : null;
-  }
-  if (
-    Object.keys(value).length !== 4
-    || !plainObject(value.attachment)
-  ) return null;
-  const attachment = value.attachment;
-  if (
-    Object.keys(attachment).length !== (attachment.snapshot === undefined ? 6 : 7)
-    || (attachment.snapshot !== undefined && !snapshotSourceSchema.safeParse(attachment.snapshot).success)
-    || typeof attachment.id !== "string"
-    || !UUID_PATTERN.test(attachment.id)
-    || typeof attachment.name !== "string"
-    || attachment.name.length < 1
-    || attachment.name.length > 255
-    || /[\0-\x1f\x7f]/u.test(attachment.name)
-    || !runtimePath(attachment.path)
-    || !(ACCEPTED_ATTACHMENT_MIME_TYPES as readonly unknown[]).includes(
-      attachment.mimeType,
+    || (
+      value.operation !== "resolve"
+      && value.operation !== "status"
+      && value.operation !== "clear"
+      && value.operation !== "forget"
     )
-    || typeof attachment.size !== "number"
-    || !Number.isInteger(attachment.size)
-    || attachment.size < 1
-    || attachment.size > MAX_ATTACHMENT_BYTES
-    || typeof attachment.digest !== "string"
-    || !/^[0-9a-f]{64}$/u.test(attachment.digest)
+    || typeof value.ok !== "boolean"
   ) return null;
-  return {
-    type: "runtime.attachment-result",
-    requestId: value.requestId,
-    ok: true,
-    attachment: {
-      id: attachment.id,
-      name: attachment.name,
-      path: attachment.path,
-      mimeType: attachment.mimeType as TrustedRuntimeAttachment["mimeType"],
-      size: attachment.size,
-      digest: attachment.digest,
-      ...(attachment.snapshot ? { snapshot: snapshotSourceSchema.parse(attachment.snapshot) } : {}),
-    },
-  };
+  if (!value.ok) {
+    if (
+      Object.keys(value).length !== 6
+      || (
+        value.code !== "not-found"
+        && value.code !== "unavailable"
+        && value.code !== "invalid"
+      )
+      || typeof value.message !== "string"
+    ) return null;
+    const message = value.message.trim();
+    return message.length > 0 && message.length <= 300
+      ? {
+          type: "runtime.credential-result",
+          requestId: value.requestId,
+          operation: value.operation,
+          ok: false,
+          code: value.code,
+          message,
+        }
+      : null;
+  }
+  if (
+    value.operation === "resolve"
+    && Object.keys(value).length === 5
+    && isBackendCredentialSecret(value.secret)
+  ) {
+    return {
+      type: "runtime.credential-result",
+      requestId: value.requestId,
+      operation: "resolve",
+      ok: true,
+      secret: value.secret,
+    };
+  }
+  if (
+    value.operation === "status"
+    && Object.keys(value).length === 6
+    && typeof value.hasSecret === "boolean"
+    && (
+      value.credentialGeneration === null
+      || isBackendCredentialGeneration(value.credentialGeneration)
+    )
+  ) {
+    return {
+      type: "runtime.credential-result",
+      requestId: value.requestId,
+      operation: "status",
+      ok: true,
+      hasSecret: value.hasSecret,
+      credentialGeneration: value.credentialGeneration,
+    };
+  }
+  if (
+    (value.operation === "clear" || value.operation === "forget")
+    && Object.keys(value).length === 5
+    && typeof value.removed === "boolean"
+  ) {
+    return {
+      type: "runtime.credential-result",
+      requestId: value.requestId,
+      operation: value.operation,
+      ok: true,
+      removed: value.removed,
+    };
+  }
+  return null;
 }
 
 export function isRuntimeWebSocketUrl(value: unknown): value is string {

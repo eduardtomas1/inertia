@@ -1,5 +1,7 @@
 import { usageLimitsRuntime } from "./usage/runtime";
-import { prepareForkSession } from "./runtime/fork-session-service";
+import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
+import { createCliConversationCommandHandler } from "./runtime/commands/cli-conversation-commands";
+import { githubIssuePublisher } from "./git/github-issue-report";
 import { storeMascotStatus } from "./runtime/mascot-status";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
@@ -24,7 +26,7 @@ import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
 import { resolveAuthoritativeProjectPath } from "./project-path";
 import { PROVIDER_IDS, ProviderManager } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
-import { createRateLimitChangeSignal, createTurnUsageRefresh, startIdleRateLimitRefresh, type ProviderUsageRefreshDependencies } from "./runtime/provider-usage-refresh";
+import { createManualUsageRefresh, createRateLimitChangeSignal, createTurnUsageRefresh, startIdleRateLimitRefresh, type ProviderUsageRefreshDependencies } from "./runtime/provider-usage-refresh";
 import { ProviderMaintenanceController } from "./provider/maintenance-controller";
 import type { ProviderMaintenanceTarget } from "./provider/maintenance-capabilities";
 import {
@@ -43,7 +45,6 @@ import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError, userCorrectableRuntimeError } from "./runtime-errors";
 import { ScratchWorkspace } from "./runtime/scratch-workspace";
 import { PostReadyWork, shellSnapshotDigest } from "./runtime/post-ready-work";
-import { checkpointCaptureExecutor } from "./runtime/checkpoint-capture-executor";
 import { isWithinScratchRoot, SCRATCH_RECOVERY_TARGET_REFUSAL } from "./scratch-root";
 import {
   ProjectIdentityRefresher,
@@ -64,20 +65,46 @@ import { createDetachedChatRuntimeSecurity } from "./runtime/detached-chat-runti
 import { SnapshotBroadcastCoalescer } from "./runtime/snapshot-broadcast-coalescer";
 import { WorkspaceRunController } from "./runtime/workspace-run-controller";
 import { startProjectAutoPull } from "./runtime/project-auto-pull";
-import { createRuntimeCommandExecutor } from "./runtime/commands/command-router";
-import { createRuntimeCommandHandlers } from "./runtime/commands/runtime-command-handlers";
+import {
+  createRuntimeCommandExecutor,
+} from "./runtime/commands/command-router";
 import { runtimeSafetyAllowsCommand } from "./runtime/commands/runtime-safety";
+import {
+  createConversationCommandHandler,
+} from "./runtime/commands/conversation-commands";
+import {
+  createDiffReviewCommandHandler,
+} from "./runtime/commands/diff-review-commands";
+import { createDuoCommandHandler } from "./runtime/commands/duo-commands";
 import { createWatcherRuntime, type WatcherRuntime } from "./runtime/watcher/watcher-runtime";
 import { createWatcherTurnPolicy } from "./runtime/watcher/watcher-turn-policy";
+import { watcherAwareTurnHooks } from "./runtime/watcher/watcher-turn-hooks";
+import {
+  createIsolatedReviewCommandHandler,
+} from "./runtime/commands/isolated-review-commands";
+import {
+  createProjectWorkspaceCommandHandler,
+} from "./runtime/commands/project-workspace-commands";
+import {
+  createProviderCommandHandler,
+} from "./runtime/commands/provider-commands";
+import {
+  createSettingsBackendCommandHandler,
+} from "./runtime/commands/settings-backend-commands";
+import { createSourceControlCommandHandler } from "./runtime/commands/source-control-commands";
+import { createTerminalLinkCommandHandler } from "./runtime/commands/terminal-link-commands";
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
-import { createDelegationRuntime, type DelegationRuntime } from "./runtime/delegation/delegation-runtime";
+import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
 import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
+import { createReadCommandHandlers } from "./runtime/commands/read-commands";
+import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
+import { createWorktreeCommandHandler } from "./runtime/commands/worktree-commands";
+import { createLibraryCommandHandler } from "./runtime/commands/library-commands";
+import { createAgentWorkflowCommandHandler } from "./runtime/commands/agent-workflow-commands";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
 import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/agent-thread-runtime";
-import {
-  attachRuntimeWebSocketBoundary,
-} from "./runtime/websocket-boundary";
+import { attachRuntimeWebSocketBoundary } from "./runtime/websocket-boundary";
 import { TrustedAttachmentResolver, conversationAttachmentReadRoots } from "./runtime/attachments/trusted-attachment-resolver";
 import { PrivateGeneratedAttachmentStore } from "./runtime/attachments/private-generated-attachments";
 import { unavailableSecureFileBroker } from "./secure-files";
@@ -87,7 +114,9 @@ import { privateConnectStoreReads } from "./private-connect/store-detail";
 import { queuePrivateConnectPrompt } from "./private-connect/prompt-admission";
 import { createPrivateConnectInputResponder } from "./private-connect/input-response-admission";
 import { PrivateConnectTranscriptCache } from "./private-connect/transcript-cache";
-import { privateConnectPromptSafetyForHarness } from "../shared/private-connect/prompt-safety";
+import {
+  privateConnectPromptSafetyForHarness,
+} from "../shared/private-connect/prompt-safety";
 import {
   writeDatabaseRecoveryExportFile,
 } from "./persistence/database-export-file";
@@ -143,7 +172,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
   let agentThreads: AgentThreadRuntime | undefined;
-  let delegation: DelegationRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
   let watchers: WatcherRuntime | undefined;
   let closed = false;
@@ -163,10 +191,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       duoLaunchCoordinator.resumeComparisons(),
       Promise.resolve(watchers?.resume()),
     ]),
-    reconcileArtifacts: () => {
-      registerCheckpointCaptures();
-      return turnGitArtifacts.reconcile();
-    },
+    reconcileArtifacts: () => turnGitArtifacts.reconcile(),
     snapshotDigest: () => shellSnapshotDigest(currentSnapshot()),
     broadcastSnapshot: () => broadcastSnapshot(),
     startProviderDiscovery: () => {
@@ -220,7 +245,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     databasePath,
     options.defaultWorkspacePath,
     {
-      recoverInterruptedRuns: false, runtimeGenerationId: options.runtimeGenerationId, systemBootId: options.systemBootId,
+      recoverInterruptedRuns: false,
       canStartDatabaseBackup: () =>
         !closed
         && !recoveryImportAdmission.isActive()
@@ -234,7 +259,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     conversationAttachments: initializedConversationAttachments,
     recovery,
     providerMaintenanceJournal,
-    orchestrationEffects,
   } = await initializeRuntimePersistence(options, startupRecovery, store);
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
@@ -283,10 +307,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   };
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
-  const registerCheckpointCaptures = checkpointCaptureExecutor({
-    effects: orchestrationEffects, store, artifacts: turnGitArtifacts,
-    invalidate: (conversationId) => broadcast({ type: "conversation.detail.invalidated", conversationId }),
-  });
   const providerInstallationLeases = new ProviderInstallationLeaseCoordinator();
   const terminals = new TerminalManager({
     windowsTerminalAuthority: options.windowsTerminalAuthority,
@@ -312,7 +332,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     (record) => record.installationIdentity.providerId,
   ));
   const providers = ProviderManager.createProduction({
-    cursorSdk: { stateRoot: join(dataDirectory, "providers"), credentials: options.backendCredentials },
     providerRecoveryPending: (providerId) => recoveryBlockedProviders.has(providerId),
     metadataCache,
     installationLeases: providerInstallationLeases,
@@ -455,7 +474,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const broadcast = (event: RuntimeMutationEvent): void => {
     mascotStatus.observe(event);
     watchers?.observe(event);
-    delegation?.observe(event);
     runtimeSync.broadcast(event);
   };
   const broadcastConversationShell = (conversationId: string): void => {
@@ -641,9 +659,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcastConversationShell,
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
-      harnessInstructionsForTurn: (input) => watcherPolicy.harnessInstructionsFor(input) ?? agentThreads?.manager.capabilityInstructions() ?? [],
-      watcherInstructionsForTurn: (input) => watcherPolicy.watcherInstructionsFor(input),
-      hostToolsForTurn: (input) => watcherPolicy.hostToolsForTurn(input) ?? agentThreads?.manager.bridgeFor(input),
+      ...watcherAwareTurnHooks(watcherPolicy, () => agentThreads?.manager),
       onReadOnlyViolation: (turn, violation) => watchers?.onReadOnlyViolation(turn, violation),
       onPlanHandoff: (turn, text) => watchers?.onPlanHandoff(turn, text),
       applyProviderMetadata: (event) => {
@@ -675,7 +691,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         (settled) => queuedMessages?.onTurnSettled(settled),
         (settled) => conversationTitles.onTurnSettled(settled, settlement),
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
-        (settled) => delegation?.onTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
         (settled) => watchers?.onTurnSettled(settled),
         (settled) => testOnlyOnTurnSettled?.(settled),
@@ -687,13 +702,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       systemBootId: options.systemBootId,
     },
   );
-  delegation = createDelegationRuntime({ store, turns, pendingApprovals, pendingInputs, broadcast, queue: () => queuedMessages });
   agentThreads = createAgentThreadRuntime({
-    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
+    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes, turnGitArtifacts,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
     conversationAttachments: initializedConversationAttachments,
-    agentBrowser: options.agentBrowser, watcherPolicy, delegation: delegation.service,
+    agentBrowser: options.agentBrowser, watcherPolicy,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
@@ -715,16 +729,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     workflows: agentWorkflows, providerTerminalResumes,
     providerInfo: () => providerInfo,
     verifyProviderInstallation: providerInstallationVerifier(providers, refreshProviderInfo),
-    prepareForkSession: enableProviders ? (id, signal) => prepareForkSession({ store, providers, turns, providerTerminalResumes }, id, AbortSignal.any([signal, runtimeLifetimeAbort.signal])) : undefined,
     broadcast, broadcastSnapshot, send,
   };
   queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {
     signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
     onWatcherNoteUndelivered: (note, reason) => watchers?.delivery.noteUndelivered(note, reason),
-    compacting: (conversationId) => compactions.isCompacting(conversationId), delegated: () => delegation?.queueHooks,
+    compacting: (conversationId) => compactions.isCompacting(conversationId),
   });
   compactions.onSettled((conversationId) => queuedMessages?.onCompactionSettled(conversationId));
-  void queuedMessages.start(() => delegation?.recover());
+  queuedMessages.start();
   watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,
     interaction: turnInteractionDependencies, queuedMessages, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, send,
     turnDiff: (turnId) => turnGitArtifacts.settledTurnDiff(turnId) });
@@ -732,55 +745,117 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)), providerMaintenance, updatePreparation,
   });
   const executeCommand = createRuntimeCommandExecutor({
-    handlers: createRuntimeCommandHandlers({
-      store,
-      providers,
-      turns,
-      enableProviders,
-      lifetimeSignal: runtimeLifetimeAbort.signal,
-      dataDirectory,
-      databasePath,
-      defaultWorkspacePath: options.defaultWorkspacePath,
-      issueEvidence: options.issueEvidence,
-      reviewSummaryTimeoutMs: options.reviewSummaryTimeoutMs,
-      send,
-      broadcast,
-      broadcastSnapshot,
-      flushSnapshot,
-      broadcastConversationShell,
-      currentSnapshot,
-      providerInfo: () => providerInfo,
-      trackRuntimeOperation,
-      reportIncident: commandIncidents.report,
-      backendProfileController,
-      providerTerminalResumes,
-      providerMaintenance,
-      terminals,
-      refreshProviderInfo,
-      providerUsage,
-      runtimeSync,
-      canStopWorkspaceRun,
-      conversationAttachments: initializedConversationAttachments,
-      workspaceRuns,
-      isolatedRuns,
-      deletedConversationIds,
-      rememberDeletedConversation,
-      privateConnectTranscriptCache,
-      compactions,
-      turnGitArtifacts,
-      secureFiles,
-      secureFileAuthorities,
-      workspacePath,
-      duoLaunches: duoLaunchCoordinator,
-      visibleDuoLaunchIds: detachedChatRuntimeSecurity.visibleDuoLaunchIds,
-      watchers,
-      agentThreads,
-      agentWorkflows,
-      delegation,
-      queuedMessages,
-      usageHandlers: usageRuntime.handlers,
-      turnInteraction: turnInteractionDependencies,
-    }),
+    handlers: [
+      createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send }),
+      queuedMessages.handler,
+      ...usageRuntime.handlers,
+      createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
+      createDuoCommandHandler({ coordinator: duoLaunchCoordinator, visibleLaunchIds: detachedChatRuntimeSecurity.visibleDuoLaunchIds, broadcastSnapshot: flushSnapshot, send }),
+      watchers.handler,
+      createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
+      createLibraryCommandHandler({ store, broadcast, send }),
+      createAgentWorkflowCommandHandler({
+        workflows: agentWorkflows, providerTerminalResumes,
+        conversationWork: store.conversationWork,
+        broadcast,
+        send,
+      }),
+      createProviderCommandHandler({
+        providers, providerMaintenance, terminals, defaultWorkspacePath: options.defaultWorkspacePath, currentSnapshot,
+        refreshProviderInfo, refreshProviderUsage: createManualUsageRefresh(providerUsage), send,
+      }),
+      ...createReadCommandHandlers({ store, send, databasePath, lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target), canStopWorkspaceRun }),
+      createConversationCommandHandler({
+        store, conversationAttachments: initializedConversationAttachments,
+        providers,
+        backendProfileController,
+        workspaceRuns,
+        providerTerminalResumes,
+        duoLaunches: duoLaunchCoordinator, watchers,
+        runtimeSync,
+        deletedConversationIds,
+        dataDirectory,
+        rememberDeletedConversation,
+      forgetRemoteTranscript: (conversationId: string) =>
+          privateConnectTranscriptCache.invalidateConversation(conversationId),
+        broadcastSnapshot: flushSnapshot,
+        publicError,
+        send,
+        creation: agentThreads.creation,
+        contextRequests: agentThreads.contextRequests,
+        reportIncident: commandIncidents.report,
+      }),
+      createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
+      queuedMessages.turnInteractionHandler,
+      createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.shellSnapshot().settings, refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }),
+      createSourceControlCommandHandler({
+        store,
+        workspaceRuns,
+        turnGitArtifacts,
+        secureFiles,
+        secureFileAuthorities,
+        workspacePath,
+        broadcastSnapshot,
+        send,
+      }),
+      createDiffReviewCommandHandler({
+        store,
+        workspaceRuns,
+        secureFiles,
+        secureFileAuthorities,
+        workspacePath,
+        broadcastSnapshot,
+        send,
+      }),
+      createIsolatedReviewCommandHandler({
+        store,
+        backendProfileController,
+        turns,
+        isolatedRuns,
+        secureFiles,
+        dataDirectory,
+        enableProviders,
+        reviewSummaryTimeoutMs: options.reviewSummaryTimeoutMs,
+        providerInfo: () => providerInfo,
+        publicError,
+        broadcastSnapshot,
+        send,
+      }),
+      createSettingsBackendCommandHandler({
+        store, turns, conversationAttachments: initializedConversationAttachments,
+        providers,
+        backendProfileController,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        providerMaintenanceBlocked: (providerId) =>
+          providerMaintenance.hasBlockingAuthority(providerId),
+        refreshProviderInfo,
+        broadcastSnapshot,
+        send,
+      }),
+      createProjectWorkspaceCommandHandler({
+        store, conversationAttachments: initializedConversationAttachments,
+        dataDirectory,
+        workspaceRuns,
+        turns,
+        providers,
+        providerTerminalResumes,
+        duoLaunches: duoLaunchCoordinator, watchers,
+        terminals,
+        secureFiles,
+        secureFileAuthorities,
+        workspacePath,
+        rememberDeletedConversation,
+      forgetRemoteTranscript: (conversationId: string) =>
+          privateConnectTranscriptCache.invalidateConversation(conversationId),
+        broadcastSnapshot,
+        reportTerminalProviderResumeRejection: (diagnostic) => {
+          console.warn("Terminal provider resume rejected.", diagnostic);
+        },
+        reportIncident: commandIncidents.report,
+        send,
+      }),
+      createTerminalLinkCommandHandler({ workspacePath, send }),
+    ],
     send,
     broadcastSnapshot: flushSnapshot,
     publicError,
@@ -947,9 +1022,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     databaseRecovery: store.databaseRecoveryReport(),
     recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot, turns, refreshProviderInfo.rediscoverAfterSystemResume),
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
-    releaseUpdatePreparation: (operationId) =>
-      updatePreparation.release(operationId),
+    releaseUpdatePreparation: (operationId) => updatePreparation.release(operationId),
     readHtmlRender: (renderId) => store.htmlRenders.read(renderId),
+    attachmentConversations: (attachmentId) => store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
     resolveProjectPath: (request) => trackRuntimeOperation(async () => {
       if (runtimeSafetyLock) {
         throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
@@ -1137,8 +1212,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             quiesceRuntimeWork: ({ deadlineAt }) => shutdownTrace.observe("commands", async () => {
               turnGitArtifacts.beginShutdown(deadlineAt);
               providers.beginShutdown(deadlineAt);
-              await store.orchestration.lanes.close();
-              await orchestrationEffects.stop();
               await gitInspectionLifecycle.cancelAndDrainWhile(async () => {
                 await gitScanCoordinator.cancelAndDrainWhile(async () => {
                   await updatePreparation.drainTracked();

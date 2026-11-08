@@ -1,11 +1,4 @@
-import { cursorSdkProviderMigration } from "./cursor-sdk-provider";
-import { conversationContextSupplementBoundMigration } from "./conversation-context-supplement-bound";
-import { delegatedTasksMigration } from "./delegated-tasks";
-import { delegationAutomaticWakesMigration } from "./delegation-automatic-wakes";
-import { orchestrationV2ReceiptStatusMigration } from "./orchestration-v2-receipt-status";
 import { limitResetMigration } from "./limit-reset";
-import { orchestrationV2Migration } from "./orchestration-v2";
-import { nativePiProviderMigration } from "./native-pi-provider";
 import type { DatabaseMigrationDefinition } from "./catalog";
 import { cliConversationImportsMigration } from "./cli-conversation-imports";
 import { agentThreadTargetOwnershipMigration } from "./agent-thread-target-ownership";
@@ -37,6 +30,10 @@ import { persistTurnFailureKindsMigration } from "./persist-turn-failure-kinds";
 import { persistCompactOnReturnMigration } from "./persist-compact-on-return";
 import { duoComparisonBriefsMigration } from "./duo-comparison-briefs";
 import { turnScopedIndexesMigration } from "./turn-scoped-indexes";
+import { libraryMigration } from "./library";
+import { agentContextReadManagedAccessMigration } from "./agent-context-read-managed-access";
+import { todoSourceConversationMigration } from "./todo-source-conversation";
+import { codexThreadToolPacksMigration } from "./codex-thread-tool-packs";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -70,11 +67,8 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   persistCompactOnReturnMigration,
   turnScopedIndexesMigration,
   duoComparisonBriefsMigration,
-  orchestrationV2Migration,
-  nativePiProviderMigration,
-  cursorSdkProviderMigration,
-  conversationContextSupplementBoundMigration,
-  delegatedTasksMigration,
-  delegationAutomaticWakesMigration,
-  orchestrationV2ReceiptStatusMigration,
+  libraryMigration,
+  agentContextReadManagedAccessMigration,
+  todoSourceConversationMigration,
+  codexThreadToolPacksMigration,
 ];

@@ -11,6 +11,7 @@ import type {
   Conversation,
   ProviderSkillInput,
 } from "../../shared/contracts";
+import { agentSkillsCapability } from "../../shared/agent-skills-capability";
 import { withCodexControlClient } from "../codex/control-client";
 import { objectValue, type JsonObject } from "../codex/protocol";
 import { boundedDisplayString, exactBoundedString, parseCodexGoal } from "./codex-goal-parsing";
@@ -97,6 +98,48 @@ function isAbsoluteSkillPath(path: string): boolean {
     || (process.platform === "win32" && win32.isAbsolute(path));
 }
 
+interface SkillCandidate {
+  identityKey: string;
+  summary: AgentSkillSummary;
+  providerInput: ProviderSkillInput;
+}
+
+function compareSkills(left: AgentSkillSummary, right: AgentSkillSummary): number {
+  return left.scope.localeCompare(right.scope, "en")
+    || left.name.localeCompare(right.name, "en");
+}
+
+function codexSkillListing(
+  response: JsonObject,
+  cwd: string,
+): { rawSkills: unknown[]; warningCount: number } {
+  const entries = Array.isArray(response.data) ? response.data : [];
+  const expectedCwd = normalizeIdentityPath(cwd);
+  const matchingEntry = entries
+    .map(objectValue)
+    .find((entry) =>
+      typeof entry?.cwd === "string"
+      && normalizeIdentityPath(entry.cwd) === expectedCwd);
+  if (!matchingEntry) {
+    throw new RuntimeRequestError(
+      "Codex did not return skills for this project.",
+    );
+  }
+  if (
+    Array.isArray(matchingEntry.errors)
+    && matchingEntry.errors.length > 0
+    && !Array.isArray(matchingEntry.skills)
+  ) {
+    throw new RuntimeRequestError(
+      "Codex could not discover skills for this project.",
+    );
+  }
+  return {
+    rawSkills: Array.isArray(matchingEntry.skills) ? matchingEntry.skills : [],
+    warningCount: Array.isArray(matchingEntry.errors) ? matchingEntry.errors.length : 0,
+  };
+}
+
 function isNativeCodexConversation(
   conversation: Conversation,
 ): boolean {
@@ -109,10 +152,6 @@ function isNativeClaudeConversation(
 ): boolean {
   return conversation.providerId === "claude"
     && conversation.modelSelection.harnessId === "claude-agent-sdk";
-}
-
-function isNativePiConversation(conversation: Conversation): boolean {
-  return conversation.providerId === "pi" && conversation.modelSelection.harnessId === "pi-rpc";
 }
 
 function assertRecoverableGoalBudget(
@@ -223,30 +262,11 @@ export class AgentWorkflowController {
           summary.conversationId === conversationId)
         .filter(({ routeKey }) => routeKey === currentSkillRouteKey)
         .map(({ summary }) => summary)
-        .sort((left, right) =>
-          left.scope.localeCompare(right.scope, "en")
-          || left.name.localeCompare(right.name, "en")),
-      skillsCapability: native
-        ? {
-            kind: "codex-native",
-            available: true,
-            label: "Codex skills",
-          }
-        : isNativePiConversation(conversation)
-          ? { kind: "pi-native", available: true, label: "Pi skills" }
-        : isNativeClaudeConversation(conversation)
-          ? {
-              kind: "claude-native",
-              available: true,
-              label: "Claude skills",
-            }
-        : {
-            kind: "unavailable",
-            available: false,
-            label: "Skills unavailable",
-            reason:
-              "This route does not expose safe structured skill invocation.",
-          },
+        .sort(compareSkills),
+      skillsCapability: agentSkillsCapability(
+        conversation.providerId,
+        conversation.modelSelection.harnessId,
+      ),
       goalRefreshWarning: native
         && nativeGoalRefreshWarning?.providerSessionId
           === conversation.providerSessionId
@@ -744,7 +764,6 @@ export class AgentWorkflowController {
     if (
       !isNativeCodexConversation(conversation)
       && !isNativeClaudeConversation(conversation)
-      && !isNativePiConversation(conversation)
     ) {
       throw new RuntimeRequestError(
         "This route does not expose safe structured skill invocation.",
@@ -795,130 +814,173 @@ export class AgentWorkflowController {
     forceReload: boolean,
     routeKey: string,
   ): Promise<AgentSkillSummary[]> {
-    if (isNativeClaudeConversation(conversation) || isNativePiConversation(conversation)) {
-      const pi = isNativePiConversation(conversation);
-      const source = pi ? "pi-native" as const : "claude-native" as const;
-      const rawSkills = pi ? await this.contact.piSkills(conversationId) : await this.contact.claudeSkills(conversationId, forceReload);
+    if (isNativeClaudeConversation(conversation)) {
+      const rawSkills = await this.contact.claudeSkills(conversationId, forceReload);
       this.requireCurrentSkillRoute(conversationId, routeKey);
       return this.replaceSkills(
         conversationId,
         rawSkills,
         rawSkills.length > MAX_SKILLS,
         0,
-        (raw) => {
-          const name = boundedDisplayString(raw.name, 160);
-          const description = boundedDisplayString(raw.description, 1_000);
-          if (!name || !SKILL_NAME_PATTERN.test(name) || !description) {
-            return null;
-          }
-          const identityKey =
-            `${conversationId}\0${routeKey}\0${source}\0${name}`;
-          return {
-            identityKey,
-            summary: {
-              id: this.skillIdsByPath.get(identityKey) ?? randomUUID(),
-              conversationId,
-              name,
-              description,
-              shortDescription:
-                boundedDisplayString(raw.argumentHint, 240) ?? null,
-              scope: raw.scope,
-              enabled: true,
-              source,
-            },
-            providerInput: {
-              source,
-              name,
-              path: raw.path,
-            },
-          };
-        },
+        (raw) => this.claudeSkillCandidate(conversationId, routeKey, raw),
         routeKey,
       );
     }
     const context = await this.contact.codexControl(conversationId);
-    const response = await withCodexControlClient(
-      context,
-      ({ request }) => request("skills/list", {
-        cwds: [cwd],
-        forceReload,
-      }),
+    const { rawSkills, warningCount } = codexSkillListing(
+      await withCodexControlClient(
+        context,
+        ({ request }) => request("skills/list", {
+          cwds: [cwd],
+          forceReload,
+        }),
+      ),
+      cwd,
     );
     this.requireCurrentSkillRoute(conversationId, routeKey);
-    const entries = Array.isArray(response.data) ? response.data : [];
-    const expectedCwd = normalizeIdentityPath(cwd);
-    const matchingEntry = entries
-      .map(objectValue)
-      .find((entry) =>
-        typeof entry?.cwd === "string"
-        && normalizeIdentityPath(entry.cwd) === expectedCwd);
-    if (!matchingEntry) {
-      throw new RuntimeRequestError(
-        "Codex did not return skills for this project.",
-      );
-    }
-    if (
-      Array.isArray(matchingEntry.errors)
-      && matchingEntry.errors.length > 0
-      && !Array.isArray(matchingEntry.skills)
-    ) {
-      throw new RuntimeRequestError(
-        "Codex could not discover skills for this project.",
-      );
-    }
-    const rawSkills = Array.isArray(matchingEntry?.skills)
-      ? matchingEntry.skills
-      : [];
-    const warningCount = Array.isArray(matchingEntry.errors)
-      ? matchingEntry.errors.length
-      : 0;
     return this.replaceSkills(
       conversationId,
       rawSkills,
       rawSkills.length > MAX_SKILLS,
       warningCount,
-      (raw) => {
-        const skill = objectValue(raw);
-        const name = boundedDisplayString(skill?.name, 160);
-        const path = exactBoundedString(skill?.path, 4_096);
-        const description = boundedDisplayString(skill?.description, 1_000);
-        const scope = skillScope(skill?.scope);
-        if (
-          !name
-          || !SKILL_NAME_PATTERN.test(name)
-          || !path
-          || !isAbsoluteSkillPath(path)
-          || !description
-          || !scope
-        ) return null;
-        const identityKey =
-          `${conversationId}\0${routeKey}\0codex\0${normalizeIdentityPath(path)}`;
-        const interfaceValue = objectValue(skill?.interface);
-        return {
-          identityKey,
-          summary: {
-            id: this.skillIdsByPath.get(identityKey) ?? randomUUID(),
-            conversationId,
-            name,
-            description,
-            shortDescription:
-              boundedDisplayString(
-                interfaceValue?.shortDescription,
-                240,
-              ) ?? null,
-            scope,
-            enabled: skill?.enabled === true,
-            source: "codex-native",
-          },
-          providerInput: {
-            source: "codex-native",
-            name,
-            path,
-          },
-        };
-      },
+      (raw) => this.codexSkillCandidate(conversationId, routeKey, raw),
       routeKey,
     );
+  }
+
+  async previewSkills(input: {
+    draftConversationId: string;
+    projectId: string;
+    harnessId: "codex-app-server" | "claude-agent-sdk";
+    forceReload: boolean;
+  }): Promise<Pick<AgentWorkflowState, "skills" | "skillDiscovery">> {
+    const cwd = this.store.projectPath(input.projectId);
+    const routeKey = `draft\0${input.harnessId}\0${normalizeIdentityPath(cwd)}`;
+    const owner = input.draftConversationId;
+    const preview = <T>(
+      rawSkills: readonly T[],
+      warningCount: number,
+      mapSkill: (raw: T) => SkillCandidate | null,
+    ): Pick<AgentWorkflowState, "skills" | "skillDiscovery"> => {
+      const candidates = rawSkills.slice(0, MAX_SKILLS).map(mapSkill)
+        .filter((candidate) => candidate !== null);
+      const counts = new Map<string, number>();
+      for (const { identityKey } of candidates) {
+        counts.set(identityKey, (counts.get(identityKey) ?? 0) + 1);
+      }
+      const ambiguousCount = [...counts.values()].filter((count) => count > 1).length;
+      return {
+        skills: candidates
+          .filter(({ identityKey }) => counts.get(identityKey) === 1)
+          .map(({ summary }) => summary)
+          .sort(compareSkills),
+        skillDiscovery: {
+          truncated: rawSkills.length > MAX_SKILLS,
+          warningCount: Math.min(99, Math.max(0, warningCount + ambiguousCount)),
+          synchronizedAt: this.clock().toISOString(),
+        },
+      };
+    };
+    if (input.harnessId === "claude-agent-sdk") {
+      return preview(
+        await this.contact.claudeSkillsAt(cwd, input.forceReload),
+        0,
+        (raw) => this.claudeSkillCandidate(owner, routeKey, raw),
+      );
+    }
+    const { rawSkills, warningCount } = codexSkillListing(
+      await withCodexControlClient(
+        await this.contact.codexControlAt(cwd),
+        ({ request }) => request("skills/list", {
+          cwds: [cwd],
+          forceReload: input.forceReload,
+        }),
+      ),
+      cwd,
+    );
+    return preview(
+      rawSkills,
+      warningCount,
+      (raw) => this.codexSkillCandidate(owner, routeKey, raw),
+    );
+  }
+
+  private claudeSkillCandidate(
+    conversationId: string,
+    routeKey: string,
+    raw: Awaited<ReturnType<ConversationProviderContact["claudeSkillsAt"]>>[number],
+  ): SkillCandidate | null {
+    const name = boundedDisplayString(raw.name, 160);
+    const description = boundedDisplayString(raw.description, 1_000);
+    if (!name || !SKILL_NAME_PATTERN.test(name) || !description) {
+      return null;
+    }
+    const identityKey =
+      `${conversationId}\0${routeKey}\0claude\0${name}`;
+    return {
+      identityKey,
+      summary: {
+        id: this.skillIdsByPath.get(identityKey) ?? randomUUID(),
+        conversationId,
+        name,
+        description,
+        shortDescription:
+          boundedDisplayString(raw.argumentHint, 240) ?? null,
+        scope: raw.scope,
+        enabled: true,
+        source: "claude-native",
+      },
+      providerInput: {
+        source: "claude-native",
+        name,
+        path: raw.path,
+      },
+    };
+  }
+
+  private codexSkillCandidate(
+    conversationId: string,
+    routeKey: string,
+    raw: unknown,
+  ): SkillCandidate | null {
+    const skill = objectValue(raw);
+    const name = boundedDisplayString(skill?.name, 160);
+    const path = exactBoundedString(skill?.path, 4_096);
+    const description = boundedDisplayString(skill?.description, 1_000);
+    const scope = skillScope(skill?.scope);
+    if (
+      !name
+      || !SKILL_NAME_PATTERN.test(name)
+      || !path
+      || !isAbsoluteSkillPath(path)
+      || !description
+      || !scope
+    ) return null;
+    const identityKey =
+      `${conversationId}\0${routeKey}\0codex\0${normalizeIdentityPath(path)}`;
+    const interfaceValue = objectValue(skill?.interface);
+    return {
+      identityKey,
+      summary: {
+        id: this.skillIdsByPath.get(identityKey) ?? randomUUID(),
+        conversationId,
+        name,
+        description,
+        shortDescription:
+          boundedDisplayString(
+            interfaceValue?.shortDescription,
+            240,
+          ) ?? null,
+        scope,
+        enabled: skill?.enabled === true,
+        source: "codex-native",
+      },
+      providerInput: {
+        source: "codex-native",
+        name,
+        path,
+      },
+    };
   }
 
   private skillRouteKey(conversation: Conversation, cwd: string): string {
@@ -1033,11 +1095,7 @@ export class AgentWorkflowController {
     rawSkills: readonly T[],
     truncated: boolean,
     warningCount: number,
-    mapSkill: (raw: T) => {
-      identityKey: string;
-      summary: AgentSkillSummary;
-      providerInput: ProviderSkillInput;
-    } | null,
+    mapSkill: (raw: T) => SkillCandidate | null,
     routeKey: string,
   ): AgentSkillSummary[] {
     const nextIds = new Set<string>();
@@ -1102,9 +1160,7 @@ export class AgentWorkflowController {
         synchronizedAt: this.clock().toISOString(),
       },
     });
-    return summaries.sort((left, right) =>
-      left.scope.localeCompare(right.scope, "en")
-      || left.name.localeCompare(right.name, "en"));
+    return summaries.sort(compareSkills);
   }
 
   private requireNativeCodexGoal(conversation: Conversation): void {

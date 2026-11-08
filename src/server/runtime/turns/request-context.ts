@@ -29,6 +29,10 @@ import {
   MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
   type DocumentAttachmentContext,
 } from "../attachments/document-attachment-context";
+import {
+  MAX_TRACKED_GOAL_CONTEXT_BYTES,
+  TRACKED_GOAL_CONTEXT_LABEL,
+} from "./turn-goal-context";
 
 export const MAX_EXECUTION_CONTEXT_REFERENCES = 32;
 export const MAX_EXECUTION_MESSAGE_SEGMENTS = 48;
@@ -66,6 +70,11 @@ export type TurnExecutionContextKind =
 export interface HiddenProviderInstruction {
   label: string;
   text: string;
+}
+
+/** The line that tells the agent its chat's id, sent with the capability instructions. */
+export function chatInstruction(conversationId: string): HiddenProviderInstruction {
+  return { label: "inertia-chat", text: `This chat's id is ${conversationId}.` };
 }
 
 export interface TurnExecutionContextBlob {
@@ -110,14 +119,12 @@ export interface PersistedTurnExecutionContext {
 }
 
 export interface AssembledTurnRequest {
-  contextHandoff?: import("../../../shared/orchestration-backings").PreparedContextHandoff;
   visibleContent: string;
   executionPrompt: string;
   imagePaths: string[];
   persistence: PersistedTurnExecutionContext;
   conversationContextDeliveries: ConversationContextDelivery[];
   sessionRecovery: TurnSessionRecovery | null;
-  restoredItemIds?: readonly string[];
 }
 
 export interface RestoredChatHistory {
@@ -125,8 +132,6 @@ export interface RestoredChatHistory {
   messageCount: number;
   omittedMessageCount: number;
   withheldMessageCount?: number;
-  itemIds?: readonly string[];
-  omittedItemIds?: readonly string[];
 }
 
 export interface ConversationContextMaterialization {
@@ -152,7 +157,13 @@ export interface AssembleTurnRequestInput {
   internalInstructions?: readonly HiddenProviderInstruction[];
   sessionInstructionDigest?: string;
   promptWithheld?: true;
-  restoredHistory?: (capacityBytes: number, currentPromptBytes: number) => RestoredChatHistory | null;
+  restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
+  /**
+   * The chat's tracked Inertia-local goal as one bounded, neutralized line
+   * from `trackedGoalContextLine`. It travels as execution context, never as a
+   * hidden instruction, and is left out when the turn's limits leave no room.
+   */
+  trackedGoalLine?: string;
 }
 
 interface MaterializedContext {
@@ -647,6 +658,38 @@ function validateImages(
   return { imagePaths, imageBytes };
 }
 
+/**
+ * Removes exact hidden instructions from an assembled execution prompt. The
+ * internal-instruction section is always the prompt's last section, so only
+ * whole `[label]` entries after its final header are matched; the header goes
+ * too when nothing remains under it. A prompt without the section, or an
+ * instruction that is not one of its entries, is left unchanged.
+ */
+export function withoutInternalProviderInstructions(
+  prompt: string,
+  withheld: readonly HiddenProviderInstruction[],
+): string {
+  const marker = `\n\n${INTERNAL_PROVIDER_INSTRUCTIONS_HEADER}`;
+  const sectionStart = prompt.lastIndexOf(marker);
+  if (sectionStart < 0 || withheld.length === 0) return prompt;
+  let entries = prompt.slice(sectionStart + marker.length);
+  for (const { label, text } of withheld) {
+    const entry = `\n[${label}]\n${text}`;
+    let at = entries.indexOf(entry);
+    while (at >= 0) {
+      const end = at + entry.length;
+      if (end === entries.length || entries.startsWith("\n[", end)) {
+        entries = entries.slice(0, at) + entries.slice(end);
+        break;
+      }
+      at = entries.indexOf(entry, at + 1);
+    }
+  }
+  return entries.length === 0
+    ? prompt.slice(0, sectionStart)
+    : `${prompt.slice(0, sectionStart)}${marker}${entries}`;
+}
+
 export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledTurnRequest {
   const visibleContent = boundedText(
     input.visibleContent.trim(),
@@ -793,6 +836,17 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     executionSegmentCount += appended.length;
   };
 
+  if (input.trackedGoalLine) {
+    const goal = [providerContext({
+      kind: "attachment",
+      label: TRACKED_GOAL_CONTEXT_LABEL,
+      content: boundedText(input.trackedGoalLine, "Tracked goal", MAX_TRACKED_GOAL_CONTEXT_BYTES),
+      truncated: false,
+    })];
+    const fit = fitAppended(goal);
+    if (fit) append(goal, fit);
+  }
+
   const carriedPackets = [...new Set((input.carriedConversationContexts ?? []).map(({ packetId }) => packetId))];
   let carried: typeof providerContexts = [];
   let carriedFit: ReturnType<typeof fitAppended> = null;
@@ -812,14 +866,13 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   if (carriedFit) append(carried, carriedFit);
 
   let sessionRecovery: TurnSessionRecovery | null = null;
-  let restoredItemIds: readonly string[] | undefined;
   if (input.restoredHistory) {
     const history = input.restoredHistory(Math.min(
       MAX_CONVERSATION_CONTEXT_TURN_BYTES,
       MAX_EXECUTION_PAYLOAD_BYTES - assembledPayloadBytes
         - (providerContexts.length === 0 ? EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES : 0)
         - MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET * CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES,
-    ), assembledPayloadBytes);
+    ));
     if (history) {
       const fitRestored = (blocks: RestoredChatHistory["blocks"]) => {
         const restored = blocks.map((block) => providerContext({
@@ -840,7 +893,6 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
           ?? (required.length < history.blocks.length ? fitRestored(required) : null);
       const fits = selected !== null;
       if (selected) append(selected.restored, selected.fit);
-      if (selected && history.itemIds) restoredItemIds = [...history.itemIds];
       sessionRecovery = {
         ...(fits
           ? {
@@ -883,7 +935,6 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     imagePaths,
     conversationContextDeliveries,
     sessionRecovery,
-    ...(restoredItemIds ? { restoredItemIds } : {}),
     persistence: {
       manifest: {
         version: 1,

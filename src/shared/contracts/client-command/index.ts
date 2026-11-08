@@ -7,16 +7,15 @@ import {
   appCommandSchemas,
   configurationCommandSchemas,
 } from "./app";
-import { gitCommandSchemas } from "./git";
+import { gitCommandSchemas, gitHistoryCommandSchemas } from "./git";
 import { workspaceCommandSchemas } from "./workspace";
+import { terminalLinkCommandSchemas } from "./terminal-links";
 import { promptPresetCommandSchema } from "./prompt-presets";
 import { todoCommandSchemas } from "./todos";
+import { libraryCommandSchemas } from "./library";
 import { updatesCommandSchemas } from "./updates";
 import { watcherCommandSchemas } from "./watcher";
-import { forkCommandSchemas } from "./forks";
-import { cursorSdkCommandSchemas } from "./cursor-sdk";
-import { delegationCommandSchemas } from "./delegation";
-import { observedChildCommandSchemas } from "./observed-children";
+import { worktreeCommandSchemas } from "./worktrees";
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   ...appCommandSchemas,
@@ -26,14 +25,14 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...configurationCommandSchemas,
   ...promptPresetCommandSchema.options,
   ...todoCommandSchemas,
+  ...libraryCommandSchemas,
   ...updatesCommandSchemas,
   ...watcherCommandSchemas,
-  ...forkCommandSchemas,
-  ...cursorSdkCommandSchemas,
-  ...delegationCommandSchemas,
-  ...observedChildCommandSchemas,
   ...gitCommandSchemas,
+  ...gitHistoryCommandSchemas,
   ...workspaceCommandSchemas,
+  ...terminalLinkCommandSchemas,
+  ...worktreeCommandSchemas,
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;

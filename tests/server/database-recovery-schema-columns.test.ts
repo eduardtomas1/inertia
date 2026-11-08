@@ -13,8 +13,10 @@ import {
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "../../src/server/persistence/migrations/turn-scoped-indexes";
 import { DUO_COMPARISON_BRIEFS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/duo-comparison-briefs";
-import { ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/orchestration-v2-receipt-status";
-import { removeDelegatedTasksFromFixture } from "../support/legacy-project-settings-schema";
+import { LIBRARY_SCHEMA_VERSION } from "../../src/server/persistence/migrations/library";
+import { AGENT_CONTEXT_READ_MANAGED_ACCESS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/agent-context-read-managed-access";
+import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "../../src/server/persistence/migrations/todo-source-conversation";
+import { CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/codex-thread-tool-packs";
 
 const directories: string[] = [];
 
@@ -36,22 +38,41 @@ const contextPacketTriggers = [
   "conversation_context_packets_draft_limit",
 ];
 
+function narrowAgentContextReadAccess(database: Database.Database, version: number): void {
+  const access = version >= 99 ? "'own', 'referenced', 'approved', 'watched'" : "'own', 'referenced', 'approved'";
+  const table = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_context_reads'")
+    .get() as { sql: string };
+  const narrowed = table.sql
+    .replace(/CHECK \(access IN \([^)]*\)\)/u, `CHECK (access IN (${access}))`)
+    .replace(/^CREATE TABLE "?agent_context_reads"?/u, "CREATE TABLE agent_context_reads_narrowed");
+  const indexes = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'agent_context_reads' AND sql IS NOT NULL")
+    .all() as Array<{ sql: string }>;
+  database.pragma("foreign_keys = OFF");
+  database.exec(`
+    ${narrowed};
+    INSERT INTO agent_context_reads_narrowed SELECT * FROM agent_context_reads;
+    DROP TABLE agent_context_reads;
+    ALTER TABLE agent_context_reads_narrowed RENAME TO agent_context_reads;
+    ${indexes.map(({ sql }) => `${sql};`).join("\n")}
+  `);
+  database.pragma("foreign_keys = ON");
+}
+
 function labelSchema(database: Database.Database, version: number): void {
-  if (version < ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION) {
+  if (version < CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION) database.exec("DROP TABLE codex_thread_tool_packs");
+  if (version < TODO_SOURCE_CONVERSATION_SCHEMA_VERSION && version >= 96) {
+    database.exec("DROP INDEX todos_source_conversation_idx; ALTER TABLE todos DROP COLUMN source_conversation_id");
+  }
+  if (version < AGENT_CONTEXT_READ_MANAGED_ACCESS_SCHEMA_VERSION && version >= 94) {
+    narrowAgentContextReadAccess(database, version);
+  }
+  if (version < LIBRARY_SCHEMA_VERSION) {
     database.exec(`
-      DROP TABLE orchestration_v2_projection_metadata;
-      ALTER TABLE orchestration_v2_receipts DROP COLUMN command_type;
-      ALTER TABLE orchestration_v2_receipts DROP COLUMN error;
-      ALTER TABLE orchestration_v2_receipts DROP COLUMN status;
+      DROP INDEX html_renders_created_idx;
+      DROP TABLE saved_answers;
+      DROP TABLE library_categories;
     `);
   }
-  if (version < 111) removeDelegatedTasksFromFixture(database);
-  if (version < 107) database.exec(`
-    DROP TABLE orchestration_v2_effects;
-    DROP TABLE orchestration_v2_receipts;
-    DROP TABLE orchestration_v2_entities;
-    DROP TABLE orchestration_v2_events;
-  `);
   if (version < DUO_COMPARISON_BRIEFS_SCHEMA_VERSION) database.exec("ALTER TABLE messages DROP COLUMN duo_comparison_json");
   if (version < TURN_SCOPED_INDEXES_SCHEMA_VERSION) {
     database.exec(`
@@ -179,17 +200,28 @@ describe("database health check for settings and subagent columns", () => {
       "reasonings_conversation_created_idx",
     ].map((index) => ({ version: TURN_SCOPED_INDEXES_SCHEMA_VERSION, sql: `DROP INDEX ${index}` })),
     { version: DUO_COMPARISON_BRIEFS_SCHEMA_VERSION, sql: "ALTER TABLE messages DROP COLUMN duo_comparison_json" },
-    { version: ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, sql: "DROP TABLE orchestration_v2_projection_metadata" },
-    ...["status", "error", "command_type"].map((column) => ({ version: ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION,
-      sql: `ALTER TABLE orchestration_v2_receipts DROP COLUMN ${column}` })),
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP TABLE saved_answers" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP TABLE library_categories" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "ALTER TABLE saved_answers DROP COLUMN excerpt" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP INDEX saved_answers_message_idx" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP INDEX library_categories_name_idx" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP INDEX html_renders_created_idx" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP TRIGGER saved_answers_count_limit" },
+    { version: LIBRARY_SCHEMA_VERSION, sql: "DROP TRIGGER library_categories_count_limit" },
+    { version: TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, sql: "DROP INDEX todos_source_conversation_idx" },
+    {
+      version: TODO_SOURCE_CONVERSATION_SCHEMA_VERSION,
+      sql: "DROP INDEX todos_source_conversation_idx; ALTER TABLE todos DROP COLUMN source_conversation_id",
+    },
+    { version: CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, sql: "DROP INDEX codex_thread_tool_packs_registered_idx" },
+    { version: CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, sql: "DROP TABLE codex_thread_tool_packs" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([...Array.from({ length: DUO_COMPARISON_BRIEFS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index), 112,
-    ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION])("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each(Array.from({ length: CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

@@ -4,6 +4,13 @@ The useful changes in each Inertia release, in plain language.
 
 ## Unreleased
 
+### Chats
+
+- Choosing Build or Plan right after a chat's first reply is no longer
+  refused with *Stop the active run*, leaving the old mode in place.
+- Pressing End while an answer is still arriving keeps following it, instead
+  of sometimes stopping just short and leaving **Jump to latest** showing.
+
 ### Chat windows
 
 - A chat's own window also has the new Git, blame and search commands for

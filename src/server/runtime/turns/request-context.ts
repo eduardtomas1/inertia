@@ -126,6 +126,7 @@ export interface RestoredChatHistory {
   omittedMessageCount: number;
   withheldMessageCount?: number;
   itemIds?: readonly string[];
+  omittedItemIds?: readonly string[];
 }
 
 export interface ConversationContextMaterialization {

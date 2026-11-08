@@ -1,9 +1,10 @@
 // @inertia-test-suite portable
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
 import {
   portableHistoryBudget, portableHistoryCost, selectPortableHistory, type PortableHistoryItem,
 } from "../../src/server/orchestration-v2/portable-history";
@@ -14,10 +15,29 @@ import type { AgentTurnUsageSnapshot, ChatAttachment } from "../../src/shared/co
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime,
-  flushTurnControllerTestPromises, turnControllerTestIdentity,
+  flushTurnControllerTestPromises, turnControllerTestIdentity, type TurnControllerTestRuntime,
 } from "../support/turn-controller-runtime";
 
 afterEach(cleanupTurnControllerTestDirectories);
+
+const claudeSelection = providerNativeModelSelection({ providerId: "claude", modelId: "claude-test" });
+const codexSelection = providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test", reasoningEffort: "high" });
+
+async function completeTurn(runtime: TurnControllerTestRuntime, content: string, sessionId: string, answer: string) {
+  const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content });
+  runtime.controller.start(queued.turn.id);
+  runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId });
+  runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: answer });
+  runtime.provider.resolve({ sessionId });
+  await flushTurnControllerTestPromises();
+  return queued;
+}
+
+function invalidations(runtime: TurnControllerTestRuntime) {
+  const { projectId } = runtime.store.conversation(runtime.conversationId);
+  return runtime.store.orchestration.events.readEvents({ projectId, threadId: runtime.conversationId, limit: 500 })
+    .filter(({ type }) => type === "provider.backing-invalidated").map(({ payload }) => payload);
+}
 
 async function handoffRuntime() {
   const runtime = await createTurnControllerTestRuntime();
@@ -350,6 +370,154 @@ describe("activity items in a returning backing's delta", () => {
       const backing = runtime.store.orchestration.backings.find({ threadId: runtime.conversationId, providerId: "codex",
         workspaceKey: runtime.workspace, identity: first.turn.continuationIdentity })!;
       expect(backing.coveredItemIds).toContain(`activity:${claudeCommand.id}`);
+    } finally { runtime.store.close(); }
+  });
+});
+
+describe("handoff coverage accounting", () => {
+  it("counts an item omitted during preparation as covered once delivered and never offers it again", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      await completeTurn(runtime, "Original Codex request", "codex-native", "Original Codex answer");
+      const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
+        identity: runtime.store.latestAgentTurnForConversation(runtime.conversationId)!.continuationIdentity };
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
+      const oversized = await completeTurn(runtime, `Oversized brief ${"x".repeat(20_000)}`, "claude-native", "Claude answer");
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "codex", modelSelection: codexSelection });
+
+      const returned = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex" });
+      const handoff = runtime.store.orchestration.backings.handoff(returned.turn.runId)!;
+      expect(handoff.omittedItemIds).toEqual([oversized.message.id]);
+      expect(handoff.itemIds).not.toContain(oversized.message.id);
+      runtime.controller.start(returned.turn.id);
+      expect(runtime.provider.input?.prompt).toContain("Claude answer");
+      expect(runtime.provider.input?.prompt).toContain("; 1 omitted.");
+      expect(runtime.provider.input?.prompt).not.toContain("x".repeat(20_000));
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Back on Codex" });
+      runtime.provider.resolve({ sessionId: "codex-native" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.orchestration.backings.handoff(returned.turn.runId)?.state).toBe("delivered");
+      expect(runtime.store.orchestration.backings.find(lookup)?.coveredItemIds)
+        .toEqual(expect.arrayContaining([...handoff.itemIds, oversized.message.id]));
+
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
+      const later = await completeTurn(runtime, "Second Claude request", "claude-native", "Second Claude answer");
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "codex", modelSelection: codexSelection });
+      const again = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex again" });
+      const next = runtime.store.orchestration.backings.handoff(again.turn.runId)!;
+      expect(next.itemIds).toContain(later.message.id);
+      expect([...next.itemIds, ...next.omittedItemIds ?? []]).not.toContain(oversized.message.id);
+      runtime.controller.start(again.turn.id);
+      expect(runtime.provider.input?.prompt).toContain("Second Claude answer");
+      expect(runtime.provider.input?.prompt).toContain("; 0 omitted.");
+      runtime.provider.resolve({ sessionId: "codex-native" });
+      await flushTurnControllerTestPromises();
+
+      const delivered = runtime.store.orchestration.backings.handoff(returned.turn.runId);
+      runtime.store.orchestration.events.rebuildProjections();
+      expect(runtime.store.orchestration.backings.handoff(returned.turn.runId)).toEqual(delivered);
+    } finally { runtime.store.close(); }
+  });
+
+  it("refuses a prepared handoff whose omitted ids repeat or overlap its delivered ids", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "First request" });
+      const { orchestration } = runtime.store;
+      const { projectId } = runtime.store.conversation(runtime.conversationId);
+      const { attemptId } = orchestration.events.projection("run", queued.turn.runId)!.value as { attemptId: string };
+      const prepare = (commandId: string, itemIds: string[], omittedItemIds: string[]) => {
+        const event = orchestration.backings.preparation(queued.turn.runId, attemptId, runtime.conversationId,
+          queued.turn.requestedAt, { itemIds, omittedItemIds, targetBackingId: null });
+        orchestration.events.commit({ actorId: "runtime", commandId, threadId: runtime.conversationId, projectId,
+          command: event, expectedRevision: orchestration.events.revision(runtime.conversationId), events: [event], result: null });
+      };
+      expect(() => prepare("overlap", ["item-a"], ["item-a"])).toThrow(OrchestrationConflict);
+      expect(() => prepare("repeat", ["item-a"], ["item-b", "item-b"])).toThrow(OrchestrationConflict);
+      expect(orchestration.backings.handoff(queued.turn.runId)).toBeNull();
+      prepare("disjoint", ["item-a"], ["item-b"]);
+      expect(orchestration.backings.handoff(queued.turn.runId)).toMatchObject({ itemIds: ["item-a"], omittedItemIds: ["item-b"] });
+    } finally { runtime.store.close(); }
+  });
+
+  it("carries a backing's coverage to the chat's moved checkout and retires the old backing", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await completeTurn(runtime, "Original Codex request", "codex-native", "Original Codex answer");
+      const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
+        identity: first.turn.continuationIdentity };
+      const original = runtime.store.orchestration.backings.find(lookup)!;
+      const moved = join(runtime.directory, "moved-checkout");
+      await mkdir(moved);
+      const path = vi.spyOn(runtime.store, "conversationPath").mockReturnValue(moved);
+      try {
+        const resumed = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue after the move" });
+        expect(resumed.turn.providerSessionBefore).toBe("codex-native");
+        expect(runtime.store.orchestration.backings.handoff(resumed.turn.runId)).toBeNull();
+        runtime.controller.start(resumed.turn.id);
+        runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "codex-native" });
+        runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Moved answer" });
+        runtime.provider.resolve({ sessionId: "codex-native" });
+        await flushTurnControllerTestPromises();
+        const carried = runtime.store.orchestration.backings.find({ ...lookup, workspaceKey: moved })!;
+        expect(carried).toMatchObject({ nativeSessionId: "codex-native", status: "ready", coverageComplete: true });
+        expect(carried.id).not.toBe(original.id);
+        expect(carried.coveredItemIds).toEqual(expect.arrayContaining([...original.coveredItemIds, resumed.message.id]));
+        expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("retired");
+        expect(invalidations(runtime)).toEqual([{ backingId: original.id, reason: "workspace-changed" }]);
+
+        runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
+        const other = await completeTurn(runtime, "Claude follow-up", "claude-native", "Claude answer");
+        runtime.store.updateConversation(runtime.conversationId, { providerId: "codex", modelSelection: codexSelection });
+        const returned = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex" });
+        expect(returned.turn.providerSessionBefore).toBe("codex-native");
+        const handoff = runtime.store.orchestration.backings.handoff(returned.turn.runId)!;
+        expect(handoff.targetBackingId).toBe(carried.id);
+        expect(handoff.itemIds).toContain(other.message.id);
+        expect(handoff.itemIds).not.toContain(first.message.id);
+        expect(handoff.itemIds).not.toContain(resumed.message.id);
+        runtime.controller.start(returned.turn.id);
+        expect(runtime.provider.input?.prompt).toContain("Claude answer");
+        expect(runtime.provider.input?.prompt).not.toContain("Original Codex answer");
+        expect(runtime.provider.input?.prompt).not.toContain("Moved answer");
+        runtime.provider.resolve({ sessionId: "codex-native", text: "Returned" });
+        await flushTurnControllerTestPromises();
+        const settled = runtime.store.orchestration.backings.get(carried.id);
+        runtime.store.orchestration.events.rebuildProjections();
+        expect(runtime.store.orchestration.backings.get(carried.id)).toEqual(settled);
+        expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("retired");
+      } finally { path.mockRestore(); }
+    } finally { runtime.store.close(); }
+  });
+
+  it("keeps an uncertain backing uncertain when its session continues in a moved checkout", async () => {
+    const runtime = await handoffRuntime();
+    try {
+      const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Request before the move" });
+      runtime.controller.start(first.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "uncertain-native" });
+      runtime.provider.resolve({ status: "failed", sessionId: "uncertain-native", text: "" });
+      await flushTurnControllerTestPromises();
+      const lookup = { threadId: runtime.conversationId, providerId: "claude", workspaceKey: runtime.workspace,
+        identity: first.turn.continuationIdentity };
+      const original = runtime.store.orchestration.backings.find(lookup)!;
+      expect(original.status).toBe("uncertain");
+      const moved = join(runtime.directory, "moved-checkout");
+      await mkdir(moved);
+      const path = vi.spyOn(runtime.store, "conversationPath").mockReturnValue(moved);
+      try {
+        const resumed = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue after the move" });
+        expect(resumed.turn.providerSessionBefore).toBe("uncertain-native");
+        runtime.controller.start(resumed.turn.id);
+        runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "uncertain-native" });
+        const carried = runtime.store.orchestration.backings.find({ ...lookup, workspaceKey: moved })!;
+        expect(carried.status).toBe("uncertain");
+        expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("retired");
+        runtime.provider.resolve({ status: "failed", sessionId: "uncertain-native", text: "" });
+        await flushTurnControllerTestPromises();
+        const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start over" });
+        expect(next.turn.providerSessionBefore).toBeNull();
+      } finally { path.mockRestore(); }
     } finally { runtime.store.close(); }
   });
 });

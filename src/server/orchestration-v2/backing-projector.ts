@@ -45,8 +45,9 @@ export function projectBackingEvent(event: OrchestrationBackingEvent, envelope: 
   }
   if (event.type === "context.handoff-prepared") {
     const handoff = event.payload;
+    const offered = [...handoff.itemIds, ...handoff.omittedItemIds ?? []];
     if (read("context-handoff", handoff.id) || handoff.threadId !== run.threadId
-      || handoff.state !== "prepared" || new Set(handoff.itemIds).size !== handoff.itemIds.length) {
+      || handoff.state !== "prepared" || new Set(offered).size !== offered.length) {
       throw new OrchestrationConflict("scope-conflict");
     }
     if (handoff.targetBackingId) {

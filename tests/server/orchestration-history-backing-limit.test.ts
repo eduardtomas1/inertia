@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MAX_BACKING_COVERAGE_ITEMS } from "../../src/shared/orchestration-backings";
 import { rollbackConversationHistory } from "../../src/server/runtime/history-rollback-service";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import type { NativeConversationRequest } from "../../src/server/provider/native-conversation-operations";
@@ -66,6 +68,42 @@ describe("rollback across complete backing history", () => {
       expect(runtime.store.orchestration.history.rolledBack(second.id)).toBe(true);
       runtime.store.orchestration.events.rebuildProjections();
       expect(ids.every((id) => runtime.store.orchestration.backings.get(id)?.status === "retired")).toBe(true);
+    } finally { runtime.store.close(); }
+  });
+});
+
+describe("backing coverage cap", () => {
+  it("stops reusing a backing past the coverage cap and restores the full history on a fresh session", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Original Codex request" });
+      runtime.controller.start(first.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "codex-native" });
+      const database = (runtime.store as unknown as { database: Database.Database }).database;
+      database.transaction(() => {
+        for (let index = 0; index < MAX_BACKING_COVERAGE_ITEMS; index += 1) {
+          runtime.store.createMessage(runtime.conversationId, `Progress note ${index}`, "assistant", [], first.turn.id);
+        }
+      })();
+      runtime.provider.resolve({ text: "Original Codex answer", sessionId: "codex-native" });
+      await flushTurnControllerTestPromises();
+      const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
+        identity: first.turn.continuationIdentity };
+      const backing = runtime.store.orchestration.backings.find(lookup)!;
+      expect(backing).toMatchObject({ nativeSessionId: "codex-native", status: "ready", coverageComplete: false });
+      expect(backing.coveredItemIds).toHaveLength(MAX_BACKING_COVERAGE_ITEMS);
+
+      const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue" });
+      expect(next.turn.providerSessionBefore).toBeNull();
+      const handoff = runtime.store.orchestration.backings.handoff(next.turn.runId)!;
+      expect(handoff).toMatchObject({ targetBackingId: null, state: "prepared" });
+      expect(handoff.itemIds).toContain(first.message.id);
+      runtime.controller.start(next.turn.id);
+      expect(runtime.provider.input?.sessionId).toBeUndefined();
+      expect(runtime.provider.input?.prompt).toContain("Original Codex request");
+      expect(runtime.provider.input?.prompt).toContain("restored because this provider session does not have them");
+      runtime.provider.resolve({ text: "Fresh answer", sessionId: "codex-fresh" });
+      await flushTurnControllerTestPromises();
     } finally { runtime.store.close(); }
   });
 });

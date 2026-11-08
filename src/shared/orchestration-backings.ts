@@ -25,6 +25,7 @@ export const contextHandoffSchema = z.object({
   targetBackingId: id.nullable(),
   nativeSessionId: nativeId.nullable(),
   itemIds: z.array(id).max(256),
+  omittedItemIds: z.array(id).max(256).optional(),
   method: z.enum(["inline", "native"]),
   state: z.enum(["prepared", "dispatching", "delivered", "uncertain", "abandoned"]),
   createdAt: time, updatedAt: time,
@@ -59,5 +60,6 @@ export type OrchestrationBackingEvent = z.infer<typeof orchestrationBackingEvent
 /** Privileged preparation output; never accepted directly from renderer/provider input. */
 export interface PreparedContextHandoff {
   itemIds: readonly string[];
+  omittedItemIds?: readonly string[];
   targetBackingId: string | null;
 }

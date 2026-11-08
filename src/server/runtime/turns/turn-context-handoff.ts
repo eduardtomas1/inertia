@@ -118,7 +118,8 @@ export function appendedContextHandoff(
   const { history, targetBackingId } = offered;
   if (history.itemIds !== undefined) {
     if (assembled.restoredItemIds === undefined) throw new RestoredHistoryRejectedError();
-    return { itemIds: [...assembled.restoredItemIds], targetBackingId };
+    return { itemIds: [...assembled.restoredItemIds], targetBackingId,
+      ...(history.omittedItemIds?.length ? { omittedItemIds: [...history.omittedItemIds] } : {}) };
   }
   if (history.messageCount > 0 && (assembled.sessionRecovery?.restoredMessageCount ?? 0) === 0) {
     throw new RestoredHistoryRejectedError();

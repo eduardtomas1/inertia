@@ -108,9 +108,9 @@ and bounded item coverage. The instance fingerprint covers the harness, backend
 profile, configuration revision, endpoint and compatibility token, but no
 account (`src/server/orchestration-v2/provider-instance.ts:4-8`). A tested
 Codex → Claude → Codex round trip resumes the original Codex session and
-delivers the intervening context. Items omitted from a delivered handoff are not
-counted as covered and are offered again on the next switch-back
-(`src/server/orchestration-v2/backing-repository.ts:141-147`). Uncertain handoff
+delivers the intervening context. Items omitted from a delivered handoff count
+as covered and are not offered again on the next switch-back (see
+[G11 part 1](#g11-part-1-coverage-accounting--2026-11-02)). Uncertain handoff
 delivery prevents native reuse; an ordinary outage alone does not retire a
 valid session. Preparation, dispatch, delivery, abandonment and uncertainty are
 separate durable states; `delivered` means the first provider output was
@@ -1419,4 +1419,77 @@ cleanup errors in `duo-launch`, `duo-worktree-adoption` and
 `turn-git-artifacts`, plus the two `EPERM` errors. Each of those three files
 then passed when run alone, as did `database-migrations` and
 `database-recovery-schema-columns`. `typecheck`, `lint` and
+`check:architecture` passed. The full `npm run check` was not run.
+
+## G11 part 1: coverage accounting — 2026-11-02
+
+A context handoff now records the ids its portable selection omitted
+(`omittedItemIds`: optional, at most 256, disjoint from `itemIds`;
+`src/shared/orchestration-backings.ts:28`). Preparation copies them from the
+selection (`src/server/runtime/turns/turn-request-preparation.ts:504-505`,
+`src/server/runtime/turns/turn-context-handoff.ts:121-122`). The projector
+refuses repeated or overlapping ids
+(`src/server/orchestration-v2/backing-projector.ts:48-50`). Once the handoff is
+`delivered`, settlement adds the omitted ids to the backing's coverage together
+with the delivered ids (`src/server/orchestration-v2/backing-repository.ts:164-166`),
+so a later switch-back does not offer them again. This is T3's rule that
+delivered plus omitted ids count as covered
+(`apps/server/src/orchestration-v2/ProviderTurnStartService.ts:893-905`).
+Older events have no field and read as having no omitted ids. A handoff
+without omitted ids keeps the previous event shape and id, so no migration or
+projector version bump is needed. The handoff `method` is still always
+`inline`; native injection is part 2.
+
+On a workspace change, coverage is carried. When a session is first observed
+in a new checkout of the same chat, and the backing does not inherit fork
+coverage, the backing of the same provider instance and native session in
+another checkout passes its covered ids, completeness and `uncertain` status
+to the new backing. In the same transaction it is retired as
+`workspace-changed` (`backing-repository.ts:89-115`). A switch-back after the
+move therefore delivers only the intervening items. This is Inertia's form of
+T3's `restart_and_resume` on a workspace change
+(`ProviderSessionTransitionPolicy.ts:73-75`). If an older database has several
+such backings, the newest is carried and all of them are retired.
+
+The coverage cap stays at 2,048 ids (`MAX_BACKING_COVERAGE_ITEMS`). Past the
+cap, `coverageComplete` becomes false and the backing is no longer reused
+natively. The next turn on that route starts a fresh session with the full
+portable history. A watermark was not adopted, because each
+`provider.backing-recorded` event repeats the full list. Counting omitted ids
+reaches the cap sooner in long chats.
+
+Deliberate differences from T3 Code:
+
+- Coverage is capped at 2,048 ids; T3's coverage is unbounded.
+- Candidates stay bounded at 256. Items older than that window, and items over
+  64,000 bytes that are skipped before selection, are counted in the omitted
+  number but never listed. They are therefore not recorded as covered, and a
+  later delta can still offer an older item that fits.
+- A move retires the old checkout's backing. Moving the chat back to that
+  checkout starts a fresh session with the full portable history; T3 would
+  resume the native thread there. The first turn after a move still resumes
+  the conversation's session without reading the old backing's status, as it
+  did before. The carried `uncertain` status makes the turn after it fresh.
+
+Tests: `tests/server/orchestration-backings.test.ts` gains four cases. The
+first is the inline variant of T3 `ContextHandoffBudget.test.ts:401`: an
+oversized item omitted during preparation is recorded, counted as covered
+after delivery, not offered on the next switch-back, and kept by a rebuild.
+The second checks that the projector refuses repeated or overlapping ids. The
+third covers a checkout move: coverage is carried, the old backing is retired
+as `workspace-changed`, and the later switch-back delivers only the
+intervening items. The fourth checks that an `uncertain` backing stays
+`uncertain` after a move. `tests/server/orchestration-history-backing-limit.test.ts`
+documents the cap: a backing past 2,048 ids is not reused, and the next turn
+restores the full history on a fresh session. The four new backing cases fail
+against the unchanged sources; the cap case passes there, because the cap
+itself is unchanged.
+
+A combined run of 36 related files (backings, context exhaustion, portable
+history, forks, rollback, merge-back, fallback, continuation, request context
+and the turn-controller suites) passed 503 of 509 tests, skipped 2 and failed
+4. All four failures were load noise and passed when rerun alone (37 of 37):
+a 15 s timeout in `orchestration-portable-history`, and `EBUSY` SQLite
+cleanup with Git-artifact waits in `orchestration-rollback-restore`. After the
+last source edit, six core files passed 64 of 64. `typecheck`, `lint` and
 `check:architecture` passed. The full `npm run check` was not run.

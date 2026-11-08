@@ -501,7 +501,8 @@ export function resolveTurnRequest(
     if (!history || (options.skipEmpty && history.messageCount === 0 && history.omittedMessageCount === 0)) {
       return offer(null, null);
     }
-    return offer({ ...history, itemIds: history.selection.items.map(({ id }) => id) }, target?.id ?? null);
+    return offer({ ...history, itemIds: history.selection.items.map(({ id }) => id),
+      omittedItemIds: history.selection.omittedItemIds }, target?.id ?? null);
   };
   const assembleOnFreshSession = (excludedMessageId?: string) => {
     offeredHistory = null;

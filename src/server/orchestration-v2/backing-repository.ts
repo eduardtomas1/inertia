@@ -49,9 +49,11 @@ export class ProviderBackingRepository {
   preparation(runId: string, attemptId: string, threadId: string, requestedAt: string,
     prepared: PreparedContextHandoff): OrchestrationBackingEvent {
     const target = prepared.targetBackingId ? this.get(prepared.targetBackingId) : null;
+    const selection = { runId, attemptId, targetBackingId: prepared.targetBackingId, itemIds: [...prepared.itemIds] };
+    const omitted = prepared.omittedItemIds?.length ? { omittedItemIds: [...prepared.omittedItemIds] } : null;
     return { type: "context.handoff-prepared", payload: {
-      id: `handoff:${commandFingerprint({ runId, attemptId, targetBackingId: prepared.targetBackingId, itemIds: prepared.itemIds })}`,
-      runId, attemptId, threadId, itemIds: [...prepared.itemIds],
+      id: `handoff:${commandFingerprint(omitted ? { ...selection, ...omitted } : selection)}`,
+      runId, attemptId, threadId, itemIds: selection.itemIds, ...omitted,
       targetBackingId: prepared.targetBackingId, nativeSessionId: target?.nativeSessionId ?? null,
       method: "inline", state: "prepared", createdAt: requestedAt, updatedAt: requestedAt,
     } };
@@ -85,13 +87,31 @@ export class ProviderBackingRepository {
     const timestamp = new Date().toISOString();
     const handoff = this.handoff(run.id);
     const inherited = previous ? null : this.nativeForkCoverage(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
-    this.record({ id, threadId: run.threadId, projectId: run.projectId, providerId: run.providerId,
-      providerInstanceId: run.providerInstanceId, workspaceKey: run.workspaceKey, nativeSessionId,
-      continuationIdentity: versionedContinuationIdentitySchema.parse(turn.continuationIdentity), selection: run.selection,
-      lastRunId: run.id, lastTurnId: run.turnId,
-      status: previous?.lastRunId === run.id ? previous.status : handoff?.state === "dispatching" ? "uncertain" : "ready",
-      coveredItemIds: previous?.coveredItemIds ?? inherited?.ids ?? [], coverageComplete: previous?.coverageComplete ?? inherited?.complete ?? true,
-      createdAt: previous?.createdAt ?? timestamp, updatedAt: timestamp }, run.id, run.attemptId);
+    const moved = previous || inherited ? [] : this.movedBackings(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
+    const [carried] = moved;
+    const status = previous?.lastRunId === run.id ? previous.status
+      : handoff?.state === "dispatching" || carried?.status === "uncertain" ? "uncertain" : "ready";
+    this.database.transaction(() => {
+      for (const backing of moved) this.invalidate(backing, "workspace-changed");
+      this.record({ id, threadId: run.threadId, projectId: run.projectId, providerId: run.providerId,
+        providerInstanceId: run.providerInstanceId, workspaceKey: run.workspaceKey, nativeSessionId,
+        continuationIdentity: versionedContinuationIdentitySchema.parse(turn.continuationIdentity), selection: run.selection,
+        lastRunId: run.id, lastTurnId: run.turnId, status,
+        coveredItemIds: previous?.coveredItemIds ?? inherited?.ids ?? carried?.coveredItemIds ?? [],
+        coverageComplete: previous?.coverageComplete ?? inherited?.complete ?? carried?.coverageComplete ?? true,
+        createdAt: previous?.createdAt ?? timestamp, updatedAt: timestamp }, run.id, run.attemptId);
+    }).immediate();
+  }
+
+  private movedBackings(threadId: string, instanceId: string, workspaceKey: string, nativeSessionId: string): ProviderBacking[] {
+    const rows = this.database.prepare(`SELECT payload_json FROM orchestration_v2_entities
+      WHERE kind = 'provider-backing' AND thread_id = ?
+        AND json_extract(payload_json, '$.providerInstanceId') = ?
+        AND json_extract(payload_json, '$.nativeSessionId') = ?
+        AND json_extract(payload_json, '$.workspaceKey') <> ?
+        AND json_extract(payload_json, '$.status') <> 'retired'
+      ORDER BY revision DESC LIMIT 64`).all(threadId, instanceId, nativeSessionId, workspaceKey) as { payload_json: string }[];
+    return rows.map((row) => providerBackingSchema.parse(JSON.parse(row.payload_json)));
   }
 
   private nativeForkCoverage(threadId: string, instanceId: string, workspaceKey: string, nativeSessionId: string) {
@@ -142,7 +162,8 @@ export class ProviderBackingRepository {
       AND role IN ('user','assistant') ORDER BY created_at, rowid LIMIT ?`)
       .all(run.threadId, run.turnId, MAX_BACKING_COVERAGE_ITEMS + 1) as { id: string }[];
     const coverage = [...new Set([...backing.coveredItemIds,
-      ...(handoff?.state === "delivered" ? handoff.itemIds : []), ...rows.map(({ id }) => id)])];
+      ...(handoff?.state === "delivered" ? [...handoff.itemIds, ...handoff.omittedItemIds ?? []] : []),
+      ...rows.map(({ id }) => id)])];
     this.record({ ...backing, coveredItemIds: coverage.slice(-MAX_BACKING_COVERAGE_ITEMS),
       coverageComplete: backing.coverageComplete && coverage.length <= MAX_BACKING_COVERAGE_ITEMS }, run.id, run.attemptId);
   }

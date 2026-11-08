@@ -1,0 +1,81 @@
+.task-created-notice {
+  display: grid;
+  min-height: 48px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+  font-size: var(--text-sm);
+  grid-template-columns: 16px minmax(0, 1fr) auto var(--control-height);
+  animation: task-created-notice-enter var(--dur-fast) var(--ease-fade) both;
+}
+
+.task-created-notice > svg {
+  color: var(--text-muted);
+}
+
+.task-created-notice > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.task-created-notice strong {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.task-created-notice small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes task-created-notice-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-created-notice {
+    animation: none;
+  }
+}
+
+.plan-step.has-task-action {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.plan-step.has-task-action > :is(.plan-step-button, .plan-step-content) {
+  min-width: 0;
+  flex: 1;
+}
+
+.plan-step-task {
+  flex: 0 0 auto;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-fade);
+}
+
+.plan-step:hover .plan-step-task,
+.plan-step:focus-within .plan-step-task,
+.plan-step-task:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .plan-step-task {
+    opacity: 1;
+  }
+}

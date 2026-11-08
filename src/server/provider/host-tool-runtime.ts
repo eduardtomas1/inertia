@@ -22,8 +22,41 @@ import type {
 
 const HOST_TOOL_APPROVAL_ID_PREFIX = "inertia-host-tool:";
 const HOST_TOOL_APPROVAL_TIMEOUT_MS = 5 * 60_000;
-const MAX_HOST_TOOL_CALLS = 1_024;
+export const MAX_HOST_TOOL_CALLS = 1_024;
+/**
+ * Calls that end without using the allowance (a wait that timed out) still
+ * reserve their identity; this bounds that set for one turn.
+ */
+export const MAX_HOST_TOOL_CALL_IDENTITIES = 8_192;
 const MAX_PENDING_HOST_TOOL_CALLS = 8;
+
+const unchargedResults = new WeakSet<ProviderHostToolResult>();
+const allowanceReportingResults = new WeakSet<ProviderHostToolResult>();
+
+/**
+ * Marks a host-owned result for the turn's call allowance. An `uncharged`
+ * result gives back the allowance its call reserved; either way, a JSON
+ * object result gains `remainingToolCalls` so the model can see what is left.
+ * Only Inertia code can mark a result; provider input never can.
+ */
+export function withHostToolAllowance(
+  result: ProviderHostToolResult,
+  charge: "charged" | "uncharged",
+): ProviderHostToolResult {
+  allowanceReportingResults.add(result);
+  if (charge === "uncharged") unchargedResults.add(result);
+  return result;
+}
+
+function withRemainingAllowance(text: string, remaining: number): string {
+  try {
+    const value: unknown = JSON.parse(text);
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return text;
+    return JSON.stringify({ ...value, remainingToolCalls: remaining });
+  } catch {
+    return text;
+  }
+}
 
 interface PendingApproval {
   callId: string;
@@ -126,6 +159,8 @@ export class ProviderHostToolRuntime {
   private readonly pendingApprovals = new Map<string, PendingApproval>();
   private readonly pendingCalls = new Map<string, PendingCall>();
   private readonly seenCallIds = new Set<string>();
+  /** Admitted calls that count toward `MAX_HOST_TOOL_CALLS`. */
+  private chargedCalls = 0;
   private settled = false;
 
   constructor(private readonly options: ProviderHostToolRuntimeOptions) {}
@@ -150,9 +185,15 @@ export class ProviderHostToolRuntime {
       // reconnect or replay cannot repeat a previously admitted mutation.
       return Promise.resolve(failure("The provider reused an Inertia tool-call identity."));
     }
-    if (this.seenCallIds.size >= MAX_HOST_TOOL_CALLS) {
+    if (this.chargedCalls >= MAX_HOST_TOOL_CALLS) {
       return Promise.resolve(failure(
         `This turn already made ${MAX_HOST_TOOL_CALLS} Inertia tool calls, which is the limit for one turn. Retrying in this turn will not restore the allowance. Finish the turn; the next turn starts a new allowance.`,
+        "host_tool_budget_exhausted",
+      ));
+    }
+    if (this.seenCallIds.size >= MAX_HOST_TOOL_CALL_IDENTITIES) {
+      return Promise.resolve(failure(
+        `This turn already started ${MAX_HOST_TOOL_CALL_IDENTITIES} Inertia tool calls, which is the limit for one turn, including waits that timed out. Finish the turn; the next turn starts a new allowance.`,
         "host_tool_budget_exhausted",
       ));
     }
@@ -162,6 +203,7 @@ export class ProviderHostToolRuntime {
       ));
     }
     this.seenCallIds.add(input.callId);
+    this.chargedCalls += 1;
     const controller = new AbortController();
     const abort = (): void => { this.cancelCall(input.callId); };
     const pending: PendingCall = {
@@ -199,13 +241,16 @@ export class ProviderHostToolRuntime {
           return failure("The Inertia chat-tool call was cancelled.");
         }
         const images = boundedHostImages(result.images);
-        return images === null
-          ? failure("The Inertia chat-tool returned invalid images.")
-          : {
-              success: result.success,
-              text: boundedUtf8(result.text, MAX_PROVIDER_HOST_TOOL_RESULT_BYTES),
-              ...(images ? { images } : {}),
-            };
+        if (images === null) return failure("The Inertia chat-tool returned invalid images.");
+        if (unchargedResults.has(result)) this.chargedCalls -= 1;
+        const text = allowanceReportingResults.has(result)
+          ? withRemainingAllowance(result.text, Math.max(0, MAX_HOST_TOOL_CALLS - this.chargedCalls))
+          : result.text;
+        return {
+          success: result.success,
+          text: boundedUtf8(text, MAX_PROVIDER_HOST_TOOL_RESULT_BYTES),
+          ...(images ? { images } : {}),
+        };
       },
       (error: unknown) => failure(
         error instanceof Error && error.message

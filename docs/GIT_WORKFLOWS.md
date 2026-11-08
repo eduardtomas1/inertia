@@ -29,8 +29,8 @@ runtime-issued authority. Opening the menus does not start a network scan.
   another remote.
   Fork workflows fetch the upstream independently of the push remote. Fetch is
   also available for a dirty checkout and from a nested repository's Changes
-  controls. Stop an active fetch from **Environment**; the activity stays live
-  until owned process cleanup settles.
+  controls. Stop an active fetch from the chat's **Background tasks** surface;
+  the activity stays live until owned process cleanup settles.
 - **Pull:** requires an upstream and a complete, clean checkout. Only a
   fast-forward is permitted; Inertia does not auto-stash, rebase, resolve
   conflicts, or recurse into submodules. Fetch first to update the incoming
@@ -39,12 +39,160 @@ runtime-issued authority. Opening the menus does not start a network scan.
   receipts, selected-path commit transaction and separate authenticated PR
   flow. Existing commits can be pushed while unrelated uncommitted work remains.
   A behind/diverged branch must be reconciled first. No force push is offered.
+- **Commit message:** the message field is multi-line. The first line is the
+  subject; a counter turns to a warning past 72 characters but never blocks the
+  commit. Leave a blank line before the body. Enter inserts a new line and
+  Cmd/Ctrl+Enter commits; messages stay bounded to 10,000 characters.
+  **Draft message** fills the field from local evidence only, with no provider
+  call: the first sentence of the chat's current review summary becomes the
+  subject and the rest the body, or, without a summary, the subject names the
+  selected files' common folder (or their count) and the body lists each file
+  with its status. Once the field has text the button reads **Replace with
+  draft**, so a typed message is only replaced by that explicit click.
+- **Stage and unstage:** the Changes list groups files into **Staged** and
+  **Changes**. **Stage** / **Unstage** on a row or in its context menu, and
+  **Stage all** / **Unstage all** in the group headings, move whole files
+  between the working tree and the index so you can shape the index yourself.
+  Commit still stages exactly the paths checked in the commit dialog. Staging
+  runs `git add --all` for the selected paths. Unstaging runs `git rm --cached`
+  for a newly added file whose working copy matches the index, `git restore
+  --staged` for other entries (both sides of a staged rename), and, before the
+  first commit, a path-limited `git reset`. All three change only the index;
+  working-tree files are never modified or deleted. Requests carry 1–200
+  repository-relative paths and the repository's live authority (the panel
+  sends larger selections in batches). The runtime resolves each path through
+  realpath and symbolic-link containment against the repository root, accepts
+  only paths the current status reports as changed, refuses unmerged files and
+  embedded repositories (stage those from their own scope), and refreshes the
+  status afterwards. Pathspecs are passed literally on standard input
+  (`--literal-pathspecs --pathspec-from-file=- --pathspec-file-nul`), never
+  through a shell. Detached chat windows cannot stage or unstage.
 
 Counts reflect locally available remote-tracking refs, not a live network
 guarantee. A truncated status is shown as incomplete and cannot authorize
 commit/pull through these controls. Git failures use bounded, credential-free
 guidance for authentication, connectivity, non-fast-forward rejection, index
 locks, occupied branches, and missing author identity.
+
+## History and blame
+
+History and blame are read-only. They never check out, reset, revert,
+cherry-pick or change the index; a diverged branch is still reconciled in the
+terminal.
+
+- **History:** choose **History…** in the Git menu. Commits on the current
+  branch are listed newest first (subject, short SHA, author, relative date),
+  50 at a time; **Load more** continues. Selecting a commit shows its message,
+  its changed files with added and removed line counts, and a read-only diff.
+  A merge is compared with its first parent and a root commit with the empty
+  tree. Arrow keys, Home, End, Page Up and Page Down move through the list;
+  Escape closes the dialog. History uses the same repository scope as the
+  header Git menu, so it opens for the chat checkout (or the project root in a
+  draft); switching chats closes it.
+- **Blame:** in the Files preview, **Blame** (off by default) adds a narrow
+  gutter showing the short SHA and author at the first line of each run of
+  lines from the same commit (SHA only when the preview is narrow). Hover or
+  focus an entry for the date and commit summary; Up and Down move between
+  entries. Commit diffs in History use the Changes panel's highlighting,
+  falling back to plain text for very large files. Blame loads in 2,000-line pages
+  as you scroll and describes the file on disk, so uncommitted lines are
+  marked **Not committed**. It is unavailable in Markdown preview mode, for
+  untracked, binary and symbolic-link files, and for files over 16 MiB.
+
+Author email addresses are never returned. Detached chat windows cannot use
+history or blame; they remain main-window Git reads.
+
+### Commands and bounds
+
+| Command | Git invocation | Bounds |
+| --- | --- | --- |
+| `git.log` | `rev-parse --verify --quiet HEAD^{commit}` on the first page, then `log -z --no-color --no-show-signature --encoding=UTF-8 --format=%H%x00%h%x00%P%x00%an%x00%aI%x00%s --max-count=N [--skip=S] <head> -- [:(literal)<path>]` | 1-100 commits per page (default 50); 2 MiB output, truncated to complete records |
+| `git.commit.show` | `show -s --no-show-signature --encoding=UTF-8 --format=… <sha>^{commit} --`, then `diff-tree -r -M --no-commit-id --no-ext-diff --no-textconv -z --raw --numstat` and `diff-tree … -p --src-prefix=a/ --dst-prefix=b/`, each with `<first parent> <sha>` or `--root <sha>` | SHA must match `^[0-9a-f]{7,40}$`; body 8 KiB, 500 files, diff 256 KiB, each with a truncation flag |
+| `git.blame` | `ls-files -z -- :(literal)<path>`, then `blame --porcelain --no-textconv --encoding=UTF-8 -L<start>,<end> -- <path>` | 2,000 lines per call; 8 MiB output, truncated to complete lines with a continuation line |
+
+Every invocation goes through the bounded inspection runner (argument arrays,
+no shell, optional locks and filesystem monitors disabled, owned process-tree
+cleanup) with a 5-second per-process clock inside the shared Git read
+deadline. The log cursor is opaque: it records the head the first page was
+anchored to, the number of commits already shown and the last commit's SHA.
+Later pages walk from that anchor, so new commits do not shift pages, and the
+last SHA is re-read to detect rewritten history.
+
+Paths for `git.log` and `git.blame` are relative to the repository scope and
+must stay inside it after realpath resolution; a symbolic link that escapes is
+refused. Untracked files return an empty blame result rather than an error.
+Omitting `repositoryPath` reads the chat checkout; a nested repository passes
+`repositoryPath` with the authority issued by its last status refresh, as the
+other repository-scoped Git commands do.
+
+## Worktrees
+
+Settings → Projects → **Worktrees** lists every checkout Git knows for the
+selected project's repository. The list loads only when you choose **Show
+worktrees**, then on **Refresh** and after each action. Each row shows the
+path, branch, a clean/changes badge, and a link that opens the owning chat.
+Paths inside the repository are shown relative to its root; Inertia's own
+isolated chat worktrees are shown with their full path; any other checkout
+shows only its folder name, so another location on disk is never revealed.
+Detached chat windows cannot list, remove or prune worktrees.
+
+**Remove** is offered only when every rule below holds. Otherwise the button
+stays focusable but inactive, its reason is shown beneath the row, and the
+runtime refuses the same request with the same reason without changing
+anything:
+
+1. The worktree is not the repository's main checkout and lies inside
+   Inertia's managed worktree folder.
+2. Inertia created it: a chat in this project holds a completed ownership
+   receipt whose path matches the worktree's realpath. Interrupted creations
+   and Duo comparison worktrees are left to chat deletion.
+3. That chat is not running, waiting for input, holding provider processes, or
+   resumed in a provider terminal, and no other workspace activity is active
+   for it.
+4. No other chat uses the worktree as its checkout, and the owning chat's
+   checkout path still matches the receipt.
+5. Git does not report it locked or prunable, and it is still on the branch
+   Inertia created.
+6. `git status` reports no modified, staged or untracked files, and no ignored
+   files (for example build output or `.env`), which removal would delete. A
+   status that cannot be confirmed counts as not clean.
+7. The receipt's repository, administrative-directory and filesystem identity
+   still match (`inspectOwnedWorktreeCleanupState`), so a replaced worktree
+   is kept.
+
+The confirmation names the path and branch. The runtime then takes an
+exclusive reservation on the worktree checkout (no chat run can start there)
+under the repository's source-control serialization, repeats every check, and
+runs `git worktree remove -- <path>`. `--force` is never passed, so Git itself
+also refuses locked or unclean worktrees. Git cannot bind removal to the
+inspected identity atomically; the repeated checks plus Git's own clean check
+mean a concurrent replacement can at most lose ignored files, never tracked or
+untracked work. After Git reports the worktree absent, the receipt is released
+and the chat keeps its historical checkout path: it stays readable, never
+falls back to the main checkout, and can then be deleted without a cleanup
+step. The generated branch (`inertia/<chat prefix>`) is deleted only when
+`for-each-ref --merged=refs/heads/<main checkout branch>` contains it, and
+then only with `git branch -d` (never `-D`); otherwise it is kept and the
+result says so.
+
+**Prune** runs `git worktree prune`, which only clears Git's administrative
+records for worktrees whose folders are already gone. It never deletes files
+or branches.
+
+| Command | Git invocation | Bounds |
+| --- | --- | --- |
+| `worktree.list` | `worktree list --porcelain -z`, then per worktree `status --porcelain=v1 -z --untracked-files=normal --ignored=traditional --ignore-submodules=none` | 200 worktrees, 1 MiB list output; status 512 KiB and 2,000 counted entries; 5 s per process, 30 s for all status checks, 4 at a time |
+| `worktree.remove` | the list inspections above, `worktree remove -- <path>`, then `for-each-ref --merged=refs/heads/<source> --format=%(refname) refs/heads/<branch>` and `branch -d -- <branch>` | removal uses the default 30 s local clock; inspections 5 s |
+| `worktree.prune` | `worktree list --porcelain -z`, `worktree prune`, `worktree list --porcelain -z` | 5 s per process |
+
+All invocations use argument arrays without a shell through the bounded Git
+runner; reads run as inspections with optional locks and filesystem monitors
+disabled. Coverage: `tests/server/worktree-commands.test.ts` (real temporary
+repositories), `tests/shared/worktree-contracts.test.ts`,
+`tests/server/detached-chat-worktree-policy.test.ts` and
+`tests/renderer/settings-project-worktrees.dom.test.tsx`. Removal was exercised
+on Linux; Windows junctions and macOS path aliases rely on the shared realpath
+comparison and were not run here.
 
 ## Checkpoints
 

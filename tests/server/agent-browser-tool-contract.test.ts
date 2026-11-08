@@ -17,6 +17,7 @@ import {
   RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS,
 } from "../../src/server/runtime/agent-browser-host-tools";
 import { createInertiaHarnessCapabilities } from "../../src/server/runtime/inertia-harness-capabilities";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../../src/server/runtime/workspace-host-tools";
 import type { Conversation } from "../../src/shared/contracts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
@@ -126,7 +127,11 @@ describe("agent browser tool contract", () => {
     try {
       const listed = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
       expect([...listed.keys()].sort())
-        .toEqual([...AGENT_BROWSER_TOOL_DEFINITIONS.map(({ name }) => name), "inertia_render_html"].sort());
+        .toEqual([
+          ...AGENT_BROWSER_TOOL_DEFINITIONS.map(({ name }) => name),
+          "inertia_render_html",
+          ...WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name),
+        ].sort());
       for (const definition of AGENT_BROWSER_TOOL_DEFINITIONS) {
         const advertised = listed.get(definition.name)!.inputSchema;
         expect(Object.keys(advertised.properties ?? {}).sort(), definition.name)

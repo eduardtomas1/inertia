@@ -795,8 +795,23 @@
     },
     {
       "version": 108,
+      "name": "RecordManagedAgentContextReads",
+      "digest": "1f30fe4a6f02f58c16afb344316cc9bf69d116195267b39c6169ef73cba1a23b"
+    },
+    {
+      "version": 109,
+      "name": "PersistTodoSourceConversation",
+      "digest": "0aba8ee28852459fbf7b11ae71117096c1f712c0a43a66b77adbffe8fe9d8d21"
+    },
+    {
+      "version": 110,
+      "name": "PersistCodexThreadToolPacks",
+      "digest": "f5d456e90892eae506655587faed66662f233aa45ad69672cce2197e43118eb3"
+    },
+    {
+      "version": 111,
       "name": "SupportNativeGrokProvider",
-      "digest": "02f54ca440fb84b3517be04ca5dd0f271b0966d6d6e47f9c56702a76a1f8a41d"
+      "digest": "57f9d069b8671dbdc4fd5684da90f122747fb8002c28f544a5142f8ed02575b8"
     }
   ]
 }

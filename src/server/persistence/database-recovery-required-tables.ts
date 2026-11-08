@@ -1,5 +1,7 @@
 import { LIBRARY_SCHEMA_VERSION } from "./migrations/library";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
+import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "./migrations/todo-source-conversation";
+import { CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION } from "./migrations/codex-thread-tool-packs";
 
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
@@ -146,6 +148,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "created_at",
     "updated_at",
   ]],
+  [TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, "todos", ["source_conversation_id"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -193,6 +196,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [99, ["watcher_links", "watcher_wakes"]],
   [103, ["turn_failure_kinds"]],
   [LIBRARY_SCHEMA_VERSION, ["library_categories", "saved_answers"]],
+  [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, ["codex_thread_tool_packs"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -224,6 +228,8 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [LIBRARY_SCHEMA_VERSION, "saved_answers_category_idx"],
     [LIBRARY_SCHEMA_VERSION, "saved_answers_created_idx"],
     [LIBRARY_SCHEMA_VERSION, "html_renders_created_idx"],
+    [TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, "todos_source_conversation_idx"],
+    [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, "codex_thread_tool_packs_registered_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [

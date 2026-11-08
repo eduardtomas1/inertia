@@ -1,11 +1,15 @@
 import clsx from "clsx";
 import { useId, useState, type ComponentProps } from "react";
-import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, Play, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, ListPlus, MessageSquarePlus, Play, RotateCcw } from "lucide-react";
+import { todoDraftFromPlanStep } from "@shared/todos";
 
 import { useCopiedState } from "../hooks/useCopiedState";
 import { planDocument, planDocumentIsLong, planInlineSegments } from "../utils/planDocument";
+import type { PlanStepSource } from "../utils/planFromText";
 import { ResponseMarkdown } from "./ResponseMarkdown";
+import { useTaskCreator } from "./tasks/taskCreation";
 import { IconButton, LoadingMark } from "./ui";
+import "./tasks/TaskCreation.css";
 
 export type PlanStepStatus = "pending" | "in-progress" | "completed" | "blocked" | "cancelled";
 
@@ -14,6 +18,7 @@ export type PlanStep = {
   title: string;
   detail?: string | null;
   status: PlanStepStatus;
+  source?: PlanStepSource;
 };
 
 export type PlanMarkdownContext = Pick<
@@ -30,7 +35,10 @@ export type PlanPanelProps = {
   onSelectStep?: (stepId: string) => void;
   actionsDisabled?: boolean;
   onRefine?: () => void;
+  /** Sends the plan itself to this chat in Build mode. */
   onImplement?: () => void;
+  /** Opens a new chat in the same checkout with the plan as its first draft. */
+  onImplementInNewChat?: () => void;
 };
 
 function StepIcon({ status }: { status: PlanStepStatus }): React.JSX.Element {
@@ -44,6 +52,10 @@ function StepIcon({ status }: { status: PlanStepStatus }): React.JSX.Element {
 function statusLabel(status: PlanStepStatus): string {
   if (status === "in-progress") return "In progress";
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function planStepPlainTitle(title: string): string {
+  return planInlineSegments(title).map(({ text }) => text).join("");
 }
 
 function PlanInlineText({ text }: { text: string }): React.JSX.Element {
@@ -67,9 +79,11 @@ export function PlanPanel({
   actionsDisabled = false,
   onRefine,
   onImplement,
+  onImplementInNewChat,
 }: PlanPanelProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const documentId = useId();
+  const sourceNoteId = useId();
   const planCopy = useCopiedState();
   const completed = steps.filter((step) => step.status === "completed").length;
   const counted = steps.filter((step) => step.status !== "cancelled").length;
@@ -78,6 +92,11 @@ export function PlanPanel({
   const body = parsed?.body ?? "";
   const collapsible = planDocumentIsLong(body);
   const collapsed = collapsible && !expanded;
+  const derived = steps.length > 0
+    && steps.every((step) => step.source === "derived");
+  const taskCreator = useTaskCreator();
+  // Tasks link to a saved chat; drafts and detached windows offer no action.
+  const taskConversationId = taskCreator ? markdown?.conversationId ?? null : null;
 
   return (
     <section className="plan-panel" aria-label="Implementation plan">
@@ -85,7 +104,9 @@ export function PlanPanel({
         <div className="panel-heading">
           <div className="panel-heading-copy">
             <h2>{heading}</h2>
-            {counted > 0 && <span>{completed} of {counted} complete</span>}
+            {derived
+              ? <span>Derived from the reply</span>
+              : counted > 0 && <span>{completed} of {counted} complete</span>}
           </div>
         </div>
         <div className="plan-toolbar-actions">
@@ -132,7 +153,12 @@ export function PlanPanel({
           </div>
         ) : (
           <>
-            <ol className="plan-steps">
+            {derived && (
+              <p id={sourceNoteId} className="plan-source-note">
+                The provider didn't report a plan. These steps come from the list in its reply and aren't tracked.
+              </p>
+            )}
+            <ol className="plan-steps" aria-describedby={derived ? sourceNoteId : undefined}>
               {steps.map((step, index) => {
                 const content = (
                   <>
@@ -146,9 +172,15 @@ export function PlanPanel({
                     <span className="plan-step-status">{statusLabel(step.status)}</span>
                   </>
                 );
+                const stepLabel = planStepPlainTitle(step.title).trim();
                 return (
                   <li
-                    className={clsx("plan-step", `is-${step.status}`, activeStepId === step.id && "is-active")}
+                    className={clsx(
+                      "plan-step",
+                      `is-${step.status}`,
+                      activeStepId === step.id && "is-active",
+                      taskConversationId && "has-task-action",
+                    )}
                     data-plan-step-status={step.status}
                     key={step.id}
                   >
@@ -164,6 +196,22 @@ export function PlanPanel({
                     ) : (
                       <div className="plan-step-content" aria-current={activeStepId === step.id ? "step" : undefined}>{content}</div>
                     )}
+                    {taskCreator && taskConversationId && (
+                      <IconButton
+                        className="plan-step-task"
+                        label="Create task"
+                        aria-label={`Create task from step ${index + 1}${stepLabel ? `: ${stepLabel}` : ""}`}
+                        onClick={() => taskCreator.create(
+                          taskConversationId,
+                          (chat) => todoDraftFromPlanStep(
+                            { title: planStepPlainTitle(step.title), detail: step.detail },
+                            chat.title,
+                          ),
+                        )}
+                      >
+                        <ListPlus size={14} aria-hidden="true" />
+                      </IconButton>
+                    )}
                   </li>
                 );
               })}
@@ -172,12 +220,18 @@ export function PlanPanel({
         )}
       </div>
 
-      {(onRefine || onImplement) && (steps.length > 0 || body) && (
-        <footer className="plan-actions">
+      {(onRefine || onImplement || onImplementInNewChat) && (steps.length > 0 || body) && (
+        <footer className="plan-actions" style={{ flexWrap: "wrap" }}>
           {onRefine && (
             <button type="button" className="secondary-button" onClick={onRefine} disabled={actionsDisabled}>
               <RotateCcw size={14} aria-hidden="true" />
               <span>Refine plan</span>
+            </button>
+          )}
+          {onImplementInNewChat && (
+            <button type="button" className="secondary-button" onClick={onImplementInNewChat} disabled={actionsDisabled || steps.length === 0}>
+              <MessageSquarePlus size={14} aria-hidden="true" />
+              <span>Implement in a new chat</span>
             </button>
           )}
           {onImplement && (

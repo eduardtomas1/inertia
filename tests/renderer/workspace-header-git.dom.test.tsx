@@ -1,10 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useLayoutEffect, type ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
 import { WorkspaceHeaderActions } from "../../src/renderer/src/components/workspace-header/WorkspaceHeaderActions";
 import { hoverTooltipText } from "./tooltip-fixtures";
+import { requestHeaderBranchMenu } from "../../src/renderer/src/utils/checkoutBranchMenu";
 import type {
   GitStatusSnapshot,
   Project,
@@ -262,6 +263,25 @@ describe("WorkspaceHeader Git split button", () => {
 
     expect(screen.queryByRole("menu", { name: "Branches" })).not.toBeInTheDocument();
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("opens the branch menu when the command palette asks for it", async () => {
+    const props = await renderHeader(status(true, { upstream: "origin/feature/pr" }));
+
+    let handled = false;
+    act(() => { handled = requestHeaderBranchMenu(); });
+    expect(handled).toBe(true);
+    expect(props.onRefreshBranches).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("menu", { name: "Branches" })).toBeInTheDocument();
+  });
+
+  it("leaves a palette branch request unanswered while Git is busy or unavailable", async () => {
+    await renderHeader(status(true, { upstream: "origin/feature/pr" }), { busy: true });
+    expect(requestHeaderBranchMenu()).toBe(false);
+    cleanup();
+    await renderHeader(status(true, { isRepository: false }));
+    expect(requestHeaderBranchMenu()).toBe(false);
+    expect(screen.queryByRole("menu", { name: "Branches" })).not.toBeInTheDocument();
   });
 
   it("closes the branch menu when keyboard focus leaves it", async () => {

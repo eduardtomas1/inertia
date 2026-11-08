@@ -41,7 +41,7 @@ test("recent attachments show real thumbnails, open retained previews and handle
     await expect(recent).toBeVisible();
     await page.locator("#workspace-content").evaluate((element) =>
       Promise.all(element.getAnimations().map(({ finished }) => finished.catch(() => undefined))));
-    for (const button of await recent.getByRole("button").all()) {
+    for (const button of await recent.getByRole("button", { name: /^Preview attachment / }).all()) {
       const layout = await button.evaluate((node) => {
         const box = node.getBoundingClientRect(); const icon = node.querySelector(".sent-attachment-thumbnail")!.getBoundingClientRect();
         const text = node.querySelector(".sent-attachment-copy")!.getBoundingClientRect();

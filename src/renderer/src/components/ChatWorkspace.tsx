@@ -869,9 +869,9 @@ export function ChatWorkspace({
     lastReaderScrollTopRef.current = element.scrollTop;
     continueTouchIntent();
     const intentional = readerIntentRef.current;
-    const { follows, arrived } = readerScrollFollow({ scrollTop: element.scrollTop, clientHeight: element.clientHeight,
+    const { follows, movedUp } = readerScrollFollow({ scrollTop: element.scrollTop, clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight, previousScrollTop, live: liveTurnRef.current, intentional, aimedAtLatest: aimedAtLatestRef.current });
-    if (arrived) aimedAtLatestRef.current = false;
+    if (movedUp) aimedAtLatestRef.current = false;
     if (finalAnswerAutoScrollOwnerRef.current !== null) {
       onLatestContentVisibilityChange?.(follows);
       return;

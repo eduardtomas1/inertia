@@ -18,6 +18,7 @@ const macLabel = (action: AppShortcutAction): string => ({
   "toggle-sidebar": "⌘B",
   "toggle-terminal": "⌘J",
   tasks: "⌘T",
+  "open-surface": "⌘G",
 })[action];
 
 const otherLabel = (action: AppShortcutAction): string => macLabel(action).replace("⌘", "Ctrl+");

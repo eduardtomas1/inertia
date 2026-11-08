@@ -43,6 +43,7 @@ function runtimeWithClose(
     releaseUpdatePreparation: vi.fn(() => true),
     resolveProjectPath: vi.fn(),
     readHtmlRender: vi.fn(() => null),
+    attachmentConversations: vi.fn(() => []),
     privateConnectRequest: vi.fn(async () => {
       throw new Error("unused");
     }),

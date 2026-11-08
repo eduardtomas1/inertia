@@ -28,6 +28,14 @@ vi.mock("@xterm/xterm", () => ({
     rows = 24;
     options = { fontSize: 13, theme: {} };
     loadAddon(): void {}
+    registerLinkProvider(): { dispose: () => void } {
+      return { dispose: () => undefined };
+    }
+    onSelectionChange(): { dispose: () => void } {
+      return { dispose: () => undefined };
+    }
+    hasSelection(): boolean { return false; }
+    getSelection(): string { return ""; }
     attachCustomKeyEventHandler(): void {}
     open(container: HTMLElement): void {
       container.append(document.createElement("textarea"));

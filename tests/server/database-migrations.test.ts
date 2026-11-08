@@ -21,7 +21,6 @@ import {
   runDatabaseMigrations,
 } from "../../src/server/database-migrations";
 import { RuntimeStore } from "../../src/server/database";
-import { ORCHESTRATION_V2_PROJECTION_VERSION } from "../../src/server/orchestration-v2/projector";
 import {
   CURRENT_DATABASE_SCHEMA_VERSION,
   LEGACY_SCHEMA_MIGRATION_COUNT,
@@ -61,6 +60,8 @@ async function fixtureManifest(): Promise<FixtureManifest> {
     await readFile(join(fixtureDirectory, "manifest.json"), "utf8"),
   ) as FixtureManifest;
 }
+
+const SEEDED_PROJECTION_VERSION = 1;
 
 function migrateFixtureInPlace(databasePath: string): void {
   const database = new Database(databasePath);
@@ -2243,7 +2244,7 @@ describe("runtime migration catalog", () => {
     }>).map(({ name }) => name)).toEqual(expect.arrayContaining(["status", "error", "command_type"]));
     expect(migrated.prepare(
       "SELECT projection_name AS name, schema_version AS version, last_sequence AS sequence FROM orchestration_v2_projection_metadata",
-    ).all()).toEqual([{ name: "orchestration-v2", version: ORCHESTRATION_V2_PROJECTION_VERSION, sequence: 0 }]);
+    ).all()).toEqual([{ name: "orchestration-v2", version: SEEDED_PROJECTION_VERSION, sequence: 0 }]);
     expect((migrated.prepare("PRAGMA table_info(thread_usage)").all() as Array<{
       name: string;
     }>).map(({ name }) => name)).toEqual(expect.arrayContaining([

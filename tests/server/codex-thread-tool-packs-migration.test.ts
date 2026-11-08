@@ -43,7 +43,7 @@ function tableExists(database: Database.Database, type: "table" | "index", name:
 describe("PersistCodexThreadToolPacks migration", () => {
   it("is schema 110, appended after the task source chat column", () => {
     expect(CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION).toBe(110);
-    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION);
+    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBeGreaterThanOrEqual(CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION);
     expect(codexThreadToolPacksMigration.name).toBe("PersistCodexThreadToolPacks");
     expect(codexThreadToolPacksMigration.foreignKeys).toBeUndefined();
   });

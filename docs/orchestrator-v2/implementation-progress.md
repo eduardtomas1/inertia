@@ -1306,3 +1306,117 @@ contention in `database-migrations`, `database-recovery-import-worker`,
 `legacy-backfill-compatibility` timed out in another case during that rerun
 and passed 11 of 11 when run alone. `check:migrations`, `check:architecture`,
 `lint` and `typecheck` passed. The full `npm run check` was not run.
+
+## G8: run and attempt model — 2026-11-02
+
+Runs and attempts now carry T3 Code's ordinals and reasons. A run has an
+`ordinal`, numbered per thread from 1; the thread keeps `lastRunOrdinal`. An
+attempt has an `ordinal` within its run, a `reason` (`initial`, `retry`,
+`provider_recovery`, or the reserved `steering_restart`), and a `superseded`
+status with `supersededAt` (`src/shared/orchestration-v2.ts`). All new fields
+are optional in the schemas, so events written before G8 still parse. The
+projector derives them during replay and does not take them from callers.
+`run.accepted` numbers the run from the thread and records attempt 1 as
+`initial`. `run.attempt-replaced` takes an optional `reason`, which defaults to
+`retry` for older events. In the same write it marks the prior attempt
+`superseded`, sets its cleanup to `confirmed`, and numbers the replacement
+`prior + 1`. A replacement normally needs the prior attempt's cleanup to be
+`confirmed`. One exception exists: with `reason: "provider_recovery"` and the
+runtime's assertion `priorCleanup: "confirmed"`, the prior attempt's cleanup
+may still be `pending`, because the run-level ownership row then covers the
+new harness. No event can change a superseded attempt. Because these values
+depend on replay order, `ORCHESTRATION_V2_PROJECTION_VERSION` is now 2. G6's
+boot check rebuilds each upgraded database once and recomputes them.
+
+`OrchestratedTurnRepository.replaceAttempt({ runId, turnId, expectedAttemptId,
+reason, priorCleanup? })` records a replacement inside the caller's
+transaction and returns the new attempt. Its command id is
+`attempt-replaced:` plus a fingerprint of the expected attempt and the reason.
+Repeating the same request returns the attempt it created and writes nothing.
+A different request for an attempt that is no longer current fails with
+`revision-conflict`. The implicit replacement, `cleanup("pending")` after
+`confirmed` (the Duo quarantine re-record), now goes through it with
+`reason: "retry"`. G9 will call it with `provider_recovery`. `attempts(runId)`
+lists a run's attempts in ordinal order.
+
+This package also covers audit area 1 rows 9 and 28, which moved here from
+G5. Row 28: the cleanup command id now includes the attempt, the previous and
+next cleanup state, and the thread revision. The `cleanup-release` id
+includes the revision. Before this change, pending → unconfirmed → pending
+replayed the first `pending` receipt and left the projection `unconfirmed`;
+now each transition is recorded. Row 9: `synchronize`, `acknowledge` and
+`nativeBoundaries.observe` accept an optional
+`observer: { attemptId, expectedStatus? }`, and `lifecycleIfCurrent` requires
+one. When the observed attempt is not the run's current one, or the run's
+status is no longer the expected one, nothing is written and the call returns
+a `StaleAttemptObservation` (`src/server/orchestration-v2/attempt-fence.ts`).
+Its reason is `attempt-superseded`, `attempt-not-current` or
+`run-status-changed`, and it names the observed and current attempts.
+`lifecycleIfCurrent` checks before running the compatibility write, so a
+stale observation changes neither the transcript turn nor V2, as T3's
+`writeIfRunCurrent` commits nothing. The unconditional `lifecycle` stays for
+the controller's own transitions. No production caller passes an observer
+yet; G9 adds that through `ActiveTurn.attemptId`. Native thread and
+turn refs still come only from provider native-boundary events. Providers
+that emit none keep `nativeThreadId` and `nativeTurnId` null. A replacement
+attempt starts with null refs.
+
+Deliberate differences from T3 Code (`packages/contracts/src/orchestrationV2.ts`
+`OrchestrationV2RunAttempt`; `o2/Orchestrator.ts` attempt replacement;
+`o2/EventSink.ts` `writeIfRunCurrent`):
+
+- Run statuses remain the turn statuses; only attempts gain `superseded`.
+  T3 sets `completedAt` on a superseded attempt. Inertia attempts have no
+  `completedAt`, so the time is stored in `supersededAt`.
+- `steering_restart` is accepted but never emitted, because Inertia has no
+  steering restart.
+- T3 derives attempt ids from the run and the attempt ordinal. Inertia keeps
+  random attempt ids and gets idempotency from the receipt command id.
+- T3 numbers runs as the highest run ordinal plus one, and attempts as the
+  highest attempt ordinal in the run plus one. Inertia counts from the
+  thread's `lastRunOrdinal` and the prior attempt. The results are the same,
+  because runs are only appended and only the current attempt can be
+  replaced. This holds while runs are created at dispatch; if queued items
+  ever become runs, T3's renumbering at queued start applies instead.
+- T3's guard returns "not committed"; Inertia's returns a typed reason. Both
+  check the active attempt and, when the caller states it, the expected run
+  status. The guard covers harness observations, not the controller's own
+  lifecycle writes.
+- T3 records no cleanup proof. Inertia replaces an attempt only after
+  confirmed cleanup, or after the runtime asserts `priorCleanup: "confirmed"`
+  for `provider_recovery`.
+
+Tests: `tests/server/orchestration-v2-attempts.test.ts` has 7 cases. They
+cover per-thread run ordinals and the initial attempt; a `provider_recovery`
+replacement (prior attempt superseded, ordinal 2, null native refs, identical
+replay, conflicting retries); the implicit `retry` replacement; late
+lifecycle, native-boundary and acknowledgement writes from a replaced or
+unknown attempt being no-ops with their reason; pending → unconfirmed →
+pending and a repeated release getting distinct command ids; a rebuild that
+reproduces every ordinal, reason and superseded mark; and a database whose
+pre-G8 events and version-1 projections are rebuilt once when it opens. In
+`tests/server/orchestration-v2-receipts.test.ts`, the event-store fixture and
+the upgrade cases now name the version that migration 113 seeds (1) instead
+of assuming it equals the projector version. An upgraded database is now
+rebuilt once to version 2 and reproduces the same entities.
+`tests/server/database-migrations.test.ts` now expects the metadata row of a
+reopened store at `ORCHESTRATION_V2_PROJECTION_VERSION`, because the boot
+check rewrites it.
+
+Verification: the focused set (`orchestration-v2-attempts`,
+`orchestration-v2`, `orchestration-v2-receipts`, `orchestration-v2-outbox`,
+the three `orchestration-delegation-*` files, `turn-restart-continuation`,
+`turn-stop-ladder-release`, `orchestration-backings` and
+`runtime-query-plans`) passed 114 of 114 tests in 11 files. The query-plan
+snapshot did not change. A wider run of 104 files (all `orchestration-*`,
+`turn-*`, `delegation-*`, `duo-*`, `native-*` and `database-*` files, plus the
+queue, worker startup, observed-child, delegated-task migration and session
+fallback files) found one real failure, the pinned metadata version in
+`database-migrations`, which was then updated. The rest were 15-second
+timeouts, `EBUSY` errors during SQLite cleanup and two Windows symlink
+`EPERM` errors. A rerun with less parallelism left only the timeouts and
+cleanup errors in `duo-launch`, `duo-worktree-adoption` and
+`turn-git-artifacts`, plus the two `EPERM` errors. Each of those three files
+then passed when run alone, as did `database-migrations` and
+`database-recovery-schema-columns`. `typecheck`, `lint` and
+`check:architecture` passed. The full `npm run check` was not run.

@@ -16,14 +16,15 @@ import { projectMergeBackEvent } from "./merge-back-projector";
 import { isDelegationEvent, projectDelegationEvent } from "./delegation-projector";
 import { OrchestrationConflict, type ProjectEvent, type ProjectionWrite } from "./types";
 
-export const ORCHESTRATION_V2_PROJECTION_VERSION = 1;
+export const ORCHESTRATION_V2_PROJECTION_VERSION = 2;
 
 export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   const event = orchestrationDomainEventSchema.parse({ type: envelope.type, payload: envelope.payload });
   const existingThread = read("thread", envelope.threadId);
   if (event.type === "thread.registered") {
     if (existingThread || event.payload.id !== envelope.threadId || event.payload.projectId !== envelope.projectId
-      || event.payload.activeRunId !== null || event.payload.latestRunId !== null) {
+      || event.payload.activeRunId !== null || event.payload.latestRunId !== null
+      || (event.payload.lastRunOrdinal ?? 0) !== 0) {
       throw new OrchestrationConflict("scope-conflict");
     }
     return [{ kind: "thread", id: envelope.threadId, value: event.payload }];
@@ -53,6 +54,7 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   }
   if (event.type === "run.accepted") {
     const { run, attempt } = event.payload;
+    const ordinal = (thread.lastRunOrdinal ?? 0) + 1;
     if (thread.latestRunId) {
       const previousRun = read("run", thread.latestRunId);
       if (previousRun) {
@@ -73,13 +75,16 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
       || run.terminalMessageId !== null || run.attemptId !== attempt.id
       || attempt.runId !== run.id || attempt.turnId !== run.turnId || attempt.threadId !== thread.id
       || attempt.providerInstanceId !== run.providerInstanceId || attempt.status !== "queued"
-      || attempt.cleanup !== "not-started" || attempt.interruptRequestedAt !== null) {
+      || attempt.cleanup !== "not-started" || attempt.interruptRequestedAt !== null
+      || (run.ordinal ?? ordinal) !== ordinal || (attempt.ordinal ?? 1) !== 1
+      || (attempt.reason ?? "initial") !== "initial" || attempt.supersededAt !== undefined) {
       throw new OrchestrationConflict("scope-conflict");
     }
     return [
-      { kind: "run", id: run.id, value: run },
-      { kind: "attempt", id: attempt.id, value: attempt },
-      { kind: "thread", id: thread.id, value: { ...thread, activeRunId: run.id, latestRunId: run.id, updatedAt: envelope.createdAt } },
+      { kind: "run", id: run.id, value: { ...run, ordinal } },
+      { kind: "attempt", id: attempt.id, value: { ...attempt, ordinal: 1, reason: "initial" } },
+      { kind: "thread", id: thread.id, value: { ...thread, activeRunId: run.id, latestRunId: run.id,
+        lastRunOrdinal: ordinal, updatedAt: envelope.createdAt } },
     ];
   }
   const runRow = read("run", event.payload.runId);
@@ -89,20 +94,28 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   }
   const run = orchestrationRunSchema.parse(runRow.value);
   const attempt = orchestrationAttemptSchema.parse(attemptRow.value);
-  if (run.attemptId !== attempt.id || attempt.runId !== run.id) throw new OrchestrationConflict("scope-conflict");
+  if (run.attemptId !== attempt.id || attempt.runId !== run.id || attempt.status === "superseded") {
+    throw new OrchestrationConflict("scope-conflict");
+  }
   switch (event.type) {
     case "run.attempt-replaced": {
-      const replacement = event.payload.replacement;
-      if (isAgentTurnTerminalStatus(run.status) || attempt.cleanup !== "confirmed"
+      const { replacement, reason = "retry", priorCleanup } = event.payload;
+      const ordinal = (attempt.ordinal ?? 1) + 1;
+      const recovered = reason === "provider_recovery" && priorCleanup === "confirmed" && attempt.cleanup === "pending";
+      if (isAgentTurnTerminalStatus(run.status) || (attempt.cleanup !== "confirmed" && !recovered)
+        || (priorCleanup !== undefined && reason !== "provider_recovery")
         || read("attempt", replacement.id) || replacement.id === attempt.id
         || replacement.runId !== run.id || replacement.threadId !== run.threadId
         || replacement.turnId !== run.turnId || replacement.providerInstanceId !== run.providerInstanceId
         || replacement.status !== run.status || replacement.cleanup !== "pending"
-        || replacement.cleanupRelease !== undefined
+        || replacement.cleanupRelease !== undefined || replacement.supersededAt !== undefined
+        || (replacement.ordinal ?? ordinal) !== ordinal || (replacement.reason ?? reason) !== reason
         || replacement.interruptRequestedAt !== null) throw new OrchestrationConflict("scope-conflict");
       return [
         { kind: "run", id: run.id, value: { ...run, attemptId: replacement.id } },
-        { kind: "attempt", id: replacement.id, value: replacement },
+        { kind: "attempt", id: attempt.id, value: { ...attempt, status: "superseded",
+          supersededAt: envelope.createdAt, cleanup: "confirmed" } },
+        { kind: "attempt", id: replacement.id, value: { ...replacement, ordinal, reason } },
       ];
     }
     case "run.status-changed": {

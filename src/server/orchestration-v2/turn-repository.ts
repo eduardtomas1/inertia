@@ -12,10 +12,12 @@ import {
   orchestrationRunSchema,
   orchestrationThreadSchema,
   type OrchestrationAttempt,
+  type OrchestrationAttemptReplacementReason,
   type OrchestrationCleanupRelease,
   type OrchestrationDomainEvent,
 } from "../../shared/orchestration-v2";
 import type { BeginAgentTurnInput, NewConversationOptions } from "../persistence/types";
+import { staleAttemptObservation, type AttemptObserver, type StaleAttemptObservation } from "./attempt-fence";
 import { OrchestrationEffectOutbox } from "./effect-outbox";
 import { CHECKPOINT_CAPTURE_EFFECT_KIND, checkpointCaptureEffect, type OrchestrationEffectRuntime } from "./effect-runtime";
 import { OrchestrationEventStore } from "./event-store";
@@ -48,8 +50,12 @@ interface TurnProjectionAccess extends MergeBackAccess {
   createConversation(projectId: string, title: string, options: NewConversationOptions): Conversation;
 }
 
-function withoutCleanupRelease({ cleanupRelease: _release, ...attempt }: OrchestrationAttempt): OrchestrationAttempt {
-  return attempt;
+export interface AttemptReplacement {
+  runId: string;
+  turnId: string;
+  expectedAttemptId: string;
+  reason: OrchestrationAttemptReplacementReason;
+  priorCleanup?: "confirmed";
 }
 
 function readableProjection(kind: string, value: JsonValue): boolean {
@@ -196,10 +202,23 @@ export class OrchestratedTurnRepository {
     return { turn, message: this.access.message(result.messageId) };
   }
 
-  acknowledge(runId: string): void {
+  acknowledge(runId: string, observer?: AttemptObserver): StaleAttemptObservation | null {
+    const row = observer ? this.events.projection("run", runId) : null;
+    const stale = row ? staleAttemptObservation(this.events, orchestrationRunSchema.parse(row.value), observer) : null;
+    if (stale) return stale;
     this.backings.acknowledge(runId);
     this.history.acknowledge(runId);
     this.mergeBacks.acknowledge(runId);
+    return null;
+  }
+
+  attempts(runId: string): OrchestrationAttempt[] {
+    const row = this.events.projection("run", runId);
+    if (!row) return [];
+    return (this.database.prepare(`SELECT payload_json FROM orchestration_v2_entities
+      WHERE thread_id = ? AND kind = 'attempt' AND json_extract(payload_json, '$.runId') = ?
+      ORDER BY json_extract(payload_json, '$.ordinal'), id`).all(row.threadId, runId) as { payload_json: string }[])
+      .map(({ payload_json }) => orchestrationAttemptSchema.parse(JSON.parse(payload_json)));
   }
 
   hasPendingCleanup(threadId: string): boolean {
@@ -231,6 +250,18 @@ export class OrchestratedTurnRepository {
     }).immediate();
   }
 
+  lifecycleIfCurrent<T>(turnId: string, observer: AttemptObserver, updateCompatibilityProjection: () => T):
+    { committed: true; result: T } | { committed: false; stale: StaleAttemptObservation } {
+    return this.database.transaction(() => {
+      const row = this.events.projection("run", this.access.agentTurn(turnId).runId);
+      const stale = row ? staleAttemptObservation(this.events, orchestrationRunSchema.parse(row.value), observer) : null;
+      if (stale) return { committed: false as const, stale };
+      const result = updateCompatibilityProjection();
+      this.synchronize(this.access.agentTurn(turnId));
+      return { committed: true as const, result };
+    }).immediate();
+  }
+
   admitPair<T>(create: () => [T, T], link: (pair: [T, T]) => void): [T, T] {
     return this.database.transaction(() => {
       const pair = create();
@@ -239,10 +270,12 @@ export class OrchestratedTurnRepository {
     })();
   }
 
-  synchronize(turn: AgentTurn): void {
+  synchronize(turn: AgentTurn, observer?: AttemptObserver): StaleAttemptObservation | null {
     const previous = this.events.projection("run", turn.runId);
-    if (!previous) return; // Imported/pre-V2 history has no invented execution authority.
+    if (!previous) return null; // Imported/pre-V2 history has no invented execution authority.
     const run = orchestrationRunSchema.parse(previous.value);
+    const stale = staleAttemptObservation(this.events, run, observer);
+    if (stale) return stale;
     const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", run.attemptId)?.value);
     const event: OrchestrationDomainEvent = { type: "run.status-changed", payload: {
       runId: turn.runId, attemptId: run.attemptId, status: turn.status,
@@ -257,7 +290,7 @@ export class OrchestratedTurnRepository {
       executionState: run.executionState, providerState: run.providerState,
       startedAt: run.startedAt, completedAt: run.completedAt, terminalMessageId: run.terminalMessageId,
       nativeSessionId: attempt.nativeSessionId };
-    if (durableJson(before) === durableJson(event.payload)) return;
+    if (durableJson(before) === durableJson(event.payload)) return null;
     const capture = isAgentTurnTerminalStatus(turn.status) && !isAgentTurnTerminalStatus(run.status)
       && !this.readOnlyWatcher(turn.conversationId)
       ? checkpointCaptureEffect({ conversationId: turn.conversationId, turnId: turn.id, runId: turn.runId }, 0)
@@ -277,6 +310,7 @@ export class OrchestratedTurnRepository {
         projectId: run.projectId, threadId: run.threadId, command: interrupted,
         expectedRevision: this.events.revision(run.threadId), events: [interrupted], result: null });
     }
+    return null;
   }
 
   cleanup(identity: { turnId: string; runId: string }, cleanup: "pending" | "confirmed" | "unconfirmed"): void {
@@ -286,15 +320,43 @@ export class OrchestratedTurnRepository {
     if (run.turnId !== identity.turnId) throw new Error("Orchestration cleanup identity conflicts.");
     const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", run.attemptId)?.value);
     if (attempt.cleanup === cleanup) return;
-    const event: OrchestrationDomainEvent = cleanup === "pending" && attempt.cleanup === "confirmed"
-      ? { type: "run.attempt-replaced", payload: { runId: run.id, attemptId: attempt.id,
-          replacement: { ...withoutCleanupRelease(attempt), id: randomUUID(), status: run.status, cleanup: "pending",
-            nativeSessionId: null, nativeThreadId: null, nativeTurnId: null,
-            interruptRequestedAt: null, runtimeId: this.runtimeId } } }
-      : { type: "attempt.cleanup-changed", payload: { runId: run.id, attemptId: attempt.id, cleanup } };
-    this.events.commit({ actorId: "runtime", commandId: `cleanup:${commandFingerprint({ attemptId: attempt.id, cleanup, type: event.type })}`,
+    if (cleanup === "pending" && attempt.cleanup === "confirmed") {
+      this.replaceAttempt({ runId: run.id, turnId: run.turnId, expectedAttemptId: attempt.id, reason: "retry" });
+      return;
+    }
+    const event: OrchestrationDomainEvent = { type: "attempt.cleanup-changed",
+      payload: { runId: run.id, attemptId: attempt.id, cleanup } };
+    const revision = this.events.revision(run.threadId);
+    this.events.commit({ actorId: "runtime",
+      commandId: `cleanup:${commandFingerprint({ attemptId: attempt.id, from: attempt.cleanup, to: cleanup, revision })}`,
       projectId: run.projectId, threadId: run.threadId, command: event,
-      expectedRevision: this.events.revision(run.threadId), events: [event], result: null });
+      expectedRevision: revision, events: [event], result: null });
+  }
+
+  replaceAttempt(input: AttemptReplacement): OrchestrationAttempt {
+    return this.database.transaction((): OrchestrationAttempt => {
+      const row = this.events.projection("run", input.runId);
+      if (!row) throw new OrchestrationConflict("scope-conflict");
+      const run = orchestrationRunSchema.parse(row.value);
+      if (run.turnId !== input.turnId) throw new Error("Orchestration attempt identity conflicts.");
+      const priorCleanup = input.priorCleanup ? { priorCleanup: input.priorCleanup } : {};
+      const command: JsonValue = { type: "run.attempt-replace", runId: run.id, turnId: run.turnId,
+        expectedAttemptId: input.expectedAttemptId, reason: input.reason, priorCleanup: input.priorCleanup ?? null };
+      const identity = { actorId: "runtime", projectId: run.projectId, threadId: run.threadId,
+        commandId: `attempt-replaced:${commandFingerprint({ expectedAttemptId: input.expectedAttemptId, reason: input.reason })}` };
+      const previous = this.events.receipt(identity, command);
+      if (previous) return this.attempt((previous.result as { attemptId: string }).attemptId);
+      if (run.attemptId !== input.expectedAttemptId) throw new OrchestrationConflict("revision-conflict");
+      const replacement: OrchestrationAttempt = { id: randomUUID(), runId: run.id, turnId: run.turnId,
+        threadId: run.threadId, providerInstanceId: run.providerInstanceId, status: run.status,
+        nativeSessionId: null, nativeThreadId: null, nativeTurnId: null, interruptRequestedAt: null,
+        cleanup: "pending", runtimeId: this.runtimeId };
+      const event: OrchestrationDomainEvent = { type: "run.attempt-replaced", payload: { runId: run.id,
+        attemptId: input.expectedAttemptId, replacement, reason: input.reason, ...priorCleanup } };
+      this.events.commit({ ...identity, command, expectedRevision: this.events.revision(run.threadId),
+        events: [event], result: { attemptId: replacement.id } });
+      return this.attempt(replacement.id);
+    }).immediate();
   }
 
   releaseCleanup(identity: { turnId: string; runId: string }, release: OrchestrationCleanupRelease): boolean {
@@ -307,9 +369,11 @@ export class OrchestratedTurnRepository {
     if (attempt.cleanup !== "pending" && attempt.cleanup !== "unconfirmed") return false;
     const event: OrchestrationDomainEvent = { type: "attempt.cleanup-released",
       payload: { runId: run.id, attemptId: attempt.id, release: orchestrationCleanupReleaseSchema.parse(release) } };
-    this.events.commit({ actorId: "runtime", commandId: `cleanup-release:${commandFingerprint(attempt.id)}`,
+    const revision = this.events.revision(run.threadId);
+    this.events.commit({ actorId: "runtime",
+      commandId: `cleanup-release:${commandFingerprint({ attemptId: attempt.id, revision })}`,
       projectId: run.projectId, threadId: run.threadId, command: event,
-      expectedRevision: this.events.revision(run.threadId), events: [event], result: null });
+      expectedRevision: revision, events: [event], result: null });
     return true;
   }
 
@@ -385,6 +449,10 @@ export class OrchestratedTurnRepository {
       reconcileCompatibilityProjection();
       this.reconcile();
     })();
+  }
+
+  private attempt(id: string): OrchestrationAttempt {
+    return orchestrationAttemptSchema.parse(this.events.projection("attempt", id)?.value);
   }
 
   private readOnlyWatcher(conversationId: string): boolean {

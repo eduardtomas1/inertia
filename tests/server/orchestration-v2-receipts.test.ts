@@ -33,6 +33,7 @@ import {
 const databases: Database.Database[] = [];
 const project: ProjectEvent = (event) => [{ kind: "test", id: event.threadId, value: event.payload }];
 const migrateReceiptStatus = orchestrationV2ReceiptStatusMigration.up as (database: Database.Database) => void;
+const SEEDED_PROJECTION_VERSION = 1;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -46,7 +47,7 @@ function fixture() {
   db.exec(orchestrationV2Migration.up as string);
   migrateReceiptStatus(db);
   const clock = () => "2026-11-01T10:00:00.000Z";
-  return { db, clock, store: new OrchestrationEventStore(db, project, "runtime-1", clock) };
+  return { db, clock, store: new OrchestrationEventStore(db, project, "runtime-1", clock, null, SEEDED_PROJECTION_VERSION) };
 }
 
 function command(overrides: Partial<CommandCommit> = {}): CommandCommit {
@@ -172,7 +173,7 @@ describe("Orchestrator V2 receipt status", () => {
 describe("Orchestrator V2 projection metadata", () => {
   it("advances the projection sequence with every commit and verifies afterwards", () => {
     const { db, store } = fixture();
-    expect(store.verify()).toMatchObject({ valid: true, schemaVersion: ORCHESTRATION_V2_PROJECTION_VERSION,
+    expect(store.verify()).toMatchObject({ valid: true, schemaVersion: SEEDED_PROJECTION_VERSION,
       expectedSequence: 0, projectionSequence: 0 });
     store.commit(command({ events: [{ type: "a", payload: 1 }, { type: "b", payload: 2 }] }));
     expect(metadata(db)).toMatchObject({ last_sequence: 2, updated_at: "2026-11-01T10:00:00.000Z" });
@@ -193,11 +194,11 @@ describe("Orchestrator V2 projection metadata", () => {
   it("fails verification after a projector version bump and passes after a rebuild", () => {
     const { db, clock, store } = fixture();
     store.commit(command());
-    const bumped = new OrchestrationEventStore(db, project, "runtime-1", clock, null, ORCHESTRATION_V2_PROJECTION_VERSION + 1);
-    expect(bumped.verify()).toMatchObject({ valid: false, schemaVersion: ORCHESTRATION_V2_PROJECTION_VERSION,
-      expectedSchemaVersion: ORCHESTRATION_V2_PROJECTION_VERSION + 1 });
+    const bumped = new OrchestrationEventStore(db, project, "runtime-1", clock, null, SEEDED_PROJECTION_VERSION + 1);
+    expect(bumped.verify()).toMatchObject({ valid: false, schemaVersion: SEEDED_PROJECTION_VERSION,
+      expectedSchemaVersion: SEEDED_PROJECTION_VERSION + 1 });
     bumped.rebuildProjections();
-    expect(bumped.verify()).toMatchObject({ valid: true, schemaVersion: ORCHESTRATION_V2_PROJECTION_VERSION + 1 });
+    expect(bumped.verify()).toMatchObject({ valid: true, schemaVersion: SEEDED_PROJECTION_VERSION + 1 });
     expect(store.verify().valid).toBe(false);
     expect(bumped.projection("test", "thread-1")?.value).toEqual({ value: 1 });
     expect(() => new OrchestrationEventStore(db, project, "runtime-1", clock, null, -1)).toThrow("projection version");
@@ -426,17 +427,22 @@ describe("Orchestrator V2 receipt status migration", () => {
     expect(db.prepare("SELECT DISTINCT status, error, command_type FROM orchestration_v2_receipts").all())
       .toEqual([{ status: "accepted", error: null, command_type: null }]);
     const seeded = metadata(db);
-    expect(seeded).toMatchObject({ schema_version: 1, last_sequence: (db.prepare(
+    expect(seeded).toMatchObject({ schema_version: SEEDED_PROJECTION_VERSION, last_sequence: (db.prepare(
       "SELECT MAX(sequence) AS sequence FROM orchestration_v2_events").get() as { sequence: number }).sequence });
     expect(seeded.last_sequence).toBeGreaterThan(0);
-    expect(new OrchestrationEventStore(db, projectOrchestrationEvent, "runtime-check").verify().valid).toBe(true);
+    expect(new OrchestrationEventStore(db, projectOrchestrationEvent, "runtime-check", undefined, null,
+      SEEDED_PROJECTION_VERSION).verify().valid).toBe(true);
+    expect(new OrchestrationEventStore(db, projectOrchestrationEvent, "runtime-check").verify()).toMatchObject({
+      valid: false, schemaVersion: SEEDED_PROJECTION_VERSION, expectedSchemaVersion: ORCHESTRATION_V2_PROJECTION_VERSION });
     db.close();
 
     const reopened = new RuntimeStore(path, runtime.workspace, { recoverInterruptedRuns: false });
     try {
       const reopenedDb = storeDatabase(reopened);
-      expect(metadata(reopenedDb)).toEqual(seeded);
+      expect(metadata(reopenedDb)).toMatchObject({ schema_version: ORCHESTRATION_V2_PROJECTION_VERSION,
+        last_sequence: seeded.last_sequence });
       expect(entities(reopenedDb)).toEqual(beforeEntities);
+      expect(reopened.orchestration.maintainProjections().rebuilt).toBe(false);
       const conversation = reopened.conversation(runtime.conversationId);
       const identity = { actorId: "human", commandId: "request-before-113", projectId: conversation.projectId,
         threadId: conversation.id };

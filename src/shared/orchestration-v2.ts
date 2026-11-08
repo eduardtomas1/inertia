@@ -15,6 +15,11 @@ import { delegationEventSchema } from "./orchestration-delegation";
 export { orchestrationIdSchema } from "./orchestration-identities";
 const timestamp = z.iso.datetime();
 const nativeId = z.string().min(1).max(1_000);
+const ordinal = z.number().int().positive();
+
+const orchestrationAttemptStatusSchema = agentTurnStatusSchema.or(z.literal("superseded"));
+const orchestrationAttemptReasonSchema = z.enum(["initial", "retry", "provider_recovery", "steering_restart"]);
+const orchestrationAttemptReplacementReasonSchema = z.enum(["retry", "provider_recovery"]);
 
 export const orchestrationThreadSchema = z.object({
   id: orchestrationIdSchema,
@@ -25,6 +30,7 @@ export const orchestrationThreadSchema = z.object({
   selection: modelSelectionSchema,
   activeRunId: orchestrationIdSchema.nullable(),
   latestRunId: orchestrationIdSchema.nullable(),
+  lastRunOrdinal: z.number().int().nonnegative().optional(),
   createdAt: timestamp,
   updatedAt: timestamp,
 }).strict();
@@ -33,6 +39,7 @@ export const orchestrationRunSchema = z.object({
   id: orchestrationIdSchema,
   threadId: orchestrationIdSchema,
   projectId: orchestrationIdSchema,
+  ordinal: ordinal.optional(),
   /** Compatibility transcript boundary, separate from run and provider attempt identity. */
   turnId: orchestrationIdSchema,
   messageId: orchestrationIdSchema,
@@ -65,7 +72,10 @@ export const orchestrationAttemptSchema = z.object({
   turnId: orchestrationIdSchema,
   threadId: orchestrationIdSchema,
   providerInstanceId: orchestrationIdSchema,
-  status: agentTurnStatusSchema,
+  ordinal: ordinal.optional(),
+  reason: orchestrationAttemptReasonSchema.optional(),
+  status: orchestrationAttemptStatusSchema,
+  supersededAt: timestamp.optional(),
   nativeSessionId: nativeId.nullable(),
   nativeThreadId: nativeId.nullable(),
   nativeTurnId: nativeId.nullable(),
@@ -110,6 +120,8 @@ export const orchestrationDomainEventSchema = z.discriminatedUnion("type", [
     runId: orchestrationIdSchema,
     attemptId: orchestrationIdSchema,
     replacement: orchestrationAttemptSchema,
+    reason: orchestrationAttemptReplacementReasonSchema.optional(),
+    priorCleanup: z.literal("confirmed").optional(),
   }).strict() }).strict(),
   z.object({ type: z.literal("attempt.interrupt-requested"), payload: z.object({
     runId: orchestrationIdSchema,
@@ -130,5 +142,6 @@ export const orchestrationDomainEventSchema = z.discriminatedUnion("type", [
 export type OrchestrationThread = z.infer<typeof orchestrationThreadSchema>;
 export type OrchestrationRun = z.infer<typeof orchestrationRunSchema>;
 export type OrchestrationAttempt = z.infer<typeof orchestrationAttemptSchema>;
+export type OrchestrationAttemptReplacementReason = z.infer<typeof orchestrationAttemptReplacementReasonSchema>;
 export type OrchestrationCleanupRelease = z.infer<typeof orchestrationCleanupReleaseSchema>;
 export type OrchestrationDomainEvent = z.infer<typeof orchestrationDomainEventSchema>;

@@ -792,6 +792,21 @@
       "version": 107,
       "name": "PersistLibrary",
       "digest": "cf3360a481f8ec2e0a5bb891ad850fc46df8669cf93d4e102d30ba7f737b3565"
+    },
+    {
+      "version": 108,
+      "name": "RecordManagedAgentContextReads",
+      "digest": "1f30fe4a6f02f58c16afb344316cc9bf69d116195267b39c6169ef73cba1a23b"
+    },
+    {
+      "version": 109,
+      "name": "PersistTodoSourceConversation",
+      "digest": "0aba8ee28852459fbf7b11ae71117096c1f712c0a43a66b77adbffe8fe9d8d21"
+    },
+    {
+      "version": 110,
+      "name": "PersistCodexThreadToolPacks",
+      "digest": "f5d456e90892eae506655587faed66662f233aa45ad69672cce2197e43118eb3"
     }
   ]
 }

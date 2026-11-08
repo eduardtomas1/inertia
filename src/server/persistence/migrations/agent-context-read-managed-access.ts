@@ -1,6 +1,6 @@
 import type { DatabaseMigrationDefinition } from "./catalog";
 
-export const AGENT_CONTEXT_READ_MANAGED_ACCESS_SCHEMA_VERSION = 107;
+export const AGENT_CONTEXT_READ_MANAGED_ACCESS_SCHEMA_VERSION = 108;
 
 /**
  * Lets the agent context read log record reads of a chat the reading chat
@@ -11,7 +11,7 @@ export const agentContextReadManagedAccessMigration: DatabaseMigrationDefinition
   name: "RecordManagedAgentContextReads",
   foreignKeys: "off",
   up: `
-    CREATE TABLE agent_context_reads_v107 (
+    CREATE TABLE agent_context_reads_v108 (
       id TEXT PRIMARY KEY CHECK (length(id) = 36),
       target_conversation_id TEXT NOT NULL
         REFERENCES conversations(id) ON DELETE CASCADE
@@ -34,7 +34,7 @@ export const agentContextReadManagedAccessMigration: DatabaseMigrationDefinition
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-    INSERT INTO agent_context_reads_v107 (
+    INSERT INTO agent_context_reads_v108 (
       id, target_conversation_id, target_turn_id, target_user_message_id,
       source_conversation_id, source_conversation_title, source_turn_id,
       access, page_count, created_at, updated_at
@@ -44,7 +44,7 @@ export const agentContextReadManagedAccessMigration: DatabaseMigrationDefinition
       access, page_count, created_at, updated_at
     FROM agent_context_reads;
     DROP TABLE agent_context_reads;
-    ALTER TABLE agent_context_reads_v107 RENAME TO agent_context_reads;
+    ALTER TABLE agent_context_reads_v108 RENAME TO agent_context_reads;
     CREATE UNIQUE INDEX agent_context_reads_identity_idx
       ON agent_context_reads(
         target_turn_id,

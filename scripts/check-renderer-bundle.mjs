@@ -120,7 +120,11 @@ const budgets = {
   deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 6 + 22 + 5 + 25_894 + 226,
   deferredLibraryViewJavaScript: 30_595,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
-  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
+  // Tools-offer integration onto main 8e096d0b (#630): the worktree section in
+  // Project settings add 6,395 bytes over main's cap (24,053 measured on
+  // Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 6_395,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
   deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43,
@@ -128,7 +132,12 @@ const budgets = {
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte + 3_267,
-  filesFirstLoadJavaScript: 115 * kibibyte,
+  // Tools-offer integration onto main 8e096d0b (#630): Files line selection and
+  // content search, attachment re-attach, diff readability, commit authoring,
+  // history and blame add 9,775 bytes over main's cap (127,535 measured on
+  // Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  filesFirstLoadJavaScript: 115 * kibibyte + 9_775,
   deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
@@ -159,7 +168,12 @@ const budgets = {
   // Roving terminal tabs and keyboard close add ~0.3 KiB (25.3 KiB measured).
   // Docking under the chat moves session controls into the tab row and adds
   // Hide: 494 bytes (26,456 measured).
-  deferredTerminalJavaScript: 25.5 * kibibyte + 494 + 106 + 159 + 198 + 160,
+  // Tools-offer integration onto main 8e096d0b (#630): @xterm/addon-search
+  // 0.16.0, @xterm/addon-web-links 0.12.0, runtime-resolved file links, the
+  // find bar and Add selection to prompt add 41,317 bytes over main's cap
+  // (68,546 measured on Windows x64). See
+  // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
+  deferredTerminalJavaScript: 25.5 * kibibyte + 494 + 106 + 159 + 198 + 160 + 41_317,
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte + 245 + 50,
   deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850 + 32,

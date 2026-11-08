@@ -1,6 +1,6 @@
 import type { DatabaseMigrationDefinition } from "./catalog";
 
-export const TODO_SOURCE_CONVERSATION_SCHEMA_VERSION = 108;
+export const TODO_SOURCE_CONVERSATION_SCHEMA_VERSION = 109;
 
 /**
  * Records the chat a task was written from, separately from the chat a task

@@ -339,6 +339,7 @@ describe("workspace.search.content command", () => {
         duoLaunchConversationIds: () => null,
         pendingApproval: () => null,
         pendingInput: () => null,
+        savedAnswerConversationId: () => null,
       },
     );
     expect(rejection(conversationId)).toBeNull();

@@ -1,6 +1,6 @@
 import type { DatabaseMigrationDefinition } from "./catalog";
 
-export const CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION = 109;
+export const CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION = 110;
 
 const EXPECTED_COLUMNS = ["thread_id", "pack_id", "pack_digest", "registered_at"];
 

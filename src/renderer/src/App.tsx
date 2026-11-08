@@ -19,7 +19,8 @@ import {
   type ProviderMaintenanceProviderId,
   type SubagentTrace,
 } from "@shared/contracts";
-import type { MessageSearchHit } from "@shared/message-search";
+import type { AppShortcutKey } from "@shared/keybindings";
+import type { MessageSearchHit, MessageSearchTarget } from "@shared/message-search";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
 import { DEFAULT_QUOTA_WARNINGS } from "@shared/quota-warnings";
 import type { ProviderAuthMethod } from "@shared/provider";
@@ -39,6 +40,7 @@ import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
 import { usePlanSteps } from "./hooks/usePlanSteps";
 import { useAsyncOperationQueue, useAuthoritativeConversationCreateQueue, useWorkspaceAuthorityCommandQueue } from "./hooks/useConversationSelectionQueue";
+import { useDraftSkills } from "./hooks/useDraftSkills";
 import { agentWorkflowRouteIdentity, agentWorkflowTargetConversation, useAgentWorkflows } from "./hooks/useAgentWorkflows";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
@@ -53,6 +55,12 @@ import { useSplitPanes } from "./hooks/useSplitPanes";
 import { useSplitPaneScenes } from "./hooks/useSplitPaneScenes";
 import { useMultiSpawn } from "./hooks/useMultiSpawn";
 import { DuoJudgeNoticeContext } from "./components/DuoJudgeNoticeContext";
+import {
+  LIBRARY_NAVIGATION_COPY,
+  LibraryAnswerContext,
+  savedAnswersByMessage,
+  type LibraryAnswerController,
+} from "./components/library/LibraryAnswerContext";
 import { useProjectChatNavigation } from "./hooks/useProjectChatNavigation";
 import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
 import { useTheme } from "./hooks/useTheme";
@@ -75,13 +83,15 @@ import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
 import { forgetWorkspaceBoundLastTool } from "./utils/workspaceStartup";
+import { openPanelSurfaceChooser, panelShortcutOrigin } from "./utils/globalShortcuts";
+import { deliverNewChatDraft, newChatDraftTarget, pendingNewChatDraft, type PendingNewChatDraft } from "./utils/newChatDraft";
 import type { SplitDropZone } from "./utils/splitConversation";
 import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
 import { activeChatCompactAndSend } from "./utils/activeChatCompactAndSend";
 import { useConversationWorkspaceOptions } from "./hooks/useConversationWorkspaceOptions";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
-import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
+import { requestSubagentFollowUp, SUBAGENT_FOLLOW_UP_UNAVAILABLE } from "./utils/subagentFollowUp";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import { liveTerminalIdsForHandoff } from "./components/terminalTabStorage";
 import type { AppView } from "./appView";
@@ -194,6 +204,14 @@ export default function App(): React.JSX.Element {
     cacheThemePreference(layoutStorage, preference);
     void window.inertia.syncThemePreference(preference).catch(() => undefined);
   }, [connection.snapshot?.settings.theme]);
+  const boundShortcutKeys = connection.snapshot
+    ? Object.values(connection.snapshot.settings.keybindings).join("")
+    : null;
+  useEffect(() => {
+    if (boundShortcutKeys === null) return;
+    const keys = [...boundShortcutKeys] as AppShortcutKey[];
+    void window.inertia.syncAppShortcutKeys(keys).catch(() => undefined);
+  }, [boundShortcutKeys]);
   useEffect(() => {
     const colorTheme = connection.snapshot?.settings.colorTheme;
     if (!colorTheme) return;
@@ -396,6 +414,11 @@ export default function App(): React.JSX.Element {
     conversation,
     draftConversation.conversation,
   );
+  const draftSkills = useDraftSkills({
+    draft: draftConversation.conversation,
+    status: connection.status,
+    request,
+  });
   const agentWorkflows = useStableController(useAgentWorkflows({
     conversationId: workflowConversation?.id ?? null,
     routeIdentity: agentWorkflowRouteIdentity(workflowConversation, project),
@@ -656,13 +679,27 @@ export default function App(): React.JSX.Element {
     acknowledgeActivity,
     dismissActivity,
   } = activityActions;
+  const pendingNewChatDraftRef = useRef<PendingNewChatDraft | null>(null);
+  useEffect(() => {
+    const pending = pendingNewChatDraftRef.current;
+    if (!pending) return;
+    const target = newChatDraftTarget(connection.snapshot, pending);
+    if (!target) return;
+    pendingNewChatDraftRef.current = null;
+    deliverNewChatDraft(target, pending.text);
+  }, [connection.snapshot]);
   const createConversation = (
     targetProject: Project | null = composerProject,
     location: NewConversationLocation = { kind: "defaults" },
+    options: { draft?: string } = {},
   ) => {
     if (!targetProject) { openNoProjectChat(); return; }
     if (!connection.snapshot) return;
     deactivateGlobalChat();
+    const pendingDraft = options.draft?.trim()
+      ? pendingNewChatDraft(connection.snapshot, targetProject.id, options.draft)
+      : null;
+    pendingNewChatDraftRef.current = pendingDraft;
     const payload = defaultConversationPayloadForProject(
       connection.snapshot,
       settings,
@@ -684,6 +721,7 @@ export default function App(): React.JSX.Element {
         }
       })
       .catch((error: unknown) => {
+        if (pendingNewChatDraftRef.current === pendingDraft) pendingNewChatDraftRef.current = null;
         if (creationGeneration === conversationSelectionGenerationRef.current) {
           setActionError(error instanceof Error ? error.message : "The new chat could not be created.");
         }
@@ -702,6 +740,14 @@ export default function App(): React.JSX.Element {
     createConversation: () => createConversation(),
     mobileNavigation, suspended: multiSpawn.open || dailyWorkOpen,
     toggleTerminal: primarySceneLayout.toggleTerminal,
+    openSurfaceChooser: () => {
+      if (view !== "workspace" || !composerProject || globalChatActive) return;
+      openPanelSurfaceChooser(document, panelShortcutOrigin(document, document.activeElement), () => {
+        if (primarySceneLayout.panel.isOpen) return false;
+        primarySceneLayout.toggleWorkspaceTools();
+        return true;
+      });
+    },
     toggleSettings: settingsMode.toggleSettings,
     setPaletteOpen,
     setSidebarCollapsed,
@@ -833,8 +879,8 @@ export default function App(): React.JSX.Element {
       },
       openProjectPath,
       followUpSubagent: (trace: SubagentTrace) => {
-        if (conversation) {
-          requestSubagentFollowUp(conversation.id, trace, conversationProjection.turns);
+        if (conversation && requestSubagentFollowUp(conversation.id, trace, conversationProjection.turns) === "unavailable") {
+          setActionError(SUBAGENT_FOLLOW_UP_UNAVAILABLE);
         }
       },
       ...turnSceneActions,
@@ -883,6 +929,7 @@ export default function App(): React.JSX.Element {
     appUpdate,
     planSteps,
     workflow: agentWorkflows,
+    draftSkills,
     detailLoading,
     selectedMaintenanceStatus,
     selectedMaintenanceOperation,
@@ -904,6 +951,7 @@ export default function App(): React.JSX.Element {
     globalChatActive,
     planSteps,
     agentWorkflows,
+    draftSkills,
     composerProject,
     providerMaintenance,
     selectedMaintenanceOperation,
@@ -1022,6 +1070,17 @@ export default function App(): React.JSX.Element {
     selectConversation,
     openConversationInSplit,
   });
+  const libraryRequest = useCallback(
+    (command: CommandWithoutId) => run(command.type, command, { passive: true, reportError: false }),
+    [run],
+  );
+  const libraryAnswers = useMemo<LibraryAnswerController>(() => ({
+    library: connection.snapshot?.library ?? null,
+    savedByMessageId: savedAnswersByMessage(connection.snapshot?.library),
+    online: connection.status === "online",
+    request: libraryRequest,
+    onError: setActionError,
+  }), [connection.snapshot?.library, connection.status, libraryRequest]);
   const layoutUsage = useMemo(
     () => ({ status: connection.status, request }),
     [connection.status, request],
@@ -1057,6 +1116,8 @@ export default function App(): React.JSX.Element {
     selectConversation,
     selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) =>
       selectMessage(hit, () => setView("workspace"), signal),
+    openLibraryAnswer: (target: MessageSearchTarget) =>
+      selectMessage(target, () => setView("workspace"), undefined, LIBRARY_NAVIGATION_COPY),
     openConversationInSplit,
     openConversationInWindow,
     closeConversationSplit: (target: Conversation) => {
@@ -1129,6 +1190,7 @@ export default function App(): React.JSX.Element {
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <DuoJudgeNoticeContext.Provider value={duoJudgeNotices}>
+    <LibraryAnswerContext.Provider value={libraryAnswers}>
     <Suspense fallback={null}><DialogPresence open={addProjectOpen}><AddProjectDialog onClose={() => setAddProjectOpen(false)} onImport={confirmProjectImport} /></DialogPresence></Suspense>
     <WatcherContext.Provider value={watchers.surface}>
     <WatcherAttachHost target={watchers.attach.target} snapshot={connection.snapshot} settings={settings} request={request}
@@ -1179,6 +1241,7 @@ export default function App(): React.JSX.Element {
       actions={layoutActions}
     />
     </WatcherContext.Provider>
+    </LibraryAnswerContext.Provider>
     </DuoJudgeNoticeContext.Provider>
     </HtmlRenderRuntimeStatusContext.Provider>
     </WorkingIndicatorProvider>

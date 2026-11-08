@@ -64,6 +64,7 @@ import {
 import { ConversationHistoryTooLargeError } from "./errors";
 import { PromptPresetRepository } from "./prompt-preset-repository";
 import { TodoRepository } from "./todo-repository";
+import { LibraryRepository } from "./library-repository";
 import { cachedStatement } from "./statement-cache";
 import { withLatestPlanDocument } from "./latest-plan-document";
 import { conversationAttachmentGallery } from "./conversation-attachment-gallery";
@@ -124,10 +125,12 @@ type SnapshotPersistenceContext = Pick<PersistenceContext, "database"> & {
 export class SnapshotRepository {
   readonly promptPresets: PromptPresetRepository;
   readonly todos: TodoRepository;
+  readonly library: LibraryRepository;
 
   constructor(private readonly context: SnapshotPersistenceContext) {
     this.promptPresets = new PromptPresetRepository(context.database);
     this.todos = new TodoRepository(context.database);
+    this.library = new LibraryRepository(context.database);
   }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {
@@ -175,6 +178,7 @@ export class SnapshotRepository {
       providers,
       promptPresets: this.promptPresets.list(),
       todos: this.todos.list(),
+      library: this.library.snapshot(),
       settings: settingsFromState(state),
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,
@@ -216,6 +220,7 @@ export class SnapshotRepository {
       providers,
       promptPresets: this.promptPresets.list(),
       todos: this.todos.list(),
+      library: this.library.snapshot(),
       watchers: watcherLinkViews(this.context.database),
       settings: settingsFromState(state),
       activeProjectId: state.active_project_id,

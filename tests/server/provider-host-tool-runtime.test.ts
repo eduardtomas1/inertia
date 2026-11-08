@@ -2,7 +2,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
-import { ProviderHostToolRuntime } from "../../src/server/provider/host-tool-runtime";
+import {
+  MAX_HOST_TOOL_CALL_IDENTITIES,
+  MAX_HOST_TOOL_CALLS,
+  ProviderHostToolRuntime,
+  withHostToolAllowance,
+} from "../../src/server/provider/host-tool-runtime";
 import type { AgentApprovalRequest } from "../../src/server/provider/interactions";
 
 const owners: ProviderHostToolRuntime[] = [];
@@ -134,6 +139,68 @@ describe("provider host-tool cancellation authority", () => {
       cleanup.resolve();
       await Promise.all(calls);
     }
+  });
+});
+
+describe("provider host-tool call allowance", () => {
+  it("charges every call once, and refuses calls past the allowance", async () => {
+    const { invoke } = fixture(async () => ({ success: true, text: "{}" }));
+    for (let index = 0; index < MAX_HOST_TOOL_CALLS; index += 1) {
+      expect(await invoke(`call-${index}`)).toEqual({ success: true, text: "{}" });
+    }
+    expect(await invoke("one-more")).toMatchObject({
+      success: false, text: expect.stringContaining("limit for one turn"),
+    });
+  });
+
+  it("gives back the allowance of an uncharged result and reports the remainder on marked results", async () => {
+    let charge: "charged" | "uncharged" | null = "uncharged";
+    const { invoke } = fixture(async () => {
+      const result = { success: true, text: JSON.stringify({ outcome: "timeout" }) };
+      return charge === null ? result : withHostToolAllowance(result, charge);
+    });
+    for (let index = 0; index < MAX_HOST_TOOL_CALLS * 2; index += 1) {
+      expect(JSON.parse((await invoke(`wait-${index}`)).text)).toEqual({
+        outcome: "timeout", remainingToolCalls: MAX_HOST_TOOL_CALLS,
+      });
+    }
+    charge = "charged";
+    expect(JSON.parse((await invoke("settled")).text)).toEqual({
+      outcome: "timeout", remainingToolCalls: MAX_HOST_TOOL_CALLS - 1,
+    });
+    charge = null;
+    expect(JSON.parse((await invoke("unmarked")).text)).toEqual({ outcome: "timeout" });
+    for (let index = 2; index < MAX_HOST_TOOL_CALLS; index += 1) await invoke(`more-${index}`);
+    expect(await invoke("past-limit")).toMatchObject({ success: false, text: expect.stringContaining("limit for one turn") });
+    charge = "uncharged";
+    expect(await invoke("uncharged-past-limit")).toMatchObject({ success: false });
+  });
+
+  it("keeps charging an uncharged call that was cancelled, and leaves non-object text unchanged", async () => {
+    const release = deferred();
+    let text = "plain";
+    const { invoke } = fixture(async () => {
+      await release.promise;
+      return withHostToolAllowance({ success: true, text }, "uncharged");
+    });
+    const controller = new AbortController();
+    const cancelled = invoke("cancelled", controller.signal);
+    controller.abort();
+    release.resolve();
+    expect(await cancelled).toMatchObject({ success: false });
+    expect(await invoke("plain")).toEqual({ success: true, text: "plain" });
+    text = "[1]";
+    expect(await invoke("array")).toEqual({ success: true, text: "[1]" });
+    text = JSON.stringify({ probe: true });
+    expect(JSON.parse((await invoke("probe")).text)).toEqual({ probe: true, remainingToolCalls: MAX_HOST_TOOL_CALLS - 1 });
+  });
+
+  it("bounds the identities a turn may use even when calls are uncharged", async () => {
+    const { invoke } = fixture(async () => withHostToolAllowance({ success: true, text: "{}" }, "uncharged"));
+    for (let index = 0; index < MAX_HOST_TOOL_CALL_IDENTITIES; index += 1) await invoke(`identity-${index}`);
+    expect(await invoke("identity-over")).toMatchObject({
+      success: false, text: expect.stringContaining("limit for one turn"),
+    });
   });
 });
 

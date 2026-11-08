@@ -10,6 +10,7 @@ type ConversationShellEvent = Extract<
   { type: "conversation.shell.updated" }
 >;
 type TodosEvent = Extract<RuntimeMutationEvent, { type: "todos.updated" }>;
+type LibraryEvent = Extract<RuntimeMutationEvent, { type: "library.updated" }>;
 
 function sortDescendingTimestamp<
   Item extends { id: string; startedAt?: string; updatedAt?: string },
@@ -68,6 +69,22 @@ export function applyTodosEvent(
 ): AppSnapshot {
   if (structurallyEqual(snapshot.todos, event.todos)) return snapshot;
   return { ...snapshot, todos: event.todos };
+}
+
+export function withStableLibrary(
+  previous: AppSnapshot | null,
+  next: AppSnapshot,
+): AppSnapshot {
+  if (!previous?.library || !next.library || previous.library === next.library) return next;
+  return structurallyEqual(previous.library, next.library) ? { ...next, library: previous.library } : next;
+}
+
+export function applyLibraryEvent(
+  snapshot: AppSnapshot,
+  event: LibraryEvent,
+): AppSnapshot {
+  if (structurallyEqual(snapshot.library, event.library)) return snapshot;
+  return { ...snapshot, library: event.library };
 }
 
 type WatcherLinkEvent = Extract<

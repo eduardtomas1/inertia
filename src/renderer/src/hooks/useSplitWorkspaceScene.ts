@@ -31,7 +31,7 @@ import {
   withRequestId,
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
-import { requestSubagentFollowUp } from "../utils/subagentFollowUp";
+import { requestSubagentFollowUp, SUBAGENT_FOLLOW_UP_UNAVAILABLE } from "../utils/subagentFollowUp";
 import type { SplitPaneOwner } from "../utils/splitLayout";
 import { focusWorkspacePreviewAddress } from "../utils/workspacePreviewFocus";
 import {
@@ -376,8 +376,8 @@ export function useSplitWorkspaceScene({
       }
     },
     followUpSubagent: (trace: SubagentTrace) => {
-      if (splitConversation) {
-        requestSubagentFollowUp(splitConversation.id, trace, projection.turns);
+      if (splitConversation && requestSubagentFollowUp(splitConversation.id, trace, projection.turns) === "unavailable") {
+        setActionError(SUBAGENT_FOLLOW_UP_UNAVAILABLE);
       }
     },
     ...turnActions,

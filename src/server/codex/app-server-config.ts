@@ -203,7 +203,7 @@ export function validateCodexModelProvider(
         /^\d{1,3}$/u.test(part) && Number(part) <= 255)
     );
   if (
-    !/^[A-Za-z0-9_-]{1,64}$/u.test(provider.providerId)
+    !/^(?!(?:true|false|inf|nan)$)[A-Za-z][A-Za-z0-9_-]{0,63}$/u.test(provider.providerId)
     || provider.displayName.length < 1
     || provider.displayName.length > 120
     || /[\0\r\n]/u.test(provider.displayName)

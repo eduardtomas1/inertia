@@ -2,7 +2,10 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { startCodexAppServerRun } from "../codex-app-server";
 import { withCodexControlClient } from "../codex/control-client";
-import { codexModelProviderThreadConfig } from "../codex/model-provider-config";
+import {
+  codexModelProviderLaunchArguments,
+  codexModelProviderThreadConfig,
+} from "../codex/model-provider-config";
 import {
   codexSessionDeveloperInstructions,
   configuredDeveloperInstructions,
@@ -451,6 +454,9 @@ function startCodexCompaction(
         executable: options.executable,
         environment: options.environment,
         cwd: options.input.cwd,
+        ...(modelProvider
+          ? { launchArguments: codexModelProviderLaunchArguments(modelProvider) }
+          : {}),
         timeoutMs: 30_000,
         processLabel: "Codex compaction process tree",
         signal: abortController.signal,

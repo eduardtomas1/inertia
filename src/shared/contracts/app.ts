@@ -36,6 +36,7 @@ import type { AgentTurnStatus } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
 import type { Todo } from "../todos";
+import type { LibrarySnapshot } from "../library";
 import type { WatcherLinkView } from "../watcher";
 
 export type { ProviderId } from "../provider";
@@ -80,6 +81,8 @@ export interface ConversationLatestTurnSummary {
   updatedAt: string;
   usageLimited?: boolean;
   failureKind?: import("../turn-lifecycle").TurnFailureKind;
+  /** The mode the turn was sent in. Optional only for legacy snapshots. */
+  interactionMode?: InteractionMode;
   providerActivityAt?: string;
 }
 
@@ -354,6 +357,7 @@ export interface AppSnapshot {
   /** Present on authoritative snapshots; optional only for legacy fixtures. */
   promptPresets?: PromptPreset[];
   todos?: Todo[];
+  library?: LibrarySnapshot;
   watchers?: WatcherLinkView[];
   activeProjectId: string | null;
   activeConversationId: string | null;

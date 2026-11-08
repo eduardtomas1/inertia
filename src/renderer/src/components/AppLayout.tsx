@@ -36,15 +36,21 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { SplitDropZone } from "../utils/splitConversation";
 import type { SplitDropPlan, SplitPaneOwner } from "../utils/splitLayout";
 import { rootGitMutationScope } from "../utils/workspaceGit";
+import { paletteWorkspaceCommands } from "../utils/paletteWorkspaceCommands";
+import { requestHeaderBranchMenu } from "../utils/checkoutBranchMenu";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import type { CommandPaletteView } from "./CommandPalette";
-import type { MessageSearchHit } from "@shared/message-search";
+import type { MessageSearchHit, MessageSearchTarget } from "@shared/message-search";
+import type { LibraryTurnTarget } from "./LibraryView";
+import { requestTimelineFocus } from "../utils/timelineFocus";
 import { AppStatusOverlays, StatusToastStack } from "./AppStatusOverlays";
 import { DialogPresence } from "./DialogPresence";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { SplitDropLayer } from "./SplitDropLayer";
 import { LoadingMark } from "./ui";
+import { TaskCreatedNotice } from "./tasks/TaskCreatedNotice";
+import { TaskCreationContext, useTaskCreationController } from "./tasks/taskCreation";
 import { WelcomeGuideHost } from "./WelcomeGuideHost";
 import { HelpGuideHost } from "./HelpGuideHost";
 import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
@@ -69,6 +75,7 @@ import {
   loadDailyWorkDialog,
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
+  loadLibraryView,
   loadTasksView,
   loadUsageView,
 } from "./lazySurfaceLoaders";
@@ -80,6 +87,7 @@ const MultiSpawnDialog = lazy(async () => ({
   default: (await loadMultiSpawnDialog()).MultiSpawnDialog,
 }));
 const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
+const GitHistoryPanel = lazy(() => import("./GitHistoryPanel"));
 const ThreadNotifications = lazy(async () => ({
   default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
 }));
@@ -109,6 +117,7 @@ interface AppLayoutActions {
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
   selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
+  openLibraryAnswer: (target: MessageSearchTarget) => Promise<boolean>;
   openConversationInSplit: (conversation: Conversation) => void;
   openConversationInWindow: (conversation: Conversation) => void;
   closeConversationSplit: (conversation: Conversation) => void;
@@ -127,6 +136,7 @@ interface AppLayoutActions {
   createConversation: (
     project?: Project | null,
     location?: NewConversationLocation,
+    options?: { draft?: string },
   ) => void;
   updateSettings: (update: Partial<AppSettings>) => Promise<void>;
   openProjectPath: (
@@ -334,8 +344,16 @@ export const AppLayout = memo(function AppLayout({
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
   const [openTaskRequest, setOpenTaskRequest] = useState<{ id: string; nonce: number } | null>(null);
   if (view !== "tasks" && openTaskRequest !== null) setOpenTaskRequest(null);
+  // History belongs to the chat it was opened from; switching chats hides it.
+  const [gitHistoryOwner, setGitHistoryOwner] = useState<string | null>(null);
+  const taskCreation = useTaskCreationController({
+    snapshot: connection.snapshot,
+    request: (command, options) => actions.run(command.type, command, options),
+    onError: setActionError,
+  });
   const UsageView = useLoadedSurface(loadUsageView, view === "usage");
   const TasksView = useLoadedSurface(loadTasksView, view === "tasks");
+  const LibraryView = useLoadedSurface(loadLibraryView, view === "library");
   const DailyWorkDialog = useLoadedSurface(loadDailyWorkDialog, dailyWorkOpen);
   const [cornerControlsWidth, setCornerControlsWidth] = useState(0);
   const [projectScopeId, setProjectScopeId] = useProjectScope(connection.snapshot);
@@ -370,6 +388,7 @@ export const AppLayout = memo(function AppLayout({
   useNativePreviewSuspension(
     Boolean(visibleError)
       || providerQuotaNotices.notices.length > 0
+      || taskCreation.notice !== null
       || commitDialogOpen
       || dailyWorkOpen
       || pullRequestDialogOpen
@@ -520,6 +539,23 @@ export const AppLayout = memo(function AppLayout({
       setView("tasks");
     },
   });
+  const libraryActions = useStableActions({
+    request: (command: CommandWithoutId) => actions.run(command.type, command, { passive: true, reportError: false }),
+    open: () => setView("library"),
+    openAnswer: (target: MessageSearchTarget) => {
+      void actions.openLibraryAnswer(target);
+    },
+    openTurn: ({ conversationId, turnId }: LibraryTurnTarget) => {
+      const target = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
+      if (!target) {
+        setActionError("This chat is no longer available.");
+        return;
+      }
+      actions.selectConversation(target);
+      setView("workspace");
+      requestTimelineFocus({ conversationId, turnId });
+    },
+  });
   const notificationActions = useStableActions({
     activate: (thread: Conversation) => {
       setDailyWorkOpen(false);
@@ -623,6 +659,36 @@ export const AppLayout = memo(function AppLayout({
         onSnoozeConversation: sidebarActions.snoozeConversation,
       }
     : null;
+
+  const workspaceCommands = paletteOpen && view === "workspace" && project && headerConversation
+    ? paletteWorkspaceCommands({
+        surfaces: headerTools ? {
+          unavailable: headerTools.panel.unavailable ?? {},
+          open: headerTools.panel.onOpenSurface,
+        } : null,
+        git: {
+          status: gitStatus,
+          busy: Boolean(busyAction),
+          commit: () => setCommitDialogOpen(true),
+          fetch: () => { void actions.mutateRemote("git.fetch").catch(() => undefined); },
+          pull: () => { void actions.mutateRemote("git.pull").catch(() => undefined); },
+          push: () => { void actions.mutateRemote("git.push").catch(() => undefined); },
+          createPullRequest: openPullRequest,
+          switchBranch: () => { requestHeaderBranchMenu(); },
+        },
+        terminal: headerTools ? {
+          unavailableReason: workspaceToolsUnavailableReason,
+          shortcut: formatAppShortcutLabel(platform, settings.keybindings["toggle-terminal"]),
+          toggle: scenePanel.toggleTerminal,
+        } : null,
+        window: isServerConversation && conversation ? {
+          conversation,
+          isDetached: detachedConversationIds.has(conversation.id),
+          detachedChatLimitReached,
+          openInWindow: sidebarActions.openConversationInWindow,
+        } : null,
+      })
+    : undefined;
 
   const [appBooted, setAppBooted] = useState(false);
   useEffect(() => {
@@ -832,6 +898,7 @@ export const AppLayout = memo(function AppLayout({
             onPull={() => { void actions.mutateRemote("git.pull").catch(() => undefined); }}
             onPush={() => { void actions.mutateRemote("git.push").catch(() => undefined); }}
             {...(actions.refreshGitStatus ? { onRefreshGitStatus: actions.refreshGitStatus } : {})}
+            onOpenGitHistory={() => setGitHistoryOwner(commitReviewOwner)}
           />
           <RuntimeConnectionBanner connection={connection} />
           {cornerControlsVisible && (
@@ -889,8 +956,25 @@ export const AppLayout = memo(function AppLayout({
                   <LoadingMark label="Loading tasks" />
                 </div>
               )
+            ) : view === "library" ? (
+              LibraryView ? (
+                <LibraryView
+                  snapshot={connection.snapshot}
+                  status={connection.status}
+                  request={libraryActions.request}
+                  onOpenAnswer={libraryActions.openAnswer}
+                  onOpenTurn={libraryActions.openTurn}
+                  onError={setActionError}
+                />
+              ) : (
+                <div className="workspace-tool-loading library-view-loading">
+                  <LoadingMark label="Loading the Library" />
+                </div>
+              )
             ) : (
-              <WorkspaceScene {...scene} />
+              <TaskCreationContext.Provider value={taskCreation.creator}>
+                <WorkspaceScene {...scene} />
+              </TaskCreationContext.Provider>
             )}
           </div>
           {view === "workspace" && (
@@ -904,6 +988,14 @@ export const AppLayout = memo(function AppLayout({
             />
           )}
           <StatusToastStack
+            confirmation={taskCreation.notice && (
+              <TaskCreatedNotice
+                key={taskCreation.notice.id}
+                notice={taskCreation.notice}
+                onOpenTasks={() => setView("tasks")}
+                onDismiss={taskCreation.dismissNotice}
+              />
+            )}
             appUpdate={appUpdate}
             providerQuotaNotices={providerQuotaNotices}
             error={visibleError}
@@ -934,6 +1026,7 @@ export const AppLayout = memo(function AppLayout({
             status={gitStatus}
             reviewStates={reviewStates}
             busy={busyAction === "git.commit" || busyAction === "git.push"}
+            reviewSummary={headerTools?.changes.summary ?? null}
             loadReview={actions.loadCommitReview}
             discardReview={actions.discardCommitReview}
             onClose={() => setCommitDialogOpen(false)}
@@ -962,6 +1055,19 @@ export const AppLayout = memo(function AppLayout({
           />
         )}
       </DialogPresence>
+      {gitHistoryOwner === commitReviewOwner && project && (
+        <Suspense fallback={null}>
+          <GitHistoryPanel
+            open
+            projectId={project.id}
+            conversationId={conversation?.id}
+            {...(rootRepository ? { repositoryPath: rootRepository.repositoryPath, authorityRef: rootRepository.authorityRef } : {})}
+            branch={gitStatus?.branch ?? null}
+            run={actions.run}
+            onClose={() => setGitHistoryOwner(null)}
+          />
+        </Suspense>
+      )}
       {pullRequestDialogOpen && project && rootRepository && (
         <Suspense fallback={null}>
           <PullRequestDialog
@@ -1028,7 +1134,9 @@ export const AppLayout = memo(function AppLayout({
         importProject={actions.importProject}
         openSettings={actions.openSettings}
         openTasks={tasksActions.open}
+        openLibrary={libraryActions.open}
         addTask={tasksActions.addTask}
+        {...(workspaceCommands ? { workspaceCommands } : {})}
       />
       <AppStatusOverlays
         providerAuth={providerAuth}
@@ -1058,6 +1166,7 @@ export const AppLayout = memo(function AppLayout({
           usage: () => setView("usage"),
           "daily-work": () => setDailyWorkOpen(true),
           tasks: tasksActions.open,
+          library: libraryActions.open,
           "welcome-guide": openWelcomeGuide,
         }}
         projects={connection.snapshot?.projects ?? []}

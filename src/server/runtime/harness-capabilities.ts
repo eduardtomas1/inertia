@@ -11,6 +11,7 @@ import type {
   ProviderHostToolResult,
 } from "../provider/contracts";
 import type { HiddenProviderInstruction } from "./turns/request-context";
+import type { ThreadToolRegistrations } from "./thread-tool-registrations";
 
 const MAX_CAPABILITY_PACKS = 16;
 const MAX_CAPABILITY_TOOLS = 64;
@@ -23,6 +24,7 @@ const CAPABILITY_ID = /^[a-z][a-z0-9.-]{0,63}$/u;
 const INSTRUCTION_LABEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const TOOL_NAME = /^inertia_[a-z0-9_]{1,119}$/u;
 const SAFE_METADATA = /^[^\u0000-\u001f\u007f]+$/u;
+const WITHHOLDING_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 const EVIDENCE_KINDS = new Set<HarnessCapabilityEvaluation["evidenceKinds"][number]>([
   "browser-evidence",
   "git-artifact",
@@ -64,7 +66,67 @@ export interface HarnessCapabilityPack {
   tools: readonly HarnessCapabilityTool[];
   retiredTools?: readonly HarnessCapabilityTool[];
   evaluation: HarnessCapabilityEvaluation;
+  /**
+   * Every provider thread this build can resume registered this pack's tools
+   * when it started, so its instructions stay truthful on a resumed thread
+   * whose registration was not recorded.
+   */
+  registeredOnEveryResumableThread?: boolean;
 }
+
+/**
+ * One pack as a bridge carries it. A thread-scoped transport registers every
+ * pack, offered or withheld, and injects only an offered pack's instructions
+ * into a thread whose recorded registration has the same pack digest.
+ */
+export interface HarnessCapabilityBridgePack {
+  id: string;
+  digest: string;
+  offered: boolean;
+  definitions: readonly ProviderHostToolDefinition[];
+  instructions: readonly HiddenProviderInstruction[];
+  registeredOnEveryResumableThread: boolean;
+}
+
+const BRIDGE_PACKS = new WeakMap<ProviderHostToolBridge, readonly HarnessCapabilityBridgePack[]>();
+const BRIDGE_THREAD_REGISTRATIONS = new WeakMap<ProviderHostToolBridge, ThreadToolRegistrations>();
+
+/** The packs behind a bridge built by a capability registry, if it was. */
+export function harnessCapabilityPacksOf(
+  bridge: ProviderHostToolBridge,
+): readonly HarnessCapabilityBridgePack[] | undefined {
+  return BRIDGE_PACKS.get(bridge);
+}
+
+/**
+ * Where a thread-scoped transport records and reads what each of its threads
+ * registered, when the registry that built the bridge was given one.
+ */
+export function harnessCapabilityThreadRegistrationsOf(
+  bridge: ProviderHostToolBridge,
+): ThreadToolRegistrations | undefined {
+  return BRIDGE_THREAD_REGISTRATIONS.get(bridge);
+}
+
+/** Why one turn does not get a compiled pack, returned to calls of its tools. */
+export interface HarnessCapabilityWithholding {
+  code: string;
+  message: string;
+}
+
+/**
+ * One turn's view of the compiled registry. A withheld pack is not instructed
+ * for that turn and, on a per-turn transport, not advertised either. The
+ * compiled registry, its manifest, and its definition digest stay the same for
+ * every turn and project.
+ */
+export interface HarnessCapabilityTurnOffer {
+  withheldPacks: ReadonlyMap<string, HarnessCapabilityWithholding>;
+}
+
+export const FULL_HARNESS_CAPABILITY_OFFER: HarnessCapabilityTurnOffer = Object.freeze({
+  withheldPacks: new Map<string, HarnessCapabilityWithholding>(),
+});
 
 export interface HarnessCapabilityManifest {
   schemaVersion: 1;
@@ -231,8 +293,14 @@ export class HarnessCapabilityRegistry {
   readonly #definitions: readonly ProviderHostToolDefinition[];
   readonly #instructions: readonly HiddenProviderInstruction[];
   readonly #manifest: HarnessCapabilityManifest;
+  readonly #packDigests: ReadonlyMap<string, string>;
+  readonly #threadRegistrations: ThreadToolRegistrations | undefined;
 
-  constructor(packs: readonly HarnessCapabilityPack[]) {
+  constructor(
+    packs: readonly HarnessCapabilityPack[],
+    options: { threadRegistrations?: ThreadToolRegistrations } = {},
+  ) {
+    this.#threadRegistrations = options.threadRegistrations;
     if (packs.length === 0 || packs.length > MAX_CAPABILITY_PACKS) {
       throw new Error("The Inertia capability registry has an invalid pack count.");
     }
@@ -371,6 +439,10 @@ export class HarnessCapabilityRegistry {
       })),
       evaluation: pack.evaluation,
     }));
+    this.#packDigests = new Map(digestInput.map((input) => [
+      input.id,
+      createHash("sha256").update(canonicalJson(input), "utf8").digest("hex"),
+    ]));
     this.#manifest = Object.freeze({
       schemaVersion: 1,
       definitionDigest: createHash("sha256")
@@ -380,19 +452,53 @@ export class HarnessCapabilityRegistry {
     });
   }
 
-  instructions(): readonly HiddenProviderInstruction[] {
-    return this.#instructions;
+  /** Private provider instructions for the packs this turn is offered. */
+  instructions(
+    offer: HarnessCapabilityTurnOffer = FULL_HARNESS_CAPABILITY_OFFER,
+  ): readonly HiddenProviderInstruction[] {
+    if (!this.#withholdsAny(offer)) return this.#instructions;
+    return Object.freeze(this.#packs
+      .filter(({ id }) => !offer.withheldPacks.has(id))
+      .flatMap((pack) => pack.instructions));
   }
 
   manifest(): HarnessCapabilityManifest {
     return this.#manifest;
   }
 
-  bridgeFor(context: HarnessCapabilityContext): ProviderHostToolBridge {
-    return {
-      definitions: this.#definitions,
-      retiredToolNames: this.#retiredToolNames,
+  /**
+   * The exact-turn bridge for the packs this turn is offered. A withheld pack's
+   * tools are not advertised. They stay accepted like retired tools, because a
+   * Codex thread registers every pack when it starts and keeps those tools, and
+   * a call to one returns the pack's withholding reason without running its
+   * handler. `harnessCapabilityPacksOf` returns the packs behind the bridge.
+   */
+  bridgeFor(
+    context: HarnessCapabilityContext,
+    offer: HarnessCapabilityTurnOffer = FULL_HARNESS_CAPABILITY_OFFER,
+  ): ProviderHostToolBridge {
+    const withheldTools = new Map<string, ProviderHostToolResult>();
+    for (const pack of this.#packs) {
+      const reason = offer.withheldPacks.get(pack.id);
+      if (!reason) continue;
+      const result = withheldFailure(reason);
+      for (const { definition } of [...pack.tools, ...(pack.retiredTools ?? [])]) {
+        withheldTools.set(definition.name, result);
+      }
+    }
+    const definitions = withheldTools.size === 0
+      ? this.#definitions
+      : Object.freeze(this.#definitions.filter(({ name }) => !withheldTools.has(name)));
+    const retiredToolNames = withheldTools.size === 0
+      ? this.#retiredToolNames
+      : new Set([...this.#retiredToolNames, ...withheldTools.keys()]);
+    const bridge: ProviderHostToolBridge = {
+      definitions,
+      retiredToolNames,
+      instructions: this.instructions(offer),
       invoke: async (call) => {
+        const withheld = withheldTools.get(call.tool);
+        if (withheld) return withheld;
         const tool = this.#tools.get(call.tool);
         if (!tool) return failure("That Inertia capability tool is unavailable.");
         try {
@@ -402,5 +508,34 @@ export class HarnessCapabilityRegistry {
         }
       },
     };
+    BRIDGE_PACKS.set(bridge, Object.freeze(this.#packs.map((pack) => Object.freeze({
+      id: pack.id,
+      digest: this.#packDigests.get(pack.id)!,
+      offered: !offer.withheldPacks.has(pack.id),
+      definitions: Object.freeze(pack.tools.map(({ definition }) => definition)),
+      instructions: pack.instructions,
+      registeredOnEveryResumableThread: pack.registeredOnEveryResumableThread === true,
+    }))));
+    if (this.#threadRegistrations) BRIDGE_THREAD_REGISTRATIONS.set(bridge, this.#threadRegistrations);
+    return bridge;
   }
+
+  #withholdsAny(offer: HarnessCapabilityTurnOffer): boolean {
+    return this.#packs.some(({ id }) => offer.withheldPacks.has(id));
+  }
+}
+
+function withheldFailure(reason: HarnessCapabilityWithholding): ProviderHostToolResult {
+  const message = reason.message.trim();
+  return {
+    success: false,
+    text: JSON.stringify({
+      error: {
+        code: WITHHOLDING_CODE.test(reason.code) ? reason.code : "capability_withheld",
+        message: message.length > 0 && message.length <= 500 && SAFE_METADATA.test(message)
+          ? message
+          : "That Inertia capability is withheld from this turn.",
+      },
+    }),
+  };
 }

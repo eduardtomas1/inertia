@@ -33,6 +33,9 @@ export const loadUsageView = createSurfaceLoader(async () => ({
 export const loadTasksView = createSurfaceLoader(async () => ({
   default: (await import("./TasksView")).TasksView,
 }));
+export const loadLibraryView = createSurfaceLoader(async () => ({
+  default: (await import("./LibraryView")).LibraryView,
+}));
 export const loadWorkspaceTerminal = createSurfaceLoader(async () => ({
   default: (await import("./WorkspaceTerminal")).WorkspaceTerminal,
 }));

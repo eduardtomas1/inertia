@@ -115,6 +115,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   },
   "agent.input.respond": shortMutation,
   "agent.skills.list": agentWorkflowRead,
+  "agent.skills.preview": agentWorkflowRead,
   "agent.stop": shortMutation,
   "agent.subagent.stop": shortMutation,
   "agent.workflow.load": agentWorkflowRead,
@@ -186,6 +187,9 @@ export const RUNTIME_COMMAND_POLICIES = {
   "git.diff": gitRead,
   "git.pr.open": gitMutation,
   "git.pr.confidence": gitRead,
+  "git.log": gitRead,
+  "git.commit.show": gitRead,
+  "git.blame": gitRead,
   "git.pr.create": gitMutation,
   "git.fetch": gitMutation,
   "git.pull": gitMutation,
@@ -197,6 +201,8 @@ export const RUNTIME_COMMAND_POLICIES = {
   "git.selection.inspect": gitMutation,
   "git.selection.revert": gitMutation,
   "git.selection.undo": gitMutation,
+  "git.stage": gitMutation,
+  "git.unstage": gitMutation,
   "git.turn.compare": gitRead,
   "git.turn.diff": shortRetrySafe,
   "git.workspace.diff": gitRead,
@@ -280,6 +286,13 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutDelivery: "ambiguous",
   },
   "terminal.resize": shortMutation,
+  "library.category.create": shortMutation,
+  "library.category.rename": shortMutation,
+  "library.category.delete": shortMutation,
+  "library.answer.save": shortMutation,
+  "library.answer.update": shortMutation,
+  "library.answer.remove": shortMutation,
+  "library.pages.list": shortRetrySafe,
   "todo.clearDone": shortMutation,
   "todo.create": shortMutation,
   "todo.delete": shortMutation,
@@ -307,11 +320,16 @@ export const RUNTIME_COMMAND_POLICIES = {
   "watcher.note.deliver": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "watcher.note.dismiss": shortMutation,
   "workspace.entries": workspaceEntryRead,
+  "workspace.search.content": workspaceEntryRead,
   "workspace.file.read": workspaceFileRead,
+  "workspace.path.resolve": shortRetrySafe,
   "workspace.file.write": {
     timeoutMs: WORKSPACE_FILE_MUTATION_REQUEST_TIMEOUT_MS,
     timeoutDelivery: "ambiguous",
   },
+  "worktree.list": gitRead,
+  "worktree.remove": gitMutation,
+  "worktree.prune": gitMutation,
 } as const satisfies Readonly<
   Record<ClientCommand["type"], RuntimeCommandPolicy>
 >;
@@ -333,6 +351,8 @@ const WORKSPACE_GIT_COMPLETION_PUBLICATIONS = new Set<ClientCommand["type"]>([
   "git.push",
   "git.selection.revert",
   "git.selection.undo",
+  "git.stage",
+  "git.unstage",
 ]);
 
 export function publishesWorkspaceGitCompletion(

@@ -408,14 +408,23 @@ export class TranscriptRepository {
     return [...new Set(projectAttachments(rows).map(({ id }) => id))].filter((id) => !active.has(id));
   }
 
-  attachmentConversationIds(attachmentIds: readonly string[]): string[] {
+  /**
+   * Chats with a message that carries any of the attachments. Cleanup also
+   * counts chats whose attachment list cannot be read, so it never deletes a
+   * file one of them might use; an ownership check passes includeUnreadable:
+   * false so an unreadable list grants nothing.
+   */
+  attachmentConversationIds(
+    attachmentIds: readonly string[],
+    { includeUnreadable = true }: { includeUnreadable?: boolean } = {},
+  ): string[] {
     if (attachmentIds.length === 0) return [];
     const rows = this.context.database.prepare(`
       SELECT DISTINCT messages.conversation_id
       FROM messages
       WHERE messages.attachments_json <> '[]'
         AND (
-          json_valid(messages.attachments_json) = 0
+          (@includeUnreadable = 1 AND json_valid(messages.attachments_json) = 0)
           OR EXISTS (
             SELECT 1
             FROM json_tree(CASE
@@ -423,10 +432,13 @@ export class TranscriptRepository {
                 THEN messages.attachments_json
               ELSE '[]'
             END) AS node
-            WHERE node.atom IN (SELECT value FROM json_each(?))
+            WHERE node.atom IN (SELECT value FROM json_each(@ids))
           )
         )
-    `).all(JSON.stringify([...new Set(attachmentIds)])) as Array<Pick<MessageRow, "conversation_id">>;
+    `).all({
+      ids: JSON.stringify([...new Set(attachmentIds)]),
+      includeUnreadable: includeUnreadable ? 1 : 0,
+    }) as Array<Pick<MessageRow, "conversation_id">>;
     return rows.map(({ conversation_id }) => conversation_id);
   }
 
@@ -465,6 +477,7 @@ export class TranscriptRepository {
       LEFT JOIN agent_turns t ON t.id = m.turn_id AND t.conversation_id = c.id
       WHERE m.id = ? AND c.archived_at IS NULL AND (
         m.role = 'user' OR (m.role = 'assistant' AND t.terminal_assistant_message_id = m.id)
+        OR (m.role = 'system' AND t.id IS NOT NULL AND m.html_render_json IS NOT NULL)
       )
     `).get(messageId) as MessageSearchTarget | undefined ?? null;
   }

@@ -26,6 +26,7 @@ interface TodoRow {
   completed_at: string | null;
   conversation_id: string | null;
   linked_at: string | null;
+  source_conversation_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -40,6 +41,8 @@ export const TODO_OPEN_LIMIT_MESSAGE =
   `You have ${MAX_OPEN_TODOS} open tasks. Finish or delete some first.`;
 export const TODO_MISSING_MESSAGE = "That task no longer exists.";
 export const TODO_PROJECT_MISSING_MESSAGE = "That project no longer exists.";
+export const TODO_SOURCE_CHAT_MISSING_MESSAGE = "That chat no longer exists.";
+export const TODO_SOURCE_CHAT_PROJECT_MESSAGE = "The chat does not belong to this project.";
 export const TODO_ALREADY_LINKED_MESSAGE = "That task is already handed to an agent.";
 export const TODO_HANDED_OFF_ELSEWHERE_MESSAGE =
   "This task was handed off somewhere else in the meantime.";
@@ -49,7 +52,7 @@ export class TodoRepositoryError extends Error {}
 
 const TODO_COLUMNS = `
   id, title, note, priority, due_date, due_time, project_id, completed_at,
-  conversation_id, linked_at, created_at, updated_at
+  conversation_id, linked_at, source_conversation_id, created_at, updated_at
 `;
 
 const COMPLETED_AT_PLACEHOLDER = new Date(0).toISOString();
@@ -83,6 +86,7 @@ function todoFromRow(row: TodoRow): Todo | null {
     completedAt: row.completed_at,
     conversationId: row.conversation_id,
     linkedAt: row.linked_at,
+    sourceConversationId: row.source_conversation_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -127,7 +131,7 @@ export class TodoRepository {
 
   create(input: TodoCreateInput): Todo {
     const { id, ...fields } = input;
-    const draft = parse(todoDraftSchema, fields);
+    const { sourceConversationId = null, ...draft } = parse(todoDraftSchema, fields);
     return this.database.transaction(() => {
       if (this.openCount() >= MAX_OPEN_TODOS) {
         throw new TodoRepositoryError(TODO_OPEN_LIMIT_MESSAGE);
@@ -136,6 +140,7 @@ export class TodoRepository {
         throw new TodoRepositoryError("That task already exists.");
       }
       this.assertProject(draft.projectId);
+      if (sourceConversationId !== null) this.assertSourceConversation(sourceConversationId, draft.projectId);
       const timestamp = this.now();
       const todo = parse(todoSchema, {
         ...draft,
@@ -143,13 +148,14 @@ export class TodoRepository {
         completedAt: null,
         conversationId: null,
         linkedAt: null,
+        sourceConversationId,
         createdAt: timestamp,
         updatedAt: timestamp,
       });
       this.makeRoom([...this.list(), todo], todo.id);
       this.database.prepare(`
         INSERT INTO todos (${TODO_COLUMNS})
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
       `).run(
         todo.id,
         todo.title,
@@ -158,6 +164,9 @@ export class TodoRepository {
         todo.dueDate,
         todo.dueTime,
         todo.projectId,
+        todo.conversationId,
+        todo.linkedAt,
+        todo.sourceConversationId ?? null,
         todo.createdAt,
         todo.updatedAt,
       );
@@ -205,14 +214,11 @@ export class TodoRepository {
       const current = this.list();
       const existing = this.require(current, todoId);
       assertTodoCanHandOff(existing, options.replaces);
-      const conversation = this.database.prepare(
-        "SELECT project_id FROM conversations WHERE id = ?",
-      ).get(conversationId) as { project_id: string | null } | undefined;
       return this.write(current, {
         ...existing,
         conversationId,
         linkedAt: this.now(),
-        projectId: conversation?.project_id ?? existing.projectId,
+        projectId: this.conversationProjectId(conversationId) ?? existing.projectId,
       });
     })();
   }
@@ -250,6 +256,23 @@ export class TodoRepository {
           LIMIT ?
         )
     `).run(MAX_DONE_TODOS);
+  }
+
+  private conversationProjectId(conversationId: string): string | null {
+    const conversation = this.database.prepare(
+      "SELECT project_id FROM conversations WHERE id = ?",
+    ).get(conversationId) as { project_id: string | null } | undefined;
+    return conversation?.project_id ?? null;
+  }
+
+  private assertSourceConversation(conversationId: string, projectId: string | null): void {
+    const conversation = this.database.prepare(
+      "SELECT project_id FROM conversations WHERE id = ?",
+    ).get(conversationId) as { project_id: string | null } | undefined;
+    if (!conversation) throw new TodoRepositoryError(TODO_SOURCE_CHAT_MISSING_MESSAGE);
+    if (conversation.project_id !== projectId) {
+      throw new TodoRepositoryError(TODO_SOURCE_CHAT_PROJECT_MESSAGE);
+    }
   }
 
   private assertProject(projectId: string | null): void {

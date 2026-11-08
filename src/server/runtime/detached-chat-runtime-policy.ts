@@ -14,6 +14,7 @@ export interface DetachedChatRuntimePolicyResources {
   subagentConversationId(traceId: string): string | null;
   checkpointConversationId(checkpointId: string): string | null;
   turnConversationId(turnId: string): string | null;
+  savedAnswerConversationId(savedAnswerId: string): string | null;
   duoLaunchConversationIds(launchId: string): readonly string[] | null;
   delegatedTaskConversationIds?(taskId: string): readonly string[] | null;
   pendingApproval(
@@ -70,6 +71,8 @@ export function detachedChatCommandRejection(
   };
   const ownsTurn = (turnId: string): boolean =>
     resources.turnConversationId(turnId) === authority.conversationId;
+  const ownsSavedAnswer = (savedAnswerId: string): boolean =>
+    resources.savedAnswerConversationId(savedAnswerId) === authority.conversationId;
   const ownsRun = (runId: string): boolean => snapshot().runs.some(
     ({ id, conversationId }) =>
       id === runId && conversationId === authority.conversationId,
@@ -223,6 +226,11 @@ export function detachedChatCommandRejection(
     case "git.fetch":
     case "git.pull":
     case "git.commit":
+    case "git.stage":
+    case "git.unstage":
+    case "git.log":
+    case "git.commit.show":
+    case "git.blame":
     case "git.push":
     case "git.pr.open":
     case "git.pr.confidence":
@@ -233,6 +241,8 @@ export function detachedChatCommandRejection(
     case "workspace.entries":
     case "workspace.file.read":
     case "workspace.file.write":
+    case "workspace.search.content":
+    case "workspace.path.resolve":
     case "project.actions":
     case "project.action.run":
     case "terminal.create":
@@ -261,6 +271,16 @@ export function detachedChatCommandRejection(
     case "prompt-preset.delete":
     case "prompt-preset.reorder":
       return null;
+    case "library.category.create":
+      return shell() ? null : REJECTION;
+    case "library.answer.save":
+      return ownsExistingConversation(command.payload.conversationId)
+        && ownsTurn(command.payload.turnId)
+        ? null
+        : REJECTION;
+    case "library.answer.update":
+    case "library.answer.remove":
+      return ownsSavedAnswer(command.payload.savedAnswerId) ? null : REJECTION;
     case "duo.pending": {
       const conversation = shell();
       return conversation

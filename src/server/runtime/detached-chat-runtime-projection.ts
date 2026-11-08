@@ -5,6 +5,7 @@ import type {
   RuntimeSequencedFrame,
 } from "../../shared/contracts";
 import { defaultSettings } from "../../shared/contracts/app";
+import type { LibrarySnapshot } from "../../shared/library";
 import type { WatcherLinkView } from "../../shared/watcher";
 import type { RuntimeDetailSubscription } from "../runtime-sequencing";
 import { projectRuntimeFrame, runtimeCursorFrame } from "../runtime-sequencing";
@@ -26,6 +27,16 @@ function watcherLinkTouches(
 ): boolean {
   return link.watcherConversationId === conversationId
     || link.watchedConversationId === conversationId;
+}
+
+export function projectDetachedLibrary(
+  library: LibrarySnapshot,
+  conversationId: string,
+): LibrarySnapshot {
+  return {
+    categories: library.categories,
+    savedAnswers: library.savedAnswers.filter((answer) => answer.conversationId === conversationId),
+  };
 }
 
 export type DetachedWatcherLinkLookup = (
@@ -93,6 +104,7 @@ export function projectDetachedChatSnapshot(
     settings: projectedSettings(snapshot.settings),
     promptPresets: snapshot.promptPresets ?? [],
     todos: [],
+    ...(snapshot.library ? { library: projectDetachedLibrary(snapshot.library, conversationId) } : {}),
     ...(snapshot.watchers ? {
       watchers: snapshot.watchers.filter((link) => watcherLinkTouches(link, conversationId)),
     } : {}),
@@ -175,6 +187,14 @@ export function projectRuntimeFrameForAuthority(
       return frame.event.conversationId === authority.conversationId
         ? frame
         : runtimeCursorFrame(frame);
+    case "library.updated":
+      return {
+        ...frame,
+        event: {
+          type: "library.updated",
+          library: projectDetachedLibrary(frame.event.library, authority.conversationId),
+        },
+      };
     case "todos.updated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":

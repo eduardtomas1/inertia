@@ -17,6 +17,7 @@ interface DetachedChatRuntimeSecurityStore {
   subagentTrace(traceId: string): { conversationId: string };
   checkpoint(checkpointId: string): { conversationId: string };
   agentTurn(turnId: string): { conversationId: string };
+  library: { savedAnswerConversationId(savedAnswerId: string): string | null };
   findPairedLaunch(launchId: string): Pick<DuoLaunchStatus, "sides" | "comparison"> | null;
   readonly orchestration?: {
     readonly delegation: { get(taskId: string): { parentConversationId: string; childConversationId: string } | null };
@@ -90,6 +91,7 @@ export function createDetachedChatRuntimeSecurity(
         return null;
       }
     },
+    savedAnswerConversationId: (savedAnswerId) => options.store.library.savedAnswerConversationId(savedAnswerId),
     duoLaunchConversationIds: (launchId) => {
       const launch = options.store.findPairedLaunch(launchId);
       if (!launch) return null;

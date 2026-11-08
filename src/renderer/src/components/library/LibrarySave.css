@@ -1,0 +1,41 @@
+.turn-meta .turn-action.library-save-toggle {
+  margin-left: -8px;
+}
+
+.turn-meta .turn-action.library-save-toggle.is-saved,
+.turn-meta .turn-action.library-save-toggle.is-saved:hover {
+  color: var(--accent);
+}
+
+.turn-meta .turn-action.library-save-toggle[aria-expanded="true"] {
+  color: var(--text-muted);
+  background: var(--fill);
+}
+
+.turn-meta .turn-action.library-save-toggle.is-saved[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+.turn-meta .turn-action.library-save-toggle:disabled {
+  opacity: var(--disabled-opacity);
+}
+
+.library-save-toggle svg {
+  transition: fill var(--dur-fast) var(--ease), transform var(--dur) var(--ease);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .library-save-toggle.is-settling svg {
+    animation: library-save-settle var(--dur-slow) var(--ease);
+  }
+}
+
+@keyframes library-save-settle {
+  40% {
+    transform: scale(1.18);
+  }
+}
+
+.turn-meta-primary:has(.library-save-toggle[aria-expanded="true"]) {
+  opacity: 1;
+}

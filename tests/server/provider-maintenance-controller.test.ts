@@ -307,6 +307,75 @@ describe("ProviderMaintenanceController", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("does not report a Homebrew release beyond the supported major as an update", async () => {
+    const runAction = vi.fn(async () => success());
+    const homebrewInfo = vi.fn(async () => JSON.stringify({
+      formulae: [{ versions: { stable: "2.2.5" } }],
+      casks: [],
+    }));
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId, "1.19.5"),
+      refreshTarget: async (providerId) => target(providerId, "1.19.5"),
+      latestVersions: new ProviderLatestVersionCache({ homebrewInfo }),
+      resolveCapabilities: async () => ({
+        ...capabilities("opencode", "homebrew:/opt/homebrew", "opencode-ai"),
+        installMethod: "homebrew",
+        homebrew: { brew: "/opt/homebrew/bin/brew", name: "opencode", cask: false },
+        update: {
+          executable: "/opt/homebrew/bin/brew",
+          args: ["upgrade", "opencode"],
+          lockKey: "homebrew:/opt/homebrew",
+          installMethod: "homebrew",
+          label: "Update with Homebrew",
+          versionPin: { major: 1, argumentIndex: null, command: null },
+        },
+        manualCommand: "brew upgrade opencode",
+      }),
+      runAction,
+    });
+
+    const [status] = await controller.refresh(["opencode"]);
+    expect(status).toMatchObject({
+      latestVersion: "2.2.5",
+      versionStatus: "unknown",
+      updateAvailability: "instructions-only",
+      updateLabel: null,
+      manualCommand: null,
+      message: "Version 2.2.5 is a new major version that Inertia does not support yet.",
+    });
+    expect(runAction).not.toHaveBeenCalled();
+  });
+
+  it("does not report OpenCode 2 as an update for a Homebrew install Inertia cannot update", async () => {
+    const homebrewInfo = vi.fn(async () => JSON.stringify({
+      formulae: [{ versions: { stable: "2.2.5" } }],
+      casks: [],
+    }));
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId, "1.19.5"),
+      refreshTarget: async (providerId) => target(providerId, "1.19.5"),
+      latestVersions: new ProviderLatestVersionCache({ homebrewInfo }),
+      resolveCapabilities: async () => ({
+        ...capabilities("opencode", "homebrew:/opt/homebrew", "opencode-ai"),
+        installMethod: "homebrew",
+        updateAvailability: "instructions-only",
+        homebrew: { brew: "/opt/homebrew/bin/brew", name: "opencode", cask: false },
+        update: null,
+        manualCommand: "brew upgrade opencode",
+        message: "Your account cannot write this Homebrew installation.",
+      }),
+    });
+
+    const [status] = await controller.refresh(["opencode"]);
+    expect(status).toMatchObject({
+      latestVersion: "2.2.5",
+      versionStatus: "unknown",
+      message: "Version 2.2.5 is a new major version that Inertia does not support yet. Your account cannot write this Homebrew installation.",
+    });
+  });
+
   it("rejects an update outside the active capability attestation", async () => {
     const runAction = vi.fn(async () => success());
     const controller = new ProviderMaintenanceController({

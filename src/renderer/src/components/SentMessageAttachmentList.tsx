@@ -10,6 +10,9 @@ import {
   useEffect,
   useId,
   useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
 } from "react";
 
 import {
@@ -25,14 +28,27 @@ import {
 import { observeAttachmentThumbnail, type AttachmentThumbnailState } from "../utils/attachmentThumbnailQueue";
 import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
 
+/** Optional per-item actions; message transcripts render previews only. */
+export interface SentAttachmentItemActions {
+  render(attachment: AttachmentPreviewSource): ReactNode;
+  /** Opens an item menu at a pointer position or, from the keyboard, beside the item. */
+  onContextMenu(
+    attachment: AttachmentPreviewSource,
+    anchor: { x: number; y: number },
+    previewButton: HTMLButtonElement,
+  ): void;
+}
+
 function SentAttachment({
   attachment,
   metadataId,
   onPreview,
+  actions,
 }: {
   attachment: AttachmentPreviewSource;
   metadataId: string;
   onPreview: (attachment: AttachmentPreviewSource) => void;
+  actions?: SentAttachmentItemActions | undefined;
 }): React.JSX.Element {
   const { id } = attachment;
   const [state, setState] = useState<AttachmentThumbnailState>("loading");
@@ -46,12 +62,31 @@ function SentAttachment({
   const Icon = kind === "image"
     ? unavailable ? TriangleAlert : ImageIcon
     : previewKind === "spreadsheet" ? FileSpreadsheet : previewKind === "file" ? File : FileText;
+  const previewButton = (node: Element | null): HTMLButtonElement | null =>
+    node?.closest(".sent-attachment")?.querySelector<HTMLButtonElement>(".sent-attachment-open") ?? null;
+  const openMenu = actions ? (event: MouseEvent<HTMLLIElement>): void => {
+    const button = previewButton(event.target as Element);
+    if (!button) return;
+    event.preventDefault();
+    actions.onContextMenu(attachment, { x: event.clientX, y: event.clientY }, button);
+  } : undefined;
+  const openMenuFromKeyboard = actions ? (event: KeyboardEvent<HTMLLIElement>): void => {
+    if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
+    const button = previewButton(event.target as Element);
+    if (!button) return;
+    event.preventDefault();
+    const rect = (event.target as Element).getBoundingClientRect();
+    actions.onContextMenu(attachment, { x: rect.left + 8, y: rect.bottom }, button);
+  } : undefined;
   return (
     <li
       className="sent-attachment"
       data-request-context-kind={kind}
       data-attachment-preview={previewKind}
       data-attachment-unavailable={unavailable || undefined}
+      data-attachment-actions={actions ? true : undefined}
+      onContextMenu={openMenu}
+      onKeyDown={openMenuFromKeyboard}
     >
       <button
         type="button"
@@ -76,6 +111,7 @@ function SentAttachment({
           </small>
         </span>
       </button>
+      {actions?.render(attachment)}
     </li>
   );
 }
@@ -83,9 +119,11 @@ function SentAttachment({
 export function SentMessageAttachmentList({
   attachments,
   label = "Message attachments",
+  actions,
 }: {
   attachments: readonly AttachmentPreviewSource[];
   label?: string;
+  actions?: SentAttachmentItemActions;
 }): React.JSX.Element | null {
   const [previewAttachment, setPreviewAttachment] =
     useState<AttachmentPreviewSource | null>(null);
@@ -113,6 +151,7 @@ export function SentMessageAttachmentList({
             attachment={attachment}
             metadataId={`${metadataIdPrefix}-${attachment.id}`}
             onPreview={setPreviewAttachment}
+            actions={actions}
           />
         ))}
       </ul>

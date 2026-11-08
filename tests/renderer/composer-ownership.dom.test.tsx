@@ -297,7 +297,7 @@ describe("composer detachment ownership", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Original request" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
-    act(() => requestComposerPrefill({ conversationId: current.id, text: "New context" }));
+    act(() => { requestComposerPrefill({ conversationId: current.id, text: "New context" }); });
     await act(async () => accept());
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Original request\n\nNew context");
     expect(screen.queryByText(image.name)).not.toBeInTheDocument();
@@ -323,7 +323,7 @@ describe("composer detachment ownership", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Original request" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
-    act(() => requestComposerPrefill({ conversationId: current.id, text: "New context" }));
+    act(() => { requestComposerPrefill({ conversationId: current.id, text: "New context" }); });
     await act(async () => fail());
 
     expect(screen.getByText(image.name)).toBeInTheDocument();

@@ -20,6 +20,7 @@ function ShortcutHarness({ onTerminalKeyUp }: {
     mobileNavigation: false,
     suspended: false,
     toggleTerminal: vi.fn(),
+    openSurfaceChooser: vi.fn(),
     setPaletteOpen,
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -62,6 +63,7 @@ function StableListenerHarness(): React.JSX.Element {
     mobileNavigation: false,
     suspended: false,
     toggleTerminal: vi.fn(),
+    openSurfaceChooser: vi.fn(),
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -84,6 +86,7 @@ function ImmediateShortcutOwner({ createConversation }: {
     mobileNavigation: false,
     suspended: false,
     toggleTerminal: vi.fn(),
+    openSurfaceChooser: vi.fn(),
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -141,6 +144,7 @@ function SuspendedShortcutHarness({
     mobileNavigation: false,
     suspended: true,
     toggleTerminal,
+    openSurfaceChooser: vi.fn(),
     setPaletteOpen,
     setSidebarCollapsed,
     setSidebarOpen: vi.fn(),
@@ -268,6 +272,7 @@ describe("global shortcut DOM integration", () => {
         mobileNavigation: false,
         suspended: false,
         toggleTerminal,
+        openSurfaceChooser: vi.fn(),
         setPaletteOpen,
         setSidebarCollapsed,
         setSidebarOpen: vi.fn(),
@@ -326,12 +331,12 @@ describe("global shortcut DOM integration", () => {
 });
 
 describe("terminal and platform shortcut ownership", () => {
-  it.each(["k", "j", "b", "n"])("preserves terminal Control+%s", async (key) => {
+  it.each(["k", "j", "b", "n", "t", "g"])("preserves terminal Control+%s", async (key) => {
     const { installGlobalShortcuts } = await import("../../src/renderer/src/utils/globalShortcuts");
     const invoke = vi.fn();
     const actions = { current: {
       keybindings: DEFAULT_APP_KEYBINDINGS, createConversation: invoke,
-      mobileNavigation: false, suspended: false, toggleTerminal: invoke,
+      mobileNavigation: false, suspended: false, toggleTerminal: invoke, openSurfaceChooser: invoke,
       setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke, toggleSettings: invoke, openTasks: invoke,
     } };
     render(<div className="xterm"><textarea aria-label="Shell input" /></div>);
@@ -349,7 +354,7 @@ describe("terminal and platform shortcut ownership", () => {
     const invoke = vi.fn();
     const actions = { current: {
       keybindings: DEFAULT_APP_KEYBINDINGS, createConversation: invoke,
-      mobileNavigation: false, suspended: false, toggleTerminal: invoke,
+      mobileNavigation: false, suspended: false, toggleTerminal: invoke, openSurfaceChooser: invoke,
       setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke, toggleSettings: invoke, openTasks: invoke,
     } };
     const dispose = installGlobalShortcuts(window, actions, "darwin");
@@ -363,5 +368,43 @@ describe("terminal and platform shortcut ownership", () => {
       expect(command.defaultPrevented).toBe(true);
       expect(invoke).toHaveBeenCalledOnce();
     } finally { dispose(); }
+  });
+});
+
+describe("panel shortcut origin", () => {
+  it("opens the surface chooser in the split pane whose Browser page has focus", async () => {
+    const { openPanelSurfaceChooser, panelShortcutOrigin } = await import("../../src/renderer/src/utils/globalShortcuts");
+    const { OPEN_PANEL_SURFACE_CHOOSER_EVENT } = await import("../../src/renderer/src/utils/rightPanelSurfaces");
+    const host = document.createElement("div");
+    host.innerHTML = `
+      <div class="conversation-pane-workspace" data-pane-owner="primary">
+        <button type="button">Primary composer</button>
+        <div class="workspace-panel" data-testid="primary-panel"></div>
+      </div>
+      <div class="conversation-pane-workspace" data-pane-owner="secondary">
+        <div class="workspace-panel" data-testid="secondary-panel">
+          <div class="preview-panel" data-page-focused=""></div>
+        </div>
+      </div>`;
+    document.body.append(host);
+    try {
+      const opened: string[] = [];
+      for (const panel of host.querySelectorAll<HTMLElement>(".workspace-panel")) {
+        panel.addEventListener(OPEN_PANEL_SURFACE_CHOOSER_EVENT, (event) => {
+          event.preventDefault();
+          opened.push(panel.dataset.testid!);
+        });
+      }
+      const primaryButton = host.querySelector("button")!;
+      primaryButton.focus();
+      expect(openPanelSurfaceChooser(document, panelShortcutOrigin(document, document.activeElement), () => false)).toBe(true);
+      expect(opened).toEqual(["secondary-panel"]);
+
+      host.querySelector(".preview-panel")!.removeAttribute("data-page-focused");
+      openPanelSurfaceChooser(document, panelShortcutOrigin(document, document.activeElement), () => false);
+      expect(opened).toEqual(["secondary-panel", "primary-panel"]);
+    } finally {
+      host.remove();
+    }
   });
 });

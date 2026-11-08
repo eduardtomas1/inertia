@@ -1,0 +1,74 @@
+.library-menu.conversation-menu {
+  position: fixed;
+  inset: auto;
+  z-index: 500;
+  width: 220px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+.library-menu .library-menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-menu .library-menu-check {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.library-menu-heading {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px 4px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}
+
+.library-menu-heading > span {
+  font-weight: 500;
+}
+
+.library-menu-heading > small {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.library-menu-create {
+  display: grid;
+  gap: 4px;
+  padding: 2px;
+}
+
+.library-menu-create input {
+  width: 100%;
+  min-height: var(--menu-item-height);
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: var(--fill);
+  font-size: var(--text-sm);
+}
+
+.library-menu-create input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.library-menu-create input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.library-menu-error {
+  margin: 0;
+  padding: 0 6px 2px;
+  color: var(--danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}

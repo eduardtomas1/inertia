@@ -2,7 +2,9 @@
 import { expect, test } from "@playwright/test";
 import { appendFile, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import WebSocket from "ws";
 
+import type { ProviderInfo, ServerEvent } from "../../src/shared/contracts";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
@@ -85,6 +87,31 @@ async function detectionProbes(): Promise<number> {
   return calls.split("\n").filter((call) => call === "--help").length;
 }
 
+async function waitForCodexDiscovery(): Promise<void> {
+  const { websocketUrl } = await app.runtimeSnapshot();
+  if (!websocketUrl) throw new Error("Fixture runtime is unavailable.");
+  const socket = new WebSocket(websocketUrl, { origin: "inertia://bundle", maxPayload: 4 * 1024 * 1024 });
+  let codex: ProviderInfo | undefined;
+  let socketError: Error | undefined;
+  socket.on("error", (error) => { socketError = error; });
+  socket.on("message", (data) => {
+    const frame = JSON.parse(data.toString()) as ServerEvent;
+    const event = frame.type === "runtime.event" ? frame.event : frame;
+    if (event.type === "server.welcome" || event.type === "snapshot.updated") {
+      codex = event.snapshot.providers.find(({ id }) => id === "codex");
+    }
+  });
+  try {
+    await expect.poll(() => {
+      if (socketError) throw socketError;
+      const quota = codex?.metadataState.rateLimits;
+      return codex?.canRun === true && Boolean(quota?.lastAttemptedAt) && quota?.refreshing === false;
+    }, { timeout: 30_000 }).toBe(true);
+  } finally {
+    socket.terminate();
+  }
+}
+
 test("Refresh usage shows its progress, reports a failed read and reads only quota", async () => {
   const { page } = app;
   const panel = await ensureWorkspaceTools(page);
@@ -92,7 +119,7 @@ test("Refresh usage shows its progress, reports a failed read and reads only quo
   const usage = page.getByRole("region", { name: "Usage", exact: true });
   const refresh = usage.getByRole("button", { name: "Refresh usage" });
   await expect(refresh).toBeEnabled({ timeout: 30_000 });
-  await expect.poll(detectionProbes, { timeout: 30_000 }).toBeGreaterThan(0);
+  await waitForCodexDiscovery();
   const probesBefore = await detectionProbes();
 
   await writeFile(join(app.workspaceDirectory, "quota-mode"), "fail-slow", "utf8");

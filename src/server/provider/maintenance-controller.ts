@@ -49,6 +49,7 @@ import {
 import type {
   ProviderMaintenanceJournalAuthority,
 } from "./maintenance-journal";
+import { OPENCODE_VERSION_CEILING } from "./provider-version-floors";
 
 const MAX_RETAINED_OPERATIONS = 64;
 const PIN_REFUSED_MESSAGE =
@@ -214,6 +215,19 @@ function heldReleaseMessage(
   return comparison !== null && comparison < 0
     ? `Version ${heldVersion} will be offered once it has been public for ${PROVIDER_CLI_RELEASE_COOLDOWN_HOURS} hours.`
     : null;
+}
+
+function unsupportedMajorRelease(
+  providerId: ProviderMaintenanceProviderId,
+  action: ProviderMaintenanceUpdateAction | null,
+  version: string | null,
+): boolean {
+  const match = version ? /^(\d+)\.\d+\.\d+$/u.exec(version)?.[1] : undefined;
+  if (match === undefined) return false;
+  const major = Number(match);
+  const pin = action?.versionPin;
+  return (pin !== undefined && major > pin.major)
+    || (providerId === "opencode" && major >= OPENCODE_VERSION_CEILING.firstUnsupportedMajor);
 }
 
 function installableVersion(
@@ -508,11 +522,15 @@ export class ProviderMaintenanceController {
       && this.options.capabilityAvailable !== undefined
       && !this.options.capabilityAvailable(target, capabilities);
     const refused = pinRefused || gateRefused;
-    const resolvedVersionStatus = versionStatus(
-      target.installed,
-      target.installedVersion,
-      latest.version,
-    );
+    const unsupportedMajor = target.installed
+      && unsupportedMajorRelease(providerId, capabilities.update, latest.version);
+    const resolvedVersionStatus = unsupportedMajor
+      ? "unknown"
+      : versionStatus(
+        target.installed,
+        target.installedVersion,
+        latest.version,
+      );
     const status: ProviderMaintenanceStatus = {
       providerId,
       installedVersion: target.installedVersion,
@@ -526,15 +544,19 @@ export class ProviderMaintenanceController {
         : capabilities.updateAvailability,
       updateLabel: refused ? null : capabilities.update?.label ?? null,
       instructionsUrl: capabilities.instructionsUrl,
-      message: [statusMessage(
-        resolvedVersionStatus,
-        latest.version,
-        latest.freshness === "stale",
-        latest.error,
-      ), heldReleaseMessage(
+      message: [unsupportedMajor
+        ? `Version ${latest.version} is a new major version that Inertia does not support yet.`
+        : statusMessage(
+          resolvedVersionStatus,
+          latest.version,
+          latest.freshness === "stale",
+          latest.error,
+        ), heldReleaseMessage(
         target.installedVersion,
         latest.heldVersion,
-      ), capabilities.message, pinRefused
+      ), capabilities.message, unsupportedMajor
+        ? null
+        : pinRefused
         ? capabilities.update?.registryPackage
           ? COOLDOWN_REFUSED_MESSAGE
           : PIN_REFUSED_MESSAGE

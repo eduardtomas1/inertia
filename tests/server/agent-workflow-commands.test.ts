@@ -223,6 +223,7 @@ describe("agent workflow commands", () => {
 
     expect(runtime.conversationWork.reserve).toHaveBeenCalledWith(
       clearCommand.payload.conversationId,
+      { locksRunConfiguration: false },
     );
     expect(runtime.conversationWork.release).not.toHaveBeenCalled();
 

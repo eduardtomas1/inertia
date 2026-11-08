@@ -9,6 +9,7 @@ export const HELP_COMMANDS = [
   "usage",
   "daily-work",
   "tasks",
+  "library",
   "welcome-guide",
 ] as const;
 
@@ -210,13 +211,45 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     ],
   },
   {
+    id: "library",
+    title: "Library",
+    summary: "Keep the answers and pages worth returning to.",
+    entries: [
+      {
+        name: "What it keeps",
+        detail: "Saved answers you choose to keep, and every page an agent has shown you. Open it from Library in the sidebar or the command palette.",
+        jump: "Open Library",
+      },
+      {
+        name: "Save an answer",
+        detail: "Choose the bookmark beside Copy under a finished reply. It goes to the category you used last, and the menu that opens lets you move it, start a new category or remove it again.",
+      },
+      {
+        name: "Categories",
+        detail: "Make categories in the Library or while saving. Rename or delete one from its … menu; deleting a category moves its answers to Unsorted.",
+      },
+      {
+        name: "Back to the answer",
+        detail: "Opening a saved answer returns you to its chat and lands on that reply, even far back in a long history or in a chat open in its own window. An archived chat is restored first.",
+      },
+      {
+        name: "Pages",
+        detail: "The Pages tab lists the visual pages agents drew for you. Open one full size, then Go to answer to read the turn it came from.",
+      },
+    ],
+    jumps: [
+      { label: "Open Library", command: "library" },
+    ],
+  },
+  {
     id: "tools",
     title: "Workspace tools",
     summary: "Open files, terminals and a browser next to the chat.",
     entries: [
       {
         name: "Surfaces",
-        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Background tasks, Usage, Goal or Plan. Each chat remembers its own surfaces.",
+        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Background tasks, Usage, Goal or Plan. The shortcut opens the surface chooser, where each surface has a letter, and Search everything lists them too. Each chat remembers its own surfaces.",
+        shortcut: "open-surface",
       },
       {
         name: "Terminal",
@@ -446,6 +479,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         name: "Tasks",
         detail: "Open Tasks with the cursor in the add row.",
         shortcut: "tasks",
+        jump: "Open Settings → Keyboard",
+      },
+      {
+        name: "Open a surface",
+        detail: "Open the surface chooser for this chat, then press a surface's letter on its own, without ⌘ or Ctrl, such as D for Changes or T for Terminal.",
+        shortcut: "open-surface",
         jump: "Open Settings → Keyboard",
       },
       { name: "Settings", detail: "⌘, on macOS or Ctrl+, elsewhere opens and closes Settings. Search settings finds a setting by name; ↑, ↓ and Enter open it. Escape clears the search, then leaves Settings." },

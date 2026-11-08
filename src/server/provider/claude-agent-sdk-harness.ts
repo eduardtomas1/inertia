@@ -256,6 +256,7 @@ function startClaudeRun(
     ? options.harnessConfiguration.promptCacheTtl
     : null;
   const launchSettings = {
+    useAutoModeDuringPlan: false,
     ...(supportsFastMode
       ? { fastMode: requestedFastMode === "fast", fastModePerSessionOptIn: true }
       : {}),
@@ -401,7 +402,7 @@ function startClaudeRun(
           settingSources: [],
           ...claudeIdentityOptions(identity, options.input.systemInstruction, options.input.sessionInstruction),
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
-          ...(Object.keys(launchSettings).length > 0 ? { settings: launchSettings } : {}),
+          settings: launchSettings,
           permissionMode: options.input.readOnlyProfile === "watcher"
             ? "default"
             : options.input.interactionMode === "plan"

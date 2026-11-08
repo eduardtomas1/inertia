@@ -330,7 +330,7 @@ export function withProvisionalLatestTurn(
     userMessageId: userMessage.id,
     terminalAssistantMessageId: null,
     modelAlias: latest.modelSelection.alias,
-    interactionMode: conversation.interactionMode,
+    interactionMode: latest.interactionMode ?? conversation.interactionMode,
     accessMode: conversation.accessMode,
     providerSessionBefore: null,
     providerSessionAfter: null,

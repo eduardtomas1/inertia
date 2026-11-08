@@ -115,6 +115,8 @@ export interface RunningRuntime extends RuntimeHtmlRenderReader {
   /** Reopens admission only when operationId owns the held update gate. */
   releaseUpdatePreparation: (operationId: string) => boolean;
   resolveProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
+  /** The chats whose sent messages carry the stored attachment. */
+  attachmentConversations: (attachmentId: string) => readonly string[];
   privateConnectRequest: (
     subject: PrivateConnectRuntimeAuthorization,
     request: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,

@@ -146,6 +146,19 @@ describe("observed child view", () => {
     expect(within(view).getByRole("button", { name: "Stop Evidence scout" })).toHaveFocus();
   });
 
+  it("keeps one agents line per turn beside the details disclosure", () => {
+    const run = vi.fn<DelegationCommandRunner>().mockResolvedValue(readResult());
+    const { container } = render(<DelegationSurfaceProvider conversationId={conversationId} delegation={undefined}
+      conversations={undefined} run={run} openConversation={undefined}>
+      <TurnAgentsLine conversationId={conversationId} turnId={turnId} turnIndex={2}
+        subagents={[taskTrace({ id: "a", conversationId, turnId })]} onOpenSurface={() => undefined} />
+    </DelegationSurfaceProvider>);
+    const line = screen.getByRole("button", { name: /^Open Background tasks, / });
+    const details = screen.getByRole("button", { name: "Agent details" });
+    expect([...container.querySelectorAll(".turn-agents-line")]).toEqual([line]);
+    expect(details).toHaveClass("turn-agents-inspect");
+  });
+
   it("keeps the turn agents line unchanged without a command runner", () => {
     render(<TurnAgentsLine conversationId={conversationId} turnId={turnId} subagents={[taskTrace({ id: "a" })]} />);
     expect(screen.queryByRole("button", { name: "Agent details" })).toBeNull();

@@ -127,7 +127,22 @@
 .observed-child-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .observed-child-reason { font-size: var(--text-xs); }
 .turn-agents-row > .turn-agents-line { display: inline-block; vertical-align: baseline; }
-.turn-agents-row > .turn-agents-inspect { margin-left: 2px; color: var(--text-faint); }
+.turn-agents-inspect {
+  display: inline-block;
+  max-width: 100%;
+  margin: 7px 0 3px 2px;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-faint);
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: start;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+.turn-agents-inspect:hover { color: var(--text); background: var(--fill); }
 .turn-agents-observed { margin-left: max(0px, calc((100% - var(--final-answer-max-width)) / 2)); }
 .delegation-full-result { flex-basis: 100%; }
 .delegation-full-result > p { margin: 0; }

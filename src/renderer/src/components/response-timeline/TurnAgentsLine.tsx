@@ -50,7 +50,7 @@ function ObservedAgents({ conversationId, turnId, turnIndex, line }: {
       {line}
       <button
         type="button"
-        className="turn-agents-line turn-agents-inspect"
+        className="turn-agents-inspect"
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((current) => !current)}

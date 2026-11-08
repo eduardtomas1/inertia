@@ -75,10 +75,11 @@ import {
 import {
   createDiffReviewCommandHandler,
 } from "./runtime/commands/diff-review-commands";
-import { createDuoCommandHandler } from "./runtime/commands/duo-commands";
+import {
+  createDuoCommandHandler,
+} from "./runtime/commands/duo-commands";
 import { createWatcherRuntime, type WatcherRuntime } from "./runtime/watcher/watcher-runtime";
 import { createWatcherTurnPolicy } from "./runtime/watcher/watcher-turn-policy";
-import { watcherAwareTurnHooks } from "./runtime/watcher/watcher-turn-hooks";
 import {
   createIsolatedReviewCommandHandler,
 } from "./runtime/commands/isolated-review-commands";
@@ -92,20 +93,19 @@ import {
   createSettingsBackendCommandHandler,
 } from "./runtime/commands/settings-backend-commands";
 import { createSourceControlCommandHandler } from "./runtime/commands/source-control-commands";
-import { createTerminalLinkCommandHandler } from "./runtime/commands/terminal-link-commands";
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
 import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
-import { createWorktreeCommandHandler } from "./runtime/commands/worktree-commands";
-import {
-  createAgentWorkflowCommandHandler,
-} from "./runtime/commands/agent-workflow-commands";
+import { createLibraryCommandHandler } from "./runtime/commands/library-commands";
+import { createAgentWorkflowCommandHandler } from "./runtime/commands/agent-workflow-commands";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
 import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/agent-thread-runtime";
-import { attachRuntimeWebSocketBoundary } from "./runtime/websocket-boundary";
+import {
+  attachRuntimeWebSocketBoundary,
+} from "./runtime/websocket-boundary";
 import { TrustedAttachmentResolver, conversationAttachmentReadRoots } from "./runtime/attachments/trusted-attachment-resolver";
 import { PrivateGeneratedAttachmentStore } from "./runtime/attachments/private-generated-attachments";
 import { unavailableSecureFileBroker } from "./secure-files";
@@ -660,7 +660,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcastConversationShell,
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
-      ...watcherAwareTurnHooks(watcherPolicy, () => agentThreads?.manager),
+      harnessInstructionsForTurn: (input) => watcherPolicy.harnessInstructionsFor(input) ?? agentThreads?.manager.capabilityInstructions() ?? [],
+      watcherInstructionsForTurn: (input) => watcherPolicy.watcherInstructionsFor(input),
+      hostToolsForTurn: (input) => watcherPolicy.hostToolsForTurn(input) ?? agentThreads?.manager.bridgeFor(input),
       onReadOnlyViolation: (turn, violation) => watchers?.onReadOnlyViolation(turn, violation),
       onPlanHandoff: (turn, text) => watchers?.onPlanHandoff(turn, text),
       applyProviderMetadata: (event) => {
@@ -704,7 +706,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   agentThreads = createAgentThreadRuntime({
-    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes, turnGitArtifacts,
+    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
     conversationAttachments: initializedConversationAttachments,
@@ -754,6 +756,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, visibleLaunchIds: detachedChatRuntimeSecurity.visibleDuoLaunchIds, broadcastSnapshot: flushSnapshot, send }),
       watchers.handler,
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
+      createLibraryCommandHandler({ store, broadcast, send }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork,
@@ -785,7 +788,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         contextRequests: agentThreads.contextRequests,
         reportIncident: commandIncidents.report,
       }),
-      createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
       queuedMessages.turnInteractionHandler,
       createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.shellSnapshot().settings, refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }),
       createSourceControlCommandHandler({
@@ -854,7 +856,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         reportIncident: commandIncidents.report,
         send,
       }),
-      createTerminalLinkCommandHandler({ workspacePath, send }),
     ],
     send,
     broadcastSnapshot: flushSnapshot,
@@ -1022,9 +1023,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     databaseRecovery: store.databaseRecoveryReport(),
     recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot, turns, refreshProviderInfo.rediscoverAfterSystemResume),
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
-    releaseUpdatePreparation: (operationId) => updatePreparation.release(operationId),
+    releaseUpdatePreparation: (operationId) =>
+      updatePreparation.release(operationId),
     readHtmlRender: (renderId) => store.htmlRenders.read(renderId),
-    attachmentConversations: (attachmentId) => store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
     resolveProjectPath: (request) => trackRuntimeOperation(async () => {
       if (runtimeSafetyLock) {
         throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));

@@ -213,8 +213,7 @@ export class RuntimeStore {
       database: this.database,
       conversationPath: (conversationId) =>
         this.conversationRepository.path(conversationId),
-      requireConversation: (conversationId) =>
-        this.requireConversation(conversationId),
+      requireConversation: (conversationId) => this.requireConversation(conversationId),
       requireProject: (projectId) => this.requireProject(projectId), createUserMessage: (conversationId, content, attachments, options) =>
         this.transcriptRepository.createMessage(
           conversationId, content, "user", attachments, null, undefined, options,

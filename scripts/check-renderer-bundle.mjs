@@ -91,7 +91,12 @@ const budgets = {
   // (973,679 measured on Windows x64), and the same 1,889 bytes to the detached
   // chat below (854,072 measured). See
   // docs/pr-evidence/subagent-task-visibility/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 841 + 8_439 + 2_660 + 863 + 35 + 34 + 211 - 28 + 166 + 21 + 7_368 + 551 + 257 + 1_576 + 1_634 + 1 + 9 + 115 + 249 + 7_757 + 315 + 396 + 8_666 + 341 + 548 + 6 + 115 + 171 + 379 + 155 + 7_168 + 558 + 470 + 61 + 41 + 114 + 1_267 + 23 + 316 + 6 + 1_891 + 240 + 1_130 + 328 + 152 + 248 + 289 + 335 + 2_489 + 1_657 + 19_230 + 1_889,
+  // Custom agents: the /calling composer menu, the selected-agent chip, the
+  // called-agent transcript row and the agent contracts add 6,944 bytes over
+  // main's cap (980,623 measured on Windows x64), and 6,930 bytes to the
+  // detached chat below (861,002 measured). See
+  // docs/pr-evidence/custom-agents/renderer-bundle.json.
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 841 + 8_439 + 2_660 + 863 + 35 + 34 + 211 - 28 + 166 + 21 + 7_368 + 551 + 257 + 1_576 + 1_634 + 1 + 9 + 115 + 249 + 7_757 + 315 + 396 + 8_666 + 341 + 548 + 6 + 115 + 171 + 379 + 155 + 7_168 + 558 + 470 + 61 + 41 + 114 + 1_267 + 23 + 316 + 6 + 1_891 + 240 + 1_130 + 328 + 152 + 248 + 289 + 335 + 2_489 + 1_657 + 19_230 + 1_889 + 6_944,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -103,7 +108,7 @@ const budgets = {
   // moved into this window add 8,415 bytes over main's cap (852,183 measured on
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127 + 8_415 + 1_889,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127 + 8_415 + 1_889 + 6_930,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -156,7 +161,10 @@ const budgets = {
   // Subagent task visibility moves 5 bytes of a shared chunk into this closure
   // (24,050 measured on Windows x64). See
   // docs/pr-evidence/subagent-task-visibility/renderer-bundle.json.
-  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 6_387 + 5,
+  // Custom agents move 22 more bytes of a shared chunk into this closure
+  // (24,072 measured on Windows x64). See
+  // docs/pr-evidence/custom-agents/renderer-bundle.json.
+  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 6_387 + 5 + 22,
   // Role labels for the themed marks: 40,166 deferred bytes (+5).
   // Larger unframed gallery labels and preview sizes: 40,313 bytes (+147).
   deferredCustomAgentsSettingsJavaScript: 29_962 + 8_423 + 1_353 + 423 + 5 + 147,
@@ -174,7 +182,10 @@ const budgets = {
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
   filesFirstLoadJavaScript: 115 * kibibyte + 9_775,
   deferredMarkdownJavaScript: 440 * kibibyte,
-  transcriptJavaScript: 600 * kibibyte,
+  // Custom agents: the called-agent block and its children load with the
+  // transcript, 2,313 bytes over its cap (616,713 measured on Windows x64). See
+  // docs/pr-evidence/custom-agents/renderer-bundle.json.
+  transcriptJavaScript: 600 * kibibyte + 2_313,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
@@ -268,7 +279,11 @@ const budgets = {
   // presentation helpers add 10,553 bytes over main's cap (2,545,921 measured
   // on Windows x64). See
   // docs/pr-evidence/subagent-task-visibility/renderer-bundle.json.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553,
+  // Custom agents: the agent library contracts, validators, marks and the
+  // called-agent renderer wiring add 31,556 bytes over main's cap (2,577,477
+  // measured on Windows x64). See
+  // docs/pr-evidence/custom-agents/renderer-bundle.json.
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 31_556,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

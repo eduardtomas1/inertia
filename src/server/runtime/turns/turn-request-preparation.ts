@@ -17,6 +17,7 @@ import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-prof
 import { officialPresetEndpoint } from "../backends/backend-profile-presets";
 import { importedFollowUpNote, importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
+import { codexAutoCompactTokenLimit } from "../../../shared/compact-on-return";
 import type { BeginAgentTurnInput } from "../../persistence/types";
 import type {
   ProviderActivityEvent,
@@ -56,6 +57,7 @@ import type {
 } from "./turn-controller-types";
 
 const CUSTOM_BACKEND_RESTORED_HISTORY_BYTES = 48 * 1_024;
+export const NATIVE_RESTORED_HISTORY_BYTES = 64 * 1_024;
 
 type InstructionRoute = Parameters<typeof routeUsesTrustedHostBridge>[0];
 
@@ -188,6 +190,39 @@ export function compactionSessionInstruction(
     route.harnessId,
     instructionPack(conversation.id, dependencies.hooks.capabilityOfferForTurn?.({ conversation }).instructions ?? []),
   );
+}
+
+export function codexCompactionLimitApplies(route: {
+  providerId: string;
+  harnessId: string;
+  backendProfile: Pick<ModelBackendProfile, "id" | "protocol" | "source" | "endpointIdentity">;
+}): boolean {
+  return route.providerId === "codex"
+    && route.harnessId === "codex-app-server"
+    && (
+      route.backendProfile.id === providerNativeBackendProfile("codex").id
+      || officialPresetEndpoint(route.backendProfile)
+    );
+}
+
+function codexContextWindow(
+  store: Pick<RuntimeStore, "usageForConversation" | "agentTurn">,
+  conversationId: string,
+  modelId: string,
+): number | null {
+  const usage = store.usageForConversation(conversationId);
+  if (!usage?.turnId || usage.maxTokens === null) return null;
+  let reported: ReturnType<RuntimeStore["agentTurn"]>;
+  try {
+    reported = store.agentTurn(usage.turnId);
+  } catch {
+    return null;
+  }
+  return reported.conversationId === conversationId
+    && reported.providerId === "codex"
+    && reported.modelSelection.modelId === modelId
+    ? usage.maxTokens
+    : null;
 }
 
 export function claudeSpendLimitApplies(route: {
@@ -436,15 +471,19 @@ export function resolveTurnRequest(
         : { handoff: { before: handoffBefore, providerId: route.providerId } }),
     };
   };
-  const restoredCapacity = (capacityBytes: number) => usesNativeCatalog
+  const referencedCapacity = (capacityBytes: number) => usesNativeCatalog
     ? capacityBytes
     : Math.min(capacityBytes, CUSTOM_BACKEND_RESTORED_HISTORY_BYTES);
+  const restoredCapacity = (capacityBytes: number) => Math.min(
+    capacityBytes,
+    usesNativeCatalog ? NATIVE_RESTORED_HISTORY_BYTES : CUSTOM_BACKEND_RESTORED_HISTORY_BYTES,
+  );
   const referencedHistory = (capacityBytes: number) => {
     const delivery = conversationContexts?.deliveries
       .find(({ packetId }) => packetId === ownChatPacketId);
     return dependencies.store.transcriptRepository.referencedContinuationHistory(
       conversation.id,
-      restoredCapacity(capacityBytes),
+      referencedCapacity(capacityBytes),
       restoredHistoryRoute(),
       {
         messageCount: delivery?.messageCount ?? 0,
@@ -492,6 +531,15 @@ export function resolveTurnRequest(
     ? dependencies.store.project(conversation.projectId).preferences
       ?.claudeMaxBudgetUsd ?? null
     : null;
+  const autoCompactWindow = claudeSpendLimitApplies(route)
+    ? dependencies.store.settings().claudeAutoCompactWindow
+    : null;
+  const autoCompactTokenLimit = codexCompactionLimitApplies(route)
+    ? codexAutoCompactTokenLimit(
+      dependencies.store.settings().codexAutoCompactTokenLimit,
+      codexContextWindow(dependencies.store, conversation.id, modelSelection.modelId),
+    )
+    : null;
   const providerInput = {
     providerId: route.providerId,
     harnessId: route.harnessId,
@@ -534,6 +582,8 @@ export function resolveTurnRequest(
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
+    ...(autoCompactWindow !== null ? { autoCompactWindow } : {}),
+    ...(autoCompactTokenLimit !== null ? { autoCompactTokenLimit } : {}),
     ...(readOnlyWatcher ? { readOnlyProfile: "watcher" as const } : {}),
     ...(systemInstruction !== undefined ? { systemInstruction } : {}),
     ...(instructionDelivery.sessionInstruction !== undefined

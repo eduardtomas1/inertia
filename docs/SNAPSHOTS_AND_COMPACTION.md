@@ -149,8 +149,9 @@ If the provider completes compaction but local receipt storage or timeline refre
 fails, the success notice explains that reporting failure without inviting a
 second compaction.
 
-Every receipt records what started it: `trigger: "manual"` for `/compact` and
-`trigger: "on-return"` for compact on return. While either runs, the chat's
+Every receipt records what started it: `trigger: "manual"` for `/compact`,
+`trigger: "on-return"` for compact on return and `trigger: "idle"` for a
+compaction before the cache expires. While either runs, the chat's
 shell carries `compaction: { state: "compacting", trigger, startedAt }` through
 `snapshot.updated` and `conversation.shell.updated`, so every window, including
 detached chats, shows it; it returns to `{ state: "idle", trigger: null,
@@ -158,16 +159,18 @@ startedAt: null }` when the operation ends, whatever the outcome.
 
 ## Compact on return
 
-Provider prompt caches expire. When a long chat on an API key is resumed after
-its cache has expired, the next message pays to re-read the whole context at
-the uncached rate. Compact on return offers to shrink the context first.
+Provider prompt caches expire. When a long chat is resumed after its cache has
+expired, the next message pays to re-read the whole context at the uncached
+rate, and every step after it re-reads it again. On an API key that is billed;
+on a Claude subscription it comes out of the usage limits. Compact on return
+offers to shrink the context first.
 
 **When it is offered.** The composer offers **Compact and send** when all of
 these hold (`compactOnReturnOffer` in `src/shared/compact-on-return.ts`):
 
-- the setting **Compact large API chats when you return** (`compactOnReturn`)
-  is `offer` (the default; `never` turns it off, and Restore defaults sets it
-  back to `offer`);
+- the setting **Compact large chats** (`compactOnReturn`) is `offer`, shown as
+  **When you return** or **Before the cache expires** (the default is **When you
+  return**; **Never** stores `never`, and Restore defaults sets it back);
 - the chat's route is eligible (below);
 - the chat holds at least 200,000 tokens of context (`usedTokens`);
 - no turn is running and the chat is not already compacting;
@@ -190,12 +193,21 @@ offer appears on long-context models.
 | --- | --- |
 | Claude harness on the **Anthropic API key** preset | 5 minutes, or 1 hour when the profile sets `promptCacheTtl: "1h"` |
 | Native Claude when `claude auth status` reports a `Console API key` | 5 minutes |
+| Native Claude when `claude auth status` reports a `Claude account` (subscription) | 1 hour |
 | Codex harness on the **OpenAI API key** preset | 30 minutes |
+
+Claude Code writes 1-hour cache entries on a subscription; in this machine's
+transcripts every subscription request broke its cache writes down as
+`ephemeral_1h_input_tokens`. While a subscription is in overage Claude Code
+falls back to 5 minutes, and the reported lifetime then says so. A reported or
+configured lifetime always wins; only an assumed one gives way to the route's
+lifetime (`promptCacheLifetimeFor`). Native Claude whose sign-in Inertia
+cannot read is left out.
 
 Kimi (Kimi Code is a quota membership, not per-token billing, and manages its
 own context), custom gateways (no published cache
-lifetime), native Claude on a Claude account, native Codex, OpenCode, Cursor
-and Antigravity are excluded. The server checks eligibility again against the
+lifetime), native Codex on a ChatGPT account, OpenCode, Cursor and Antigravity
+are excluded. The server checks eligibility again against the
 chat's current route and refuses an ineligible request.
 
 **What happens.** `conversation.compact-and-send` carries the full message
@@ -289,13 +301,79 @@ When the facts change:
 - Usage from other providers, and the context reset after a compaction that
   reported no usage, keeps the stored facts.
 
+## Compact before the cache expires
+
+With **Compact large chats** set to **Before the cache expires**
+(`compactBeforeCacheExpires: true`, schema migration 113,
+`PersistContextCompactionSettings`), the runtime compacts an idle chat while
+its history can still be read from the cache, instead of waiting for the
+person to come back after it expired. It follows T3 Code's beta of the same
+name.
+
+- **When.** `idleCompactionWindow` in `src/shared/compact-on-return.ts` opens
+  two minutes before the cache expires and closes 30 seconds before it. It
+  needs the Claude harness, an eligible route, a one-hour cache (a five-minute
+  cache would expire too soon after every reply) and at least 200,000 tokens of
+  context.
+- **How often.** `startIdleCompaction` in
+  `src/server/runtime/idle-compaction-scheduler.ts` sweeps once a minute. It
+  reads unarchived Claude chats of 200,000 tokens or more from `thread_usage`
+  whose window is open now (last request started between 60 and 58 minutes
+  ago), at most 64, closest to expiry first, and compacts up to three at a
+  time through the runtime's operation tracking. It skips a chat with a running
+  turn, a queued message, a workspace or terminal-resume lock or another
+  compaction, and tries a chat only once per stored request start. Under the
+  chat lock it checks again that the chat's last request, the setting and the
+  window are unchanged. There is no timer per chat, so a restart loses
+  nothing: the next sweep sees the same facts.
+- **What runs.** `compactIdleConversation` takes the same path as compact on
+  return without a message: the refusals above (archived, watcher, Duo judge,
+  usage-limited or failed last turn, setting **Never**, ineligible route, no
+  provider session, a new session needed), the native sign-in check, the chat
+  lock and the provider's own compaction with the 600-second deadline. The
+  receipt carries `trigger: "idle"` and the timeline shows *Compacted while
+  idle* without a `/compact` message.
+- **Failure.** A refused or failed compaction is not retried for that request;
+  the person gets **Compact and send** when they return, as before.
+- **Cost.** One request that reads the history from the cache and writes the
+  summary. A chat nobody returns to was compacted for nothing.
+
+## Automatic compaction window
+
+Claude Code compacts on its own when a chat nears its window: the window minus
+the smaller of 20,000 and the model's output limit, minus 13,000. On a
+1M-token model that is 967,000 tokens, and long chats in this machine's
+transcripts sat there for hundreds of requests. **Auto-compact Claude chats
+after** (`claudeAutoCompactWindow`, default 400,000, `null` for Claude Code's
+own default, stored in `app_state.claude_auto_compact_window` with a 100,000
+to 1,000,000 check) is sent as `autoCompactWindow` in the Claude launch
+settings (`--settings`), which Claude Code reads even with
+`settingSources: []`. Claude Code caps the window at the model's context, so a
+size at or above it has no effect, and compacts 33,000 tokens before the size
+chosen. Only Claude turns carry the field; the provider adapter rejects it on
+any other harness.
+
+Codex compacts at about 95% of the model's context window (449K of 475K
+tokens in this machine's sessions). **Auto-compact Codex chats after**
+(`codexAutoCompactTokenLimit`, default 300,000, `null` for Codex's own default,
+`app_state.codex_auto_compact_token_limit`, schema migration 114,
+`PersistCodexCompactionLimit`) is sent as `config.model_auto_compact_token_limit`
+on `thread/start` and `thread/resume`, through the same `config` object as the
+model provider and watcher settings. Codex's model list carries no context
+window, so Inertia sends the limit only once the chat's own usage has reported
+`model_context_window` for the model the turn uses, and caps it at 90% of that
+window (`codexAutoCompactTokenLimit`), so a smaller model never gets a limit at
+or above its context. Only Codex turns on the ChatGPT sign-in or an OpenAI API
+key carry it; the provider adapter rejects it on any other harness.
+
 **What is assumed.** The Anthropic lifetimes are published defaults; the
 OpenAI figure is an assumption. Providers can evict earlier. Inertia measures
 from when it observed a
 request start, not from when the provider wrote or last read the cache.
 The 30-minute OpenAI figure and the start time of Codex requests are estimates;
 the Codex start time is the report time, so the idle time is never overstated.
-The offer is a prompt to the person, never an automatic action.
+The offer is a prompt to the person; only **Before the cache expires**
+compacts without one.
 
 ## T3 Code reference and adaptation
 

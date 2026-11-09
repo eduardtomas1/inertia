@@ -6,7 +6,11 @@ import { ATTACHMENT_STORAGE_GIB_OPTIONS } from "../../attachment-storage";
 import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
 import { QUOTA_WARNING_THRESHOLDS } from "../../quota-warnings";
-import { COMPACT_ON_RETURN_SETTINGS } from "../../compact-on-return";
+import {
+  AUTO_COMPACT_TOKENS_MAX,
+  AUTO_COMPACT_TOKENS_MIN,
+  COMPACT_ON_RETURN_SETTINGS,
+} from "../../compact-on-return";
 import { isReleaseRepositoryUrl, RELEASE_REPOSITORY_URL_MAX_LENGTH } from "../../release-repository";
 import {
   WORKING_INDICATOR_COLORS,
@@ -424,6 +428,9 @@ export const configurationCommandSchemas = [
           desktopNotifications: z.boolean().optional(),
           notifyOnlyInBackground: z.boolean().optional(),
           compactOnReturn: z.enum(COMPACT_ON_RETURN_SETTINGS).optional(),
+          compactBeforeCacheExpires: z.boolean().optional(),
+          claudeAutoCompactWindow: z.number().int().min(AUTO_COMPACT_TOKENS_MIN).max(AUTO_COMPACT_TOKENS_MAX).nullable().optional(),
+          codexAutoCompactTokenLimit: z.number().int().min(AUTO_COMPACT_TOKENS_MIN).max(AUTO_COMPACT_TOKENS_MAX).nullable().optional(),
           quotaWarnings: z.object({
             enabled: z.boolean().optional(),
             firstThreshold: z.union(QUOTA_WARNING_THRESHOLDS.map((threshold) => z.literal(threshold))).optional(),

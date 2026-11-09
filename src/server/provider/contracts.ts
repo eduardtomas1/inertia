@@ -147,6 +147,8 @@ interface ProviderRunRequest {
    * it. Every other harness or backend ignores it. Absent means no limit.
    */
   maxBudgetUsd?: number;
+  autoCompactWindow?: number;
+  autoCompactTokenLimit?: number;
   readOnlyProfile?: "watcher";
   systemInstruction?: string;
   sessionInstruction?: string;

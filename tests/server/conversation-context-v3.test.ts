@@ -21,7 +21,7 @@ import {
   createConversationCommandHandler,
   type ConversationCommandDependencies,
 } from "../../src/server/runtime/commands/conversation-commands";
-import { resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
+import { NATIVE_RESTORED_HISTORY_BYTES, resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
 import type { QueueTurnRequest, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import type {
   ChatAttachment,
@@ -465,7 +465,7 @@ describe("conversation context transport version 3", () => {
     expect(checked).toBeGreaterThan(40);
   });
 
-  it("restores exactly the counts it sends and states a split history's envelope once", async () => {
+  it("restores exactly the counts it sends inside the handoff budget and points the agent at older turns", async () => {
     const w = await world();
     const chat = w.chat(w.billing.id, "Steps", "claude");
     const code = (index: number) => [
@@ -486,14 +486,14 @@ describe("conversation context transport version 3", () => {
     const sent = entries(handoff.providerInput.prompt);
     const gaps = sent.filter(([author]) => author === "gap");
 
-    expect(restored.length).toBeGreaterThan(1);
-    expect(restored.map(({ content }) => content.part)).toEqual(restored.map((_block, index) => index + 1));
-    expect(restored.slice(1).every(({ content }) => Object.keys(content).join() === "part,messages")).toBe(true);
-    expect(Object.keys(restored[0]!.content)).toEqual(["about", "format", "source", "moved", "omitted", "part", "more", "messages"]);
+    expect(restored).toHaveLength(1);
+    expect(Buffer.byteLength(JSON.stringify(restored[0]!.content), "utf8")).toBeLessThanOrEqual(NATIVE_RESTORED_HISTORY_BYTES);
+    expect(restored[0]!.content.more).toBe(`If the ${AGENT_CONTEXT_TOOL_NAME} tool is available, call it with the source conversationId to read older turns of this chat and their attached images.`);
     expect(sent.length - gaps.length).toBe(recovery.restoredMessageCount);
     expect(gaps).toEqual([["gap", recovery.omittedMessageCount]]);
     expect(restored[0]!.content.omitted).toEqual({ earlierMessages: recovery.omittedMessageCount });
     expect(recovery.restoredMessageCount + recovery.omittedMessageCount).toBe(800);
+    expect(recovery.omittedMessageCount).toBeGreaterThan(recovery.restoredMessageCount);
   });
 
   it("upgrades sent version 1 and 2 packets untouched, moves drafts to version 3, and keeps reading both", async () => {

@@ -14,6 +14,8 @@ import type {
   ThreadUsageSnapshot,
 } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import type { ProviderAccountKind } from "../../src/shared/provider";
+import type { ContextCompactionTrigger } from "../../src/shared/context-compaction";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearance } from "./support/appearance";
@@ -29,6 +31,22 @@ const MINUTE_MS = 60_000;
 
 type Phase = "stale" | "compacted";
 
+interface Scenario {
+  accountKind: ProviderAccountKind;
+  cacheLifetimeMs: number;
+  trigger: ContextCompactionTrigger;
+  beforeTokens: number;
+  afterTokens: number;
+}
+
+const API_KEY_SCENARIO: Scenario = {
+  accountKind: "Console API key",
+  cacheLifetimeMs: 5 * MINUTE_MS,
+  trigger: "on-return",
+  beforeTokens: 252_000,
+  afterTokens: 18_300,
+};
+
 let app!: AppFixture;
 let page!: Page;
 let conversationId = "";
@@ -38,6 +56,7 @@ let staleSince = "";
 let compactedAt = "";
 let releaseCompaction: (() => void) | null = null;
 let compactRequests: Extract<ClientCommand, { type: "conversation.compact-and-send" }>[] = [];
+let scenario: Scenario = API_KEY_SCENARIO;
 
 function claudeProvider(provider: ProviderInfo): ProviderInfo {
   const fresh = {
@@ -52,7 +71,7 @@ function claudeProvider(provider: ProviderInfo): ProviderInfo {
     available: true,
     installState: "installed",
     authState: "authenticated",
-    accountKind: "Console API key",
+    accountKind: scenario.accountKind,
     canRun: true,
     statusMessage: null,
     models: provider.models.length > 0 ? provider.models : [{
@@ -81,7 +100,7 @@ function fixtureUsage(): ThreadUsageSnapshot {
   return {
     conversationId,
     turnId: seededTurnId,
-    usedTokens: compacted ? 18_300 : 252_000,
+    usedTokens: compacted ? scenario.afterTokens : scenario.beforeTokens,
     totalProcessedTokens: null,
     totalProcessedScope: null,
     maxTokens: 1_000_000,
@@ -93,7 +112,7 @@ function fixtureUsage(): ThreadUsageSnapshot {
     compactsAutomatically: null,
     promptCache: {
       lastRequestStartedAt: compacted ? compactedAt : staleSince,
-      lifetimeMs: 5 * MINUTE_MS,
+      lifetimeMs: scenario.cacheLifetimeMs,
       source: "reported",
     },
     updatedAt: new Date().toISOString(),
@@ -106,15 +125,15 @@ function compactionReceipt(): ChatMessage {
     conversationId,
     turnId: null,
     role: "system",
-    content: "",
+    content: scenario.trigger === "idle" ? "/compact" : "",
     attachments: [],
     createdAt: compactedAt,
     compaction: {
       providerId: "claude",
-      beforeTokens: 252_000,
-      afterTokens: 18_300,
+      beforeTokens: scenario.beforeTokens,
+      afterTokens: scenario.afterTokens,
       instructionForwarded: false,
-      trigger: "on-return",
+      trigger: scenario.trigger,
     },
   };
 }
@@ -342,10 +361,10 @@ test("offers Compact and send on a stale API-key chat, then shows the compaction
   await setAppearance(page, "light", null);
   const sections = page.getByRole("navigation", { name: "Settings sections" });
   await sections.getByRole("button", { name: "Chats", exact: true }).click();
-  const setting = page.getByRole("radiogroup", { name: "Compact large API chats when you return" });
+  const setting = page.getByRole("radiogroup", { name: "Compact large chats" });
   await setting.scrollIntoViewIfNeeded();
-  await expect(setting.getByRole("radio", { name: "Offer" })).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByText("Offers Compact and send when you return to a chat of 200K tokens or more on an Anthropic or OpenAI API key after its prompt cache has expired. Later turns then cost less. Enter follows the button.")).toBeVisible();
+  await expect(setting.getByRole("radio", { name: "When you return" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByText(/Send becomes Compact and send/u)).toBeVisible();
   await capture(testInfo, "chats-setting-light");
 
   await sections.getByRole("button", { name: "Agents", exact: true }).click();
@@ -360,5 +379,86 @@ test("offers Compact and send on a stale API-key chat, then shows the compaction
   await expect(dialog).toHaveCount(0);
   await expect(add).toBeFocused();
 
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("offers Compact and send on a stale Claude subscription chat, records an idle compaction and sets both context settings", async ({ browserName: _browserName }, testInfo) => {
+  test.setTimeout(180_000);
+  await app.resizeWindow(1280, 820);
+  scenario = {
+    accountKind: "Claude account",
+    cacheLifetimeMs: 60 * MINUTE_MS,
+    trigger: "idle",
+    beforeTokens: 412_000,
+    afterTokens: 21_400,
+  };
+  phase = "stale";
+  staleSince = new Date(Date.now() - 75 * MINUTE_MS).toISOString();
+  const workspace = page.getByRole("button", { name: "Workspace", exact: true });
+  if (await workspace.isVisible()) await workspace.click();
+  await page.reload();
+  const message = page.getByRole("textbox", { name: "Message" });
+  await expect(message).toBeVisible();
+
+  for (const theme of ["light", "dark"] as const) {
+    await setAppearance(page, theme);
+    await message.fill(DRAFT);
+    const offer = page.getByRole("button", { name: "Compact and send" });
+    await expect(offer).toBeVisible();
+    await expect(offer).toHaveAccessibleDescription("Summarize 412K tokens of history, then send");
+    await app.expectNoViewportOverflow();
+    await capture(testInfo, `subscription-compact-and-send-${theme}`);
+  }
+  const usageTrigger = page.getByRole("button", { name: /^Open usage and context\./u });
+  await usageTrigger.click();
+  const meter = page.getByRole("dialog", { name: "Usage & context" });
+  await expect(meter.getByText(/^Prompt cache expired 1\d min ago$/u)).toBeVisible();
+  await capture(testInfo, "subscription-usage-meter-dark");
+  await page.keyboard.press("Escape");
+  await message.fill("");
+
+  compactedAt = new Date(Date.now() - 77 * MINUTE_MS + 58 * MINUTE_MS).toISOString();
+  phase = "compacted";
+  await page.reload();
+  const row = page.getByRole("separator", { name: "Compacted while idle 412K → 21.4K tokens" });
+  await expect(row).toBeVisible();
+  await expect(page.getByText("/compact", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Compact and send" })).toHaveCount(0);
+  for (const theme of ["light", "dark"] as const) {
+    await setAppearance(page, theme);
+    await expect(row).toBeVisible();
+    await app.expectNoViewportOverflow();
+    await capture(testInfo, `compacted-while-idle-${theme}`);
+  }
+
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  const openChatsSettings = async (theme: "light" | "dark") => {
+    await setAppearance(page, theme, null);
+    if (!await sections.isVisible()) await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await sections.getByRole("button", { name: "Chats", exact: true }).click();
+  };
+  for (const theme of ["light", "dark"] as const) {
+    await openChatsSettings(theme);
+    const context = page.getByRole("heading", { name: "Context", exact: true });
+    await context.scrollIntoViewIfNeeded();
+    const compactLargeChats = page.getByRole("radiogroup", { name: "Compact large chats" });
+    const autoCompact = page.getByRole("combobox", { name: "Auto-compact Claude chats after" });
+    await expect(autoCompact).toHaveValue(theme === "light" ? "400000" : "300000");
+    await expect(page.getByRole("combobox", { name: "Auto-compact Codex chats after" })).toHaveValue("300000");
+    if (theme === "light") {
+      await compactLargeChats.getByRole("radio", { name: "Before the cache expires" }).click();
+      await expect(compactLargeChats.getByRole("radio", { name: "Before the cache expires" })).toHaveAttribute("aria-checked", "true");
+      await autoCompact.selectOption("300000");
+      await expect(autoCompact).toHaveValue("300000");
+    }
+    await app.expectNoViewportOverflow();
+    await capture(testInfo, `context-settings-${theme}`);
+  }
+
+  await page.reload();
+  await openChatsSettings("dark");
+  await expect(page.getByRole("radiogroup", { name: "Compact large chats" }).getByRole("radio", { name: "Before the cache expires" }))
+    .toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("combobox", { name: "Auto-compact Claude chats after" })).toHaveValue("300000");
   expect(app.rendererErrors).toEqual([]);
 });

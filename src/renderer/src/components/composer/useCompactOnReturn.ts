@@ -10,6 +10,7 @@ import type {
 import {
   compactOnReturnEligibility,
   compactOnReturnOffer,
+  promptCacheLifetimeFor,
   type CompactOnReturnSetting,
   type ConversationCompactionState,
   type PromptCacheFacts,
@@ -86,7 +87,7 @@ export function useCompactOnReturn(options: {
   const route = compactOnReturnRoute({ selection, profile, provider });
   const eligibility = route ? compactOnReturnEligibility(route) : null;
   const eligible = eligibility?.eligible === true;
-  const lifetimeMs = usage?.promptCache?.lifetimeMs ?? eligibility?.lifetimeMs ?? null;
+  const lifetimeMs = promptCacheLifetimeFor(usage?.promptCache, eligibility);
   const lastRequestStartedAt = usage?.promptCache?.lastRequestStartedAt ?? null;
   const startedAt = lastRequestStartedAt === null ? Number.NaN : Date.parse(lastRequestStartedAt);
   const expiresAt = eligible && lifetimeMs !== null && Number.isFinite(startedAt)

@@ -586,6 +586,7 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
     expect(turnCount).toBe(0);
     await expect(page.getByRole("heading", { name: "New chat", level: 1 }))
       .toBeVisible();
+    await expect(page.getByLabel("Message", { exact: true })).toBeFocused();
   };
 
   await resizeWindow(1440, 920);

@@ -13,6 +13,7 @@ import {
   type ModelBackendProfile,
 } from "../../shared/model-routing";
 import { MAX_CLAUDE_TURN_BUDGET_USD } from "../../shared/project-preferences";
+import { validAutoCompactTokenCount } from "../../shared/compact-on-return";
 import {
   customAgentHandleFromNativeName,
   MAX_CUSTOM_AGENT_COMPILED_CHARS,
@@ -184,6 +185,32 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     throw new ProviderRuntimeError(
       "invalid_input",
       "The spend limit is invalid.",
+    );
+  }
+  if (
+    input.autoCompactWindow !== undefined
+    && (
+      input.harnessId !== "claude-agent-sdk"
+      || input.autoCompactWindow === null
+      || !validAutoCompactTokenCount(input.autoCompactWindow)
+    )
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The automatic compaction window is invalid.",
+    );
+  }
+  if (
+    input.autoCompactTokenLimit !== undefined
+    && (
+      input.harnessId !== "codex-app-server"
+      || input.autoCompactTokenLimit === null
+      || !validAutoCompactTokenCount(input.autoCompactTokenLimit)
+    )
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The automatic compaction limit is invalid.",
     );
   }
   if (

@@ -6,7 +6,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { RESTORED_CHAT_HISTORY_LABEL } from "../../src/server/persistence/conversation-context-transport";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { MAX_CONVERSATION_CONTEXT_BLOCK_BYTES, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
-import { resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
+import { NATIVE_RESTORED_HISTORY_BYTES, resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
 import type { QueueTurnRequest, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
@@ -614,8 +614,11 @@ describe("restored history on a custom backend", () => {
     };
     const native = restoredBytes(false);
     const custom = restoredBytes(true);
-    expect(native.recovery).toEqual({ restoredMessageCount: 42, omittedMessageCount: 0 });
-    expect(native.bytes).toBeGreaterThan(150 * 1_024);
+    expect(native.bytes).toBeGreaterThan(48 * 1_024);
+    expect(native.bytes).toBeLessThanOrEqual(NATIVE_RESTORED_HISTORY_BYTES);
+    expect(native.recovery!.restoredMessageCount).toBeGreaterThan(custom.recovery!.restoredMessageCount);
+    expect(native.recovery!.restoredMessageCount + native.recovery!.omittedMessageCount).toBe(42);
+    expect(native.recovery!.omittedMessageCount).toBeGreaterThan(0);
     expect(custom.bytes).toBeGreaterThan(0);
     expect(custom.bytes).toBeLessThanOrEqual(48 * 1_024);
     expect(custom.recovery!.restoredMessageCount).toBeGreaterThan(0);

@@ -1,6 +1,6 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository"; import { WorkspaceToolReads } from "./persistence/workspace-tool-reads";
-import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository"; import { CodexThreadToolPackRepository } from "./persistence/codex-thread-tool-pack-repository";
+import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository"; import { CodexThreadToolPackRepository } from "./persistence/codex-thread-tool-pack-repository"; import { IdleCompactionCandidateRepository } from "./persistence/idle-compaction-candidate-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
@@ -13,6 +13,7 @@ import {
   type AgentPlan,
   type AgentReasoning,
   type AgentTurn,
+  type AppSettings,
   type AppSettingsUpdate,
   type AppSnapshot,
   type ChatAttachment,
@@ -143,7 +144,7 @@ export class RuntimeStore {
   readonly limitResets: LimitResetRepository;
   readonly queuedMessages: QueuedMessageRepository;
   readonly htmlRenders: HtmlRenderRepository;
-  readonly codexThreadToolPacks = new CodexThreadToolPackRepository(() => this.database);
+  readonly codexThreadToolPacks = new CodexThreadToolPackRepository(() => this.database); readonly idleCompactionCandidates = new IdleCompactionCandidateRepository(() => this.database);
   readonly watcherLinks: WatcherLinkRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
@@ -1200,6 +1201,7 @@ export class RuntimeStore {
       this.backendProfileRepository.clearDefault(null);
     })();
   }
+  settings(): AppSettings { return this.settingsRepository.settings(); }
   updateSettings(update: AppSettingsUpdate): void {
     this.settingsRepository.update(update);
   }

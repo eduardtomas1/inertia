@@ -264,6 +264,7 @@ function startClaudeRun(
       ? { fastMode: requestedFastMode === "fast", fastModePerSessionOptIn: true }
       : {}),
     ...(promptCacheTtl ? { promptCacheTtl } : {}),
+    ...(options.input.autoCompactWindow ? { autoCompactWindow: options.input.autoCompactWindow } : {}),
   };
   let sessionUnavailable = false;
   const ownedProcess = createClaudeOwnedQueryProcess(

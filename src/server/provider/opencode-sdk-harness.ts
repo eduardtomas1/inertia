@@ -168,6 +168,7 @@ export interface OpenCodeSdkHarnessOptions {
    * verification.
    */
   initializationTimeoutMs?: number;
+  interactionReplyTimeoutMs?: number;
   terminateProcessTree?: ProcessTreeTerminator;
   /** Test seam for the local manual-compaction initiation timestamp. */
   compactionTimestampNow?: () => number;
@@ -177,6 +178,7 @@ interface OpenCodeRunDeadlines {
   runDeadlineMs: number;
   eventInactivityDeadlineMs: number;
   initializationTimeoutMs: number;
+  interactionReplyTimeoutMs: number;
 }
 
 export function createOpenCodeSdkHarness(
@@ -457,7 +459,7 @@ function startOpenCodeRun(
       if (cancelRequested) throw new Error("OpenCode startup was cancelled.");
       if (terminalError) throw new Error(terminalError);
       client = createOwnedOpenCodeClient(started.url, options.input.cwd, credentials);
-      replies = boundedOpenCodeInteractionReplies(client, deadlines.initializationTimeoutMs, eventAbort.signal);
+      replies = boundedOpenCodeInteractionReplies(client, deadlines.interactionReplyTimeoutMs, eventAbort.signal);
       await waitForOpenCodeHealth(
         client,
         child,
@@ -1146,6 +1148,11 @@ function completesRequestedOpenCodeCompaction(
 function openCodeRunDeadlines(
   options: OpenCodeSdkHarnessOptions,
 ): OpenCodeRunDeadlines {
+  const initializationTimeoutMs = shortenedDeadline(
+    options.initializationTimeoutMs,
+    INITIALIZATION_TIMEOUT_MS,
+    "initializationTimeoutMs",
+  );
   return {
     runDeadlineMs: shortenedDeadline(
       options.runDeadlineMs,
@@ -1157,10 +1164,11 @@ function openCodeRunDeadlines(
       EVENT_INACTIVITY_DEADLINE_MS,
       "eventInactivityDeadlineMs",
     ),
-    initializationTimeoutMs: shortenedDeadline(
-      options.initializationTimeoutMs,
-      INITIALIZATION_TIMEOUT_MS,
-      "initializationTimeoutMs",
+    initializationTimeoutMs,
+    interactionReplyTimeoutMs: shortenedDeadline(
+      options.interactionReplyTimeoutMs,
+      initializationTimeoutMs,
+      "interactionReplyTimeoutMs",
     ),
   };
 }

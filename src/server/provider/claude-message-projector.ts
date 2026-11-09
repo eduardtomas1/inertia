@@ -970,6 +970,33 @@ export class ClaudeMessageProjector {
           },
         );
         return;
+      case "session_writes_lost": {
+        const transcriptLost = message.lost.includes("transcript");
+        this.options.emitter.activity(
+          "system",
+          "failed",
+          transcriptLost
+            ? "Claude couldn't save part of this chat"
+            : "Claude Code couldn't save its settings",
+          {
+            activityId: boundedIdentifier(message.uuid),
+            detail: detailLines([
+              message.error_code === "EDQUOT"
+                ? "The disk quota is used up."
+                : message.error_code === "ENOSPC"
+                  ? "The disk is full."
+                  : "Claude Code couldn't write to the disk.",
+              transcriptLost
+                ? "Free up space before continuing, or Claude may miss part of the conversation."
+                : null,
+              message.lost.includes("global_config")
+                ? "Changes to ~/.claude.json weren't saved."
+                : null,
+            ]),
+          },
+        );
+        return;
+      }
       default: {
         const exhaustive: never = message;
         this.observeUnknownRuntimeMessage("system message", exhaustive);

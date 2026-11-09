@@ -143,6 +143,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => removePortableFixture(root)));
   discoveryFixture.directory = "";
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 async function fixture() {
@@ -164,6 +165,12 @@ async function fixture() {
     if (name.toUpperCase() === "PATH") vi.stubEnv(name, undefined);
   }
   vi.stubEnv("PATH", isolatedPath);
+  const networkFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.hostname === "registry.npmjs.org") return new Response("", { status: 503 });
+    return await networkFetch(input, init);
+  });
   writeNodeSubcommand(workspaceDirectory, "login", `
 if (process.argv[2] !== "status") process.exit(2);
 console.log("Logged in using ChatGPT");

@@ -247,6 +247,7 @@ function runReleaseAssets(
   args: string[],
   environment: Record<string, string>,
 ): { status: number | null; stdout: string; stderr: string } {
+  const startedAt = performance.now();
   const result = spawnSync(process.execPath, ["scripts/release-assets.mjs", ...args], {
     cwd: root,
     encoding: "utf8",
@@ -256,11 +257,15 @@ function runReleaseAssets(
       RELEASE_SOURCE_SHA: releaseSourceSha,
       ...environment,
     },
+    timeout: 25_000,
   });
+  const elapsedMs = Math.round(performance.now() - startedAt);
   return {
     status: result.status,
     stdout: result.stdout,
-    stderr: result.stderr,
+    stderr: result.error
+      ? `release-assets ${args.join(" ")} stopped after ${elapsedMs}ms (${result.error.message}; signal ${result.signal ?? "none"}). stderr: ${result.stderr}`
+      : result.stderr,
   };
 }
 

@@ -134,6 +134,7 @@ test("keeps the reader's position near the end of a completed or streaming answe
       await page.mouse.wheel(0, -30);
       await page.waitForTimeout(60);
     }
+    await expect.poll(async () => (await readPosition(transcript)).gap).toBeGreaterThanOrEqual(88);
     await expectReaderStaysAt(page, transcript, (await readPosition(transcript)).top);
 
     await page.mouse.wheel(0, -2_000);

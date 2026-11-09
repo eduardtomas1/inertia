@@ -7,9 +7,15 @@ import {
   IDLE_CONVERSATION_COMPACTION,
   PROMPT_CACHE_LIFETIMES_MS,
   PROMPT_CACHE_TTLS,
+  CLAUDE_AUTO_COMPACT_WINDOWS,
+  DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW,
+  DEFAULT_COMPACT_BEFORE_CACHE_EXPIRES,
   compactOnReturnEligibility,
   compactOnReturnOffer,
+  idleCompactionWindow,
+  promptCacheLifetimeFor,
   promptCacheTtlAllowed,
+  validAutoCompactTokenCount,
 } from "../../src/shared/compact-on-return";
 
 const anthropicKey = { harnessId: "claude-agent-sdk", preset: "anthropic-api-key", protocol: "anthropic-messages" } as const;
@@ -51,14 +57,23 @@ describe("compact on return eligibility", () => {
     expect(compactOnReturnEligibility(openaiKey)).toEqual({ eligible: true, lifetimeMs: 1_800_000 });
   });
 
-  it("includes native Claude only on a Console API key", () => {
+  it("includes native Claude on a Console API key with Claude Code's default or longer cache", () => {
     expect(compactOnReturnEligibility({ ...nativeClaude, accountKind: "Console API key" })).toEqual({ eligible: true, lifetimeMs: 300_000 });
     expect(compactOnReturnEligibility({ ...nativeClaude, accountKind: "Console API key", promptCacheTtl: "1h" })).toEqual({ eligible: true, lifetimeMs: 3_600_000 });
     expect(compactOnReturnEligibility({ ...nativeClaude, preset: null, routeKind: "account", accountKind: "Console API key" })).toEqual({ eligible: true, lifetimeMs: 300_000 });
-    for (const accountKind of ["Claude account", null, undefined]) {
+  });
+
+  it("includes native Claude on a Claude subscription with the one-hour cache Claude Code uses there", () => {
+    expect(compactOnReturnEligibility({ ...nativeClaude, accountKind: "Claude account" })).toEqual({ eligible: true, lifetimeMs: 3_600_000 });
+    expect(compactOnReturnEligibility({ ...nativeClaude, accountKind: "Claude account", promptCacheTtl: "5m" })).toEqual({ eligible: true, lifetimeMs: 300_000 });
+    expect(compactOnReturnEligibility({ ...nativeClaude, preset: null, routeKind: "account", accountKind: "Claude account" })).toEqual({ eligible: true, lifetimeMs: 3_600_000 });
+  });
+
+  it("leaves native Claude out while its sign-in is unknown", () => {
+    for (const accountKind of [null, undefined]) {
       const result = compactOnReturnEligibility({ ...nativeClaude, accountKind });
       expect(result).toMatchObject({ eligible: false, lifetimeMs: null });
-      expect(result.reason).toMatch(/Console API key/u);
+      expect(result.reason).toMatch(/signed in/u);
     }
   });
 
@@ -146,5 +161,72 @@ describe("prompt cache lifetime option", () => {
     expect(promptCacheTtlAllowed({ harnessId: "claude-agent-sdk", protocol: "anthropic-messages", preset: "kimi-code" })).toBe(false);
     expect(promptCacheTtlAllowed({ harnessId: "claude-agent-sdk", protocol: "anthropic-messages", preset: "anthropic-api-key" })).toBe(true);
     expect(promptCacheTtlAllowed({ harnessId: "claude-agent-sdk", protocol: "anthropic-messages", preset: "custom" })).toBe(true);
+  });
+});
+
+describe("Claude automatic compaction window", () => {
+  it("defaults to 400K and offers windows inside Claude Code's 100K to 1M range", () => {
+    expect(DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW).toBe(400_000);
+    expect(CLAUDE_AUTO_COMPACT_WINDOWS).toEqual([200_000, 300_000, 400_000, 600_000]);
+    for (const value of [null, 100_000, ...CLAUDE_AUTO_COMPACT_WINDOWS, 1_000_000]) {
+      expect(validAutoCompactTokenCount(value)).toBe(true);
+    }
+    for (const value of [undefined, 99_999, 1_000_001, 400_000.5, "400000", Number.NaN]) {
+      expect(validAutoCompactTokenCount(value)).toBe(false);
+    }
+  });
+});
+
+describe("prompt cache lifetime choice", () => {
+  const subscription = compactOnReturnEligibility({ ...nativeClaude, accountKind: "Claude account" });
+
+  it("prefers what Claude reported or the profile configured", () => {
+    expect(promptCacheLifetimeFor({ lifetimeMs: 300_000, source: "reported" }, subscription)).toBe(300_000);
+    expect(promptCacheLifetimeFor({ lifetimeMs: 3_600_000, source: "configured" }, compactOnReturnEligibility(anthropicKey))).toBe(3_600_000);
+  });
+
+  it("uses the route's lifetime instead of an assumption, and the assumption only when nothing else is known", () => {
+    expect(promptCacheLifetimeFor({ lifetimeMs: 300_000, source: "assumed" }, subscription)).toBe(3_600_000);
+    expect(promptCacheLifetimeFor(null, subscription)).toBe(3_600_000);
+    expect(promptCacheLifetimeFor({ lifetimeMs: 300_000, source: "assumed" }, { lifetimeMs: null })).toBe(300_000);
+    expect(promptCacheLifetimeFor(undefined, null)).toBeNull();
+  });
+});
+
+describe("idle compaction window", () => {
+  const startedAt = Date.parse("2030-01-01T10:00:00.000Z");
+  const due = {
+    enabled: true,
+    setting: "offer",
+    harnessId: "claude-agent-sdk",
+    eligible: true,
+    lifetimeMs: 3_600_000,
+    usedTokens: 300_000,
+    lastRequestStartedAt: new Date(startedAt).toISOString(),
+    now: startedAt + 30 * 60_000,
+  } as const;
+
+  it("is off by default and opens two minutes before a one-hour cache expires", () => {
+    expect(DEFAULT_COMPACT_BEFORE_CACHE_EXPIRES).toBe(false);
+    expect(idleCompactionWindow(due)).toEqual({
+      opensAt: startedAt + 58 * 60_000,
+      closesAt: startedAt + 60 * 60_000 - 30_000,
+    });
+  });
+
+  it.each([
+    ["the setting is off", { enabled: false }],
+    ["compaction is set to Never", { setting: "never" as const }],
+    ["the route is not eligible", { eligible: false }],
+    ["the chat runs on Codex", { harnessId: "codex-app-server" as const }],
+    ["the cache lasts five minutes", { lifetimeMs: 300_000, now: startedAt }],
+    ["the lifetime is unknown", { lifetimeMs: null }],
+    ["the chat is under 200K tokens", { usedTokens: 199_999 }],
+    ["the usage is unknown", { usedTokens: null }],
+    ["no request was recorded", { lastRequestStartedAt: null }],
+    ["the request time is unreadable", { lastRequestStartedAt: "yesterday" }],
+    ["the window has closed", { now: startedAt + 60 * 60_000 - 30_000 }],
+  ])("has no window when %s", (_case, overrides) => {
+    expect(idleCompactionWindow({ ...due, ...overrides })).toBeNull();
   });
 });

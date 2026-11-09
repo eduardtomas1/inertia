@@ -25,6 +25,7 @@ export interface ChangeClassification {
   allEvidence: boolean;
   fullCertification: boolean;
   nativeArchitecture: boolean;
+  measuredPerformance: boolean;
   documentationOnly: boolean;
   domains: ChangeDomain[];
   reasons: string[];

@@ -39,6 +39,7 @@ import {
   signalLinuxGuardianExact,
 } from "../../src/node/runtime-owned-process-linux";
 import { runtimeOwnedPtyInvocation } from "../../src/node/runtime-owned-pty-invocation";
+import { runtimeOwnedProcessWriterName } from "../../src/node/runtime-owned-process-session-journal";
 
 const systemBootId = "test:10000000-0000-4000-8000-000000000001";
 const runtimeGenerationId = "20000000-0000-4000-8000-000000000002:1";
@@ -455,6 +456,39 @@ describe.skipIf(process.platform !== "linux")(
         expect(journal.records(runtimeGenerationId)).toEqual([]);
       },
     );
+
+    it("recovers a Linux owned record whose runtime died while publishing its retirement", async () => {
+      const directory = temporaryDirectory();
+      const { guardian, journal } = await completedLinuxGuardian(directory, "owned");
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+      const [record] = journal.records(runtimeGenerationId) ?? [];
+      if (!record || record.state !== "owned") throw new Error("Missing owned claim");
+      writeFileSync(
+        join(
+          directory,
+          runtimeOwnedProcessWriterName(runtimeGenerationId),
+          `.runtime-owned-child-${record.ownershipId}.retire.tmp`,
+        ),
+        JSON.stringify({ ...record, state: "retiring" }),
+        { mode: 0o600 },
+      );
+
+      await expect(recoverRuntimeOwnedProcesses(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        {
+          deadlineAt: Date.now() + 2_000,
+          darwinGuardianPath: guardianPath,
+        },
+      )).resolves.toBe(true);
+
+      await closeOf(guardian);
+      expect(journal.records(runtimeGenerationId)).toEqual([]);
+    });
 
     it("keeps a post-exec Linux terminal fail-closed without durable authorization", async () => {
       const directory = temporaryDirectory();

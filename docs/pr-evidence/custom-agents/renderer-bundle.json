@@ -1,7 +1,7 @@
 {
-  "baseline": "9479f0ff1c96ec3934dbefb7d3dd202c904b32c9",
+  "baseline": "5d0788e2f04986098cb4fad71f7bbb2b60b5fa1a",
   "platform": "Windows 11 x64, Node 22.23.1, package-lock.json identical on both builds",
-  "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from a build of origin/main 9479f0ff and from a build of feat/custom-agents after merging it, with the same dependencies. The budgets start from main expressions; only the closures that exceeded their caps are raised, each by its measured overflow rounded up to a whole byte, with no headroom: mainWorkbenchFirstLoadJavaScript (+6,688) and detachedChatFirstLoadJavaScript (+6,674, the /calling composer menu, the selected-agent chip, the called-agent transcript row and the agent contracts), coreJavaScript (+31,419, the agent library contracts, validators, marks and renderer wiring), transcriptJavaScript (+2,384, the called-agent block and its children), settingsJavaScript (+587, the Custom agents settings section entry and its search rows), entryCss (+201, the chip and called-agent row styles) and detachedChatJavaScript (+11, a longer minified import alias). The new deferredCustomAgentsSettingsJavaScript closure measures 40,186 bytes within the 40,313-byte cap this branch introduced; every other change is within its existing cap.",
+  "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from a build of origin/main 5d0788e2 and from a build of feat/custom-agents after merging it, with the same dependencies. The budgets start from main expressions; only the closures that exceeded their caps are raised, each by its measured overflow rounded up to a whole byte, with no headroom: mainWorkbenchFirstLoadJavaScript (+6,921) and detachedChatFirstLoadJavaScript (+6,892, the /calling composer menu, the selected-agent chip, the called-agent transcript row and the agent contracts), coreJavaScript (+31,652, the agent library contracts, validators, marks and renderer wiring), transcriptJavaScript (+2,515, the called-agent block and its children), settingsJavaScript (+843, the Custom agents settings section entry and its search rows), entryCss (+201, the chip and called-agent row styles) and detachedChatJavaScript (+11, a longer minified import alias). The new deferredCustomAgentsSettingsJavaScript closure measures 40,186 bytes within the 40,313-byte cap this branch introduced; every other change is within its existing cap. The main baseline is measured with main's script, which has no Custom agents settings closure; the branch script excludes that deferred chunk from coreJavaScript.",
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
       "baselineBytes": 1155,
@@ -22,9 +22,9 @@
       "withinCap": true
     },
     "deferredWatcherDockJavaScript": {
-      "baselineBytes": 41450,
+      "baselineBytes": 41479,
       "baselineCapBytes": 41701,
-      "afterBytes": 41450,
+      "afterBytes": 41479,
       "deltaFromBaselineBytes": 0,
       "capBytes": 41701,
       "capChangeBytes": 0,
@@ -123,8 +123,8 @@
     "deferredProjectSettingsJavaScript": {
       "baselineBytes": 24133,
       "baselineCapBytes": 24389,
-      "afterBytes": 24160,
-      "deltaFromBaselineBytes": 27,
+      "afterBytes": 24155,
+      "deltaFromBaselineBytes": 22,
       "capBytes": 24389,
       "capChangeBytes": 0,
       "withinCap": true
@@ -247,29 +247,29 @@
       "withinCap": true
     },
     "mainWorkbenchFirstLoadJavaScript": {
-      "baselineBytes": 974733,
-      "baselineCapBytes": 974989.8,
-      "afterBytes": 981677,
+      "baselineBytes": 975981,
+      "baselineCapBytes": 976004.8,
+      "afterBytes": 982925,
       "deltaFromBaselineBytes": 6944,
-      "capBytes": 981677.8,
-      "capChangeBytes": 6688,
+      "capBytes": 982925.8,
+      "capChangeBytes": 6921,
       "withinCap": true
     },
     "detachedChatFirstLoadJavaScript": {
-      "baselineBytes": 855126,
-      "baselineCapBytes": 855382.2,
-      "afterBytes": 862056,
+      "baselineBytes": 855856,
+      "baselineCapBytes": 855894.2,
+      "afterBytes": 862786,
       "deltaFromBaselineBytes": 6930,
-      "capBytes": 862056.2,
-      "capChangeBytes": 6674,
+      "capBytes": 862786.2,
+      "capChangeBytes": 6892,
       "withinCap": true
     },
     "entryCss": {
-      "baselineBytes": 254616,
-      "baselineCapBytes": 254616,
-      "afterBytes": 254817,
+      "baselineBytes": 254644,
+      "baselineCapBytes": 254644,
+      "afterBytes": 254845,
       "deltaFromBaselineBytes": 201,
-      "capBytes": 254817,
+      "capBytes": 254845,
       "capChangeBytes": 201,
       "withinCap": true
     },
@@ -292,12 +292,12 @@
       "withinCap": true
     },
     "settingsJavaScript": {
-      "baselineBytes": 99936,
-      "baselineCapBytes": 100192,
-      "afterBytes": 100779,
+      "baselineBytes": 101356,
+      "baselineCapBytes": 101356,
+      "afterBytes": 102199,
       "deltaFromBaselineBytes": 843,
-      "capBytes": 100779,
-      "capChangeBytes": 587,
+      "capBytes": 102199,
+      "capChangeBytes": 843,
       "withinCap": true
     },
     "filesFirstLoadJavaScript": {
@@ -319,12 +319,12 @@
       "withinCap": true
     },
     "transcriptJavaScript": {
-      "baselineBytes": 603101,
+      "baselineBytes": 603232,
       "baselineCapBytes": 614400,
-      "afterBytes": 616784,
+      "afterBytes": 616915,
       "deltaFromBaselineBytes": 13683,
-      "capBytes": 616784,
-      "capChangeBytes": 2384,
+      "capBytes": 616915,
+      "capChangeBytes": 2515,
       "withinCap": true
     },
     "deferredFailureDiagnosticsJavaScript": {
@@ -499,27 +499,27 @@
       "withinCap": true
     },
     "coreJavaScript": {
-      "baselineBytes": 2565146,
-      "baselineCapBytes": 2565402,
-      "afterBytes": 2596821,
+      "baselineBytes": 2568562,
+      "baselineCapBytes": 2568585,
+      "afterBytes": 2600237,
       "deltaFromBaselineBytes": 31675,
-      "capBytes": 2596821,
-      "capChangeBytes": 31419,
+      "capBytes": 2600237,
+      "capChangeBytes": 31652,
       "withinCap": true
     },
     "deferredPdfJavaScript": {
-      "baselineBytes": 437503,
+      "baselineBytes": 451972,
       "baselineCapBytes": 512000,
-      "afterBytes": 437503,
+      "afterBytes": 451972,
       "deltaFromBaselineBytes": 0,
       "capBytes": 512000,
       "capChangeBytes": 0,
       "withinCap": true
     },
     "deferredPdfWorker": {
-      "baselineBytes": 1264342,
+      "baselineBytes": 1271915,
       "baselineCapBytes": 1382400,
-      "afterBytes": 1264342,
+      "afterBytes": 1271915,
       "deltaFromBaselineBytes": 0,
       "capBytes": 1382400,
       "capChangeBytes": 0,

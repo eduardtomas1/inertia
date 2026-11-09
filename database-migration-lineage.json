@@ -827,6 +827,11 @@
       "version": 114,
       "name": "PersistCodexCompactionLimit",
       "digest": "7eab8b764454dd55038878e98a08b9216b87e11427566d0cb44cd55fbddf5262"
+    },
+    {
+      "version": 115,
+      "name": "PersistCustomAgents",
+      "digest": "2a5c784eb8113b59bece4d1f82adb192d04b9d71955fce95951ee92ee4f1d21e"
     }
   ]
 }

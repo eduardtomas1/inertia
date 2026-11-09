@@ -14,6 +14,8 @@ import type { ProviderAccountKind } from "../../src/shared/provider";
 import type { ProviderManager } from "../../src/server/providers";
 import {
   COMPACT_ON_RETURN_COMPACTION_DEADLINE_MS,
+  compactIdleConversation,
+  compactionRouteForConversation,
   createConversationCompactionCommandHandler,
   type ConversationCompactionCommandDependencies,
 } from "../../src/server/runtime/commands/conversation-compaction-commands";
@@ -48,6 +50,8 @@ interface FixtureOptions {
   setting?: "offer" | "never";
   sessionId?: string | null;
   turnActive?: boolean;
+  beforeCacheExpires?: boolean;
+  lastRequestStartedAt?: string;
 }
 
 function fixture(options: FixtureOptions = {}) {
@@ -131,7 +135,14 @@ function fixture(options: FixtureOptions = {}) {
     })),
     conversationShell: vi.fn(() => ({ ...conversation, latestTurn: options.latestTurn ?? { status: "completed" } })),
     watcherLinks: { findByWatcher: vi.fn(() => options.watcher ? { id: "link" } : null) },
-    usageForConversation: vi.fn(() => ({ conversationId, turnId: null, usedTokens: 240_000 })),
+    usageForConversation: vi.fn(() => ({
+      conversationId,
+      turnId: null,
+      usedTokens: 240_000,
+      ...(options.lastRequestStartedAt
+        ? { promptCache: { lastRequestStartedAt: options.lastRequestStartedAt, lifetimeMs: 3_600_000, source: "reported" } }
+        : {}),
+    })),
     upsertUsage: vi.fn(),
     createMessage: vi.fn((id, content, role, attachments, messageTurnId, createdAt, extra) => ({
       id: "55555555-5555-4555-8555-555555555555", conversationId: id, content, role, attachments,
@@ -217,7 +228,7 @@ function fixture(options: FixtureOptions = {}) {
     enableProviders: true,
     compactions,
     interaction,
-    settings: () => ({ compactOnReturn: options.setting ?? "offer" }),
+    settings: () => ({ compactOnReturn: options.setting ?? "offer", compactBeforeCacheExpires: options.beforeCacheExpires ?? true }),
     providerInfo: () => [provider],
     broadcast,
     broadcastConversationShell,
@@ -487,53 +498,25 @@ describe("conversation.compact-and-send", () => {
     expect(attachmentResolver.resolvePayloads).not.toHaveBeenCalled();
   });
 
-  it("refuses a deleted or oversized called agent before compacting", async () => {
-    const agentId = "66666666-6666-4666-8666-666666666666";
-    const oversized = {
-      id: agentId,
-      name: "Wide",
-      handle: "wide",
-      description: "",
-      icon: { kind: "symbol", name: "star" },
-      accent: null,
-      blocks: [0, 1].map((index) => ({ id: `7777777${index}-7777-4777-8777-777777777777`, kind: "directions", body: "é".repeat(3_999) })),
-      skills: [],
-      position: 0,
-      revision: 1,
-      createdAt: "2026-10-25T08:00:00.000Z",
-      updatedAt: "2026-10-25T08:00:00.000Z",
-    };
-    const calling = (): ReturnType<typeof compactAndSend> => {
-      const command = compactAndSend();
-      return { ...command, payload: { ...command.payload, context: { ...context, calledAgent: { agentId } } } };
-    };
-    for (const [providerId, agent, message] of [
-      ["claude", null, "The custom agent you called no longer exists."],
-      ["codex", oversized, "too long to send with this request"],
-    ] as const) {
-      const { dependencies, compact, attachmentResolver, store } = fixture({ providerId });
-      Object.assign(store, { customAgents: () => ({ get: (id: string) => id === agentId ? agent : null }) });
-      await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, calling()))
-        .rejects.toThrow(message);
-      expect(compact).not.toHaveBeenCalled();
-      expect(attachmentResolver.resolvePayloads).not.toHaveBeenCalled();
-    }
-    const { dependencies, compact, send, store } = fixture();
-    Object.assign(store, { customAgents: () => ({ get: (id: string) => id === agentId ? oversized : null }) });
-    await createConversationCompactionCommandHandler(dependencies)({} as WebSocket, calling());
+  it("compacts a native Claude chat on a Claude subscription and then sends", async () => {
+    const { dependencies, compact, send, queue } = fixture({ preset: "native", routeKind: "account", accountKind: "Claude account" });
+    dependencies.refreshProviderAccount = vi.fn(async () => undefined);
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, compactAndSend()))
+      .resolves.toBe("handled");
     expect(compact).toHaveBeenCalledOnce();
-    expect(sentResult(send)).toMatchObject({ result: { outcome: "sent" } });
+    expect(queue).toHaveBeenCalledOnce();
+    expect(sentResult(send)).toMatchObject({ result: { outcome: "sent", compaction: { trigger: "on-return" } } });
   });
 
   it("checks the Claude sign-in again before compacting a native route", async () => {
     const { dependencies, compact, providerTerminalResumes, provider, send, queue } = fixture({ preset: "native", routeKind: "account", accountKind: "Console API key" });
     const refreshProviderAccount = vi.fn(async () => {
-      Object.assign(provider, { accountKind: "Claude account" });
+      Reflect.deleteProperty(provider, "accountKind");
     });
     dependencies.refreshProviderAccount = refreshProviderAccount;
     await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, compactAndSend()))
       .resolves.toBe("handled");
-    expect(sentResult(send)).toEqual(compactionFailed("Console API key"));
+    expect(sentResult(send)).toEqual(compactionFailed("could not confirm how Claude is signed in"));
     expect(queue).not.toHaveBeenCalled();
     expect(refreshProviderAccount).toHaveBeenCalledExactlyOnceWith("claude");
     expect(compact).not.toHaveBeenCalled();
@@ -570,8 +553,8 @@ describe("conversation.compact-and-send", () => {
   it.each([
     ["the Kimi preset", { preset: "kimi-code" }, "Kimi manages its own context"],
     ["a custom gateway", { preset: "custom" }, "Custom gateways do not publish a prompt cache lifetime"],
-    ["native Claude on a Claude account", { preset: "native", routeKind: "account" as const, accountKind: "Claude account" as const }, "Console API key"],
-    ["native Codex", { providerId: "codex" as const, preset: "native", protocol: "openai-responses", routeKind: "account" as const, accountKind: "ChatGPT account" as const }, "Anthropic or OpenAI API key"],
+    ["native Claude whose sign-in is unknown", { preset: "native", routeKind: "account" as const }, "could not confirm how Claude is signed in"],
+    ["native Codex", { providerId: "codex" as const, preset: "native", protocol: "openai-responses", routeKind: "account" as const, accountKind: "ChatGPT account" as const }, "an Anthropic API key or an OpenAI API key"],
   ])("offers sending without compacting for %s before taking the chat lock", async (_label, options, message) => {
     const { dependencies, compact, providerTerminalResumes, send, queue } = fixture(options);
     await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, compactAndSend()))
@@ -684,6 +667,90 @@ describe("manual compaction state", () => {
       type: "conversation.compact", requestId, payload: { conversationId },
     });
     expect(compact).toHaveBeenCalledOnce();
+  });
+});
+
+describe("idle compaction", () => {
+  const lastRequestStartedAt = "2026-11-09T08:00:00.000Z";
+  const expected = (closesAt = Date.parse(lastRequestStartedAt) + 59.5 * 60_000, now = Date.parse(lastRequestStartedAt) + 58.5 * 60_000) => ({
+    lastRequestStartedAt,
+    closesAt,
+    now: () => now,
+  });
+
+  it("compacts under the chat lock with the idle trigger and records its receipt without sending anything", async () => {
+    const { dependencies, compact, compactions, timeline, store, queue, held } = fixture({ lastRequestStartedAt });
+    let during: unknown;
+    compact.mockImplementationOnce(async (input) => {
+      during = compactions.state(conversationId);
+      expect(held.has(conversationId)).toBe(true);
+      return {
+        providerId: "claude", conversationId, runId: input.runId, turnId: input.turnId, status: "completed",
+        terminalReason: { outcome: "completed", reason: "provider-completed" }, instructionForwarded: false,
+        message: "Context compacted.", cleanupConfirmed: true,
+      } as Awaited<ReturnType<ProviderManager["compact"]>>;
+    });
+
+    await expect(compactIdleConversation(dependencies, conversationId, expected())).resolves.toMatchObject({ trigger: "idle", beforeTokens: 240_000 });
+
+    expect(during).toEqual({ state: "compacting", trigger: "idle", startedAt: expect.any(String) });
+    expect(timeline).toEqual(["shell:compacting", "shell:idle"]);
+    expect(store.createMessage).toHaveBeenCalledWith(conversationId, "/compact", "system", [], null, undefined, {
+      compaction: expect.objectContaining({ trigger: "idle" }),
+    });
+    expect(compact.mock.calls[0]![0]).toMatchObject({ prompt: "/compact", sessionId: "provider-session" });
+    expect(queue).not.toHaveBeenCalled();
+    expect(held.has(conversationId)).toBe(false);
+  });
+
+  it.each([
+    ["the setting is Never", { setting: "never" as const }, /Never/u],
+    ["the chat is archived", { archived: true }, /Unarchive/u],
+    ["the chat is a watcher", { watcher: true }, /Watcher chats/u],
+    ["the last turn hit a usage limit", { latestTurn: { status: "completed", usageLimited: true } }, /usage limit/u],
+    ["the last turn did not complete", { latestTurn: { status: "cancelled" } }, /last turn completed/u],
+    ["the route is a custom gateway", { preset: "custom" }, /Custom gateways/u],
+    ["the chat has no provider session", { sessionId: null }, /provider session/u],
+    ["a turn is running", { turnActive: true }, /Wait for the current/u],
+  ])("refuses before taking the lock when %s", async (_case, options, message) => {
+    const { dependencies, compact, providerTerminalResumes } = fixture({ lastRequestStartedAt, ...options });
+    await expect(compactIdleConversation(dependencies, conversationId, expected())).rejects.toThrow(message);
+    expect(compact).not.toHaveBeenCalled();
+    if (!("turnActive" in options)) expect(providerTerminalResumes.acquire).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the chat was used again", { lastRequestStartedAt: "2026-11-09T08:40:00.000Z" }, expected(), /used again/u],
+    ["the setting was turned off", { lastRequestStartedAt, beforeCacheExpires: false }, expected(), /off in Settings/u],
+    ["the cache is about to expire", { lastRequestStartedAt }, expected(Date.parse(lastRequestStartedAt) + 59.5 * 60_000, Date.parse(lastRequestStartedAt) + 59.6 * 60_000), /about to expire/u],
+  ])("re-checks under the lock and gives the lock back when %s", async (_case, options, expectation, message) => {
+    const { dependencies, compact, held, compactions } = fixture(options);
+    await expect(compactIdleConversation(dependencies, conversationId, expectation)).rejects.toThrow(message);
+    expect(compact).not.toHaveBeenCalled();
+    expect(held.has(conversationId)).toBe(false);
+    expect(compactions.isCompacting(conversationId)).toBe(false);
+  });
+
+  it("re-reads the Claude sign-in before compacting a subscription chat", async () => {
+    const refreshProviderAccount = vi.fn(async () => undefined);
+    const { dependencies, compact } = fixture({ preset: "native", routeKind: "account", accountKind: "Claude account", lastRequestStartedAt });
+    await compactIdleConversation({ ...dependencies, refreshProviderAccount }, conversationId, expected());
+    expect(refreshProviderAccount).toHaveBeenCalledWith("claude");
+    expect(compact).toHaveBeenCalledOnce();
+  });
+
+  it("describes a chat's route for eligibility and answers null for a chat that is gone", () => {
+    const { dependencies, store } = fixture({ preset: "native", routeKind: "account", accountKind: "Claude account" });
+    expect(compactionRouteForConversation(dependencies, conversationId)).toMatchObject({
+      harnessId: "claude-agent-sdk",
+      preset: "native",
+      routeKind: "account",
+      accountKind: "Claude account",
+    });
+    store.conversation.mockImplementationOnce(() => {
+      throw new Error("Conversation not found.");
+    });
+    expect(compactionRouteForConversation(dependencies, conversationId)).toBeNull();
   });
 });
 

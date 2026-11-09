@@ -28,6 +28,8 @@ import { watcherAccessMigration } from "./watcher-access";
 import { extendBackendPresetsMigration } from "./extend-backend-presets";
 import { persistTurnFailureKindsMigration } from "./persist-turn-failure-kinds";
 import { persistCompactOnReturnMigration } from "./persist-compact-on-return";
+import { contextCompactionSettingsMigration } from "./context-compaction-settings";
+import { codexCompactionLimitMigration } from "./codex-compaction-limit";
 import { duoComparisonBriefsMigration } from "./duo-comparison-briefs";
 import { turnScopedIndexesMigration } from "./turn-scoped-indexes";
 import { libraryMigration } from "./library";
@@ -36,7 +38,6 @@ import { todoSourceConversationMigration } from "./todo-source-conversation";
 import { codexThreadToolPacksMigration } from "./codex-thread-tool-packs";
 import { subagentTaskShapeMigration } from "./subagent-task-shape";
 import { nativeGrokProviderMigration } from "./native-grok-provider";
-import { customAgentsMigration } from "./custom-agents";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -76,5 +77,6 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   codexThreadToolPacksMigration,
   subagentTaskShapeMigration,
   nativeGrokProviderMigration,
-  customAgentsMigration,
+  contextCompactionSettingsMigration,
+  codexCompactionLimitMigration,
 ];

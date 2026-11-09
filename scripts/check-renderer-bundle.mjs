@@ -92,12 +92,7 @@ const budgets = {
   // chat below (854,072 measured). See
   // docs/pr-evidence/subagent-task-visibility/renderer-bundle.json.
   // Grok's shared provider maps add 1,054 bytes (974,733 measured). Keep 256 bytes.
-  // Custom agents: the /calling composer menu, the selected-agent chip, the
-  // called-agent transcript row and the agent contracts add 6,688 bytes over
-  // main's cap (981,677 measured on Windows x64), and 6,674 bytes to the
-  // detached chat below (862,056 measured). See
-  // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 841 + 8_439 + 2_660 + 863 + 35 + 34 + 211 - 28 + 166 + 21 + 7_368 + 551 + 257 + 1_576 + 1_634 + 1 + 9 + 115 + 249 + 7_757 + 315 + 396 + 8_666 + 341 + 548 + 6 + 115 + 171 + 379 + 155 + 7_168 + 558 + 470 + 61 + 41 + 114 + 1_267 + 23 + 316 + 6 + 1_891 + 240 + 1_130 + 328 + 152 + 248 + 289 + 335 + 2_489 + 1_657 + 19_230 + 1_889 + 1_054 + 256 + 6_688,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 841 + 8_439 + 2_660 + 863 + 35 + 34 + 211 - 28 + 166 + 21 + 7_368 + 551 + 257 + 1_576 + 1_634 + 1 + 9 + 115 + 249 + 7_757 + 315 + 396 + 8_666 + 341 + 548 + 6 + 115 + 171 + 379 + 155 + 7_168 + 558 + 470 + 61 + 41 + 114 + 1_267 + 23 + 316 + 6 + 1_891 + 240 + 1_130 + 328 + 152 + 248 + 289 + 335 + 2_489 + 1_657 + 19_230 + 1_889 + 1_054 + 256 + 454 + 38 + 57 + 466,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -110,7 +105,7 @@ const budgets = {
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
   // Grok's shared provider maps add 1,054 bytes (855,126 measured). Keep 256 bytes.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127 + 8_415 + 1_889 + 1_054 + 256 + 6_674,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127 + 8_415 + 1_889 + 1_054 + 256 + 417 + 38 + 57,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -118,20 +113,14 @@ const budgets = {
   // bar, diff split view, commit, history, blame and worktree rules add 11,205
   // bytes over main's cap (254,616 measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Custom agents: the composer chip and called-agent row styles add 201
-  // bytes over main's cap (254,817 measured on Windows x64). See
-  // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351 + 190 + 11_205 + 201,
+  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351 + 190 + 11_205 + 28,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
   colorThemesCss: 8 * kibibyte + 120 + 552,
   detachedChatCss: 1.5 * kibibyte + 55 + 21,
   // The Add provider menu and Grok sign-in state add 18,425 bytes (99,936 measured). Keep 256 bytes.
-  // Custom agents: the settings section entry and its search rows add 587
-  // bytes over main's cap (100,779 measured on Windows x64). See
-  // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114 + 18_425 + 256 + 587,
+  settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114 + 18_425 + 256 + 659 + 505,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6 + 1 + 242 + 2,
@@ -170,9 +159,6 @@ const budgets = {
   // docs/pr-evidence/subagent-task-visibility/renderer-bundle.json.
   // Grok in the shared provider lists adds 83 bytes (24,133 measured). Keep 256 bytes.
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 6_387 + 5 + 83 + 256,
-  // Role labels for the themed marks: 40,166 deferred bytes (+5).
-  // Larger unframed gallery labels and preview sizes: 40,313 bytes (+147).
-  deferredCustomAgentsSettingsJavaScript: 29_962 + 8_423 + 1_353 + 423 + 5 + 147,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
   deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43,
@@ -187,10 +173,7 @@ const budgets = {
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
   filesFirstLoadJavaScript: 115 * kibibyte + 9_775,
   deferredMarkdownJavaScript: 440 * kibibyte,
-  // Custom agents: the called-agent block and its children load with the
-  // transcript, 2,384 bytes over its cap (616,784 measured on Windows x64). See
-  // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  transcriptJavaScript: 600 * kibibyte + 2_384,
+  transcriptJavaScript: 600 * kibibyte,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
@@ -232,10 +215,7 @@ const budgets = {
   // alias from the grown shared chunks add 22 bytes over main's cap (22,149
   // measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Custom agents lengthen a minified import alias by 11 bytes (22,160
-  // measured on Windows x64). See
-  // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184 + 34 + 56 + 232 + 22 + 11,
+  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184 + 34 + 56 + 232 + 22,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte + 205 + 47,
   deferredIconRegionJavaScript: 12_995,
@@ -285,11 +265,7 @@ const budgets = {
   // on Windows x64). See
   // docs/pr-evidence/subagent-task-visibility/renderer-bundle.json.
   // Grok's shared contracts and the provider menu add 19,225 bytes (2,565,146 measured). Keep 256 bytes.
-  // Custom agents: the agent library contracts, validators, marks and the
-  // called-agent renderer wiring add 31,419 bytes over main's cap (2,596,821
-  // measured on Windows x64). See
-  // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 31_419,
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 1_855 + 38 + 824 + 466,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -731,12 +707,6 @@ const deferredCliConversationImportJavaScriptBytes = await assetBytes(`assets/${
 const deferredProjectSettingsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[0]}`);
 const deferredThreadActionsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[1]}`);
 const deferredReviewNoteJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[2]}`);
-const customAgentsSettingsEntry = assetNames.find((name) => /^CustomAgentsSettings-.*\.js$/u.test(name));
-if (!customAgentsSettingsEntry) throw new Error("Missing deferred Custom agents settings");
-if (entryJavaScriptClosure.has(customAgentsSettingsEntry) || mainWorkbenchJavaScriptClosure.has(customAgentsSettingsEntry) || detachedChatJavaScriptClosure.has(customAgentsSettingsEntry)) {
-  throw new Error("Custom agents settings must stay deferred from the initial chat routes");
-}
-const deferredCustomAgentsSettingsJavaScriptBytes = await assetBytes(`assets/${customAgentsSettingsEntry}`);
 const [projectCustomizeEntry, projectColorContrastEntry] = ["ProjectCustomizePanel", "project-color-contrast"].map((prefix) => {
   const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
   if (!entry) throw new Error(`Missing deferred project appearance surface: ${prefix}`);
@@ -856,7 +826,6 @@ const coreJavaScriptBytes =
   - deferredLibraryViewJavaScriptBytes
   - deferredIconRegionJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
-  - deferredCustomAgentsSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
   - deferredProjectCustomizeJavaScriptBytes
@@ -903,7 +872,6 @@ const measurements = {
   deferredLibraryViewJavaScript: deferredLibraryViewJavaScriptBytes,
   deferredIconRegionJavaScript: deferredIconRegionJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
-  deferredCustomAgentsSettingsJavaScript: deferredCustomAgentsSettingsJavaScriptBytes,
   deferredCliConversationImportJavaScript: deferredCliConversationImportJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,

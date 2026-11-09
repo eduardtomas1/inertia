@@ -820,8 +820,13 @@
     },
     {
       "version": 113,
-      "name": "PersistCustomAgents",
-      "digest": "c03d70be6f22fe11cbbccf9e05cb6b90cb987bf157d2ba76a4ba1ad9b358bbf6"
+      "name": "PersistContextCompactionSettings",
+      "digest": "64614f9597ea1cdbbfc761ed2877cdc1a9c5f5c062a7696d32769073c74a333e"
+    },
+    {
+      "version": 114,
+      "name": "PersistCodexCompactionLimit",
+      "digest": "7eab8b764454dd55038878e98a08b9216b87e11427566d0cb44cd55fbddf5262"
     }
   ]
 }

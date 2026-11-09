@@ -753,7 +753,7 @@ export const Composer = memo(function Composer({
     submitting,
     sending,
   });
-  const queueBlocked = !attachmentsAreImages || Boolean(promptContext) || Boolean(agentCall.calledAgentId) || previewContextSelected
+  const queueBlocked = !attachmentsAreImages || Boolean(promptContext) || Boolean(agentCall.calledAgentId) || agentCall.invocationPending || previewContextSelected
     || fileReferences.length > 0 || contextPacketIds.length > 0;
   const canQueue = running && sendEligible && !queueBlocked && !submitting && !sending;
   const documentBlocksFollowUp = running && !attachmentsAreImages;

@@ -81,6 +81,7 @@ export interface ComposerAgentCall {
   activeOptionId: string | undefined;
   calledAgent: CustomAgent | null;
   calledAgentId: string | null;
+  invocationPending: boolean;
   calledAgentDeleted: boolean;
   canOpenSettings: boolean;
   setActiveAgentId: (agentId: string) => void;
@@ -229,6 +230,7 @@ export function useComposerAgentCall({
     activeOptionId,
     calledAgent,
     calledAgentId: current.agentId,
+    invocationPending: parseCallingInvocation(message) !== null,
     calledAgentDeleted,
     canOpenSettings,
     setActiveAgentId,

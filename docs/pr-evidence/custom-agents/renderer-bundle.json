@@ -1,7 +1,7 @@
 {
   "baseline": "5d0788e2f04986098cb4fad71f7bbb2b60b5fa1a",
   "platform": "Windows 11 x64, Node 22.23.1, package-lock.json identical on both builds",
-  "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from a build of origin/main 5d0788e2 and from a build of feat/custom-agents after merging it, with the same dependencies. The budgets start from main expressions; only the closures that exceeded their caps are raised, each by its measured overflow rounded up to a whole byte, with no headroom: mainWorkbenchFirstLoadJavaScript (+6,921) and detachedChatFirstLoadJavaScript (+6,892, the /calling composer menu, the selected-agent chip, the called-agent transcript row and the agent contracts), coreJavaScript (+31,652, the agent library contracts, validators, marks and renderer wiring), transcriptJavaScript (+2,515, the called-agent block and its children), settingsJavaScript (+843, the Custom agents settings section entry and its search rows), entryCss (+201, the chip and called-agent row styles) and detachedChatJavaScript (+11, a longer minified import alias). The new deferredCustomAgentsSettingsJavaScript closure measures 40,186 bytes within the 40,313-byte cap this branch introduced; every other change is within its existing cap. The main baseline is measured with main's script, which has no Custom agents settings closure; the branch script excludes that deferred chunk from coreJavaScript.",
+  "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from a build of origin/main 5d0788e2 and from a build of feat/custom-agents after merging it, with the same dependencies. The budgets start from main expressions; only the closures that exceeded their caps are raised, each by its measured overflow rounded up to a whole byte, with no headroom: mainWorkbenchFirstLoadJavaScript (+6,979) and detachedChatFirstLoadJavaScript (+6,950, the /calling composer menu, the selected-agent chip, the called-agent transcript row and the agent contracts), coreJavaScript (+31,710, the agent library contracts, validators, marks and renderer wiring), transcriptJavaScript (+2,515, the called-agent block and its children), settingsJavaScript (+843, the Custom agents settings section entry and its search rows), entryCss (+201, the chip and called-agent row styles) and detachedChatJavaScript (+11, a longer minified import alias). The new deferredCustomAgentsSettingsJavaScript closure measures 40,186 bytes within the 40,313-byte cap this branch introduced; every other change is within its existing cap. The main baseline is measured with main's script, which has no Custom agents settings closure; the branch script excludes that deferred chunk from coreJavaScript.",
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
       "baselineBytes": 1155,
@@ -249,19 +249,19 @@
     "mainWorkbenchFirstLoadJavaScript": {
       "baselineBytes": 975981,
       "baselineCapBytes": 976004.8,
-      "afterBytes": 982925,
-      "deltaFromBaselineBytes": 6944,
-      "capBytes": 982925.8,
-      "capChangeBytes": 6921,
+      "afterBytes": 982983,
+      "deltaFromBaselineBytes": 7002,
+      "capBytes": 982983.8,
+      "capChangeBytes": 6979,
       "withinCap": true
     },
     "detachedChatFirstLoadJavaScript": {
       "baselineBytes": 855856,
       "baselineCapBytes": 855894.2,
-      "afterBytes": 862786,
-      "deltaFromBaselineBytes": 6930,
-      "capBytes": 862786.2,
-      "capChangeBytes": 6892,
+      "afterBytes": 862844,
+      "deltaFromBaselineBytes": 6988,
+      "capBytes": 862844.2,
+      "capChangeBytes": 6950,
       "withinCap": true
     },
     "entryCss": {
@@ -501,10 +501,10 @@
     "coreJavaScript": {
       "baselineBytes": 2568562,
       "baselineCapBytes": 2568585,
-      "afterBytes": 2600237,
-      "deltaFromBaselineBytes": 31675,
-      "capBytes": 2600237,
-      "capChangeBytes": 31652,
+      "afterBytes": 2600295,
+      "deltaFromBaselineBytes": 31733,
+      "capBytes": 2600295,
+      "capChangeBytes": 31710,
       "withinCap": true
     },
     "deferredPdfJavaScript": {

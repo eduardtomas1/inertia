@@ -1,6 +1,7 @@
 import type { AppSettings } from "@shared/contracts";
 import {
   CLAUDE_AUTO_COMPACT_WINDOWS,
+  CODEX_AUTO_COMPACT_LIMITS,
   DEFAULT_COMPACT_ON_RETURN,
 } from "@shared/compact-on-return";
 import { SettingRadioGroup, SettingSelect, SettingSwitch, type SettingOption } from "../SettingControls";
@@ -22,11 +23,15 @@ const COMPACT_LARGE_CHATS_CHOICES: readonly SettingOption<CompactLargeChats>[] =
 ];
 
 const CLAUDE_DEFAULT_WINDOW = "claude-code-default";
+const CODEX_DEFAULT_LIMIT = "codex-default";
 
-const AUTO_COMPACT_WINDOW_CHOICES: readonly SettingOption<string>[] = [
-  ...CLAUDE_AUTO_COMPACT_WINDOWS.map((tokens) => ({ value: String(tokens), label: `${tokens / 1000}K tokens` })),
-  { value: CLAUDE_DEFAULT_WINDOW, label: "Claude Code default" },
+const tokenChoices = (sizes: readonly number[], defaultValue: string, defaultLabel: string): readonly SettingOption<string>[] => [
+  ...sizes.map((tokens) => ({ value: String(tokens), label: `${tokens / 1000}K tokens` })),
+  { value: defaultValue, label: defaultLabel },
 ];
+
+const AUTO_COMPACT_WINDOW_CHOICES = tokenChoices(CLAUDE_AUTO_COMPACT_WINDOWS, CLAUDE_DEFAULT_WINDOW, "Claude Code default");
+const CODEX_AUTO_COMPACT_CHOICES = tokenChoices(CODEX_AUTO_COMPACT_LIMITS, CODEX_DEFAULT_LIMIT, "Codex default");
 
 function compactLargeChats(settings: Pick<AppSettings, "compactOnReturn" | "compactBeforeCacheExpires">): CompactLargeChats {
   if ((settings.compactOnReturn ?? DEFAULT_COMPACT_ON_RETURN) === "never") return "never";
@@ -40,9 +45,9 @@ function compactLargeChatsUpdate(choice: CompactLargeChats): Pick<AppSettings, "
   };
 }
 
-function autoCompactWindowValue(window: AppSettings["claudeAutoCompactWindow"]): string {
-  if (window === null) return CLAUDE_DEFAULT_WINDOW;
-  return AUTO_COMPACT_WINDOW_CHOICES.some(({ value }) => value === String(window)) ? String(window) : CLAUDE_DEFAULT_WINDOW;
+function tokenChoiceValue(tokens: number | null, choices: readonly SettingOption<string>[], defaultValue: string): string {
+  if (tokens === null) return defaultValue;
+  return choices.some(({ value }) => value === String(tokens)) ? String(tokens) : defaultValue;
 }
 
 export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
@@ -86,10 +91,19 @@ export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
           id="claude-auto-compact"
           title="Auto-compact Claude chats after"
           description="Claude Code summarizes a chat on its own just before this size. Its default waits until about 967K tokens on 1M-token models."
-          value={autoCompactWindowValue(settings.claudeAutoCompactWindow)}
+          value={tokenChoiceValue(settings.claudeAutoCompactWindow, AUTO_COMPACT_WINDOW_CHOICES, CLAUDE_DEFAULT_WINDOW)}
           options={AUTO_COMPACT_WINDOW_CHOICES}
           disabled={disabled}
           onChange={(value) => onUpdate({ claudeAutoCompactWindow: value === CLAUDE_DEFAULT_WINDOW ? null : Number(value) })}
+        />
+        <SettingSelect
+          id="codex-auto-compact"
+          title="Auto-compact Codex chats after"
+          description="Codex summarizes a chat on its own at this size, or at 90% of the model's context if that is smaller. Its default waits until about 95% of the context."
+          value={tokenChoiceValue(settings.codexAutoCompactTokenLimit, CODEX_AUTO_COMPACT_CHOICES, CODEX_DEFAULT_LIMIT)}
+          options={CODEX_AUTO_COMPACT_CHOICES}
+          disabled={disabled}
+          onChange={(value) => onUpdate({ codexAutoCompactTokenLimit: value === CODEX_DEFAULT_LIMIT ? null : Number(value) })}
         />
       </SettingsGroup>
 

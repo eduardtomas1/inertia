@@ -353,6 +353,19 @@ size at or above it has no effect, and compacts 33,000 tokens before the size
 chosen. Only Claude turns carry the field; the provider adapter rejects it on
 any other harness.
 
+Codex compacts at about 95% of the model's context window (449K of 475K
+tokens in this machine's sessions). **Auto-compact Codex chats after**
+(`codexAutoCompactTokenLimit`, default 300,000, `null` for Codex's own default,
+`app_state.codex_auto_compact_token_limit`, schema migration 114,
+`PersistCodexCompactionLimit`) is sent as `config.model_auto_compact_token_limit`
+on `thread/start` and `thread/resume`, through the same `config` object as the
+model provider and watcher settings. Codex's model list carries no context
+window, so Inertia sends the limit only once the chat's own usage has reported
+`model_context_window` for the model the turn uses, and caps it at 90% of that
+window (`codexAutoCompactTokenLimit`), so a smaller model never gets a limit at
+or above its context. Only Codex turns on the ChatGPT sign-in or an OpenAI API
+key carry it; the provider adapter rejects it on any other harness.
+
 **What is assumed.** The Anthropic lifetimes are published defaults; the
 OpenAI figure is an assumption. Providers can evict earlier. Inertia measures
 from when it observed a

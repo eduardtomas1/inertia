@@ -10,6 +10,7 @@ export const RESTORE_DEFAULTS_RESETS = [
       "defaultCodeWrap", "autoOpenPlan", "confirmDestructiveActions", "usageDisplayMode", "wrapDiffs", "ignoreWhitespace",
       "terminalFontSize", "desktopNotifications", "notifyOnlyInBackground", "completionSound", "quotaWarnings",
       "compactOnReturn", "compactBeforeCacheExpires", "claudeAutoCompactWindow",
+      "codexAutoCompactTokenLimit",
     ],
   },
   { label: "project grouping and the compact sidebar", keys: ["projectGrouping", "compactSidebar"] },

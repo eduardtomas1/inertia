@@ -444,6 +444,7 @@ test("offers Compact and send on a stale Claude subscription chat, records an id
     const compactLargeChats = page.getByRole("radiogroup", { name: "Compact large chats" });
     const autoCompact = page.getByRole("combobox", { name: "Auto-compact Claude chats after" });
     await expect(autoCompact).toHaveValue(theme === "light" ? "400000" : "300000");
+    await expect(page.getByRole("combobox", { name: "Auto-compact Codex chats after" })).toHaveValue("300000");
     if (theme === "light") {
       await compactLargeChats.getByRole("radio", { name: "Before the cache expires" }).click();
       await expect(compactLargeChats.getByRole("radio", { name: "Before the cache expires" })).toHaveAttribute("aria-checked", "true");

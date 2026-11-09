@@ -18,17 +18,27 @@ export const IDLE_COMPACTION_LEAD_MS = 2 * 60_000;
 export const IDLE_COMPACTION_SAFETY_MS = 30_000;
 export const IDLE_COMPACTION_MIN_LIFETIME_MS = PROMPT_CACHE_LIFETIMES_MS.anthropic1h;
 
-export const CLAUDE_AUTO_COMPACT_WINDOW_MIN = 100_000;
-export const CLAUDE_AUTO_COMPACT_WINDOW_MAX = 1_000_000;
+export const AUTO_COMPACT_TOKENS_MIN = 100_000;
+export const AUTO_COMPACT_TOKENS_MAX = 1_000_000;
 export const CLAUDE_AUTO_COMPACT_WINDOWS = [200_000, 300_000, 400_000, 600_000] as const;
 export const DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW = 400_000;
 
-export function validClaudeAutoCompactWindow(value: unknown): value is number | null {
+export const CODEX_AUTO_COMPACT_LIMITS = [200_000, 300_000, 400_000] as const;
+export const DEFAULT_CODEX_AUTO_COMPACT_LIMIT = 300_000;
+export const CODEX_AUTO_COMPACT_WINDOW_SHARE = 0.9;
+
+export function codexAutoCompactTokenLimit(setting: number | null, contextWindow: number | null): number | null {
+  if (setting === null || contextWindow === null || !Number.isSafeInteger(contextWindow) || contextWindow <= 0) return null;
+  const limit = Math.min(setting, Math.floor(contextWindow * CODEX_AUTO_COMPACT_WINDOW_SHARE));
+  return limit >= AUTO_COMPACT_TOKENS_MIN ? limit : null;
+}
+
+export function validAutoCompactTokenCount(value: unknown): value is number | null {
   return value === null
     || (typeof value === "number"
       && Number.isSafeInteger(value)
-      && value >= CLAUDE_AUTO_COMPACT_WINDOW_MIN
-      && value <= CLAUDE_AUTO_COMPACT_WINDOW_MAX);
+      && value >= AUTO_COMPACT_TOKENS_MIN
+      && value <= AUTO_COMPACT_TOKENS_MAX);
 }
 
 export const PROMPT_CACHE_TTLS = ["5m", "1h"] as const;

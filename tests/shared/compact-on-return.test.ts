@@ -15,7 +15,7 @@ import {
   idleCompactionWindow,
   promptCacheLifetimeFor,
   promptCacheTtlAllowed,
-  validClaudeAutoCompactWindow,
+  validAutoCompactTokenCount,
 } from "../../src/shared/compact-on-return";
 
 const anthropicKey = { harnessId: "claude-agent-sdk", preset: "anthropic-api-key", protocol: "anthropic-messages" } as const;
@@ -169,10 +169,10 @@ describe("Claude automatic compaction window", () => {
     expect(DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW).toBe(400_000);
     expect(CLAUDE_AUTO_COMPACT_WINDOWS).toEqual([200_000, 300_000, 400_000, 600_000]);
     for (const value of [null, 100_000, ...CLAUDE_AUTO_COMPACT_WINDOWS, 1_000_000]) {
-      expect(validClaudeAutoCompactWindow(value)).toBe(true);
+      expect(validAutoCompactTokenCount(value)).toBe(true);
     }
     for (const value of [undefined, 99_999, 1_000_001, 400_000.5, "400000", Number.NaN]) {
-      expect(validClaudeAutoCompactWindow(value)).toBe(false);
+      expect(validAutoCompactTokenCount(value)).toBe(false);
     }
   });
 });

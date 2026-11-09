@@ -29,6 +29,7 @@ import { extendBackendPresetsMigration } from "./extend-backend-presets";
 import { persistTurnFailureKindsMigration } from "./persist-turn-failure-kinds";
 import { persistCompactOnReturnMigration } from "./persist-compact-on-return";
 import { contextCompactionSettingsMigration } from "./context-compaction-settings";
+import { codexCompactionLimitMigration } from "./codex-compaction-limit";
 import { duoComparisonBriefsMigration } from "./duo-comparison-briefs";
 import { turnScopedIndexesMigration } from "./turn-scoped-indexes";
 import { libraryMigration } from "./library";
@@ -77,4 +78,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   subagentTaskShapeMigration,
   nativeGrokProviderMigration,
   contextCompactionSettingsMigration,
+  codexCompactionLimitMigration,
 ];

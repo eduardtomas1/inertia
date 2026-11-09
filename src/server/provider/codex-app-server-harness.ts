@@ -162,6 +162,7 @@ function startCodexRun(
       ...(options.harnessConfiguration
         ? { modelProvider: options.harnessConfiguration }
         : {}),
+      ...(options.input.autoCompactTokenLimit ? { autoCompactTokenLimit: options.input.autoCompactTokenLimit } : {}),
       ...(options.input.reasoningEffort ? { reasoningEffort: options.input.reasoningEffort } : {}),
       ...(options.input.sessionId ? { sessionId: options.input.sessionId } : {}),
       ...(options.input.imagePaths ? { imagePaths: options.input.imagePaths } : {}),

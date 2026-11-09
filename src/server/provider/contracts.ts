@@ -140,6 +140,7 @@ interface ProviderRunRequest {
    */
   maxBudgetUsd?: number;
   autoCompactWindow?: number;
+  autoCompactTokenLimit?: number;
   readOnlyProfile?: "watcher";
   systemInstruction?: string;
   sessionInstruction?: string;

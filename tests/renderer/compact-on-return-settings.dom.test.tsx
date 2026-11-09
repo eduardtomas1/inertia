@@ -104,3 +104,38 @@ describe("Auto-compact Claude chats setting", () => {
       .getByRole("option", { name: /compact Claude chats after$/u })).toHaveTextContent("Auto-compact Claude chats after");
   });
 });
+
+describe("Auto-compact Codex chats setting", () => {
+  it("starts at 300K tokens and stores Codex's own default as null", async () => {
+    const onUpdate = vi.fn(async () => undefined);
+    render(<SettingsView {...settingsViewProps({ target: { section: "chats" }, onUpdate })} />);
+
+    const select = await screen.findByRole("combobox", { name: "Auto-compact Codex chats after" });
+    expect(defaultSettings.codexAutoCompactTokenLimit).toBe(300_000);
+    expect(select).toHaveValue("300000");
+    expect(within(select).getAllByRole("option").map((option) => option.textContent))
+      .toEqual(["200K tokens", "300K tokens", "400K tokens", "Codex default"]);
+    expect(screen.getByText(/90% of the model's context/u)).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "codex-default" } });
+    expect(onUpdate).toHaveBeenLastCalledWith({ codexAutoCompactTokenLimit: null });
+    fireEvent.change(select, { target: { value: "400000" } });
+    expect(onUpdate).toHaveBeenLastCalledWith({ codexAutoCompactTokenLimit: 400_000 });
+  });
+
+  it("shows Codex's default for a cleared limit", async () => {
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "chats" },
+      settings: { ...defaultSettings, codexAutoCompactTokenLimit: null },
+    })} />);
+    expect(await screen.findByRole("combobox", { name: "Auto-compact Codex chats after" })).toHaveValue("codex-default");
+  });
+
+  it.each(["codex", "chatgpt"])("finds the setting by searching for %s compaction", async (provider) => {
+    render(<SettingsView {...settingsViewProps({ target: { section: "appearance" } })} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Search settings" }), { target: { value: `${provider} compaction` } });
+    const results = screen.getByRole("listbox", { name: "Matching settings" });
+    expect(within(within(results).getByRole("group", { name: "Chats" }))
+      .getByRole("option", { name: /Codex chats after$/u })).toHaveTextContent("Auto-compact Codex chats after");
+  });
+});

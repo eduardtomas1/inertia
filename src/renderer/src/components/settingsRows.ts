@@ -64,6 +64,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
     Context: [
       ["compact-on-return", "Compact large chats", ["compact on return", "compaction", "compact", "summarize", "prompt cache", "cache", "idle", "before the cache expires", "subscription", "api key", "tokens", "usage", "cost", "context"]],
       ["claude-auto-compact", "Auto-compact Claude chats after", ["auto-compact", "autocompact", "compaction", "compact", "context window", "claude", "tokens", "usage", "cost", "context"]],
+      ["codex-auto-compact", "Auto-compact Codex chats after", ["auto-compact", "autocompact", "compaction", "compact", "context window", "codex", "openai", "chatgpt", "tokens", "usage", "cost", "context"]],
     ],
     "Review and terminal": [
       ["wrap-diffs", "Wrap long diff lines", ["diff", "wrap", "review", "source control"]],

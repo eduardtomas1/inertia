@@ -372,6 +372,7 @@ export interface StateRow {
   compact_on_return?: string;
   compact_before_cache_expires?: number;
   claude_auto_compact_window?: number | null;
+  codex_auto_compact_token_limit?: number | null;
   attachment_storage_gib?: number;
   auto_remove_old_attachments?: number;
   active_project_id: string | null;

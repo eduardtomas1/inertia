@@ -42,6 +42,8 @@ With **Compact large chats** set to **Before the cache expires**, Inertia compac
 
 Claude Code also compacts a chat on its own when it nears a size. By default that is about 967K tokens on a model with a 1M-token context, so a long chat re-reads up to that much on every step. **Settings → Chats → Context → Auto-compact Claude chats after** sets the size: **200K**, **300K**, **400K** (the default) or **600K tokens**, or **Claude Code default**. Claude Code compacts about 33K tokens before the size you choose, and a size at or above the model's context changes nothing.
 
+Codex does the same at about 95% of the model's context. **Auto-compact Codex chats after** sets **200K**, **300K** (the default) or **400K tokens**, or **Codex default**. Inertia sends it from a chat's second turn on, once Codex has reported that model's context, and never above 90% of it: a 258K-token model compacts at about 233K. It applies to Codex signed in with ChatGPT and to an OpenAI API key, not to custom backends.
+
 ## Follow the work
 
 - The **Work** tab lists your chats. Running chats show the agent pixels and elapsed time, and a chat that needs your input or finishes gets a brief cue.

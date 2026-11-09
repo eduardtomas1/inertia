@@ -73,6 +73,7 @@ export class SettingsRepository {
         compact_on_return = ?,
         compact_before_cache_expires = ?,
         claude_auto_compact_window = ?,
+        codex_auto_compact_token_limit = ?,
         muted_custom_colors = ?
       WHERE id = 1
     `).run(
@@ -119,6 +120,7 @@ export class SettingsRepository {
       next.compactOnReturn,
       Number(next.compactBeforeCacheExpires),
       next.claudeAutoCompactWindow,
+      next.codexAutoCompactTokenLimit,
       Number(mutedCustomColors),
     );
   }

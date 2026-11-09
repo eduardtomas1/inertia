@@ -67,8 +67,9 @@ import { providerTimestamp, validatePromptCacheFacts, validateProviderUsage, val
 import {
   COMPACT_ON_RETURN_SETTINGS,
   DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW,
+  DEFAULT_CODEX_AUTO_COMPACT_LIMIT,
   DEFAULT_COMPACT_ON_RETURN,
-  validClaudeAutoCompactWindow,
+  validAutoCompactTokenCount,
   type CompactOnReturnSetting,
 } from "../../shared/compact-on-return";
 import {
@@ -481,7 +482,8 @@ export function settingsFromState(state: StateRow): AppSettings {
     notifyOnlyInBackground: state.notify_only_in_background === 1,
     compactOnReturn: compactOnReturnFromState(state.compact_on_return),
     compactBeforeCacheExpires: state.compact_before_cache_expires === 1,
-    claudeAutoCompactWindow: claudeAutoCompactWindowFromState(state.claude_auto_compact_window),
+    claudeAutoCompactWindow: autoCompactTokensFromState(state.claude_auto_compact_window, DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW),
+    codexAutoCompactTokenLimit: autoCompactTokensFromState(state.codex_auto_compact_token_limit, DEFAULT_CODEX_AUTO_COMPACT_LIMIT),
     quotaWarnings: {
       enabled: state.quota_warnings_enabled !== 0,
       firstThreshold: isQuotaWarningThreshold(state.quota_warning_threshold)
@@ -992,9 +994,9 @@ function promptCacheFromRow(row: ThreadUsageRow): Pick<ThreadUsageSnapshot, "pro
   return promptCache ? { promptCache } : {};
 }
 
-function claudeAutoCompactWindowFromState(value: number | null | undefined): number | null {
-  if (value === undefined) return DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW;
-  return validClaudeAutoCompactWindow(value) ? value : DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW;
+function autoCompactTokensFromState(value: number | null | undefined, fallback: number): number | null {
+  if (value === undefined) return fallback;
+  return validAutoCompactTokenCount(value) ? value : fallback;
 }
 
 function compactOnReturnFromState(value: string | undefined): CompactOnReturnSetting {

@@ -98,6 +98,30 @@ detail a summary loses or files an agent reads again after compacting.
 The 22 automatic history restores in that period carried 2.41M characters;
 capped at 64 KiB they would have carried 1.14M.
 
+## Codex
+
+The same comparison over Codex's own logs (`~/.codex/sessions`, telling apps
+apart by each session's `originator`), weighting input 1, cached input 0.1 and
+output 8:
+
+| Group | Sessions | Requests | Per output | Avg context | >200K | Cache hits |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Inertia | 58 | 5,504 | 46.0 | 180K | 35% | 98.4% |
+| T3 Code | 31 | 1,947 | 39.5 | 131K | 20% | 98.0% |
+
+Fixed overhead was the same (21.5K and 20.1K tokens on a session's first
+request), Codex's cache survived 30 to 60 idle minutes almost fully, and only 8
+large Inertia Codex chats came back after more than an hour, so compact on
+return has little to win there. The gap is again long chats: Codex compacts at
+about 95% of its window. Replaying Inertia's Codex sessions with a lower limit
+gave 137M → 115M weighted tokens at 300K (−16%, 15 extra compactions) and 98M
+at 200K (−29%). Codex is about 8% of Inertia's weighted use, so **Auto-compact
+Codex chats after** defaults to 300K. T3 Code has no Codex equivalent.
+
+Kimi manages its own context; Cursor, OpenCode, Antigravity and Grok report no
+cache lifetime and saw almost no use in the period. Only the 64 KiB cap on
+automatic history restores applies to them.
+
 ## What was looked at and left alone
 
 - **Session titles.** T3 Code passes its own title so Claude Code skips its

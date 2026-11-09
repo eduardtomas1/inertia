@@ -103,9 +103,12 @@ The useful changes in each Inertia release, in plain language.
 - Updated `@napi-rs/canvas` to 1.1.0. Its Linux build now binds its own Skia
   symbols, so it no longer crashes inside Electron as 1.0.12 and 1.0.13 did.
   PDF.js shares the same copy instead of shipping a second one.
+- Updated PDF.js to 6.5.438. Scanned PDFs and PDF pages with charts or
+  little text are still sent to the agent as page images; PDF.js 6.5 changed
+  how it asks for a drawing surface, which would otherwise have dropped them.
 - Updated the Agent Client Protocol SDK used by Cursor, Kimi and Grok to
-  2.4.0, PDF.js to 6.5.438, lucide-react to 1.69.0, TanStack Virtual to
-  3.14.26, ws to 8.22.1 and Tailwind CSS to 4.3.4.
+  2.4.0, lucide-react to 1.69.0, TanStack Virtual to 3.14.26, ws to 8.22.1
+  and Tailwind CSS to 4.3.4.
 - Development: Playwright 1.65, Vitest 5.1, oxlint 1.91 and Babel's parser
   7.29.13.
 

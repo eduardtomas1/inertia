@@ -427,7 +427,7 @@ function validateOpenDatabase(
   if (version >= 64 && !runStateSchemaIsValid(database)) return "inconsistent";
   if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "inconsistent";
   if (version >= 96 && !todosSchemaIsValid(database)) return "inconsistent";
-  if (version >= 112 && !customAgentsSchemaIsValid(database)) return "inconsistent";
+  if (version >= 113 && !customAgentsSchemaIsValid(database)) return "inconsistent";
   for (const [introducedAt, index] of schemaRequirements.indexes) {
     if (version >= introducedAt && !database.prepare(
       "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?",

@@ -1,6 +1,6 @@
 import type { DatabaseMigrationDefinition } from "./catalog";
 
-export const CUSTOM_AGENTS_SCHEMA_VERSION = 112;
+export const CUSTOM_AGENTS_SCHEMA_VERSION = 113;
 
 export const customAgentsMigration: DatabaseMigrationDefinition = {
   name: "PersistCustomAgents",

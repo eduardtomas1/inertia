@@ -53,8 +53,8 @@ function rows(database: Database.Database, table: string): unknown[] {
 describe("native Grok provider migration", () => {
   it("is registered after the released subagent task shape migration", () => {
     expect(NATIVE_GROK_PROVIDER_SCHEMA_VERSION).toBe(112);
-    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(112);
-    expect(runtimeMigrationCatalog().at(-1)).toMatchObject({
+    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBeGreaterThanOrEqual(NATIVE_GROK_PROVIDER_SCHEMA_VERSION);
+    expect(runtimeMigrationCatalog()[NATIVE_GROK_PROVIDER_SCHEMA_VERSION - 1]).toMatchObject({
       version: NATIVE_GROK_PROVIDER_SCHEMA_VERSION,
       name: nativeGrokProviderMigration.name,
       foreignKeys: "off",

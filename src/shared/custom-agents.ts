@@ -373,6 +373,11 @@ const CUSTOM_AGENT_ROUTES: Readonly<Record<ProviderId, CustomAgentRoute>> = {
     native: null,
     inline: () => `If you have the invoke_subagent tool, call it once ${PROMPT_CARRIES_AGENT}.`,
   },
+  grok: {
+    delivery: "in-role",
+    native: null,
+    inline: () => `If you have a task or subagent tool, call it once ${PROMPT_CARRIES_AGENT}.`,
+  },
 };
 
 const DELEGATION_CLOSING = [

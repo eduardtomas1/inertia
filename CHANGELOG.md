@@ -58,9 +58,9 @@ The useful changes in each Inertia release, in plain language.
 - Type `/calling` in any chat to pick an agent. It stays on the message box
   for that chat until you remove it, and each message goes to that agent.
 - Claude, Codex, OpenCode and Cursor hand the request to a subagent with the
-  agent's instructions; Kimi and Antigravity follow them in the chat itself.
-  The transcript shows the called agent with its character, what it is
-  doing, its status and time, and its report when it finishes.
+  agent's instructions; Kimi, Antigravity and Grok follow them in the chat
+  itself. The transcript shows the called agent with its character, what it
+  is doing, its status and time, and its report when it finishes.
 
 ### Plan
 

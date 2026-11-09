@@ -41,7 +41,7 @@ export function createEvidencePlan({
   const certifiedRun = event === "push" && base !== null && validReusedRun(reusedRun) ? {
     runId: reusedRun.runId, pullRequest: reusedRun.pullRequest, sourceHead: reusedRun.sourceHead,
   } : null;
-  const reused = certifiedRun && !changes.domains.includes("performance") ? certifiedRun : null;
+  const reused = certifiedRun && !changes.measuredPerformance ? certifiedRun : null;
   const reuseReasons = certifiedRun && !reused ? ["performance-change-measured-on-main"] : [];
   const lane = event === "schedule" ? "nightly"
     : event === "push" ? (reused ? "main-reused" : "main")

@@ -12,6 +12,13 @@ inputs:
     description: Extra arguments appended to npm ci when the cache misses.
     required: false
     default: ""
+  electron-downloads:
+    description: >-
+      Restore and save the Electron and electron-builder download caches for a
+      job that launches or packages Electron. Electron artifacts are verified
+      against the locked checksums on every cache hit.
+    required: false
+    default: "false"
 
 outputs:
   cache-hit:
@@ -26,8 +33,6 @@ runs:
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: ${{ inputs.node-version }}
-        cache: npm
-        cache-dependency-path: package-lock.json
 
     # A partially restored dependency tree is worse than no cache at all, so
     # this deliberately offers no fallback key. The key covers the lockfile,
@@ -59,3 +64,25 @@ runs:
       if: steps.dependencies.outputs.cache-hit == 'true'
       shell: bash
       run: node scripts/ensure-node-pty-helper.mjs
+
+    - name: Locate Electron download caches
+      id: electron-downloads
+      if: inputs.electron-downloads == 'true'
+      shell: bash
+      env:
+        DOWNLOAD_ROOT: ${{ runner.temp }}/electron-downloads
+      run: |
+        set -euo pipefail
+        {
+          echo "electron_config_cache=$DOWNLOAD_ROOT/electron"
+          echo "ELECTRON_BUILDER_CACHE=$DOWNLOAD_ROOT/electron-builder"
+        } >> "$GITHUB_ENV"
+        versions="$(node -p "['electron', 'app-builder-lib'].map((name) => name + '@' + require(name + '/package.json').version).join('-')")"
+        echo "versions=$versions" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Electron download caches
+      if: inputs.electron-downloads == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/electron-downloads
+        key: electron-downloads-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron-downloads.outputs.versions }}

@@ -228,7 +228,7 @@ jobs:
         run: npm run test:browser-evidence-cpu-budget
 
       - name: Prepare Electron end-to-end binary
-        run: node -e "console.log(require('electron'))"
+        run: node scripts/ci/prepare-electron-binary.mjs
 
       - name: Build the application bundle for the desktop benchmark
         run: npm run build:bundle

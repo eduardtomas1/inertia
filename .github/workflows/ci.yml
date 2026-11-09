@@ -99,6 +99,7 @@ jobs:
           archive="$RUNNER_TEMP/actionlint.tar.gz"
           binary="$RUNNER_TEMP/actionlint"
           curl --fail --location --silent --show-error \
+            --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 --max-time 120 \
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
             --output "$archive"
           printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive" | sha256sum --check --strict
@@ -187,6 +188,8 @@ jobs:
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
+        with:
+          electron-downloads: "true"
 
       - name: Run core suite with all-source coverage baselines
         run: npm run test:coverage
@@ -236,6 +239,8 @@ jobs:
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
+        with:
+          electron-downloads: "true"
 
       - name: Verify native dependency architecture
         env:
@@ -249,7 +254,7 @@ jobs:
         run: npm run build:packaged
 
       - name: Prepare Electron end-to-end binary
-        run: node -e "console.log(require('electron'))"
+        run: node scripts/ci/prepare-electron-binary.mjs
 
       - name: Run compact Electron/core bridge smoke under Xvfb
         if: needs.classify.outputs.renderer != 'true'
@@ -329,6 +334,8 @@ jobs:
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
+        with:
+          electron-downloads: "true"
 
       - name: Verify native dependency architecture
         env:
@@ -362,7 +369,7 @@ jobs:
         run: npm run build:packaged
 
       - name: Prepare Electron end-to-end binary
-        run: node -e "console.log(require('electron'))"
+        run: node scripts/ci/prepare-electron-binary.mjs
 
       - name: Run destructive runtime-recovery Electron sentinels
         run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
@@ -406,6 +413,8 @@ jobs:
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
+        with:
+          electron-downloads: "true"
 
       - name: Verify native dependency architecture
         env:
@@ -434,7 +443,7 @@ jobs:
         run: npm run build:packaged
 
       - name: Prepare Electron end-to-end binary
-        run: node -e "console.log(require('electron'))"
+        run: node scripts/ci/prepare-electron-binary.mjs
 
       - name: Run destructive runtime-recovery Electron sentinels
         run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
@@ -506,6 +515,8 @@ jobs:
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
+        with:
+          electron-downloads: "true"
 
       - name: Verify native dependency architecture
         env:
@@ -577,13 +588,24 @@ jobs:
 
       - name: Package native macOS containers and unpacked app
         if: runner.os == 'macOS'
+        shell: bash
         env:
           # The builder is configured for ad-hoc signing (identity "-"), so no
           # signing secret is exposed by enabling it for pull-request builds.
           CSC_FOR_PULL_REQUEST: "true"
           INERTIA_RELEASE_CHANNEL: stable
           INERTIA_RELEASE_PLATFORM: ${{ matrix.release_platform }}
-        run: npm run "${{ matrix.release_package_script }}"
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/macos-package.log"
+          for attempt in 1 2; do
+            npm run "${{ matrix.release_package_script }}" 2>&1 | tee "$log"
+            status="${PIPESTATUS[0]}"
+            if [[ "$status" -eq 0 ]]; then exit 0; fi
+            if [[ "$attempt" -eq 2 ]] || ! grep -Fq 'DMGError: Unable to detach device cleanly' "$log"; then exit "$status"; fi
+            echo "::warning::hdiutil could not detach the DMG volume; packaging once more."
+            sleep 15
+          done
 
       - name: Package Linux AppImage and unpacked app
         if: runner.os == 'Linux'
@@ -808,6 +830,8 @@ jobs:
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
+        with:
+          electron-downloads: "true"
 
       - name: Verify native dependency architecture
         env:
@@ -824,7 +848,7 @@ jobs:
       # payload. Download it outside Playwright's hook deadline so a cold cache
       # cannot consume the first display-sensitive suite's startup budget.
       - name: Prepare Electron end-to-end binary
-        run: node -e "console.log(require('electron'))"
+        run: node scripts/ci/prepare-electron-binary.mjs
 
       - name: Measure desktop workloads under Xvfb
         if: (needs.classify.outputs.benchmarks == 'true') && matrix.artifact == 'linux-x64' && matrix.phase == 'isolated'
@@ -949,6 +973,8 @@ jobs:
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
+        with:
+          electron-downloads: "true"
 
       # The guard test keeps its 90 s deadline for compile and native probes.
       # Resolve electron-builder's checksum-verified compiler before Vitest so
@@ -991,6 +1017,8 @@ jobs:
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
+        with:
+          electron-downloads: "true"
 
       - name: Verify native dependency architecture
         env:

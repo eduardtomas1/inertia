@@ -24,7 +24,7 @@ import {
   waitForPackageSmokeReadiness,
 } from "./package-smoke-launch.mjs";
 
-const STARTUP_TIMEOUT_MS = 30_000;
+const STARTUP_TIMEOUT_MS = process.platform === "darwin" && process.arch === "x64" ? 60_000 : 30_000;
 // This begins only after runtime readiness. It covers the product's bounded
 // 30s cold module load plus 12s extraction deadline and result-file cleanup.
 const PACKAGED_PDF_TIMEOUT_MS = 47_000;

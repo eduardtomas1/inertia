@@ -314,6 +314,18 @@ describe("main push reuse of an identical certified pull-request tree", () => {
     expect(evaluateMergeEvidence(performance, evidence(performance))).toEqual([]);
   });
 
+  it.each([
+    ["broad end-to-end and dependency", ["tests/e2e/app-shell.spec.ts", "package-lock.json"]],
+    ["unmodeled source", ["src/server/index.ts", "tests/server/unclassified-new-area.test.ts"]],
+    ["workflow", [".github/workflows/ci.yml"]],
+  ])("reuses a %s change whose performance domain only comes from failing open", (_label, paths) => {
+    const selected = plan(paths, { event: "push", reusedRun });
+    expect(selected.domains).toContain("performance");
+    expect(selected.lane).toBe("main-reused");
+    expect(selected.requiredJobs).toEqual(["gate", "lineage"]);
+    expect(selected.reasons).not.toContain("performance-change-measured-on-main");
+  });
+
   it("cannot be forged by editing the plan", () => {
     const forged = { ...plan(["src/server/database.ts"], { event: "push" }), lane: "main-reused" };
     expect(evaluateMergeEvidence(forged, { ...evidence(forged), reusedRunJobs: [mergeReady()] }))

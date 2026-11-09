@@ -2,6 +2,7 @@ import anthropicIcon from "../assets/provider-icons/anthropic.svg?no-inline";
 import antigravityIcon from "../assets/provider-icons/antigravity.svg?no-inline";
 import cursorDarkIcon from "../assets/provider-icons/cursor-dark.svg?no-inline";
 import cursorLightIcon from "../assets/provider-icons/cursor-light.svg?no-inline";
+import grokIcon from "../assets/provider-icons/grok.svg?no-inline";
 import kimiDarkIcon from "../assets/provider-icons/kimi-dark.svg?no-inline";
 import kimiLightIcon from "../assets/provider-icons/kimi-light.svg?no-inline";
 import openaiIcon from "../assets/provider-icons/openai.svg?no-inline";
@@ -12,7 +13,7 @@ import type { ProviderId } from "@shared/contracts";
 
 export type ProviderIconDefinition = Readonly<{
   providerId: ProviderId;
-  brand: "openai" | "anthropic" | "cursor" | "kimi" | "opencode" | "antigravity";
+  brand: "openai" | "anthropic" | "cursor" | "kimi" | "opencode" | "antigravity" | "grok";
   label: string;
   lightSrc: string;
   darkSrc?: string;
@@ -59,6 +60,13 @@ const providerIconDefinitions: Readonly<Record<ProviderId, ProviderIconDefinitio
     brand: "antigravity",
     label: "Antigravity",
     lightSrc: antigravityIcon,
+    invertInDark: true,
+  },
+  grok: {
+    providerId: "grok",
+    brand: "grok",
+    label: "Grok",
+    lightSrc: grokIcon,
     invertInDark: true,
   },
 };

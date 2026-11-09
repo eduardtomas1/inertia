@@ -125,7 +125,8 @@ type ProductionHarnessId =
   | "cursor-acp"
   | "kimi-acp"
   | "opencode-sdk"
-  | "antigravity-cli";
+  | "antigravity-cli"
+  | "grok-acp";
 
 interface ManifestDefinition {
   readonly providerId: ProviderId;
@@ -201,6 +202,7 @@ const PROVIDER_IDS = new Set<ProviderId>([
   "kimi",
   "opencode",
   "antigravity",
+  "grok",
 ]);
 const CAPABILITY_IDS = new Set<ProviderCapabilityId>(PROVIDER_CAPABILITY_IDS);
 const SUPPORT_VALUES = new Set<ProviderCapabilitySupport>([
@@ -236,6 +238,7 @@ const CONTRACT_TESTS: Readonly<Record<ProductionHarnessId, string>> = {
   "kimi-acp": "tests/server/kimi-acp-harness.test.ts",
   "opencode-sdk": "tests/server/opencode-sdk-harness.test.ts",
   "antigravity-cli": "tests/server/antigravity-cli-harness.test.ts",
+  "grok-acp": "tests/server/grok-acp-harness.test.ts",
 };
 
 const CORE_NATIVE = {
@@ -365,6 +368,21 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       "native-session-id": "native",
       "process-cleanup": "host-exact-turn",
       "maintenance-update": "negotiated",
+    },
+  },
+  {
+    providerId: "grok",
+    harnessId: "grok-acp",
+    implementationRevision: 1,
+    protocolRevision: "acp-v1/sdk-2.1.0/grok",
+    bundledSdkVersion: "2.1.0",
+    support: {
+      ...CORE_NATIVE,
+      images: "negotiated",
+      "session-resume": "negotiated",
+      compaction: "unavailable",
+      "usage-tokens": "negotiated",
+      "model-discovery": "negotiated",
     },
   },
 ];

@@ -10,7 +10,7 @@ import { resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-
 import type { QueueTurnRequest, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
-const providers = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const;
+const providers = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"] as const;
 const capturedAt = "2030-01-01T00:01:00.000Z";
 const stores: RuntimeStore[] = [];
 const directories: string[] = [];

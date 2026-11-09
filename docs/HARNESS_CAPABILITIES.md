@@ -1368,6 +1368,7 @@ part of a step.
 | `opencode-sdk` | Child sessions, named by `Session.agent`, then the assistant message's `agent`, then the task's `subagent_type`. The model comes from `Session.model`, else the first assistant message. The trace links to the parent's task call by its `callID`, and child tool parts become steps. |
 | `cursor-acp` | One trace per `cursor/task` extension notification with its subagent type, description, model, result and duration. Cursor sends no live progress, steps, effort or background state, and its tasks cannot be stopped or moved. |
 | `kimi-acp`, `antigravity-cli` | No delegated-task traces: neither protocol reports subagents or background tasks to the host. |
+| `grok-acp` | No delegated-task traces yet. Grok reports subagents and background commands through its own `x.ai` extensions, which Inertia does not read. |
 
 Background commands, monitors and MCP tasks never hold a turn open or count as
 delegated work in the run state, so a provider that ends its turn while a dev

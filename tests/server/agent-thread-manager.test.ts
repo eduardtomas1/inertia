@@ -1236,7 +1236,7 @@ describe("AgentThreadManager", () => {
           "Fix it and call inertia_create_conversation again.",
         ].join("\n")],
         ["inertia_create_conversation", { title: "x", prompt: "y", route: { providerId: "anthropic" } }, [
-          "route.providerId: expected one of codex, claude, cursor, kimi, opencode, antigravity",
+          "route.providerId: expected one of codex, claude, cursor, kimi, opencode, antigravity, grok",
           "Fix it and call inertia_create_conversation again.",
         ].join("\n")],
         ["inertia_send_message", { conversationId: "55555555-5555-4555-8555-555555555555", message: "hi" }, [

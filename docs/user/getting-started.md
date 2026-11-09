@@ -21,7 +21,7 @@ Choose **Add your first project** on the home screen, or the add-project button 
 
 ## Connect an agent
 
-Open **Settings → Agents** and connect a provider. Inertia uses the accounts you already have: each provider keeps its own authentication. To use API credits instead, add an API key under [Accounts and API keys](#accounts-and-api-keys); keys are stored in your operating system's credential vault. If a provider stops responding, refresh it in the same place.
+Open **Settings → Agents** and choose **Add provider** at the end of the provider list. Pick the agent, optionally name the account, then sign in through the agent or add an API key. Inertia uses the accounts you already have: each provider keeps its own authentication. To use API credits instead, add an API key under [Accounts and API keys](#accounts-and-api-keys); keys are stored in your operating system's credential vault. If a provider stops responding, refresh it in the same place.
 
 The sign-in runs the provider's own login in a terminal. When the provider asks for a code, paste it there with ⌘V (Ctrl+V on Windows and Linux) or right-click and choose **Paste**. After **Copy link** or **Open again**, the terminal keeps focus, so the paste lands in it when you come back from the browser. The pasted code goes only to the provider's login; Inertia does not store it or add it to diagnostics.
 
@@ -39,7 +39,7 @@ A chat uses one route at a time: the account, or an API key you choose in the mo
 
 **Antigravity.** Google says wrapping agy in another app isn't supported on consumer plans and points to a Gemini API key. Inertia doesn't offer a Gemini API key route yet, so Antigravity runs on its own sign-in.
 
-**Usage for Cursor and Kimi.** Cursor and Kimi Code don't report usage to Inertia, so **Usage → Limits** shows *Usage is not reported by this agent.* for them.
+**Usage for Cursor, Kimi and Grok.** Cursor, Kimi Code and Grok don't report usage to Inertia, so **Usage → Limits** shows *Usage is not reported by this agent.* for them.
 
 What each provider supports:
 
@@ -50,6 +50,7 @@ What each provider supports:
 | Kimi Code | **Sign in through Kimi Code** runs Kimi Code's own sign-in. Usage is not reported. | A built-in Kimi key route. Choose **Add key** on its row. It runs on the Claude Code harness, so Claude Code 2.1.309 or newer must be installed. |
 | OpenCode | **Sign in through OpenCode** runs `opencode auth login`. | OpenCode keeps its own keys; add them with `opencode auth login`. |
 | Cursor | **Sign in through Cursor** runs Cursor's own sign-in. Usage is not reported. | Account only. |
+| Grok | **Sign in through Grok** runs `grok login`. Usage is not reported. | Account only. |
 | Antigravity | Sign in with Antigravity's own prompt; see the note above. | Account only. |
 
 ### Add an API key

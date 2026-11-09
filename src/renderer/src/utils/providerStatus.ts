@@ -10,6 +10,14 @@ function verifiesSignInOnRun(provider: ProviderInfo): boolean {
   return provider.id === "antigravity";
 }
 
+function grokNeedsSignIn(provider: ProviderInfo): boolean {
+  return provider.id === "grok"
+    && provider.installState === "installed"
+    && provider.authState === "unknown"
+    && provider.canRun
+    && !provider.updateRequired;
+}
+
 export function providerStateLabel(provider: ProviderInfo): string {
   if (provider.installState === "recovery-required") return "Recovery required";
   if (provider.installState === "checking" || provider.authState === "checking") return "Checking";
@@ -23,6 +31,7 @@ export function providerStateLabel(provider: ProviderInfo): string {
   if (provider.authState === "configured") return "Configured";
   if (provider.authState === "unauthenticated") return "Sign in required";
   if (provider.authState === "error") return "Connection issue";
+  if (grokNeedsSignIn(provider)) return "Sign in required";
   if (provider.canRun) return "Ready";
   return "Setup required";
 }
@@ -61,6 +70,7 @@ export function providerSetupAction(provider: ProviderInfo): ProviderSetupAction
   ) return "connect";
   if ((provider.authState === "authenticated" || provider.authState === "configured") && !provider.canRun) return "refresh";
   if (provider.authState === "error") return "refresh";
+  if (grokNeedsSignIn(provider)) return "connect";
   if (!provider.canRun) return "connect";
   return "refresh";
 }

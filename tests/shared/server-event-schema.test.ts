@@ -1304,6 +1304,7 @@ describe("server event provider identity boundary", () => {
     kimi: "kimi-acp",
     opencode: "opencode-sdk",
     antigravity: "antigravity-cli",
+    grok: "grok-acp",
   } as const;
   const provider = {
     id: "codex",
@@ -1379,7 +1380,7 @@ describe("server event provider identity boundary", () => {
       expect(() => parseServerEvent(withCapabilities(entries))).toThrow("Malformed server event");
     }
   });
-  it.each(["codex", "claude", "cursor", "kimi", "opencode", "antigravity"])(
+  it.each(["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"])(
     "accepts the canonical %s provider identity",
     (id) => {
       const expectedFastMode = id === "codex"

@@ -13,6 +13,7 @@ const PROVIDER_HARNESS_IDS = {
   kimi: "kimi-acp",
   opencode: "opencode-sdk",
   antigravity: "antigravity-cli",
+  grok: "grok-acp",
 } as const;
 
 const CAPABILITY_CONTRACT_KEYS = [

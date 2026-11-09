@@ -106,6 +106,15 @@ const PRIVATE_CONNECT_PROMPT_SAFETY: Readonly<Record<string, PrivateConnectPromp
         + "write or command. Kimi Code controls project reads, and the Private Connect answer "
         + "can include project-derived text, so this is not a sandbox.",
     },
+    "grok-acp": {
+      ...APPROVAL_ROUTED,
+      headline: "Provider-controlled reads · Local approval required for reported actions",
+      explanation:
+        "Grok reports permission requests over the Agent Client Protocol and "
+        + "a supervised conversation requires a desktop decision for each reported "
+        + "write or command. Grok controls project reads, and the Private Connect answer "
+        + "can include project-derived text, so this is not a sandbox.",
+    },
     "opencode-sdk": {
       ...APPROVAL_ROUTED,
       permissionModel: "inertia-enforced",

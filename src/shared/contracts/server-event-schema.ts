@@ -33,7 +33,7 @@ import { compactOnReturnResultValidators, isConversationCompactionState, isPromp
 import { workspaceToolResultValidators } from "./workspace-tool-results-schema";
 import { duoResultValidators } from "./duo-results-schema";
 import { record, stringField, nonemptyStringField, nullableStringField, booleanField, numberField, integerField, integerFieldAtLeast, nullableNumberField, optionalStringField, optionalNullableStringField, optionalBooleanField, oneOf, recordWithStrings, arrayOf, type UnknownRecord } from "./server-event-fields";
-const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
+const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function providerId(value: UnknownRecord, key: string): boolean {
   return oneOf(value, key, PROVIDER_IDS);
@@ -1101,7 +1101,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
                 "sessionId",
               )
               && oneOf(value.providerResume, "providerId", [
-                "codex", "claude", "cursor", "kimi", "opencode", "antigravity",
+                "codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok",
               ])
               && nonemptyStringField(value.providerResume, "providerLabel")
               && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(

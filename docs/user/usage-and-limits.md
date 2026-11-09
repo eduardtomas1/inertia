@@ -16,7 +16,7 @@ Subscription quota across your accounts:
 - The **i** next to the title explains how averages work.
 - Email addresses stay hidden until you choose **Reveal**.
 - **Refresh limits** asks the providers again. The page and the **All provider limits** dialog read the providers when they open and refresh themselves at most every three minutes while visible.
-- Cursor and Kimi Code don't report usage to Inertia; their rows say *Usage is not reported by this agent.*
+- Cursor, Kimi Code and Grok don't report usage to Inertia; their rows say *Usage is not reported by this agent.*
 
 Limits cover accounts. A chat that runs on an API key or a custom backend shows **Usage is not available for API keys**; the provider bills that usage to your API account.
 

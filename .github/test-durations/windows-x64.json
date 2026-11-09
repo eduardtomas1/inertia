@@ -723,7 +723,6 @@
     "tests/renderer/transcript-work-chrome.test.ts": 8,
     "tests/renderer/trusted-overlay-native-preview.dom.test.tsx": 498,
     "tests/renderer/turn-agent-status.test.ts": 4,
-    "tests/renderer/turn-agents-line.dom.test.tsx": 250,
     "tests/renderer/turn-artifacts.dom.test.tsx": 24,
     "tests/renderer/turn-metadata.test.ts": 65,
     "tests/renderer/type-scale-floor.test.ts": 4,

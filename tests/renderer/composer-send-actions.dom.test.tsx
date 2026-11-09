@@ -29,6 +29,66 @@ afterEach(() => {
 
 describe("composer morphing send actions", () => {
   it.each([
+    ["send-disabled", "Send message", { disabled: true, resting: false, busy: false, stop: false, icon: "send" }],
+    ["send-ready", "Send message", { disabled: false, resting: false, busy: false, stop: false, icon: "send" }],
+    ["submitting", "Sending message", { disabled: true, resting: false, busy: true, stop: false, icon: "sending" }],
+    ["stop-ready", "Stop agent", { disabled: false, resting: false, busy: false, stop: true, icon: "stop" }],
+    ["stop-pending", "Stopping agent", { disabled: false, resting: false, busy: true, stop: true, icon: "stop" }],
+    ["stop-and-send", "Stop and send", { disabled: false, resting: false, busy: false, stop: true, icon: "stop" }],
+  ] as const)("presents %s as %s in the deferred action and its fallback", (primaryAction, label, expected) => {
+    const view = render(<ComposerSendActionsFallback {...idle} primaryAction={primaryAction} />);
+    for (const deferred of [false, true]) {
+      if (deferred) view.rerender(<ComposerSendActions {...idle} primaryAction={primaryAction} />);
+      const primary = screen.getByRole("button", { name: label });
+      expect(primary).toHaveClass("send-button");
+      expect(primary).toHaveAttribute("data-composer-action-state", primaryAction);
+      expect(primary.classList.contains("stop-button")).toBe(expected.stop);
+      expect(primary.hasAttribute("disabled")).toBe(expected.disabled);
+      expect(primary.getAttribute("aria-disabled")).toBe(expected.resting ? "true" : null);
+      expect(primary).toHaveAttribute("aria-busy", String(expected.busy));
+      if (deferred) {
+        expect(primary).toHaveAttribute("data-motion-state", expected.icon);
+        expect(primary.querySelector("svg")).toHaveAttribute("width", "16");
+      }
+    }
+  });
+
+  it("focuses the message input instead of sending when the draft is empty and the resting send is activated", () => {
+    const onSubmit = vi.fn(async () => undefined);
+    const onFocusInput = vi.fn();
+    const view = render(<ComposerSendActionsFallback {...idle} awaitingInput onSubmit={onSubmit} onFocusInput={onFocusInput} primaryAction="send-disabled" />);
+    for (const deferred of [false, true]) {
+      if (deferred) view.rerender(<ComposerSendActions {...idle} awaitingInput onSubmit={onSubmit} onFocusInput={onFocusInput} primaryAction="send-disabled" />);
+      const primary = screen.getByRole("button", { name: "Send message" });
+      expect(primary).toBeEnabled();
+      expect(primary).toHaveAttribute("aria-disabled", "true");
+      fireEvent.click(primary);
+    }
+    expect(onFocusInput).toHaveBeenCalledTimes(2);
+    expect(onSubmit).not.toHaveBeenCalled();
+    view.rerender(<ComposerSendActions {...idle} onSubmit={onSubmit} onFocusInput={onFocusInput} primaryAction="send-ready" />);
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onFocusInput).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops the agent from the stop disc and sends from the arrow", () => {
+    const onStop = vi.fn(async () => undefined);
+    const onSubmit = vi.fn(async () => undefined);
+    const view = render(<ComposerSendActions {...idle} onStop={onStop} onSubmit={onSubmit} primaryAction="stop-ready" />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop agent" }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    view.rerender(<ComposerSendActions {...idle} onStop={onStop} onSubmit={onSubmit} primaryAction="stop-and-send" />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop and send" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    view.rerender(<ComposerSendActions {...idle} onStop={onStop} onSubmit={onSubmit} primaryAction="send-ready" />);
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
     ["Send message", "send-ready"],
     ["Stop agent", "stop-ready"],
     ["Stop and send", "stop-and-send"],

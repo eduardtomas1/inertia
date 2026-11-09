@@ -274,6 +274,15 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
       "send-disabled",
     );
     await expect(disabledSend).toHaveAttribute("data-motion-state", "send");
+    await expect(disabledSend).toHaveAttribute("aria-disabled", "true");
+    const accentFill = await composer.evaluate((element) => {
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = "var(--accent)";
+      element.append(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    });
     const disabledStyle = await disabledSend.evaluate((button) => {
       const style = getComputedStyle(button);
       return {
@@ -283,6 +292,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
         opacity: style.opacity,
       };
     });
+    expect(disabledStyle.background).toBe(accentFill);
     expect(disabledStyle.boxShadow).toBe("none");
     expect(disabledStyle.filter).toBe("none");
     expect(disabledStyle.opacity).toBe("1");
@@ -312,10 +322,8 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     expect(readyGeometry.width).toBeCloseTo(readyGeometry.height, 3);
     expect(readyGeometry.width).toBeGreaterThanOrEqual(28);
     expect(readyGeometry.borderRadius).toBe("50%");
-    await expect.poll(() => readySend.evaluate((button) =>
-      getComputedStyle(button).backgroundColor)).not.toBe(
-      disabledStyle.background,
-    );
+    await expect(readySend).not.toHaveAttribute("aria-disabled", "true");
+    expect(readyGeometry.background).toBe(accentFill);
     expect(readyGeometry.boxShadow).toBe("none");
     expect(readyGeometry.filter).toBe("none");
     await expect(textbox).toBeFocused();
@@ -595,8 +603,14 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
     testDirectory,
     workspaceDirectory,
   );
-  const contextTrigger = page.getByRole("button", { name: /Checkout context differs/u });
+  await ensureWorkspaceTools(page);
+  const markedMore = page.getByRole("button", { name: "More composer options, Checkout context differs", exact: true });
+  await expect(markedMore).toBeVisible();
+  await expect(markedMore).toHaveAttribute("data-attention", "true");
+  await closeWorkspaceTools(page);
+  const contextTrigger = page.getByRole("button", { name: /^Checkout context differs/u });
   await expect(contextTrigger).toBeVisible();
+  await expect(contextTrigger).toHaveAttribute("data-attention", "true");
   await contextTrigger.click();
   const branchMenu = page.getByRole("menu", { name: "Branches" });
   await expect(branchMenu.getByRole("status").getByText("Chat and checkout differ")).toBeVisible();

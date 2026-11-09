@@ -36,6 +36,7 @@ function primaryPresentation(
   state: ComposerPrimaryActionState,
   compactOnReturn: ComposerCompactOnReturnAction | null,
   compacting: boolean,
+  awaitingInput: boolean,
 ) {
   if (state === "stop-ready" || state === "stop-pending") {
     return {
@@ -69,10 +70,12 @@ function primaryPresentation(
   }
   const offered = state === "send-ready" && compactOnReturn !== null;
   const compactAndSend = offered && compactOnReturn.mode === "compact";
+  const resting = state === "send-disabled" && awaitingInput;
   return {
     action: "send" as const,
     busy: false,
-    disabled: state === "send-disabled",
+    disabled: state === "send-disabled" && !resting,
+    resting,
     icon: arrowUpMorphIcon,
     iconState: "send",
     label: compactAndSend ? COMPACT_AND_SEND : offered ? "Send" : "Send message",
@@ -105,11 +108,13 @@ export function ComposerSendActions({
   latestTurnAuthoritative = true,
   compactOnReturn = null,
   compacting = false,
+  awaitingInput = false,
   onSendQueued,
   onQueueCommand,
   onReleaseAttachment,
   onSubmit,
   onStop,
+  onFocusInput,
 }: {
   conversationId: string;
   primaryAction: ComposerPrimaryActionState;
@@ -120,6 +125,7 @@ export function ComposerSendActions({
   latestTurnAuthoritative?: boolean;
   compactOnReturn?: ComposerCompactOnReturnAction | null;
   compacting?: boolean;
+  awaitingInput?: boolean;
   onSendQueued: (
     content: string,
     attachments: ChatAttachment[],
@@ -128,6 +134,7 @@ export function ComposerSendActions({
   onReleaseAttachment: (attachmentId: string) => Promise<void>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
+  onFocusInput?: () => void;
 }): React.JSX.Element {
   const [queueHost, setQueueHost] = useState<HTMLElement | null>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
@@ -144,8 +151,9 @@ export function ComposerSendActions({
     if (group !== focusedGroup || document.activeElement !== document.body) return;
     if (focusedAction === "primary") primaryRef.current?.focus();
   }, [focusedAction, focusedGroup]);
-  const presentation = primaryPresentation(primaryAction, compactOnReturn, compacting);
+  const presentation = primaryPresentation(primaryAction, compactOnReturn, compacting, awaitingInput);
   const showsToggle = compactOnReturn !== null && compactOnReturn.toggleVisible && primaryAction === "send-ready";
+  const resting = "resting" in presentation && presentation.resting;
   return (
     <>
       <Suspense fallback={null}>
@@ -175,8 +183,10 @@ export function ComposerSendActions({
         data-composer-action-state={primaryAction}
         data-motion-state={presentation.iconState}
         aria-busy={presentation.busy}
+        aria-disabled={resting || undefined}
         onClick={() => {
           if (presentation.action === "stop") void onStop();
+          else if (resting) onFocusInput?.();
           else void onSubmit();
         }}
         disabled={presentation.disabled}

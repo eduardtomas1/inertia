@@ -10,9 +10,9 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { resolveMessageSearchDestination, useMessageSearchFocus } from "./useMessageSearchFocus";
+import { foldedCommentaryIds, resolveMessageSearchDestination, useMessageSearchFocus } from "./useMessageSearchFocus";
 import { useViewportSyncedVirtualizer } from "./useViewportSyncedVirtualizer";
-import { groupSubagentsByTurn, subagentEstimateSignature } from "../../utils/response-timeline/virtualization";
+import { subagentEstimateSignature } from "../../utils/response-timeline/virtualization";
 import type {
   InterfaceScale,
   ResponseDensity,
@@ -29,7 +29,6 @@ import {
   estimateTimelineRowSize,
   resolveTimelineKeyboardIntent,
   shouldAdjustTimelineScrollPosition,
-  shouldConsolidateSettledWorkIntoRunDetails,
   shouldFollowTimeline,
   shouldShowTimelineMinimap,
   shouldShowTurnGitArtifactSummary,
@@ -64,6 +63,9 @@ import {
 } from "./row-lookup";
 import { startTimelineItemFocus } from "./timeline-item-focus";
 import { TurnTimeline } from "./turn";
+import { turnFoldOpen } from "./turn-fold-store";
+import { usePublishedTurnSubagents } from "./subagent-trace-store";
+import { subagentGroupFoldable, turnAgentStatus } from "../../utils/turnAgentStatus";
 import type { ResponseTimelineProps } from "./types";
 
 export { TimelineMinimap, type TimelineMarker } from "./minimap";
@@ -304,9 +306,6 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const rowEstimateCache = useRef(
     new WeakMap<ResponseTimelineItem, Map<string, number>>(),
   );
-  const previousSubagentsByTurn = useRef(
-    new Map<string, SubagentTrace[]>(),
-  );
   const pendingLayoutAnchor = useRef<TimelineLayoutAnchor | null>(null);
   const captureLayoutAnchorRef = useRef<() => void>(() => undefined);
   const restoreLayoutAnchorRef = useRef<() => void>(() => undefined);
@@ -455,31 +454,33 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     props.showThinking ? "thinking" : "hidden-thinking",
     props.showChangedFileSummaries ? "files" : "hidden-files",
   ].join(":");
-  const subagentsByTurn = useMemo(() => {
-    const grouped = groupSubagentsByTurn(props.subagents ?? [], previousSubagentsByTurn.current);
-    previousSubagentsByTurn.current = grouped;
-    return grouped;
-  }, [props.subagents]);
   const getItemKey = useCallback(
     (index: number) => timelineRef.current[index]?.id ?? `missing-${index}`,
     [],
   );
+  const subagentsByTurn = usePublishedTurnSubagents(props.subagents);
+  const subagentFoldKey = useMemo(() => [...subagentsByTurn]
+    .flatMap(([turnId, traces]) => subagentGroupFoldable(turnAgentStatus(traces)) ? [turnId] : [])
+    .sort()
+    .join("\n"), [subagentsByTurn]);
+  const subagentFoldTurns = useMemo(() => new Set(subagentFoldKey.split("\n")), [subagentFoldKey]);
   const estimateSize = useCallback((index: number) => {
     const item = timeline[index];
     if (!item) return 280;
     const subagents = item.kind === "turn" ? subagentsByTurn.get(item.turn.id) : undefined;
-    const layoutKey = subagents ? `${estimateKey}:${subagentEstimateSignature(subagents)}` : estimateKey;
+    const foldExpanded = item.kind === "turn" && turnFoldOpen(item.turn.id, !props.autoCollapseWorkLog);
+    const subagentsFold = item.kind === "turn" && subagentFoldTurns.has(item.turn.id);
+    const itemKey = `${estimateKey}:${foldExpanded ? "fold-open" : "fold-closed"}:${subagentsFold ? "agents-fold" : "agents-apart"}`
+      + `:${subagents ? subagentEstimateSignature(subagents) : "no-agents"}`;
     const cachedByLayout = rowEstimateCache.current.get(item);
-    const cached = cachedByLayout?.get(layoutKey);
+    const cached = cachedByLayout?.get(itemKey);
     if (cached !== undefined) return cached;
     const artifact = item.kind === "turn" ? item.turn.gitArtifact : null;
-    const expandsConsolidatedWork = item.kind === "turn"
-      && !props.autoCollapseWorkLog
-      && shouldConsolidateSettledWorkIntoRunDetails(item.turn);
     const estimate = estimateTimelineRowSize(item, {
       ...estimateLayout,
       workDetailsExpanded: !props.autoCollapseWorkLog,
-      runDetailsExpanded: expandsConsolidatedWork,
+      turnFoldExpanded: foldExpanded,
+      settledSubagentsFoldable: subagentsFold,
       showThinking: props.showThinking,
       showChangedFiles: props.showChangedFileSummaries
         && artifact !== null
@@ -487,11 +488,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       subagents,
     });
     const nextCache = cachedByLayout ?? new Map<string, number>();
-    if (!nextCache.has(layoutKey) && nextCache.size >= 12) {
+    if (!nextCache.has(itemKey) && nextCache.size >= 12) {
       const oldestKey = nextCache.keys().next().value;
       if (oldestKey !== undefined) nextCache.delete(oldestKey);
     }
-    nextCache.set(layoutKey, estimate);
+    nextCache.set(itemKey, estimate);
     rowEstimateCache.current.set(item, nextCache);
     return estimate;
   }, [
@@ -501,6 +502,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     estimateLayout,
     estimateKey,
     subagentsByTurn,
+    subagentFoldTurns,
     timeline,
   ]);
   const [virtualizer, measureVirtualRow] = useViewportSyncedVirtualizer({
@@ -1110,7 +1112,12 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
           : findResponseRow(root, item.id);
         if (!row) return null;
         const destination = typeof target === "object"
-          ? resolveMessageSearchDestination(row, target.messageId, target.turnId)
+          ? resolveMessageSearchDestination(
+              row,
+              target.messageId,
+              target.turnId,
+              foldedCommentaryIds(item, target.turnId),
+            )
           : target === "turn"
           ? row
           : row.querySelector<HTMLElement>(

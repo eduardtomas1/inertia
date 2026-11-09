@@ -2,7 +2,6 @@ import { accessModeUnavailableReason, effectiveAccessMode } from "@shared/access
 import {
   ArrowLeft,
   Check,
-  ChevronDown,
   ChevronRight,
   Play,
   SlidersHorizontal,
@@ -22,6 +21,7 @@ import type { ComposerSettingsModel } from "./ComposerSettings";
 import { useWatcherRunLock } from "../watcher/watcherContext";
 import { ComposerResponseSpeedOptions } from "./ComposerResponseSpeedOptions";
 import type { MoreSection } from "./types";
+import type { ComposerFoldKey } from "./useComposerChipFolding";
 import {
   moreSectionLabel,
   type ComposerMenuController,
@@ -47,7 +47,12 @@ export interface ComposerMoreMenuProps {
     >>,
   ) => Promise<void>;
   conversationUpdatePending: boolean;
+  folded: ReadonlySet<ComposerFoldKey>;
+  branch: { label: string; available: boolean; attention: string | null } | null;
+  onOpenBranch: () => boolean;
 }
+
+const FOLDABLE_SECTIONS: readonly Extract<MoreSection, ComposerFoldKey>[] = ["reasoning", "speed", "mode", "access"];
 
 export function ComposerMoreMenu({
   actions,
@@ -64,6 +69,9 @@ export function ComposerMoreMenu({
   onUpdateFastMode,
   onUpdateConversation,
   conversationUpdatePending,
+  folded,
+  branch,
+  onOpenBranch,
 }: ComposerMoreMenuProps): React.JSX.Element {
   const {
     menu,
@@ -88,6 +96,9 @@ export function ComposerMoreMenu({
     (item) => item.value === effectiveAccess,
   ) ?? accessOptions[2]!;
   const runLocked = useWatcherRunLock(conversation.id);
+  const settingsLocked = disabled || running || conversationUpdatePending;
+  const branchFolded = branch !== null && folded.has("branch");
+  const foldedAttention = branchFolded ? branch.attention : null;
 
   const renderMoreSectionOptions = (section: MoreSection) => {
     if (section === "actions") {
@@ -210,6 +221,32 @@ export function ComposerMoreMenu({
     });
   };
 
+  const foldedSettings: Record<Extract<MoreSection, ComposerFoldKey>, {
+    label: string;
+    value: string;
+    disabled: boolean;
+  }> = {
+    reasoning: {
+      label: "Reasoning",
+      value: reasoningLabel,
+      disabled: settingsLocked || !selectedModel?.reasoningOptions.length,
+    },
+    speed: {
+      label: RESPONSE_SPEED_LABEL,
+      value: selectedFastMode ? "Fast" : "Standard",
+      disabled: settingsLocked,
+    },
+    mode: {
+      label: "Mode",
+      value: conversation.interactionMode === "build" ? "Build" : "Plan",
+      disabled: settingsLocked || runLocked,
+    },
+    access: {
+      label: "Access",
+      value: access.label,
+      disabled: disabled || running || runLocked,
+    },
+  };
   const moreRootItems: Array<{
     section: MoreSection;
     label: string;
@@ -223,49 +260,30 @@ export function ComposerMoreMenu({
           value: `${actions.length} available`,
         }]
       : []),
-    {
-      section: "reasoning",
-      label: "Reasoning",
-      value: reasoningLabel,
-      disabled: !selectedModel?.reasoningOptions.length,
-    },
-    ...((selectedModel?.fastMode ?? null) !== null || selectedFastMode
-      ? [{
-          section: "speed" as const,
-          label: RESPONSE_SPEED_LABEL,
-          value: selectedFastMode
-            ? "Fast"
-            : "Standard",
-        }]
-      : []),
-    {
-      section: "mode",
-      label: "Mode",
-      value: conversation.interactionMode === "build" ? "Build" : "Plan",
-      disabled: runLocked,
-    },
-    {
-      section: "access",
-      label: "Access",
-      value: access.label,
-      disabled: runLocked,
-    },
+    ...FOLDABLE_SECTIONS
+      .filter((section) => folded.has(section))
+      .map((section) => ({ section, ...foldedSettings[section] })),
   ];
 
   return (
-    <div className="popover-anchor composer-more-control">
+    <div
+      className="popover-anchor composer-more-control"
+      data-overflow={folded.size > 0 ? "true" : undefined}
+      data-actions={actions.length > 0 ? "true" : undefined}
+    >
       <button
         ref={(node) => setMenuTrigger("more", node)}
         type="button"
         className={clsx(
-          "composer-pill",
+          "icon-button composer-more-trigger",
           menu === "more" && "is-active",
         )}
-        aria-label="More composer options"
+        aria-label={foldedAttention ? `More composer options, ${foldedAttention}` : "More composer options"}
+        data-attention={foldedAttention ? "true" : undefined}
         aria-haspopup="menu"
         aria-controls={menuId("more")}
         aria-expanded={menu === "more"}
-        disabled={disabled || running || conversationUpdatePending}
+        disabled={settingsLocked && !branchFolded}
         onClick={() => {
           if (menu !== "more") returnToMoreRoot();
           toggleMenu("more");
@@ -274,11 +292,9 @@ export function ComposerMoreMenu({
           handleComposerMenuTriggerKeyDown("more", event)}
       >
         <SlidersHorizontal
-          size={14}
+          size={16}
           aria-hidden="true"
         />
-        <span>More</span>
-        <ChevronDown size={14} aria-hidden="true" />
       </button>
       {menu === "more" && (
         <div
@@ -358,6 +374,32 @@ export function ComposerMoreMenu({
                       <ChevronRight size={14} />
                     </button>
                   ))}
+                  {branchFolded && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      aria-haspopup="menu"
+                      disabled={!branch.available}
+                      data-more-branch
+                      onPointerEnter={closeMorePreview}
+                      onClick={() => {
+                        dismissMenu("context-change");
+                        onOpenBranch();
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== "ArrowRight") return;
+                        event.preventDefault();
+                        dismissMenu("context-change");
+                        onOpenBranch();
+                      }}
+                    >
+                      <span>
+                        <strong>Branch</strong>
+                        <small translate="no">{branch.label}</small>
+                      </span>
+                      <ChevronRight size={14} />
+                    </button>
+                  )}
                 </div>
               </>
             )}

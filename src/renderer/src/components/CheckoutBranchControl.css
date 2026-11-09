@@ -1,36 +1,11 @@
 .checkout-branch-anchor {
   display: inline-flex;
   min-width: 0;
-  flex: 0 1 auto;
-  justify-content: flex-end;
-  margin: -2px -5px;
+  max-width: 100%;
 }
 
 .checkout-branch-button {
   max-width: 100%;
-  padding: 2px 5px;
-  border: 0;
-  border-radius: var(--radius-xs);
-  color: inherit;
-  background: transparent;
-  font: inherit;
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
-}
-
-.checkout-branch-button:hover,
-.checkout-branch-button[aria-expanded="true"] {
-  color: var(--text-muted);
-  background: var(--fill);
-}
-
-.checkout-branch-button.is-detached {
-  color: var(--warning);
-}
-
-.checkout-branch-chevron {
-  flex: 0 0 auto;
-  color: var(--text-faint);
 }
 
 .checkout-branch-portal {
@@ -45,10 +20,4 @@
   right: auto;
   bottom: 0;
   left: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .checkout-branch-button {
-    transition: none;
-  }
 }

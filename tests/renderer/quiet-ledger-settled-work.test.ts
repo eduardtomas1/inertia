@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import {
   buildResponseTimeline,
-  shouldConsolidateSettledWorkIntoRunDetails,
+  isQuietSettledTurn,
+  shouldFoldSettledTurn,
   turnExecutionElapsedMs,
   turnQueueElapsedMs,
   turnTimingLabels,
@@ -276,20 +277,33 @@ describe("Quiet Ledger settled work summary", () => {
     expect(queuedHtml).not.toContain("turn-settled-summary");
   });
 
-  it("consolidates only clean successful history with a persisted answer", () => {
+  it("folds settled history that neither failed nor waits on the reader", () => {
     const clean = responseTurn(turn("clean"), [activity("read-clean", "clean")]);
-    expect(shouldConsolidateSettledWorkIntoRunDetails(clean)).toBe(true);
+    expect(shouldFoldSettledTurn(clean)).toBe(true);
+    expect(isQuietSettledTurn(clean, false)).toBe(true);
+    expect(isQuietSettledTurn(clean, true)).toBe(false);
 
-    const exceptionalTurns: ResponseTurn[] = [
+    for (const folding of [
+      { ...clean, agentTurn: turn("stopped-clean", { status: "cancelled" }) },
+      { ...clean, agentTurn: turn("interrupted-clean", { status: "interrupted" }) },
+      { ...clean, terminalAssistantMessage: null },
+    ]) {
+      expect(shouldFoldSettledTurn(folding)).toBe(true);
+    }
+    for (const exceptional of [
+      { ...clean, agentTurn: turn("failed-clean", { status: "failed" }) },
+      { ...clean, isActive: true },
+      { ...clean, approvals: [{} as ResponseTurn["approvals"][number]] },
+      { ...clean, inputRequests: [{} as ResponseTurn["inputRequests"][number]] },
+    ]) {
+      expect(shouldFoldSettledTurn(exceptional)).toBe(false);
+      expect(isQuietSettledTurn(exceptional, false)).toBe(false);
+    }
+    for (const visible of [
       { ...clean, importantActivities: [activity("warning-clean", "clean", {
         kind: "status",
         title: "Warning: fallback used",
       })] },
-      { ...clean, agentTurn: turn("failed-clean", { status: "failed" }) },
-      { ...clean, agentTurn: turn("stopped-clean", { status: "cancelled" }) },
-      { ...clean, terminalAssistantMessage: null },
-      { ...clean, approvals: [{} as ResponseTurn["approvals"][number]] },
-      { ...clean, inputRequests: [{} as ResponseTurn["inputRequests"][number]] },
       { ...clean, systemMessages: [message(
         "notice-clean",
         "clean",
@@ -297,13 +311,13 @@ describe("Quiet Ledger settled work summary", () => {
         "Provider resumed the run.",
         requestedAt,
       )] },
-    ];
-    for (const exceptional of exceptionalTurns) {
-      expect(shouldConsolidateSettledWorkIntoRunDetails(exceptional)).toBe(false);
+    ]) {
+      expect(shouldFoldSettledTurn(visible)).toBe(true);
+      expect(isQuietSettledTurn(visible, false)).toBe(false);
     }
   });
 
-  it("keeps a partial completed turn provider-scoped with important activity folded once beneath collapsed Details", () => {
+  it("keeps important activity pinned once beneath the collapsed fold of a partial completed turn", () => {
     const agentTurn = turn("rendered");
     const html = renderTurn(agentTurn, [
       activity("successful-read", agentTurn.id),
@@ -322,27 +336,22 @@ describe("Quiet Ledger settled work summary", () => {
       }),
     ]);
 
-    expect(html).toContain('class="turn-execution-rail is-settled"');
+    expect(html).toContain('class="turn-execution-rail is-settled" data-turn-fold="closed"');
     expect(html).toContain('data-settled-work-status="completed"');
     expect(html).toContain('data-settled-work-visibility="collapsed"');
     expect(html).toContain("Codex App Server");
-    expect(html).toContain("Worked for 1m 42s · 2 actions");
-    expect(html).toContain('class="turn-settled-summary" aria-expanded="false"');
-    expect(html).toContain('aria-controls="turn-work-details-rendered"');
-    expect(html).toContain('id="turn-work-details-rendered"');
+    expect(html).toContain('<span class="turn-fold-label">Worked for 1m 42s</span>');
+    expect(html).toContain('class="turn-fold-toggle" aria-expanded="false" aria-controls="turn-fold-rendered"');
+    expect(html).toContain('class="turn-work-log turn-fold-body" id="turn-fold-rendered" hidden=""></div>');
     expect(html).not.toContain(">Details</small>");
-    expect(html).toContain("lucide-chevron-right turn-work-chevron");
+    expect(html).toContain("lucide-chevron-right turn-fold-chevron");
+    expect(html).not.toContain('data-activity-group="activity-group:successful-read"');
 
-    const detailsStart = html.indexOf("<details");
-    const detailsEnd = html.indexOf("</details>", detailsStart);
-    const details = html.slice(detailsStart, detailsEnd);
-    expect(details).not.toContain("Read source");
-    expect(details).not.toContain("Warning: provider fallback used");
-    expect(details).not.toContain("Tests failed");
+    const foldEnd = html.indexOf('id="turn-fold-rendered"');
     const pinnedStart = html.indexOf('data-activity-group="activity-group:attention:rendered"');
-    expect(pinnedStart).toBeGreaterThan(detailsEnd);
+    expect(pinnedStart).toBeGreaterThan(foldEnd);
     expect(html).toContain('data-activity-group-state="folded"');
-    expect(html).toContain('aria-label="1 command, 1 failed, 1 warning"');
+    expect(html).toContain('aria-label="Ran 1 command, 1 failed, 1 warning"');
     expect(html.indexOf("Warning: provider fallback used")).toBeGreaterThan(pinnedStart);
     expect(html.indexOf("Tests failed")).toBeGreaterThan(pinnedStart);
     expect(html.match(/data-folded="true"/g)).toHaveLength(2);
@@ -362,37 +371,35 @@ describe("Quiet Ledger settled work summary", () => {
     expect(html).not.toContain('class="turn-execution-rail is-settled"');
     expect(html).not.toContain("turn-settled-summary");
     expect(html).not.toContain("Completed without tool activity");
-    expect(html.match(/class="turn-duration" data-turn-status="completed">Worked 1m 42s/g)).toHaveLength(1);
-    expect(html.match(/Worked for 1m 42s/g) ?? []).toHaveLength(0);
+    expect(html.match(/class="turn-duration" data-turn-status="completed">Worked for 1m 42s/g)).toHaveLength(1);
+    expect(html.match(/Worked for 1m 42s/g)).toHaveLength(1);
+    expect(html).not.toContain("turn-fold-label");
     expect(html.match(/data-turn-status=/g)).toHaveLength(1);
     expect(html).not.toContain(">Completed<");
     expect(html).toContain('aria-controls="turn-run-details-no-detail-render"');
     expect(html).toContain('data-turn-layer="final-answer"');
   });
 
-  it("moves successful work behind Run details and follows the work-log collapse setting", () => {
+  it("folds successful work above the answer and follows the work-log collapse setting", () => {
     const successful = turn("auto-collapse");
     const activities = [activity("read", successful.id)];
     const collapsed = renderTurn(successful, activities, true);
     const expanded = renderTurn(successful, activities, false);
 
-    expect(collapsed).not.toContain("turn-settled-summary");
-    expect(collapsed).toContain(
-      'class="turn-run-details-toggle" id="turn-run-details-auto-collapse-label" aria-expanded="false"',
-    );
-    expect(collapsed).toContain(
-      'class="turn-run-details" id="turn-run-details-auto-collapse" aria-labelledby="turn-run-details-auto-collapse-label" hidden=""',
-    );
-    expect(collapsed).not.toContain("Execution transcript");
-    expect(collapsed).not.toContain("Read source");
-    expect(expanded).not.toContain("turn-settled-summary");
-    expect(expanded).toContain(
-      'class="turn-run-details-toggle" id="turn-run-details-auto-collapse-label" aria-expanded="true"',
-    );
-    expect(expanded).toContain(
-      'class="turn-run-details" id="turn-run-details-auto-collapse" aria-labelledby="turn-run-details-auto-collapse-label"',
-    );
-    expect(expanded).not.toContain('aria-labelledby="turn-run-details-auto-collapse-label" hidden=""');
+    for (const html of [collapsed, expanded]) {
+      expect(html).not.toContain("turn-settled-summary");
+      expect(html).toContain(
+        'class="turn-run-details-toggle" id="turn-run-details-auto-collapse-label" aria-expanded="false"',
+      );
+      expect(html).not.toContain('class="turn-duration"');
+      expect(html.indexOf('class="turn-fold-row"'))
+        .toBeLessThan(html.indexOf('data-turn-layer="final-answer"'));
+    }
+    expect(collapsed).toContain('class="turn-fold-toggle" aria-expanded="false"');
+    expect(collapsed).not.toContain('data-activity-group="activity-group:read"');
+    expect(expanded).toContain('class="turn-fold-toggle" aria-expanded="true"');
+    expect(expanded).toContain('class="turn-work-log turn-fold-body" id="turn-fold-auto-collapse">');
+    expect(expanded).toContain('data-activity-group="activity-group:read"');
   });
 
   it("settles three consecutive successful turns without duplicate work rows or durations", () => {
@@ -403,11 +410,12 @@ describe("Quiet Ledger settled work summary", () => {
         activity(`read-${successful.id}`, successful.id)),
     );
 
-    expect(html.match(/turn-agent-execution is-quiet-settled/g)).toHaveLength(3);
+    expect(html).not.toContain("is-quiet-settled");
     expect(html).not.toContain("turn-settled-summary");
-    expect(html).not.toContain("Worked for");
-    expect(html.match(/class="turn-duration" data-turn-status="completed">Worked 1m 42s/g)).toHaveLength(3);
-    expect(html).not.toContain(">Execution transcript<");
+    expect(html.match(/<span class="turn-fold-label">Worked for 1m 42s<\/span>/g)).toHaveLength(3);
+    expect(html.match(/Worked for 1m 42s/g)).toHaveLength(3);
+    expect(html).not.toContain('class="turn-duration"');
+    expect(html).not.toContain('data-activity-group="activity-group:read-success-a"');
   });
 
   it("keeps historical summaries static and never derives terminal time from a mutable clock", () => {

@@ -23,9 +23,9 @@ vi.mock("../../src/renderer/src/utils/responseTimeline", async (importOriginal) 
   const actual = await importOriginal<typeof import("../../src/renderer/src/utils/responseTimeline")>();
   return {
     ...actual,
-    activitySummaryParts: (...args: Parameters<typeof actual.activitySummaryParts>) => {
+    activitySummarySentence: (...args: Parameters<typeof actual.activitySummarySentence>) => {
       counts.groupRenders += 1;
-      return actual.activitySummaryParts(...args);
+      return actual.activitySummarySentence(...args);
     },
   };
 });

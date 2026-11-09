@@ -68,7 +68,7 @@ test("keeps an edit-heavy completed patch history terminal without historical an
   });
 
   const historyButton = activeTurn.getByRole("button", {
-    name: "1 command, 1 edit, 320 tool calls",
+    name: "Ran 1 command, made 1 edit and 320 other actions",
   });
   await expect(historyButton).toBeVisible();
   await expect(historyButton).toHaveAttribute("aria-expanded", "false");

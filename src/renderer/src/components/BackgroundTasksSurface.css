@@ -51,11 +51,20 @@
 }
 
 .background-task-title {
+  display: -webkit-box;
+  overflow: hidden;
   color: var(--text);
   font-size: var(--text-base);
   font-weight: 500;
   line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.background-task-card:has(.background-task-transcript-toggle[aria-expanded="true"]) .background-task-title {
+  display: block;
+  -webkit-line-clamp: unset;
 }
 
 .background-task-meta,

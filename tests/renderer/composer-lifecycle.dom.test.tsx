@@ -479,10 +479,10 @@ describe("composer asynchronous ownership", () => {
     const usage = within(toolbar).getByRole("group", { name: "Usage" });
     const precedes = (first: Element, second: Element): boolean =>
       Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(precedes(attach, model)).toBe(true);
-    expect(precedes(model, presets)).toBe(true);
-    expect(precedes(presets, usage)).toBe(true);
-    expect(precedes(usage, send)).toBe(true);
+    expect(precedes(model, usage)).toBe(true);
+    expect(precedes(usage, presets)).toBe(true);
+    expect(precedes(presets, attach)).toBe(true);
+    expect(precedes(attach, send)).toBe(true);
     attach.focus();
     await userEvent.setup().tab();
     expect(attach).not.toHaveFocus();
@@ -931,7 +931,7 @@ describe("composer asynchronous ownership", () => {
     await screen.findByRole("button", { name: "Remove attachment spec.pdf" });
     view.rerender(<Composer {...props} running latestTurn={{ ...latestTurn, id: "queued-turn", status: "running" }} />);
 
-    expect(input).toHaveAttribute("placeholder", "Follow up");
+    expect(input).toHaveAttribute("placeholder", "Follow up. / commands");
     expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
 
     expect(screen.queryByRole("alert")).toBeNull();

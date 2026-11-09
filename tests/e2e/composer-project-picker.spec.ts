@@ -45,29 +45,33 @@ for (const { projectName, truncated } of [
         await composer.evaluate((element, maxWidth) => {
           element.style.maxWidth = `${maxWidth}px`;
         }, width);
+        await expect.poll(() => composer.evaluate((element) => {
+          const rail = element.querySelector<HTMLElement>(".composer-primary-rail")!;
+          return rail.scrollWidth <= rail.clientWidth + 1;
+        })).toBe(true);
         const geometry = await composer.evaluate((element) => {
           const trigger = element.querySelector<HTMLElement>(".composer-project-picker-trigger")!;
           const label = trigger.querySelector<HTMLElement>("span")!;
-          const strip = element.querySelector<HTMLElement>(".composer-checkout-strip")!;
-          const branch = strip.querySelector<HTMLElement>(".composer-checkout-branch")!;
+          const rail = element.querySelector<HTMLElement>(".composer-primary-rail")!;
+          const branch = element.querySelector<HTMLElement>(".composer-checkout-context .composer-branch-control");
+          const branchShown = Boolean(branch && getComputedStyle(branch).display !== "none");
           const triggerBounds = trigger.getBoundingClientRect();
-          const stripBounds = strip.getBoundingClientRect();
-          const branchBounds = branch.getBoundingClientRect();
+          const railBounds = rail.getBoundingClientRect();
           return {
             width: element.getBoundingClientRect().width,
             labelWidth: label.clientWidth,
             labelScrollWidth: label.scrollWidth,
-            triggerContained: triggerBounds.left >= stripBounds.left
-              && triggerBounds.right <= stripBounds.right,
-            controlsSeparated: triggerBounds.right < branchBounds.left,
-            stripFits: strip.scrollWidth <= strip.clientWidth,
+            triggerContained: triggerBounds.left >= railBounds.left
+              && triggerBounds.right <= railBounds.right,
+            controlsSeparated: !branchShown || triggerBounds.right < branch!.getBoundingClientRect().left,
+            railFits: rail.scrollWidth <= rail.clientWidth + 1,
           };
         });
         expect(geometry.width).toBeCloseTo(width, 0);
         expect(geometry).toMatchObject({
           triggerContained: true,
           controlsSeparated: true,
-          stripFits: true,
+          railFits: true,
         });
         if (!truncated) {
           expect(geometry.labelScrollWidth).toBeLessThanOrEqual(geometry.labelWidth);

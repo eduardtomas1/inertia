@@ -14,7 +14,7 @@
   z-index: -1;
   inset: 0;
   pointer-events: none;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
   box-shadow: var(--shadow-float);
@@ -22,7 +22,7 @@
     border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 .composer-shell .composer:focus-within > .composer-surface {
-  border-color: var(--line);
+  border-color: var(--line-strong);
 }
 .composer-shell .composer[data-just-sent] > .composer-surface {
   animation: composer-sent 420ms ease-out;
@@ -40,67 +40,195 @@
   position: relative;
   z-index: 1;
   min-height: 0;
-  padding: 15px 18px 4px;
+  padding: var(--composer-zone-padding-top) var(--composer-zone-padding-inline) var(--composer-zone-padding-bottom);
   border: 0;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background: transparent;
   box-shadow: none;
 }
 .composer-shell .composer textarea {
-  min-height: 26px;
+  min-height: var(--composer-input-min-height);
   max-height: 200px;
 }
 .composer-shell .composer-toolbar {
+  --composer-chip-inset: 8px;
   position: static;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "rail send"
-    "strip strip";
+  grid-template-rows: var(--composer-toolbar-height);
+  grid-template-areas: "rail send";
   align-items: center;
+  column-gap: 4px;
   margin: 0;
-  padding: 0 0 7px;
+  padding: 0 calc(var(--composer-zone-padding-inline) - var(--composer-chip-inset)) var(--composer-toolbar-padding-bottom);
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-}
-.composer-shell .composer-toolbar:has(> .composer-checkout-strip) {
-  row-gap: 4px;
-  padding-bottom: 0;
 }
 .composer-shell .composer-primary-rail {
   z-index: 1;
   display: flex;
   grid-area: rail;
   min-width: 0;
+  height: 100%;
   align-items: center;
   gap: 4px;
-  padding: 2px 4px 2px 8px;
+  padding: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
 }
-.composer-shell .composer-attach-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-}
-.composer-shell .composer-attach-actions .icon-button {
-  width: var(--composer-control-height);
-  height: var(--composer-control-height);
-  min-height: var(--composer-control-height);
-  color: var(--text-muted);
-}
-.composer-shell .composer-attach-actions .icon-button:not(:disabled):hover {
-  color: var(--text);
-}
 .composer-shell .composer-options {
   flex: 0 1 auto;
   min-width: 0;
+  gap: 4px;
 }
-.composer-shell .composer-tools,
+.composer-shell .composer-options > *,
+.composer-shell .composer-setting-family > *,
+.composer-shell .composer-checkout-context > * {
+  flex: 0 0 auto;
+}
+.composer-shell .composer-options[data-fold-exhausted="true"] > :is(.model-chooser-anchor, .composer-checkout-context),
+.composer-shell .composer-options[data-fold-exhausted="true"] .composer-checkout-context > * {
+  min-width: 0;
+  flex-shrink: 1;
+}
+.composer-shell .composer-setting-family,
+.composer-shell .composer-checkout-context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.composer-shell .composer-setting-family .composer-setting-control,
+.composer-shell .composer-branch-control {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+.composer-shell [data-composer-fold][data-folded="true"],
+.composer-shell :is(.composer-setting-family, .composer-checkout-context):not(:has(> :not([data-folded="true"]))) {
+  display: none;
+}
+.composer-shell .composer-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: none;
+  height: var(--composer-control-height);
+  min-height: var(--composer-control-height);
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 var(--composer-chip-inset);
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: var(--leading-heading);
+  white-space: nowrap;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.composer-shell button.composer-chip:not(:disabled, [aria-expanded="true"]):hover {
+  color: var(--text);
+  background: var(--fill);
+}
+.composer-shell button.composer-chip[aria-expanded="true"] {
+  color: var(--text);
+  background: var(--fill-strong);
+}
+.composer-shell button.composer-chip:disabled,
+.composer-shell .composer-chip.composer-run-lock {
+  color: var(--text-muted);
+  background: transparent;
+}
+.composer-shell .composer-chip > :is(span, code) {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+}
+.composer-shell .composer-chip .composer-setting-icon,
+.composer-shell .composer-chip > .project-icon-symbol,
+.composer-shell .composer-chip > .project-custom-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: currentcolor;
+}
+.composer-shell .composer-chip:not([data-attention="true"]) .composer-setting-icon {
+  color: var(--text-muted);
+}
+.composer-shell .composer-chip .composer-setting-chevron {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  color: currentcolor;
+  opacity: 0.7;
+}
+.composer-shell .selected-model-chip {
+  gap: 4px;
+  padding: 0 var(--composer-chip-inset);
+  border-color: transparent;
+  color: var(--text);
+  background: transparent;
+}
+.composer-shell .selected-model-chip:not(:disabled, [aria-expanded="true"]):hover {
+  border-color: transparent;
+  color: var(--text);
+  background: var(--fill);
+}
+.composer-shell .selected-model-chip[aria-expanded="true"] {
+  border-color: transparent;
+  background: var(--fill-strong);
+}
+.composer-shell .selected-model-chip-label {
+  font-weight: 600;
+}
+.composer-shell .selected-model-chip-glyph {
+  color: var(--text-muted);
+}
+.composer-shell .selected-model-chip-glyph > :is(.provider-brand-icon, svg) {
+  width: 16px;
+  height: 16px;
+  flex-basis: 16px;
+  color: currentcolor;
+}
+.composer-shell .selected-model-chip-chevron {
+  width: 12px;
+  height: 12px;
+  color: currentcolor;
+  opacity: 0.7;
+}
 .composer-shell .composer-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-left: auto;
+  padding-left: 0;
+  border-left: 0;
+}
+.composer-shell .composer-actions .composer-usage {
+  margin-left: 0;
+}
+.composer-shell .composer-actions .usage-popover-trigger {
+  width: max(var(--composer-icon-button-size), var(--usage-ring-size));
+  min-width: 0;
+  height: max(var(--composer-icon-button-size), var(--usage-ring-size));
+  min-height: 0;
+  padding: 0;
+}
+.composer-shell .composer-tools {
   flex: 0 0 auto;
   padding-left: 0;
   border-left: 0;
@@ -114,28 +242,32 @@
 .composer-shell .composer-more-tools[hidden] {
   display: none;
 }
-.composer-shell .composer-tools-toggle {
-  width: var(--composer-control-height);
-  height: var(--composer-control-height);
-  margin-left: auto;
+.composer-shell .composer-attach-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+.composer-shell :is(.composer-tools-toggle, .composer-more-trigger, .composer-attach-actions .icon-button) {
+  width: var(--composer-icon-button-size);
+  height: var(--composer-icon-button-size);
+  min-height: var(--composer-icon-button-size);
+  flex: 0 0 auto;
   color: var(--text-muted);
 }
-.composer-shell .composer-tools-toggle[aria-expanded="true"] {
+.composer-shell :is(.composer-tools-toggle, .composer-more-trigger, .composer-attach-actions .icon-button):not(:disabled):hover {
+  color: var(--text);
+}
+.composer-shell :is(.composer-tools-toggle, .composer-more-trigger)[aria-expanded="true"] {
   color: var(--text);
   background: var(--fill-strong);
 }
-.composer-shell .composer-primary-rail:not(:has(> .composer-tools-toggle)) > .composer-actions {
-  margin-left: auto;
+.composer-shell :is(.composer-chip, .composer-more-trigger)[data-attention="true"] {
+  color: var(--warning);
 }
-@container (max-width: 820px) {
-  .composer-shell .composer-options {
-    min-width: var(--composer-control-height);
-  }
+@container (max-width: 820px) or ((max-width: 900px) and style(--interface-scale: large)) {
   .composer-shell .composer-primary-rail:not(:has(.prompt-presets-control, .prompt-stash-control)) > :is(.composer-tools-toggle, .composer-more-tools) {
     display: none;
-  }
-  .composer-shell .composer-primary-rail:not(:has(.prompt-presets-control, .prompt-stash-control)) > .composer-actions {
-    margin-left: auto;
   }
 }
 @container (max-width: 320px) {
@@ -150,13 +282,13 @@
   display: flex;
   grid-area: send;
   align-items: center;
-  gap: 6px;
-  padding: 2px 10px 2px 2px;
+  gap: 4px;
+  padding: 0;
 }
 .composer-shell .composer-input-actions .icon-button:where(:not(.send-button)) {
-  width: 28px;
-  height: 32px;
-  min-height: 32px;
+  width: var(--composer-icon-button-size);
+  height: var(--composer-icon-button-size);
+  min-height: var(--composer-icon-button-size);
   color: var(--text-muted);
 }
 .composer-shell .composer-input-actions .send-button {
@@ -166,70 +298,39 @@
   min-height: var(--composer-send-size);
   flex: 0 0 var(--composer-send-size);
   margin-left: 0;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
 }
-.composer-shell .selected-model-chip {
+.composer-shell .composer-input-actions .send-button[aria-disabled="true"] {
   border-color: transparent;
-  background: transparent;
+  color: var(--accent-text);
+  background: var(--accent);
+  opacity: 1;
 }
-.composer-shell .selected-model-chip:hover {
-  border-color: var(--line-strong);
-  background: var(--fill);
+.composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"], .has-label):hover {
+  transform: scale(1.05);
 }
-.composer-shell .selected-model-chip[aria-expanded="true"] {
-  border-color: var(--line-strong);
-  background: var(--fill-strong);
+@container (max-width: 420px) {
+  .composer-shell .composer-input-actions .send-button.has-label:not(:disabled, [aria-disabled="true"]):hover {
+    transform: scale(1.05);
+  }
 }
-.composer-shell .composer-setting-family {
-  gap: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
+.composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"]):active {
+  transform: scale(0.97);
 }
-.composer-shell .composer-setting-family .composer-setting-control {
-  display: inline-flex;
-  align-items: center;
+.composer-shell .composer-input-actions .send-button:is([data-composer-action-state="stop-ready"], [data-composer-action-state="stop-pending"]) {
+  border-color: transparent;
+  color: var(--surface-raised);
+  background: var(--status-failed);
 }
-.composer-shell .composer-setting-family .composer-setting-control + .composer-setting-control::before {
-  content: "·";
-  color: var(--text-muted);
-  opacity: 0.7;
+.composer-shell .composer-input-actions .send-button .composer-send-motion-icon path {
+  fill: transparent;
 }
-.composer-shell .composer-setting-family .composer-pill {
-  padding-inline: 5px;
-  color: var(--text-muted);
-}
-.composer-shell .composer-setting-family .composer-pill:hover,
-.composer-shell .composer-setting-family .composer-pill[aria-expanded="true"] {
-  color: var(--text);
-}
-.composer-shell .composer-setting-family .composer-setting-control:not(:first-child) .composer-setting-icon,
-.composer-shell .composer-setting-family .composer-setting-control:not(:last-child) .composer-setting-chevron {
-  display: none;
-}
-.composer-shell .composer-checkout-strip {
-  z-index: auto;
-  grid-area: strip;
-  height: 40px;
-  min-height: 0;
-  margin: 0;
-  padding: 0 14px 8px 18px;
-  border: 0;
-  border-top: 1px solid var(--line-soft);
-  border-radius: 0;
-  color: var(--text-muted);
-  background: transparent;
-  font-size: var(--text-sm);
-}
-.composer-shell .composer-checkout-strip.is-branch-only {
-  height: 36px;
-  border-top: 0;
-  color: var(--text-faint);
-  font-size: var(--text-xs);
-}
-.composer-shell .composer-checkout-location {
-  color: inherit;
-  font-weight: 400;
+.composer-shell .composer-input-actions .send-button:is([data-composer-action-state="stop-ready"], [data-composer-action-state="stop-pending"]) .composer-send-motion-icon path {
+  fill: currentColor;
+  transition: fill var(--dur) var(--ease) var(--dur-fast);
 }
 .composer-handoff-notice {
   display: flex;
@@ -287,22 +388,23 @@
 @container (max-width: 480px) {
   .composer-shell .composer {
     --composer-drawer-inset: 12px;
+    --composer-zone-padding-inline: 14px;
   }
-  .composer-shell .composer-primary-rail {
-    padding-left: 5px;
-  }
-  .composer-shell .composer-input-zone {
-    padding-inline: 14px;
-  }
-  .composer-shell .composer-checkout-strip {
-    padding-inline: 12px 8px;
-  }
-  .composer-input-actions {
-    padding-right: 8px;
+  .composer-shell .composer-toolbar {
+    --composer-chip-inset: 4px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .composer-shell .composer > .composer-surface {
     transition: none;
+  }
+  .composer-shell .composer-chip,
+  .composer-shell .composer-input-actions .send-button,
+  .composer-shell .composer-input-actions .send-button:is([data-composer-action-state="stop-ready"], [data-composer-action-state="stop-pending"]) .composer-send-motion-icon path {
+    transition: none;
+  }
+  .composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"]):is(:hover, :active),
+  .composer-shell .composer-input-actions .send-button.has-label:not(:disabled, [aria-disabled="true"]):hover {
+    transform: none;
   }
 }

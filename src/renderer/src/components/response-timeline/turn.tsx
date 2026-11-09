@@ -11,7 +11,14 @@ import clsx from "clsx";
 import type { SubagentTrace } from "@shared/contracts";
 import { activeWorkIdentityLabel } from "../../utils/finalAnswerIdentity";
 import {
+  subagentGroupFoldable,
+  turnAgentStatus,
+} from "../../utils/turnAgentStatus";
+import {
   answerTailCommentary,
+  shouldFoldSettledTurn,
+  turnFoldLabel,
+  turnHasFoldableWork,
   type ResponseTurn,
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
@@ -28,12 +35,20 @@ import {
 import { HtmlRenderTurnScopeProvider, TurnHtmlRenders } from "./html-render";
 import { SubagentCallContext } from "./subagentCallContext";
 import { transcriptSubagentCallMemory } from "./subagentCallMemory";
-import { sameSubagentCallsForTurn } from "../../utils/response-timeline/subagentCalls";
+import {
+  customAgentsById,
+  partitionSubagentCalls,
+  sameSubagentCallsForTurn,
+} from "../../utils/response-timeline/subagentCalls";
 import { turnCompletionAnnouncement } from "./metadata";
+import type { TurnFoldControl } from "./TurnFold";
+import { setTurnFoldOpen, useTurnFoldOpen } from "./turn-fold-store";
+import { UserRequestMeta } from "./UserRequestMeta";
 import type { ResponseTimelineProps } from "./types";
 
-const TURN_SETTLEMENT_TRANSITION_MS = 160;
+const TURN_SETTLEMENT_TRANSITION_MS = 200;
 const NO_HELD_FOLLOW_UPS: string[] = [];
+const NO_CUSTOM_AGENTS = customAgentsById(undefined);
 
 type CommentaryEntry = Extract<TurnExecutionStreamEntry, { kind: "commentary" }>;
 
@@ -174,6 +189,43 @@ function TurnTimelineComponent({
     props.projectId,
     props.projectRoot,
   ]);
+  const foldOpen = useTurnFoldOpen(turn.id, !props.autoCollapseWorkLog);
+  const groupedSubagents = useMemo(
+    () => partitionSubagentCalls(subagents ?? NO_SUBAGENTS, NO_CUSTOM_AGENTS, undefined, props.turns).remaining,
+    [props.turns, subagents],
+  );
+  const agentStatus = turnAgentStatus(groupedSubagents);
+  const agentsLive = (agentStatus?.live ?? 0) > 0;
+  const [agentsHeldOutside, setAgentsHeldOutside] = useState(agentsLive);
+  if (agentsLive && !agentsHeldOutside) setAgentsHeldOutside(true);
+  const agentsFoldable = !agentsHeldOutside && subagentGroupFoldable(agentStatus);
+  const folds = shouldFoldSettledTurn(turn);
+  const foldVisible = folds && (
+    agentsFoldable || turnHasFoldableWork(turn, { showThinking: props.showThinking })
+  );
+  const fold = useMemo<TurnFoldControl | null>(() => folds
+    ? {
+        visible: foldVisible,
+        open: foldOpen,
+        status: turn.agentTurn.status,
+        label: turnFoldLabel(turn),
+        startedAt: turn.startedAt ?? turn.requestedAt,
+        showTimes: props.showTimestamps,
+        onToggle: () => {
+          handleBeforeToggle();
+          setTurnFoldOpen(turn.id, !foldOpen);
+          window.requestAnimationFrame(handleAfterToggle);
+        },
+      }
+    : null, [
+    foldOpen,
+    foldVisible,
+    folds,
+    handleAfterToggle,
+    handleBeforeToggle,
+    props.showTimestamps,
+    turn,
+  ]);
 
   useLayoutEffect(() => {
     if (turn.isActive) answerTailWasVisible.current = answerTailVisible;
@@ -238,6 +290,13 @@ function TurnTimelineComponent({
         onBeforeToggle={handleBeforeToggle}
         onAfterToggle={handleAfterToggle}
       />
+      {!turn.watcherWake && !turn.userMessage.duoComparison && (
+        <UserRequestMeta
+          content={turn.userMessage.content}
+          createdAt={turn.userMessage.createdAt}
+          showTime={props.showTimestamps}
+        />
+      )}
 
       {omitted ? (
         <p className="response-turn-omitted" role="note">
@@ -257,6 +316,8 @@ function TurnTimelineComponent({
                 heldFollowUpIds={heldFollowUpIds}
                 timerStart={timerStart}
                 completionAnnouncement={completionAnnouncement}
+                fold={fold}
+                agentsInFold={foldVisible && agentsFoldable}
                 onBeforeToggle={handleBeforeToggle}
                 onAfterToggle={handleAfterToggle}
               />
@@ -275,6 +336,7 @@ function TurnTimelineComponent({
               turn={turn}
               props={props}
               previousArtifactTurnId={previousArtifactTurnId}
+              durationShownAbove={foldVisible}
               onBeforeToggle={handleBeforeToggle}
               onAfterToggle={handleAfterToggle}
             />

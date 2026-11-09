@@ -1,7 +1,7 @@
-import { ChevronDown } from "lucide-react";
 import { ProjectIcon, ProjectName } from "../ProjectIcon";
 import { useEffect, useRef, useState } from "react";
 import { ProjectSearchDialog } from "../ProjectSearchDialog";
+import { SettingChevron } from "./ComposerSettings";
 import type { NewChatProjectPicker } from "./types";
 
 export function ProjectPicker({ picker }: { picker: NewChatProjectPicker }): React.JSX.Element {
@@ -11,12 +11,12 @@ export function ProjectPicker({ picker }: { picker: NewChatProjectPicker }): Rea
   return (
     <div className="composer-project-picker">
       <button ref={trigger} type="button" aria-label="Project" aria-haspopup="dialog" aria-expanded={open && !picker.disabled}
-        className="composer-project-picker-trigger" disabled={picker.disabled}
+        className="composer-project-picker-trigger composer-chip" disabled={picker.disabled}
         onClick={() => setOpen((current) => !current)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
         }}>
-        <ProjectIcon project={picker.selectedProject} size={14} /><ProjectName project={picker.selectedProject}>{picker.selectedProject.name}</ProjectName><ChevronDown size={14} aria-hidden="true" />
+        <ProjectIcon project={picker.selectedProject} size={16} /><ProjectName project={picker.selectedProject}>{picker.selectedProject.name}</ProjectName><SettingChevron />
       </button>
       {open && !picker.disabled && <ProjectSearchDialog projects={picker.projects} selectedId={picker.selectedProject.id}
         onSelectNoProject={() => { if (picker.selectedProject.workspaceKind !== "scratch") picker.onChange(null); }}

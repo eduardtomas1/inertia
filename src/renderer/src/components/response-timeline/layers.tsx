@@ -21,7 +21,7 @@ import {
 import {
   activeAgentPresentation,
   buildTurnExecutionStream,
-  shouldConsolidateSettledWorkIntoRunDetails,
+  isQuietSettledTurn,
   type ActiveAgentPhase,
   type ResponseTurn,
 } from "../../utils/responseTimeline";
@@ -41,10 +41,10 @@ import {
   workingOrbSyncKey,
 } from "../working-indicator/orbMotion";
 import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
-import { TurnAgentsLine } from "./TurnAgentsLine";
 import { MessageAgentCall } from "./MessageAgentCall";
 import { SubagentCallList } from "./SubagentCallBlock";
 import { customAgentsById, partitionSubagentCalls } from "../../utils/response-timeline/subagentCalls";
+import { SubagentGroup } from "./SubagentGroup";
 import { UnlinkedSubagentRows } from "./SubagentActivityRow";
 import {
   createSubagentActivityStore,
@@ -55,7 +55,6 @@ import { useFreshRequest } from "./useFreshRequest";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
   LiveElapsed,
-  SettledWorkDetails,
   WorkLog,
 } from "./activity";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
@@ -66,6 +65,7 @@ import {
 } from "./changedFiles";
 import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
+import type { TurnFoldControl } from "./TurnFold";
 import "./ConversationContextProvenance.css";
 import { TooltipText } from "../TooltipText";
 
@@ -268,6 +268,8 @@ export function AgentExecutionLayer({
   heldFollowUpIds,
   timerStart,
   completionAnnouncement,
+  fold,
+  agentsInFold,
   onBeforeToggle,
   onAfterToggle,
 }: {
@@ -280,6 +282,8 @@ export function AgentExecutionLayer({
   heldFollowUpIds: string[];
   timerStart: string;
   completionAnnouncement: string;
+  fold: TurnFoldControl | null;
+  agentsInFold: boolean;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
@@ -300,7 +304,7 @@ export function AgentExecutionLayer({
     stopPressedAtRef.current = pressedAt;
     props.onStop();
   };
-  const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
+  const consolidatesSettledWork = isQuietSettledTurn(turn, fold?.visible ?? false);
   const settledCompactions = useMemo(
     () => turn.isActive
       ? []
@@ -326,6 +330,27 @@ export function AgentExecutionLayer({
     subagentCalls.remaining,
     new Set([...turn.activities, ...turn.importantActivities].map(({ id }) => id)),
   ), [subagentCalls.remaining, turn.activities, turn.importantActivities]);
+  const subagentGroup = (
+    <SubagentGroup
+      conversationId={props.conversationId}
+      turnId={turn.id}
+      subagents={subagentCalls.remaining}
+      onOpenSurface={props.onOpenSurface}
+      onBeforeToggle={onBeforeToggle}
+      onAfterToggle={onAfterToggle}
+    />
+  );
+  const groupInFold = agentsInFold && !turn.isActive && !consolidatesSettledWork;
+  const delegatedWork = (
+    <>
+      <UnlinkedSubagentRows
+        traces={unlinkedSubagents}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
+      {subagentGroup}
+    </>
+  );
   return (
     <section
       className={clsx(
@@ -400,7 +425,10 @@ export function AgentExecutionLayer({
           />
         </div>
       ) : !consolidatesSettledWork ? (
-        <div className="turn-execution-rail is-settled">
+        <div
+          className="turn-execution-rail is-settled"
+          data-turn-fold={fold?.visible ? fold.open ? "open" : "closed" : undefined}
+        >
           <WorkLog
             key="work-log"
             turn={turn}
@@ -418,6 +446,8 @@ export function AgentExecutionLayer({
             onOpenProjectFile={props.onOpenTurnFile}
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
+            fold={fold}
+            foldedWork={groupInFold ? delegatedWork : null}
           />
         </div>
       ) : null}
@@ -427,17 +457,7 @@ export function AgentExecutionLayer({
       {!turn.isActive && consolidatesSettledWork && (
         <SubagentCallList entries={subagentCalls.entries} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />
       )}
-      <UnlinkedSubagentRows
-        traces={unlinkedSubagents}
-        onBeforeToggle={onBeforeToggle}
-        onAfterToggle={onAfterToggle}
-      />
-      <TurnAgentsLine
-        conversationId={props.conversationId}
-        turnId={turn.id}
-        subagents={subagentCalls.remaining}
-        onOpenSurface={props.onOpenSurface}
-      />
+      {!groupInFold && delegatedWork}
       <span
         className="visually-hidden"
         role="status"
@@ -544,21 +564,17 @@ export function SupportingLedgerLayer({
   turn,
   props,
   previousArtifactTurnId,
+  durationShownAbove = false,
   onBeforeToggle,
   onAfterToggle,
 }: {
   turn: ResponseTurn;
   props: ResponseTimelineProps;
   previousArtifactTurnId: string | null;
+  durationShownAbove?: boolean;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
-  const consolidatesSettledWork = !turn.isActive
-    && shouldConsolidateSettledWorkIntoRunDetails(turn);
-  const settledWorkStream = useMemo(
-    () => consolidatesSettledWork ? buildTurnExecutionStream(turn) : [],
-    [consolidatesSettledWork, turn],
-  );
   if (turn.isActive) {
     return props.showTimestamps
       ? (
@@ -572,12 +588,6 @@ export function SupportingLedgerLayer({
         )
       : null;
   }
-  const includesReasoning = consolidatesSettledWork
-    && props.showThinking
-    && Boolean(turn.reasoning?.content);
-  const hasSettledWorkDetails = settledWorkStream.length > 0
-    || includesReasoning
-    || turn.plans.length > 0;
   const showChangedFiles = props.showChangedFileSummaries
     && turn.gitArtifact !== null
     && shouldShowChangedFilesSummary(turn.gitArtifact);
@@ -596,25 +606,7 @@ export function SupportingLedgerLayer({
           turn={turn}
           terminalAnswer={turn.terminalAssistantMessage}
           showTimestamp={props.showTimestamps}
-          settledWorkDetails={hasSettledWorkDetails
-            ? (
-                <SettledWorkDetails
-                  entries={settledWorkStream}
-                  turn={turn}
-                  reasoningContent={turn.reasoning?.content ?? ""}
-                  includesReasoning={includesReasoning}
-                  projectRoot={props.projectRoot}
-                  projectId={props.projectId}
-                  conversationId={props.conversationId}
-                  defaultCodeWrap={props.defaultCodeWrap}
-                  onOpenProjectFile={props.onOpenTurnFile}
-                  onBeforeToggle={onBeforeToggle}
-                  onAfterToggle={onAfterToggle}
-                />
-              )
-            : null}
-          workDetailsExpandedByDefault={hasSettledWorkDetails
-            && !props.autoCollapseWorkLog}
+          durationShownAbove={durationShownAbove}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />

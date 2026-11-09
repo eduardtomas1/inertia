@@ -208,6 +208,7 @@ export const claudeHandledSystemSubtypes = {
   permission_denied: true,
   mirror_error: true,
   informational: true,
+  session_writes_lost: true,
 } as const satisfies Record<ClaudeSystemMessageSurface["subtype"], true>;
 
 export type ClaudeAssistantRecoverySurface = Pick<

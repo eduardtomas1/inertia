@@ -10,6 +10,7 @@ import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/mi
 import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
 import { defaultSettings } from "../../src/shared/contracts/app";
 import { restoredDefaultSettings } from "../../src/shared/restore-defaults";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { removeTemporaryDirectory } from "../helpers/temporary-directory";
 
 const directories: string[] = [];
@@ -103,6 +104,63 @@ describe("compact on return setting", () => {
       expect(reopened.snapshot().settings.compactOnReturn).toBe("offer");
     } finally {
       reopened.close();
+    }
+  });
+});
+
+describe("context compaction settings", () => {
+  it("default to compacting on return at a 400K Claude window, persist across restart and restore their defaults", () => {
+    const { path, workspace } = workspaceRoot();
+    const store = new RuntimeStore(path, workspace, { recoverInterruptedRuns: false });
+    expect(store.settings()).toMatchObject({ compactOnReturn: "offer", compactBeforeCacheExpires: false, claudeAutoCompactWindow: 400_000 });
+    store.updateSettings({ compactBeforeCacheExpires: true, claudeAutoCompactWindow: null });
+    store.updateSettings({ notifyOnlyInBackground: true });
+    store.close();
+    const reopened = new RuntimeStore(path, workspace, { recoverInterruptedRuns: false });
+    try {
+      expect(reopened.snapshot().settings).toMatchObject({ compactBeforeCacheExpires: true, claudeAutoCompactWindow: null });
+      reopened.updateSettingsClearingGlobalDefault(restoredDefaultSettings(reopened.snapshot().settings));
+      expect(reopened.settings()).toMatchObject({ compactBeforeCacheExpires: false, claudeAutoCompactWindow: 400_000 });
+    } finally {
+      reopened.close();
+    }
+  });
+});
+
+describe("idle compaction candidates", () => {
+  it("lists large Claude chats in the window with stored cache facts, oldest request first, and leaves out archived, small and other providers' chats", () => {
+    const { path, workspace } = workspaceRoot();
+    const store = new RuntimeStore(path, workspace, { recoverInterruptedRuns: false });
+    try {
+      const project = store.createProject("Candidates", workspace);
+      const chat = (title: string, used: number, startedAt: string | null, source: "reported" | "assumed" | null = "reported", providerId: "claude" | "codex" = "claude") => {
+        const conversation = store.createConversation(project.id, title, {
+          modelSelection: providerNativeModelSelection({ providerId }),
+        });
+        store.upsertUsage({
+          conversationId: conversation.id,
+          ...usage,
+          usedTokens: used,
+          ...(source && startedAt ? { promptCache: { lastRequestStartedAt: startedAt, lifetimeMs: 3_600_000, source } } : {}),
+        });
+        return conversation;
+      };
+      const newer = chat("Newer", 400_000, "2030-01-01T10:30:00.000Z");
+      const older = chat("Older", 300_000, "2030-01-01T10:00:00.000Z", "assumed");
+      chat("Small", 120_000, "2030-01-01T10:10:00.000Z");
+      chat("Stale", 500_000, "2030-01-01T07:00:00.000Z");
+      chat("Too recent", 500_000, "2030-01-01T10:50:00.000Z");
+      chat("Codex", 500_000, "2030-01-01T10:15:00.000Z", "reported", "codex");
+      chat("No facts", 500_000, null, null);
+      const archived = chat("Archived", 500_000, "2030-01-01T10:20:00.000Z");
+      store.archiveConversation(archived.id, true);
+
+      expect(store.idleCompactionCandidates.candidates({ startedSince: "2030-01-01T09:00:00.000Z", startedBefore: "2030-01-01T10:45:00.000Z", minimumTokens: 200_000 })).toEqual([
+        { conversationId: older.id, usedTokens: 300_000, promptCache: { lastRequestStartedAt: "2030-01-01T10:00:00.000Z", lifetimeMs: 3_600_000, source: "assumed" } },
+        { conversationId: newer.id, usedTokens: 400_000, promptCache: { lastRequestStartedAt: "2030-01-01T10:30:00.000Z", lifetimeMs: 3_600_000, source: "reported" } },
+      ]);
+    } finally {
+      store.close();
     }
   });
 });

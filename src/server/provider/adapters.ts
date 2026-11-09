@@ -13,6 +13,7 @@ import {
   type ModelBackendProfile,
 } from "../../shared/model-routing";
 import { MAX_CLAUDE_TURN_BUDGET_USD } from "../../shared/project-preferences";
+import { validClaudeAutoCompactWindow } from "../../shared/compact-on-return";
 import {
   PROVIDER_IDS,
   ProviderRuntimeError,
@@ -153,6 +154,19 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     throw new ProviderRuntimeError(
       "invalid_input",
       "The spend limit is invalid.",
+    );
+  }
+  if (
+    input.autoCompactWindow !== undefined
+    && (
+      input.harnessId !== "claude-agent-sdk"
+      || input.autoCompactWindow === null
+      || !validClaudeAutoCompactWindow(input.autoCompactWindow)
+    )
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The automatic compaction window is invalid.",
     );
   }
   if (

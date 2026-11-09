@@ -1,6 +1,9 @@
 import type { AppSettings } from "@shared/contracts";
-import { DEFAULT_COMPACT_ON_RETURN } from "@shared/compact-on-return";
-import { SettingRadioGroup, SettingSwitch, type SettingOption } from "../SettingControls";
+import {
+  CLAUDE_AUTO_COMPACT_WINDOWS,
+  DEFAULT_COMPACT_ON_RETURN,
+} from "@shared/compact-on-return";
+import { SettingRadioGroup, SettingSelect, SettingSwitch, type SettingOption } from "../SettingControls";
 import { SettingsGroup } from "../SettingsLayout";
 import { NewChatDefaults, type NewChatDefaultsProps } from "./NewChatDefaults";
 import { TerminalFontSize } from "./TerminalFontSize";
@@ -10,10 +13,37 @@ const USAGE_DISPLAY_MODES: readonly SettingOption<AppSettings["usageDisplayMode"
   { value: "hidden", label: "Hidden" },
 ];
 
-const COMPACT_ON_RETURN_CHOICES: readonly SettingOption<AppSettings["compactOnReturn"]>[] = [
-  { value: "offer", label: "Offer" },
+type CompactLargeChats = "on-return" | "before-expiry" | "never";
+
+const COMPACT_LARGE_CHATS_CHOICES: readonly SettingOption<CompactLargeChats>[] = [
+  { value: "on-return", label: "When you return" },
+  { value: "before-expiry", label: "Before the cache expires" },
   { value: "never", label: "Never" },
 ];
+
+const CLAUDE_DEFAULT_WINDOW = "claude-code-default";
+
+const AUTO_COMPACT_WINDOW_CHOICES: readonly SettingOption<string>[] = [
+  ...CLAUDE_AUTO_COMPACT_WINDOWS.map((tokens) => ({ value: String(tokens), label: `${tokens / 1000}K tokens` })),
+  { value: CLAUDE_DEFAULT_WINDOW, label: "Claude Code default" },
+];
+
+function compactLargeChats(settings: Pick<AppSettings, "compactOnReturn" | "compactBeforeCacheExpires">): CompactLargeChats {
+  if ((settings.compactOnReturn ?? DEFAULT_COMPACT_ON_RETURN) === "never") return "never";
+  return settings.compactBeforeCacheExpires ? "before-expiry" : "on-return";
+}
+
+function compactLargeChatsUpdate(choice: CompactLargeChats): Pick<AppSettings, "compactOnReturn" | "compactBeforeCacheExpires"> {
+  return {
+    compactOnReturn: choice === "never" ? "never" : "offer",
+    compactBeforeCacheExpires: choice === "before-expiry",
+  };
+}
+
+function autoCompactWindowValue(window: AppSettings["claudeAutoCompactWindow"]): string {
+  if (window === null) return CLAUDE_DEFAULT_WINDOW;
+  return AUTO_COMPACT_WINDOW_CHOICES.some(({ value }) => value === String(window)) ? String(window) : CLAUDE_DEFAULT_WINDOW;
+}
 
 export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
   const { settings, disabled, onUpdate } = props;
@@ -40,14 +70,26 @@ export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
           disabled={disabled}
           onChange={(usageDisplayMode) => onUpdate({ usageDisplayMode })}
         />
+      </SettingsGroup>
+
+      <SettingsGroup title="Context" headingId="context-heading">
         <SettingRadioGroup
           id="compact-on-return"
-          title="Compact large API chats when you return"
-          description="Offers Compact and send when you return to a chat of 200K tokens or more on an Anthropic or OpenAI API key after its prompt cache has expired. Later turns then cost less. Enter follows the button."
-          value={settings.compactOnReturn ?? DEFAULT_COMPACT_ON_RETURN}
-          options={COMPACT_ON_RETURN_CHOICES}
+          title="Compact large chats"
+          description="Once a chat of 200K tokens or more outlives its prompt cache, Send becomes Compact and send. Before the cache expires (beta) compacts idle Claude chats two minutes before their one-hour cache runs out."
+          value={compactLargeChats(settings)}
+          options={COMPACT_LARGE_CHATS_CHOICES}
           disabled={disabled}
-          onChange={(compactOnReturn) => onUpdate({ compactOnReturn })}
+          onChange={(choice) => onUpdate(compactLargeChatsUpdate(choice))}
+        />
+        <SettingSelect
+          id="claude-auto-compact"
+          title="Auto-compact Claude chats after"
+          description="Claude Code summarizes a chat on its own just before this size. Its default waits until about 967K tokens on 1M-token models."
+          value={autoCompactWindowValue(settings.claudeAutoCompactWindow)}
+          options={AUTO_COMPACT_WINDOW_CHOICES}
+          disabled={disabled}
+          onChange={(value) => onUpdate({ claudeAutoCompactWindow: value === CLAUDE_DEFAULT_WINDOW ? null : Number(value) })}
         />
       </SettingsGroup>
 

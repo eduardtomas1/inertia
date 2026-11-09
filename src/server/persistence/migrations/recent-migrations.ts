@@ -28,6 +28,7 @@ import { watcherAccessMigration } from "./watcher-access";
 import { extendBackendPresetsMigration } from "./extend-backend-presets";
 import { persistTurnFailureKindsMigration } from "./persist-turn-failure-kinds";
 import { persistCompactOnReturnMigration } from "./persist-compact-on-return";
+import { contextCompactionSettingsMigration } from "./context-compaction-settings";
 import { duoComparisonBriefsMigration } from "./duo-comparison-briefs";
 import { turnScopedIndexesMigration } from "./turn-scoped-indexes";
 import { libraryMigration } from "./library";
@@ -75,4 +76,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   codexThreadToolPacksMigration,
   subagentTaskShapeMigration,
   nativeGrokProviderMigration,
+  contextCompactionSettingsMigration,
 ];

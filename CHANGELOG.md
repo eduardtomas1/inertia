@@ -4,6 +4,31 @@ The useful changes in each Inertia release, in plain language.
 
 ## Unreleased
 
+### Usage
+
+- Long Claude chats on a subscription now offer **Compact and send** when you
+  return after their one-hour prompt cache has expired, as API key chats
+  already did, so the next turns re-read a short summary instead of the whole
+  history.
+- **Settings → Chats → Context → Compact large chats** can also compact an
+  idle Claude chat about two minutes before its cache expires (**Before the
+  cache expires**, beta), while its history is still cheap to read.
+- Claude chats compact on their own at 400K tokens instead of about 967K on
+  1M-token models. **Auto-compact Claude chats after** sets 200K, 300K, 400K,
+  600K tokens or Claude Code's own default.
+- A new session after a provider switch carries up to 64 KiB of the chat's
+  earlier messages instead of 192 KiB, and points the agent at
+  `inertia_request_context` for older turns.
+- Inertia's own tools load only when Claude searches for them, also inside
+  subagents, instead of being sent with every request. Because the tool list
+  changes, each existing Claude chat re-reads its history uncached once, on its
+  first turn after the update.
+- Claude's context meter reads its counts from the last response instead of
+  asking the token-count API after every message.
+- `npm run usage:claude` summarizes Claude Code's own transcripts: weighted
+  tokens per output token, context sizes, compactions and cache rebuilds, per
+  app and for main chats and subagents separately.
+
 ### Chats
 
 - Choosing Build or Plan right after a chat's first reply is no longer

@@ -288,7 +288,7 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     harnessId: "claude-agent-sdk",
     implementationRevision: 1,
     protocolRevision: "claude-agent-sdk/messages-v1",
-    bundledSdkVersion: "0.3.314",
+    bundledSdkVersion: "0.3.319",
     requiresConfiguration: ["custom-backend", "endpoint-selection"],
     support: {
       ...CORE_NATIVE,
@@ -307,8 +307,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "cursor",
     harnessId: "cursor-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-2.1.0/cursor",
-    bundledSdkVersion: "2.1.0",
+    protocolRevision: "acp-v1/sdk-2.4.0/cursor",
+    bundledSdkVersion: "2.4.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",
@@ -324,8 +324,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "kimi",
     harnessId: "kimi-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-2.1.0/kimi",
-    bundledSdkVersion: "2.1.0",
+    protocolRevision: "acp-v1/sdk-2.4.0/kimi",
+    bundledSdkVersion: "2.4.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",
@@ -374,8 +374,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "grok",
     harnessId: "grok-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-2.1.0/grok",
-    bundledSdkVersion: "2.1.0",
+    protocolRevision: "acp-v1/sdk-2.4.0/grok",
+    bundledSdkVersion: "2.4.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",

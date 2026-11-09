@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { describe, expect, it } from "vitest";
 
-import { parseAcpSessionNotification } from "../../src/server/provider/acp-json-rpc";
+import { parseAcpSessionNotification, validAcpJsonRpcEnvelope } from "../../src/server/provider/acp-json-rpc";
 
 describe("ACP session update validation", () => {
   it("accepts plan entries the agent cancelled", () => {
@@ -157,6 +157,17 @@ describe("ACP session update validation", () => {
         update: { sessionUpdate },
       })).toThrow("malformed session update envelope");
     }
+  });
+
+  it("rejects JSON-RPC batch frames before the SDK sees them", () => {
+    const notification = {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: { sessionId: "session-1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hi" } } },
+    };
+    expect(validAcpJsonRpcEnvelope(notification)).toBe(true);
+    expect(validAcpJsonRpcEnvelope([notification])).toBe(false);
+    expect(validAcpJsonRpcEnvelope([])).toBe(false);
   });
 
   it("keeps protocol identifiers bounded and control-free", () => {

@@ -152,6 +152,18 @@ describe("Claude startup failures", () => {
   });
 
   it.each([
+    ["initialize_not_first", "Claude Code didn't receive Inertia's start request first. If Claude Code runs through a wrapper script, make sure it passes input through unchanged."],
+    ["config_file_invalid", "A Claude Code configuration file isn't valid JSON. Repair the file named in the details, then try again."],
+  ] as const)("explains %s without offering a fresh session", (reason, message) => {
+    const result = failedResult({
+      startup_failure_reason: reason,
+      errors: ["Claude Code refused to start."],
+    }) as Extract<SDKMessage, { type: "result" }>;
+    expect(claudeStartupFailure(result)).toEqual({ reason, message });
+    expect(claudeSessionUnavailable(result)).toBe(false);
+  });
+
+  it.each([
     [savedSessionId, true],
     [undefined, false],
   ] as const)("marks a missing conversation as an unavailable session only when resuming (%s)", async (sessionId, unavailable) => {

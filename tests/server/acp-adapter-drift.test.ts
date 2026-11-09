@@ -153,6 +153,7 @@ describe.each(["cursor", "kimi"] as const)("%s ACP drift regressions", (provider
 
   it.each([
     { sessionUpdate: "subagent_update", sessionId: "child-session", title: "Fixture child" },
+    { sessionUpdate: "subagent_update", sessionId: "child-session", cwd: 42 },
     { sessionUpdate: "session_message", messageId: "message-1", content: [{ type: "text", text: "Hello" }] },
     { sessionUpdate: "session_message_chunk", messageId: "message-1", content: { type: "text", text: "Hello" } },
   ])("rejects an unnegotiated ACP 1.7 $sessionUpdate and confirms cleanup", async (update) => {

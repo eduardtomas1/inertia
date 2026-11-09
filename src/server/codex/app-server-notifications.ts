@@ -14,6 +14,7 @@ export const CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS = {
   "thread/reverted": "projected",
   "skills/changed": "ignored",
   "thread/name/updated": "ignored",
+  "thread/section/changed": "ignored",
   // Codex 0.155: thread attachment bookkeeping; Inertia owns its own
   // attachment store and never reads Codex's copy.
   "thread/attachment/updated": "ignored",

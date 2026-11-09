@@ -45,6 +45,7 @@ test("new draft has a painted, clickable composer and can reference a chat", asy
     await page.getByRole("button", { name: "Start a new chat", exact: true }).click();
     const editor = page.getByLabel("Message", { exact: true });
     await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
     await page.getByRole("heading", { name: "What should we build today?" }).click();
     const empty = await page.screenshot({ animations: "disabled", scale: "css",
       path: testInfo.outputPath(`composer-empty-${theme}.png`) });

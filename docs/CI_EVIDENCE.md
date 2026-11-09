@@ -24,7 +24,7 @@ It does not select only tests whose filenames changed.
 | --- | --- | --- |
 | Draft feedback | Shared quality/lineage, full canonical Linux coverage for code, selected native interaction/provider sentinels; clean minimum Node when its contract changes | `merge-ready` deliberately fails: draft feedback is not merge approval. |
 | Merge validation | Quality/lineage once; canonical Linux coverage for code; contract-selected interaction, provider/native and package evidence | Ready-for-review and every subsequent head run the required plan. |
-| Main validation | Quality/lineage only when the squash commit's tree equals the head of its merged PR, whose CI run has a successful `merge-ready`, and the previous main commit is an ancestor of that head; performance changes still run the complete plan | Any missing PR, run, tree match, ancestry or API answer requires the complete plan. |
+| Main validation | Quality/lineage only when the squash commit's tree equals the head of its merged PR, whose CI run has a successful `merge-ready`, and the previous main commit is an ancestor of that head; a change to `benchmarks/` or `tests/performance/` still runs the complete plan so its measurement lands on main | Any missing PR, run, tree match, ancestry or API answer requires the complete plan. |
 | Nightly certification | All six native targets with every Electron project, full units/portable contracts, packages and the Linux x64 desktop benchmark | Each native matrix (package and Electron) is limited to two simultaneous target jobs; every failed attempt still fails certification. |
 | Release certification | Shared quality once on frozen release SHA; every shipped native target, exact packages/signatures/fuses/upgrades/checksums/provenance | Separate non-cancellable tag owner; no PR artifact reuse or trust-policy change. |
 
@@ -37,9 +37,12 @@ portable contracts, and Windows retains native Codex shim/discovery proof.
 OS-specific package paths select both architectures of that OS plus canonical
 coverage. Shared lifecycle, startup, containment, migrations, shared contracts,
 test infrastructure and native Electron verifier changes under `tests/e2e/`
-require the primary targets (Linux x64, Windows x64, macOS arm64). Dependency
+require the primary targets (Linux x64, Windows x64, macOS arm64), and so do
+unmodeled files under `src/` and `tests/`: they still fail open to every domain,
+but TypeScript is compiled identically for every architecture, and the
+architecture-specific sources are enumerated separately. Dependency
 graphs, workflows, CI scripts, native and packaging sources, updater and guardian
-code, and unknown changes require all six targets; outside the nightly, the
+code, and other unknown changes require all six targets; outside the nightly, the
 sibling architectures (Linux ARM64, Windows ARM64, macOS x64) run only the
 runtime-recovery Electron project. Nightly and release run every project on all
 six. This rule precedes

@@ -86,6 +86,10 @@ function isNativeArchitecturePath(path) {
   return NATIVE_ARCHITECTURE_PATHS.some((pattern) => pattern.test(path));
 }
 
+function isArchitectureIndependentSource(path) {
+  return /^(?:src|tests)\//u.test(path) && !isNativeArchitecturePath(path);
+}
+
 function providerDomains(path) {
   const domains = new Set(["provider_common", "turn_session", "agent_management"]);
   const providerMatchers = [
@@ -197,6 +201,13 @@ function domainsForTestPath(path) {
 
 function domainsForKnownPath(path) {
   if (isDocumentation(path)) return { domains: new Set(), documentation: true };
+
+  if (path === "scripts/check-renderer-bundle.mjs") {
+    return { domains: new Set(["renderer_ui"]) };
+  }
+  if (path === "database-migration-lineage.json") {
+    return { domains: new Set(["database_migrations"]) };
+  }
 
   if (path.startsWith("tests/") || path.startsWith("benchmarks/")) {
     return domainsForTestPath(path);
@@ -341,6 +352,7 @@ export function classifyChangedPaths(inputPaths) {
       allEvidence: true,
       fullCertification: true,
       nativeArchitecture: true,
+      measuredPerformance: true,
       documentationOnly: false,
       domains: [...CHANGE_DOMAINS],
       reasons: ["empty-or-unavailable-diff"],
@@ -352,6 +364,7 @@ export function classifyChangedPaths(inputPaths) {
   let broad = false;
   let full = false;
   let nativeArchitecture = false;
+  let measuredPerformance = false;
   let documentationOnly = true;
 
   for (const input of inputPaths) {
@@ -366,7 +379,7 @@ export function classifyChangedPaths(inputPaths) {
     const result = domainsForKnownPath(path);
     if (result === null) {
       broad = true;
-      nativeArchitecture = true;
+      if (!isArchitectureIndependentSource(path)) nativeArchitecture = true;
       documentationOnly = false;
       reasons.add(`unclassified:${path}`);
       continue;
@@ -378,6 +391,7 @@ export function classifyChangedPaths(inputPaths) {
     }
     if (result.broad) broad = true;
     if (result.full) full = true;
+    if (!result.broad && result.domains.has("performance")) measuredPerformance = true;
     for (const domain of result.domains) domains.add(domain);
   }
 
@@ -392,6 +406,7 @@ export function classifyChangedPaths(inputPaths) {
       (domain) => FULL_CERTIFICATION_DOMAINS.has(domain),
     ),
     nativeArchitecture,
+    measuredPerformance,
     documentationOnly,
     domains: CHANGE_DOMAINS.filter((domain) => domains.has(domain)),
     reasons: [...reasons].sort(),

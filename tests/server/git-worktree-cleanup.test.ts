@@ -1314,7 +1314,9 @@ describe("launch-owned Git cleanup", () => {
     writeFileSync(join(worktreesDirectory, "scan-keeper"), "", "utf8");
     await removeWorktree(root, path, true);
     let parentProbeCount = 0;
-    const startedAt = Date.now();
+    let parentProbeSpawnCount = 0;
+    let deadlineExpiredAt = 0;
+    const validProbe = linuxBirthtimeProbe("valid");
 
     await expect(inspectOwnedWorktreeCleanupState(
       root,
@@ -1328,20 +1330,27 @@ describe("launch-owned Git cleanup", () => {
       {
         administrativeScanTimeoutMs: 80,
         filesystemIdentity: {
-          ...linuxBirthtimeProbe("valid"),
+          ...validProbe,
+          linuxStatArguments: (descriptorPath, identityPath) => {
+            if (basename(identityPath) === "worktrees") parentProbeSpawnCount += 1;
+            return validProbe.linuxStatArguments!(descriptorPath, identityPath);
+          },
           beforeLinuxStatProbe: async (identityPath) => {
             if (basename(identityPath) !== "worktrees") return;
             parentProbeCount += 1;
             if (parentProbeCount === 2) {
               await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+              deadlineExpiredAt = Date.now();
             }
           },
         },
       },
     )).rejects.toMatchObject({ code: "timeout" });
 
-    expect(Date.now() - startedAt).toBeLessThan(1_500);
+    expect(deadlineExpiredAt).toBeGreaterThan(0);
+    expect(Date.now() - deadlineExpiredAt).toBeLessThan(1_500);
     expect(parentProbeCount).toBe(2);
+    expect(parentProbeSpawnCount).toBe(1);
     expect(git(root, "rev-parse", branch)).toBe(ownership.head);
   });
 

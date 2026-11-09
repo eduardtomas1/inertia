@@ -94,6 +94,7 @@ import { requestSubagentFollowUp, SUBAGENT_FOLLOW_UP_UNAVAILABLE } from "./utils
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import { liveTerminalIdsForHandoff } from "./components/terminalTabStorage";
 import type { AppView } from "./appView";
+import { focusNewChatComposer } from "./utils/focusNewChatComposer";
 import { useWatcherSurfaceController } from "./hooks/useWatcherSurface";
 import { WatcherContext } from "./components/watcher/watcherContext";
 import { WatcherAttachHost } from "./components/watcher/WatcherAttachHost";
@@ -716,7 +717,7 @@ export default function App(): React.JSX.Element {
         ) {
           discardDraftConversation();
           setView("workspace");
-          setSidebarOpen(false);
+          setSidebarOpen(false); focusNewChatComposer();
         }
       })
       .catch((error: unknown) => {

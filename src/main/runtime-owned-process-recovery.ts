@@ -399,10 +399,10 @@ export function recoverRuntimeOwnedProcesses(
   }
   const session = journal.sessionExact(runtimeGenerationId);
   // A crash can interrupt a child temporary before its payload is complete.
-  // Fence this exact exited/prior Darwin writer before reading claims, so the
+  // Fence this exact exited/prior writer before reading claims, so the
   // existing journal settlement can discard only uncommitted temporaries.
   // Canonical malformed claims remain unreadable and cannot be retired here.
-  if (platform === "darwin" && session && !journal.fenceSessionExact(session)) return false;
+  if (session && !journal.fenceSessionExact(session)) return false;
   let records = journal.records(runtimeGenerationId);
   if (!records && session === null) return null;
   if (records?.length === 0) return true;
@@ -638,7 +638,6 @@ export function recoverRuntimeOwnedProcesses(
             candidate.ownershipId === record.ownershipId)) continue;
         }
         if (Date.now() >= processProofDeadlineAt) return false;
-        if (record.state === "owned" && !journal.retire(record.ownershipId)) return false;
         if (!recoverLinuxGuardian(record.process, options.darwinGuardianPath)) return false;
         while (Date.now() < processProofDeadlineAt && readIdentity(identity.pid)) {
           await waitForProcessGroupDrain(PROCESS_GROUP_DRAIN_POLL_MS);

@@ -22,6 +22,62 @@ describe("CI change classifier", () => {
     }
   });
 
+  it("keeps unmodeled TypeScript sources broad on the primary targets without sibling architectures", () => {
+    for (const path of [
+      "src/server/index.ts",
+      "src/main/index.ts",
+      "src/main/external-link-open.ts",
+      "src/node/conversation-attachment-store.ts",
+      "src/preload/index.ts",
+      "tests/server/unclassified-new-area.test.ts",
+      "tests/contracts.test.ts",
+      "tests/server/__snapshots__/runtime-query-plans.test.ts.snap",
+    ]) {
+      const result = classifyChangedPaths([path]);
+      expect(result.allEvidence, path).toBe(true);
+      expect(result.fullCertification, path).toBe(true);
+      expect(result.nativeArchitecture, path).toBe(false);
+      expect(result.domains, path).toEqual(CHANGE_DOMAINS);
+      expect(result.reasons, path).toContain(`unclassified:${path}`);
+    }
+    for (const path of [
+      "src/main/app-update-release-notes.ts",
+      "src/main/windows-runtime-job.ts",
+      "src/node/runtime-owned-process-linux.ts",
+      "scripts/visual-evidence.mjs",
+      "resources/icon.png",
+    ]) {
+      expect(classifyChangedPaths([path]).nativeArchitecture, path).toBe(true);
+    }
+  });
+
+  it("routes the renderer bundle budgets and the migration lineage manifest to their owners", () => {
+    const bundle = classifyChangedPaths(["scripts/check-renderer-bundle.mjs"]);
+    expect(bundle).toMatchObject({ allEvidence: false, fullCertification: false, nativeArchitecture: false });
+    expect(bundle.domains).toEqual(["quality_shared", "renderer_ui"]);
+
+    const lineage = classifyChangedPaths(["database-migration-lineage.json"]);
+    expect(lineage).toMatchObject({ allEvidence: false, fullCertification: true, nativeArchitecture: false });
+    expect(lineage.domains).toEqual(["quality_shared", "database_migrations"]);
+  });
+
+  it("marks only an owned benchmark change, not failing open, as measured performance", () => {
+    expect(classifyChangedPaths([]).measuredPerformance).toBe(true);
+    expect(classifyChangedPaths(["benchmarks/data-throughput.test.ts"]).measuredPerformance).toBe(true);
+    expect(classifyChangedPaths(["tests/performance/checkpoint.benchmark.test.ts", "README.md"]).measuredPerformance)
+      .toBe(true);
+    for (const paths of [
+      ["tests/e2e/app-shell.spec.ts"],
+      ["package-lock.json"],
+      ["src/server/index.ts"],
+      ["src/renderer/src/App.tsx", "src/server/database.ts"],
+    ]) {
+      const result = classifyChangedPaths(paths);
+      expect(result.measuredPerformance, paths.join()).toBe(false);
+    }
+    expect(classifyChangedPaths(["tests/e2e/app-shell.spec.ts"]).domains).toContain("performance");
+  });
+
   it("only classifies an entirely documentary change as documentation-only", () => {
     expect(classifyChangedPaths([
       "README.md",
@@ -33,6 +89,7 @@ describe("CI change classifier", () => {
       allEvidence: false,
       fullCertification: false,
       nativeArchitecture: false,
+      measuredPerformance: false,
       documentationOnly: true,
       domains: [],
       reasons: [],

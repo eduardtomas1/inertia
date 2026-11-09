@@ -38,13 +38,13 @@ test("loads older pages at the transcript start without moving the reading posit
   await expect(page.locator(`[data-turn-id="${turns.at(-1)}"]`).first()).toBeInViewport();
   await expect(feed(40)).toBeAttached();
   await transcript.evaluate((scroll, anchorId) => {
-    const samples: { count: number; top: number | null }[] = [];
+    const samples: { count: number; top: number | null; scrollTop: number }[] = [];
     Reflect.set(window, "__historySamples", samples);
     const sample = () => {
       const label = scroll.querySelector('[role="feed"]')?.getAttribute("aria-label") ?? "";
       const row = scroll.querySelector<HTMLElement>(`[data-response-row-id="${anchorId}"]`);
       samples.push({ count: Number(/^(\d+) /u.exec(label)?.[1] ?? 0),
-        top: row ? row.getBoundingClientRect().top - scroll.getBoundingClientRect().top : null });
+        top: row ? row.getBoundingClientRect().top - scroll.getBoundingClientRect().top : null, scrollTop: Math.round(scroll.scrollTop) });
       if (samples.length < 3_000) requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
@@ -67,8 +67,18 @@ test("loads older pages at the transcript start without moving the reading posit
     await info.attach("prepend-positions", { body: JSON.stringify({ anchor: turns[45], samples }, null, 2), contentType: "application/json" });
     await info.attach("prepend-viewport", { body: await page.screenshot(), contentType: "image/png" });
   }
-  await readFromTranscriptStart(page);
-  await expect(feed(turns.length)).toBeAttached();
+  const homeSample = await page.evaluate(() => (Reflect.get(window, "__historySamples") as unknown[]).length);
+  try {
+    await readFromTranscriptStart(page);
+    await expect(feed(turns.length)).toBeAttached();
+  } finally {
+    const clientHeight = await transcript.evaluate((scroll) => scroll.clientHeight);
+    const afterHome = await page.evaluate((from) => {
+      const all = Reflect.get(window, "__historySamples") as unknown[];
+      return { frames: all.slice(from, from + 240), last: all.at(-1) };
+    }, homeSample);
+    await info.attach("start-positions", { body: JSON.stringify({ clientHeight, ...afterHome }, null, 2), contentType: "application/json" });
+  }
   await expect(page.getByRole("button", { name: /earlier messages/u })).toHaveCount(0);
   const oldest = page.locator(`[data-turn-id="${turns[0]}"]`).first();
   await expect(async () => {

@@ -596,7 +596,7 @@ jobs:
           INERTIA_RELEASE_CHANNEL: stable
           INERTIA_RELEASE_PLATFORM: ${{ matrix.release_platform }}
         run: |
-          set -uo pipefail
+          set +e -uo pipefail
           log="$RUNNER_TEMP/macos-package.log"
           for attempt in 1 2; do
             npm run "${{ matrix.release_package_script }}" 2>&1 | tee "$log"

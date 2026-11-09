@@ -40,10 +40,10 @@ function state(database: Database.Database): StateRow {
 }
 
 describe("context compaction settings migration", () => {
-  it("is the newest registered migration", () => {
+  it("is registered at schema version 113", () => {
     expect(CONTEXT_COMPACTION_SETTINGS_SCHEMA_VERSION).toBe(113);
-    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(113);
-    expect(runtimeMigrationCatalog().at(-1)).toMatchObject({
+    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBeGreaterThanOrEqual(113);
+    expect(runtimeMigrationCatalog().find(({ version }) => version === CONTEXT_COMPACTION_SETTINGS_SCHEMA_VERSION)).toMatchObject({
       version: CONTEXT_COMPACTION_SETTINGS_SCHEMA_VERSION,
       name: contextCompactionSettingsMigration.name,
     });
@@ -57,7 +57,7 @@ describe("context compaction settings migration", () => {
       const before = state(database);
       const history = database.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
 
-      migrateRuntimeDatabase(database);
+      migrateRuntimeDatabase(database, CONTEXT_COMPACTION_SETTINGS_SCHEMA_VERSION);
 
       const after = state(database);
       expect(after).toEqual({ ...before, compact_before_cache_expires: 0, claude_auto_compact_window: 400_000 });

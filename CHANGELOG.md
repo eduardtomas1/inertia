@@ -16,6 +16,10 @@ The useful changes in each Inertia release, in plain language.
 - Claude chats compact on their own at 400K tokens instead of about 967K on
   1M-token models. **Auto-compact Claude chats after** sets 200K, 300K, 400K,
   600K tokens or Claude Code's own default.
+- Codex chats compact on their own at 300K tokens instead of about 95% of the
+  model's context. **Auto-compact Codex chats after** sets 200K, 300K, 400K
+  tokens or Codex's own default, and never goes above 90% of the model's
+  context.
 - A new session after a provider switch carries up to 64 KiB of the chat's
   earlier messages instead of 192 KiB, and points the agent at
   `inertia_request_context` for older turns.

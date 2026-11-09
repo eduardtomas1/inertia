@@ -7,8 +7,8 @@ import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../messa
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
 import { QUOTA_WARNING_THRESHOLDS } from "../../quota-warnings";
 import {
-  CLAUDE_AUTO_COMPACT_WINDOW_MAX,
-  CLAUDE_AUTO_COMPACT_WINDOW_MIN,
+  AUTO_COMPACT_TOKENS_MAX,
+  AUTO_COMPACT_TOKENS_MIN,
   COMPACT_ON_RETURN_SETTINGS,
 } from "../../compact-on-return";
 import { isReleaseRepositoryUrl, RELEASE_REPOSITORY_URL_MAX_LENGTH } from "../../release-repository";
@@ -429,7 +429,8 @@ export const configurationCommandSchemas = [
           notifyOnlyInBackground: z.boolean().optional(),
           compactOnReturn: z.enum(COMPACT_ON_RETURN_SETTINGS).optional(),
           compactBeforeCacheExpires: z.boolean().optional(),
-          claudeAutoCompactWindow: z.number().int().min(CLAUDE_AUTO_COMPACT_WINDOW_MIN).max(CLAUDE_AUTO_COMPACT_WINDOW_MAX).nullable().optional(),
+          claudeAutoCompactWindow: z.number().int().min(AUTO_COMPACT_TOKENS_MIN).max(AUTO_COMPACT_TOKENS_MAX).nullable().optional(),
+          codexAutoCompactTokenLimit: z.number().int().min(AUTO_COMPACT_TOKENS_MIN).max(AUTO_COMPACT_TOKENS_MAX).nullable().optional(),
           quotaWarnings: z.object({
             enabled: z.boolean().optional(),
             firstThreshold: z.union(QUOTA_WARNING_THRESHOLDS.map((threshold) => z.literal(threshold))).optional(),

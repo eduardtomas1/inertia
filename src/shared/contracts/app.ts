@@ -29,6 +29,7 @@ import {
 import { DEFAULT_QUOTA_WARNINGS, type QuotaWarningSettings } from "../quota-warnings";
 import {
   DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW,
+  DEFAULT_CODEX_AUTO_COMPACT_LIMIT,
   DEFAULT_COMPACT_BEFORE_CACHE_EXPIRES,
   DEFAULT_COMPACT_ON_RETURN,
   type CompactOnReturnSetting,
@@ -231,6 +232,7 @@ export interface AppSettings {
   compactOnReturn: CompactOnReturnSetting;
   compactBeforeCacheExpires: boolean;
   claudeAutoCompactWindow: number | null;
+  codexAutoCompactTokenLimit: number | null;
   /** Local display aliases only; provider authentication remains provider-owned. */
   providerIdentityLabels: ProviderIdentityLabels;
   /** App-local Cmd/Ctrl chords; the primary modifier is never remapped. */
@@ -406,6 +408,7 @@ export const defaultSettings: AppSettings = {
   compactOnReturn: DEFAULT_COMPACT_ON_RETURN,
   compactBeforeCacheExpires: DEFAULT_COMPACT_BEFORE_CACHE_EXPIRES,
   claudeAutoCompactWindow: DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW,
+  codexAutoCompactTokenLimit: DEFAULT_CODEX_AUTO_COMPACT_LIMIT,
   providerIdentityLabels: {},
   keybindings: DEFAULT_APP_KEYBINDINGS,
   workingIndicator: { ...DEFAULT_WORKING_INDICATOR },

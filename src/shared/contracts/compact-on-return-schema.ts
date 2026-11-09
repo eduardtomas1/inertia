@@ -1,6 +1,6 @@
 import {
   COMPACT_ON_RETURN_SETTINGS,
-  validClaudeAutoCompactWindow,
+  validAutoCompactTokenCount,
   CONVERSATION_COMPACTION_STATES,
   PROMPT_CACHE_FACT_SOURCES,
   type ConversationCompactionState,
@@ -43,7 +43,9 @@ export function validCompactOnReturnSetting(settings: UnknownRecord): boolean {
     && (settings.compactBeforeCacheExpires === undefined
       || typeof settings.compactBeforeCacheExpires === "boolean")
     && (settings.claudeAutoCompactWindow === undefined
-      || validClaudeAutoCompactWindow(settings.claudeAutoCompactWindow));
+      || validAutoCompactTokenCount(settings.claudeAutoCompactWindow))
+    && (settings.codexAutoCompactTokenLimit === undefined
+      || validAutoCompactTokenCount(settings.codexAutoCompactTokenLimit));
 }
 
 function compactAndSendResult(value: UnknownRecord): boolean {

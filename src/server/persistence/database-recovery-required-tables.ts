@@ -4,6 +4,7 @@ import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "./migrations/todo-sourc
 import { CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION } from "./migrations/codex-thread-tool-packs";
 import { SUBAGENT_TASK_SHAPE_SCHEMA_VERSION } from "./migrations/subagent-task-shape";
 import { CONTEXT_COMPACTION_SETTINGS_SCHEMA_VERSION } from "./migrations/context-compaction-settings";
+import { CODEX_COMPACTION_LIMIT_SCHEMA_VERSION } from "./migrations/codex-compaction-limit";
 
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
@@ -164,6 +165,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "compact_before_cache_expires",
     "claude_auto_compact_window",
   ]],
+  [CODEX_COMPACTION_LIMIT_SCHEMA_VERSION, "app_state", ["codex_auto_compact_token_limit"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [

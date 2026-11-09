@@ -81,8 +81,9 @@ describe("prompt cache in the usage meter", () => {
 
   it.each([
     ["Console API key" as const, true],
-    ["Claude account" as const, false],
-  ])("shows the cache line in the composer meter for a %s only when it is an API-key route", (accountKind, shown) => {
+    ["Claude account" as const, true],
+    [undefined, false],
+  ])("shows the cache line in the composer meter for native Claude signed in with %s", (accountKind, shown) => {
     const claude: ProviderInfo = { ...provider, id: "claude", label: "Claude", command: "claude", accountKind };
     const chat = {
       ...conversation("88888888-8888-4888-8888-888888888888"),

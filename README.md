@@ -43,7 +43,7 @@ Inertia is a desktop app for working with coding agents. Each chat belongs to a 
 - **Keep follow-ups moving.** While an agent works, Enter sends a follow-up and Tab queues it for the next turn.
 - **Switch providers without losing the chat.** Pick another provider and the next message continues with the earlier messages as context. The timeline marks the switch with a **Context handoff** divider.
 - **Get visual answers.** An agent can reply with a chart, table, diagram or mockup rendered in the chat, themed like the app and sandboxed from the network and your files. See [Visual replies](docs/user/chats-and-agents.md#visual-replies).
-- **Pay less for long API chats.** Return to a chat of 200K tokens or more on an Anthropic or OpenAI key after its prompt cache has expired and the send button reads **Compact and send**. See [Compact on return](docs/user/chats-and-agents.md#compact-on-return).
+- **Spend less on long chats.** Return to a chat of 200K tokens or more on a Claude subscription, an Anthropic key or an OpenAI key after its prompt cache has expired and the send button reads **Compact and send**. Claude chats compact on their own at 400K tokens instead of near 1M, and can compact while idle before their cache expires. See [Compact on return](docs/user/chats-and-agents.md#compact-on-return).
 - **Choose the access you are comfortable with.** **Supervised** keeps provider approvals, **Auto-accept edits** allows supported file edits, and **Full access** lets the agent act without asking.
 
 ## Find anything

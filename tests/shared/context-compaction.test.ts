@@ -19,8 +19,8 @@ describe("confirmed context compaction receipts", () => {
     expect(isContextCompaction({ ...compaction, providerId: "unknown" })).toBe(false);
     expect(isContextCompaction({ ...compaction, extra: true })).toBe(false);
   });
-  it("records an optional manual or on-return trigger within the stored size", () => {
-    expect(CONTEXT_COMPACTION_TRIGGERS).toEqual(["manual", "on-return"]);
+  it("records an optional manual, on-return or idle trigger within the stored size", () => {
+    expect(CONTEXT_COMPACTION_TRIGGERS).toEqual(["manual", "on-return", "idle"]);
     for (const trigger of CONTEXT_COMPACTION_TRIGGERS) expect(isContextCompaction({ ...compaction, trigger })).toBe(true);
     for (const trigger of ["automatic", null, "", 1]) expect(isContextCompaction({ ...compaction, trigger })).toBe(false);
     expect(isContextCompaction({ ...compaction, trigger: undefined })).toBe(false);

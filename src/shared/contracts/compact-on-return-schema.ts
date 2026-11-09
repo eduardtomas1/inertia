@@ -1,5 +1,6 @@
 import {
   COMPACT_ON_RETURN_SETTINGS,
+  validClaudeAutoCompactWindow,
   CONVERSATION_COMPACTION_STATES,
   PROMPT_CACHE_FACT_SOURCES,
   type ConversationCompactionState,
@@ -37,8 +38,12 @@ export function isConversationCompactionState(value: unknown): value is Conversa
 }
 
 export function validCompactOnReturnSetting(settings: UnknownRecord): boolean {
-  return settings.compactOnReturn === undefined
-    || includes(COMPACT_ON_RETURN_SETTINGS, settings.compactOnReturn);
+  return (settings.compactOnReturn === undefined
+    || includes(COMPACT_ON_RETURN_SETTINGS, settings.compactOnReturn))
+    && (settings.compactBeforeCacheExpires === undefined
+      || typeof settings.compactBeforeCacheExpires === "boolean")
+    && (settings.claudeAutoCompactWindow === undefined
+      || validClaudeAutoCompactWindow(settings.claudeAutoCompactWindow));
 }
 
 function compactAndSendResult(value: UnknownRecord): boolean {

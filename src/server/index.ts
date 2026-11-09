@@ -95,7 +95,7 @@ import { createSourceControlCommandHandler } from "./runtime/commands/source-con
 import { createTerminalLinkCommandHandler } from "./runtime/commands/terminal-link-commands";
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
-import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
+import { createConversationCompactionCommandHandler, type ConversationCompactionCommandDependencies } from "./runtime/commands/conversation-compaction-commands"; import { startIdleCompaction } from "./runtime/idle-compaction-scheduler";
 import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
@@ -738,6 +738,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   compactions.onSettled((conversationId) => queuedMessages?.onCompactionSettled(conversationId));
   queuedMessages.start();
+  const compactionDependencies: ConversationCompactionCommandDependencies = { store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.settings(), refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }; startIdleCompaction(compactionDependencies, { signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)) });
   watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,
     interaction: turnInteractionDependencies, queuedMessages, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, send,
     turnDiff: (turnId) => turnGitArtifacts.settledTurnDiff(turnId) });
@@ -787,7 +788,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
       queuedMessages.turnInteractionHandler,
-      createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.shellSnapshot().settings, refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }),
+      createConversationCompactionCommandHandler(compactionDependencies),
       createSourceControlCommandHandler({
         store,
         workspaceRuns,

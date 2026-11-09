@@ -817,6 +817,11 @@
       "version": 112,
       "name": "SupportNativeGrokProvider",
       "digest": "71b43b366ace5ddb61918ba39368d24dccfc044e69a77f848fe3f668fbd9b74e"
+    },
+    {
+      "version": 113,
+      "name": "PersistContextCompactionSettings",
+      "digest": "64614f9597ea1cdbbfc761ed2877cdc1a9c5f5c062a7696d32769073c74a333e"
     }
   ]
 }

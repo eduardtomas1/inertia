@@ -298,7 +298,7 @@ export async function readClaudeContextUsage(
 ): Promise<SDKControlGetContextUsageResponse | undefined> {
   if (typeof query.getContextUsage !== "function") return undefined;
   try {
-    return await query.getContextUsage();
+    return await query.getContextUsage({ detail: "summary" });
   } catch {
     return undefined;
   }

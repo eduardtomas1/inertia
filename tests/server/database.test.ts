@@ -275,7 +275,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     const first = store.snapshot().conversations[0]!;
     const second = store.createConversation(first.projectId, "Second chat");
     const messageCount = 100;
-    const payload = "x".repeat(4_096);
+    const payload = "x".repeat(8_192);
     let shellSizeBefore = 0;
 
     for (let index = 0; index < messageCount; index += 1) {

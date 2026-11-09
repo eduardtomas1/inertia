@@ -64,7 +64,13 @@ import {
   versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
 import { providerTimestamp, validatePromptCacheFacts, validateProviderUsage, validateSubagentTaskUsage } from "../provider/usage-values";
-import { COMPACT_ON_RETURN_SETTINGS, DEFAULT_COMPACT_ON_RETURN, type CompactOnReturnSetting } from "../../shared/compact-on-return";
+import {
+  COMPACT_ON_RETURN_SETTINGS,
+  DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW,
+  DEFAULT_COMPACT_ON_RETURN,
+  validClaudeAutoCompactWindow,
+  type CompactOnReturnSetting,
+} from "../../shared/compact-on-return";
 import {
   boundedSubagentCount,
   boundedSubagentLabel,
@@ -474,6 +480,8 @@ export function settingsFromState(state: StateRow): AppSettings {
     desktopNotifications: state.desktop_notifications === 1,
     notifyOnlyInBackground: state.notify_only_in_background === 1,
     compactOnReturn: compactOnReturnFromState(state.compact_on_return),
+    compactBeforeCacheExpires: state.compact_before_cache_expires === 1,
+    claudeAutoCompactWindow: claudeAutoCompactWindowFromState(state.claude_auto_compact_window),
     quotaWarnings: {
       enabled: state.quota_warnings_enabled !== 0,
       firstThreshold: isQuotaWarningThreshold(state.quota_warning_threshold)
@@ -982,6 +990,11 @@ function promptCacheFromRow(row: ThreadUsageRow): Pick<ThreadUsageSnapshot, "pro
     source: row.prompt_cache_source,
   });
   return promptCache ? { promptCache } : {};
+}
+
+function claudeAutoCompactWindowFromState(value: number | null | undefined): number | null {
+  if (value === undefined) return DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW;
+  return validClaudeAutoCompactWindow(value) ? value : DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW;
 }
 
 function compactOnReturnFromState(value: string | undefined): CompactOnReturnSetting {

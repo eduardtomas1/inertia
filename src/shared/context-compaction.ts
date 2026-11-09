@@ -1,6 +1,6 @@
 import type { ProviderId } from "./provider";
 const PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"];
-export const CONTEXT_COMPACTION_TRIGGERS = ["manual", "on-return"] as const;
+export const CONTEXT_COMPACTION_TRIGGERS = ["manual", "on-return", "idle"] as const;
 export type ContextCompactionTrigger = (typeof CONTEXT_COMPACTION_TRIGGERS)[number];
 
 /** Provider-confirmed context mutation; it is not an agent turn. */

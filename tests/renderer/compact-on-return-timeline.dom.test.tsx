@@ -41,6 +41,16 @@ describe("compaction timeline rows", () => {
     expect(container.querySelector("section")).toHaveAccessibleName("Compacted on return 252K → 18.3K tokens");
   });
 
+  it("renders a compaction while idle as one row without a /compact bubble", () => {
+    const { container } = render(<ContextCompactionRow message={receipt("idle", "/compact")} />);
+
+    const separator = screen.getByRole("separator", { name: "Compacted while idle 252K → 18.3K tokens" });
+    expect(separator.querySelector(".context-compaction-marker"))
+      .toHaveTextContent("Compacted while idle·252K → 18.3K tokens");
+    expect(container.querySelector(".turn-user-request")).toBeNull();
+    expect(container.querySelector("section")).toHaveAttribute("data-compaction-trigger", "idle");
+  });
+
   it("keeps the manual /compact request bubble with the same token label style", () => {
     const { container } = render(<ContextCompactionRow message={receipt("manual", "/compact keep the API decisions")} />);
 
@@ -55,17 +65,22 @@ describe("compaction timeline rows", () => {
       .toBe("Compacted on return 252K → 18.3K tokens");
     expect(responseTimelineArticleLabel({ kind: "compaction", id: "b", message: receipt() }))
       .toBe("Compacted context 252K → 18.3K tokens");
+    expect(responseTimelineArticleLabel({ kind: "compaction", id: "c", message: receipt("idle") }))
+      .toBe("Compacted while idle 252K → 18.3K tokens");
   });
 
-  it("estimates an on-return row as a single separator", () => {
+  it("estimates on-return and idle rows as a single separator", () => {
     const onReturn = estimateTimelineRowSize({ kind: "compaction", id: "a", message: receipt("on-return", "") });
+    const idle = estimateTimelineRowSize({ kind: "compaction", id: "c", message: receipt("idle") });
     const manual = estimateTimelineRowSize({ kind: "compaction", id: "b", message: receipt("manual", "/compact") });
     expect(onReturn).toBeLessThan(manual);
+    expect(idle).toBe(onReturn);
   });
 
   it.each([
     ["manual" as const, "Compacting context"],
     ["on-return" as const, "Compacting before sending"],
+    ["idle" as const, "Compacting context"],
   ])("shows a live row while a %s compaction runs", (trigger, label) => {
     render(
       <PendingContextCompaction

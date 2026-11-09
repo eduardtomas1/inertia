@@ -781,7 +781,8 @@ export function estimateTimelineRowSize(
   options: TimelineRowEstimateOptions = {},
 ): number {
   if (item.kind === "compaction") {
-    return item.message.compaction?.trigger === "on-return"
+    const trigger = item.message.compaction?.trigger;
+    return trigger === "on-return" || trigger === "idle"
       ? 56
       : 120 + Math.ceil(item.message.content.length / 80) * 20;
   }

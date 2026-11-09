@@ -12,7 +12,7 @@ import type {
   ThreadUsageSnapshot,
 } from "../../../shared/contracts";
 import type { ContextCompaction, ContextCompactionTrigger } from "../../../shared/context-compaction";
-import { compactOnReturnEligibility } from "../../../shared/compact-on-return";
+import { compactOnReturnEligibility, type CompactOnReturnRoute } from "../../../shared/compact-on-return";
 import { CONVERSATION_COMPACTION_REQUEST_TIMEOUT_MS } from "../../../shared/runtime-command-timeouts";
 import { importedResumeCwd } from "../../cli-import/resume-cwd";
 import {
@@ -71,7 +71,7 @@ export interface ConversationCompactionCommandDependencies {
   compactions?: ConversationCompactionStates;
   instructions?: Pick<TurnController, "compactionSessionInstruction" | "forgetPromptDelivery">;
   interaction?: TurnInteractionCommandDependencies;
-  settings?(): Pick<AppSettings, "compactOnReturn">;
+  settings?(): Pick<AppSettings, "compactOnReturn"> & Partial<Pick<AppSettings, "compactBeforeCacheExpires">>;
   refreshProviderAccount?(providerId: ProviderInfo["id"]): Promise<void>;
   providerInfo(): readonly ProviderInfo[];
   broadcast(event: RuntimeMutationEvent): void;
@@ -90,6 +90,13 @@ interface CompactionRequest {
   instruction?: string;
   trigger: ContextCompactionTrigger;
   deadline?: AbortSignal;
+  confirmUnderLock?: () => void;
+}
+
+export interface IdleCompactionExpectation {
+  lastRequestStartedAt: string;
+  closesAt: number;
+  now?: () => number;
 }
 
 interface CompactionProgress {
@@ -350,6 +357,7 @@ async function compactUnderLock<T>(
         "The chat configuration changed while compaction was starting. Try again with the current provider settings.",
       );
     }
+    request.confirmUnderLock?.();
     const beforeTokens = dependencies.store.usageForConversation(conversation.id)?.usedTokens ?? null;
     let afterTokens: number | null = null;
     let usageObserved = false;
@@ -466,6 +474,37 @@ async function compactUnderLock<T>(
 
 class SignInUnconfirmedError extends RuntimeRequestError {}
 
+function compactionRoute(
+  dependencies: Pick<ConversationCompactionCommandDependencies, "backendProfileController" | "providerInfo">,
+  selection: ModelSelection,
+): CompactOnReturnRoute {
+  const profile = dependencies.backendProfileController
+    .profiles(dependencies.providerInfo())
+    .find(({ id }) => id === selection.backendProfileId);
+  return {
+    harnessId: selection.harnessId,
+    preset: profile?.preset ?? null,
+    protocol: profile?.protocol ?? "",
+    accountKind: profile
+      ? dependencies.providerInfo().find(({ id }) => id === profile.providerId)?.accountKind ?? null
+      : null,
+    ...(profile ? { routeKind: profile.routeKind } : {}),
+    promptCacheTtl: profile?.promptCacheTtl ?? null,
+  };
+}
+
+export function compactionRouteForConversation(
+  dependencies: Pick<ConversationCompactionCommandDependencies, "store" | "backendProfileController" | "providerInfo">,
+  conversationId: string,
+): CompactOnReturnRoute | null {
+  try {
+    const conversation = dependencies.store.conversation(conversationId);
+    return compactionRoute(dependencies, dependencies.backendProfileController.validateSelection(conversation.modelSelection));
+  } catch {
+    return null;
+  }
+}
+
 function refuseUnlessCompactableOnReturn(
   dependencies: ConversationCompactionCommandDependencies,
   conversation: Conversation,
@@ -494,16 +533,8 @@ function refuseUnlessCompactableOnReturn(
   const profile = dependencies.backendProfileController
     .profiles(dependencies.providerInfo())
     .find(({ id }) => id === selection.backendProfileId);
-  const eligibility = (): ReturnType<typeof compactOnReturnEligibility> => compactOnReturnEligibility({
-    harnessId: selection.harnessId,
-    preset: profile?.preset ?? null,
-    protocol: profile?.protocol ?? "",
-    accountKind: profile
-      ? dependencies.providerInfo().find(({ id }) => id === profile.providerId)?.accountKind ?? null
-      : null,
-    ...(profile ? { routeKind: profile.routeKind } : {}),
-    promptCacheTtl: profile?.promptCacheTtl ?? null,
-  });
+  const eligibility = (): ReturnType<typeof compactOnReturnEligibility> =>
+    compactOnReturnEligibility(compactionRoute(dependencies, selection));
   const refuseIneligible = (): void => {
     const decision = eligibility();
     if (!decision.eligible) {
@@ -586,6 +617,56 @@ async function sendAfterCompaction(
     disposition: result.disposition,
     compaction: receipt.compaction,
   };
+}
+
+function confirmIdleCompaction(
+  dependencies: ConversationCompactionCommandDependencies,
+  conversationId: string,
+  expected: IdleCompactionExpectation,
+): void {
+  const settings = dependencies.settings?.();
+  if (!settings?.compactBeforeCacheExpires || settings.compactOnReturn === "never") {
+    throw new CompactionRefusedError("Compacting before the cache expires is off in Settings → Chats.");
+  }
+  const lastRequestStartedAt = dependencies.store.usageForConversation(conversationId)?.promptCache?.lastRequestStartedAt ?? null;
+  if (lastRequestStartedAt !== expected.lastRequestStartedAt) {
+    throw new CompactionRefusedError("The chat was used again after this compaction was scheduled.");
+  }
+  if ((expected.now ?? Date.now)() >= expected.closesAt) {
+    throw new CompactionRefusedError("The prompt cache is about to expire, so compacting now would read the history uncached.");
+  }
+}
+
+export async function compactIdleConversation(
+  dependencies: ConversationCompactionCommandDependencies,
+  conversationId: string,
+  expected: IdleCompactionExpectation,
+): Promise<ContextCompaction> {
+  if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), COMPACT_ON_RETURN_COMPACTION_DEADLINE_MS);
+  timer.unref?.();
+  try {
+    const prepared = await prepareCompaction(
+      dependencies,
+      conversationId,
+      async (conversation, selection) => {
+        const recheckSignIn = refuseUnlessCompactableOnReturn(dependencies, conversation, selection);
+        if (dependencies.store.conversationShell(conversation.id)?.latestTurn?.status !== "completed") {
+          throw new CompactionRefusedError("Idle compaction waits for a chat whose last turn completed.");
+        }
+        await recheckSignIn?.(deadline.signal);
+      },
+      deadline.signal,
+    );
+    return await compactUnderLock(dependencies, prepared, {
+      trigger: "idle",
+      deadline: deadline.signal,
+      confirmUnderLock: () => confirmIdleCompaction(dependencies, conversationId, expected),
+    }, { locked: false, compacted: false }, async (receipt) => receipt.compaction);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function createConversationCompactionCommandHandler(

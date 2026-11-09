@@ -67,6 +67,7 @@
     "notices:generate": "node scripts/generate-third-party-notices.mjs",
     "screenshots:readme": "npm run build && node scripts/capture-readme-screenshots.mjs",
     "check:workflow-concurrency": "node scripts/check-workflow-concurrency.mjs",
+    "usage:claude": "node scripts/claude-usage-report.mjs",
     "check:quality": "npm run check:workflow-concurrency && npm run check:migrations && npm run check:architecture && npm run check:color-themes && npm run lint && npm run typecheck",
     "check:platform": "npm run check:quality && npm run build:bundle",
     "check": "npm run check:quality && npm run test && npm run build:bundle",

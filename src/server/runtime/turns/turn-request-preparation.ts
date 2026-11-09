@@ -55,6 +55,7 @@ import type {
 } from "./turn-controller-types";
 
 const CUSTOM_BACKEND_RESTORED_HISTORY_BYTES = 48 * 1_024;
+export const NATIVE_RESTORED_HISTORY_BYTES = 64 * 1_024;
 
 type InstructionRoute = Parameters<typeof routeUsesTrustedHostBridge>[0];
 
@@ -429,15 +430,19 @@ export function resolveTurnRequest(
         : { handoff: { before: handoffBefore, providerId: route.providerId } }),
     };
   };
-  const restoredCapacity = (capacityBytes: number) => usesNativeCatalog
+  const referencedCapacity = (capacityBytes: number) => usesNativeCatalog
     ? capacityBytes
     : Math.min(capacityBytes, CUSTOM_BACKEND_RESTORED_HISTORY_BYTES);
+  const restoredCapacity = (capacityBytes: number) => Math.min(
+    capacityBytes,
+    usesNativeCatalog ? NATIVE_RESTORED_HISTORY_BYTES : CUSTOM_BACKEND_RESTORED_HISTORY_BYTES,
+  );
   const referencedHistory = (capacityBytes: number) => {
     const delivery = conversationContexts?.deliveries
       .find(({ packetId }) => packetId === ownChatPacketId);
     return dependencies.store.transcriptRepository.referencedContinuationHistory(
       conversation.id,
-      restoredCapacity(capacityBytes),
+      referencedCapacity(capacityBytes),
       restoredHistoryRoute(),
       {
         messageCount: delivery?.messageCount ?? 0,
@@ -485,6 +490,9 @@ export function resolveTurnRequest(
     ? dependencies.store.project(conversation.projectId).preferences
       ?.claudeMaxBudgetUsd ?? null
     : null;
+  const autoCompactWindow = claudeSpendLimitApplies(route)
+    ? dependencies.store.settings().claudeAutoCompactWindow
+    : null;
   const providerInput = {
     providerId: route.providerId,
     harnessId: route.harnessId,
@@ -526,6 +534,7 @@ export function resolveTurnRequest(
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
+    ...(autoCompactWindow !== null ? { autoCompactWindow } : {}),
     ...(readOnlyWatcher ? { readOnlyProfile: "watcher" as const } : {}),
     ...(systemInstruction !== undefined ? { systemInstruction } : {}),
     ...(instructionDelivery.sessionInstruction !== undefined

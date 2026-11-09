@@ -69,11 +69,15 @@ that the next message starts a new session on that provider with the chat's
 earlier messages as context, and any reset offer from the previous provider is
 retired. When that message starts, a snooze on the chat ends too, because the
 chat was waiting for a provider it no longer uses; switching back before sending
-keeps it. That message carries the chat's earlier visible messages, up to 192
-KiB (three 64 KiB blocks, each message excerpt at most 8 KiB, oldest messages
-left out first and counted as omitted), with pattern-matched secrets redacted,
+keeps it. That message carries the chat's earlier visible messages, up to 64
+KiB (about 16K tokens, the same cap T3 Code puts on a context handoff; 48 KiB
+on a custom backend; each message excerpt at most 8 KiB, oldest messages left
+out first and counted as omitted), with pattern-matched secrets redacted,
 plus a list of the files the chat's turns changed (paths and line counts only,
-up to 200 files and 8 KiB). Tool output, file contents and hidden provider
+up to 200 files and 8 KiB). The block tells the agent to read older turns with
+`inertia_request_context`, so what was left out stays one call away instead of
+being re-read on every request. Referencing the chat with `@this-chat` still
+sends up to 192 KiB. Tool output, file contents and hidden provider
 state are not carried over. The timeline marks the switch with a **Context
 handoff** divider showing both providers and how many earlier messages were
 restored. Start a goal only after that first message, so the new provider has

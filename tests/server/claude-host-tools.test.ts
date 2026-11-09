@@ -145,13 +145,14 @@ describe("Claude in-process Inertia chat tools", () => {
     const client = new Client({ name: "inertia-test", version: "1.0.0" });
     await tools.config.instance.connect(serverTransport);
     await client.connect(clientTransport);
-    expect(await client.listTools()).toMatchObject({
+    const listed = await client.listTools();
+    expect(listed).toMatchObject({
       tools: [{
         name: "inertia_create_conversation",
         annotations: { readOnlyHint: false },
-        _meta: { "anthropic/alwaysLoad": true },
       }],
     });
+    expect(listed.tools[0]?._meta?.["anthropic/alwaysLoad"]).toBeUndefined();
     const call = client.callTool({
       name: "inertia_create_conversation",
       arguments: { title: "Verifier" },

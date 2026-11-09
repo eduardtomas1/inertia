@@ -91,6 +91,24 @@ The useful changes in each Inertia release, in plain language.
 - A focused Browser page keeps the keys Inertia does not use, such as
   Ctrl+Y, Ctrl+U and Ctrl+H.
 
+### Dependencies
+
+- Updated the Claude Agent SDK to 0.3.319. When a Claude Code configuration
+  file isn't valid JSON, or a wrapper script changes what Inertia sends
+  Claude Code at start-up, the chat now says so instead of showing a generic
+  failure. If Claude Code reports that a full disk kept it from saving part
+  of a chat, that shows in the chat too. The Claude Code it bundles is about
+  42 MB larger on every platform.
+- Updated Electron to 45.2.3, with Chromium 156.0.8078.80 and Node 24.22.2.
+- Updated `@napi-rs/canvas` to 1.1.0. Its Linux build now binds its own Skia
+  symbols, so it no longer crashes inside Electron as 1.0.12 and 1.0.13 did.
+  PDF.js shares the same copy instead of shipping a second one.
+- Updated the Agent Client Protocol SDK used by Cursor, Kimi and Grok to
+  2.4.0, PDF.js to 6.5.438, lucide-react to 1.69.0, TanStack Virtual to
+  3.14.26, ws to 8.22.1 and Tailwind CSS to 4.3.4.
+- Development: Playwright 1.65, Vitest 5.1, oxlint 1.91 and Babel's parser
+  7.29.13.
+
 ## 0.0.82 — 2026-11-03
 
 A Library for the answers worth keeping and the pages your agents drew.

@@ -231,6 +231,10 @@ export function customAgentNativeName(handle: string): string {
   return `${CUSTOM_AGENT_NATIVE_PREFIX}${handle}`;
 }
 
+export function customAgentCodexTaskName(nativeName: string): string {
+  return nativeName.replaceAll("-", "_");
+}
+
 export function customAgentHandleFromNativeName(name: string | null | undefined): string | null {
   if (!name || !name.startsWith(CUSTOM_AGENT_NATIVE_PREFIX)) return null;
   const handle = name.slice(CUSTOM_AGENT_NATIVE_PREFIX.length);
@@ -351,7 +355,7 @@ const CUSTOM_AGENT_ROUTES: Readonly<Record<ProviderId, CustomAgentRoute>> = {
   codex: {
     delivery: "subagent",
     native: null,
-    inline: (name) => `Call spawn_agent once with task_name "${name}" and a message that starts with the full custom-agent text as the agent's instructions, followed by the task and the context it needs.`,
+    inline: (name) => `Call spawn_agent once with task_name "${customAgentCodexTaskName(name)}" and a message that starts with the full custom-agent text as the agent's instructions, followed by the task and the context it needs.`,
   },
   opencode: {
     delivery: "subagent",

@@ -45,6 +45,13 @@ describe("CustomAgentTraceAttribution", () => {
     expect(attribution.resolve(trace({ providerAgentId: "thread-1", providerName: "Explore" }))).toBeNull();
   });
 
+  it("matches the Codex task name, which spells the handle with underscores", () => {
+    const attribution = new CustomAgentTraceAttribution({ ...CALL, handle: "code-reviewer" }, "codex");
+    expect(attribution.resolve(trace({ providerAgentId: "thread-1", providerName: "Explore" }))).toBeNull();
+    expect(attribution.resolve(trace({ providerToolUseId: "call-1", providerName: "inertia_code_reviewer" }))).toBe(CALL.agentId);
+    expect(attribution.resolve(trace({ providerAgentId: "thread-2", providerName: "inertia_code_reviewer_2" }))).toBeNull();
+  });
+
   it("waits for the OpenCode subagent type before claiming a child session", () => {
     const attribution = new CustomAgentTraceAttribution(CALL, "opencode");
     expect(attribution.resolve(trace({ providerAgentId: "ses-1" }))).toBeNull();

@@ -432,7 +432,7 @@ export const Composer = memo(function Composer({
     canRestoreStoppedPrompt: () => draftValueRef.current.length === 0 && attachmentsRef.current.length === 0 && pendingAttachmentIdsRef.current.size === 0 && !attachmentImportingRef.current && !submittingRef.current && !promptContext && selectedPreviewUrlRef.current === null && fileReferences.length === 0 && contextPacketIds.length === 0, textareaRef,
   });
   const updateMessage = promptHistoryController.replaceMessage;
-  const agentCall = useComposerAgentCall({ conversationId: conversation.id, message, customAgents, replaceMessage: updateMessage, textareaRef, onOpenSettings: onOpenCustomAgentSettings });
+  const agentCall = useComposerAgentCall({ conversationId: conversation.id, providerId: conversation.providerId, message, customAgents, replaceMessage: updateMessage, textareaRef, onOpenSettings: onOpenCustomAgentSettings });
 
   const addFileReference = (path: string): void => {
     if (fileReferences.includes(path)) return;

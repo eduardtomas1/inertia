@@ -27,6 +27,7 @@ import {
   assembleTurnRequest,
   type AssembleTurnRequestInput,
   type ConversationContextMaterialization,
+  type HiddenProviderInstruction,
 } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import { trackedGoalContextLine, trackedLocalGoal } from "./turn-goal-context";
@@ -47,6 +48,7 @@ import {
 import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
 import { rejectGoalCustomAgentCall, resolveCustomAgentCall } from "./custom-agent-call";
 import { FULL_HARNESS_CAPABILITY_OFFER } from "../harness-capabilities";
+import { SECRET_REQUEST_FALLBACK_INSTRUCTION } from "../../../node/agent-secrets";
 import type {
   ActiveTurn,
   QueuedTurn,
@@ -116,6 +118,11 @@ interface WatcherTurnPolicy {
   wakeId: string | null;
   readOnly?: ReadOnlyWatcherTurn;
 }
+
+const SECRET_REQUEST_FALLBACK_HIDDEN_INSTRUCTION: HiddenProviderInstruction = {
+  label: "inertia-secrets-fallback",
+  text: SECRET_REQUEST_FALLBACK_INSTRUCTION,
+};
 
 function watcherTurnPolicy(
   store: RuntimeStore,
@@ -290,7 +297,9 @@ export function resolveTurnRequest(
     ? dependencies.hooks.capabilityOfferForTurn?.({ conversation })
       ?? { instructions: [], offer: FULL_HARNESS_CAPABILITY_OFFER }
     : undefined;
-  const capabilityInstructions = watcherTurn ? [] : capabilityOffer?.instructions ?? [];
+  const capabilityInstructions = watcherTurn
+    ? []
+    : capabilityOffer?.instructions ?? [SECRET_REQUEST_FALLBACK_HIDDEN_INSTRUCTION];
   const roleInstructions = request.systemInstructions
     ?? (watcherTurn?.wakeId === null
       ? dependencies.hooks.watcherInstructionsForTurn?.({ conversation, hostTools: hostToolBridgeAttested }) ?? []
@@ -385,7 +394,7 @@ export function resolveTurnRequest(
     deliveries: dependencies.instructionDeliveries,
     conversation,
     harnessId: route.harnessId,
-    pack: resumesImportedCodex ? [] : instructionPack(conversation.id, capabilityInstructions),
+    pack: resumesImportedCodex ? [] : hostToolBridgeAttested ? instructionPack(conversation.id, capabilityInstructions) : capabilityInstructions,
     resumedSessionId: canResume ? conversation.providerSessionId : null,
     latestTurn,
     promptWithheld: request.goalStart !== undefined,

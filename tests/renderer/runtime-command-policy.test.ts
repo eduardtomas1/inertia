@@ -33,6 +33,11 @@ describe("runtime command delivery policy", () => {
     expect(runtimeCommandPolicy("updates.run").timeoutDelivery).toBe("ambiguous");
     expect(runtimeCommandPolicy("updates.finish")).toEqual({ timeoutMs: 15_000, timeoutDelivery: "ambiguous" });
   });
+  it("treats secret request answers as ambiguous mutations and the secret list as a retry-safe read", () => {
+    expect(runtimeCommandPolicy("secret-request.decline")).toEqual({ timeoutMs: 15_000, timeoutDelivery: "ambiguous" });
+    expect(runtimeCommandPolicy("secret-request.revoke")).toEqual({ timeoutMs: 15_000, timeoutDelivery: "ambiguous" });
+    expect(runtimeCommandPolicy("secret-request.list")).toEqual({ timeoutMs: 15_000, timeoutDelivery: "rejected" });
+  });
   it("classifies representative reads and idempotent refreshes as retry-safe", () => {
     expect(runtimeCommandPolicy("app.refresh")).toEqual({
       timeoutMs: 15_000,

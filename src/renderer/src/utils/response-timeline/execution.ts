@@ -7,6 +7,7 @@ import {
 } from "./activity-attention";
 import type { ResponseTurn } from "./model";
 import type { SubagentCallEntry } from "./subagentCalls";
+import type { SecretRequestMessage } from "./secretRequests";
 
 export {
   activityAttentionSeverity,
@@ -116,19 +117,18 @@ export type TurnWorkStreamEntry =
       createdAt: string;
       message: ChatMessage;
     }
+  | {
+      kind: "secret-request";
+      id: string;
+      createdAt: string;
+      message: SecretRequestMessage;
+    }
   | SubagentCallEntry;
 
-export function withHtmlRenders(
-  stream: TurnExecutionStreamEntry[],
-  renders: ChatMessage[],
+function mergeChronologically(
+  stream: TurnWorkStreamEntry[],
+  pending: TurnWorkStreamEntry[],
 ): TurnWorkStreamEntry[] {
-  if (renders.length === 0) return stream;
-  const pending = renders.map((message) => ({
-    kind: "html-render" as const,
-    id: `html-render:${message.id}`,
-    createdAt: message.createdAt,
-    message,
-  }));
   const merged: TurnWorkStreamEntry[] = [];
   for (const entry of stream) {
     while (pending.length > 0 && timestamp(pending[0]!.createdAt) <= timestamp(entry.createdAt)) {
@@ -137,6 +137,32 @@ export function withHtmlRenders(
     merged.push(entry);
   }
   return [...merged, ...pending];
+}
+
+export function withHtmlRenders(
+  stream: TurnExecutionStreamEntry[],
+  renders: ChatMessage[],
+): TurnWorkStreamEntry[] {
+  if (renders.length === 0) return stream;
+  return mergeChronologically(stream, renders.map((message) => ({
+    kind: "html-render" as const,
+    id: `html-render:${message.id}`,
+    createdAt: message.createdAt,
+    message,
+  })));
+}
+
+export function withSecretRequests(
+  stream: TurnWorkStreamEntry[],
+  requests: readonly SecretRequestMessage[],
+): TurnWorkStreamEntry[] {
+  if (requests.length === 0) return stream;
+  return mergeChronologically(stream, requests.map((message) => ({
+    kind: "secret-request" as const,
+    id: `secret-request:${message.secretRequest.requestId}`,
+    createdAt: message.createdAt,
+    message,
+  })));
 }
 
 export interface LiveTextFollowUps {

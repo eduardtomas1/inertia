@@ -35,6 +35,7 @@ import {
 import { HtmlRenderTurnScopeProvider, TurnHtmlRenders } from "./html-render";
 import { SubagentCallContext } from "./subagentCallContext";
 import { transcriptSubagentCallMemory } from "./subagentCallMemory";
+import { SecretRequestContext } from "./secretRequestContext";
 import {
   customAgentsById,
   partitionSubagentCalls,
@@ -227,6 +228,11 @@ function TurnTimelineComponent({
     turn,
   ]);
 
+  const secretContext = useMemo(() => ({
+    conversationId: props.conversationId,
+    onCommand: props.onSecretRequestCommand,
+  }), [props.conversationId, props.onSecretRequestCommand]);
+
   useLayoutEffect(() => {
     if (turn.isActive) answerTailWasVisible.current = answerTailVisible;
   }, [answerTailVisible, turn.isActive]);
@@ -306,21 +312,23 @@ function TurnTimelineComponent({
         <HtmlRenderTurnScopeProvider>
           <TurnSubagentActivities subagents={subagents ?? NO_SUBAGENTS}>
             <SubagentCallContext.Provider value={callContext}>
-              <AgentExecutionLayer
-                turn={railTurn}
-                props={props}
-                subagents={subagents ?? NO_SUBAGENTS}
-                providerLabel={providerLabel}
-                reasoningContent={reasoningContent}
-                liveContent={liveContent}
-                heldFollowUpIds={heldFollowUpIds}
-                timerStart={timerStart}
-                completionAnnouncement={completionAnnouncement}
-                fold={fold}
-                agentsInFold={foldVisible && agentsFoldable}
-                onBeforeToggle={handleBeforeToggle}
-                onAfterToggle={handleAfterToggle}
-              />
+              <SecretRequestContext.Provider value={secretContext}>
+                <AgentExecutionLayer
+                  turn={railTurn}
+                  props={props}
+                  subagents={subagents ?? NO_SUBAGENTS}
+                  providerLabel={providerLabel}
+                  reasoningContent={reasoningContent}
+                  liveContent={liveContent}
+                  heldFollowUpIds={heldFollowUpIds}
+                  timerStart={timerStart}
+                  completionAnnouncement={completionAnnouncement}
+                  fold={fold}
+                  agentsInFold={foldVisible && agentsFoldable}
+                  onBeforeToggle={handleBeforeToggle}
+                  onAfterToggle={handleAfterToggle}
+                />
+              </SecretRequestContext.Provider>
             </SubagentCallContext.Provider>
 
             <TurnHtmlRenders turn={layeredRenders} />
@@ -384,6 +392,7 @@ export function sameTurnTimelineProps(
     && left.checkpointRestoreDisabled === right.checkpointRestoreDisabled
     && left.onRespondToApproval === right.onRespondToApproval
     && left.onRespondToInput === right.onRespondToInput
+    && left.onSecretRequestCommand === right.onSecretRequestCommand
     && left.onRevertCheckpoint === right.onRevertCheckpoint
     && left.onOpenTurnDiff === right.onOpenTurnDiff
     && left.onCompareTurnArtifacts === right.onCompareTurnArtifacts

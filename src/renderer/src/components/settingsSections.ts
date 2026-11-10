@@ -223,6 +223,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       onReportCommand: context.onSaveCommand ?? context.onReportCommand,
       onUpdate: context.onUpdate,
       onUnarchive: context.onUnarchive,
+      onOpenConversation: context.onOpenConversation,
       onRestoreDefaults: context.onRestoreDefaults,
     }),
   }),

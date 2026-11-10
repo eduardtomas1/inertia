@@ -85,9 +85,10 @@ describe("turn-scoped row indexes", () => {
         expect(plan(database, `UPDATE ${table} SET turn_id = NULL WHERE turn_id = ?`, "turn"))
           .toMatch(new RegExp(`SEARCH ${table} USING (COVERING )?INDEX ${index} \\(turn_id=\\?\\)`, "u"));
         expect(deletion).toContain(index);
-        expect((rows(database, table) as Array<Record<string, unknown>>).map(({ duo_comparison_json: duo, custom_agent_call_json: call, ...row }) => {
+        expect((rows(database, table) as Array<Record<string, unknown>>).map(({ duo_comparison_json: duo, custom_agent_call_json: call, secret_request_json: secret, ...row }) => {
           expect(duo ?? null).toBeNull();
           expect(call ?? null).toBeNull();
+          expect(secret ?? null).toBeNull();
           return row;
         })).toEqual(before[table]);
       }

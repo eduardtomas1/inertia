@@ -12,6 +12,7 @@ import {
   isTranscriptActivity,
   type TurnExecutionStreamEntry,
 } from "./execution";
+import { estimateSecretRequestHeight } from "./secretRequests";
 import { latestFailureIndex, resolveActivityGroupWindow } from "./activity-summary";
 import {
   isQuietSettledTurn,
@@ -139,6 +140,7 @@ function estimateResponseTurnRenderWeight(turn: ResponseTurn): number {
     + turn.assistantMessages.length / 8
     + turn.activities.length / 24
     + turn.htmlRenders.length / 4
+    + turn.secretRequests.length / 4
     + messageChars / 40_000
     + detailChars / 50_000;
 }
@@ -712,7 +714,9 @@ function estimateTurnRowSize(
   const exceptionalHeight = turn.approvals.reduce((total, approval) =>
     total + estimateApprovalHeight(approval, answerColumns), 0)
     + turn.inputRequests.reduce((total, request) =>
-      total + estimateInputRequestHeight(request, answerColumns), 0);
+      total + estimateInputRequestHeight(request, answerColumns), 0)
+    + turn.secretRequests.reduce((total, message) =>
+      total + estimateSecretRequestHeight(message.secretRequest, answerColumns), 0);
 
   const systemHeight = turn.systemMessages.reduce((total, message) =>
     total + 35 + estimatedWrappedLines(message.content, answerColumns) * 20, 0);

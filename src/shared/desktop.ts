@@ -977,6 +977,7 @@ export interface DesktopBridge {
   setBackendCredential: (request: SetBackendCredentialRequest) => Promise<BackendCredentialState>;
   clearBackendCredential: (request: BackendCredentialProfileRequest) => Promise<BackendCredentialState>;
   getBackendCredentialState: (request: BackendCredentialProfileRequest) => Promise<BackendCredentialState>;
+  saveAgentSecret: (request: SaveAgentSecretRequest) => Promise<SaveAgentSecretResult>;
   getPrivateConnectState: () => Promise<PrivateConnectStateView>;
   onPrivateConnectState: (listener: (state: PrivateConnectStateView) => void) => () => void;
   setPrivateConnectEnabled: (request: PrivateConnectEnableRequest) => Promise<PrivateConnectStateView>;
@@ -998,3 +999,4 @@ import type {
   BackendCredentialState,
   SetBackendCredentialRequest,
 } from "./backend-credentials";
+import type { SaveAgentSecretRequest, SaveAgentSecretResult } from "./agent-secrets";

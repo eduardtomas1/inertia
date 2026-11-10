@@ -43,6 +43,7 @@ import {
 import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
 import { MessageAgentCall } from "./MessageAgentCall";
 import { SubagentCallList } from "./SubagentCallBlock";
+import { SecretRequestList } from "./SecretRequestCard";
 import { customAgentsById, partitionSubagentCalls } from "../../utils/response-timeline/subagentCalls";
 import { SubagentGroup } from "./SubagentGroup";
 import { UnlinkedSubagentRows } from "./SubagentActivityRow";
@@ -457,6 +458,7 @@ export function AgentExecutionLayer({
       {!turn.isActive && consolidatesSettledWork && (
         <SubagentCallList entries={subagentCalls.entries} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />
       )}
+      {!turn.isActive && consolidatesSettledWork && <SecretRequestList messages={turn.secretRequests} />}
       {!groupInFold && delegatedWork}
       <span
         className="visually-hidden"

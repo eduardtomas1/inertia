@@ -96,6 +96,7 @@ describe("git.stage / git.unstage contracts", () => {
       duoLaunchConversationIds: () => null,
       pendingApproval: () => null,
       pendingInput: () => null,
+      secretRequestConversationId: () => null,
       savedAnswerConversationId: () => null,
     };
     for (const type of types) {

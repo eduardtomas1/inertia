@@ -84,8 +84,9 @@ The useful changes in each Inertia release, in plain language.
   own instructions, optional skills, an icon or character and an accent.
   Start from one of nine presets, reorder, duplicate, export and import
   them; an imported agent whose name is taken is renamed and you are told.
-- Type `/calling` in any chat to pick an agent. It stays on the message box
-  for that chat until you remove it, and each message goes to that agent.
+- Type `/calling` in any chat to pick an agent. It waits on the message box
+  for that chat, also when you switch chats, and the next message you send
+  goes to that agent.
 - Claude, Codex, OpenCode and Cursor hand the request to a subagent with the
   agent's instructions; Kimi, Antigravity and Grok follow them in the chat
   itself. The transcript shows the called agent with its character, what it

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { agentSecretDataPath } from "../../src/main/runtime-bootstrap-safety";
+import { agentSecretDataPath } from "../../src/main/agent-secret-data-path";
 
 const userDataPath = "C:\\Users\\ana\\AppData\\Roaming\\Inertia";
 

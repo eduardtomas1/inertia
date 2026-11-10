@@ -20,6 +20,7 @@ import {
   secretRequestCodexAppServer,
   type SecretProviderEvent,
 } from "./support/secret-request-provider-fixture";
+import { agentSecretDataPath } from "../../src/main/agent-secret-data-path";
 
 const WIDTH = 1512;
 const HEIGHT = 868;
@@ -59,7 +60,11 @@ async function plantOrphanedVaultCopy(): Promise<void> {
 }
 
 function agentSecretsDirectory(): string {
-  return join(app.testDirectory, "data", "agent-secrets");
+  return join(agentSecretDataPath({
+    platform: process.platform,
+    dataDirectory: join(app.testDirectory, "data"),
+    userDataPath: join(app.testDirectory, "electron-profile"),
+  }), "agent-secrets");
 }
 
 async function exists(path: string): Promise<boolean> {

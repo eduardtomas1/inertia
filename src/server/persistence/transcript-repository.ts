@@ -204,13 +204,15 @@ export class TranscriptRepository {
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
       this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, custom_agent_call_json, secret_request_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @customAgentCallJson, @secretRequestJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null, customAgentCallJson: customAgentCall ? JSON.stringify(customAgentCall) : null, secretRequestJson: message.secretRequest ? JSON.stringify(message.secretRequest) : null });
-      this.context.database.prepare(`
-        UPDATE conversations
-        SET updated_at = ?, settled_at = NULL,
-            last_viewed_at = CASE WHEN ? = 'user' THEN ? ELSE last_viewed_at END
-        WHERE id = ?
-      `).run(now, role, now, conversationId);
-      this.context.touchProject(conversation.project_id, now);
+      if (options.touchConversation !== false) {
+        this.context.database.prepare(`
+          UPDATE conversations
+          SET updated_at = ?, settled_at = NULL,
+              last_viewed_at = CASE WHEN ? = 'user' THEN ? ELSE last_viewed_at END
+          WHERE id = ?
+        `).run(now, role, now, conversationId);
+        this.context.touchProject(conversation.project_id, now);
+      }
       if (role === "user" && options.activateConversation !== false) {
         this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1")
           .run(conversation.project_id, conversationId);

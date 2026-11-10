@@ -448,7 +448,7 @@ async function compactUnderLock<T>(
         conversation.id,
         request.instruction ? `/compact ${request.instruction}` : "/compact",
         "system", [], null, undefined,
-        { compaction },
+        { compaction, touchConversation: request.trigger !== "idle" },
       );
       try { dependencies.broadcast({ type: "conversation.message.persisted", message }); }
       catch { resultMessage += " The receipt was saved, but the timeline could not refresh. Reload this chat to view it."; }

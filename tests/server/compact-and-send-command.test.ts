@@ -284,6 +284,7 @@ describe("conversation.compact-and-send", () => {
     expect(compact.mock.calls[0]![1]).toBeUndefined();
     expect(store.createMessage).toHaveBeenCalledWith(conversationId, "/compact", "system", [], null, undefined, {
       compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: null, instructionForwarded: false, trigger: "on-return", sessionInstructionDigest: null },
+      touchConversation: true,
     });
     expect(attachmentResolver.resolvePayloads).toHaveBeenCalledWith([attachment], requestId, expect.any(AbortSignal));
     expect(queue).toHaveBeenCalledWith(expect.objectContaining({
@@ -696,6 +697,7 @@ describe("manual compaction state", () => {
     expect(timeline).toEqual(["shell:compacting", "shell:idle"]);
     expect(store.createMessage).toHaveBeenCalledWith(conversationId, "/compact keep the tests", "system", [], null, undefined, {
       compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: null, instructionForwarded: true, trigger: "manual", sessionInstructionDigest: null },
+      touchConversation: true,
     });
     expect(sentResult(send)).toMatchObject({ result: { kind: "conversation.compacted" } });
     expect(compactions.isCompacting(conversationId)).toBe(false);
@@ -737,6 +739,7 @@ describe("idle compaction", () => {
     expect(timeline).toEqual(["shell:compacting", "shell:idle"]);
     expect(store.createMessage).toHaveBeenCalledWith(conversationId, "/compact", "system", [], null, undefined, {
       compaction: expect.objectContaining({ trigger: "idle" }),
+      touchConversation: false,
     });
     expect(compact.mock.calls[0]![0]).toMatchObject({ prompt: "/compact", sessionId: "provider-session" });
     expect(queue).not.toHaveBeenCalled();

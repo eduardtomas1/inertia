@@ -178,6 +178,7 @@ export interface CreateMessageOptions {
   htmlRender?: import("../../shared/html-render").HtmlRenderReference;
   secretRequest?: import("../../shared/agent-secrets").SecretRequestReference;
   activateConversation?: boolean;
+  touchConversation?: boolean;
 }
 
 export interface AgentTurnSettlementUpdate

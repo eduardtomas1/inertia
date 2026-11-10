@@ -24,10 +24,12 @@ import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
 import { SubagentElapsed, subscribeLiveElapsed } from "../SubagentElapsed";
 import { useLatestTurnSubagents } from "./subagent-trace-store";
+import { customAgentsById, partitionSubagentCalls } from "../../utils/response-timeline/subagentCalls";
 import { setSubagentGroupOpen, useSubagentGroupOpen } from "./turn-fold-store";
 import "./SubagentGroup.css";
 
 const MAX_AVATARS = 3;
+const NO_CUSTOM_AGENTS = customAgentsById(undefined);
 
 function focusFoldToggleAfterRemoval(turn: HTMLElement): void {
   queueMicrotask(() => {
@@ -161,7 +163,13 @@ function SubagentGroupComponent({
 }: SubagentGroupProps): React.JSX.Element | null {
   const panelId = useId();
   const open = useSubagentGroupOpen(turnId);
-  const subagents = useLatestTurnSubagents(turnId, renderedSubagents, open);
+  const latestSubagents = useLatestTurnSubagents(turnId, renderedSubagents, open);
+  const subagents = useMemo(
+    () => latestSubagents === renderedSubagents
+      ? renderedSubagents
+      : partitionSubagentCalls(latestSubagents, NO_CUSTOM_AGENTS, undefined).remaining,
+    [latestSubagents, renderedSubagents],
+  );
   const status = turnAgentStatus(subagents);
   if (!status) return null;
   const count = subagentCountLabel(status);

@@ -291,3 +291,36 @@ describe("secret output redactor: one matcher per active value set", () => {
     expect(JSON.stringify(finished)).not.toContain("kQ9");
   });
 });
+
+describe("secret output redactor: identity fields", () => {
+  it("leaves ids, types and kinds of events and results intact while hiding the value in their text", () => {
+    const value = redactor(["turn-abc"]);
+    const approval = {
+      providerId: "codex", conversationId: "c", runId: "run-turn-abc", turnId: "turn-abc", type: "approval",
+      request: { id: "approval-turn-abc", kind: "command", title: "Run turn-abc", command: "echo turn-abc" },
+    } as unknown as ProviderEvent;
+    const [out] = value.events(approval) as unknown as Array<{ turnId: string; runId: string; type: string; request: Record<string, string> }>;
+    expect(out!.turnId).toBe("turn-abc");
+    expect(out!.runId).toBe("run-turn-abc");
+    expect(out!.request.id).toBe("approval-turn-abc");
+    expect(out!.request.kind).toBe("command");
+    expect(out!.request.title).toBe("Run [redacted]");
+    expect(out!.request.command).toBe("echo [redacted]");
+
+    const typed = redactor(["approval"]);
+    const [kept] = typed.events({ ...approval, request: { id: "a1", kind: "approval", title: "Needs approval" } } as unknown as ProviderEvent) as unknown as Array<{ type: string; request: Record<string, string> }>;
+    expect(kept!.type).toBe("approval");
+    expect(kept!.request.kind).toBe("approval");
+    expect(kept!.request.title).toBe("Needs [redacted]");
+
+    const { result } = value.result({ ...BASE, turnId: "turn-abc", status: "completed", message: "done with turn-abc" } as unknown as ProviderRunResult);
+    expect(result).toMatchObject({ turnId: "turn-abc", message: "done with [redacted]" });
+  });
+
+  it("still finds the value under an id-like key when checking what an agent wants to store", () => {
+    const value = redactor(["turn-abc"]);
+    const input = { fooId: "turn-abc" };
+    expect(value.payload(input)).not.toBe(input);
+    expect(value.payload(input, true)).toBe(input);
+  });
+});

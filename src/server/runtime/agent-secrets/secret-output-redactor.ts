@@ -14,6 +14,7 @@ import type {
 } from "../../provider/contracts";
 
 const MAX_DEPTH = 32;
+const STRUCTURAL_KEY = /^(?:id|type|kind|status|phase|decision)$|Id$/u;
 const MAX_OUTPUT_STREAMS_PER_TURN = 64;
 
 const ASSISTANT_SEGMENT_CLOSERS: ReadonlySet<ProviderEvent["type"]> = new Set([
@@ -142,7 +143,7 @@ export class SecretOutputRedactor {
     return edge === "end" ? `${part.slice(0, -longest)}[redacted]` : `[redacted]${part.slice(longest)}`;
   }
 
-  payload<T>(value: T): T {
+  payload<T>(value: T, structural = false): T {
     if (!this.active()) return value;
     const visit = (current: unknown, depth: number): unknown => {
       if (typeof current === "string") return this.text(current);
@@ -160,7 +161,7 @@ export class SecretOutputRedactor {
       let changed = false;
       const next: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(current)) {
-        const visited = visit(entry, depth + 1);
+        const visited = structural && typeof entry === "string" && STRUCTURAL_KEY.test(key) ? entry : visit(entry, depth + 1);
         if (visited !== entry) changed = true;
         next[key] = visited;
       }
@@ -176,7 +177,7 @@ export class SecretOutputRedactor {
     if (event.type === "reasoning-summary") return this.streamReasoning(event);
     const closed = ASSISTANT_SEGMENT_CLOSERS.has(event.type) ? this.closeText(event.turnId) : [];
     if (event.type === "activity") return [...closed, ...this.activity(event)];
-    return [...closed, this.payload(event)];
+    return [...closed, this.payload(event, true)];
   }
 
   closeText(turnId: string): readonly ProviderEvent[] {
@@ -193,7 +194,7 @@ export class SecretOutputRedactor {
     const events = this.finishTurn(result.turnId);
     if (!this.active()) return { events, result };
     const { cleanupConfirmation, ...rest } = result;
-    const redacted = this.payload(rest);
+    const redacted = this.payload(rest, true);
     const next = redacted === rest ? result : {
       ...redacted,
       ...(cleanupConfirmation ? { cleanupConfirmation } : {}),
@@ -227,7 +228,7 @@ export class SecretOutputRedactor {
   }
 
   private activity(event: ProviderActivityEvent): readonly ProviderEvent[] {
-    const safe = this.payload(withoutOutput(event));
+    const safe = this.payload(withoutOutput(event), true);
     const activityId = event.activityId;
     const turn = this.turns.get(event.turnId);
     const existing = activityId ? turn?.outputs.get(activityId) : undefined;

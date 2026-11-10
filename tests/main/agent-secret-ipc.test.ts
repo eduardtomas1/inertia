@@ -192,7 +192,7 @@ describe("agent secret save IPC values", () => {
     ["only whitespace", "   \n ", "Paste the secret. Only spaces or line breaks were entered."],
     ["the mask", BACKEND_CREDENTIAL_MASK, "Paste the secret itself. The masked placeholder cannot be saved."],
     ["a multi-line value", "fixture\nauth-key", "The secret must be on a single line."],
-    ["a short value", "abc", "The secret must be at least 4 characters long."],
+    ["a short value", "abc", "The secret must be at least 8 characters long."],
     ["an oversized value", "a".repeat(16_385), "The secret is longer than 16,384 characters."],
   ])("rejects %s with the card's fixed message", async (_label, secret, message) => {
     const { invoke, vault, runtime } = setup();

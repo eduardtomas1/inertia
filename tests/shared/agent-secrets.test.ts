@@ -199,19 +199,20 @@ describe("agent secret values", () => {
     [BACKEND_CREDENTIAL_MASK, "Paste the secret itself. The masked placeholder cannot be saved."],
     ["fixture\nabc", "The secret must be on a single line."],
     ["tsk\0ey", "The secret must be on a single line."],
-    [" abc ", "The secret must be at least 4 characters long."],
+    [" abc ", "The secret must be at least 8 characters long."],
   ])("rejects %j", (value, issue) => {
     expect(agentSecretValueIssue(value)).toBe(issue);
     expect(isAgentSecretValue(value)).toBe(false);
   });
 
-  it("accepts single-line values from 4 characters and trims them", () => {
-    expect(agentSecretValueIssue("abcd")).toBeNull();
+  it("accepts single-line values from 8 characters and trims them", () => {
+    expect(agentSecretValueIssue("abcdefgh")).toBeNull();
+    expect(agentSecretValueIssue("abcdefg")).toBe("The secret must be at least 8 characters long.");
     expect(agentSecretValueIssue("x".repeat(AGENT_SECRET_MAX_LENGTH))).toBeNull();
     expect(normalizeAgentSecretValue("  fake-token-123  ")).toBe("fake-token-123");
     expect(isAgentSecretValue("fake-token-123")).toBe(true);
     expect(isAgentSecretValue(" fake-token-123")).toBe(false);
-    expect(() => normalizeAgentSecretValue("ab")).toThrow("The secret must be at least 4 characters long.");
+    expect(() => normalizeAgentSecretValue("ab")).toThrow("The secret must be at least 8 characters long.");
   });
 
   it("parses only an exact save request", () => {

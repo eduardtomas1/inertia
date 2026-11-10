@@ -4,7 +4,7 @@ export const AGENT_SECRET_VALUE_ISSUES = Object.freeze({
   blank: "Paste the secret. Only spaces or line breaks were entered.",
   masked: "Paste the secret itself. The masked placeholder cannot be saved.",
   multiline: "The secret must be on a single line.",
-  tooShort: "The secret must be at least 4 characters long.",
+  tooShort: "The secret must be at least 8 characters long.",
 });
 
 export const AGENT_SECRET_SAVE_ERRORS = Object.freeze({

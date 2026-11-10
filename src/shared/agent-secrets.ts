@@ -13,7 +13,7 @@ export const SECRET_REQUEST_MAX_DESCRIPTION_LENGTH = 600;
 export const SECRET_REQUEST_MIN_TTL_HOURS = 1;
 export const SECRET_REQUEST_MAX_TTL_HOURS = 24;
 export const SECRET_REQUEST_MAX_ACTIVE = 32;
-export const AGENT_SECRET_MIN_LENGTH = 4;
+export const AGENT_SECRET_MIN_LENGTH = 8;
 export const AGENT_SECRET_MAX_LENGTH = MAX_BACKEND_CREDENTIAL_LENGTH;
 
 export interface SecretRequestReference {

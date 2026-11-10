@@ -6,6 +6,7 @@ import {
   activityNeedsAttention,
 } from "./activity-attention";
 import type { ResponseTurn } from "./model";
+import type { SubagentCallEntry } from "./subagentCalls";
 
 export {
   activityAttentionSeverity,
@@ -114,7 +115,8 @@ export type TurnWorkStreamEntry =
       id: string;
       createdAt: string;
       message: ChatMessage;
-    };
+    }
+  | SubagentCallEntry;
 
 export function withHtmlRenders(
   stream: TurnExecutionStreamEntry[],

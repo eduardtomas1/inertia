@@ -1,6 +1,7 @@
 export const SETTINGS_SECTION_IDS = [
   "appearance",
   "chats",
+  "custom-agents",
   "notifications",
   "keyboard",
   "projects",

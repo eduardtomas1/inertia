@@ -14,11 +14,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  FolderPlus,
-  MessageCircleQuestion,
-  SquarePen,
-} from "lucide-react";
+import { FolderPlus, MessageCircleQuestion, SquarePen } from "lucide-react";
 import clsx from "clsx";
 import type {
   AgentActivity,
@@ -59,6 +55,7 @@ import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
+import type { CustomAgent } from "@shared/custom-agents";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useReaderScrollIntent } from "../hooks/useReaderScrollIntent";
@@ -68,10 +65,7 @@ import {
   useStreamingAgentState,
   type StreamingAgentSource,
 } from "../hooks/useStreamingAgentState";
-import {
-  turnEventOwner,
-  type TerminalTurnProjections,
-} from "../utils/terminalTurnProjection";
+import { turnEventOwner, type TerminalTurnProjections } from "../utils/terminalTurnProjection";
 import { revealAgentInputRequest } from "../utils/agentInputNavigation";
 import { DuoJudgeNoticeSlot } from "./DuoJudgeNoticeContext";
 import {
@@ -184,6 +178,9 @@ type ChatWorkspaceProps = {
   skillsError: string | null;
   promptPresets?: readonly PromptPreset[];
   promptPresetsEnabled?: boolean;
+  customAgents?: readonly CustomAgent[];
+  onOpenCustomAgentSettings?: () => void;
+  onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
   promptStashEnabled?: boolean;
   conversationContextHandoffEnabled?: boolean;
   agentContextRequestEnabled?: boolean;
@@ -302,7 +299,7 @@ export function ChatWorkspace({
   skillsLoading,
   skillsError,
   promptPresets = EMPTY_PROMPT_PRESETS,
-  promptPresetsEnabled = true,
+  promptPresetsEnabled = true, customAgents, onOpenCustomAgentSettings, onStopSubagent,
   promptStashEnabled = true,
   conversationContextHandoffEnabled = true,
   agentContextRequestEnabled = conversationContextHandoffEnabled,
@@ -1081,7 +1078,7 @@ export function ChatWorkspace({
                 ? onConversationContextCommand
                 : undefined}
               activities={ownedActivities}
-              subagents={ownedSubagents}
+              subagents={ownedSubagents} customAgents={customAgents} onStopSubagent={onStopSubagent}
               reasonings={ownedReasonings}
               plans={ownedPlans}
               checkpoints={ownedCheckpoints}
@@ -1222,7 +1219,7 @@ export function ChatWorkspace({
           compactOnReturnSetting={compactOnReturnSetting}
           onListSkills={onListSkills}
           promptPresets={promptPresets}
-          promptPresetsEnabled={promptPresetsEnabled}
+          promptPresetsEnabled={promptPresetsEnabled} customAgents={customAgents} onOpenCustomAgentSettings={onOpenCustomAgentSettings}
           promptStashEnabled={promptStashEnabled}
           onPromptPresetCommand={onPromptPresetCommand}
           onUpdateConversation={onUpdateConversation}

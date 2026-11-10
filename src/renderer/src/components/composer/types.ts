@@ -21,6 +21,7 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { CustomAgent } from "@shared/custom-agents";
 import type { QueueCommandRunner } from "./runtimeQueueClient";
 import type { CompactOnReturnSetting, ConversationCompactionState } from "@shared/compact-on-return";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
@@ -91,6 +92,8 @@ export interface ComposerProps {
   onListSkills: (forceReload?: boolean) => Promise<void>;
   promptPresets?: readonly PromptPreset[];
   onPromptPresetCommand?: PromptPresetCommandRunner;
+  customAgents?: readonly CustomAgent[];
+  onOpenCustomAgentSettings?: () => void;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,

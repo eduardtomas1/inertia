@@ -153,6 +153,24 @@ describe("Stop and send for routes without live follow-ups", () => {
     expect(input).toHaveValue("Keep me.");
   });
 
+  it("never stops and sends a /calling command that names no custom agent", async () => {
+    const current = conversation("75757575-7575-4575-8575-757575757575");
+    const run = queueRunner();
+    const onStop = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      running: true, latestTurn: runningTurn("kimi-acp"), onQueueCommand: run, onStop, customAgents: [],
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "/calling nobody investigate this" } });
+
+    await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
+
+    expect(await screen.findByText("No custom agent answers to /calling nobody.")).toBeVisible();
+    expect(input).toHaveValue("/calling nobody investigate this");
+    expect(run.mock.calls.map(([command]) => command.type)).not.toContain("message.queue.stop-and-send");
+    expect(onStop).not.toHaveBeenCalled();
+  });
+
   it("keeps Stop agent and live follow-ups on routes that steer the running turn", async () => {
     const current = conversation("74747474-7474-4474-8474-747474747474");
     const onSend = vi.fn(async () => undefined);

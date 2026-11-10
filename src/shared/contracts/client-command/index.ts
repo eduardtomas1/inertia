@@ -11,6 +11,7 @@ import { gitCommandSchemas, gitHistoryCommandSchemas } from "./git";
 import { workspaceCommandSchemas } from "./workspace";
 import { terminalLinkCommandSchemas } from "./terminal-links";
 import { promptPresetCommandSchema } from "./prompt-presets";
+import { customAgentCommandSchemas } from "./custom-agents";
 import { todoCommandSchemas } from "./todos";
 import { libraryCommandSchemas } from "./library";
 import { updatesCommandSchemas } from "./updates";
@@ -24,6 +25,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...agentCommandSchemas,
   ...configurationCommandSchemas,
   ...promptPresetCommandSchema.options,
+  ...customAgentCommandSchemas,
   ...todoCommandSchemas,
   ...libraryCommandSchemas,
   ...updatesCommandSchemas,

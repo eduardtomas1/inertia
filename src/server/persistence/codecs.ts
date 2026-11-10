@@ -7,6 +7,7 @@ import { isHtmlRenderReference } from "../../shared/html-render";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
 import { duoComparisonBriefFromJson } from "../../shared/duo-comparison-brief";
+import { customAgentCallAttributionSchema, type CustomAgentCallAttribution } from "../../shared/custom-agents";
 import {
   AGENT_RUN_STATES,
   type AgentActivity,
@@ -797,7 +798,18 @@ export function watcherNoteFromJson(value: string | null | undefined): WatcherNo
   }
 }
 
+export function customAgentCallFromJson(value: string | null | undefined): CustomAgentCallAttribution | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = customAgentCallAttributionSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function messageFromRow(row: MessageRow): ChatMessage {
+  const customAgentCall = row.role === "user" ? customAgentCallFromJson(row.custom_agent_call_json) : undefined;
   const watcherNote = row.role === "user" ? watcherNoteFromJson(row.watcher_note_json) : undefined;
   const duoComparison = row.role === "user" ? duoComparisonBriefFromJson(row.duo_comparison_json) : undefined;
   let compaction: unknown;
@@ -809,6 +821,7 @@ export function messageFromRow(row: MessageRow): ChatMessage {
       ? { privateConnectDeviceId: row.private_connect_device_id } : {}),
     ...(watcherNote ? { watcherNote } : {}),
     ...(duoComparison ? { duoComparison } : {}),
+    ...(customAgentCall ? { customAgentCall } : {}),
     ...(row.role === "system" && row.turn_id === null && isContextCompaction(compaction) ? { compaction } : {}),
     ...(row.role === "system" && row.turn_id !== null && isHtmlRenderReference(htmlRender) ? { htmlRender } : {}),
     id: row.id,
@@ -852,6 +865,7 @@ export function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
     providerToolUseId: row.provider_tool_use_id,
     providerRole: row.provider_role,
     providerName: row.provider_name,
+    ...(row.custom_agent_id && customAgentCallAttributionSchema.shape.agentId.safeParse(row.custom_agent_id).success ? { customAgentId: row.custom_agent_id } : {}),
     providerStatus: row.provider_status,
     status: row.status,
     isLive: row.is_live === 1,

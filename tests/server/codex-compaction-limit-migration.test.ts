@@ -39,10 +39,10 @@ function state(database: Database.Database): StateRow {
 }
 
 describe("Codex compaction limit migration", () => {
-  it("is the newest registered migration", () => {
+  it("is registered after the context compaction settings migration", () => {
     expect(CODEX_COMPACTION_LIMIT_SCHEMA_VERSION).toBe(114);
-    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(114);
-    expect(runtimeMigrationCatalog().at(-1)).toMatchObject({
+    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBeGreaterThanOrEqual(CODEX_COMPACTION_LIMIT_SCHEMA_VERSION);
+    expect(runtimeMigrationCatalog().find(({ version }) => version === CODEX_COMPACTION_LIMIT_SCHEMA_VERSION)).toMatchObject({
       version: CODEX_COMPACTION_LIMIT_SCHEMA_VERSION,
       name: codexCompactionLimitMigration.name,
     });

@@ -152,6 +152,49 @@ function unsavedChatQueueRunner(run: QueueCommandRunner): QueueCommandRunner {
   return unsaved;
 }
 
+interface StableSceneCallbacks {
+  setActionError: Dispatch<SetStateAction<string | null>>;
+  stopSubagent: (trace: SubagentTrace) => Promise<void>;
+  backgroundSubagent: (trace: SubagentTrace) => Promise<void>;
+  openCustomAgentSettings: () => void;
+}
+
+const stableSceneCallbacks = new WeakMap<WorkspaceSceneActions, StableSceneCallbacks>();
+
+export function workspaceSceneCallbacks(
+  actions: WorkspaceSceneActions,
+  setActionError: Dispatch<SetStateAction<string | null>>,
+): StableSceneCallbacks {
+  const cached = stableSceneCallbacks.get(actions);
+  if (cached?.setActionError === setActionError) return cached;
+  const created: StableSceneCallbacks = {
+    setActionError,
+    stopSubagent: async (trace) => {
+      try {
+        await actions.stopSubagent(trace);
+      } catch (error) {
+        setActionError(error instanceof Error
+          ? error.message
+          : "The delegated task could not be stopped.");
+        throw error;
+      }
+    },
+    backgroundSubagent: async (trace) => {
+      try {
+        await actions.backgroundSubagent?.(trace);
+      } catch (error) {
+        setActionError(error instanceof Error
+          ? error.message
+          : "The agent could not be moved to the background.");
+        throw error;
+      }
+    },
+    openCustomAgentSettings: () => actions.openSettings({ section: "custom-agents" }),
+  };
+  stableSceneCallbacks.set(actions, created);
+  return created;
+}
+
 export function chatQueueRunner(
   run: QueueCommandRunner | undefined,
   draft: Conversation | null,
@@ -270,7 +313,7 @@ export interface WorkspaceSceneActions {
   connectProvider: (providerId: ProviderId) => void;
   openProviderSetup: (providerId: ProviderId) => void;
   openBackendSetup: (profileId: string) => void;
-  openSettings: () => void;
+  openSettings: (target?: SettingsTarget) => void;
   openUsageView?: () => void;
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
@@ -542,26 +585,8 @@ export function createWorkspaceSceneModel({
     persistedConversation?.id ?? null,
     projection.turns,
   );
-  const stopSubagent = async (trace: SubagentTrace): Promise<void> => {
-    try {
-      await actions.stopSubagent(trace);
-    } catch (error) {
-      setActionError(error instanceof Error
-        ? error.message
-        : "The delegated task could not be stopped.");
-      throw error;
-    }
-  };
-  const backgroundSubagent = async (trace: SubagentTrace): Promise<void> => {
-    try {
-      await actions.backgroundSubagent?.(trace);
-    } catch (error) {
-      setActionError(error instanceof Error
-        ? error.message
-        : "The agent could not be moved to the background.");
-      throw error;
-    }
-  };
+  const sceneCallbacks = workspaceSceneCallbacks(actions, setActionError);
+  const { stopSubagent, backgroundSubagent } = sceneCallbacks;
   const setGoal = async (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -613,6 +638,8 @@ export function createWorkspaceSceneModel({
         ({ archivedAt }) => archivedAt !== null,
       ) ?? [],
       databaseBackup: connection.snapshot?.databaseBackup,
+      customAgents: connection.snapshot?.customAgents ?? EMPTY_LIST,
+      skills: currentWorkflow?.skills ?? EMPTY_LIST,
       lifecycleDiagnostics: connection.status === "online"
         ? connection.snapshot?.lifecycleDiagnostics
         : undefined,
@@ -711,6 +738,9 @@ export function createWorkspaceSceneModel({
       skillsLoading: draftConversation && draftSkills ? draftSkills.loading : workflow.loading,
       skillsError: draftConversation && draftSkills ? draftSkills.error : workflow.error,
       promptPresets: connection.snapshot?.promptPresets ?? EMPTY_LIST,
+      customAgents: connection.snapshot ? connection.snapshot.customAgents ?? EMPTY_LIST : undefined,
+      onOpenCustomAgentSettings: sceneCallbacks.openCustomAgentSettings,
+      onStopSubagent: stopSubagent,
       goal: persistedConversation && !globalChatActive ? {
         workflow: currentWorkflow,
         executionStatus: currentGoalExecution,

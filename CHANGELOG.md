@@ -78,6 +78,19 @@ The useful changes in each Inertia release, in plain language.
   its next new session, also after Inertia restarts. With Browser access
   off, the Browser tools answer that access is off.
 
+### Custom agents
+
+- Settings → Custom agents keeps a library of named agents, each with its
+  own instructions, optional skills, an icon or character and an accent.
+  Start from one of nine presets, reorder, duplicate, export and import
+  them; an imported agent whose name is taken is renamed and you are told.
+- Type `/calling` in any chat to pick an agent. It stays on the message box
+  for that chat until you remove it, and each message goes to that agent.
+- Claude, Codex, OpenCode and Cursor hand the request to a subagent with the
+  agent's instructions; Kimi, Antigravity and Grok follow them in the chat
+  itself. The transcript shows the called agent with its character, what it
+  is doing, its status and time, and its report when it finishes.
+
 ### Plan
 
 - Steps read from a reply appear only for replies in Plan mode, are marked

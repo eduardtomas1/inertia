@@ -150,6 +150,7 @@ export interface BeginAgentTurnInput
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
   duoComparison?: DuoComparisonBrief;
+  customAgentCall?: import("../../shared/custom-agents").CustomAgentCallAttribution;
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
   /**
@@ -171,6 +172,7 @@ export interface CreateMessageOptions {
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
   duoComparison?: DuoComparisonBrief;
+  customAgentCall?: import("../../shared/custom-agents").CustomAgentCallAttribution;
   compaction?: import("../../shared/context-compaction").ContextCompaction;
   /** Turn-scoped system messages only; written with its html_renders row. */
   htmlRender?: import("../../shared/html-render").HtmlRenderReference;
@@ -263,6 +265,7 @@ export interface UpsertSubagentTraceInput {
   providerToolUseId: string | null;
   providerRole: string | null;
   providerName: string | null;
+  customAgentId?: string | null;
   providerStatus?: string | null;
   status: SubagentTraceStatus;
   isLive: boolean;

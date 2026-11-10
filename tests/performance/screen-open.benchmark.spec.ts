@@ -35,6 +35,7 @@ const IDLE_BEFORE_FIRST_OPEN_MS = 2_000;
 const HOME_CHAT = "screen-open fixture";
 const SETTINGS_SECTIONS = [
   "Chats",
+  "Custom agents",
   "Notifications",
   "Keyboard",
   "Projects",

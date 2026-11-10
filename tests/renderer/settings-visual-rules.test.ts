@@ -101,6 +101,24 @@ describe("agents settings", () => {
   });
 });
 
+describe("custom agents", () => {
+  const agents = "../../src/renderer/src/components/custom-agents/CustomAgentsSettings.css";
+
+  it("marks chosen symbols, accents and skills with the selected fill, never the accent", () => {
+    expect(source(agents)).not.toMatch(/var\(--accent/u);
+    expect(rule(agents, ".custom-agent-symbols > .custom-agent-symbol[aria-checked=\"true\"]")).toContain("background: var(--fill-strong);");
+    expect(rule(agents, ".custom-agent-swatches > .custom-agent-swatch[aria-checked=\"true\"]")).toContain("background: var(--fill-strong);");
+    expect(rule(agents, ".custom-agent-skill[aria-pressed=\"true\"]")).toContain("background: var(--fill-strong);");
+  });
+
+  it("uses quiet dividers, chrome type sizes and token tints for the block kinds", () => {
+    expect(source(agents)).not.toMatch(/solid var\(--line\);|--text-base|font-size:\s*\d+px|#[0-9a-f]{3,8}\b/iu);
+    expect(rule(agents, ".custom-agent-row")).toContain("border-top: 1px solid var(--line-soft);");
+    expect(rule(agents, ".custom-agent-block[data-kind=\"must\"]")).toContain("--block-tint: var(--status-completed);");
+    expect(rule(agents, ".custom-agent-block[data-kind=\"must-not\"]")).toContain("--block-tint: var(--danger);");
+  });
+});
+
 describe("devices and integrations", () => {
   it("separates Discord fields and Private Connect blocks like other rows", () => {
     const discord = rule("../../src/renderer/src/components/DiscordSettings.css", ".discord-field");

@@ -13,6 +13,7 @@ import {
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "../../src/server/persistence/migrations/turn-scoped-indexes";
 import { DUO_COMPARISON_BRIEFS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/duo-comparison-briefs";
+import { CUSTOM_AGENTS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/custom-agents";
 import { LIBRARY_SCHEMA_VERSION } from "../../src/server/persistence/migrations/library";
 import { AGENT_CONTEXT_READ_MANAGED_ACCESS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/agent-context-read-managed-access";
 import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "../../src/server/persistence/migrations/todo-source-conversation";
@@ -40,6 +41,20 @@ const contextPacketTriggers = [
   "conversation_context_packets_draft_limit",
 ];
 
+const nonUniqueCustomAgentHandles = `
+  CREATE TABLE custom_agents_loose AS SELECT * FROM custom_agents;
+  DROP TABLE custom_agents;
+  ALTER TABLE custom_agents_loose RENAME TO custom_agents;
+  CREATE INDEX custom_agents_position_idx ON custom_agents(position ASC, id ASC);
+  CREATE INDEX custom_agents_handle_idx ON custom_agents(handle);
+  CREATE TRIGGER custom_agents_count_limit
+    BEFORE INSERT ON custom_agents
+    WHEN (SELECT COUNT(*) FROM custom_agents) >= 40
+    BEGIN
+      SELECT RAISE(ABORT, 'custom agent count limit exceeded');
+    END;
+`;
+
 function narrowAgentContextReadAccess(database: Database.Database, version: number): void {
   const access = version >= 99 ? "'own', 'referenced', 'approved', 'watched'" : "'own', 'referenced', 'approved'";
   const table = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_context_reads'")
@@ -61,6 +76,13 @@ function narrowAgentContextReadAccess(database: Database.Database, version: numb
 }
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < CUSTOM_AGENTS_SCHEMA_VERSION) {
+    database.exec(`
+      DROP TABLE custom_agents;
+      ALTER TABLE messages DROP COLUMN custom_agent_call_json;
+      ALTER TABLE subagent_traces DROP COLUMN custom_agent_id;
+    `);
+  }
   if (version < SUBAGENT_TASK_SHAPE_SCHEMA_VERSION) {
     for (const column of taskShapeColumns) database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
   }
@@ -221,13 +243,20 @@ describe("database health check for settings and subagent columns", () => {
     { version: CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, sql: "DROP INDEX codex_thread_tool_packs_registered_idx" },
     { version: CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, sql: "DROP TABLE codex_thread_tool_packs" },
     ...taskShapeColumns.map((column) => ({ version: SUBAGENT_TASK_SHAPE_SCHEMA_VERSION, sql: `ALTER TABLE subagent_traces DROP COLUMN ${column}` })),
+    { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "DROP TABLE custom_agents" },
+    { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "ALTER TABLE custom_agents DROP COLUMN skills_json" },
+    { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "DROP INDEX custom_agents_position_idx" },
+    { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "DROP TRIGGER custom_agents_count_limit" },
+    { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: nonUniqueCustomAgentHandles },
+    { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "ALTER TABLE messages DROP COLUMN custom_agent_call_json" },
+    { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "ALTER TABLE subagent_traces DROP COLUMN custom_agent_id" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each(Array.from({ length: SUBAGENT_TASK_SHAPE_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each(Array.from({ length: CUSTOM_AGENTS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);
@@ -244,6 +273,18 @@ describe("database health check for settings and subagent columns", () => {
     new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false }).close();
     const primary = new Database(databasePath);
     primary.exec("ALTER TABLE app_state DROP COLUMN notify_only_in_background");
+    const manager = new DatabaseBackupManager(primary, databasePath);
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    primary.close();
+  });
+
+  it("rejects a backup whose custom agent handles are not unique during off-thread validation", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-recovery-columns-"));
+    directories.push(directory);
+    const databasePath = join(directory, "inertia.sqlite");
+    new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false }).close();
+    const primary = new Database(databasePath);
+    primary.exec(nonUniqueCustomAgentHandles);
     const manager = new DatabaseBackupManager(primary, databasePath);
     await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
     primary.close();

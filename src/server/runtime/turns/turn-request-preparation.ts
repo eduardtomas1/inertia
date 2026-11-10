@@ -45,6 +45,7 @@ import {
   type PromptInstructionDeliveries,
 } from "./turn-instruction-delivery";
 import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
+import { rejectGoalCustomAgentCall, resolveCustomAgentCall } from "./custom-agent-call";
 import { FULL_HARNESS_CAPABILITY_OFFER } from "../harness-capabilities";
 import type {
   ActiveTurn,
@@ -276,6 +277,11 @@ export function resolveTurnRequest(
   dependencies.store.assertConversationProvider(conversation.id, route.providerId);
   const watcherTurn = watcherTurnPolicy(dependencies.store, conversation, route.harnessId, request);
   const readOnlyWatcher = watcherTurn?.readOnly;
+  const calledAgent = request.context?.calledAgent;
+  if (calledAgent && request.goalStart !== undefined) rejectGoalCustomAgentCall();
+  const customAgentCall = calledAgent
+    ? resolveCustomAgentCall({ calledAgent, store: dependencies.store, providerId: route.providerId })
+    : null;
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const hostToolBridgeAttested = routeHostBridgeAttested(providerInfo, route);
   // Read once: the prompt's instructions and the tools attached at provider
@@ -400,6 +406,7 @@ export function resolveTurnRequest(
         : null,
     )]),
     ...(request.internalInstructions ?? []),
+    ...(customAgentCall ? [customAgentCall.instructionBlock] : []),
   ];
   // Codex-native goals reach the provider through its own thread-goal API;
   // only an Inertia-local goal is described here, as visible context.
@@ -571,6 +578,7 @@ export function resolveTurnRequest(
       attachmentIds: attachments.map(({ id }) => id),
     }) ?? [],
     skills: request.skills,
+    ...(customAgentCall ? customAgentCall.providerInput : {}),
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
@@ -606,6 +614,7 @@ export function resolveTurnRequest(
     activateConversation: request.activateConversation,
     privateConnectDeviceId: request.privateConnectDeviceId,
     ...(request.watcherNote ? { watcherNote: request.watcherNote } : {}),
+    ...(customAgentCall ? { customAgentCall: customAgentCall.attribution } : {}),
     ...(request.duoComparison && request.duoComparison.launchId === request.authorizedDuoComparisonLaunchId
       ? { duoComparison: request.duoComparison }
       : {}),
@@ -670,6 +679,7 @@ export function resolveTurnRequest(
             ? { turnCheckpoint: true }
             : {}),
           ...(readOnlyWatcher ? { readOnlyWatcher } : {}),
+          ...(customAgentCall ? { customAgentCall: customAgentCall.attribution } : {}),
           rendererOwnerId: request.rendererOwnerId ?? null,
           structuredContext,
           gitBeforeCapture: null,

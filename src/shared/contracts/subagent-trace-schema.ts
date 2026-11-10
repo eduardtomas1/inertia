@@ -60,6 +60,7 @@ const USAGE_KEYS = Object.keys({
   maxContextTokens: true,
 } satisfies Record<keyof SubagentTaskUsage, true>);
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_TOKEN_COUNT = 1_000_000_000_000;
 const MAX_TOOL_USE_COUNT = 1_000_000;
 const MAX_DURATION_MS = 31 * 24 * 60 * 60 * 1_000;
@@ -131,5 +132,7 @@ export function subagentTrace(value: unknown): boolean {
     && (value.background === null || typeof value.background === "boolean")
     && (value.effort === null || SUBAGENT_TASK_EFFORTS.includes(value.effort as string))
     && (value.modelSource === null || SUBAGENT_MODEL_SOURCES.includes(value.modelSource as string))
-    && subagentTaskSteps(value.steps);
+    && subagentTaskSteps(value.steps)
+    && (value.customAgentId === undefined || value.customAgentId === null
+      || (typeof value.customAgentId === "string" && UUID.test(value.customAgentId)));
 }

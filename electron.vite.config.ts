@@ -156,6 +156,7 @@ export default defineConfig({
       },
       sourcemap: false,
       cssCodeSplit: true,
+      assetsInlineLimit: (filePath) => filePath.replaceAll("\\", "/").includes("/assets/marks/") ? false : undefined,
       chunkSizeWarningLimit: 850,
       rollupOptions: {
         input: { index: resolve("src/renderer/index.html"), mascot: resolve("src/renderer/mascot.html") },
@@ -186,7 +187,7 @@ export default defineConfig({
             // names reduce repeated import/preload metadata without changing code.
             const budgetedChunks = new Set([
               "App", "DetachedChatApp", "FilesPanel", "ResponseTimeline", "ResponseMarkdown", "SettingsView",
-              "MascotSettings", "IssueReportSettings", "DiagnosticsSettings", "ProjectSettings", "CliConversationImportDialog", "ConversationActionsMenu", "PreMergeConfidenceLauncher", "TerminalPanel", "PreviewPanel",
+              "MascotSettings", "IssueReportSettings", "DiagnosticsSettings", "ProjectSettings", "CustomAgentsSettings", "CliConversationImportDialog", "ConversationActionsMenu", "PreMergeConfidenceLauncher", "TerminalPanel", "PreviewPanel",
               "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions",
               "DiscordSettings", "DocumentAttachmentPreview", "SidebarUpdateControl", "CanaryRollbackSetting",
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "iconRegion", "pdf", "xlsx",

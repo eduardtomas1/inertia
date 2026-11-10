@@ -339,8 +339,8 @@ test("asks for a secret in a private card and hands the agent only a file path",
   await expect(notice).toHaveCount(0);
   await expect(turn.getByText(SECRET_SAVED_REPLY)).toBeVisible({ timeout: 30_000 });
 
-  await expect(turn.getByRole("status").filter({ hasText: "Completed · 1 action" })).toBeVisible({ timeout: 30_000 });
   const runDetails = turn.getByRole("button", { name: /^Worked for /u });
+  await expect(runDetails).toBeVisible({ timeout: 30_000 });
   await runDetails.click();
   await expect(runDetails).toHaveAttribute("aria-expanded", "true");
   const disclosure = turn.getByRole("button", { name: /^Output: / });

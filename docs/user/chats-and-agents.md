@@ -48,6 +48,9 @@ Codex does the same at about 95% of the model's context. **Auto-compact Codex ch
 
 ## Follow the work
 
+- A finished turn shows its answer and folds the work behind one row, **Worked for 3m 2s** or **Stopped after 12s**. Open it to see the steps in the order they ran, with each block's time on hover. Approvals, questions, failures, changed files and called custom agents stay outside the fold, and each turn keeps your choice while the window is open.
+- Tool calls are summed up as a sentence, such as *Ran 3 commands, edited 2 files and 4 other actions*. A turn's subagents share one row with their provider marks, a count and their state; open it for one line per agent, and choose a line to open that agent in **Background tasks**.
+- Repository paths in an answer, such as `src/app.ts:42`, are chips: choose one to open the file in **Files** at that line. Paths outside the project, in code blocks or in links stay plain text.
 - The **Work** tab lists your chats. Running chats show the agent pixels and elapsed time, and a chat that needs your input or finishes gets a brief cue.
 - The **Plan** and **Goal** panels show the plan and objective that the provider reports. Inertia doesn't invent a goal from the chat text. A local goal, which you set for a provider without native goals, is shown to the agent on each turn as a short line with its objective and status, as context rather than as an instruction. When the provider reports no plan, a list in a Plan-mode reply appears in the Plan panel: while the reply runs, its first step shows as in progress; once it finishes, the list is labeled **Derived from the reply** and no step is marked done. Lists in Build-mode replies never appear in the Plan panel, running or finished.
 - **Implement** switches the chat to Build mode and sends the plan itself, not a pointer to an earlier reply, so the request still makes sense after compaction or a provider switch. A plan read from a reply keeps its **Derived from the reply** label in the message. Plan text over 16 KiB is cut at a line and the message says it was trimmed. **Implement in a new chat** opens a new chat in the same checkout, the chat's worktree when it has one, with that message waiting in the message box for you to review and send.
@@ -67,6 +70,21 @@ An agent can answer with a page as well as text: a chart, a table, a diagram or 
 - HTTPS links in the page open in your default browser when you click them.
 - The page runs in a sandbox. It cannot fetch from the network, load remote content, or reach your files, the project or the rest of Inertia, so everything it shows must be inside the page itself. A script in the page can still open a WebRTC connection through a relay server over TCP.
 - Private Connect clients, chats you share as context, and another model continuing the chat see only a one-line *[page: title]* note in its place, so the agent’s reply also says in one sentence what the page shows.
+
+## Custom agents
+
+A custom agent is a named agent you keep, with its own instructions, optional skills, an icon or character and an accent. Make one in **Settings → Custom agents**, or start from one of the nine presets, and reorder, duplicate, export or import them there. An imported agent whose name is already taken is renamed, and Inertia tells you.
+
+Type `/calling` in the message box and choose an agent: it shows on the message box, and the next message you send goes to it. Claude, Codex, OpenCode and Cursor hand the request to a subagent with the agent's instructions; Kimi Code, Antigravity and Grok follow them in the chat itself. The transcript shows the called agent beside the answer with its character, what it is doing, its status and time, and its report when it finishes.
+
+## Secrets an agent asks for
+
+When an agent needs a credential, such as an API token for a test environment, it can ask for it in a private card in the chat instead of asking you to paste it. Type the value there and choose **Save securely**, or **Decline**.
+
+- The value never enters the chat, its history, Inertia's database or the logs. The agent receives only the path of a file it can read, private to your user account, for up to 24 hours.
+- The value and its common encodings are replaced with *[redacted]* in anything the agent prints back.
+- With a system keychain, the secret is kept there too and survives a restart; otherwise it lasts until Inertia quits. **Settings → Data → Agent secrets** lists active secrets, and **Revoke** there or on the card deletes them.
+- You can answer from the chat's own window. The agent waits up to ten minutes (four and a half on Cursor and Kimi Code); providers without Inertia's tools are told never to ask you for a secret in the chat.
 
 ## Keep work organized
 

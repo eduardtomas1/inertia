@@ -235,12 +235,12 @@ describe("Quiet Ledger transcript accessibility", () => {
     expect(changedFiles).toBeGreaterThan(metadata);
     expect(changedFiles).toBeLessThan(ledgerEnd);
     expect([...html.matchAll(/data-turn-layer="([^"]+)"/gu)].map((match) => match[1]))
-      .toEqual(["user-request", "agent-execution", "final-answer", "supporting-ledger"]);
+      .toEqual(["user-request", "user-request-meta", "agent-execution", "final-answer", "supporting-ledger"]);
     expect(html).toContain('aria-label="Agent system notice"');
     expect(html).toContain('aria-label="Supporting turn ledger"');
     expect(html).toContain('aria-label="Copy final answer"');
-    expect(html).toContain('aria-controls="turn-work-details-turn-accessibility"');
-    expect(html).toContain('id="turn-work-details-turn-accessibility"');
+    expect(html).toContain('class="turn-fold-toggle" aria-expanded="false" aria-controls="turn-fold-turn-accessibility"');
+    expect(html).toContain('id="turn-fold-turn-accessibility"');
     expect(html).toContain('aria-controls="turn-run-details-turn-accessibility"');
     expect(html).toContain('aria-controls="turn-changed-files-details-artifact-accessibility"');
     expect(html).toContain('id="turn-changed-files-details-artifact-accessibility"');
@@ -264,7 +264,12 @@ describe("Quiet Ledger transcript accessibility", () => {
       html.indexOf("</article>", html.indexOf('data-turn-layer="final-answer"')),
     );
     expect(finalAnswer).not.toContain("aria-live");
-    expect(html.match(/aria-live="polite"/gu)).toHaveLength(2);
+    const requestMeta = html.slice(
+      html.indexOf('data-turn-layer="user-request-meta"'),
+      html.indexOf('data-turn-layer="agent-execution"'),
+    );
+    expect(requestMeta.match(/aria-live="polite"/gu)).toHaveLength(1);
+    expect(html.match(/aria-live="polite"/gu)).toHaveLength(3);
   });
 
   it("announces only an active-to-terminal transition, never initial history or timer updates", () => {

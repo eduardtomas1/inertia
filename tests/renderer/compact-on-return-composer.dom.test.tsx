@@ -300,6 +300,7 @@ describe("compact on return composer offer", () => {
     expect(screen.queryByRole("button", { name: "Compact and send" })).toBeNull();
     const send = screen.getByRole("button", { name: "Send" });
     expect(send).toBeEnabled();
+    expect(send).not.toHaveAttribute("aria-disabled");
     expect(send).toHaveTextContent("Send");
 
     fireEvent.keyDown(textbox(), { key: "Enter" });

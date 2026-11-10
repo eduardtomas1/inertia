@@ -1,8 +1,7 @@
-import { lazy, Suspense, useContext, useId } from "react";
+import { lazy, Suspense, useContext, useEffect, useId, useRef } from "react";
 import {
   ChevronDown,
   Ellipsis,
-  FolderGit2,
   Paperclip,
   Play,
   Wrench,
@@ -37,6 +36,8 @@ import {
   usageQuotaSourceForSelection,
 } from "../../utils/usageDisplay";
 import { CheckoutBranchControlContext, CheckoutBranchSlot } from "../CheckoutBranchControl";
+import { checkoutBranchChip, type CheckoutBranchMenuOpener } from "../checkoutBranchChip";
+import { conversationContextMismatch } from "../../lib/newConversation";
 import { setComposerToolsOpen, useComposerToolsOpen } from "../../hooks/useComposerToolsOpen";
 import { ModelChooser } from "../ModelChooser";
 import { IconButton, LoadingMark } from "../ui";
@@ -49,6 +50,7 @@ import {
 import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
 import { ProjectPicker } from "./ProjectPicker";
 import type { ComposerMenuController } from "./useComposerMenus";
+import { useComposerChipFolding, type ComposerFoldKey } from "./useComposerChipFolding";
 import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
@@ -76,6 +78,8 @@ const ComposerMoreMenu = lazy(async () => ({
 }));
 
 const COMPOSER_TOOL_MENUS: ReadonlySet<string> = new Set(["presets", "stash", "action"]);
+const BRANCH_ATTENTION: readonly ComposerFoldKey[] = ["branch"];
+const NO_ATTENTION: readonly ComposerFoldKey[] = [];
 
 export function composerCheckoutStrip({
   showCheckoutContext,
@@ -188,6 +192,8 @@ export interface ComposerToolbarProps {
   onReleaseAttachment: (attachmentId: string) => Promise<void>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
+  onFocusInput?: () => void;
+  awaitingInput?: boolean;
 }
 
 export function ComposerToolbar({
@@ -261,6 +267,8 @@ export function ComposerToolbar({
   onReleaseAttachment,
   onSubmit,
   onStop,
+  onFocusInput,
+  awaitingInput = false,
 }: ComposerToolbarProps): React.JSX.Element {
   const canSendAttachmentWhileRunning = supportsActiveParentFollowUp(
     latestTurn?.harnessId ?? null,
@@ -289,6 +297,44 @@ export function ComposerToolbar({
       ? checkoutGitStatus.isRepository
       : Boolean(checkoutModel?.project.repositoryRoot),
   });
+  const railRef = useRef<HTMLDivElement>(null);
+  const branchMenuRef = useRef<CheckoutBranchMenuOpener | null>(null);
+  const showBranch = checkoutStrip !== "hidden" && !scratchWorkspace;
+  const worktree = Boolean(conversation.worktreePath);
+  const branchChip = showBranch
+    ? checkoutBranchChip(
+        visibleCheckoutBranch,
+        checkoutModel,
+        worktree,
+        checkoutModel
+          ? conversationContextMismatch(checkoutModel.project, checkoutModel.conversation, checkoutGitStatus) !== null
+          : false,
+      )
+    : null;
+  const { folded, exhausted } = useComposerChipFolding(
+    railRef,
+    branchChip?.attention ? BRANCH_ATTENTION : NO_ATTENTION,
+  );
+  const moreTrigger = (): HTMLButtonElement | null =>
+    railRef.current?.querySelector<HTMLButtonElement>(".composer-more-trigger") ?? null;
+  useEffect(() => {
+    const more = moreTrigger();
+    const moreShown = Boolean(more?.getClientRects().length);
+    const active = document.activeElement;
+    const focusHidden = active instanceof HTMLElement
+      && Boolean(railRef.current?.contains(active))
+      && active.getClientRects().length === 0;
+    if (menu === "reasoning" || menu === "speed" || menu === "access" || menu === "mode") {
+      if (folded.has(menu)) dismissMenu("context-change");
+    }
+    if (menu === "more" && !moreShown) {
+      dismissMenu("context-change");
+      if (focusHidden || active === document.body) onFocusInput?.();
+    } else if (focusHidden) {
+      if (moreShown) more?.focus({ preventScroll: true });
+      else onFocusInput?.();
+    }
+  }, [dismissMenu, folded, menu, onFocusInput]);
   const toolsId = useId();
   const toolsOpen = useComposerToolsOpen();
   const toolsVisible = toolsOpen || (menu !== null && COMPOSER_TOOL_MENUS.has(menu));
@@ -299,33 +345,12 @@ export function ComposerToolbar({
       role="group"
       aria-label="Composer controls"
     >
-      <div className="composer-primary-rail">
-        <div className="composer-attach-actions" role="group" aria-label="Attach">
-          <IconButton
-            label={running
-              ? imageInputUnavailableReason
-                ? `Attach images. ${imageInputUnavailableReason}`
-                : canSendAttachmentWhileRunning
-                  ? "Attach follow-up images"
-                  : "Attach queued images"
-              : imageInputUnavailableReason
-                ? `Attach documents or spreadsheets. ${imageInputUnavailableReason}`
-                : "Attach images, documents, or spreadsheets"}
-            onClick={() => void onChooseAttachments()}
-            disabled={
-              attachmentDisabled
-              || attachmentCount >= MAX_ATTACHMENT_COUNT
-              || (running && imageInputUnavailableReason !== null)
-            }
-          >
-            <Paperclip size={16} />
-          </IconButton>
-          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} disabled={attachmentDisabled || attachmentCount >= MAX_ATTACHMENT_COUNT || imageInputUnavailableReason !== null} /></Suspense>
-        </div>
+      <div ref={railRef} className="composer-primary-rail">
         <div
           className="composer-options"
           role="group"
           aria-label="Model and run settings"
+          data-fold-exhausted={exhausted ? "true" : undefined}
         >
           <ModelChooser
             routes={modelRoutes}
@@ -364,7 +389,32 @@ export function ComposerToolbar({
             onUpdateFastMode={onUpdateFastMode}
             onUpdateConversation={onUpdateConversation}
             conversationUpdatePending={conversationUpdatePending}
+            folded={folded}
           />
+          {checkoutStrip !== "hidden" && (
+            <div
+              className="composer-checkout-context"
+              role="group"
+              aria-label="Chat checkout context"
+              data-checkout-context={checkoutStrip}
+            >
+              {newChatProjectPicker ? <ProjectPicker picker={newChatProjectPicker} /> : null}
+              {showBranch && (
+                <div
+                  className="composer-branch-control"
+                  data-composer-fold="branch"
+                  data-folded={folded.has("branch") ? "true" : undefined}
+                >
+                  <CheckoutBranchSlot
+                    branch={visibleCheckoutBranch}
+                    worktree={worktree}
+                    menuRef={branchMenuRef}
+                    fallbackAnchor={moreTrigger}
+                  />
+                </div>
+              )}
+            </div>
+          )}
           <Suspense fallback={null}>
             <ComposerMoreMenu
               actions={actions}
@@ -381,6 +431,11 @@ export function ComposerToolbar({
               onUpdateFastMode={onUpdateFastMode}
               onUpdateConversation={onUpdateConversation}
               conversationUpdatePending={conversationUpdatePending}
+              folded={folded}
+              branch={branchChip
+                ? { label: branchChip.text, available: branchChip.interactive, attention: branchChip.attention }
+                : null}
+              onOpenBranch={() => branchMenuRef.current?.() ?? false}
             />
           </Suspense>
         </div>
@@ -406,6 +461,32 @@ export function ComposerToolbar({
             onInsert={onInsertSkill}
           />
         </Suspense>
+        <div
+          className="composer-actions"
+          role="group"
+          aria-label="Usage"
+        >
+        {selectedProvider ? (
+          <UsageIndicator
+            providerId={selectedProvider.id}
+            usage={usage}
+            rateLimits={selectedProvider.rateLimits}
+            rateLimitState={selectedProvider.metadataState.rateLimits}
+            quotaSource={usageQuotaSourceForSelection(
+              conversation.modelSelection,
+              selectedBackendProfile,
+            )}
+            mode={usageDisplayMode}
+            providerLabel={selectedIdentityLabel}
+            contextQuality={contextUsageQualityForTurn(
+              usage,
+              latestTurn?.id ?? null,
+            )}
+            promptCache={promptCache}
+            onModeChange={onUsageDisplayModeChange}
+          />
+        ) : null}
+        </div>
         {hasTools && <IconButton
           label="More tools"
           className="composer-tools-toggle"
@@ -520,31 +601,27 @@ export function ComposerToolbar({
         ) : null}
         </div>
         </div>
-        <div
-          className="composer-actions"
-          role="group"
-          aria-label="Usage"
-        >
-        {selectedProvider ? (
-          <UsageIndicator
-            providerId={selectedProvider.id}
-            usage={usage}
-            rateLimits={selectedProvider.rateLimits}
-            rateLimitState={selectedProvider.metadataState.rateLimits}
-            quotaSource={usageQuotaSourceForSelection(
-              conversation.modelSelection,
-              selectedBackendProfile,
-            )}
-            mode={usageDisplayMode}
-            providerLabel={selectedIdentityLabel}
-            contextQuality={contextUsageQualityForTurn(
-              usage,
-              latestTurn?.id ?? null,
-            )}
-            promptCache={promptCache}
-            onModeChange={onUsageDisplayModeChange}
-          />
-        ) : null}
+        <div className="composer-attach-actions" role="group" aria-label="Attach">
+          <IconButton
+            label={running
+              ? imageInputUnavailableReason
+                ? `Attach images. ${imageInputUnavailableReason}`
+                : canSendAttachmentWhileRunning
+                  ? "Attach follow-up images"
+                  : "Attach queued images"
+              : imageInputUnavailableReason
+                ? `Attach documents or spreadsheets. ${imageInputUnavailableReason}`
+                : "Attach images, documents, or spreadsheets"}
+            onClick={() => void onChooseAttachments()}
+            disabled={
+              attachmentDisabled
+              || attachmentCount >= MAX_ATTACHMENT_COUNT
+              || (running && imageInputUnavailableReason !== null)
+            }
+          >
+            <Paperclip size={16} />
+          </IconButton>
+          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} disabled={attachmentDisabled || attachmentCount >= MAX_ATTACHMENT_COUNT || imageInputUnavailableReason !== null} /></Suspense>
         </div>
       </div>
       <div className="composer-input-actions" role="group" aria-label="Message actions">
@@ -556,6 +633,8 @@ export function ComposerToolbar({
               compacting={compacting}
               onSubmit={onSubmit}
               onStop={onStop}
+              onFocusInput={onFocusInput}
+              awaitingInput={awaitingInput}
             />
           )}
         >
@@ -574,26 +653,11 @@ export function ComposerToolbar({
             onReleaseAttachment={onReleaseAttachment}
             onSubmit={onSubmit}
             onStop={onStop}
+            onFocusInput={onFocusInput}
+            awaitingInput={awaitingInput}
           />
         </Suspense>
       </div>
-      {checkoutStrip !== "hidden" && (
-        <div
-          className={clsx("composer-checkout-strip", checkoutStrip === "branch" && "is-branch-only")}
-          role="group"
-          aria-label="Chat checkout context"
-        >
-          {checkoutStrip === "branch" ? null : newChatProjectPicker ? (
-            <ProjectPicker picker={newChatProjectPicker} />
-          ) : (
-            <span className="composer-checkout-location">
-              <FolderGit2 size={14} aria-hidden="true" />
-              <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
-            </span>
-          )}
-          {!scratchWorkspace && <CheckoutBranchSlot branch={visibleCheckoutBranch} />}
-        </div>
-      )}
     </div>
   );
 }

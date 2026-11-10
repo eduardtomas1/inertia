@@ -55,34 +55,6 @@ export interface ResponseTurn {
   watcherWake?: WatcherWakeSummary;
 }
 
-/**
- * Clean successful history does not need a second status row above the answer.
- * Its authoritative status and duration live in the answer footer, while the
- * execution transcript remains available from that footer's Run details.
- */
-export function shouldConsolidateSettledWorkIntoRunDetails(
-  turn: Pick<
-    ResponseTurn,
-    | "isActive"
-    | "agentTurn"
-    | "terminalAssistantMessage"
-    | "followUpMessages"
-    | "importantActivities"
-    | "approvals"
-    | "inputRequests"
-    | "systemMessages"
-  >,
-): boolean {
-  return !turn.isActive
-    && turn.agentTurn.status === "completed"
-    && turn.terminalAssistantMessage !== null
-    && turn.followUpMessages.length === 0
-    && turn.importantActivities.length === 0
-    && turn.approvals.length === 0
-    && turn.inputRequests.length === 0
-    && turn.systemMessages.length === 0;
-}
-
 export function layeredHtmlRenders(
   turn: Pick<ResponseTurn, "htmlRenders" | "followUpMessages">,
 ): ChatMessage[] {

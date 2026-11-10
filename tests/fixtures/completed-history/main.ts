@@ -41,7 +41,7 @@ async function run(): Promise<void> {
   console.log("HIDDEN_HISTORY " + JSON.stringify(hidden));
   assert.deepEqual(hidden, {
     visibility: "hidden", count: 5, completed: 5, icons: 5, expanded: "false",
-    summary: "1 command, 1 edit, 320 tool calls", pending: [],
+    summary: "Ran 1 command, made 1 edit and 320 other actions", pending: [],
   });
   window.show();
   await evaluate(window, "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
@@ -49,7 +49,7 @@ async function run(): Promise<void> {
   console.log("SHOWN_HISTORY " + JSON.stringify(shown));
   assert.deepEqual(shown, {
     visibility: "visible", count: 5, completed: 5, icons: 5, expanded: "false",
-    summary: "1 command, 1 edit, 320 tool calls", pending: [],
+    summary: "Ran 1 command, made 1 edit and 320 other actions", pending: [],
   });
   window.destroy();
 }

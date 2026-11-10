@@ -54,6 +54,10 @@
   color: var(--active-work-text-highlight);
 }
 
+.turn-activity-group-mark[data-tone="failure"] {
+  color: var(--status-failed);
+}
+
 .turn-activity-group-parts {
   display: flex;
   min-width: 0;
@@ -65,6 +69,13 @@
 
 .turn-activity-group-part {
   flex: 0 0 auto;
+}
+
+.turn-activity-group-sentence {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .turn-activity-group-part + .turn-activity-group-part::before {

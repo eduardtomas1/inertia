@@ -305,7 +305,8 @@ describe("Git and branch menus", () => {
 describe("checkout branch control", () => {
   it("names a differing checkout in words instead of an accent dot and opens 4px above the trigger", () => {
     const button = readSourceText("src/renderer/src/components/CheckoutBranchMenuButton.tsx");
-    expect(button).toContain("contextMismatch ? `Current checkout · ${branch}` : branch");
+    expect(readSourceText("src/renderer/src/components/checkoutBranchChip.ts")).toContain("text: `Current checkout · ${short}`");
+    expect(button).toContain("<code translate=\"no\">{chip.text}</code>");
     expect(button).not.toContain("checkout-context-dot");
     expect(button).toContain("window.innerHeight - bounds.top + 4");
     expect(css).not.toContain(".checkout-context-dot");

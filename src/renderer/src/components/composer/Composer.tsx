@@ -36,6 +36,7 @@ import {
   type PromptStashEntry,
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
+import { composerPlaceholder } from "./composerPlaceholder";
 import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps } from "./types";
 import { useRuntimeQueueLength } from "./runtimeQueueEvents";
@@ -198,6 +199,7 @@ export const Composer = memo(function Composer({
   useNativePreviewSuspension(menu !== null || conversationContext.previewPacketId !== null || conversationContext.confirmation !== null || agentContextRequest !== null);
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const focusInput = useCallback(() => textareaRef.current?.focus(), []);
   const skillCompletion = useComposerSkillCompletion(skills, message, menu === "skills");
   const { setMenuTrigger } = menuController;
   useLayoutEffect(() => {
@@ -693,13 +695,9 @@ export const Composer = memo(function Composer({
   const composedLength = (message.trim() || (attachments.length > 0 ? attachmentFallback : selectedPreviewUrlRef.current ? "Please inspect the current preview." : contextPacketIds.length > 0 ? "Please use the selected chat context." : "Please review the selected diff context.")).length;
   const typedMessageLimit = MAX_CHAT_MESSAGE_CHARS;
   const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
-  const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext) || previewContextSelected || contextPacketIds.length > 0)
-    && messageFits
-    && routeReadiness.ready
-    && !disabled
-    && !attachmentImporting
-    && !conversationContext.referencing
-    && !conversationUpdatePending;
+  const draftHasContent = Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext) || previewContextSelected || contextPacketIds.length > 0;
+  const sendBlocked = !messageFits || !routeReadiness.ready || disabled || attachmentImporting || conversationContext.referencing || conversationUpdatePending;
+  const sendEligible = draftHasContent && !sendBlocked;
   const compaction = shellCompaction ?? conversation.compaction ?? null;
   const shellCompacting = compaction?.state === "compacting";
   const primaryAction = composerPrimaryActionState({
@@ -1116,10 +1114,10 @@ export const Composer = memo(function Composer({
           onImportAttachments={importAttachments}
           onSubmit={submit}
           canQueue={canQueue}
-          queueBlocked={queueBlocked}
           onQueue={() => void queueCurrentMessage()}
-          running={running} hasHistory={hasVisibleHistory || latestKnownTurn !== null}
-          stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}
+          running={running}
+          placeholder={composerPlaceholder({ disabled, running, queueBlocked, hasHistory: hasVisibleHistory || latestKnownTurn !== null, skillsAvailable: Boolean(skillsCapability?.available),
+            stopsBeforeSending: running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null) })}
           submissionPending={submissionPending}
           followUpPending={followUpPending}
           typedMessageLimit={typedMessageLimit}
@@ -1242,6 +1240,8 @@ export const Composer = memo(function Composer({
           onReleaseAttachment={onReleaseAttachment}
           onSubmit={submit}
           onStop={stopAndKeepFocus}
+          onFocusInput={focusInput}
+          awaitingInput={!draftHasContent && !sendBlocked}
         />
       </section>
     </div>

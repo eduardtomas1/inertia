@@ -40,8 +40,8 @@ const measureComposerRail = async (composer: Locator): Promise<{
   const shellStyle = shell ? getComputedStyle(shell) : null;
   const groups = [
     dock.querySelector<HTMLElement>(".composer-options"),
-    dock.querySelector<HTMLElement>(".composer-tools"),
     dock.querySelector<HTMLElement>(".composer-actions"),
+    dock.querySelector<HTMLElement>(".composer-tools"),
   ].flatMap((group) => group ? [group.getBoundingClientRect()] : []);
   const toolbarBounds = toolbar?.getBoundingClientRect();
   const attachmentBounds = dock.querySelector<HTMLElement>(
@@ -252,7 +252,7 @@ test("keeps preview and failed-run actions in the Run menu", async () => {
   }
 });
 
-test("shows a turn's delegated agents as one line that opens Background tasks while the composer accepts a parent follow-up", async ({ browserName: _browserName }, testInfo) => {
+test("shows a turn's delegated agents as one group row whose agents open Background tasks while the composer accepts a parent follow-up", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const store = new RuntimeStore(databasePath, workspaceDirectory, {
@@ -494,17 +494,30 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
       name: "Delegated agent trace fixture",
       level: 1,
     })).toBeVisible();
-    const agentsLine = page.locator(`[data-turn-id="${turn.id}"]`).getByRole("button", {
-      name: "Open Background tasks, 1 agent working · 1 failed",
+    const agentsGroup = page.locator(`[data-turn-id="${turn.id}"]`).getByRole("button", {
+      name: "3 subagents, 1 working · 1 done · 1 failed",
     });
-    await expect(agentsLine).toHaveText("1 agent working · 1 failed");
-    await expect(agentsLine.locator(".background-task-live")).toHaveCount(1);
-    await expect(agentsLine.locator(".turn-agents-danger")).toHaveText("1 failed");
-    await agentsLine.click();
+    await expect(agentsGroup).toContainText("3 subagents");
+    await expect(agentsGroup.locator('[data-tone="working"]')).toHaveText("1 working");
+    await expect(agentsGroup.locator('[data-tone="failed"]')).toHaveText("· 1 failed");
+    await expect(agentsGroup).toHaveAttribute("aria-expanded", "false");
+    await agentsGroup.click();
+    await expect(agentsGroup).toHaveAttribute("aria-expanded", "true");
+    await page.locator(`[data-turn-id="${turn.id}"]`).getByRole("button", {
+      name: "Open Verifier in Background tasks, Failed",
+    }).click();
     const agentsTab = page.locator('[data-workspace-tab="agents"]');
     await expect(agentsTab).toHaveAttribute("aria-selected", "true");
-    await expect(agentsTab).toBeFocused();
     const backgroundTasks = page.getByRole("region", { name: "Background tasks" });
+    await expect(backgroundTasks.getByRole("button", {
+      name: "View transcript for Verifier",
+    })).toBeFocused();
+    await expect(backgroundTasks.getByRole("button", {
+      name: "View transcript for Verifier",
+    })).toHaveAttribute("aria-expanded", "true");
+    await expect(backgroundTasks.getByRole("button", {
+      name: "View transcript for Researcher",
+    })).toBeVisible();
     await expect(backgroundTasks.getByText("Checking the provider lifecycle and exact task identity.", { exact: true }))
       .toBeVisible();
     await expect(backgroundTasks.getByRole("button", {
@@ -514,6 +527,9 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
       .toHaveCount(1);
     await expect(backgroundTasks.getByRole("button", { name: /^Finished/u }))
       .toHaveAttribute("aria-expanded", "true");
+    await expect(backgroundTasks.getByRole("button", {
+      name: "View transcript for Analyst",
+    })).toBeVisible();
     await expect(backgroundTasks.getByText("Read the typed lifecycle contract.", { exact: true }))
       .toBeVisible();
     await expect(backgroundTasks.getByText("Run the optional provider check.", { exact: true }))
@@ -589,9 +605,9 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
     const workspacePanel = page.locator(".workspace-panel");
     await closeWorkspaceTools(page);
     await expect(workspacePanel).toBeHidden();
-    await expect(compactMore).toBeVisible();
-    await expect(composer.getByRole("group", { name: "Composer settings" }))
-      .toBeHidden();
+    await expect.poll(async () =>
+      await composer.locator('[data-composer-fold][data-folded="true"]').count() > 0
+        === await compactMore.isVisible()).toBe(true);
     const constrainedRailGeometry = await measureComposerRail(composer);
     expect(constrainedRailGeometry.dockWidth).toBeGreaterThanOrEqual(775);
     expect(constrainedRailGeometry.dockWidth).toBeLessThanOrEqual(constrainedRailGeometry.columnWidth + 0.5);
@@ -648,8 +664,8 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
     }).click();
 
     await resizeWindow(760, 800);
-    await agentsLine.scrollIntoViewIfNeeded();
-    await expect(agentsLine).toBeVisible();
+    await agentsGroup.scrollIntoViewIfNeeded();
+    await expect(agentsGroup).toBeVisible();
     await expectNoViewportOverflow();
     const narrowScreenshot = testInfo.outputPath(
       "delegated-agent-trace-narrow-dark.png",

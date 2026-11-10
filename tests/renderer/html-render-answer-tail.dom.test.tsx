@@ -182,7 +182,7 @@ describe("the answer after a visual reply", () => {
     const figure = element("[data-testid='html-render']");
     const tail = element("[data-turn-layer='answer-tail']");
     const rail = element("[data-active-work-region]");
-    expect(layers()).toEqual(["user-request", "agent-execution", "html-renders", "answer-tail"]);
+    expect(layers()).toEqual(["user-request", "user-request-meta", "agent-execution", "html-renders", "answer-tail"]);
     expect(precedes(figure, tail)).toBe(true);
     expect(tail.textContent).toContain(ANSWER);
     expect(rail.textContent).not.toContain(ANSWER);
@@ -212,7 +212,7 @@ describe("the answer after a visual reply", () => {
     const view = render(<ResponseTimeline {...props("running", [page], ANSWER)} />);
     view.rerender(<ResponseTimeline {...props("settled", [page, answer])} />);
 
-    expect(layers()).toEqual(["user-request", "agent-execution", "html-renders", "final-answer", "supporting-ledger"]);
+    expect(layers()).toEqual(["user-request", "user-request-meta", "agent-execution", "html-renders", "final-answer", "supporting-ledger"]);
     const final = element("[data-turn-layer='final-answer']");
     expect(precedes(element("[data-testid='html-render']"), final)).toBe(true);
     expect(final.textContent).toContain(ANSWER);

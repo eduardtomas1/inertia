@@ -136,13 +136,19 @@ test("collapses composer settings without displacing send and right-aligns user 
     .toBeLessThanOrEqual(900);
   await page.keyboard.press("Escape");
 
+  await composer.evaluate((element) => {
+    element.style.maxWidth = "340px";
+  });
+  await expect(page.locator('[data-composer-fold="mode"]')).toHaveAttribute("data-folded", "true");
   await more.click();
   const compactOptions = page.getByRole("menu", { name: "More composer options" });
   await expect(compactOptions.getByRole("menuitem", { name: /^Backend\b/ })).toHaveCount(0);
   await expect(compactOptions.getByRole("menuitem", { name: /^Model\b/ })).toHaveCount(0);
   const modeItem = compactOptions.getByRole("menuitem", { name: /^Mode\b/ });
   await expect(modeItem).toBeVisible();
-  await expect(compactOptions.getByRole("menuitem", { name: /^Access\b/ })).toBeVisible();
+  const accessFolded = await page.locator('[data-composer-fold="access"]').getAttribute("data-folded") === "true";
+  await expect(compactOptions.getByRole("menuitem", { name: /^Access\b/ })).toHaveCount(accessFolded ? 1 : 0);
+  if (!accessFolded) await expect(page.getByRole("button", { name: /^Choose project access\./u })).toBeVisible();
   await modeItem.hover();
   const modeOptions = page.getByRole("menu", { name: "Mode options" });
   await expect(modeOptions).toHaveCount(0);
@@ -153,6 +159,9 @@ test("collapses composer settings without displacing send and right-aligns user 
   await expect(compactOptions).toBeVisible();
   await expect(modeItem).toBeFocused();
   await page.keyboard.press("Escape");
+  await composer.evaluate((element) => {
+    element.style.removeProperty("max-width");
+  });
 
   const userAlignmentGap = await page.evaluate(() => {
     const timeline = document.querySelector(".response-timeline");
@@ -214,11 +223,15 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
   })).toEqual({ left: 0, top: 0, width: 0, pointerEvents: "none", brandOnTop: true });
   const auroraTimes = () => aurora.evaluate((element) =>
     element.getAnimations({ subtree: true })
-      .filter((animation) => animation instanceof CSSAnimation && animation.animationName.startsWith("sidebar-aurora-"))
+      .filter((animation) => animation instanceof CSSAnimation && /^sidebar-(?:aurora|sky|star)-/u.test(animation.animationName))
       .map((animation) => Number(animation.currentTime)));
+  const visibleStars = await aurora.evaluate((element) =>
+    [...element.querySelectorAll(".sidebar-star")].filter((star) => getComputedStyle(star).display !== "none").length);
+  expect(visibleStars).toBeGreaterThan(0);
   const initialAuroraTimes = await auroraTimes();
-  expect(initialAuroraTimes).toHaveLength(3);
-  await expect.poll(async () => (await auroraTimes())[0]! - initialAuroraTimes[0]!).toBeGreaterThan(500);
+  expect(initialAuroraTimes).toHaveLength(5 + visibleStars);
+  await expect.poll(async () => Math.min(...(await auroraTimes()).map((time, index) => time - initialAuroraTimes[index]!)))
+    .toBeGreaterThan(500);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect.poll(async () => (await auroraTimes()).length).toBe(0);
   await page.emulateMedia({ reducedMotion: "no-preference" });

@@ -104,11 +104,14 @@ describe("activity group summaries", () => {
       read: 2,
       search: 1,
       edit: 1,
+      browser: 0,
       tool: 1,
       failed: 2,
       warnings: 1,
       running: 1,
       events: 2,
+      editedFiles: null,
+      readFiles: null,
     });
     const parts = activitySummaryParts(summary);
     expect(parts.map(({ count, label, tone }) => [count, label, tone])).toEqual([

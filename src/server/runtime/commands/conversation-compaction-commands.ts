@@ -633,6 +633,9 @@ function confirmIdleCompaction(
   if (!settings?.compactBeforeCacheExpires || settings.compactOnReturn === "never") {
     throw new CompactionRefusedError("Compacting before the cache expires is off in Settings → Chats.");
   }
+  if (dependencies.store.conversation(conversationId).settledAt) {
+    throw new CompactionRefusedError("Settled chats are not compacted while idle.");
+  }
   const lastRequestStartedAt = dependencies.store.usageForConversation(conversationId)?.promptCache?.lastRequestStartedAt ?? null;
   if (lastRequestStartedAt !== expected.lastRequestStartedAt) {
     throw new CompactionRefusedError("The chat was used again after this compaction was scheduled.");

@@ -317,14 +317,15 @@ name.
   context.
 - **How often.** `startIdleCompaction` in
   `src/server/runtime/idle-compaction-scheduler.ts` sweeps once a minute. It
-  reads unarchived Claude chats of 200,000 tokens or more from `thread_usage`
-  whose window is open now (last request started between 60 and 58 minutes
-  ago), at most 64, closest to expiry first, and compacts up to three at a
-  time through the runtime's operation tracking. It skips a chat with a running
+  reads unarchived, unsettled Claude chats of 200,000 tokens or more from
+  `thread_usage` whose window is open now (last request started between 60 and
+  58 minutes ago), at most 64, closest to expiry first, and compacts up to
+  three at a time through the runtime's operation tracking. It skips a chat with a running
   turn, a queued message, a workspace or terminal-resume lock or another
   compaction, and tries a chat only once per stored request start. Under the
   chat lock it checks again that the chat's last request, the setting and the
-  window are unchanged. There is no timer per chat, so a restart loses
+  window are unchanged and that the chat was not settled, since the receipt
+  would reopen it. There is no timer per chat, so a restart loses
   nothing: the next sweep sees the same facts.
 - **What runs.** `compactIdleConversation` takes the same path as compact on
   return without a message: the refusals above (archived, watcher, Duo judge,

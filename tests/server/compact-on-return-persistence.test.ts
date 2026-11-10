@@ -128,7 +128,7 @@ describe("context compaction settings", () => {
 });
 
 describe("idle compaction candidates", () => {
-  it("lists large Claude chats in the window with stored cache facts, oldest request first, and leaves out archived, small and other providers' chats", () => {
+  it("lists large Claude chats in the window with stored cache facts, oldest request first, and leaves out archived, settled, small and other providers' chats", () => {
     const { path, workspace } = workspaceRoot();
     const store = new RuntimeStore(path, workspace, { recoverInterruptedRuns: false });
     try {
@@ -154,6 +154,8 @@ describe("idle compaction candidates", () => {
       chat("No facts", 500_000, null, null);
       const archived = chat("Archived", 500_000, "2030-01-01T10:20:00.000Z");
       store.archiveConversation(archived.id, true);
+      const settled = chat("Settled", 500_000, "2030-01-01T10:25:00.000Z");
+      store.settleConversation(settled.id, true);
 
       expect(store.idleCompactionCandidates.candidates({ startedSince: "2030-01-01T09:00:00.000Z", startedBefore: "2030-01-01T10:45:00.000Z", minimumTokens: 200_000 })).toEqual([
         { conversationId: older.id, usedTokens: 300_000, promptCache: { lastRequestStartedAt: "2030-01-01T10:00:00.000Z", lifetimeMs: 3_600_000, source: "assumed" } },

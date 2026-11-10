@@ -35,7 +35,7 @@ Every turn of a chat re-reads its whole history. While the provider's prompt cac
 With **Compact large chats** set to **Before the cache expires**, Inertia compacts an idle Claude chat of 200K tokens or more about two minutes before its one-hour cache runs out, while the history can still be read from the cache. You come back to a short chat and the first message costs a fraction of re-reading the whole history.
 
 - It applies only to Claude chats whose cache lasts an hour: a Claude subscription, or a 1-hour Prompt cache on an Anthropic API key. A five-minute cache expires too soon after each reply for this to help.
-- It runs the same compaction as `/compact`, under the same chat lock, and only when the chat is idle: no turn, queued message, workspace operation or other compaction. A chat you start using in that moment waits for the compaction to finish.
+- It runs the same compaction as `/compact`, under the same chat lock, and only when the chat is idle: no turn, queued message, workspace operation or other compaction. Settled chats are left alone. A chat you start using in that moment waits for the compaction to finish.
 - The timeline marks it with one line, such as *Compacted while idle · 412K → 21.4K tokens*.
 - Inertia checks once a minute while it is open. If it was closed, or the compaction fails, the chat falls back to **Compact and send** when you return.
 - A chat you never come back to was compacted for nothing; that costs one cached read of its history plus the summary.

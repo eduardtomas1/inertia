@@ -1036,6 +1036,7 @@ async function bootstrap(safetyAssets: ReturnType<typeof resolveDesktopRuntimePr
       dataDirectory,
       defaultWorkspacePath,
       attachmentRoot: attachmentDirectory(),
+      agentSecretDirectory: runtimeBootstrap.agentSecretDataPath({ platform: process.platform, dataDirectory, userDataPath: app.getPath("userData") }),
       enableProviders: process.env.NODE_ENV !== "test" || Boolean(packageSmokeCodexExecutable),
       ...(modernDarwinRecoveryAuthority
         ? { manualModernDarwinRecovery: modernDarwinRecoveryAuthority }

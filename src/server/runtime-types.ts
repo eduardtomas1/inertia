@@ -43,6 +43,7 @@ export interface RuntimeOptions {
   kimiClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
   backendCredentials?: RuntimeBackendCredentialBroker;
   attachmentRoot?: string;
+  agentSecretDirectory?: string;
   attachments?: RuntimeAttachmentBroker;
   conversationAttachmentStoreOperations?: ConversationAttachmentStoreAnyOperationRunner;
   prepareDocumentAttachments?: typeof import("./runtime/attachments/document-attachment-context").prepareDocumentAttachments;

@@ -505,6 +505,7 @@ describe("runtime process protocol", () => {
         systemBootId,
         codexBinaryPath: resolve(tmpdir(), "Codex Ω", "codex.cmd"),
         attachmentRoot,
+        agentSecretDirectory: resolve(tmpdir(), "inertia private"),
       },
     })).toEqual({
       type: "runtime.start",
@@ -516,6 +517,7 @@ describe("runtime process protocol", () => {
         systemBootId,
         codexBinaryPath: resolve(tmpdir(), "Codex Ω", "codex.cmd"),
         attachmentRoot,
+        agentSecretDirectory: resolve(tmpdir(), "inertia private"),
       },
     });
     expect(parseRuntimeWorkerCommand({
@@ -573,6 +575,17 @@ describe("runtime process protocol", () => {
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: true,
         attachmentRoot: "relative",
+      },
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.start",
+      options: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: true,
+        runtimeGenerationId,
+        systemBootId,
+        agentSecretDirectory: "relative",
       },
     })).toBeNull();
   });

@@ -32,6 +32,7 @@ interface AgentThreadRuntimeDependencies {
   workspaceRuns: Pick<WorkspaceRunController<never>, "trackSourceControl" | "listActions">;
   turnGitArtifacts?: Pick<TurnGitArtifactManager, "turnDiff" | "liveTurnDiff" | "settledTurnDiffWithin">;
   dataDirectory: string;
+  agentSecretDirectory?: string | undefined;
   turns: TurnController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   pendingInputs: Map<string, AgentInputRequest>;
@@ -66,7 +67,7 @@ export function createAgentThreadRuntime(
   });
   const secrets = new AgentSecretService({
     store: dependencies.store,
-    dataDirectory: dependencies.dataDirectory,
+    dataDirectory: dependencies.agentSecretDirectory ?? dependencies.dataDirectory,
     turns: dependencies.turns.secretRequests,
     broadcast: dependencies.broadcast,
     ...(dependencies.backendCredentials ? { credentials: dependencies.backendCredentials } : {}),

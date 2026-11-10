@@ -101,13 +101,17 @@ describe("inertia_request_secret registration and routes", () => {
     }
   });
 
-  it("covers every provider in the route table, caps waits at ten minutes and lets OpenCode hold a call that long", () => {
+  it("covers every provider in the route table, caps waits at ten minutes, ends Cursor and Kimi waits before the stdio bridge fetch times out, and lets OpenCode hold a call that long", () => {
     expect(Object.keys(SECRET_REQUEST_ROUTES).sort()).toEqual([...PROVIDER_IDS].sort());
     expect(Object.keys(SECRET_REQUEST_WAIT_MS_BY_PROVIDER).sort()).toEqual([...PROVIDER_IDS].sort());
     for (const providerId of PROVIDER_IDS) {
       const wait = secretRequestWaitMs(providerId);
       expect(wait).toBeLessThanOrEqual(SECRET_REQUEST_DEFAULT_WAIT_MS);
-      if (SECRET_REQUEST_ROUTES[providerId] !== "prompt-fallback") expect(wait, providerId).toBeGreaterThanOrEqual(5 * 60_000);
+      if (SECRET_REQUEST_ROUTES[providerId] !== "prompt-fallback") expect(wait, providerId).toBeGreaterThanOrEqual(4 * 60_000);
+    }
+    const nodeFetchHeadersTimeoutMs = 300_000;
+    for (const providerId of ["cursor", "kimi"] as const) {
+      expect(secretRequestWaitMs(providerId), providerId).toBeLessThan(nodeFetchHeadersTimeoutMs);
     }
     expect(SECRET_REQUEST_ROUTES.antigravity).toBe("prompt-fallback");
     const connection = { url: "http://127.0.0.1:1/mcp", bearerToken: "t".repeat(43) } as never;

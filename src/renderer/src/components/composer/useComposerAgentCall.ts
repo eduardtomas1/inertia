@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { ProviderId } from "@shared/contracts";
-import { customAgentDelivery, type CustomAgent, type CustomAgentDelivery } from "@shared/custom-agents";
+import type { CustomAgent } from "@shared/custom-agents";
+import { customAgentDelivery, type CustomAgentDelivery } from "@shared/custom-agent-delivery";
 import { paletteScore } from "../../utils/paletteMatch";
 import {
   handleComposerSuggestionKey,

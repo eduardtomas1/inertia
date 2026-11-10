@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SecretMatcher } from "../../src/server/provider/acp-redaction";
+import { boundProviderActivityDetail } from "../../src/server/provider/activity-detail";
 import type { ProviderEvent, ProviderRunResult } from "../../src/server/provider/contracts";
 import { SecretOutputRedactor } from "../../src/server/runtime/agent-secrets/secret-output-redactor";
 
@@ -86,6 +87,30 @@ describe("secret output redactor: active values never leave the turn controller 
     expect((output[0] as { outputDelta: string }).outputDelta).toContain("[redacted]");
     expect(output[2]).toMatchObject({ text: "Snapshot [redacted]" });
     expect(output[4]).toMatchObject({ result: "Logged in with [redacted]" });
+  });
+
+  it("redacts the pieces of a value that a bounded detail cut at its omission marker", () => {
+    const value = redactor();
+    const limit = 400;
+    const probe = boundProviderActivityDetail("x".repeat(800), limit);
+    const headLength = probe.indexOf("\n…");
+    const tailLength = limit - probe.lastIndexOf("…\n") - 2;
+    const source = `${"a".repeat(headLength - 12)}${SECRET}${"b".repeat(800 - headLength - tailLength - 28)}${SECRET}${"c".repeat(tailLength - SECRET.length + 9)}`;
+    const detail = boundProviderActivityDetail(source, limit);
+    const marker = detail.slice(detail.indexOf("\n…"), detail.lastIndexOf("…\n") + 2);
+    expect(source.length).toBe(800);
+    expect(detail).toContain(SECRET.slice(0, 12));
+    expect(detail).toContain(SECRET.slice(-(SECRET.length - 9)));
+    const emitted = [
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "completed", label: "curl", activityId: "cmd-1", detail }),
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "curl", activityId: "cmd-2", outputDelta: detail }),
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "completed", label: "curl", activityId: "cmd-2" }),
+    ];
+    const serialized = JSON.stringify(emitted);
+    expect(serialized).not.toContain(SECRET.slice(0, 12));
+    expect(serialized).not.toContain(SECRET.slice(-(SECRET.length - 9)));
+    expect(emitted[0]).toMatchObject({ detail: `${"a".repeat(headLength - 12)}[redacted]${marker}[redacted]${"c".repeat(tailLength - SECRET.length + 9)}` });
+    expect(value.text(`plain${marker}text`)).toBe(`plain${marker}text`);
   });
 
   it("redacts the final result text and failure detail, keeps the cleanup promise, and flushes held text first", () => {
@@ -264,5 +289,38 @@ describe("secret output redactor: one matcher per active value set", () => {
       .map((event) => (event.type === "activity" ? event.outputDelta ?? "" : "")).join("|");
     expect(output).toBe("A |B |C |[redacted]");
     expect(JSON.stringify(finished)).not.toContain("kQ9");
+  });
+});
+
+describe("secret output redactor: identity fields", () => {
+  it("leaves ids, types and kinds of events and results intact while hiding the value in their text", () => {
+    const value = redactor(["turn-abc"]);
+    const approval = {
+      providerId: "codex", conversationId: "c", runId: "run-turn-abc", turnId: "turn-abc", type: "approval",
+      request: { id: "approval-turn-abc", kind: "command", title: "Run turn-abc", command: "echo turn-abc" },
+    } as unknown as ProviderEvent;
+    const [out] = value.events(approval) as unknown as Array<{ turnId: string; runId: string; type: string; request: Record<string, string> }>;
+    expect(out!.turnId).toBe("turn-abc");
+    expect(out!.runId).toBe("run-turn-abc");
+    expect(out!.request.id).toBe("approval-turn-abc");
+    expect(out!.request.kind).toBe("command");
+    expect(out!.request.title).toBe("Run [redacted]");
+    expect(out!.request.command).toBe("echo [redacted]");
+
+    const typed = redactor(["approval"]);
+    const [kept] = typed.events({ ...approval, request: { id: "a1", kind: "approval", title: "Needs approval" } } as unknown as ProviderEvent) as unknown as Array<{ type: string; request: Record<string, string> }>;
+    expect(kept!.type).toBe("approval");
+    expect(kept!.request.kind).toBe("approval");
+    expect(kept!.request.title).toBe("Needs [redacted]");
+
+    const { result } = value.result({ ...BASE, turnId: "turn-abc", status: "completed", message: "done with turn-abc" } as unknown as ProviderRunResult);
+    expect(result).toMatchObject({ turnId: "turn-abc", message: "done with [redacted]" });
+  });
+
+  it("still finds the value under an id-like key when checking what an agent wants to store", () => {
+    const value = redactor(["turn-abc"]);
+    const input = { fooId: "turn-abc" };
+    expect(value.payload(input)).not.toBe(input);
+    expect(value.payload(input, true)).toBe(input);
   });
 });

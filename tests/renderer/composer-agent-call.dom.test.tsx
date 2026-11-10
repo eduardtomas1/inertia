@@ -219,6 +219,15 @@ describe("composer /calling", () => {
     expect(input).toHaveValue("Review after this turn");
   });
 
+  it("says the chip calls in role on providers that follow the agent in the chat", async () => {
+    const current = { ...conversation("c5c5c5c5-c5c5-4c5c-8c5c-c5c5c5c5c5c5"), providerId: "kimi" as const };
+    window.localStorage.setItem(`inertia:called-agent:${current.id}`, reviewer.id);
+    render(<Composer {...composerProps(current, { customAgents: [reviewer] })} />);
+    const chip = await screen.findByRole("group", { name: "Calling Code reviewer" });
+    expect(chip).toHaveTextContent("Calling in role");
+    expect(chip).not.toHaveTextContent("Calling as a subagent");
+  });
+
   it("parses a /calling handle followed by the task", () => {
     expect(parseCallingInvocation("/calling reviewer fix the login bug")).toEqual({ handle: "reviewer", rest: "fix the login bug" });
     expect(parseCallingInvocation(" /calling Reviewer ")).toEqual({ handle: "reviewer", rest: "" });

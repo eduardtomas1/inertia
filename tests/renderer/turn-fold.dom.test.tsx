@@ -363,6 +363,36 @@ describe("finished-turn fold", () => {
     expect(screen.getByRole("region", { name: "Called agent Code reviewer" }).closest(".turn-fold-body")).toBeNull();
   });
 
+  it("keeps a called custom agent out of the subagent group once the group is open", async () => {
+    const user = userEvent.setup();
+    const call = {
+      id: "trace-called-open",
+      turnId: working.id,
+      customAgentId: "agent-reviewer",
+      providerName: "Code reviewer",
+      isLive: false,
+      status: "completed",
+      createdAt: at(4),
+      updatedAt: at(5),
+    } as SubagentTrace;
+    const helper = {
+      id: "trace-helper-open",
+      turnId: working.id,
+      providerName: "Helper",
+      isLive: false,
+      status: "completed",
+      createdAt: at(6),
+    } as SubagentTrace;
+    render(<ResponseTimeline {...props([working], { subagents: [call, helper], onOpenSurface: vi.fn() })} />);
+
+    await user.click(foldToggle(working.id));
+    await user.click(screen.getByRole("button", { name: "1 subagent, 1 done" }));
+    const list = screen.getByRole("list", { name: "Subagents" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list).queryByText("Code reviewer")).toBeNull();
+    expect(screen.getByRole("button", { name: "1 subagent, 1 done" })).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("keeps a group that was live while watched outside the fold until the turn mounts again", async () => {
     const user = userEvent.setup();
     const live = { id: "trace-live", turnId: working.id, isLive: true, status: "running" } as SubagentTrace;

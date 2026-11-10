@@ -27,6 +27,7 @@ const PATH_SEGMENT = /^[\p{L}\p{M}\p{N}_@+\-.()[\]$]+$/u;
 const SEPARATOR = /[\\/]/u;
 const WEB_HOST = /^(?:[a-z0-9-]+\.)+(?:com|org|net|io|dev|app|ai|co|gov|edu)$/iu;
 const LIBRARY_NAME = /^\p{Lu}\p{Ll}+\.js$/u;
+const ENVIRONMENT_OBJECT = /^[^.].*\.env$/iu;
 
 export interface FileChipReference {
   token: string;
@@ -70,7 +71,7 @@ export function fileChipReference(token: string): FileChipReference | null {
   const separated = rooted || segments.length > 1;
   const kind = fileChipKind(name);
   if (kind === null) return null;
-  if (!separated && LIBRARY_NAME.test(name)) return null;
+  if (!separated && (LIBRARY_NAME.test(name) || ENVIRONMENT_OBJECT.test(name))) return null;
   if (separated && !rooted && WEB_HOST.test(segments[0] ?? "")) return null;
   const startLine = suffix ? Number(suffix[1]) : undefined;
   const startColumn = suffix?.[2] ? Number(suffix[2]) : undefined;

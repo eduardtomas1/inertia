@@ -30,7 +30,8 @@ import type {
   ProviderId,
   TurnGitArtifactFile,
 } from "../../src/shared/contracts";
-import { modelSelectionSchema, providerNativeModelSelection, type ModelSelection } from "../../src/shared/model-routing";
+import { modelSelectionSchema, providerNativeHarnessId, providerNativeModelSelection, type ModelSelection } from "../../src/shared/model-routing";
+import type { ProviderInfo } from "../../src/shared/contracts";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
 const directories: string[] = [];
@@ -63,7 +64,7 @@ function migrationGuide(): string {
   return parts.join("\n");
 }
 
-async function world() {
+async function world(options: { hostBridge?: boolean } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "inertia-context-v3-"));
   directories.push(directory);
   const billingDirectory = join(directory, "billing");
@@ -84,7 +85,17 @@ async function world() {
       resolveModelRoute: (selection: ModelSelection) => resolveNativeModelRoute(selection),
       harnessIdFor: (input: { harnessId: string }) => input.harnessId,
     } as unknown as TurnProviderRuntime,
-    hooks: { broadcast: () => undefined, broadcastSnapshot: () => undefined, providerInfo: () => [] },
+    hooks: {
+      broadcast: () => undefined,
+      broadcastSnapshot: () => undefined,
+      providerInfo: () => options.hostBridge
+        ? (["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"] as const).map((id) => ({
+          id,
+          models: [],
+          capabilityContract: { installationVerified: true, hostToolBridgeAvailable: true, harnessId: providerNativeHarnessId(id) },
+        })) as unknown as ProviderInfo[]
+        : [],
+    },
     id: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     now: tick,
     clock: () => new Date(clock),
@@ -466,7 +477,7 @@ describe("conversation context transport version 3", () => {
   });
 
   it("restores exactly the counts it sends inside the handoff budget and points the agent at older turns", async () => {
-    const w = await world();
+    const w = await world({ hostBridge: true });
     const chat = w.chat(w.billing.id, "Steps", "claude");
     const code = (index: number) => [
       `Here is the patch for step ${index}:`, "", "```ts", `export function step${index}(input: string): string {`,

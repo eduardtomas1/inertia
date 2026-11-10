@@ -29,6 +29,7 @@ export class IdleCompactionCandidateRepository {
       FROM thread_usage AS usage
       JOIN conversations ON conversations.id = usage.conversation_id
       WHERE conversations.archived_at IS NULL
+        AND conversations.settled_at IS NULL
         AND conversations.provider_id = 'claude'
         AND usage.used_tokens >= @minimumTokens
         AND usage.last_request_started_at IS NOT NULL

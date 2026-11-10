@@ -501,6 +501,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const hasKimiProfiles = Object.hasOwn(options, "kimiClaudeProfiles");
   const hasCodexBinaryPath = Object.hasOwn(options, "codexBinaryPath");
   const hasAttachmentRoot = Object.hasOwn(options, "attachmentRoot");
+  const hasAgentSecretDirectory = Object.hasOwn(options, "agentSecretDirectory");
   const hasPackageSmokePdf = Object.hasOwn(options, "packageSmokePdf");
   const hasPackageSmokeImage = Object.hasOwn(options, "packageSmokeImage");
   const hasRecoveryImportFault = Object.hasOwn(options, "recoveryImportFault");
@@ -528,6 +529,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       + Number(hasKimiProfiles)
       + Number(hasCodexBinaryPath)
       + Number(hasAttachmentRoot)
+      + Number(hasAgentSecretDirectory)
       + Number(hasPackageSmokePdf)
       + Number(hasPackageSmokeImage)
       + Number(hasRecoveryImportFault)
@@ -555,6 +557,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     )
     || (hasCodexBinaryPath && !runtimePath(options.codexBinaryPath))
     || (hasAttachmentRoot && !runtimePath(options.attachmentRoot))
+    || (hasAgentSecretDirectory && !runtimePath(options.agentSecretDirectory))
     || (
       hasPackageSmokePdf
       && (
@@ -620,6 +623,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       ...(windowsTerminalAuthority ? { windowsTerminalAuthority } : {}),
       ...(hasCodexBinaryPath ? { codexBinaryPath: options.codexBinaryPath as string } : {}),
       ...(hasAttachmentRoot ? { attachmentRoot: options.attachmentRoot as string } : {}),
+      ...(hasAgentSecretDirectory ? { agentSecretDirectory: options.agentSecretDirectory as string } : {}),
       ...(hasKimiProfiles ? { kimiClaudeProfiles } : {}),
       ...(hasPackageSmokePdf
         ? {

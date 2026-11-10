@@ -1,5 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import type { ProviderId } from "@shared/contracts";
 import type { CustomAgent } from "@shared/custom-agents";
+import { customAgentDelivery, type CustomAgentDelivery } from "@shared/custom-agent-delivery";
 import { paletteScore } from "../../utils/paletteMatch";
 import {
   handleComposerSuggestionKey,
@@ -64,6 +66,7 @@ export function rankCustomAgents(
 
 export interface ComposerAgentCallOptions {
   conversationId: string;
+  providerId: ProviderId;
   message: string;
   customAgents?: readonly CustomAgent[];
   replaceMessage: (next: string) => void;
@@ -81,6 +84,7 @@ export interface ComposerAgentCall {
   activeOptionId: string | undefined;
   calledAgent: CustomAgent | null;
   calledAgentId: string | null;
+  delivery: CustomAgentDelivery;
   invocationPending: boolean;
   calledAgentDeleted: boolean;
   canOpenSettings: boolean;
@@ -96,6 +100,7 @@ export interface ComposerAgentCall {
 
 export function useComposerAgentCall({
   conversationId,
+  providerId,
   message,
   customAgents,
   replaceMessage,
@@ -230,6 +235,7 @@ export function useComposerAgentCall({
     activeOptionId,
     calledAgent,
     calledAgentId: current.agentId,
+    delivery: customAgentDelivery(providerId),
     invocationPending: parseCallingInvocation(message) !== null,
     calledAgentDeleted,
     canOpenSettings,

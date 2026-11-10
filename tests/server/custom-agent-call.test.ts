@@ -96,7 +96,7 @@ describe("resolveCustomAgentCall", () => {
   it("names the provider's own delegation tool once per provider", () => {
     const agent = stored();
     const expectations: Record<Exclude<ProviderId, "claude">, string> = {
-      codex: 'Call spawn_agent once with task_name "inertia-reviewer" and a message that starts with the full custom-agent text as the agent\'s instructions, followed by the task and the context it needs.',
+      codex: 'Call spawn_agent once with task_name "inertia_reviewer" and a message that starts with the full custom-agent text as the agent\'s instructions, followed by the task and the context it needs.',
       opencode: 'Call the task tool once with subagent_type "inertia-reviewer". If that subagent type is unavailable, call the task tool with a general subagent with the full custom-agent text at the start of its prompt, followed by the task and the context it needs.',
       cursor: "Call your task (subagent) tool once with the full custom-agent text at the start of its prompt, followed by the task and the context it needs.",
       kimi: "If you have the Agent tool, call it once with the full custom-agent text at the start of its prompt, followed by the task and the context it needs.",
@@ -324,7 +324,7 @@ describe("custom agent calls through the turn controller", () => {
     const input = runtime.provider.input!;
     expect(input.prompt.startsWith("Review the open patch.")).toBe(true);
     expect(input.prompt).toContain(`[${CUSTOM_AGENT_INSTRUCTION_LABEL}]\nThe user called the custom agent "Patch Reviewer" (/calling reviewer) for this request.`);
-    expect(input.prompt).toContain('Call spawn_agent once with task_name "inertia-reviewer"');
+    expect(input.prompt).toContain('Call spawn_agent once with task_name "inertia_reviewer"');
     expect(input.customAgent).toMatchObject({ nativeName: "inertia-reviewer", skills: ["code-review"] });
     expect(() => validateProviderRunInput(input)).not.toThrow();
 

@@ -45,6 +45,7 @@ interface FixtureOptions {
   accountKind?: ProviderAccountKind;
   compactStatus?: "completed" | "failed";
   archived?: boolean;
+  settled?: boolean;
   watcher?: boolean;
   latestTurn?: Record<string, unknown> | null;
   setting?: "offer" | "never";
@@ -75,6 +76,7 @@ function fixture(options: FixtureOptions = {}) {
     interactionMode: "build",
     accessMode: "supervised",
     archivedAt: options.archived ? "2026-10-25T08:00:00.000Z" : null,
+    settledAt: options.settled ? "2026-11-09T08:30:00.000Z" : null,
     model: null,
     reasoningEffort: "",
   };
@@ -282,6 +284,7 @@ describe("conversation.compact-and-send", () => {
     expect(compact.mock.calls[0]![1]).toBeUndefined();
     expect(store.createMessage).toHaveBeenCalledWith(conversationId, "/compact", "system", [], null, undefined, {
       compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: null, instructionForwarded: false, trigger: "on-return", sessionInstructionDigest: null },
+      touchConversation: true,
     });
     expect(attachmentResolver.resolvePayloads).toHaveBeenCalledWith([attachment], requestId, expect.any(AbortSignal));
     expect(queue).toHaveBeenCalledWith(expect.objectContaining({
@@ -694,6 +697,7 @@ describe("manual compaction state", () => {
     expect(timeline).toEqual(["shell:compacting", "shell:idle"]);
     expect(store.createMessage).toHaveBeenCalledWith(conversationId, "/compact keep the tests", "system", [], null, undefined, {
       compaction: { providerId: "claude", beforeTokens: 240_000, afterTokens: null, instructionForwarded: true, trigger: "manual", sessionInstructionDigest: null },
+      touchConversation: true,
     });
     expect(sentResult(send)).toMatchObject({ result: { kind: "conversation.compacted" } });
     expect(compactions.isCompacting(conversationId)).toBe(false);
@@ -735,6 +739,7 @@ describe("idle compaction", () => {
     expect(timeline).toEqual(["shell:compacting", "shell:idle"]);
     expect(store.createMessage).toHaveBeenCalledWith(conversationId, "/compact", "system", [], null, undefined, {
       compaction: expect.objectContaining({ trigger: "idle" }),
+      touchConversation: false,
     });
     expect(compact.mock.calls[0]![0]).toMatchObject({ prompt: "/compact", sessionId: "provider-session" });
     expect(queue).not.toHaveBeenCalled();
@@ -760,6 +765,7 @@ describe("idle compaction", () => {
   it.each([
     ["the chat was used again", { lastRequestStartedAt: "2026-11-09T08:40:00.000Z" }, expected(), /used again/u],
     ["the setting was turned off", { lastRequestStartedAt, beforeCacheExpires: false }, expected(), /off in Settings/u],
+    ["the chat was settled", { lastRequestStartedAt, settled: true }, expected(), /Settled chats/u],
     ["the cache is about to expire", { lastRequestStartedAt }, expected(Date.parse(lastRequestStartedAt) + 59.5 * 60_000, Date.parse(lastRequestStartedAt) + 59.6 * 60_000), /about to expire/u],
   ])("re-checks under the lock and gives the lock back when %s", async (_case, options, expectation, message) => {
     const { dependencies, compact, held, compactions } = fixture(options);

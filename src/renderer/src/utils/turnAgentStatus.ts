@@ -11,6 +11,7 @@ export interface TurnAgentStatus {
   stopped: number;
   failed: number;
   review: number;
+  remote: number;
   agents: number;
   commands: number;
 }
@@ -22,16 +23,24 @@ export type SubagentTone =
   | "done"
   | "stopped"
   | "failed"
-  | "review";
+  | "review"
+  | "remote";
 
 const FAILED_STATUSES: ReadonlySet<SubagentTrace["status"]> = new Set(["failed", "interrupted", "lost"]);
 
-export function subagentTone(trace: Pick<SubagentTrace, "isLive" | "status">): SubagentTone {
+type SubagentToneTrace = Pick<SubagentTrace, "isLive" | "status"> & Partial<Pick<SubagentTrace, "taskKind">>;
+
+function stillRunningRemotely(trace: SubagentToneTrace): boolean {
+  return !trace.isLive && trace.status === "unknown" && trace.taskKind === "remote";
+}
+
+export function subagentTone(trace: SubagentToneTrace): SubagentTone {
   if (trace.isLive) {
     if (trace.status === "waiting") return "waiting";
     return trace.status === "queued" ? "queued" : "working";
   }
   if (FAILED_STATUSES.has(trace.status)) return "failed";
+  if (stillRunningRemotely(trace)) return "remote";
   if (trace.status === "unknown") return "review";
   return trace.status === "cancelled" ? "stopped" : "done";
 }
@@ -44,6 +53,7 @@ const STATUS_KEYS: Record<SubagentTone, Exclude<keyof TurnAgentStatus, "total" |
   stopped: "stopped",
   failed: "failed",
   review: "review",
+  remote: "remote",
 };
 
 export function turnAgentStatus(traces: readonly SubagentTrace[]): TurnAgentStatus | null {
@@ -57,6 +67,7 @@ export function turnAgentStatus(traces: readonly SubagentTrace[]): TurnAgentStat
     stopped: 0,
     failed: 0,
     review: 0,
+    remote: 0,
     agents: 0,
     commands: 0,
   };
@@ -90,7 +101,7 @@ export function subagentGroupFoldable(status: TurnAgentStatus | null): boolean {
 }
 
 export function subagentGroupSettledDone(status: TurnAgentStatus): boolean {
-  return status.total > 0 && status.done === status.total;
+  return status.total > 0 && status.done + status.remote === status.total;
 }
 
 function sameCollapsedTrace(left: SubagentTrace, right: SubagentTrace): boolean {
@@ -153,6 +164,7 @@ export function turnAgentStatusParts(status: TurnAgentStatus): TurnAgentStatusPa
     ["waiting", status.waiting, "waiting", "waiting"],
     ["queued", status.queued, "queued", "queued"],
     ["done", status.done, "done", "done"],
+    ["remote", status.remote, "in the cloud", "in the cloud"],
     ["stopped", status.stopped, "stopped", "stopped"],
     ["failed", status.failed, "failed", "failed"],
     ["review", status.review, "needs review", "need review"],
@@ -178,7 +190,8 @@ const SETTLED_WORDS: Partial<Record<SubagentTrace["status"], string>> = {
   unknown: "Needs review",
 };
 
-export function subagentStatusWord(trace: Pick<SubagentTrace, "isLive" | "status">): string {
+export function subagentStatusWord(trace: SubagentToneTrace): string {
+  if (stillRunningRemotely(trace)) return "Running in the cloud";
   return trace.isLive
     ? LIVE_WORDS[trace.status] ?? "Working"
     : SETTLED_WORDS[trace.status] ?? "Finished";

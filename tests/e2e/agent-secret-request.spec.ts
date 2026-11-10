@@ -20,6 +20,7 @@ import {
   secretRequestCodexAppServer,
   type SecretProviderEvent,
 } from "./support/secret-request-provider-fixture";
+import { agentSecretDataPath } from "../../src/main/agent-secret-data-path";
 
 const WIDTH = 1512;
 const HEIGHT = 868;
@@ -59,7 +60,11 @@ async function plantOrphanedVaultCopy(): Promise<void> {
 }
 
 function agentSecretsDirectory(): string {
-  return join(app.testDirectory, "data", "agent-secrets");
+  return join(agentSecretDataPath({
+    platform: process.platform,
+    dataDirectory: join(app.testDirectory, "data"),
+    userDataPath: join(app.testDirectory, "electron-profile"),
+  }), "agent-secrets");
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -339,8 +344,8 @@ test("asks for a secret in a private card and hands the agent only a file path",
   await expect(notice).toHaveCount(0);
   await expect(turn.getByText(SECRET_SAVED_REPLY)).toBeVisible({ timeout: 30_000 });
 
-  await expect(turn.getByRole("status").filter({ hasText: "Completed · 1 action" })).toBeVisible({ timeout: 30_000 });
   const runDetails = turn.getByRole("button", { name: /^Worked for /u });
+  await expect(runDetails).toBeVisible({ timeout: 30_000 });
   await runDetails.click();
   await expect(runDetails).toHaveAttribute("aria-expanded", "true");
   const disclosure = turn.getByRole("button", { name: /^Output: / });

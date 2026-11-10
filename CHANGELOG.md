@@ -2,7 +2,73 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Unreleased
+## 0.0.83 — 2026-11-10
+
+Calmer chats, Grok, custom agents you call by name, secrets that never enter
+the chat, and long chats that spend far less usage.
+
+### Chats
+
+- A finished turn folds everything that happened on the way behind one row,
+  **Worked for 3m 2s** (or **Stopped after 12s**), and shows only its
+  answer. Open it to see the work in order, with each block's time on hover.
+  The answer, changed files, failures, approvals and questions never fold, and
+  the choice is kept for the session.
+- Groups of tool calls read as sentences, such as *Ran 3 commands, edited 2
+  files*, with failures and warnings still named.
+- A turn's subagents share one row with their provider marks, a count and
+  their state. Open it for one line per agent; a row opens that agent in
+  **Background tasks**. Called custom agents keep their own block instead,
+  and a Claude agent still running in the cloud reads *in the cloud* rather
+  than as something to review.
+- Repository paths in answers, like `src/renderer/src/App.tsx:42`, become
+  chips that open the file in Files at that line. Paths outside the workspace,
+  inside code blocks or links stay plain text.
+- Your message shows its time and a Copy button on hover or focus.
+- Choosing Build or Plan right after a chat's first reply is no longer
+  refused with *Stop the active run*, leaving the old mode in place.
+- Pressing End while an answer is still arriving keeps following it, instead
+  of sometimes stopping just short and leaving **Jump to latest** showing.
+
+### Composer and look
+
+- The composer lays out in two rows: the message on top, every control below,
+  with the branch as the last chip. Chips fold into **More** when the row runs
+  out of space and come back as soon as it returns.
+- The placeholder names only what works right now, for example *Ask anything.
+  @ files, $ skills, / commands*.
+- Typing `$` on the New chat screen lists the project's skills before the chat
+  exists, and lists them again when you switch project or provider.
+- The command palette, dialogs, menus, popovers and toasts sit on a
+  translucent surface, solid under reduced transparency and forced colours.
+  The sidebar's brand strip has a few slowly breathing stars, still under
+  reduced motion.
+
+### Providers
+
+- **Grok** joins as a provider, through `grok agent stdio`. It signs in with
+  your saved Grok login, or `XAI_API_KEY`, resumes its sessions, and shows its
+  plans and questions in Inertia. Plan turns run in Grok's plan mode from the
+  first turn.
+- **Settings → Agents → Add provider** walks through Provider, Identity and
+  Config, and says when a provider is not installed or needs you to sign in.
+
+### Secrets
+
+- An agent that needs a credential asks for it in a private card in the
+  chat. What you type there never enters the chat, its database or the logs:
+  the agent gets an owner-only file path it can read for up to 24 hours.
+- The value and its common encodings are hidden from text, thinking and
+  command output, also when long output is shortened around it.
+- With a system keychain, a saved secret survives a restart. **Settings →
+  Data → Agent secrets** and the card can revoke it at any time.
+- The card works in a chat's own window too, and the agent waits up to ten
+  minutes for an answer (four and a half on Cursor and Kimi).
+- A secret must be at least 8 characters, and hiding it never touches the ids
+  Inertia uses to track turns and approvals.
+- On Windows, secret files stay in your user profile even when Inertia's data
+  folder is somewhere else, such as a shared drive, so only your account can
+  read them.
 
 ### Usage
 
@@ -12,7 +78,9 @@ The useful changes in each Inertia release, in plain language.
   history.
 - **Settings → Chats → Context → Compact large chats** can also compact an
   idle Claude chat about two minutes before its cache expires (**Before the
-  cache expires**, beta), while its history is still cheap to read.
+  cache expires**, beta), while its history is still cheap to read. It
+  leaves chats you marked Done alone, and the chat keeps its place in the
+  sidebar.
 - Claude chats compact on their own at 400K tokens instead of about 967K on
   1M-token models. **Auto-compact Claude chats after** sets 200K, 300K, 400K,
   600K tokens or Claude Code's own default.
@@ -20,9 +88,10 @@ The useful changes in each Inertia release, in plain language.
   model's context. **Auto-compact Codex chats after** sets 200K, 300K, 400K
   tokens or Codex's own default, and never goes above 90% of the model's
   context.
-- A new session after a provider switch carries up to 64 KiB of the chat's
-  earlier messages instead of 192 KiB, and points the agent at
-  `inertia_request_context` for older turns.
+- A new session in an existing chat, after a provider switch or a reset,
+  carries up to 64 KiB of the chat's earlier messages instead of 192 KiB, and
+  points the agent at `inertia_request_context` for older turns. Agents that
+  cannot use that tool still get 192 KiB.
 - Inertia's own tools load only when Claude searches for them, also inside
   subagents, instead of being sent with every request. Because the tool list
   changes, each existing Claude chat re-reads its history uncached once, on its
@@ -32,13 +101,6 @@ The useful changes in each Inertia release, in plain language.
 - `npm run usage:claude` summarizes Claude Code's own transcripts: weighted
   tokens per output token, context sizes, compactions and cache rebuilds, per
   app and for main chats and subagents separately.
-
-### Chats
-
-- Choosing Build or Plan right after a chat's first reply is no longer
-  refused with *Stop the active run*, leaving the old mode in place.
-- Pressing End while an answer is still arriving keeps following it, instead
-  of sometimes stopping just short and leaving **Jump to latest** showing.
 
 ### Chat windows
 
@@ -84,8 +146,9 @@ The useful changes in each Inertia release, in plain language.
   own instructions, optional skills, an icon or character and an accent.
   Start from one of nine presets, reorder, duplicate, export and import
   them; an imported agent whose name is taken is renamed and you are told.
-- Type `/calling` in any chat to pick an agent. It stays on the message box
-  for that chat until you remove it, and each message goes to that agent.
+- Type `/calling` in any chat to pick an agent. It waits on the message box
+  for that chat, also when you switch chats, and the next message you send
+  goes to that agent.
 - Claude, Codex, OpenCode and Cursor hand the request to a subagent with the
   agent's instructions; Kimi, Antigravity and Grok follow them in the chat
   itself. The transcript shows the called agent with its character, what it

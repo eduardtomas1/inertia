@@ -2,6 +2,9 @@ import { z } from "zod";
 
 import { PROJECT_COLOR_NAMES } from "./project-colors";
 import type { ProviderId } from "./provider";
+import { CUSTOM_AGENT_DELIVERIES } from "./custom-agent-delivery";
+
+export { CUSTOM_AGENT_DELIVERIES, customAgentDelivery, type CustomAgentDelivery } from "./custom-agent-delivery";
 
 export const MAX_CUSTOM_AGENTS = 40;
 export const MAX_CUSTOM_AGENT_NAME_CHARS = 60;
@@ -85,7 +88,6 @@ export const CUSTOM_AGENT_BLOCK_HINTS: Readonly<Record<CustomAgentBlockKind, str
   example: "A sample request and the answer you expect, so the tone is unmistakable.",
 };
 
-export const CUSTOM_AGENT_DELIVERIES = ["subagent", "in-role"] as const;
 
 const timestampSchema = z.string().datetime({ offset: true });
 const singleLine = (value: string): boolean => !/[\0\r\n]/u.test(value);
@@ -208,7 +210,6 @@ export const customAgentExportSchema = z.strictObject({
 export type CustomAgentIconName = typeof CUSTOM_AGENT_ICON_NAMES[number];
 export type CustomAgentMarkName = typeof CUSTOM_AGENT_MARK_NAMES[number];
 export type CustomAgentBlockKind = typeof CUSTOM_AGENT_BLOCK_KINDS[number];
-export type CustomAgentDelivery = typeof CUSTOM_AGENT_DELIVERIES[number];
 export type CustomAgentIcon = z.infer<typeof customAgentIconSchema>;
 export type CustomAgentAccent = z.infer<typeof customAgentAccentSchema>;
 export type CustomAgentBlock = z.infer<typeof customAgentBlockSchema>;
@@ -229,6 +230,10 @@ export interface CustomAgentPreset {
 
 export function customAgentNativeName(handle: string): string {
   return `${CUSTOM_AGENT_NATIVE_PREFIX}${handle}`;
+}
+
+export function customAgentCodexTaskName(nativeName: string): string {
+  return nativeName.replaceAll("-", "_");
 }
 
 export function customAgentHandleFromNativeName(name: string | null | undefined): string | null {
@@ -334,7 +339,6 @@ export function buildCustomAgentExport(
 }
 
 interface CustomAgentRoute {
-  delivery: CustomAgentDelivery;
   native: ((nativeName: string) => string) | null;
   inline: ((nativeName: string) => string) | null;
 }
@@ -344,37 +348,30 @@ const ALREADY_REGISTERED = "that subagent is already registered with these instr
 
 const CUSTOM_AGENT_ROUTES: Readonly<Record<ProviderId, CustomAgentRoute>> = {
   claude: {
-    delivery: "subagent",
     native: (name) => `Call the Agent tool once with subagent_type "${name}"; ${ALREADY_REGISTERED}`,
     inline: null,
   },
   codex: {
-    delivery: "subagent",
     native: null,
-    inline: (name) => `Call spawn_agent once with task_name "${name}" and a message that starts with the full custom-agent text as the agent's instructions, followed by the task and the context it needs.`,
+    inline: (name) => `Call spawn_agent once with task_name "${customAgentCodexTaskName(name)}" and a message that starts with the full custom-agent text as the agent's instructions, followed by the task and the context it needs.`,
   },
   opencode: {
-    delivery: "subagent",
     native: (name) => `Call the task tool once with subagent_type "${name}"; ${ALREADY_REGISTERED}`,
     inline: (name) => `Call the task tool once with subagent_type "${name}". If that subagent type is unavailable, call the task tool with a general subagent ${PROMPT_CARRIES_AGENT}.`,
   },
   cursor: {
-    delivery: "subagent",
     native: null,
     inline: () => `Call your task (subagent) tool once ${PROMPT_CARRIES_AGENT}.`,
   },
   kimi: {
-    delivery: "in-role",
     native: null,
     inline: () => `If you have the Agent tool, call it once ${PROMPT_CARRIES_AGENT}.`,
   },
   antigravity: {
-    delivery: "in-role",
     native: null,
     inline: () => `If you have the invoke_subagent tool, call it once ${PROMPT_CARRIES_AGENT}.`,
   },
   grok: {
-    delivery: "in-role",
     native: null,
     inline: () => `If you have a task or subagent tool, call it once ${PROMPT_CARRIES_AGENT}.`,
   },
@@ -393,9 +390,6 @@ const FENCE_TAG = new RegExp(
 );
 const UTF8 = new TextEncoder();
 
-export function customAgentDelivery(providerId: ProviderId): CustomAgentDelivery {
-  return CUSTOM_AGENT_ROUTES[providerId].delivery;
-}
 
 export function fencedCustomAgentText(instructions: string): string {
   return instructions.replace(FENCE_TAG, "<\\").trimEnd();

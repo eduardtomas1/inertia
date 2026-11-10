@@ -1,6 +1,7 @@
-import { BoundarySecretRedactor, SecretMatcher } from "../../provider/acp-redaction";
+import { BoundarySecretRedactor, SecretMatcher, SIGNIFICANT_SECRET_PREFIX_CHARS } from "../../provider/acp-redaction";
 import {
   credentialEncodings,
+  PROVIDER_ACTIVITY_DETAIL_OMISSION,
   redactExactCredentials,
   stripTerminalControlSequences,
 } from "../../provider/activity-detail";
@@ -13,6 +14,7 @@ import type {
 } from "../../provider/contracts";
 
 const MAX_DEPTH = 32;
+const STRUCTURAL_KEY = /^(?:id|type|kind|status|phase|decision)$|Id$/u;
 const MAX_OUTPUT_STREAMS_PER_TURN = 64;
 
 const ASSISTANT_SEGMENT_CLOSERS: ReadonlySet<ProviderEvent["type"]> = new Set([
@@ -55,6 +57,30 @@ function withOutput(event: ProviderActivityEvent, output: string): ProviderActiv
   return output ? { ...event, outputDelta: output } : event;
 }
 
+function prefixOverlap(pattern: string, text: string): number {
+  const failure = new Int32Array(pattern.length);
+  for (let index = 1, matched = 0; index < pattern.length; index += 1) {
+    while (matched > 0 && pattern[index] !== pattern[matched]) matched = failure[matched - 1]!;
+    if (pattern[index] === pattern[matched]) matched += 1;
+    failure[index] = matched;
+  }
+  let state = 0;
+  for (let index = Math.max(0, text.length - pattern.length); index < text.length; index += 1) {
+    while (state > 0 && text[index] !== pattern[state]) state = failure[state - 1]!;
+    if (text[index] === pattern[state]) state += 1;
+    if (state === pattern.length) state = failure[state - 1]!;
+  }
+  return state;
+}
+
+function reversed(value: string): string {
+  return value.split("").reverse().join("");
+}
+
+function significantOverlap(length: number, secret: string): boolean {
+  return length >= SIGNIFICANT_SECRET_PREFIX_CHARS || length * 2 >= secret.length;
+}
+
 function outputTemplate(event: ProviderActivityEvent): ProviderActivityEvent {
   const { outputDelta: _outputDelta, detail: _detail, fileMutation: _fileMutation, ...rest } = event;
   return { ...rest, phase: "started" };
@@ -82,6 +108,10 @@ export class SecretOutputRedactor {
 
   text(value: string): string {
     if (!this.active()) return value;
+    return this.omissionEdges(this.exact(value));
+  }
+
+  private exact(value: string): string {
     const direct = redactExactCredentials(value, this.matcher.secrets);
     const stripped = stripTerminalControlSequences(direct);
     if (stripped === direct) return direct;
@@ -89,7 +119,31 @@ export class SecretOutputRedactor {
     return redacted === stripped ? direct : redacted;
   }
 
-  payload<T>(value: T): T {
+  private omissionEdges(value: string): string {
+    if (!PROVIDER_ACTIVITY_DETAIL_OMISSION.test(value)) return value;
+    const parts = value.split(PROVIDER_ACTIVITY_DETAIL_OMISSION);
+    for (let index = 0; index < parts.length; index += 2) {
+      let part = parts[index]!;
+      if (index > 0) part = this.redactEdge(part, "start");
+      if (index + 2 < parts.length) part = this.redactEdge(part, "end");
+      parts[index] = part;
+    }
+    return parts.join("");
+  }
+
+  private redactEdge(part: string, edge: "start" | "end"): string {
+    let longest = 0;
+    for (const secret of this.matcher.secrets) {
+      const length = edge === "end"
+        ? prefixOverlap(secret, part)
+        : prefixOverlap(reversed(secret), reversed(part.slice(0, secret.length)));
+      if (length > longest && significantOverlap(length, secret)) longest = length;
+    }
+    if (longest === 0) return part;
+    return edge === "end" ? `${part.slice(0, -longest)}[redacted]` : `[redacted]${part.slice(longest)}`;
+  }
+
+  payload<T>(value: T, structural = false): T {
     if (!this.active()) return value;
     const visit = (current: unknown, depth: number): unknown => {
       if (typeof current === "string") return this.text(current);
@@ -107,7 +161,7 @@ export class SecretOutputRedactor {
       let changed = false;
       const next: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(current)) {
-        const visited = visit(entry, depth + 1);
+        const visited = structural && typeof entry === "string" && STRUCTURAL_KEY.test(key) ? entry : visit(entry, depth + 1);
         if (visited !== entry) changed = true;
         next[key] = visited;
       }
@@ -123,7 +177,7 @@ export class SecretOutputRedactor {
     if (event.type === "reasoning-summary") return this.streamReasoning(event);
     const closed = ASSISTANT_SEGMENT_CLOSERS.has(event.type) ? this.closeText(event.turnId) : [];
     if (event.type === "activity") return [...closed, ...this.activity(event)];
-    return [...closed, this.payload(event)];
+    return [...closed, this.payload(event, true)];
   }
 
   closeText(turnId: string): readonly ProviderEvent[] {
@@ -140,7 +194,7 @@ export class SecretOutputRedactor {
     const events = this.finishTurn(result.turnId);
     if (!this.active()) return { events, result };
     const { cleanupConfirmation, ...rest } = result;
-    const redacted = this.payload(rest);
+    const redacted = this.payload(rest, true);
     const next = redacted === rest ? result : {
       ...redacted,
       ...(cleanupConfirmation ? { cleanupConfirmation } : {}),
@@ -174,7 +228,7 @@ export class SecretOutputRedactor {
   }
 
   private activity(event: ProviderActivityEvent): readonly ProviderEvent[] {
-    const safe = this.payload(withoutOutput(event));
+    const safe = this.payload(withoutOutput(event), true);
     const activityId = event.activityId;
     const turn = this.turns.get(event.turnId);
     const existing = activityId ? turn?.outputs.get(activityId) : undefined;
@@ -191,7 +245,7 @@ export class SecretOutputRedactor {
       streams.set(activityId, stream);
     }
     let output = event.outputDelta
-      ? stream.boundary.push(stripTerminalControlSequences(event.outputDelta))
+      ? stream.boundary.push(this.omissionEdges(stripTerminalControlSequences(event.outputDelta)))
       : "";
     if (event.phase !== "started" || event.detail !== undefined) {
       streams.delete(activityId);

@@ -456,7 +456,7 @@ export function ComposerInputZone({
         )}
         {(agentCall?.calledAgent || agentCall?.calledAgentDeleted) && (
           <Suspense fallback={null}>
-            <ComposerCalledAgentChip agent={agentCall.calledAgent} onRemove={agentCall.remove} />
+            <ComposerCalledAgentChip agent={agentCall.calledAgent} delivery={agentCall.delivery} onRemove={agentCall.remove} />
           </Suspense>
         )}
         {previewContextUrl && (

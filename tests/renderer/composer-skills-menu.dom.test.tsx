@@ -276,6 +276,19 @@ describe("ComposerSkillsMenu", () => {
     expect(onList).toHaveBeenLastCalledWith(true);
   });
 
+  it("discovers again when the composer moves to another skill route while the query stays open", () => {
+    const firstRoute = vi.fn(async () => undefined);
+    const nextRoute = vi.fn(async () => undefined);
+    const view = render(<Harness {...defaults} skills={[]} completion="" onList={firstRoute} />);
+    expect(firstRoute).toHaveBeenCalledExactlyOnceWith(false);
+    view.rerender(<Harness {...defaults} completion="" onList={firstRoute} />);
+    view.rerender(<Harness {...defaults} completion="" onList={nextRoute} />);
+    view.rerender(<Harness {...defaults} skills={[]} completion="r" onList={nextRoute} />);
+    expect(nextRoute).toHaveBeenCalledExactlyOnceWith(false);
+    view.rerender(<Harness {...defaults} skills={[]} completion="re" onList={nextRoute} />);
+    expect(nextRoute).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps Escape dismissed until the query changes and shows no-match feedback", () => {
     const view = render(<Harness {...defaults} completion="skill" />);
     const editor = screen.getByRole("textbox");

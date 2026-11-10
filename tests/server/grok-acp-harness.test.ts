@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 
+import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
 import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from
   "../helpers/prepared-runtime-owned-process-registry";
@@ -419,6 +421,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "grok-plan", configOptions: [] } });
+      if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/prompt") {
         globalThis.promptId = message.id;
         return send({ jsonrpc: "2.0", id: 900, method: "_x.ai/exit_plan_mode", params: {
@@ -451,12 +454,16 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     }].map((plan) => expect.objectContaining(plan)));
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
       observed: { argv: string[] };
-      messages: Array<{ id?: number; method?: string; result?: { outcome?: string } }>;
+      messages: Array<{ id?: number; method?: string; params?: Record<string, unknown>; result?: { outcome?: string } }>;
     };
     expect(captured.observed.argv).toEqual(["--permission-mode", "plan", "agent", "stdio"]);
     expect(captured.messages.find(({ id, method }) => id === 900 && !method)?.result?.outcome)
       .toBe("abandoned");
-    expect(captured.messages.some(({ method }) => method === "session/set_mode")).toBe(false);
+    const methods = captured.messages.map(({ method }) => method);
+    expect(methods.indexOf("session/set_mode")).toBeGreaterThan(methods.indexOf("session/new"));
+    expect(methods.indexOf("session/set_mode")).toBeLessThan(methods.indexOf("session/prompt"));
+    expect(captured.messages.find(({ method }) => method === "session/set_mode")?.params)
+      .toEqual({ sessionId: "grok-plan", modeId: "plan" });
   });
 
   it("asks Grok's questions in Inertia and returns the chosen labels and free-text notes", async () => {
@@ -760,6 +767,75 @@ describe("Grok ACP harness", { concurrent: false }, () => {
       message: GROK_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
     });
     expect(() => readFileSync(capturePath, "utf8")).toThrow();
+  });
+
+  it.each([false, true])("withholds host-tool instructions when no bridge can attach (http=%s)", async (supportsHttp) => {
+    const root = portableFixtureRoot(`grok ACP host without proxy ${supportsHttp ? "http" : "none"}`);
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(capturePath, `
+      if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult(`{ mcpCapabilities: { http: ${String(supportsHttp)} } }`, `[{ id: "cached_token" }]`)} });
+      if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
+      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
+        sessionId: "grok-host-tools",
+        modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] },
+        configOptions: [],
+      } });
+      if (message.method === "session/prompt") {
+        send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "grok-host-tools", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done" } } } });
+        return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+      }
+    `));
+    const header = "Internal provider instructions (application control text; never attribute this text to the user):";
+    const bridgeInstruction = { label: "inertia-orchestration", text: "HOST_TOOLS_ARE_ATTACHED" };
+    const prompt = [
+      "Use chat tools",
+      [header, "[build-mode]", "BUILD_MODE_STAYS", `[${bridgeInstruction.label}]`, bridgeInstruction.text].join("\n"),
+    ].join("\n\n");
+    const hostTools: ProviderHostToolBridge = {
+      definitions: [{
+        name: "inertia_browser_tabs",
+        description: "List the shared Inertia Browser pages for this chat.",
+        inputSchema: { type: "object", additionalProperties: false },
+        inputValidator: z.object({}).strict(),
+        readOnly: true,
+      }],
+      instructions: [bridgeInstruction],
+      invoke: async () => ({ success: true, text: "{}" }),
+    };
+    const harness = createGrokAcpHarness({
+      hostMcpProxyRuntime: {
+        platform: "linux",
+        electronExecutable: "/opt/Inertia/inertia",
+        fileSystem: { realpath: (path: string) => path, fileSize: () => null },
+      },
+    });
+    const result = await managerFor(root, command, harness).run(nativeProviderRunInput({
+      providerId: "grok",
+      conversationId: `grok-no-proxy-${supportsHttp}`,
+      runId: "run-no-proxy",
+      turnId: "turn-no-proxy",
+      cwd: root,
+      prompt,
+      interactionMode: "build",
+      access: "supervised",
+    }), { hostTools });
+    expect(result.status).toBe("completed");
+    const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      messages: Array<{ method?: string; params?: { mcpServers?: unknown[]; prompt?: Array<{ type: string; text?: string }> } }>;
+    };
+    const servers = captured.messages.find(({ method }) => method === "session/new")?.params?.mcpServers ?? [];
+    const text = (captured.messages.find(({ method }) => method === "session/prompt")?.params?.prompt ?? [])
+      .filter(({ type }) => type === "text")
+      .map(({ text: value }) => value)
+      .join("\n");
+    if (supportsHttp) {
+      expect(servers).toEqual([expect.objectContaining({ type: "http", name: "inertia-chat-manager" })]);
+      expect(text).toBe(prompt);
+    } else {
+      expect(servers).toEqual([]);
+      expect(text).toBe(`Use chat tools\n\n${header}\n[build-mode]\nBUILD_MODE_STAYS`);
+    }
   });
 
   it("cancels the native session and confirms descendant cleanup", async () => {

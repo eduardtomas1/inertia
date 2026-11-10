@@ -55,7 +55,7 @@ Same machine, same account, same model family, both apps launching Claude Code
 | **Compact and send** for Claude subscription chats, with the 1-hour cache Claude Code reports there | `compactOnReturnEligibility` | The lever behind every T3 Code compaction above |
 | **Before the cache expires** (beta): compact an idle Claude chat two minutes before its 1-hour cache expires | `idle-compaction-scheduler.ts`, `compactIdleConversation` | T3 Code's idle compaction; the history is still read from the cache |
 | **Auto-compact Claude chats after**, 400K tokens by default | `autoCompactWindow` in the Claude launch settings | Claude Code's default waits until 967K on 1M-token models |
-| A provider switch carries at most 64 KiB of history and points at `inertia_request_context` for the rest | `NATIVE_RESTORED_HISTORY_BYTES` | T3 Code caps a handoff at 16K tokens and lets the agent read more on demand |
+| A fresh session in an existing chat carries at most 64 KiB of history and points at `inertia_request_context` for the rest; a route that cannot call that tool keeps 192 KiB | `NATIVE_RESTORED_HISTORY_BYTES` | T3 Code caps every handoff at 64,000 bytes (16K tokens) and lets the agent read more on demand |
 | Inertia's host tools load through tool search instead of on every request, also inside subagents | `claude-host-tools.ts` | T3 Code defers its MCP tools on purpose |
 | The context meter reads the summary instead of counting each category through the token-count API | `readClaudeContextUsage` | The default `'full'` made several requests after every assistant message |
 
@@ -120,7 +120,8 @@ Codex chats after** defaults to 300K. T3 Code has no Codex equivalent.
 
 Kimi manages its own context; Cursor, OpenCode, Antigravity and Grok report no
 cache lifetime and saw almost no use in the period. Only the 64 KiB cap on
-automatic history restores applies to them.
+history restores applies to them, and only where they can call
+`inertia_request_context`.
 
 ## What was looked at and left alone
 

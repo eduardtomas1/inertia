@@ -448,7 +448,7 @@ async function compactUnderLock<T>(
         conversation.id,
         request.instruction ? `/compact ${request.instruction}` : "/compact",
         "system", [], null, undefined,
-        { compaction },
+        { compaction, touchConversation: request.trigger !== "idle" },
       );
       try { dependencies.broadcast({ type: "conversation.message.persisted", message }); }
       catch { resultMessage += " The receipt was saved, but the timeline could not refresh. Reload this chat to view it."; }
@@ -632,6 +632,9 @@ function confirmIdleCompaction(
   const settings = dependencies.settings?.();
   if (!settings?.compactBeforeCacheExpires || settings.compactOnReturn === "never") {
     throw new CompactionRefusedError("Compacting before the cache expires is off in Settings → Chats.");
+  }
+  if (dependencies.store.conversation(conversationId).settledAt) {
+    throw new CompactionRefusedError("Settled chats are not compacted while idle.");
   }
   const lastRequestStartedAt = dependencies.store.usageForConversation(conversationId)?.promptCache?.lastRequestStartedAt ?? null;
   if (lastRequestStartedAt !== expected.lastRequestStartedAt) {

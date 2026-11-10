@@ -208,7 +208,7 @@ describe("pending secret request card", () => {
     fireEvent.change(input(), { target: { value: "abc" } });
     await act(async () => { fireEvent.submit(input().closest("form")!); });
     expect(saveAgentSecret).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent("The secret must be at least 4 characters long.");
+    expect(screen.getByRole("alert")).toHaveTextContent("The secret must be at least 8 characters long.");
   });
 
   it("declines through the runtime command without any value", async () => {

@@ -444,6 +444,7 @@ describe("conversation compaction command", () => {
     expect(provider).toHaveBeenCalledOnce();
     expect(dependencies.store.createMessage).toHaveBeenCalledWith(conversationId, "/compact", "system", [], null, undefined, {
       compaction: { providerId: "claude", beforeTokens: 12000, afterTokens: 5690, instructionForwarded: true, trigger: "manual", sessionInstructionDigest: null },
+      touchConversation: true,
     });
     expect(send).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ result: expect.objectContaining({
       kind: "conversation.compacted", message: expect.stringContaining("Usage could not be refreshed"),
@@ -482,6 +483,7 @@ describe("conversation compaction command", () => {
     });
     expect(dependencies.store.createMessage).toHaveBeenCalledWith(conversationId, "/compact keep the tests", "system", [], null, undefined, {
       compaction: { providerId: "claude", beforeTokens: 12000, afterTokens: 5690, instructionForwarded: true, trigger: "manual", sessionInstructionDigest: null },
+      touchConversation: true,
     });
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "conversation.message.persisted", message: expect.objectContaining({ turnId: null }) }));
   });

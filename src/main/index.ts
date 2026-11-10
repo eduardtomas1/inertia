@@ -100,6 +100,7 @@ import { applyRuntimeConnectionRequest } from "./runtime-connection-request.js";
 import { RuntimeSystemSuspendDelivery } from "./runtime-system-suspend-delivery.js";
 import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
+import { agentSecretDataPath } from "./agent-secret-data-path.js";
 import { prepareRuntimeBootstrapRecovery } from "./runtime-bootstrap-recovery.js";
 import { RuntimeLiveDarwinRecoveryCoordinator } from "./runtime-live-darwin-recovery.js";
 import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
@@ -1036,6 +1037,7 @@ async function bootstrap(safetyAssets: ReturnType<typeof resolveDesktopRuntimePr
       dataDirectory,
       defaultWorkspacePath,
       attachmentRoot: attachmentDirectory(),
+      agentSecretDirectory: agentSecretDataPath({ platform: process.platform, dataDirectory, userDataPath: app.getPath("userData") }),
       enableProviders: process.env.NODE_ENV !== "test" || Boolean(packageSmokeCodexExecutable),
       ...(modernDarwinRecoveryAuthority
         ? { manualModernDarwinRecovery: modernDarwinRecoveryAuthority }

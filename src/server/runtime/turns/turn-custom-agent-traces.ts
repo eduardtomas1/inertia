@@ -1,4 +1,5 @@
 import {
+  customAgentCodexTaskName,
   customAgentHandleFromNativeName,
   customAgentNativeName,
   type CustomAgentCallAttribution,
@@ -53,6 +54,7 @@ export class CustomAgentTraceAttribution {
     return [trace.providerRole, trace.providerName].some((value) => {
       const normalized = value?.trim().toLowerCase();
       return normalized === this.nativeName
+        || normalized === customAgentCodexTaskName(this.nativeName)
         || customAgentHandleFromNativeName(normalized) === this.call.handle;
     });
   }

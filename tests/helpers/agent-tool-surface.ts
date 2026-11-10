@@ -135,7 +135,7 @@ export async function createSurfaceRuntime(options: SurfaceRuntimeOptions = {}) 
         });
       });
     },
-    waitMs: () => 50,
+    waitMs: () => options.secretAnswer === "none" ? 50 : 30_000,
   });
   secretHolder.service = secrets;
   secrets.start();

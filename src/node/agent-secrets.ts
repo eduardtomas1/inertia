@@ -52,8 +52,8 @@ export const SECRET_REQUEST_ROUTES: Readonly<Record<ProviderId, SecretRequestRou
 export const SECRET_REQUEST_WAIT_MS_BY_PROVIDER: Readonly<Record<ProviderId, number>> = Object.freeze({
   codex: SECRET_REQUEST_DEFAULT_WAIT_MS,
   claude: SECRET_REQUEST_DEFAULT_WAIT_MS,
-  cursor: 5 * 60_000,
-  kimi: 5 * 60_000,
+  cursor: 270_000,
+  kimi: 270_000,
   opencode: SECRET_REQUEST_DEFAULT_WAIT_MS,
   antigravity: 0,
   grok: SECRET_REQUEST_DEFAULT_WAIT_MS,

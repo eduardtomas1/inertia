@@ -1,6 +1,6 @@
 import {
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -52,7 +52,7 @@ export function useDraftSkills({
       : null,
     [draft],
   );
-  useEffect(() => {
+  useLayoutEffect(() => {
     generationRef.current += 1;
     setSkills(NO_SKILLS);
     setLoading(false);

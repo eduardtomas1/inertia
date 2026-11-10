@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BackgroundTasksSurface } from "../../src/renderer/src/components/BackgroundTasksSurface";
 import { SubagentGroup } from "../../src/renderer/src/components/response-timeline/SubagentGroup";
+import { publishTurnSubagents } from "../../src/renderer/src/components/response-timeline/subagent-trace-store";
 import {
   requestBackgroundTaskReveal,
   takeBackgroundTaskReveal,
@@ -83,6 +84,22 @@ describe("subagent group row", () => {
     const row = screen.getByRole("button", { name: "Open Checker in Background tasks, Needs review" });
     expect(row).toHaveAttribute("data-subagent-tone", "review");
     expect(declarationsFor(rules, '[data-subagent-tone="review"]').get("--subagent-tone")).toBe("var(--status-failed)");
+  });
+
+  it("says a cloud agent still running after its turn is in the cloud, in a muted tone, not for review", async () => {
+    const user = userEvent.setup();
+    render(<SubagentGroup {...line} subagents={[
+      taskTrace({ id: "done", providerName: "Reader", status: "completed" }),
+      taskTrace({ id: "cloud", providerName: "Builder", status: "unknown", isLive: false, taskKind: "remote" }),
+    ]} onOpenSurface={vi.fn()} />);
+    const button = screen.getByRole("button", { name: "2 subagents, 1 done · 1 in the cloud" });
+    expect(button.querySelector('[data-tone="remote"]')).toHaveTextContent(/^· 1 in the cloud$/u);
+    expect(button.querySelector('[data-tone="review"]')).toBeNull();
+    expect(button.closest(".subagent-group")).toHaveClass("is-idle");
+    await user.click(button);
+    const row = screen.getByRole("button", { name: "Open Builder in Background tasks, Running in the cloud" });
+    expect(row).toHaveAttribute("data-subagent-tone", "remote");
+    expect(declarationsFor(rules, '[data-subagent-tone="remote"]').get("--subagent-tone")).toBe("var(--text-muted)");
   });
 
   it("counts waiting and queued agents in their own words, not as working", async () => {
@@ -277,6 +294,37 @@ describe("subagent group row", () => {
     await user.click(screen.getByRole("button", { name: "Open Composer in Background tasks, Done" }));
     expect(onOpenSurface).toHaveBeenCalledWith("agents");
     expect(takeBackgroundTaskReveal("conversation-1")).toEqual({ ...line, traceId: "b" });
+  });
+
+  it("keeps a called custom agent out of the open group while live updates arrive", async () => {
+    const user = userEvent.setup();
+    const turn = { conversationId: "conversation-1", turnId: "turn-custom-call" };
+    const helper = taskTrace({ id: "helper", turnId: turn.turnId, providerName: "Helper", progress: "Reading" });
+    const called = taskTrace({
+      id: "called",
+      turnId: turn.turnId,
+      providerName: "Reviewer",
+      customAgentId: "00000000-0000-4000-8000-000000000001",
+    });
+    let published = new Map([[turn.turnId, [helper, called]]]);
+    publishTurnSubagents(published, new Map());
+    try {
+      render(<SubagentGroup {...turn} subagents={[helper]} onOpenSurface={vi.fn()} />);
+      expect(groupButton()).toHaveAccessibleName("1 subagent, 1 working");
+      await user.click(groupButton());
+      expect(groupButton()).toHaveAccessibleName("1 subagent, 1 working");
+      const list = screen.getByRole("list", { name: "Subagents" });
+      expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+      expect(within(list).queryByText("Reviewer")).toBeNull();
+      const updated = { ...helper, progress: "Writing the report", sequence: 2, updatedAt: "2030-01-01T00:00:40.000Z" };
+      const next = new Map([[turn.turnId, [updated, called]]]);
+      act(() => publishTurnSubagents(next, published));
+      published = next;
+      expect(within(list).getByText("Writing the report")).toBeVisible();
+      expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    } finally {
+      act(() => publishTurnSubagents(new Map(), published));
+    }
   });
 
   it("lists agents as plain rows when nothing can open the panel", async () => {

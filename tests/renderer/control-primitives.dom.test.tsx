@@ -89,6 +89,7 @@ describe("focus ring", () => {
     "components/UsageView.css",
     "components/UsageLimitsPanel.css",
     "components/ThemeLibrary.css",
+    "components/response-timeline/SecretRequestCard.css",
   ].map((path) => readSourceText(`src/renderer/src/${path}`)).join("\n");
 
   it("draws one accent ring, outset on controls and inset on rows, tabs and menu items", () => {

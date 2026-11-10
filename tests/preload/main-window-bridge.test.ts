@@ -108,6 +108,7 @@ describe("main window preload", () => {
       "reportValidationDiagnostic",
       "revealRuntimeLogs",
       "revokePrivateConnectDevice",
+      "saveAgentSecret",
       "selectAttachments",
       "selectCodexExecutable",
       "selectDirectory",

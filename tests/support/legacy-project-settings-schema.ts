@@ -49,6 +49,7 @@ export function removeWatcherLinksFromLegacyFixture(database: Database.Database)
 }
 
 export function removeCustomAgentsFromLegacyFixture(database: Database.Database): void {
+  removeAgentSecretRequestsFromLegacyFixture(database);
   database.exec(`
     DROP TRIGGER IF EXISTS custom_agents_count_limit;
     DROP TABLE IF EXISTS custom_agents;
@@ -57,5 +58,12 @@ export function removeCustomAgentsFromLegacyFixture(database: Database.Database)
     if ((database.pragma(`table_info(${table})`) as Array<{ name: string }>).some(({ name }) => name === column)) {
       database.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
     }
+  }
+}
+
+export function removeAgentSecretRequestsFromLegacyFixture(database: Database.Database): void {
+  database.exec("DROP TABLE IF EXISTS agent_secret_requests");
+  if ((database.pragma("table_info(messages)") as Array<{ name: string }>).some(({ name }) => name === "secret_request_json")) {
+    database.exec("ALTER TABLE messages DROP COLUMN secret_request_json");
   }
 }

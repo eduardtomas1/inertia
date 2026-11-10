@@ -102,6 +102,7 @@ import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
 import { createCustomAgentCommandHandler } from "./runtime/commands/custom-agent-commands";
 import { createWorktreeCommandHandler } from "./runtime/commands/worktree-commands";
 import { createLibraryCommandHandler } from "./runtime/commands/library-commands";
+import { createSecretRequestCommandHandler } from "./runtime/commands/secret-request-commands";
 import { createAgentWorkflowCommandHandler } from "./runtime/commands/agent-workflow-commands";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
 import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/agent-thread-runtime";
@@ -112,7 +113,7 @@ import { unavailableSecureFileBroker } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 import { PrivateConnectRuntimeGateway } from "./private-connect/runtime-gateway";
 import { privateConnectStoreReads } from "./private-connect/store-detail";
-import { queuePrivateConnectPrompt } from "./private-connect/prompt-admission";
+import { assertPrivateConnectPromptRunnable, queuePrivateConnectPrompt } from "./private-connect/prompt-admission";
 import { createPrivateConnectInputResponder } from "./private-connect/input-response-admission";
 import { PrivateConnectTranscriptCache } from "./private-connect/transcript-cache";
 import {
@@ -697,6 +698,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         (settled) => testOnlyOnTurnSettled?.(settled),
       ], () => store.createInitialBackup({ quietGraceMs: 1_000 })),
       testOnlyStreamingTrace: streamingTrace,
+      secretOutput: () => agentThreads?.secrets.output,
     },
     {
       runtimeGenerationId: options.runtimeGenerationId,
@@ -709,6 +711,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     broadcastConversationShell, pendingInputs, broadcast,
     conversationAttachments: initializedConversationAttachments,
     agentBrowser: options.agentBrowser, watcherPolicy,
+    backendCredentials: options.backendCredentials, lifetime: runtimeLifetimeAbort.signal,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
@@ -748,7 +751,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
-      createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send }),
+      createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send, secretValues: () => agentThreads?.secrets.output.values() ?? [] }),
       queuedMessages.handler,
       ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
@@ -757,6 +760,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
       createCustomAgentCommandHandler({ store }),
       createLibraryCommandHandler({ store, broadcast, send }),
+      createSecretRequestCommandHandler({ service: () => agentThreads?.secrets ?? null, send }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork, broadcast, send,
@@ -784,6 +788,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
         creation: agentThreads.creation,
         contextRequests: agentThreads.contextRequests,
+        agentSecrets: agentThreads.secrets,
         reportIncident: commandIncidents.report,
       }),
       createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
@@ -842,6 +847,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         providerTerminalResumes,
         duoLaunches: duoLaunchCoordinator, watchers,
         terminals,
+        agentSecrets: agentThreads.secrets,
         secureFiles,
         secureFileAuthorities,
         workspacePath,
@@ -954,30 +960,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     ...privateConnectStoreReads(store),
     isConversationActive: (conversationId) =>
       turns.isActive(conversationId) || isolatedRuns.has(conversationId),
-    preparePrompt: async (conversation) => {
-      if (!enableProviders) {
-        throw new Error("Provider execution is disabled.");
-      }
-      const selectedProvider = providerInfo.find(
-        ({ id }) => id === conversation.providerId,
-      );
-      backendProfileController.validateSelection(conversation.modelSelection);
-      const backendReadiness = await backendProfileController.readiness(
-        conversation.modelSelection,
-        selectedProvider,
-      );
-      if (backendReadiness && !backendReadiness.ready) {
-        throw new Error(
-          backendReadiness.message ?? "The selected model backend is unavailable.",
-        );
-      }
-      if (!backendReadiness && !selectedProvider?.canRun) {
-        throw new Error(
-          selectedProvider?.statusMessage
-            ?? "This agent is not ready on the desktop.",
-        );
-      }
-    },
+    preparePrompt: (conversation) => assertPrivateConnectPromptRunnable({
+      enableProviders,
+      providerInfo: () => providerInfo,
+      backends: backendProfileController,
+    }, conversation),
     transcriptCache: privateConnectTranscriptCache,
     privateConnectPromptSafety: (conversation) =>
       privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId, { watcher: watcherPolicy.privateConnectWatcher(conversation) }),
@@ -1021,11 +1008,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     websocketUrl,
     focusMascotChat: (conversationId, request) => mascotStatus.focus(conversationId, request),
     databaseRecovery: store.databaseRecoveryReport(),
-    recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot, turns, refreshProviderInfo.rediscoverAfterSystemResume),
+    recordSystemSuspendInterval: (interval) => {
+      agentThreads?.secrets.sweep();
+      return recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot, turns, refreshProviderInfo.rediscoverAfterSystemResume);
+    },
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
     releaseUpdatePreparation: (operationId) => updatePreparation.release(operationId),
     readHtmlRender: (renderId) => store.htmlRenders.read(renderId),
     attachmentConversations: (attachmentId) => store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
+    deliverAgentSecret: (delivery) => agentThreads!.secrets.deliver(delivery),
+    orphanedAgentSecrets: (requestIds) => agentThreads?.secrets.orphanedVaultRequests(requestIds) ?? [],
     resolveProjectPath: (request) => trackRuntimeOperation(async () => {
       if (runtimeSafetyLock) {
         throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));

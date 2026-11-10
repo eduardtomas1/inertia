@@ -1,4 +1,5 @@
 import type { RuntimeWorkerCommand } from "../node/runtime-process-protocol.js";
+import { AGENT_SECRET_DELIVERY_TIMEOUT_MS, RuntimeAgentSecretCoordinator } from "./runtime-agent-secret-coordinator.js";
 import { RuntimeAttachmentBrokerCoordinator } from "./runtime-attachment-broker.js";
 import { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.js";
 import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
@@ -94,6 +95,13 @@ export function createRuntimeSupervisorCoordinators(
     }),
     queries: new RuntimeSupervisorQueries({
       requestTimeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
+      ...timers,
+      readyRecord: () => host.readyRecord(),
+      post,
+    }),
+    agentSecrets: new RuntimeAgentSecretCoordinator({
+      timeoutMs: AGENT_SECRET_DELIVERY_TIMEOUT_MS,
+      vault: options.credentialBroker?.agentSecrets,
       ...timers,
       readyRecord: () => host.readyRecord(),
       post,

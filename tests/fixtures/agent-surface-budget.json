@@ -158,6 +158,12 @@
       "cursorKimi": 484,
       "opencode": 484
     },
+    "inertia_request_secret": {
+      "claude": 1178,
+      "codex": 1073,
+      "cursorKimi": 1178,
+      "opencode": 1178
+    },
     "inertia_render_html": {
       "claude": 1508,
       "codex": 1403,
@@ -210,20 +216,20 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 23411,
-      "withoutBrowser": 11990
+      "withBrowser": 24589,
+      "withoutBrowser": 13168
     },
     "codex": {
-      "withBrowser": 19955,
-      "withoutBrowser": 10211
+      "withBrowser": 21028,
+      "withoutBrowser": 11284
     },
     "cursorKimi": {
-      "withBrowser": 23420,
-      "withoutBrowser": 11990
+      "withBrowser": 24598,
+      "withoutBrowser": 13168
     },
     "opencode": {
-      "withBrowser": 23411,
-      "withoutBrowser": 11990
+      "withBrowser": 24589,
+      "withoutBrowser": 13168
     }
   }
 }

@@ -63,6 +63,7 @@ export interface ProjectWorkspaceCommandDependencies {
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   duoLaunches?: Pick<DuoLaunchCoordinator, "reconcileProjectDeletion">;
   watchers?: { beforeProjectRemove?(projectId: string): () => void };
+  agentSecrets?: { revokeForConversation(conversationId: string): void };
   terminals: TerminalManager;
   secureFiles: RuntimeSecureFileBroker;
   secureFileAuthorities: SecureFileAuthorityRegistry;
@@ -244,6 +245,7 @@ export function createProjectWorkspaceCommandHandler(
           const attachmentIds = latestConversations.flatMap(({ id }) =>
             dependencies.store.attachments(id).map(({ id: attachmentId }) =>
               attachmentId));
+          for (const { id } of latestConversations) dependencies.agentSecrets?.revokeForConversation(id);
           const publishRemovedWatcherLinks = dependencies.watchers?.beforeProjectRemove?.(projectId);
           const recoveryRecords = latestConversations.flatMap(({ id }) => providerRecoveryRecords(
             dependencies.store,

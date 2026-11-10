@@ -1477,7 +1477,7 @@ describe("runtime migration catalog", () => {
       expect(database.prepare("SELECT name FROM sqlite_master WHERE name = 'messages_created_id_idx'").get()).toBeUndefined();
       migrateRuntimeDatabase(database);
       expect(database.prepare("SELECT * FROM messages ORDER BY id").all())
-        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, html_render_json: null, private_connect_device_id: null, watcher_note_json: null, duo_comparison_json: null, custom_agent_call_json: null })));
+        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, html_render_json: null, private_connect_device_id: null, watcher_note_json: null, duo_comparison_json: null, custom_agent_call_json: null, secret_request_json: null })));
       expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 69 ORDER BY version").all()).toEqual(history);
       expect(database.pragma("index_xinfo(messages_created_id_idx)")).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "created_at", desc: 1, key: 1 }),
@@ -2108,74 +2108,9 @@ describe("runtime migration catalog", () => {
     const migrated = new Database(databasePath, { readonly: true });
     expect(migrated.prepare(
       "SELECT version FROM schema_migrations WHERE version >= 50 ORDER BY version",
-    ).all()).toEqual([
-      { version: 50 },
-      { version: 51 },
-      { version: 52 },
-      { version: 53 },
-      { version: 54 },
-      { version: 55 },
-      { version: 56 },
-      { version: 57 },
-      { version: 58 },
-      { version: 59 },
-      { version: 60 },
-      { version: 61 },
-      { version: 62 },
-      { version: 63 },
-      { version: 64 },
-      { version: 65 },
-      { version: 66 },
-      { version: 67 },
-      { version: 68 },
-      { version: 69 },
-      { version: 70 },
-      { version: 71 },
-      { version: 72 },
-      { version: 73 },
-      { version: 74 },
-      { version: 75 },
-      { version: 76 },
-      { version: 77 },
-      { version: 78 },
-      { version: 79 },
-      { version: 80 },
-      { version: 81 },
-      { version: 82 },
-      { version: 83 },
-      { version: 84 },
-      { version: 85 },
-      { version: 86 },
-      { version: 87 },
-      { version: 88 },
-      { version: 89 },
-      { version: 90 },
-      { version: 91 },
-      { version: 92 },
-      { version: 93 },
-      { version: 94 },
-      { version: 95 },
-      { version: 96 },
-      { version: 97 },
-      { version: 98 },
-      { version: 99 },
-      { version: 100 },
-      { version: 101 },
-      { version: 102 },
-      { version: 103 },
-      { version: 104 },
-      { version: 105 },
-      { version: 106 },
-      { version: 107 },
-      { version: 108 },
-      { version: 109 },
-      { version: 110 },
-      { version: 111 },
-      { version: 112 },
-      { version: 113 },
-      { version: 114 },
-      { version: 115 },
-    ]);
+    ).all()).toEqual(
+      Array.from({ length: CURRENT_DATABASE_SCHEMA_VERSION - 49 }, (_, index) => ({ version: 50 + index })),
+    );
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
     ).get() as { enabled: number }).enabled).toBe(1);

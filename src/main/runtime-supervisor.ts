@@ -32,6 +32,7 @@ import type { RuntimeUpdatePreparationCoordinator, RuntimeUpdateHandoffIdentity 
 import type { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
 import type { RuntimeHtmlRenderCoordinator } from "./runtime-html-render-coordinator.js";
 import type { RuntimeSupervisorQueries } from "./runtime-supervisor-queries.js";
+import type { RuntimeAgentSecretCoordinator, RuntimeAgentSecretDelivery, RuntimeAgentSecretDeliveryOutcome } from "./runtime-agent-secret-coordinator.js";
 import type { RuntimeHtmlRenderDocument } from "../node/runtime-html-render-protocol.js";
 import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
@@ -106,6 +107,7 @@ export class RuntimeSupervisor {
   private readonly startupRecovery: RuntimeSupervisorStartupRecovery;
   private readonly queries: RuntimeSupervisorQueries;
   private readonly htmlRenders: RuntimeHtmlRenderCoordinator;
+  private readonly agentSecrets: RuntimeAgentSecretCoordinator;
   private readonly privateConnectRequests: RuntimePrivateConnectRequestCoordinator;
   private readonly databaseRecoveryRequests: RuntimeDatabaseRecoveryCoordinator;
   private readonly updatePreparation: RuntimeUpdatePreparationCoordinator;
@@ -210,6 +212,7 @@ export class RuntimeSupervisor {
     this.privateConnectRequests = coordinators.privateConnectRequests;
     this.htmlRenders = coordinators.htmlRenders;
     this.queries = coordinators.queries;
+    this.agentSecrets = coordinators.agentSecrets;
     this.updatePreparation = coordinators.updatePreparation;
     this.onRestartRequested = options.onRestartRequested;
     this.requestExplicitRecovery = options.requestExplicitRecovery;
@@ -316,6 +319,9 @@ export class RuntimeSupervisor {
   /** Reads one stored visual reply for the protocol route; `null` when the runtime has no such render. */
   readHtmlRender(renderId: string): Promise<RuntimeHtmlRenderDocument | null> {
     return this.htmlRenders.read(renderId);
+  }
+  deliverAgentSecret(delivery: RuntimeAgentSecretDelivery): Promise<RuntimeAgentSecretDeliveryOutcome> {
+    return this.agentSecrets.deliver(delivery);
   }
   prepareForUpdate(): Promise<RuntimeUpdatePreparationResult> {
     return this.updatePreparation.prepareCurrent();
@@ -653,6 +659,7 @@ export class RuntimeSupervisor {
     }
     if (this.queries.handle(record, event)) return;
     if (this.htmlRenders.handle(record, event)) return;
+    if (this.agentSecrets.handle(record, event)) return;
     if (event.type === "runtime.private-connect-response") {
       this.privateConnectRequests.handle(record, event);
       return;
@@ -797,6 +804,7 @@ export class RuntimeSupervisor {
       this.emitState();
     }, this.stableUptimeMs);
     this.testRecycle.succeed(record);
+    this.agentSecrets.ready(record);
     this.emitState();
   }
   private handleExit(record: RuntimeProcessRecord, code: number): void {
@@ -1165,6 +1173,7 @@ export class RuntimeSupervisor {
   private rejectProjectPaths(record: RuntimeProcessRecord | null, message: string): void {
     this.queries.reject(record, message);
     this.htmlRenders.reject(record, message);
+    this.agentSecrets.reject(record);
   }
   private rejectPrivateConnectRuntimeRequests(
     record: RuntimeProcessRecord | null,

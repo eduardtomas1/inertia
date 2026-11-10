@@ -8,6 +8,7 @@ import {
 import { HTML_RENDER_TOOL_DEFINITION } from "./html-render-host-tool";
 import { WORKSPACE_TOOL_DEFINITIONS } from "./workspace-host-tools";
 import type { ProjectPreferences } from "../../shared/project-preferences";
+import { SECRET_REQUEST_TOOL_DEFINITION } from "./agent-secrets/secret-request-host-tool";
 import {
   FULL_HARNESS_CAPABILITY_OFFER,
   HarnessCapabilityRegistry,
@@ -78,6 +79,7 @@ export const WORKSPACE_INSTRUCTION: HiddenProviderInstruction = {
 interface InertiaHarnessCapabilityInput {
   orchestrationTools: readonly ProviderHostToolDefinition[];
   browserEnabled: boolean;
+  secretsEnabled?: boolean;
   invoke: HarnessCapabilityTool["invoke"];
   /** Durable record of what each Codex thread registered when it started. */
   threadRegistrations?: ThreadToolRegistrations;
@@ -155,6 +157,19 @@ export function createInertiaHarnessCapabilities(
       tags: ["git", "planning", "workspace"],
       evidenceKinds: ["git-artifact", "host-tool-result"],
       scenarioIds: ["workspace-read-snapshot", "exact-turn-diff", "bounded-workspace-result"],
+    },
+  });
+  if (input.secretsEnabled) packs.push({
+    id: "inertia.secrets",
+    revision: 1,
+    title: "Inertia secrets",
+    summary: "Asks the user for one secret in a private card and hands the agent an expiring private file path, never the value.",
+    instructions: [],
+    tools: [{ definition: SECRET_REQUEST_TOOL_DEFINITION, invoke: input.invoke }],
+    evaluation: {
+      tags: ["permissions", "secrets"],
+      evidenceKinds: ["host-tool-result"],
+      scenarioIds: ["private-secret-card", "exact-turn-secret-wait"],
     },
   });
   return new HarnessCapabilityRegistry(packs, { threadRegistrations: input.threadRegistrations });

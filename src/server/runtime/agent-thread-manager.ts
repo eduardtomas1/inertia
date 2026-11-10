@@ -64,6 +64,8 @@ import { CachedThreadToolRegistrations } from "./thread-tool-registrations";
 import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
 import { HtmlRenderHostTool } from "./html-render-host-tool";
 import { WORKSPACE_TOOL_NAMES, WorkspaceHostTools, type WorkspaceHostToolDependencies } from "./workspace-host-tools";
+import { SECRET_REQUEST_TOOL_NAME, SECRET_VALUE_EXPOSURE_MESSAGE } from "../../node/agent-secrets";
+import type { AgentSecretHostToolSource } from "./agent-secrets/agent-secret-service";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
 import {
   AGENT_THREAD_WAIT_TOOL_DEFINITION,
@@ -82,6 +84,7 @@ const MAX_LIST_LIMIT = 25;
 const MAX_PROMPT_CHARS = 32_768;
 const MAX_LATEST_RESULT_BYTES = 8_000;
 const MAX_ACTIVE_CHILDREN = 3;
+const STORED_CONTENT_TOOLS = new Set([HTML_RENDER_TOOL_NAME, SECRET_REQUEST_TOOL_NAME, "inertia_create_conversation", "inertia_send_message"]);
 const LATEST_RESULT_RUNNING_NEXT = "Still running; wait for it with inertia_wait_for_conversation, then call inertia_get_latest_result again.";
 const TERMINAL_TURN_STATUSES = new Set([
   "completed",
@@ -296,6 +299,10 @@ export interface AgentThreadManagerDependencies {
   agentBrowser?: RuntimeAgentBrowserBroker;
   turnGitArtifacts?: WorkspaceHostToolDependencies["turnGitArtifacts"];
   workspaceRuns?: WorkspaceHostToolDependencies["workspaceRuns"];
+  agentSecrets?: {
+    containsSecret(value: unknown): boolean;
+    invoke(source: AgentSecretHostToolSource, call: ProviderHostToolCall): Promise<ProviderHostToolResult>;
+  };
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;
@@ -367,6 +374,7 @@ export class AgentThreadManager {
     this.capabilities = createInertiaHarnessCapabilities({
       orchestrationTools: TOOL_DEFINITIONS,
       browserEnabled: this.agentBrowser !== undefined,
+      secretsEnabled: dependencies.agentSecrets !== undefined,
       invoke: async (context, call) => await this.invoke(context, call),
       threadRegistrations: new CachedThreadToolRegistrations(dependencies.store.codexThreadToolPacks),
     });
@@ -451,8 +459,14 @@ export class AgentThreadManager {
     try {
       const current = this.assertSource(source);
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
+      if (STORED_CONTENT_TOOLS.has(call.tool) && this.dependencies.agentSecrets?.containsSecret(call.arguments)) {
+        return failure("secret_value_not_allowed", SECRET_VALUE_EXPOSURE_MESSAGE);
+      }
       if (call.tool === HTML_RENDER_TOOL_NAME) return this.htmlRenders.invoke({ conversation: current, turn: source.turn }, call);
       if (WORKSPACE_TOOL_NAMES.has(call.tool)) return await this.workspaceTools.invoke({ conversation: current, turn: source.turn }, call);
+      if (call.tool === SECRET_REQUEST_TOOL_NAME && this.dependencies.agentSecrets) {
+        return await this.dependencies.agentSecrets.invoke({ conversation: current, turn: source.turn }, call);
+      }
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
         // The turn's offer already withholds these tools when Browser access
         // was off at turn start; this covers a setting changed mid-turn.

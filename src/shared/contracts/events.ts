@@ -296,7 +296,8 @@ export type ServerEvent =
         | { kind: "external.url"; url: string; label: string }
         | ConversationDetailResult
         | MessageSearchResult
-        | TerminalPathResolveResult;
+        | TerminalPathResolveResult
+        | import("./secret-request-results").SecretRequestCommandResult;
     }
   | RuntimeMutationEvent
   | ({

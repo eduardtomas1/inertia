@@ -246,6 +246,7 @@ export interface ChatMessage {
   compaction?: import("../context-compaction").ContextCompaction;
   /** A visual reply the agent published in this turn; system role, always turn-scoped. */
   htmlRender?: import("../html-render").HtmlRenderReference;
+  secretRequest?: import("../agent-secrets").SecretRequestReference;
   customAgentCall?: import("../custom-agents").CustomAgentCallAttribution;
   id: string;
   conversationId: string;

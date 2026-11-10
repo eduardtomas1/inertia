@@ -772,6 +772,7 @@ export function createWorkspaceSceneModel({
       contextPackets: chatProjection.contextPackets,
       watcherWakes: chatProjection.watcherWakes,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
+      onSecretRequestCommand: actions.run,
       onQueueCommand: chatQueueRunner(
         actions.runQueueCommand,
         draftConversation,

@@ -19,6 +19,7 @@ import { AGENT_CONTEXT_READ_MANAGED_ACCESS_SCHEMA_VERSION } from "../../src/serv
 import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "../../src/server/persistence/migrations/todo-source-conversation";
 import { CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/codex-thread-tool-packs";
 import { SUBAGENT_TASK_SHAPE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/subagent-task-shape";
+import { AGENT_SECRET_REQUESTS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/agent-secret-requests";
 
 const directories: string[] = [];
 
@@ -76,6 +77,12 @@ function narrowAgentContextReadAccess(database: Database.Database, version: numb
 }
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < AGENT_SECRET_REQUESTS_SCHEMA_VERSION) {
+    database.exec(`
+      DROP TABLE agent_secret_requests;
+      ALTER TABLE messages DROP COLUMN secret_request_json;
+    `);
+  }
   if (version < CUSTOM_AGENTS_SCHEMA_VERSION) {
     database.exec(`
       DROP TABLE custom_agents;
@@ -250,13 +257,18 @@ describe("database health check for settings and subagent columns", () => {
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: nonUniqueCustomAgentHandles },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "ALTER TABLE messages DROP COLUMN custom_agent_call_json" },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "ALTER TABLE subagent_traces DROP COLUMN custom_agent_id" },
+    { version: AGENT_SECRET_REQUESTS_SCHEMA_VERSION, sql: "DROP TABLE agent_secret_requests" },
+    { version: AGENT_SECRET_REQUESTS_SCHEMA_VERSION, sql: "ALTER TABLE agent_secret_requests DROP COLUMN provider_id" },
+    { version: AGENT_SECRET_REQUESTS_SCHEMA_VERSION, sql: "DROP INDEX agent_secret_requests_status_expiry_idx" },
+    { version: AGENT_SECRET_REQUESTS_SCHEMA_VERSION, sql: "DROP INDEX agent_secret_requests_conversation_idx" },
+    { version: AGENT_SECRET_REQUESTS_SCHEMA_VERSION, sql: "ALTER TABLE messages DROP COLUMN secret_request_json" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each(Array.from({ length: CUSTOM_AGENTS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each(Array.from({ length: AGENT_SECRET_REQUESTS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

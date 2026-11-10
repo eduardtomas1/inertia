@@ -578,7 +578,7 @@ function startGrokRun(
       if (!sessionId) throw new Error("Grok ACP did not return a session ID.");
 
       activeFailurePhase = "configuration";
-      if (options.input.sessionId) {
+      if (options.input.sessionId || options.input.interactionMode === "plan") {
         activeTerminalEvent = "session/set_mode";
         await requestControl(
           context.request(acp.methods.agent.session.setMode, {

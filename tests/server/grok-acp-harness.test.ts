@@ -421,6 +421,7 @@ describe("Grok ACP harness", { concurrent: false }, () => {
       if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
       if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "grok-plan", configOptions: [] } });
+      if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
       if (message.method === "session/prompt") {
         globalThis.promptId = message.id;
         return send({ jsonrpc: "2.0", id: 900, method: "_x.ai/exit_plan_mode", params: {
@@ -453,12 +454,16 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     }].map((plan) => expect.objectContaining(plan)));
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
       observed: { argv: string[] };
-      messages: Array<{ id?: number; method?: string; result?: { outcome?: string } }>;
+      messages: Array<{ id?: number; method?: string; params?: Record<string, unknown>; result?: { outcome?: string } }>;
     };
     expect(captured.observed.argv).toEqual(["--permission-mode", "plan", "agent", "stdio"]);
     expect(captured.messages.find(({ id, method }) => id === 900 && !method)?.result?.outcome)
       .toBe("abandoned");
-    expect(captured.messages.some(({ method }) => method === "session/set_mode")).toBe(false);
+    const methods = captured.messages.map(({ method }) => method);
+    expect(methods.indexOf("session/set_mode")).toBeGreaterThan(methods.indexOf("session/new"));
+    expect(methods.indexOf("session/set_mode")).toBeLessThan(methods.indexOf("session/prompt"));
+    expect(captured.messages.find(({ method }) => method === "session/set_mode")?.params)
+      .toEqual({ sessionId: "grok-plan", modeId: "plan" });
   });
 
   it("asks Grok's questions in Inertia and returns the chosen labels and free-text notes", async () => {

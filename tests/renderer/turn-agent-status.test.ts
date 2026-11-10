@@ -30,6 +30,7 @@ function status(overrides: Partial<TurnAgentStatus>): TurnAgentStatus {
     stopped: 0,
     failed: 0,
     review: 0,
+    remote: 0,
     agents: 0,
     commands: 0,
     ...overrides,
@@ -100,6 +101,21 @@ describe("turn agent status", () => {
     expect(subagentGroupFoldable(turnAgentStatus([taskTrace({ status: "waiting" })]))).toBe(true);
     expect(subagentGroupFoldable(turnAgentStatus([taskTrace({ status: "running" })]))).toBe(false);
     expect(subagentGroupFoldable(null)).toBe(false);
+  });
+
+  it("shows a cloud agent still running after its turn as in the cloud, not for review, and lets the group fold", () => {
+    const cloud = taskTrace({ id: "cloud", status: "unknown", isLive: false, taskKind: "remote" });
+    const done = taskTrace({ id: "done", status: "completed" });
+    expect(subagentTone(cloud)).toBe("remote");
+    expect(subagentTone(taskTrace({ status: "unknown", isLive: false, taskKind: "agent" }))).toBe("review");
+    expect(subagentTone({ ...cloud, isLive: true })).toBe("working");
+    expect(subagentStatusWord(cloud)).toBe("Running in the cloud");
+    const group = turnAgentStatus([done, cloud])!;
+    expect(group).toMatchObject({ done: 1, remote: 1, review: 0 });
+    expect(turnAgentStatusText(group)).toBe("1 done · 1 in the cloud");
+    expect(subagentGroupFoldable(group)).toBe(true);
+    expect(subagentGroupSettledDone(group)).toBe(true);
+    expect(subagentGroupFoldable(turnAgentStatus([cloud, taskTrace({ id: "u", status: "unknown", isLive: false })]))).toBe(false);
   });
 
   it("dims a group only when every agent is done", () => {

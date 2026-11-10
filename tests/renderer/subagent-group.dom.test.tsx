@@ -86,6 +86,22 @@ describe("subagent group row", () => {
     expect(declarationsFor(rules, '[data-subagent-tone="review"]').get("--subagent-tone")).toBe("var(--status-failed)");
   });
 
+  it("says a cloud agent still running after its turn is in the cloud, in a muted tone, not for review", async () => {
+    const user = userEvent.setup();
+    render(<SubagentGroup {...line} subagents={[
+      taskTrace({ id: "done", providerName: "Reader", status: "completed" }),
+      taskTrace({ id: "cloud", providerName: "Builder", status: "unknown", isLive: false, taskKind: "remote" }),
+    ]} onOpenSurface={vi.fn()} />);
+    const button = screen.getByRole("button", { name: "2 subagents, 1 done · 1 in the cloud" });
+    expect(button.querySelector('[data-tone="remote"]')).toHaveTextContent(/^· 1 in the cloud$/u);
+    expect(button.querySelector('[data-tone="review"]')).toBeNull();
+    expect(button.closest(".subagent-group")).toHaveClass("is-idle");
+    await user.click(button);
+    const row = screen.getByRole("button", { name: "Open Builder in Background tasks, Running in the cloud" });
+    expect(row).toHaveAttribute("data-subagent-tone", "remote");
+    expect(declarationsFor(rules, '[data-subagent-tone="remote"]').get("--subagent-tone")).toBe("var(--text-muted)");
+  });
+
   it("counts waiting and queued agents in their own words, not as working", async () => {
     const user = userEvent.setup();
     render(<SubagentGroup {...line} subagents={[

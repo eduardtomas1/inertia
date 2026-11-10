@@ -208,6 +208,10 @@ button.subagent-group-agent:focus-visible {
   --subagent-tone: var(--status-failed);
 }
 
+[data-subagent-tone="remote"] {
+  --subagent-tone: var(--text-muted);
+}
+
 [data-subagent-tone="waiting"] {
   --subagent-tone: var(--status-input);
 }

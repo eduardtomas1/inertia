@@ -35,7 +35,7 @@ Every turn of a chat re-reads its whole history. While the provider's prompt cac
 With **Compact large chats** set to **Before the cache expires**, Inertia compacts an idle Claude chat of 200K tokens or more about two minutes before its one-hour cache runs out, while the history can still be read from the cache. You come back to a short chat and the first message costs a fraction of re-reading the whole history.
 
 - It applies only to Claude chats whose cache lasts an hour: a Claude subscription, or a 1-hour Prompt cache on an Anthropic API key. A five-minute cache expires too soon after each reply for this to help.
-- It runs the same compaction as `/compact`, under the same chat lock, and only when the chat is idle: no turn, queued message, workspace operation or other compaction. Settled chats are left alone. A chat you start using in that moment waits for the compaction to finish.
+- It runs the same compaction as `/compact`, under the same chat lock, and only when the chat is idle: no turn, queued message, workspace operation or other compaction. Settled chats are left alone, and a compacted chat keeps its place in the sidebar. A chat you start using in that moment waits for the compaction to finish.
 - The timeline marks it with one line, such as *Compacted while idle · 412K → 21.4K tokens*.
 - Inertia checks once a minute while it is open. If it was closed, or the compaction fails, the chat falls back to **Compact and send** when you return.
 - A chat you never come back to was compacted for nothing; that costs one cached read of its history plus the summary.
@@ -81,7 +81,7 @@ Type `/calling` in the message box and choose an agent: it shows on the message 
 
 When an agent needs a credential, such as an API token for a test environment, it can ask for it in a private card in the chat instead of asking you to paste it. Type the value there and choose **Save securely**, or **Decline**.
 
-- The value never enters the chat, its history, Inertia's database or the logs. The agent receives only the path of a file it can read, private to your user account, for up to 24 hours.
+- The value must be at least 8 characters. It never enters the chat, its history, Inertia's database or the logs. The agent receives only the path of a file it can read, private to your user account, for up to 24 hours. On Windows the file stays in your user profile even when Inertia's data folder is elsewhere.
 - The value and its common encodings are replaced with *[redacted]* in anything the agent prints back.
 - With a system keychain, the secret is kept there too and survives a restart; otherwise it lasts until Inertia quits. **Settings → Data → Agent secrets** lists active secrets, and **Revoke** there or on the card deletes them.
 - You can answer from the chat's own window. The agent waits up to ten minutes (four and a half on Cursor and Kimi Code); providers without Inertia's tools are told never to ask you for a secret in the chat.

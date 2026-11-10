@@ -3,7 +3,7 @@ import { redactHostToolPayload } from "./host-tool-redaction";
 
 const CREDENTIAL_ENVIRONMENT_KEY =
   /(?:^|[._-])(?:api[._-]?key|auth(?:entication|orization|[._-]key)|cookie|credentials?|(?:access|client|encryption|private|secret|service|signing|subscription)[._-]?key(?:[._-]?id)?|pass(?:code|phrase|word)?|passwd|private[._-]?key|pwd|secret|token)(?:$|[._-])/iu;
-const SIGNIFICANT_SECRET_PREFIX_CHARS = 6;
+export const SIGNIFICANT_SECRET_PREFIX_CHARS = 6;
 const FILE_REFERENCE_ENVIRONMENT_KEY =
   /(?:^|[._-])(?:dir(?:ectory)?|file|home|path|root|sock(?:et)?)$/iu;
 

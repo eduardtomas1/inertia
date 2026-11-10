@@ -38,6 +38,8 @@ function scrubPathPrefix(text: string, path: string | undefined, replacement: st
   return text.replace(new RegExp(escaped(normalized), process.platform === "win32" ? "giu" : "gu"), replacement);
 }
 
+export const PROVIDER_ACTIVITY_DETAIL_OMISSION = /(\n… \[\d+ or more characters omitted\] …\n)/u;
+
 export function boundProviderActivityDetail(
   value: string,
   maxChars = MAX_PROVIDER_ACTIVITY_DETAIL_CHARS,

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SecretMatcher } from "../../src/server/provider/acp-redaction";
+import { boundProviderActivityDetail } from "../../src/server/provider/activity-detail";
 import type { ProviderEvent, ProviderRunResult } from "../../src/server/provider/contracts";
 import { SecretOutputRedactor } from "../../src/server/runtime/agent-secrets/secret-output-redactor";
 
@@ -86,6 +87,30 @@ describe("secret output redactor: active values never leave the turn controller 
     expect((output[0] as { outputDelta: string }).outputDelta).toContain("[redacted]");
     expect(output[2]).toMatchObject({ text: "Snapshot [redacted]" });
     expect(output[4]).toMatchObject({ result: "Logged in with [redacted]" });
+  });
+
+  it("redacts the pieces of a value that a bounded detail cut at its omission marker", () => {
+    const value = redactor();
+    const limit = 400;
+    const probe = boundProviderActivityDetail("x".repeat(800), limit);
+    const headLength = probe.indexOf("\n…");
+    const tailLength = limit - probe.lastIndexOf("…\n") - 2;
+    const source = `${"a".repeat(headLength - 12)}${SECRET}${"b".repeat(800 - headLength - tailLength - 28)}${SECRET}${"c".repeat(tailLength - SECRET.length + 9)}`;
+    const detail = boundProviderActivityDetail(source, limit);
+    const marker = detail.slice(detail.indexOf("\n…"), detail.lastIndexOf("…\n") + 2);
+    expect(source.length).toBe(800);
+    expect(detail).toContain(SECRET.slice(0, 12));
+    expect(detail).toContain(SECRET.slice(-(SECRET.length - 9)));
+    const emitted = [
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "completed", label: "curl", activityId: "cmd-1", detail }),
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "curl", activityId: "cmd-2", outputDelta: detail }),
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "completed", label: "curl", activityId: "cmd-2" }),
+    ];
+    const serialized = JSON.stringify(emitted);
+    expect(serialized).not.toContain(SECRET.slice(0, 12));
+    expect(serialized).not.toContain(SECRET.slice(-(SECRET.length - 9)));
+    expect(emitted[0]).toMatchObject({ detail: `${"a".repeat(headLength - 12)}[redacted]${marker}[redacted]${"c".repeat(tailLength - SECRET.length + 9)}` });
+    expect(value.text(`plain${marker}text`)).toBe(`plain${marker}text`);
   });
 
   it("redacts the final result text and failure detail, keeps the cleanup promise, and flushes held text first", () => {

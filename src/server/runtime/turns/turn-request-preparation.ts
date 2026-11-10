@@ -61,6 +61,7 @@ import type {
 
 const CUSTOM_BACKEND_RESTORED_HISTORY_BYTES = 48 * 1_024;
 export const NATIVE_RESTORED_HISTORY_BYTES = 64 * 1_024;
+export const NATIVE_RESTORED_HISTORY_BYTES_WITHOUT_CONTEXT_TOOL = 192 * 1_024;
 
 type InstructionRoute = Parameters<typeof routeUsesTrustedHostBridge>[0];
 
@@ -485,9 +486,12 @@ export function resolveTurnRequest(
   const referencedCapacity = (capacityBytes: number) => usesNativeCatalog
     ? capacityBytes
     : Math.min(capacityBytes, CUSTOM_BACKEND_RESTORED_HISTORY_BYTES);
+  const nativeRestoredBytes = hostToolBridgeAttested
+    ? NATIVE_RESTORED_HISTORY_BYTES
+    : NATIVE_RESTORED_HISTORY_BYTES_WITHOUT_CONTEXT_TOOL;
   const restoredCapacity = (capacityBytes: number) => Math.min(
     capacityBytes,
-    usesNativeCatalog ? NATIVE_RESTORED_HISTORY_BYTES : CUSTOM_BACKEND_RESTORED_HISTORY_BYTES,
+    usesNativeCatalog ? nativeRestoredBytes : CUSTOM_BACKEND_RESTORED_HISTORY_BYTES,
   );
   const referencedHistory = (capacityBytes: number) => {
     const delivery = conversationContexts?.deliveries

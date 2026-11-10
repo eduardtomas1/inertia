@@ -6,8 +6,9 @@ import { RuntimeStore } from "../../src/server/database";
 import { RESTORED_CHAT_HISTORY_LABEL } from "../../src/server/persistence/conversation-context-transport";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { MAX_CONVERSATION_CONTEXT_BLOCK_BYTES, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
-import { NATIVE_RESTORED_HISTORY_BYTES, resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
+import { NATIVE_RESTORED_HISTORY_BYTES, NATIVE_RESTORED_HISTORY_BYTES_WITHOUT_CONTEXT_TOOL, resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
 import type { QueueTurnRequest, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
+import type { ProviderInfo } from "../../src/shared/contracts";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
 const providers = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"] as const;
@@ -591,7 +592,12 @@ describe("restored history on a custom backend", () => {
       providerSessionId: "before-update",
       continuationIdentity: { ...f.previous, backendConfigurationRevision: f.previous.backendConfigurationRevision + 1 },
     });
-    const restoredBytes = (custom: boolean) => {
+    const bridged = [{
+      id: f.route.providerId,
+      models: [],
+      capabilityContract: { installationVerified: true, hostToolBridgeAvailable: true, harnessId: f.route.harnessId },
+    }] as unknown as ProviderInfo[];
+    const restoredBytes = (custom: boolean, providerInfo: ProviderInfo[] = bridged) => {
       const resolved = resolveTurnRequest({
         store: f.store,
         providers: {
@@ -600,7 +606,7 @@ describe("restored history on a custom backend", () => {
             : f.route,
           harnessIdFor: () => f.route.harnessId,
         } as unknown as TurnProviderRuntime,
-        hooks: { broadcast: () => undefined, broadcastSnapshot: () => undefined, providerInfo: () => [] },
+        hooks: { broadcast: () => undefined, broadcastSnapshot: () => undefined, providerInfo: () => providerInfo },
         id: () => `bounded-${custom}`,
         now: () => capturedAt,
         clock: () => new Date(capturedAt),
@@ -623,6 +629,10 @@ describe("restored history on a custom backend", () => {
     expect(custom.bytes).toBeLessThanOrEqual(48 * 1_024);
     expect(custom.recovery!.restoredMessageCount).toBeGreaterThan(0);
     expect(custom.recovery!.restoredMessageCount + custom.recovery!.omittedMessageCount).toBe(42);
+    const toolless = restoredBytes(false, []);
+    expect(toolless.bytes).toBeGreaterThan(NATIVE_RESTORED_HISTORY_BYTES);
+    expect(toolless.bytes).toBeLessThanOrEqual(NATIVE_RESTORED_HISTORY_BYTES_WITHOUT_CONTEXT_TOOL);
+    expect(toolless.recovery!.restoredMessageCount).toBeGreaterThan(native.recovery!.restoredMessageCount);
   });
 });
 

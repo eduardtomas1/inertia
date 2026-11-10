@@ -335,6 +335,34 @@ describe("finished-turn fold", () => {
     expect(document.querySelector(".turn-fold-body .subagent-group")).not.toBeNull();
   });
 
+  it("keeps a called custom agent beside the answer and out of the subagent group's count", async () => {
+    const user = userEvent.setup();
+    const call = {
+      id: "trace-called",
+      turnId: working.id,
+      customAgentId: "agent-reviewer",
+      providerName: "Code reviewer",
+      isLive: false,
+      status: "completed",
+      createdAt: at(4),
+      updatedAt: at(5),
+    } as SubagentTrace;
+    const helper = { id: "trace-helper", turnId: working.id, isLive: false, status: "completed", createdAt: at(6) } as SubagentTrace;
+    const view = render(<ResponseTimeline {...props([working], { subagents: [call, helper] })} />);
+
+    const calledAgent = screen.getByRole("region", { name: "Called agent Code reviewer" });
+    expect(calledAgent.closest(".turn-fold-body")).toBeNull();
+    expect(document.querySelector(".subagent-group")).toBeNull();
+    await user.click(foldToggle(working.id));
+    const body = document.getElementById(foldToggle(working.id).getAttribute("aria-controls")!)!;
+    expect(within(body).getByRole("button", { name: "1 subagent, 1 done" })).toBeVisible();
+    expect(screen.getAllByRole("region", { name: /^Called agent / })).toHaveLength(1);
+
+    view.rerender(<ResponseTimeline {...props([working], { subagents: [call] })} />);
+    expect(document.querySelector(".subagent-group")).toBeNull();
+    expect(screen.getByRole("region", { name: "Called agent Code reviewer" }).closest(".turn-fold-body")).toBeNull();
+  });
+
   it("keeps a group that was live while watched outside the fold until the turn mounts again", async () => {
     const user = userEvent.setup();
     const live = { id: "trace-live", turnId: working.id, isLive: true, status: "running" } as SubagentTrace;

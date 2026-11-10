@@ -110,7 +110,7 @@ const budgets = {
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
   // Grok's shared provider maps add 1,054 bytes (855,126 measured). Keep 256 bytes.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127 + 8_415 + 1_889 + 1_054 + 256 + 417 + 38 + 57 + 6_950 + 752,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127 + 8_415 + 1_889 + 1_054 + 256 + 417 + 38 + 57 + 6_950 + 790,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -159,7 +159,7 @@ const budgets = {
   // Nesting a watcher under its chat in the Work tab adds 6 bytes over v0.0.73
   // (21,132 measured on Linux x64).
   deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 6 + 22 + 5 + 25_894 + 226,
-  deferredLibraryViewJavaScript: 30_595 + 45,
+  deferredLibraryViewJavaScript: 30_595,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   // Tools-offer integration onto main 2f470060 (#630): the worktree section in
   // Project settings add 6,387 bytes over main's cap (24,045 measured on
@@ -190,7 +190,7 @@ const budgets = {
   // Custom agents: the called-agent block and its children load with the
   // transcript, 2,515 bytes over its cap (616,915 measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  transcriptJavaScript: 600 * kibibyte + 2_515 + 15_165,
+  transcriptJavaScript: 600 * kibibyte + 2_515 + 26_419,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
@@ -289,7 +289,7 @@ const budgets = {
   // called-agent renderer wiring add 31,710 bytes over main's cap (2,600,295
   // measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 1_855 + 38 + 824 + 466 + 31_710 + 29_060,
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 1_855 + 38 + 824 + 466 + 31_710 + 29_167,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

@@ -135,6 +135,28 @@
     "deferredPdfJavaScript": 512000,
     "deferredPdfWorker": 1382400
   },
+  "customAgentsRebaseNote": "Rebased onto main ad15acb0 (#684, custom agents) and measured on Linux x64 with scripts/check-renderer-bundle.mjs from two builds with the same node_modules: main ad15acb0 (customAgentsRebaseBaselineBytes; its caps equal these bytes) and the rebased branch (customAgentsRebaseAfterBytes). The subagent group counts only traces that are not custom agent calls, so called agents keep their own blocks. 5 caps rise by exactly the bytes they exceed: coreJavaScript 29,167, transcriptJavaScript 26,419, entryCss 4,383, detachedChatFirstLoadJavaScript 790, filesFirstLoadJavaScript 33. transcriptJavaScript rises more than at 5d0788e2 (15,165) because that raise was over a flat 600 KiB cap the closure sat under, and #684 used that headroom; the closure grows by the same ResponseTimeline and ResponseMarkdown bytes as before, with no shared chunk duplicated. deferredLibraryViewJavaScript grows 45 bytes but stays under main's cap, so its earlier raise is dropped.",
+  "capRaisesAtCustomAgentsRebase": {
+    "coreJavaScript": 29167,
+    "transcriptJavaScript": 26419,
+    "entryCss": 4383,
+    "detachedChatFirstLoadJavaScript": 790,
+    "filesFirstLoadJavaScript": 33
+  },
+  "customAgentsRebaseBaselineBytes": {
+    "coreJavaScript": 2600295,
+    "transcriptJavaScript": 616915,
+    "entryCss": 254845,
+    "detachedChatFirstLoadJavaScript": 862844,
+    "filesFirstLoadJavaScript": 127535
+  },
+  "customAgentsRebaseAfterBytes": {
+    "coreJavaScript": 2629462,
+    "transcriptJavaScript": 643334,
+    "entryCss": 259228,
+    "detachedChatFirstLoadJavaScript": 863634,
+    "filesFirstLoadJavaScript": 127568
+  },
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
       "baselineBytes": 1163,

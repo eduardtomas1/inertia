@@ -1116,14 +1116,8 @@ export const Composer = memo(function Composer({
           canQueue={canQueue}
           onQueue={() => void queueCurrentMessage()}
           running={running}
-          placeholder={composerPlaceholder({
-            disabled,
-            running,
-            stopsBeforeSending: running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null),
-            queueBlocked,
-            hasHistory: hasVisibleHistory || latestKnownTurn !== null,
-            skillsAvailable: Boolean(skillsCapability?.available),
-          })}
+          placeholder={composerPlaceholder({ disabled, running, queueBlocked, hasHistory: hasVisibleHistory || latestKnownTurn !== null, skillsAvailable: Boolean(skillsCapability?.available),
+            stopsBeforeSending: running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null) })}
           submissionPending={submissionPending}
           followUpPending={followUpPending}
           typedMessageLimit={typedMessageLimit}

@@ -12,6 +12,7 @@ import {
   providerNativeModelSelection,
   routeSupportsNativeFastModeIdentity,
   type ModelBackendProfile,
+  type ModelSelection,
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
 import { officialPresetEndpoint } from "../backends/backend-profile-presets";
@@ -215,7 +216,7 @@ export function codexCompactionLimitApplies(route: {
 function codexContextWindow(
   store: Pick<RuntimeStore, "usageForConversation" | "agentTurn">,
   conversationId: string,
-  modelId: string,
+  selection: Pick<ModelSelection, "backendProfileId" | "modelId">,
 ): number | null {
   const usage = store.usageForConversation(conversationId);
   if (!usage?.turnId || usage.maxTokens === null) return null;
@@ -227,7 +228,8 @@ function codexContextWindow(
   }
   return reported.conversationId === conversationId
     && reported.providerId === "codex"
-    && reported.modelSelection.modelId === modelId
+    && reported.modelSelection.backendProfileId === selection.backendProfileId
+    && reported.modelSelection.modelId === selection.modelId
     ? usage.maxTokens
     : null;
 }
@@ -546,7 +548,7 @@ export function resolveTurnRequest(
   const autoCompactTokenLimit = codexCompactionLimitApplies(route)
     ? codexAutoCompactTokenLimit(
       dependencies.store.settings().codexAutoCompactTokenLimit,
-      codexContextWindow(dependencies.store, conversation.id, modelSelection.modelId),
+      codexContextWindow(dependencies.store, conversation.id, modelSelection),
     )
     : null;
   const providerInput = {

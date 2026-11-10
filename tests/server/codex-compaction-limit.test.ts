@@ -154,6 +154,23 @@ describe("Codex automatic compaction limit", () => {
     expect(resolveFor(store, codex.id)).toMatchObject({ autoCompactTokenLimit: 232_560 });
   });
 
+  it("waits for the window of the chat's current backend after it switches backends on the same model", async () => {
+    const { store, projectId } = await runtimeStore();
+    const native = providerNativeModelSelection({ providerId: "codex", modelId: "gpt-shared" });
+    const codex = store.createConversation(projectId, "Codex", {
+      modelSelection: { ...native, backendProfileId: "openai-api-key-profile", backendProfileDisplayName: "OpenAI API key" },
+    });
+    const first = resolveFor(store, codex.id);
+    reportWindow(store, codex.id, first.turnId, 1_000_000);
+    store.updateConversation(codex.id, { modelSelection: native });
+
+    const switched = resolveFor(store, codex.id);
+    expect(switched).not.toHaveProperty("autoCompactTokenLimit");
+
+    reportWindow(store, codex.id, switched.turnId, 258_400);
+    expect(resolveFor(store, codex.id)).toMatchObject({ autoCompactTokenLimit: 232_560 });
+  });
+
   it("ignores usage that names no turn", async () => {
     const { store, projectId } = await runtimeStore();
     const codex = store.createConversation(projectId, "Codex", { modelSelection: providerNativeModelSelection({ providerId: "codex" }) });

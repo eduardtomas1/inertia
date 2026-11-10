@@ -49,7 +49,11 @@ import {
   type ProviderHostToolMcpConnection,
   type ProviderHostToolMcpSession,
 } from "./host-tool-mcp-http";
-import { acpHostMcpServers } from "./host-tool-mcp-config";
+import {
+  acpHostMcpServers,
+  acpPromptForHostMcp,
+  type HostMcpProxyRuntimeOptions,
+} from "./host-tool-mcp-config";
 import {
   BoundedGrokJsonLineTransform,
   grokErrorDetail,
@@ -130,6 +134,7 @@ export interface GrokAcpHarnessOptions {
   createHostMcpSession?(
     runtime: ProviderHostToolRuntime,
   ): ProviderHostToolMcpSession;
+  hostMcpProxyRuntime?: HostMcpProxyRuntimeOptions;
 }
 
 interface PendingApproval {
@@ -191,6 +196,7 @@ export function createGrokAcpHarness(
       options.terminateProcessTree,
       options.controlRpcTimeoutMs,
       options.createHostMcpSession,
+      options.hostMcpProxyRuntime,
     ),
   };
 }
@@ -200,6 +206,7 @@ function startGrokRun(
   terminateProcessTree?: ProcessTreeTerminator,
   controlRpcTimeoutMs = CONTROL_RPC_TIMEOUT_MS,
   createHostMcpSession = createProviderHostToolMcpSession,
+  hostMcpProxyRuntime: HostMcpProxyRuntimeOptions = {},
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
@@ -518,8 +525,15 @@ function startGrokRun(
             hostMcpConnection,
             initialized.agentCapabilities?.mcpCapabilities?.http === true,
             options.environment,
+            hostMcpProxyRuntime,
           )
         : [];
+      const turnPrompt = acpPromptForHostMcp(
+        options.input.prompt,
+        options.hostTools,
+        hostMcpServers,
+        options.input.conversationId,
+      );
 
       let session: { configOptions?: SessionConfigOption[] | null };
       if (options.input.sessionId) {
@@ -587,7 +601,7 @@ function startGrokRun(
       emitGrokMetadata(configuredOptions, supportsImages, emitter);
 
       const prompt = await grokPrompt(
-        options.input.prompt,
+        turnPrompt,
         options.input.imagePaths ?? [],
         initialized,
         promptPreparationAbort.signal,

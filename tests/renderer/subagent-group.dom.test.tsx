@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BackgroundTasksSurface } from "../../src/renderer/src/components/BackgroundTasksSurface";
 import { SubagentGroup } from "../../src/renderer/src/components/response-timeline/SubagentGroup";
+import { publishTurnSubagents } from "../../src/renderer/src/components/response-timeline/subagent-trace-store";
 import {
   requestBackgroundTaskReveal,
   takeBackgroundTaskReveal,
@@ -277,6 +278,37 @@ describe("subagent group row", () => {
     await user.click(screen.getByRole("button", { name: "Open Composer in Background tasks, Done" }));
     expect(onOpenSurface).toHaveBeenCalledWith("agents");
     expect(takeBackgroundTaskReveal("conversation-1")).toEqual({ ...line, traceId: "b" });
+  });
+
+  it("keeps a called custom agent out of the open group while live updates arrive", async () => {
+    const user = userEvent.setup();
+    const turn = { conversationId: "conversation-1", turnId: "turn-custom-call" };
+    const helper = taskTrace({ id: "helper", turnId: turn.turnId, providerName: "Helper", progress: "Reading" });
+    const called = taskTrace({
+      id: "called",
+      turnId: turn.turnId,
+      providerName: "Reviewer",
+      customAgentId: "00000000-0000-4000-8000-000000000001",
+    });
+    let published = new Map([[turn.turnId, [helper, called]]]);
+    publishTurnSubagents(published, new Map());
+    try {
+      render(<SubagentGroup {...turn} subagents={[helper]} onOpenSurface={vi.fn()} />);
+      expect(groupButton()).toHaveAccessibleName("1 subagent, 1 working");
+      await user.click(groupButton());
+      expect(groupButton()).toHaveAccessibleName("1 subagent, 1 working");
+      const list = screen.getByRole("list", { name: "Subagents" });
+      expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+      expect(within(list).queryByText("Reviewer")).toBeNull();
+      const updated = { ...helper, progress: "Writing the report", sequence: 2, updatedAt: "2030-01-01T00:00:40.000Z" };
+      const next = new Map([[turn.turnId, [updated, called]]]);
+      act(() => publishTurnSubagents(next, published));
+      published = next;
+      expect(within(list).getByText("Writing the report")).toBeVisible();
+      expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    } finally {
+      act(() => publishTurnSubagents(new Map(), published));
+    }
   });
 
   it("lists agents as plain rows when nothing can open the panel", async () => {

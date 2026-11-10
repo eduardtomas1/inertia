@@ -59,5 +59,11 @@ export function useLatestTurnSubagents(
     () => enabled ? latest.get(turnId) ?? null : null,
     [enabled, turnId],
   );
-  return useSyncExternalStore(subscribe, read, read) ?? fallback;
+  const traces = useSyncExternalStore(subscribe, read, read);
+  return useMemo(() => {
+    if (!traces || traces === fallback) return fallback;
+    const ids = new Set(fallback.map(({ id }) => id));
+    const owned = traces.filter(({ id }) => ids.has(id));
+    return owned.length === traces.length ? traces : owned;
+  }, [fallback, traces]);
 }

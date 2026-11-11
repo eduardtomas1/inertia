@@ -328,14 +328,30 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
         if (data?.type !== "inertia-html-render:open-link") return;
         links.push({ url: data.url, focused: document.activeElement?.tagName === "IFRAME", activated: navigator.userActivation.isActive });
       });
+      const presses: Record<string, unknown>[] = [];
+      Reflect.set(window, "__inertiaE2eParentPresses", presses);
+      window.addEventListener("pointerdown", (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const embedded = document.querySelector('[data-testid="html-render-frame"]')?.getBoundingClientRect();
+        const scroller = document.querySelector('[aria-label="Thread transcript"]');
+        presses.push({ at: Math.round(performance.now()), target: target?.tagName ?? null, className: target?.getAttribute("class") ?? null,
+          x: event.clientX, y: event.clientY, frameTop: embedded?.top ?? null, frameHeight: embedded?.height ?? null,
+          scrollTop: scroller?.scrollTop ?? null, scrollHeight: scroller?.scrollHeight ?? null, clientHeight: scroller?.clientHeight ?? null });
+      }, true);
     });
 
     await content.getByRole("button", { name: "Not a link" }).click();
     await content.getByRole("textbox", { name: "Access token" }).fill("secret-token");
     await content.getByRole("textbox", { name: "Access token" }).press("Enter");
     await content.getByRole("link", { name: "Real link" }).click();
-    await expect.poll(() => page.evaluate(() => Reflect.get(window, "__inertiaE2eFrameLinks")))
-      .toContainEqual({ url: HOSTILE_PAGE_LINK, focused: true, activated: true });
+    try {
+      await expect.poll(() => page.evaluate(() => Reflect.get(window, "__inertiaE2eFrameLinks")))
+        .toContainEqual({ url: HOSTILE_PAGE_LINK, focused: true, activated: true });
+    } catch (error) {
+      await test.info().attach("parent-pointer-presses", { contentType: "application/json",
+        body: JSON.stringify(await page.evaluate(() => Reflect.get(window, "__inertiaE2eParentPresses")), null, 2) });
+      throw error;
+    }
     await expect.poll(opened).toContain(HOSTILE_PAGE_LINK);
     expect(await opened()).toEqual([HOSTILE_PAGE_LINK]);
     expect(await frame.evaluate(() => Reflect.get(window, "parent") === window.top)).toBe(false);

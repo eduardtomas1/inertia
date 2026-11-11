@@ -11,6 +11,7 @@ import { createElectronMainProcessDiagnostic, survivingHelperRoles,
   "./electron-main-process-diagnostic";
 import { electronProcessEvidence, observeElectronIdentity, reportedExitStages,
   type ElectronProcessEvidence, type ElectronProcessEvidenceSnapshot } from "./electron-process-evidence";
+import { sampleUnexitedElectronMain } from "./electron-unexited-main-sample";
 import { forceStopWindowsElectronLauncher,
   type WindowsElectronProcessDependencies } from "./electron-windows-process";
 
@@ -300,6 +301,7 @@ interface ElectronAppCloseOptions {
 
 export interface ElectronAppQuitOptions extends ElectronAppCloseOptions {
   readonly quitRequestTimeoutMs?: number;
+  readonly sampleUnexitedMain?: typeof sampleUnexitedElectronMain;
   readonly mainProcessDiagnostic?: ElectronMainProcessDiagnostic;
   readonly recoverStalledWindowDestroy?: boolean;
 }
@@ -416,6 +418,13 @@ export async function quitElectronAppBounded<T>(
   } else {
     options.mainProcessDiagnostic?.stop();
     evidence.observeMainPresence();
+    if (gracefulTimeoutMs > 0 && (options.platform ?? process.platform) === "darwin") {
+      evidence.record("unexited-main-sample-started");
+      await (options.sampleUnexitedMain ?? sampleUnexitedElectronMain)(
+        evidence.snapshot().mainPid ?? child.pid, { platform: "darwin" });
+      evidence.record(child.exitCode === null && child.signalCode === null
+        ? "unexited-main-alive-after-sample" : "unexited-main-exited-during-sample");
+    }
     evidence.record("force-stop-started");
     const exitedAfterForce = await forceStopElectronChild(child, options);
     evidence.record(exitedAfterForce ? "force-stop-confirmed" : "force-stop-unconfirmed");

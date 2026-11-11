@@ -50,14 +50,14 @@ function summary(limits: readonly ProviderRateLimit[]): string[] {
 }
 
 describe("Claude rate limit windows (#723)", () => {
-  it("names the live overage-included window as a model's weekly limit, never extra usage", () => {
+  it("names the live overage-included window after the model Claude Code names it for, never extra usage", () => {
     const limits = parseClaudeRateLimitEvents(liveEvent({
       seven_day: { utilization: 0.09, resetsAt: Date.parse(WEEK_RESET) / 1_000 },
       seven_day_overage_included: { utilization: 0.15, resetsAt: Date.parse(WEEK_RESET) / 1_000 },
     }));
     expect(limits.map(({ id, label, windowMinutes }) => ({ id, label, windowMinutes }))).toEqual([
       { id: "claude:seven_day", label: "Weekly", windowMinutes: 10_080 },
-      { id: CLAUDE_MODEL_WEEKLY_LIMIT_ID, label: "Weekly · model", windowMinutes: 10_080 },
+      { id: CLAUDE_MODEL_WEEKLY_LIMIT_ID, label: "Weekly · Fable", windowMinutes: 10_080 },
     ]);
     expect(limits.map(({ label }) => label).join(" ")).not.toMatch(/extra usage/iu);
   });
@@ -73,16 +73,24 @@ describe("Claude rate limit windows (#723)", () => {
     ]);
   });
 
-  it("keeps several model-scoped windows apart and maps only the first to the live window", () => {
+  it("keeps several model-scoped windows apart and maps the live window to the model it is named for, else the first", () => {
     const limits = parseClaudeRateLimits(usageRead([
-      { display_name: "Fable", utilization: 19, resets_at: WEEK_RESET },
       { display_name: "Saga", utilization: 40, resets_at: WEEK_RESET },
+      { display_name: "Fable", utilization: 19, resets_at: WEEK_RESET },
       { utilization: 5, resets_at: WEEK_RESET },
     ]), NOW);
     expect(summary(limits).slice(1)).toEqual([
-      `${CLAUDE_MODEL_WEEKLY_LIMIT_ID}|Weekly · Fable|19`,
       "claude:model_scoped:saga|Weekly · Saga|40",
+      `${CLAUDE_MODEL_WEEKLY_LIMIT_ID}|Weekly · Fable|19`,
       "claude:model_scoped:2|Weekly · model 3|5",
+    ]);
+    const others = parseClaudeRateLimits(usageRead([
+      { display_name: "Saga", utilization: 40, resets_at: WEEK_RESET },
+      { display_name: "Nova", utilization: 12, resets_at: WEEK_RESET },
+    ]), NOW);
+    expect(summary(others).slice(1)).toEqual([
+      `${CLAUDE_MODEL_WEEKLY_LIMIT_ID}|Weekly · Saga|40`,
+      "claude:model_scoped:nova|Weekly · Nova|12",
     ]);
   });
 
@@ -142,10 +150,30 @@ describe("Claude rate limit windows (#723)", () => {
     });
     expect(resetQuota(exhausted("Weekly · Fable"), "default", NOW)).toEqual({ kind: "unknown" });
     expect(resetQuota(exhausted("Weekly · Fable"), "default", NOW, "Default (recommended)")).toEqual({ kind: "unknown" });
-    expect(resetQuota(exhausted("Weekly · model"), "claude-opus-5-5", NOW)).toEqual({ kind: "unknown" });
     expect(resetQuota(exhausted("Weekly · model 1"), "claude-opus-5-5", NOW)).toEqual({ kind: "unknown" });
     expect(resetQuota(exhausted("Weekly · Saga"), "claude-opus-5-5", NOW)).toEqual({ kind: "unknown" });
     expect(resetQuota(exhausted("Weekly · Fable"), "claude-opus-5-5", NOW)).toEqual({ kind: "available" });
+    expect(resetQuota(exhausted("Weekly · Fable 5"), "claude-opus-5-5", NOW)).toEqual({ kind: "available" });
+    expect(resetQuota(exhausted("Weekly · Fable 5"), "sonnet", NOW, "Sonnet 5.5")).toEqual({ kind: "available" });
+    expect(resetQuota(exhausted("Weekly · Fable 5"), "fable", NOW)).toEqual({ kind: "exhausted", resetsAt: WEEK_RESET });
+  });
+
+  it("resumes a Fable turn at its reset from a live window alone, before oauth/usage has named it", () => {
+    const [live] = parseClaudeRateLimitEvents(liveEvent({
+      seven_day_overage_included: { utilization: 1, resetsAt: Date.parse(WEEK_RESET) / 1_000 },
+    }));
+    const account: UsageAccount = {
+      id: "native:claude", providerId: "claude", providerLabel: "Claude", label: "Claude account",
+      email: null, plan: "max", identityKey: null, sources: ["This computer"], status: "ready", detail: null,
+      updatedAt: new Date(NOW).toISOString(), checkedAt: new Date(NOW).toISOString(), credits: null, canReset: false,
+      windows: [
+        { id: "claude:seven_day", label: "Weekly", remainingPercent: 60, windowMinutes: 10_080, resetsAt: WEEK_RESET },
+        { id: live!.id, label: live!.label, remainingPercent: live!.remainingPercent, windowMinutes: live!.windowMinutes, resetsAt: live!.resetsAt },
+      ],
+    };
+    expect(resetQuota(account, "claude-fable-5-2", NOW)).toEqual({ kind: "exhausted", resetsAt: WEEK_RESET });
+    expect(resetQuota(account, "default", NOW)).toEqual({ kind: "unknown" });
+    expect(resetQuota(account, "claude-opus-5-5", NOW)).toEqual({ kind: "available" });
   });
 });
 

@@ -6,7 +6,9 @@ const LEGACY_MODEL_ID = /^claude:model_(\d+)$/u;
 const MODEL_SCOPED_ID_PREFIX = "claude:model_scoped:";
 
 export const CLAUDE_MODEL_WEEKLY_LIMIT_ID = "claude:seven_day_overage_included";
-const UNNAMED_MODEL = "model";
+const LIVE_MODEL_WEEKLY_TYPE = "seven_day_overage_included";
+const LIVE_WINDOW_MODELS: Readonly<Record<string, string>> = { [LIVE_MODEL_WEEKLY_TYPE]: "Fable" };
+const UNNAMED_MODEL = /^model(?:-\d+)?$/u;
 const CLAUDE_FAMILIES = ["fable", "opus", "sonnet", "haiku"];
 
 const WINDOWS: Readonly<Record<string, { label: string; minutes: number | null }>> = {
@@ -28,13 +30,13 @@ function modelSlug(name: string): string {
   return name.toLowerCase().replaceAll(/[^a-z0-9]+/gu, "-").replaceAll(/^-|-$/gu, "");
 }
 
-function claudeModelWeeklyLabel(model?: unknown): string {
-  return `${MODEL_WEEKLY_PREFIX}${modelName(model) ?? UNNAMED_MODEL}`;
+function claudeModelWeeklyLabel(model: unknown): string {
+  return `${MODEL_WEEKLY_PREFIX}${modelName(model) ?? LIVE_WINDOW_MODELS[LIVE_MODEL_WEEKLY_TYPE]}`;
 }
 
 export function claudeRateLimitWindow(type: string): { label: string; minutes: number | null } {
-  if (type === "seven_day_overage_included") {
-    return { label: claudeModelWeeklyLabel(), minutes: WEEK_MINUTES };
+  if (type === LIVE_MODEL_WEEKLY_TYPE) {
+    return { label: claudeModelWeeklyLabel(LIVE_WINDOW_MODELS[type]), minutes: WEEK_MINUTES };
   }
   const known = WINDOWS[type];
   if (known) return known;
@@ -53,10 +55,13 @@ export function claudeModelScopedWindows(
       ? [entry as Record<string, unknown>]
       : []
   ));
+  const names = models.map((value) => modelName(value.display_name));
+  const liveModel = LIVE_WINDOW_MODELS[LIVE_MODEL_WEEKLY_TYPE]!.toLowerCase();
+  const liveIndex = Math.max(0, names.findIndex((name) => name?.toLowerCase() === liveModel));
   return models.map((value, index) => {
-    const name = modelName(value.display_name);
+    const name = names[index] ?? null;
     return {
-      id: index === 0
+      id: index === liveIndex
         ? CLAUDE_MODEL_WEEKLY_LIMIT_ID
         : `${MODEL_SCOPED_ID_PREFIX}${(name && modelSlug(name)) || index}`,
       label: claudeModelWeeklyLabel(name ?? `model ${index + 1}`),
@@ -72,7 +77,7 @@ function isModelWeeklyWindow(id: string): boolean {
 function modelWeeklyScope(window: { id: string; label: string }): string | null {
   if (!window.label.startsWith(MODEL_WEEKLY_PREFIX)) return null;
   const scope = modelSlug(window.label.slice(MODEL_WEEKLY_PREFIX.length));
-  return scope && scope !== UNNAMED_MODEL ? scope : null;
+  return scope && !UNNAMED_MODEL.test(scope) ? scope : null;
 }
 
 type ClaudeModelWeeklyRelation = "applies" | "other-model" | "unknown";
@@ -84,11 +89,11 @@ export function claudeModelWeeklyRelation(
   if (!isModelWeeklyWindow(window.id)) return null;
   const scope = modelWeeklyScope(window);
   const names = modelNames.flatMap((name) => name ? [modelSlug(name)] : []);
-  if (scope && names.some((name) => name.includes(scope))) return "applies";
   const families = CLAUDE_FAMILIES.filter((family) => names.some((name) => name.split("-").includes(family)));
-  return scope && CLAUDE_FAMILIES.includes(scope) && families.length > 0 && !families.includes(scope)
-    ? "other-model"
-    : "unknown";
+  const scopeFamily = scope ? CLAUDE_FAMILIES.find((family) => scope.split("-").includes(family)) : undefined;
+  if (scope && names.some((name) => name.includes(scope))) return "applies";
+  if (!scopeFamily || families.length === 0) return "unknown";
+  return families.includes(scopeFamily) ? "applies" : "other-model";
 }
 
 export function withKnownClaudeModelWeeklyLabel<T extends { id: string; label: string }>(
@@ -97,7 +102,7 @@ export function withKnownClaudeModelWeeklyLabel<T extends { id: string; label: s
 ): T[] {
   const known = previous.find(({ id }) => id === CLAUDE_MODEL_WEEKLY_LIMIT_ID);
   if (!known?.label.startsWith(MODEL_WEEKLY_PREFIX)) return [...next];
-  const fallback = claudeModelWeeklyLabel();
+  const fallback = claudeModelWeeklyLabel(null);
   return next.map((limit) => (
     limit.id === CLAUDE_MODEL_WEEKLY_LIMIT_ID && limit.label === fallback
       ? { ...limit, label: known.label }
@@ -139,7 +144,7 @@ export function canonicalClaudeRateLimits(
         ...limit,
         label: limit.label.startsWith(MODEL_WEEKLY_PREFIX)
           ? limit.label
-          : primary ? scopedName(primary) : claudeModelWeeklyLabel(),
+          : primary ? scopedName(primary) : claudeModelWeeklyLabel(null),
         windowMinutes: limit.windowMinutes ?? WEEK_MINUTES,
       });
       continue;

@@ -121,7 +121,7 @@ const budgets = {
   // Custom agents: the composer chip and called-agent row styles add 201
   // bytes over main's cap (254,845 measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351 + 190 + 11_205 + 28 + 201 + 4_383,
+  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351 + 190 + 11_205 + 28 + 201 + 4_383 + 15,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.

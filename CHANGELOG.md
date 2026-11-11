@@ -15,6 +15,12 @@ The useful changes in each Inertia release, in plain language.
   busy computer the chat could snap back to the latest message, or stay at
   the start with nothing loading until you pressed **Load earlier messages**.
 
+### Look and feel
+
+- In a narrow window the navigation drawer dims the chat behind it again, and
+  clicking the dimmed area closes the drawer. The chat used to look usable
+  while the drawer was open but ignored every click.
+
 ## 0.0.83 — 2026-11-10
 
 Calmer chats, Grok, custom agents you call by name, secrets that never enter

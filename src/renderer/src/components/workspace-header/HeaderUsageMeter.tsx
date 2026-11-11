@@ -8,7 +8,7 @@ import {
   headerUsageMeterModel,
   isQuotaResetDue,
   quotaResetLabel,
-  quotaWindowLabel,
+  quotaLimitName,
 } from "../../utils/headerUsageMeter";
 
 export function HeaderUsageMeter({
@@ -80,7 +80,6 @@ export function HeaderUsageMeter({
             )}
           </span>
           {model.limits.map((limit) => {
-            const window = quotaWindowLabel(limit.windowMinutes);
             const resetDue = isQuotaResetDue(limit, now);
             return (
               <span
@@ -90,7 +89,7 @@ export function HeaderUsageMeter({
                 data-reset-due={resetDue || undefined}
               >
                 <span>
-                  {window ? `${window.slice(0, 1).toUpperCase()}${window.slice(1)} limit` : limit.label}
+                  {quotaLimitName(limit)}
                   <small>{quotaResetLabel(limit.resetsAt, now)}</small>
                 </span>
                 <b>{resetDue ? "Reset" : `${clampRemainingPercent(limit.remainingPercent)}% left`}</b>

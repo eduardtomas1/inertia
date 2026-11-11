@@ -6,7 +6,7 @@ import {
   headerUsageMeterModel,
   isQuotaResetDue,
   quotaResetLabel,
-  quotaWindowLabel,
+  quotaLimitName,
 } from "../../src/renderer/src/utils/headerUsageMeter";
 
 function usage(
@@ -57,7 +57,7 @@ describe("header usage meter", () => {
     expect(model?.secondary?.id).toBe("weekly");
     expect(model?.tightest.id).toBe("five-hour");
     expect(model?.valueLabel).toBe("62%");
-    expect(model?.accessibleLabel).toBe("Usage: 62% of 5-hour limit left");
+    expect(model?.accessibleLabel).toBe("Usage: 62% of Session limit left");
     expect(model?.low).toBe(false);
   });
 
@@ -66,7 +66,7 @@ describe("header usage meter", () => {
     const low = headerUsageMeterModel(usage([fiveHour, { ...weekly, remainingPercent: 14 }]), NOW);
     expect(low?.low).toBe(true);
     expect(low?.tightest.id).toBe("weekly");
-    expect(low?.accessibleLabel).toBe("Usage: 14% of weekly limit left");
+    expect(low?.accessibleLabel).toBe("Usage: 14% of Weekly limit left");
     expect(headerUsageMeterModel(usage([{ ...fiveHour, remainingPercent: 20 }]), NOW)?.low).toBe(false);
     expect(headerUsageMeterModel(usage([{ ...fiveHour, remainingPercent: 19.6 }]), NOW)).toMatchObject({
       low: true,
@@ -81,9 +81,9 @@ describe("header usage meter", () => {
 
   it("qualifies stale or refreshing quota in the accessible label", () => {
     expect(headerUsageMeterModel(usage([fiveHour], { freshness: "stale" }), NOW)?.accessibleLabel)
-      .toBe("Usage: 62% of 5-hour limit left, may be out of date");
+      .toBe("Usage: 62% of Session limit left, may be out of date");
     expect(headerUsageMeterModel(usage([fiveHour], { freshness: "refreshing" }), NOW)?.accessibleLabel)
-      .toBe("Usage: 62% of 5-hour limit left, refreshing");
+      .toBe("Usage: 62% of Session limit left, refreshing");
   });
 
   it("hides without shared quota or limits", () => {
@@ -93,12 +93,11 @@ describe("header usage meter", () => {
   });
 
   it("labels windows and resets", () => {
-    expect(quotaWindowLabel(300)).toBe("5-hour");
-    expect(quotaWindowLabel(10_080)).toBe("weekly");
-    expect(quotaWindowLabel(1_440)).toBe("daily");
-    expect(quotaWindowLabel(2_880)).toBe("2-day");
-    expect(quotaWindowLabel(45)).toBe("45-minute");
-    expect(quotaWindowLabel(null)).toBeNull();
+    expect(quotaLimitName({ id: "claude:seven_day", label: "Weekly", windowMinutes: 10_080 })).toBe("Weekly limit");
+    expect(quotaLimitName({ id: "claude:seven_day_overage_included", label: "Weekly · Fable", windowMinutes: 10_080 })).toBe("Weekly · Fable limit");
+    expect(quotaLimitName({ id: "codex:primary", label: "Codex usage", windowMinutes: 300 })).toBe("Session limit");
+    expect(quotaLimitName({ id: "codex:secondary", label: "Codex usage · secondary", windowMinutes: 10_080 })).toBe("Weekly limit");
+    expect(quotaLimitName({ id: "five-hour", label: "Five-hour limit", windowMinutes: 300 })).toBe("Five-hour limit");
     const now = Date.parse("2026-09-21T12:00:00.000Z");
     expect(quotaResetLabel("2026-09-21T14:20:00.000Z", now)).toBe("Resets in 2h 20m");
     expect(quotaResetLabel("2026-09-21T12:30:00.000Z", now)).toBe("Resets in 30m");

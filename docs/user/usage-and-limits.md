@@ -1,6 +1,6 @@
 # Usage and limits
 
-Open **Usage** in the sidebar. It opens one popup over the app with three tabs, **Cost**, **Tokens** and **Limits**; press C, T or L to switch. The popup opens on the tab you used last, and on Limits the first time. Escape or the close button returns to where you were.
+Open **Usage** in the sidebar. It opens one popup over the app with three tabs, **Cost**, **Tokens** and **Limits**; press C, T or L to switch, or use the arrow keys on the tabs. The popup opens on the tab you used last, and on Limits the first time. Escape or the close button returns to where you were.
 
 The header reads **Usage / period / providers**. On Cost and Tokens the middle part chooses the last 7, 30 or 90 days. On Limits it chooses the source (this computer or one usage hub) and only appears once a hub is configured. **All providers** hides or shows providers on all three tabs. The popup remembers the tab, the period and the hidden providers. The round arrow refreshes the tab you are on.
 
@@ -10,7 +10,8 @@ Locally recorded usage across your chats and providers for the chosen period.
 
 - **Tokens** shows the processed tokens Inertia measured: the total, each provider's share, a daily chart, tokens by type, and a breakdown by model or by day.
 - **Cost** shows the same usage as an **API estimate**: what those tokens would cost at public API list prices. It is not a bill, and a subscription is not charged this way. Input, cache reads, cache writes and output are priced separately; **Cache savings** is what cached input saved against the full input price.
-- The estimate says how many requests it covers (*priced 3 of 8*). A model with no known price is marked **Unpriced** and adds nothing. A Claude alias such as `opus` is priced as the version recorded with the request (*priced as claude-opus-5-5*), and stays unpriced when no version was recorded.
+- The estimate says how many requests it covers (*priced 3 of 8*). A model with no known price is marked **Unpriced** and adds nothing. A Claude alias such as `opus` is priced as the version recorded with the request (*priced as claude-opus-5-5*), and stays unpriced when no version was recorded. Cursor requests are always Unpriced for now, because Inertia can't yet tell which of Cursor's token counts include cached input.
+- Limits of the estimate: cache writes are priced at the standard five-minute rate, long-context and other price tiers are not applied, and a model row that spans several versions names the first one it priced.
 - Prices come from LiteLLM's public model price list. Inertia ships a copy with each build, so Cost works offline and never waits for the network; the note under the tables says how old the prices are.
 - **Network request.** When you open Cost or Tokens and the prices Inertia has are older than 24 hours, it downloads the current list in the background with one plain GET to `raw.githubusercontent.com` (`BerriAI/litellm`, `model_prices_and_context_window.json`). The request carries no account, usage, model or project information, only what any download reveals: your IP address to GitHub. The downloaded list is stored in Inertia's data folder and used from the next refresh. If the download fails, Inertia keeps the prices it has and tries again no more than once a minute while Usage is open.
 - Changing the period or refreshing keeps the previous figures on screen while the new ones load.

@@ -33,6 +33,7 @@ The useful changes in each Inertia release, in plain language.
   API list prices, per day, provider and model, split by token type and with
   what the cache saved. It is an estimate, not a bill: it says how many
   requests it covers and marks models without a known price **Unpriced**.
+  Cursor requests stay Unpriced for now.
   Prices come from LiteLLM's public model price list. A copy ships with the
   build, so Cost works offline and never waits for the network.
 - **New network request.** When Cost or Tokens is open and the prices are
@@ -49,7 +50,9 @@ The useful changes in each Inertia release, in plain language.
 - Claude's weekly limit for a model (today Fable) reads **Weekly · Fable**
   instead of *Claude extra usage · 7 day*, and it is one row: the value from
   a live chat replaces the last full reading instead of sitting beside it.
-  A reset that waits for this limit now waits for the right time.
+  A chat that stopped at this limit resumes when it resets, and Inertia does
+  not resume a chat while it cannot tell whether an exhausted model limit
+  covers it.
 - A quota row no longer keeps a value from an earlier week, from another
   account or from before a Claude Code update while the panel says *Fresh*.
 - Windows read **Session**, **Weekly**, **Weekly · Opus**… once, instead of

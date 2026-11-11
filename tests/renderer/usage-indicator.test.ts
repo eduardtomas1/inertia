@@ -316,6 +316,8 @@ describe("UsageIndicator", () => {
   });
 
   it("renders reported quota windows, reset timing, and bounded percentages", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-22T12:30:00.000Z"));
     const html = render(
       usage(),
       [
@@ -342,14 +344,34 @@ describe("UsageIndicator", () => {
     expect(displayPercent(-30)).toBe(0);
     expect(displayPercent(130)).toBe(100);
     expect(displayPercent(Number.NaN)).toBeNull();
-    expect(html).toContain("Five hour · 5 hours");
-    expect(html).toContain("Weekly · 7 days");
+    expect(html).toContain('<span class="limit-row-label">Five hour</span>');
+    expect(html).toContain('<span class="limit-row-label">Weekly</span>');
     expect(html).toContain("75% left");
     expect(html).toContain("0% left");
-    expect(html).toContain("width:75%");
-    expect(html).toContain("width:0%");
-    expect(html).toMatch(/Resets Jul 22.*(?:UTC|GMT)/u);
+    expect(html).toContain('class="limit-bar-fill" style="width:75%"');
+    expect(html).toContain('class="limit-bar-hatch" style="width:25%"');
+    expect(html).toContain('style="--limit-mark:50%"');
+    expect(html).toContain("Resets in 2h 30m");
+    expect(html).toMatch(/title="Jul 22.*(?:UTC|GMT)"/u);
     expect(html).not.toContain("Reset time unavailable");
+  });
+
+  it("names each quota window once, without repeating its length", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-22T12:30:00.000Z"));
+    const html = render(
+      usage(),
+      [
+        { id: "codex:primary", label: "Codex", usedPercent: 25, remainingPercent: 75, windowMinutes: 300, resetsAt: "2026-07-22T15:00:00.000Z" },
+        { id: "codex:secondary", label: "Codex · secondary", usedPercent: 40, remainingPercent: 60, windowMinutes: 10_080, resetsAt: "2026-07-26T15:00:00.000Z" },
+        { id: "claude:seven_day", label: "Weekly", usedPercent: 10, remainingPercent: 90, windowMinutes: 10_080, resetsAt: "2026-07-26T15:00:00.000Z" },
+        { id: "claude:seven_day_overage_included", label: "Weekly · Fable", usedPercent: 10, remainingPercent: 90, windowMinutes: 10_080, resetsAt: "2026-07-26T15:00:00.000Z" },
+      ],
+      freshState,
+    );
+    const labels = [...html.matchAll(/<span class="limit-row-label">([^<]*)<\/span>/gu)].map((match) => match[1]);
+    expect(labels).toEqual(["Session", "Weekly", "Weekly", "Weekly · Fable"]);
+    expect(html).not.toMatch(/7 days?|5 hours?|10080|· secondary/u);
   });
 
   it("keeps stale and cached data quality explicit without inventing timestamps", () => {
@@ -466,7 +488,7 @@ describe("UsageIndicator", () => {
     expect(html).toContain("Claude SDK · Team profile · sonnet");
     expect(html).toContain("Unavailable");
     expect(html).toContain("Provider quota unavailable");
-    expect(html).not.toContain('role="progressbar"');
+    expect(html).not.toContain('role="meter"');
     expect(html).not.toContain("Update time unavailable");
     expect(html).not.toContain("Reset time unavailable");
   });
@@ -484,9 +506,9 @@ describe("UsageIndicator", () => {
     expect(low).not.toContain("usage-trigger-quota");
     expect(low).not.toContain('title="Context window');
     expect(low).toContain('aria-label="Open usage and context. Context window 50% remaining."');
-    expect(low).toContain('class="usage-popover-quota" data-tone="ok"');
-    expect(low).toContain('class="usage-popover-quota" data-tone="low"');
-    expect(render(usage(), [limit(12)], freshState)).toContain('class="usage-popover-quota" data-tone="critical"');
+    expect(low).toContain('class="limit-row" data-tone="ok"');
+    expect(low).toContain('class="limit-row" data-tone="low"');
+    expect(render(usage(), [limit(12)], freshState)).toContain('class="limit-row" data-tone="critical"');
   });
 
   it("repeats the context ring inside the popover without a second quota refresh marker", () => {

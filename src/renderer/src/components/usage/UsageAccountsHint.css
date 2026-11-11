@@ -1,0 +1,8 @@
+.usage-accounts-hint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 10px 0 0; padding-top: 9px; border-top: 1px solid var(--line-soft); color: var(--text-muted); font-size: var(--text-xs); }
+.usage-accounts-hint b { margin-left: auto; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-accounts-hint small { flex-basis: 100%; color: var(--text-muted); text-align: right; }
+
+@keyframes usage-accounts-hint-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: no-preference) {
+  .usage-accounts-hint { animation: usage-accounts-hint-in var(--dur) var(--ease) backwards; }
+}

@@ -10,12 +10,12 @@ import { usageAccount } from "../helpers/usage-limits";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import type { ServerEvent } from "../../src/shared/contracts";
 afterEach(() => vi.restoreAllMocks());
-it("accepts Escape at the first committed frame of cold and warm Limits dialogs", async () => {
+it("accepts Escape at the first committed frame of a cold and a warm Usage popup", async () => {
   const focusedAtCommit: boolean[] = [];
   let dismissAtCommit = false;
   const request = async (): Promise<ServerEvent> => ({ type: "request.result", requestId: "request", result: { kind: "usage.limits", snapshot: { accounts: [], sources: [], checkedAt: null } } });
   render(<Profiler id="limits-focus" onRender={() => {
-    const dialog = screen.queryByRole("dialog", { name: "Provider usage limits" });
+    const dialog = screen.queryByRole("dialog", { name: "Usage" });
     if (!dialog || !dismissAtCommit) return;
     dismissAtCommit = false;
     // Commit observers run after layout effects, before passive effects/paint.
@@ -31,11 +31,11 @@ it("accepts Escape at the first committed frame of cold and warm Limits dialogs"
     dismissAtCommit = true;
     await act(async () => { fireEvent.click(shortcut); await vi.dynamicImportSettled(); });
     expect(focusedAtCommit).toEqual(Array.from({ length: index + 1 }, () => true));
-    expect(screen.queryByRole("dialog", { name: "Provider usage limits" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Usage" })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
   }
 });
-it("keeps keyboard focus inside Limits after the shortcut's next animation frame", async () => {
+it("keeps keyboard focus inside the Usage popup after the shortcut's next animation frame", async () => {
   const frames: FrameRequestCallback[] = [];
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => { frames.push(callback); return frames.length; });
   const request = async (): Promise<ServerEvent> => ({ type: "request.result", requestId: "request", result: { kind: "usage.limits", snapshot: { accounts: [], sources: [], checkedAt: null } } });
@@ -45,19 +45,19 @@ it("keeps keyboard focus inside Limits after the shortcut's next animation frame
   const shortcut = screen.getByRole("button", { name: "All provider limits" });
   shortcut.focus();
   await act(async () => { fireEvent.click(shortcut); await vi.dynamicImportSettled(); });
-  const dialog = await screen.findByRole("dialog", { name: "Provider usage limits" });
+  const dialog = await screen.findByRole("dialog", { name: "Usage" });
   expect(dialog).toContainElement(document.activeElement as HTMLElement);
   expect(dialog.parentElement).toHaveAttribute("role", "presentation");
 
   await act(async () => { for (const frame of frames.splice(0)) frame(performance.now()); });
   expect(dialog).toContainElement(document.activeElement as HTMLElement);
   fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-  expect(screen.queryByRole("dialog", { name: "Provider usage limits" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Usage" })).not.toBeInTheDocument();
   expect(trigger).toHaveFocus();
   // The loaded lazy module must keep the same ownership on a warm reopen.
   fireEvent.click(trigger);
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "All provider limits" })); await vi.dynamicImportSettled(); });
-  const reopened = await screen.findByRole("dialog", { name: "Provider usage limits" });
+  const reopened = await screen.findByRole("dialog", { name: "Usage" });
   await act(async () => { for (const frame of frames.splice(0)) frame(performance.now()); });
   expect(reopened).toContainElement(document.activeElement as HTMLElement);
   fireEvent.keyDown(document.activeElement!, { key: "Escape" }); expect(trigger).toHaveFocus();
@@ -71,16 +71,15 @@ it("retains modal focus when reset preparation replaces its launching button", a
     : { kind: "usage.limits", snapshot: { accounts: [account], sources: [], checkedAt: new Date().toISOString() } } });
   render(<UsageLimitsProvider request={request} status="online"><Opener /></UsageLimitsProvider>);
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Open limits directly" })); await vi.dynamicImportSettled(); });
-  const dialog = await screen.findByRole("dialog", { name: "Provider usage limits" });
-  fireEvent.click(await screen.findByRole("button", { name: "Show Codex accounts" }));
-  fireEvent.click(screen.getByRole("button", { name: /1 Codex account pro ready 2 resets/ }));
+  const dialog = await screen.findByRole("dialog", { name: "Usage" });
+  fireEvent.click(await screen.findByRole("button", { name: /^Codex account: 60% left/ }));
   const useReset = screen.getByRole("button", { name: "Use reset" });
   useReset.focus();
   await act(async () => fireEvent.click(useReset));
   await screen.findByRole("button", { name: "Confirm reset" });
   expect(dialog).toContainElement(document.activeElement as HTMLElement);
   fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-  expect(screen.queryByRole("dialog", { name: "Provider usage limits" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Usage" })).not.toBeInTheDocument();
 });
 
 it("renews an expired unattempted confirmation instead of offering an endless same-confirmation retry", async () => {
@@ -95,8 +94,7 @@ it("renews an expired unattempted confirmation instead of offering an endless sa
       : { kind: "usage.limits", snapshot: { accounts: [account], sources: [], checkedAt: new Date(now).toISOString() } } };
   });
   render(<UsageLimitsPanel request={request} status="online" />);
-  fireEvent.click(await screen.findByRole("button", { name: "Show Codex accounts" }));
-  fireEvent.click(screen.getByRole("button", { name: /1 Codex account pro ready 2 resets/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Codex account: 60% left/ }));
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use reset" })));
   now = expires + 1;
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Confirm reset" })));
@@ -108,7 +106,7 @@ it("renews an expired unattempted confirmation instead of offering an endless sa
   expect(screen.getByRole("button", { name: "Renew confirmation" })).toBeVisible();
   expect(screen.queryByText(/The result is uncertain/)).not.toBeInTheDocument();
 });
-it("opens the Limits dialog on the first commit once the idle prefetch has loaded it", async () => {
+it("opens the Usage popup with its Limits tab on the first commit once the idle prefetch has loaded them", async () => {
   const request = async (): Promise<ServerEvent> => await new Promise<ServerEvent>(() => undefined);
   vi.resetModules();
   const { UsageLimitsProvider } = await import("../../src/renderer/src/components/usage-limits-context");
@@ -123,7 +121,9 @@ it("opens the Limits dialog on the first commit once the idle prefetch has loade
 
   act(() => { fireEvent.click(screen.getByRole("button", { name: "All provider limits" })); });
 
-  expect(screen.getByRole("dialog", { name: "Provider usage limits" })).toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "Usage" })).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Provider limits" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("Loading limits")).not.toBeInTheDocument();
 });
 
 function HideableUsage() {

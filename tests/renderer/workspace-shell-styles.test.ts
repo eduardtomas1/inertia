@@ -178,7 +178,7 @@ describe("Windows panel tab strip", () => {
 
 describe("dead selectors", () => {
   it("drops rules for elements that are no longer rendered", () => {
-    const usage = readSourceText("src/renderer/src/components/UsageView.css");
+    const usage = readSourceText("src/renderer/src/components/usage/UsageOverview.css");
     const preview = readSourceText("src/renderer/src/components/PreviewPanel.css");
     const plan = readSourceText("src/renderer/src/components/PlanPanel.tsx");
     expect(css).not.toContain(".plan-summary");
@@ -188,8 +188,8 @@ describe("dead selectors", () => {
     expect(css.match(/\.terminal-header \{/gu)).toHaveLength(2);
     expect(/\.preview-evidence-toggle \{([^}]*)\}/u.exec(preview)?.[1]).not.toContain("font-size");
     const forced = usage.slice(usage.indexOf("@media (forced-colors: active)"));
-    expect(forced).toContain(".usage-chart-point-core { stroke: Canvas; }");
-    expect(forced).not.toContain("fill: Canvas; }\n  .usage-provider-meter > i");
+    expect(forced).toContain(".usage-overview-chart-point-core { stroke: Canvas; }");
+    expect(forced).not.toContain("fill: Canvas; }\n  .usage-overview-model-meter > i");
   });
 });
 

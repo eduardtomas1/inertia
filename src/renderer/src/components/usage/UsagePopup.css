@@ -1,0 +1,212 @@
+.usage-popup-backdrop {
+  padding: 40px;
+}
+
+.usage-popup {
+  --dialog-width: 1280px;
+  container: usage-popup / inline-size;
+  height: min(960px, calc(100dvh - 80px));
+  border-radius: 16px;
+}
+
+.usage-popup:focus-visible {
+  outline: none;
+}
+
+.usage-popup > .dialog-shell-header {
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 8px 8px 8px 20px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.usage-popup .dialog-shell-heading {
+  padding-top: 0;
+}
+
+.usage-popup .dialog-shell-heading > h2,
+.usage-popup-crumbs {
+  font-size: var(--text-base);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.usage-popup .dialog-shell-heading > h2,
+.usage-popup-slash {
+  color: var(--text-muted);
+}
+
+.usage-popup-crumbs {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.usage-popup-slash {
+  flex: 0 0 auto;
+}
+
+.usage-filter {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.usage-filter-trigger {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.usage-filter-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-filter-trigger:hover > span {
+  text-decoration: underline;
+}
+
+.usage-filter-trigger > svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.usage-filter-trigger:is(:hover, :focus-visible, [aria-expanded="true"]) > svg {
+  opacity: 1;
+}
+
+.usage-filter-menu.conversation-menu {
+  top: calc(100% + 8px);
+  right: auto;
+  left: -8px;
+  width: max-content;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 48px));
+  max-height: min(420px, 60dvh);
+  overflow-y: auto;
+  font-weight: 400;
+}
+
+.usage-filter-check {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.usage-popup-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.usage-popup-tabs {
+  display: flex;
+  width: fit-content;
+  gap: 2px;
+  padding: 2px;
+  border-radius: calc(var(--radius-xs) + 2px);
+  background: var(--fill);
+}
+
+.usage-popup-tabs > button {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--text-base);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.usage-popup-tabs > button:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.usage-popup-tabs > button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--fill-strong);
+}
+
+.usage-popup :is(.usage-popup-refresh, .dialog-shell-close) {
+  width: var(--control-height-small);
+  height: var(--control-height-small);
+  margin-left: 0;
+}
+
+.usage-popup-body.dialog-shell-body {
+  padding: 0;
+  scrollbar-gutter: stable both-edges;
+}
+
+.usage-popup-content {
+  width: 100%;
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 24px 24px 48px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .usage-popup-tabs > button {
+    transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+  }
+
+  .usage-popup-refresh[aria-busy="true"] svg {
+    animation: spin 800ms linear infinite;
+  }
+}
+
+@container usage-popup (max-width: 760px) {
+  .usage-popup > .dialog-shell-header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding-left: 16px;
+  }
+
+  .usage-popup-controls {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    justify-content: space-between;
+  }
+
+  .usage-popup-crumbs {
+    gap: 8px;
+  }
+
+  .usage-popup-content {
+    padding: 20px 16px 40px;
+  }
+}
+
+@media (max-width: 760px) {
+  .usage-popup-backdrop {
+    padding: 12px;
+  }
+
+  .usage-popup {
+    height: calc(100dvh - 24px);
+  }
+}

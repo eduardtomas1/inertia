@@ -104,7 +104,7 @@ Choose System, Light or Dark and a colour theme from the theme library, or pick 
 <summary><strong>More</strong></summary>
 
 - **Resume at reset.** When a chat stops at a subscription limit, the composer offers **Resume at reset** and **Snooze until reset**; Inertia must be running to resume.
-- **Usage and limits.** **Usage** shows locally recorded usage across chats and providers, and each provider's remaining quota per window with a countdown to its reset. **Daily work** summarises tokens, runtime and conversations for a day.
+- **Usage and limits.** **Usage** opens one popup with Cost, Tokens and Limits: locally recorded usage across chats and providers, and each account's remaining quota per window with its pace and a countdown to its reset. **Daily work** summarises tokens, runtime and conversations for a day.
 - **Import CLI conversations.** Bring a project's Codex or Claude Code history into Inertia from **Settings → Projects**; the chat continues the original session.
 - **Chats without a project.** Choose **No project** in the composer to work in a chat folder of its own.
 - **Start from a terminal.** Run Inertia with `--new-chat` to open a chat for the current folder, or `--new-chat <path>` for another.

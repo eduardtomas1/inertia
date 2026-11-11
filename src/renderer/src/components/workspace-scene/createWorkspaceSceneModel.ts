@@ -314,7 +314,6 @@ export interface WorkspaceSceneActions {
   openProviderSetup: (providerId: ProviderId) => void;
   openBackendSetup: (profileId: string) => void;
   openSettings: (target?: SettingsTarget) => void;
-  openUsageView?: () => void;
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
   ) => void;
@@ -916,7 +915,6 @@ export function createWorkspaceSceneModel({
         ...(usageProvider && usageQuotaSource === "selected-route"
           ? { onRefreshUsage: () => actions.refreshUsage(usageProvider.id) }
           : {}),
-        ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },
       attachments: { attachments: environmentSummary.attachments, conversationId: conversation?.id ?? null },
       agents: {

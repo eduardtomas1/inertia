@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { defaultSettings, type ServerEvent } from "../../src/shared/contracts";
@@ -164,20 +164,16 @@ describe("screens preloaded at idle", () => {
     vi.doUnmock("../../src/renderer/src/components/TasksView");
   });
 
-  it("opens Usage and its Limits tab on the first commit", async () => {
+  it("opens the Usage popup on its Limits tab on the first commit", async () => {
     const container = await renderPreloadedWorkbench();
+    window.localStorage.removeItem("inertia:usage-popup-preferences:v1");
 
     act(() => { fireEvent.click(footerButton(container, "Usage")); });
 
-    expect(container.querySelector(".usage-view")).not.toBeNull();
-    expect(container.querySelector(".usage-surface-loading")).toBeNull();
-
-    act(() => {
-      fireEvent.click(within(screen.getByRole("group", { name: "Usage section" })).getByRole("button", { name: "Limits" }));
-    });
-
-    expect(container.querySelector(".usage-limits-panel")).not.toBeNull();
+    const popup = screen.getByRole("dialog", { name: "Usage" });
+    expect(popup.querySelector(".usage-limits-panel")).not.toBeNull();
     expect(screen.queryByLabelText("Loading limits")).toBeNull();
+    expect(container.querySelector("#workspace-content")).not.toHaveAttribute("data-view", "usage");
   });
 
   it("opens Tasks on the first commit", async () => {

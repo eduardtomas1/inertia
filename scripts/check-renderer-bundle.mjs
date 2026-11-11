@@ -134,7 +134,7 @@ const budgets = {
   settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114 + 18_425 + 256 + 659 + 505 + 843 + 3_672,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
-  deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6 + 1 + 242 + 2,
+  deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6 + 1 + 242 + 2 + 1_841,
   // The watcher dock (bar, notices, feed, cards, receipts) and the attach
   // dialog stay lazy; their closures exclude every initial-route chunk.
   // Measured 41,091 / 18,691 bytes after the last review round, no headroom.
@@ -144,7 +144,7 @@ const budgets = {
   // topic beside the Tasks topic add 370 bytes over main's cap (41,135 measured
   // on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539 + 197 + 89 + 39 + 198 + 785 + 125 + 202 + 750 + 281 + 8 + 169 + 63 + 69 + 1 + 1_066 + 370,
+  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539 + 197 + 89 + 39 + 198 + 785 + 125 + 202 + 750 + 281 + 8 + 169 + 63 + 69 + 1 + 1_066 + 370 + 326,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte + 886,
@@ -175,7 +175,7 @@ const budgets = {
   deferredCustomAgentsSettingsJavaScript: 29_962 + 8_423 + 1_353 + 423 + 5 + 147,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
-  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43,
+  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43 + 26,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,

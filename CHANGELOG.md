@@ -15,6 +15,55 @@ The useful changes in each Inertia release, in plain language.
   busy computer the chat could snap back to the latest message, or stay at
   the start with nothing loading until you pressed **Load earlier messages**.
 
+### Usage and limits
+
+- **Usage** is one popup with **Cost**, **Tokens** and **Limits** in its
+  header, next to the period and provider filters, a refresh and a close
+  button. The sidebar's Usage button, **All provider limits** in the composer
+  and **All accounts** and **Usage history** in the Usage surface all open it,
+  on the right tab. Press C, T or L to switch; it remembers the tab, the
+  period and the providers you hid.
+- **Limits** shows one card per window: what is left as a large number, a bar
+  filled in the provider's colour with the part the next reset gives back
+  hatched, a line for an even pace through the window, the countdown to the
+  reset and an account's banked resets. Several equivalent accounts share a
+  bar, one segment each. Select a segment for the account's details and to use
+  a reset. The composer's quota and the Usage surface use the same bars.
+- **Cost** works. It estimates what the recorded tokens would cost at public
+  API list prices, per day, provider and model, split by token type and with
+  what the cache saved. It is an estimate, not a bill: it says how many
+  requests it covers and marks models without a known price **Unpriced**.
+  Prices come from LiteLLM's public model price list. A copy ships with the
+  build, so Cost works offline and never waits for the network.
+- **New network request.** When Cost or Tokens is open and the prices are
+  older than 24 hours, Inertia downloads the current list with one GET to
+  `raw.githubusercontent.com` (`BerriAI/litellm`,
+  `model_prices_and_context_window.json`). It sends no account, usage, model
+  or project information. A failed download changes nothing: the prices
+  Inertia already has stay in use.
+- Claude's limits load in about a second instead of timing out. Inertia asked
+  Claude Code for a usage report that scans a week of transcripts, which took
+  15 to 30 seconds here against a 6 second limit; it now asks only for the
+  plan limits. Limits also appear at once from the last reading and update
+  account by account, and every provider is read at the same time.
+- Claude's weekly limit for a model (today Fable) reads **Weekly · Fable**
+  instead of *Claude extra usage · 7 day*, and it is one row: the value from
+  a live chat replaces the last full reading instead of sitting beside it.
+  A reset that waits for this limit now waits for the right time.
+- A quota row no longer keeps a value from an earlier week, from another
+  account or from before a Claude Code update while the panel says *Fresh*.
+- Windows read **Session**, **Weekly**, **Weekly · Opus**… once, instead of
+  *Claude · 7 day · 7 days*.
+- Reading limits in the Usage popup also refreshes the quota each chat shows.
+
+### Window
+
+- The window moves when you press and drag anywhere on the empty top bar,
+  including above the sidebar and the right panel. Before, most of the bar's
+  middle did nothing: only thin strips at its edges moved the window, fewer
+  still with the sidebar collapsed or the chat list scrolled. Every control in
+  the bar still works and nothing in it moved.
+
 ## 0.0.83 — 2026-11-10
 
 Calmer chats, Grok, custom agents you call by name, secrets that never enter

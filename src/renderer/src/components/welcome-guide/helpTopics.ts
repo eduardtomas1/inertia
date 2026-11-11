@@ -366,12 +366,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "History",
-        detail: "Usage in the sidebar shows locally recorded usage across chats and providers.",
+        detail: "Usage in the sidebar opens one popup with Cost, Tokens and Limits. Cost and Tokens show locally recorded usage across chats and providers for the period and providers you pick in its header. Press C, T or L to switch.",
         jump: "Open Usage",
       },
       {
         name: "Limits",
-        detail: "Each provider shows the remaining quota for every reported window with a countdown to its reset. A window whose reset has passed shows Reset due · updating until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset, even during a running turn. Refresh limits asks the providers right away.",
+        detail: "Each provider shows a card for every reported window: the percentage left, a bar whose hatched part is what the next reset restores, a line for an even pace and a countdown to the reset. Several equivalent accounts sit side by side in the same bar; select one for its details and banked resets. A window whose reset has passed shows Reset due until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset, even during a running turn. Refresh limits asks the providers right away.",
         jump: "Open Usage",
       },
       {

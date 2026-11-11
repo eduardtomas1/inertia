@@ -1,6 +1,6 @@
 import { useUsageLimitsContext } from "./usage-limits-state";
 import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { ChevronRight, Clock, EyeOff, X } from "lucide-react";
+import { ChevronRight, EyeOff, X } from "lucide-react";
 
 import type {
   ProviderMetadataFieldState,
@@ -24,8 +24,9 @@ import { INTERFACE_LOCALE } from "../lib/locale";
 import { promptCacheStatus } from "../utils/compactOnReturn";
 import type { PromptCacheFacts } from "@shared/compact-on-return";
 import { formatUpdatedAge } from "../utils/quotaAge";
+import { LimitRows } from "./usage/LimitBar";
 
-const UsageAccountsHint = lazy(async () => ({ default: (await import("./UsageLimitsPanel")).UsageAccountsHint }));
+const UsageAccountsHint = lazy(async () => ({ default: (await import("./usage/UsageAccountsHint")).UsageAccountsHint }));
 
 type UsageIndicatorProps = {
   providerId?: string;
@@ -141,21 +142,6 @@ function usageBreakdownRows(
       ? [{ id, label, value }]
       : []
   ));
-}
-
-function quotaWindowLabel(limit: ProviderRateLimit): string {
-  if (!Number.isSafeInteger(limit.windowMinutes) || !limit.windowMinutes || limit.windowMinutes <= 0) {
-    return limit.label;
-  }
-  if (limit.windowMinutes % (24 * 60) === 0) {
-    const days = limit.windowMinutes / (24 * 60);
-    return `${limit.label} · ${days} day${days === 1 ? "" : "s"}`;
-  }
-  if (limit.windowMinutes % 60 === 0) {
-    const hours = limit.windowMinutes / 60;
-    return `${limit.label} · ${hours} hour${hours === 1 ? "" : "s"}`;
-  }
-  return `${limit.label} · ${limit.windowMinutes} min`;
 }
 
 function contextDetail(usage: ThreadUsageSnapshot | null): string | null {
@@ -280,12 +266,12 @@ export function UsageIndicator({
     setOpen(false);
   }, [mode, providerLabel, quotaSource]);
 
-  const tracksPromptCache = open && promptCache !== null;
+  const tracksTime = open && (promptCache !== null || scopedRateLimits.length > 0);
   useEffect(() => {
-    if (!tracksPromptCache) return;
+    if (!tracksTime) return;
     const timer = window.setInterval(() => setNow(Date.now()), PROMPT_CACHE_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [tracksPromptCache]);
+  }, [tracksTime]);
 
   // Release document capture handlers before a successor dialog takes input.
   useLayoutEffect(() => {
@@ -440,34 +426,7 @@ export function UsageIndicator({
                 </span>
               </div>
               {hasQuota ? (
-                <div className="usage-popover-quota-list">
-                  {scopedRateLimits.map((limit) => {
-                    const remaining = displayPercent(limit.remainingPercent);
-                    const reset = dateLabel(limit.resetsAt, "Resets");
-                    return (
-                      <div
-                        className="usage-popover-quota"
-                        data-tone={remaining === null ? undefined : remaining < 20 ? "critical" : remaining < 50 ? "low" : "ok"}
-                        key={limit.id}
-                      >
-                        <span><strong>{quotaWindowLabel(limit)}</strong><b>{remaining === null ? "Unavailable" : `${Math.round(remaining)}% left`}</b></span>
-                        {remaining !== null && (
-                          <span
-                            className="usage-popover-meter"
-                            role="progressbar"
-                            aria-label={`${limit.label} remaining`}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={Math.round(remaining)}
-                          >
-                            <span style={{ width: `${remaining}%` }} />
-                          </span>
-                        )}
-                        {reset && <small><Clock size={14} aria-hidden="true" />{reset}</small>}
-                      </div>
-                    );
-                  })}
-                </div>
+                <LimitRows providerId={providerId} limits={scopedRateLimits} now={now} />
               ) : (
                 <p className="usage-popover-unavailable">
                   {quotaSource === "api-key"
@@ -493,7 +452,7 @@ export function UsageIndicator({
               <button
                 type="button"
                 className="usage-limits-shortcut"
-                onClick={() => { closePopover(false); limitsContext.open(triggerRef.current); }}
+                onClick={() => { closePopover(false); limitsContext.open(triggerRef.current, "limits"); }}
               >
                 All provider limits
                 <ChevronRight size={14} aria-hidden="true" />

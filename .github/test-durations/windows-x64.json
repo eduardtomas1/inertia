@@ -801,7 +801,6 @@
     "tests/renderer/usage-limits-focus.dom.test.tsx": 867,
     "tests/renderer/usage-limits.dom.test.tsx": 926,
     "tests/renderer/usage-popover-placement.dom.test.tsx": 105,
-    "tests/renderer/usage-view.dom.test.tsx": 636,
     "tests/renderer/use-loaded-surface.dom.test.tsx": 39,
     "tests/renderer/use-parsed-unified-diff.dom.test.tsx": 239,
     "tests/renderer/use-quota-now.dom.test.tsx": 26,

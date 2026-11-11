@@ -1,22 +1,55 @@
 # Provider usage limits
 
-Open **Usage → Limits** to inspect subscription quota. The existing composer
-usage indicator also offers **All provider limits**, which opens the same
-cached account information without sending a message or running an agent.
-Use **Refresh limits** to request new observations.
+Open **Usage** in the sidebar and choose **Limits** to inspect subscription
+quota. Usage is one popup with three tabs, Cost, Tokens and Limits; it opens on
+the tab used last and on Limits the first time. The composer usage indicator
+offers **All provider limits** and the Usage surface offers **All accounts**;
+both open the same popup on Limits without sending a message or running an
+agent. The round arrow in the popup header is **Refresh limits** and requests
+new observations.
 
-Each provider is one row with its reported windows, remaining percentages and
-countdowns; equivalent accounts are averaged. Expand the row to see each account
-in the same columns, then select an account to inspect its plan, sources,
-freshness and banked reset credits. Email addresses stay hidden until you choose
-**Reveal**, or deliberately open a reset confirmation. Details work with keyboard
-and touch; no hover is required.
+Each provider is a section with one card per reported window. A card shows the
+percentage left, a pace icon, and a bar: the filled part is what is left, the
+hatched end is what the next reset restores, the thin line marks an even pace
+through the window (it sits at the share of the window's time still left), and
+the chip at the right end counts down to the reset and shows the account's
+banked resets after a ticket. Equivalent accounts share a bar, one segment per
+account in a stable order, and the large number is their unweighted average.
+Accounts whose plan, window length or identity cannot be proven equal keep
+their own cards. While an account's weekly limit is used up (Claude's general
+weekly window, or Codex's weekly slot), its session card shows 0% left with the
+countdown of the reset that restores it and no pace, because the session quota
+cannot be spent until then. Select a segment to inspect that account's plan,
+sources, freshness and banked reset credits. Email addresses stay hidden until
+you choose **Reveal**, or deliberately open a reset confirmation. Details work
+with keyboard and touch; no hover is required.
 
-The composer usage popover repeats the selected account's quota with the same
-health colours. When the last cached Limits reading shows another ready account
-of that provider with more room than the selected account's tightest window, the
-popover names it and says how old that reading is. It reads the cache only; it
-never refreshes providers.
+The pace icon compares the share of quota used with the share of the window
+elapsed: an upward arrow above five points ahead, a downward arrow below five
+points under, a gauge in between. A window without a reset time or a length has
+no line and no icon.
+
+The header filters apply to the whole popup: the provider menu hides providers
+on all three tabs, and on Limits a source menu (this computer, or one usage hub)
+appears once a hub is configured. The tab, the period and the hidden providers
+are remembered on this computer.
+
+Limits render at once from what is already known: the snapshot the app holds,
+or the runtime's cached snapshot, which includes the last reported quota of
+native providers even before the first read. The refresh then runs in the
+background; the runtime reads every provider at the same time and publishes
+each account as it answers, and the popup re-reads the cached snapshot about
+every 600 ms while the refresh is pending, so accounts update one by one.
+Accounts still being read are dimmed. A skeleton appears only when nothing is
+known yet.
+
+The composer usage popover and the Usage surface draw the selected account's
+quota with the same bar in a compact size, from the same code, so the three
+places cannot drift. Window names come from one place and are shown once:
+Session, Weekly, Weekly · Fable. When the last cached Limits reading shows
+another ready account of that provider with more room than the selected
+account's tightest window, the popover names it and says how old that reading
+is. It reads the cache only; it never refreshes providers.
 
 An unavailable measurement is never treated as zero. A reset countdown reaching
 zero does not refill a quota bar, and it no longer shows the old percentage
@@ -40,10 +73,9 @@ account identity or the same login's private credential fingerprint. When a subs
 Inertia waits for its `Retry-After` (five minutes when absent, at most fifteen)
 before asking again for that login and says so in the account details. Other
 failures say the provider did not answer, or refused the check for this login,
-without asking you to sign in again. The Limits page and the composer's
-**All provider limits** dialog read the providers when they open and at most
-every three minutes while visible, and read again when they become visible
-with a reading older than three minutes. Inertia does not read Cursor or Kimi
+without asking you to sign in again. The Limits tab reads the providers when
+it opens and at most every three minutes while visible, and reads again when it
+becomes visible with a reading older than three minutes. Inertia does not read Cursor or Kimi
 Code credential stores, so their usage shows as not reported. No additional
 background worker, persistent provider process or startup probe is created by
 this feature.

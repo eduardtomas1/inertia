@@ -45,7 +45,7 @@ export interface WindowDragBand {
   points: DragPointReading[];
 }
 
-const CONTROL_SELECTOR = [
+export const CONTROL_SELECTOR = [
   "button",
   "input",
   "textarea",
@@ -67,7 +67,7 @@ const CONTROL_SELECTOR = [
   ".workspace-corner-controls.no-drag",
 ].join(", ");
 
-const BACKDROP_SELECTOR = ".sidebar-scrim";
+export const BACKDROP_SELECTOR = ".sidebar-scrim";
 
 export async function measureWindowDragBand(
   page: Page,

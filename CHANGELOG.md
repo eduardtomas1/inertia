@@ -14,6 +14,10 @@ The useful changes in each Inertia release, in plain language.
 - Going to the start of a long chat always loads the earlier messages. On a
   busy computer the chat could snap back to the latest message, or stay at
   the start with nothing loading until you pressed **Load earlier messages**.
+- Image thumbnails in a chat and in **Attachments** load when they come into
+  view and unload when they leave it, even on a busy computer. When an image
+  passed through the view faster than the app could keep up, it could stay
+  loaded out of sight, or stay an icon while you were looking at it.
 
 ## 0.0.83 — 2026-11-10
 

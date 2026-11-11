@@ -5,7 +5,8 @@ The useful changes in each Inertia release, in plain language.
 ## 0.0.83 — 2026-11-11
 
 Calmer chats, Grok, custom agents you call by name, secrets that never enter
-the chat, and long chats that spend far less usage.
+the chat, one Usage popup with real limits and cost, and long chats that spend
+far less usage.
 
 ### Chats
 
@@ -41,6 +42,14 @@ the chat, and long chats that spend far less usage.
   view and unload when they leave it, even on a busy computer. When an image
   passed through the view faster than the app could keep up, it could stay
   loaded out of sight, or stay an icon while you were looking at it.
+- Messages no longer wait while Inertia checks a Codex chat's goal. Opening
+  or reconnecting a Codex chat starts a short check, and while Codex was slow
+  to answer it your next message, in that chat or any other chat on the same
+  folder, could sit on **Sending** for up to about 12 seconds. Compacting,
+  restoring a checkpoint or deleting a chat during the check failed with a
+  message about a resumed terminal. A chat's first reply no longer starts a
+  check at all, and deleting a chat or removing its worktree stops a running
+  check first.
 
 ### Composer and look
 
@@ -55,6 +64,9 @@ the chat, and long chats that spend far less usage.
   translucent surface, solid under reduced transparency and forced colours.
   The sidebar's brand strip has a few slowly breathing stars, still under
   reduced motion.
+- In a narrow window the navigation drawer dims the chat behind it again, and
+  clicking the dimmed area closes the drawer. The chat used to look usable
+  while the drawer was open but ignored every click.
 
 ### Providers
 
@@ -113,12 +125,62 @@ the chat, and long chats that spend far less usage.
 - `npm run usage:claude` summarizes Claude Code's own transcripts: weighted
   tokens per output token, context sizes, compactions and cache rebuilds, per
   app and for main chats and subagents separately.
+- **Usage** is one popup with **Cost**, **Tokens** and **Limits** in its
+  header, next to the period and provider filters, a refresh and a close
+  button. The sidebar's Usage button, **All provider limits** in the composer
+  and **All accounts** and **Usage history** in the Usage surface all open it,
+  on the right tab. Press C, T or L to switch; it remembers the tab, the
+  period and the providers you hid.
+- **Limits** shows one card per window: what is left as a large number, a bar
+  filled in the provider's colour with the part the next reset gives back
+  hatched, a line for an even pace through the window, the countdown to the
+  reset and an account's banked resets. Several equivalent accounts share a
+  bar, one segment each. Select a segment for the account's details and to use
+  a reset. The composer's quota and the Usage surface use the same bars.
+- **Cost** works. It estimates what the recorded tokens would cost at public
+  API list prices, per day, provider and model, split by token type and with
+  what the cache saved. It is an estimate, not a bill: it says how many
+  requests it covers and marks models without a known price **Unpriced**.
+  Cursor requests stay Unpriced for now.
+  Prices come from LiteLLM's public model price list. A copy ships with the
+  build, so Cost works offline and never waits for the network.
+- **New network request.** When Cost or Tokens is open and the prices are
+  older than 24 hours, Inertia downloads the current list with one GET to
+  `raw.githubusercontent.com` (`BerriAI/litellm`,
+  `model_prices_and_context_window.json`). It sends no account, usage, model
+  or project information. A failed download changes nothing: the prices
+  Inertia already has stay in use.
+- Claude's limits load in about a second instead of timing out. Inertia asked
+  Claude Code for a usage report that scans a week of transcripts, which took
+  15 to 30 seconds here against a 6 second limit; it now asks only for the
+  plan limits. Limits also appear at once from the last reading and update
+  account by account, and every provider is read at the same time.
+- Claude's weekly limit for a model (today Fable) reads **Weekly · Fable**
+  instead of *Claude extra usage · 7 day*, and it is one row: the value from
+  a live chat replaces the last full reading instead of sitting beside it.
+  A chat that stopped at this limit resumes when it resets, and Inertia does
+  not resume a chat while it cannot tell whether an exhausted model limit
+  covers it.
+- A quota row no longer keeps a value from an earlier week, from another
+  account or from before a Claude Code update while the panel says *Fresh*.
+- Windows read **Session**, **Weekly**, **Weekly · Opus**… once, instead of
+  *Claude · 7 day · 7 days*. The header meter and the quota warning use the
+  same names (*Claude Session limit*, *Claude Weekly limit · Fable*).
+- Reading limits in the Usage popup also refreshes the quota each chat shows.
 
 ### Chat windows
 
 - A chat's own window also has the new Git, blame and search commands for
   its workspace. Worktree management and creating tasks stay in the main
   window.
+
+### Window
+
+- The window moves when you press and drag anywhere on the empty top bar,
+  including above the sidebar and the right panel. Before, most of the bar's
+  middle did nothing: only thin strips at its edges moved the window, fewer
+  still with the sidebar collapsed or the chat list scrolled. Every control in
+  the bar still works and nothing in it moved.
 
 ### Subagents and background commands
 

@@ -1,7 +1,7 @@
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
 import { createSurfaceLoader } from "../utils/surfaceLoader";
 import { loadModelSourceRail } from "./chatSurfaceLoaders";
-import { loadUsageLimitsDialog, loadUsageLimitsPanel } from "./usageLimitsLoaders";
+import { loadUsageLimitsPanel, loadUsagePopup } from "./usageLimitsLoaders";
 
 export const loadCommandPalette = createSurfaceLoader(async () => ({
   default: (await import("./CommandPalette")).CommandPalette,
@@ -27,9 +27,6 @@ export const loadSettingsView = createSurfaceLoader(async () => ({
   default: (await import("./SettingsView")).SettingsView,
 }));
 export const loadUsageSurface = createSurfaceLoader(() => import("./UsageSurface"));
-export const loadUsageView = createSurfaceLoader(async () => ({
-  default: (await import("./UsageView")).UsageView,
-}));
 export const loadTasksView = createSurfaceLoader(async () => ({
   default: (await import("./TasksView")).TasksView,
 }));
@@ -48,9 +45,8 @@ const frequentSurfaceLoads = [
   loadConversationSplitView,
   loadDailyWorkDialog,
   loadSettingsView,
-  loadUsageView,
+  loadUsagePopup,
   loadUsageLimitsPanel,
-  loadUsageLimitsDialog,
   loadTasksView,
   loadModelSourceRail,
 ] as const;

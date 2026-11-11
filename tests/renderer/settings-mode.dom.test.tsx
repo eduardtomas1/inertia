@@ -84,10 +84,10 @@ describe("Settings as a mode", () => {
   });
 
   it("returns to the view that was showing before Settings opened", () => {
-    render(<Harness initialView="usage" />);
+    render(<Harness initialView="tasks" />);
     openFrom("Open settings");
     pressEscape();
-    expect(screen.getByLabelText("Current view")).toHaveTextContent("usage");
+    expect(screen.getByLabelText("Current view")).toHaveTextContent("tasks");
   });
 
   it("returns to the workspace instead of the ended new chat view", () => {
@@ -106,7 +106,7 @@ describe("Settings as a mode", () => {
   });
 
   it("focuses the main region when the opener is gone and no chat is shown", async () => {
-    render(<Harness initialView="usage" />);
+    render(<Harness initialView="tasks" />);
     openFrom("Palette item");
     pressEscape();
     await waitFor(() => expect(screen.getByRole("region", { name: "Main workspace" })).toHaveFocus());

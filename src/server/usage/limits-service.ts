@@ -43,7 +43,7 @@ export class UsageLimitsService {
     const now = Date.now();
     return { checkedAt: this.checkedAt,
       sources: this.dependencies.repository.sources().map((source) => ({ ...source, error: this.sourceErrors.get(source.id) ?? null })),
-      accounts: this.accounts.map((account) => {
+      accounts: [...this.accounts, ...this.lastReportedAccounts()].map((account) => {
         const publicAccount = { ...account };
         delete publicAccount.credentialFingerprint;
         delete publicAccount.resumeUnavailable;
@@ -55,6 +55,14 @@ export class UsageLimitsService {
         ...staleProjection(account, now),
       }; }),
     };
+  }
+  private lastReportedAccounts(): NativeUsageAccount[] {
+    if (!this.dependencies.enabled || this.checkedAt) return [];
+    const read = new Set(this.accounts.map(({ id }) => id));
+    return this.dependencies.providers()
+      .filter((info) => info.rateLimits.length > 0 && !read.has(`native:${info.id}`)
+        && (info.available || info.installState !== "not-installed"))
+      .map((info) => this.reportedAccount(info, "stale"));
   }
   private serial<T>(run: () => Promise<T>): Promise<T> {
     const next = this.operation.then(() => { this.dependencies.signal.throwIfAborted(); return run(); });
@@ -134,57 +142,75 @@ export class UsageLimitsService {
   }
   private async read(): Promise<UsageLimitsSnapshot> {
     const previous = new Map(this.accounts.map((account) => [account.id, account]));
-    const next: NativeUsageAccount[] = [];
-    this.routes.clear(); this.sourceErrors.clear();
-    for (const info of this.dependencies.providers()) {
-      if (!info.available && info.installState === "not-installed") continue;
-      try {
-        next.push(this.dependencies.enabled ? await this.dependencies.native.read(info) : {
-          id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
-          email: null, plan: null, identityKey: null, sources: ["This computer"], status: info.rateLimits.length ? "ready" : "unsupported", detail: info.rateLimits.length ? null : "This provider does not expose a supported subscription quota API.",
-          windows: usageWindows(info.rateLimits), credits: null, canReset: false, updatedAt: info.metadataState.rateLimits.updatedAt, checkedAt: new Date().toISOString(),
-        });
-      } catch {
-        next.push({ id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
-          email: null, plan: null, identityKey: null, sources: ["This computer"], status: "error", detail: "Account usage could not be read.", windows: [], credits: null, canReset: false, updatedAt: null, checkedAt: new Date().toISOString() });
-      }
-    }
-    for (const profile of this.dependencies.customProfiles()) next.push({ id: `profile:${profile.id}`, providerId: "custom", providerLabel: profile.label, label: profile.label,
-      email: null, plan: null, identityKey: null, sources: ["Configured route"], windows: [], credits: null, canReset: false, updatedAt: null, checkedAt: null,
-      ...(profile.routeKind === "api-key"
-        ? { status: "unavailable" as const, detail: "Usage and limits are not available for API keys." }
-        : { status: "unsupported" as const, detail: "This custom route does not expose subscription quotas. Connecting a usage hub does not change agent routing." }) });
-    // A single deadline covers all hub requests, including streaming and account fan-out.
-    const timeout = AbortSignal.timeout(20000);
-    const signal = AbortSignal.any([this.dependencies.signal, timeout]);
-    for (const source of this.dependencies.repository.sources()) {
-      if (!source.enabled) continue;
-      try {
-        const key = await this.dependencies.credentials?.resolve(backendSecretReferenceForProfile(usageSourceProfileId(source.id)), signal);
-        if (!key) throw new Error();
-        const auths = await this.hub.accounts(source, key, signal);
-        for (let offset = 0; offset < auths.length; offset += 4) {
-          const batch = await Promise.all(auths.slice(offset, offset + 4).map(async (auth) => {
-            const account = await this.hub.read(source, key, auth, signal);
-            this.routes.set(account.id, { source, auth }); return account;
-          }));
-          next.push(...batch);
-        }
-      } catch {
-        this.sourceErrors.set(source.id, "The hub could not be read. Check its address, management key, and account limit (32).");
-        next.push(...[...previous.values()].filter((account) => account.id.startsWith(`hub:${source.id}:`)).map((account) => ({ ...account, status: "stale" as const, canReset: false, checkedAt: new Date().toISOString(), detail: "Hub unavailable; showing previously reported quota." })));
-      }
-    }
-    this.accounts = next.map((account) => {
+    const reconcile = (account: NativeUsageAccount): NativeUsageAccount => {
       const old = previous.get(account.id);
       const sameLogin = old && ((old.identityKey && account.identityKey === old.identityKey)
         || (old.credentialFingerprint && account.credentialFingerprint === old.credentialFingerprint));
       return account.status === "error" && sameLogin
         ? { ...account, status: "stale", windows: old.windows, updatedAt: old.updatedAt, credits: old.credits, canReset: false }
         : account;
+    };
+    const publish = (accounts: NativeUsageAccount[]): void => {
+      const fresh = new Map(accounts.map((account) => [account.id, reconcile(account)]));
+      const known = new Set(this.accounts.map(({ id }) => id));
+      this.accounts = [
+        ...this.accounts.map((account) => fresh.get(account.id) ?? account),
+        ...[...fresh.values()].filter(({ id }) => !known.has(id)),
+      ];
+    };
+    this.routes.clear(); this.sourceErrors.clear();
+    const native = this.dependencies.providers()
+      .filter((info) => info.available || info.installState !== "not-installed")
+      .map(async (info) => {
+        const account = await this.readNative(info);
+        publish([account]);
+        return account;
+      });
+    const profiles = this.dependencies.customProfiles().map((profile): NativeUsageAccount => ({ id: `profile:${profile.id}`, providerId: "custom", providerLabel: profile.label, label: profile.label,
+      email: null, plan: null, identityKey: null, sources: ["Configured route"], windows: [], credits: null, canReset: false, updatedAt: null, checkedAt: null,
+      ...(profile.routeKind === "api-key"
+        ? { status: "unavailable" as const, detail: "Usage and limits are not available for API keys." }
+        : { status: "unsupported" as const, detail: "This custom route does not expose subscription quotas. Connecting a usage hub does not change agent routing." }) }));
+    const timeout = AbortSignal.timeout(20000);
+    const signal = AbortSignal.any([this.dependencies.signal, timeout]);
+    const hubs = this.dependencies.repository.sources().filter((source) => source.enabled).map(async (source) => {
+      try {
+        const key = await this.dependencies.credentials?.resolve(backendSecretReferenceForProfile(usageSourceProfileId(source.id)), signal);
+        if (!key) throw new Error();
+        const auths = await this.hub.accounts(source, key, signal);
+        const accounts: NativeUsageAccount[] = [];
+        for (let offset = 0; offset < auths.length; offset += 4) {
+          const batch = await Promise.all(auths.slice(offset, offset + 4).map(async (auth) => {
+            const account = await this.hub.read(source, key, auth, signal);
+            this.routes.set(account.id, { source, auth }); return account;
+          }));
+          publish(batch);
+          accounts.push(...batch);
+        }
+        return accounts;
+      } catch {
+        this.sourceErrors.set(source.id, "The hub could not be read. Check its address, management key, and account limit (32).");
+        return [...previous.values()].filter((account) => account.id.startsWith(`hub:${source.id}:`)).map((account) => ({ ...account, status: "stale" as const, canReset: false, checkedAt: new Date().toISOString(), detail: "Hub unavailable; showing previously reported quota." }));
+      }
     });
+    const [nativeAccounts, hubAccounts] = await Promise.all([Promise.all(native), Promise.all(hubs)]);
+    this.accounts = [...nativeAccounts, ...profiles, ...hubAccounts.flat()].map(reconcile);
     this.checkedAt = new Date().toISOString();
     return this.snapshot();
+  }
+  private async readNative(info: ProviderInfo): Promise<NativeUsageAccount> {
+    try {
+      return this.dependencies.enabled ? await this.dependencies.native.read(info) : this.reportedAccount(info, info.rateLimits.length ? "ready" : "unsupported");
+    } catch {
+      return { id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
+        email: null, plan: null, identityKey: null, sources: ["This computer"], status: "error", detail: "Account usage could not be read.", windows: [], credits: null, canReset: false, updatedAt: null, checkedAt: new Date().toISOString() };
+    }
+  }
+  private reportedAccount(info: ProviderInfo, status: "ready" | "stale" | "unsupported"): NativeUsageAccount {
+    return { id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
+      email: null, plan: null, identityKey: null, sources: ["This computer"], status,
+      detail: status === "unsupported" ? "This provider does not expose a supported subscription quota API." : status === "stale" ? "Showing the last reported quota while this account is checked." : null,
+      windows: usageWindows(info.rateLimits), credits: null, canReset: false, updatedAt: info.metadataState.rateLimits.updatedAt, checkedAt: status === "stale" ? null : new Date().toISOString() };
   }
   prepareReset(accountId: string): UsageResetConfirmation {
     const account = this.snapshot().accounts.find(({ id }) => id === accountId);

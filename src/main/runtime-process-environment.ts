@@ -360,6 +360,10 @@ export function runtimeProcessEnvironment(
   if (sanitized.NODE_ENV === "test" && attachmentRecordLimit && /^[1-9][0-9]{0,2}$/u.test(attachmentRecordLimit)) {
     sanitized.INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS = attachmentRecordLimit;
   }
+  const usagePriceListUrl = environmentValue(environment, "INERTIA_TEST_USAGE_PRICE_LIST_URL", platform);
+  if (sanitized.NODE_ENV === "test" && usagePriceListUrl && /^http:\/\/127\.0\.0\.1:\d{1,5}\/[A-Za-z0-9._/-]*$/u.test(usagePriceListUrl)) {
+    sanitized.INERTIA_TEST_USAGE_PRICE_LIST_URL = usagePriceListUrl;
+  }
   const providerBinDirectory = environmentValue(environment, TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY, platform);
   if (sanitized.NODE_ENV === "test" && isTestProviderBinDirectory(providerBinDirectory, platform)) {
     sanitized[TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY] = providerBinDirectory;

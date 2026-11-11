@@ -98,6 +98,7 @@ import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler, type ConversationCompactionCommandDependencies } from "./runtime/commands/conversation-compaction-commands"; import { startIdleCompaction } from "./runtime/idle-compaction-scheduler";
 import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
+import { UsagePriceList, usagePriceListUrl } from "./usage/price-list-service";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
 import { createCustomAgentCommandHandler } from "./runtime/commands/custom-agent-commands";
 import { createWorktreeCommandHandler } from "./runtime/commands/worktree-commands";
@@ -748,7 +749,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     turnDiff: (turnId) => turnGitArtifacts.settledTurnDiff(turnId) });
   const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
     dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)), providerMaintenance, updatePreparation,
-  });
+  }, (providerId) => { applyProviderMetadata(providerId, providers.cachedMetadata(providerId)); flushSnapshot(); });
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send, secretValues: () => agentThreads?.secrets.output.values() ?? [] }),
@@ -769,14 +770,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         providers, providerMaintenance, terminals, defaultWorkspacePath: options.defaultWorkspacePath, currentSnapshot,
         refreshProviderInfo, refreshProviderUsage: createManualUsageRefresh(providerUsage), send,
       }),
-      ...createReadCommandHandlers({ store, send, databasePath, lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target), canStopWorkspaceRun }),
+      ...createReadCommandHandlers({ store, send, databasePath, priceList: new UsagePriceList({ cachePath: join(dataDirectory, "usage-price-list.json"), signal: runtimeLifetimeAbort.signal, url: usagePriceListUrl(process.env) }), lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target), canStopWorkspaceRun }),
       createConversationCommandHandler({
         store, conversationAttachments: initializedConversationAttachments,
         providers,
         backendProfileController,
         workspaceRuns,
         providerTerminalResumes,
-        duoLaunches: duoLaunchCoordinator, watchers,
+        duoLaunches: duoLaunchCoordinator, watchers, nativeGoalReads: agentWorkflows.nativeGoalReads,
         runtimeSync,
         deletedConversationIds,
         dataDirectory,
@@ -791,7 +792,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         agentSecrets: agentThreads.secrets,
         reportIncident: commandIncidents.report,
       }),
-      createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
+      createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, nativeGoalReads: agentWorkflows.nativeGoalReads, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
       queuedMessages.turnInteractionHandler,
       createConversationCompactionCommandHandler(compactionDependencies),
       createSourceControlCommandHandler({

@@ -8,7 +8,7 @@ import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../shared/provider-mai
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
 import type { UsageAccount, UsageResetConfirmation, UsageResetOutcome } from "../../shared/provider-usage-limits";
 import { usageResetOutcomeSchema } from "../../shared/provider-usage-limits";
-import type { ProviderInfo } from "../../shared/contracts";
+import type { ProviderInfo, ProviderRateLimit } from "../../shared/contracts";
 import { withCodexControlClient, type CodexControlClient } from "../codex/control-client";
 import { parseCodexRateLimits } from "../codex-metadata";
 import type { ProviderManager } from "../providers";
@@ -46,7 +46,8 @@ async function verifiedFileIdentity(client: CodexControlClient, environment: Nod
 }
 const accountSchema = z.object({ type: z.string(), email: z.string().max(256).nullable().optional(), planType: z.string().max(200).nullable().optional() }).nullable();
 export class NativeUsageReader {
-  constructor(private readonly providers: ProviderManager, private readonly cwd: string, private readonly signal: AbortSignal, private readonly subscriptions = new NativeSubscriptionReader({ openCodeAccount: (directory, model, signal) => providers.openCodeUsageAccount(directory, model, signal) })) {}
+  constructor(private readonly providers: ProviderManager, private readonly cwd: string, private readonly signal: AbortSignal, private readonly subscriptions = new NativeSubscriptionReader({ openCodeAccount: (directory, model, signal) => providers.openCodeUsageAccount(directory, model, signal) }),
+    private readonly onRateLimits: (providerId: "codex" | "claude", rateLimits: ProviderRateLimit[]) => void = () => undefined) {}
   async read(info: ProviderInfo, model?: string, cwd = this.cwd): Promise<NativeUsageAccount> {
     const account = await this.readAccount(info, model, cwd);
     if (info.id !== "codex" && info.id !== "claude") return account;
@@ -74,6 +75,7 @@ export class NativeUsageReader {
       const parsed = z.object({ email: z.string().max(256).optional(), organization: z.string().max(256).optional(), subscriptionType: z.string().max(200).optional(), apiProvider: z.string().max(50).optional() }).safeParse(result.account);
       const account = parsed.success ? parsed.data : null;
       if (account?.apiProvider && account.apiProvider !== "firstParty") return { ...base, windows: [], status: "unsupported", detail: "This Claude API backend does not report subscription limits." };
+      if (result.rateLimits?.length) this.onRateLimits("claude", result.rateLimits);
       return { ...base, email: account?.email ?? null, organization: account?.organization ?? null, plan: account?.subscriptionType ?? null,
         windows: usageWindows(result.rateLimits ?? []), updatedAt: result.rateLimits ? base.checkedAt : null,
         status: result.rateLimitsUnavailable ? "unsupported" : result.rateLimits?.length ? "ready" : "unavailable",
@@ -94,7 +96,9 @@ export class NativeUsageReader {
       }
       const identityAfter = await codexAccountIdentity(context.environment);
       if (identityBefore !== identityAfter) throw new Error("The signed-in account changed during the read.");
-      base.windows = usageWindows(parseCodexRateLimits(result));
+      const rateLimits = parseCodexRateLimits(result);
+      if (rateLimits.length) this.onRateLimits("codex", rateLimits);
+      base.windows = usageWindows(rateLimits);
       base.credits = nativeResetCredits(result.rateLimitResetCredits);
       base.canReset = base.identityKey !== null && (base.credits?.availableCount ?? 0) > 0;
       return { ...base, status: base.windows.length ? "ready" : "unavailable", updatedAt: base.checkedAt,

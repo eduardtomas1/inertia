@@ -863,6 +863,7 @@ describe("usage dashboard event trust boundary", () => {
       activeDays: 0,
       runtime: measured,
       processedTokens: measured,
+      cost: measured,
     },
     daily: Array.from({ length: 7 }, (_, index) => ({
       date: `2026-06-${24 + index}`,
@@ -873,6 +874,7 @@ describe("usage dashboard event trust boundary", () => {
       interruptedCount: 0,
       runtime: measured,
       processedTokens: measured,
+      cost: measured,
       providers: [],
     })),
     providers: [],
@@ -884,7 +886,13 @@ describe("usage dashboard event trust boundary", () => {
       output: measured,
       reasoningOutput: measured,
     },
-    cost: { status: "unavailable", reason: "No pricing provenance." },
+    cost: {
+      status: "unavailable",
+      reason: null,
+      pricing: { status: "unavailable", source: "https://prices.example.test/list.json", fetchedAt: null, modelCount: 0 },
+      byType: { input: 0, cachedInput: 0, cacheWriteInput: 0, output: 0 },
+      cacheSavings: 0,
+    },
   };
 
   it("accepts safe aggregates and rejects malformed or duplicate series", () => {
@@ -947,6 +955,28 @@ describe("usage dashboard event trust boundary", () => {
         range: { ...dashboard.range, days: "7" },
       },
     }))).toThrow("Malformed server event");
+    for (const cost of [
+      { ...measured, value: -0.01 },
+      { ...measured, value: Number.POSITIVE_INFINITY },
+      { ...measured, value: null },
+      { ...measured, totalRequests: 3 },
+    ]) {
+      expect(() => parseServerEvent(event({
+        kind: "usage.dashboard",
+        dashboard: { ...dashboard, totals: { ...dashboard.totals, cost } },
+      }))).toThrow("Malformed server event");
+    }
+    for (const cost of [
+      { ...dashboard.cost, status: "billed" },
+      { ...dashboard.cost, pricing: { ...dashboard.cost.pricing, status: "live" } },
+      { ...dashboard.cost, byType: { ...dashboard.cost.byType, output: -1 } },
+      { ...dashboard.cost, cacheSavings: "0" },
+    ]) {
+      expect(() => parseServerEvent(event({
+        kind: "usage.dashboard",
+        dashboard: { ...dashboard, cost },
+      }))).toThrow("Malformed server event");
+    }
   });
 });
 describe("server event settings trust boundary", () => {

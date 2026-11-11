@@ -22,6 +22,26 @@ export interface UsageTokenField extends UsageMeasuredValue {
   value: number | null;
 }
 
+export interface UsageCostValue extends UsageMeasuredValue {
+  value: number | null;
+}
+
+export type UsagePricingStatus = "fresh" | "cached" | "unavailable";
+
+export interface UsageDashboardPricing {
+  status: UsagePricingStatus;
+  source: string;
+  fetchedAt: string | null;
+  modelCount: number;
+}
+
+export interface UsageCostByType {
+  input: number;
+  cachedInput: number;
+  cacheWriteInput: number;
+  output: number;
+}
+
 export interface UsageDashboardDay {
   date: string;
   requestCount: number;
@@ -31,6 +51,7 @@ export interface UsageDashboardDay {
   interruptedCount: number;
   runtime: UsageRuntimeValue;
   processedTokens: UsageMeasuredValue;
+  cost: UsageCostValue;
   /** Renderer-safe per-provider aggregates for truthful daily series. */
   providers: UsageDashboardBreakdown[];
 }
@@ -42,11 +63,13 @@ export interface UsageDashboardBreakdown {
   requestCount: number;
   runtime: UsageRuntimeValue;
   processedTokens: UsageMeasuredValue;
+  cost: UsageCostValue;
 }
 
 export interface UsageDashboardModelBreakdown
   extends UsageDashboardBreakdown {
   model: string;
+  pricedAs: string | null;
   backendProfileId: string;
   backendLabel: string;
   /** Immutable backend configuration revision captured for these turns. */
@@ -72,6 +95,7 @@ export interface UsageDashboard {
     activeDays: number;
     runtime: UsageRuntimeValue;
     processedTokens: UsageMeasuredValue;
+    cost: UsageCostValue;
   };
   daily: UsageDashboardDay[];
   providers: UsageDashboardBreakdown[];
@@ -84,7 +108,10 @@ export interface UsageDashboard {
     reasoningOutput: UsageTokenField;
   };
   cost: {
-    status: "unavailable";
-    reason: string;
+    status: "estimated" | "unavailable";
+    reason: string | null;
+    pricing: UsageDashboardPricing;
+    byType: UsageCostByType;
+    cacheSavings: number;
   };
 }

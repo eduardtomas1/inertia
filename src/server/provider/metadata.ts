@@ -29,6 +29,8 @@ import { grokStaticModels } from "./grok-models";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 import { RATE_LIMIT_TTL_MS } from "../runtime/provider-usage-refresh";
 import { slowMachineProbeDeadline } from "./probe-deadline";
+import { canonicalClaudeRateLimits, withKnownClaudeModelWeeklyLabel } from "./claude-rate-limit-windows";
+import { mergeSparseRateLimits } from "./rate-limit-merge";
 
 export type ProviderMetadataField = "models" | "rateLimits";
 
@@ -698,7 +700,13 @@ export class ProviderMetadataCache {
       rateLimits.length > 0
       && AVAILABLE_FIELDS[scope.providerId].includes("rateLimits")
     ) {
-      entry.rateLimits.values = options.merge ? mergeById(entry.rateLimits.values, rateLimits).slice(0, MAX_RATE_LIMITS) : rateLimits;
+      entry.rateLimits.values = options.merge
+        ? mergeSparseRateLimits(
+            this.isFresh("rateLimits", entry.rateLimits) ? entry.rateLimits.values : [],
+            withKnownClaudeModelWeeklyLabel(entry.rateLimits.values, rateLimits),
+            attemptedAt,
+          ).slice(0, MAX_RATE_LIMITS)
+        : rateLimits;
       entry.rateLimits.updatedAt = attemptedAt;
       entry.rateLimits.lastAttemptedAt = attemptedAt;
       entry.rateLimits.provenance = provenance;
@@ -876,7 +884,10 @@ export class ProviderMetadataCache {
     const scope = normalizeCurrentProviderMetadataScope(cached.scope);
     if (!scope) return;
     const models = validateProviderModels(cached.models, scope.providerId);
-    const rateLimits = validateProviderRateLimits(cached.rateLimits);
+    const validRateLimits = validateProviderRateLimits(cached.rateLimits);
+    const rateLimits = scope.providerId === "claude"
+      ? canonicalClaudeRateLimits(validRateLimits)
+      : validRateLimits;
     const entry = blankProvider(scope);
     entry.models = {
       values: models,

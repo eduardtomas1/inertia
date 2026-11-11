@@ -185,36 +185,33 @@ const steps: ScreenStep[] = [
   {
     id: "usage",
     start: pointer,
-    target: { selector: ".usage-view", ready: "settled" },
+    target: { selector: ".usage-popup .usage-popup-content", ready: "settled" },
     act: async (page) => await page.locator(".sidebar-footer").getByRole("button", { name: "Usage", exact: true }).click(),
-    reset: backToWorkspace,
+    reset: async (page) => await closeDialog(page, ".usage-popup"),
   },
   {
     id: "usage-limits-tab",
     start: pointer,
-    target: { selector: ".usage-view .usage-canvas", text: "Refresh limits", ready: "settled" },
+    target: { selector: ".usage-popup .usage-limits-panel", text: "Usage sources", ready: "settled" },
     prepare: async (page) => {
       await page.locator(".sidebar-footer").getByRole("button", { name: "Usage", exact: true }).click();
-      await page.locator(".usage-view:not([aria-busy='true'])").waitFor();
+      await page.getByRole("tablist", { name: "Usage view" }).getByRole("tab", { name: "Tokens", exact: true }).click();
+      await page.locator(".usage-popup .usage-overview:not([aria-busy='true'])").waitFor();
     },
-    act: async (page) => await page.getByRole("group", { name: "Usage section" })
-      .getByRole("button", { name: "Limits", exact: true }).click(),
-    reset: async (page) => {
-      await page.getByRole("group", { name: "Usage section" })
-        .getByRole("button", { name: "History", exact: true }).click();
-      await backToWorkspace(page);
-    },
+    act: async (page) => await page.getByRole("tablist", { name: "Usage view" })
+      .getByRole("tab", { name: "Limits", exact: true }).click(),
+    reset: async (page) => await closeDialog(page, ".usage-popup"),
   },
   {
     id: "limits-dialog",
     start: pointer,
-    target: { selector: ".limits-dialog", text: "Refresh limits", ready: "settled" },
+    target: { selector: ".usage-popup .usage-limits-panel", text: "Usage sources", ready: "settled" },
     prepare: async (page) => {
       await page.locator(".usage-popover-trigger").first().click();
       await page.getByRole("button", { name: "All provider limits", exact: true }).waitFor();
     },
     act: async (page) => await page.getByRole("button", { name: "All provider limits", exact: true }).click(),
-    reset: async (page) => await closeDialog(page, ".limits-dialog"),
+    reset: async (page) => await closeDialog(page, ".usage-popup"),
   },
   {
     id: "tasks",
@@ -465,7 +462,7 @@ for (let run = 1; run <= (PROFILE ? 1 : RUNS); run += 1) {
           result.error = error instanceof Error ? error.message.split("\n").slice(0, 6).join("\n") : String(error);
           await page.screenshot({ path: join(directory, `run-${run}-${step.id}-failure.png`) }).catch(() => undefined);
           await page.keyboard.press("Escape").catch(() => undefined);
-          if (await page.locator(".settings-view, .usage-view, .tasks-view").count() > 0) {
+          if (await page.locator(".settings-view, .tasks-view").count() > 0) {
             await backToWorkspace(page).catch(() => undefined);
           }
           await selectChat(page, HOME_CHAT).catch(() => undefined);

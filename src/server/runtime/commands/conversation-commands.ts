@@ -33,6 +33,7 @@ import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import { ConversationCreationService } from "../conversation-creation-service";
 import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
+import type { NativeGoalReads, NativeGoalReadScope } from "../native-goal-reads";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import { liveProviderRunOwnership, providerRecoveryRecords } from "../turns/turn-checkout-activity";
@@ -129,6 +130,7 @@ export interface ConversationCommandDependencies {
   creation?: ConversationCreationService;
   contextRequests?: ConversationContextRequestCoordinator;
   agentSecrets?: { revokeForConversation(conversationId: string): void };
+  nativeGoalReads?: Pick<NativeGoalReads, "quiesce">;
   reportIncident?(observation: IncidentObservation): unknown;
 }
 
@@ -509,7 +511,7 @@ export function createConversationCommandHandler(
         if (
           changesRunConfiguration
           && (
-            dependencies.store.conversationWork.locksRunConfiguration(
+            dependencies.store.conversationWork.hasConversation(
               conversationId,
             )
             || dependencies.store.hasRecordedActiveWorkspaceRunForConversation(
@@ -630,6 +632,11 @@ export function createConversationCommandHandler(
             "End the resumed provider terminal before deleting this thread.",
           );
         }
+        const goalReadHolds: Array<() => void> = [];
+        const holdGoalReads = async (scope: NativeGoalReadScope): Promise<void> => {
+          const release = await dependencies.nativeGoalReads?.quiesce(scope);
+          if (release) goalReadHolds.push(release);
+        };
         try {
           if (liveProviderRunOwnership(
             dependencies.store,
@@ -698,6 +705,7 @@ export function createConversationCommandHandler(
             ) throw new RuntimeRequestError(error.message);
             throw error;
           }
+          await holdGoalReads({ conversationId: conversation.id });
           if (ownership?.ownsWorktree) {
             const sharedCheckout = dependencies.store.shellSnapshot()
               .conversations.find((candidate) => (
@@ -713,6 +721,7 @@ export function createConversationCommandHandler(
                 sharedCheckout.id,
               );
             } else {
+              await holdGoalReads({ checkoutPath: ownership.path });
               const repositoryPath = dependencies.store.projectPath(
                 conversation.projectId,
               );
@@ -789,6 +798,7 @@ export function createConversationCommandHandler(
           dependencies.forgetRemoteTranscript(finalConversation.id);
           return "mutation";
         } finally {
+          for (const release of goalReadHolds) release();
           dependencies.providerTerminalResumes.release(conversation.id);
         }
       }

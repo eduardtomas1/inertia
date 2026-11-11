@@ -80,6 +80,13 @@ describe("third-party notice generation", () => {
     expect(output).toContain("musl libc");
   });
 
+  it("includes the bundled model price list license in packaged notices", () => {
+    const output = generate([]);
+
+    expect(output).toContain("BUNDLED MODEL PRICE LIST");
+    expect(output).toContain("Copyright (c) 2023 Berri AI");
+  });
+
   it("sorts packages and de-duplicates identical license text deterministically", () => {
     const packages = [
       { name: "zeta", version: "1.0.0", license: "MIT", files: { LICENSE: "Shared license\r\n" } },

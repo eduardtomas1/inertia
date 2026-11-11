@@ -21,7 +21,6 @@ import {
   Folder,
   FolderGit2,
   FolderOpen,
-  Gauge,
   GitBranch,
   ListTodo,
   Pencil,
@@ -75,7 +74,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
-import { loadDailyWorkDialog, loadLibraryView, loadMultiSpawnDialog, loadSettingsView, loadTasksView, loadUsageView } from "./lazySurfaceLoaders";
+import { loadDailyWorkDialog, loadLibraryView, loadMultiSpawnDialog, loadSettingsView, loadTasksView } from "./lazySurfaceLoaders";
 import { sidebarTasksLabel, tasksNeedingYou } from "./sidebar/sidebarTaskCount";
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
@@ -88,6 +87,7 @@ import {
   EMPTY_DETACHED_CONVERSATION_IDS,
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
+import { SidebarUsageButton } from "./sidebar/SidebarUsageButton";
 import { WorkStatusCue as LiveWorkStatusCue } from "./sidebar/WorkStatusCue";
 import { INTERFACE_LOCALE } from "../lib/locale";
 const WorkStatusCue = memo(LiveWorkStatusCue);
@@ -1001,6 +1001,7 @@ function SidebarView({
         className={clsx("sidebar-scrim", open && "is-open")}
         onClick={onClose}
       />
+      <div className="window-drag-strip sidebar-drawer-drag-strip drag-region" aria-hidden="true" />
       <aside
         ref={sidebarRef}
         className={clsx(
@@ -1038,6 +1039,7 @@ function SidebarView({
         }}
       >
         <SidebarAurora moving={!reducedMotion && (!mobile || open)} activity={auroraActivity} />
+        <div className="window-drag-strip drag-region" aria-hidden="true" />
         <div className="sidebar-brand drag-region">
           {preview.preview}
           <button type="button" className="brand-lockup no-drag" aria-label="Start a new chat" onClick={onOpenHome}>
@@ -1152,9 +1154,7 @@ function SidebarView({
           <IconButton label="Daily work" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
             <DailyWorkMark size={16} />
           </IconButton>
-          <IconButton label="Usage" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
-            <Gauge size={16} />
-          </IconButton>
+          <SidebarUsageButton onOpen={onClose} />
           <IconButton label="Settings" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
             <Settings size={16} />
           </IconButton>

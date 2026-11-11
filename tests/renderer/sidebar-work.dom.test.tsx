@@ -148,7 +148,7 @@ function renderSidebar(
     splitConversationId?: string | null;
     detachedConversationIds?: ReadonlySet<string>;
     dailyWorkOpen?: boolean;
-    view?: "workspace" | "settings" | "usage" | "tasks" | "library" | "home";
+    view?: "workspace" | "settings" | "tasks" | "library" | "home";
     onRender?: () => void;
   } = {},
 ) {

@@ -12,16 +12,13 @@ import {
 } from "./claude-owned-query";
 import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { CLAUDE_ISOLATED_SKILL_SETTINGS } from "./claude-skill-plugin";
+import { claudeModelScopedWindows, claudeRateLimitWindow } from "./claude-rate-limit-windows";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 export function claudeModels(
@@ -72,44 +69,41 @@ export async function emitClaudeModelMetadata(
   }
 }
 
-export function parseClaudeRateLimits(value: unknown): ProviderRateLimit[] {
+const CLAUDE_ENDED_WINDOW_GRACE_MS = 60_000;
+
+export function parseClaudeRateLimits(value: unknown, now = Date.now()): ProviderRateLimit[] {
   const response = objectValue(value);
   if (response?.rate_limits_available !== true) return [];
   const limits = objectValue(response.rate_limits);
   if (!limits) return [];
-  const windows: Array<{
-    key: string;
-    label: string;
-    minutes: number | null;
-    value: unknown;
-  }> = [
-    { key: "five_hour", label: "Claude · 5 hour", minutes: 300, value: limits.five_hour },
-    { key: "seven_day", label: "Claude · 7 day", minutes: 10_080, value: limits.seven_day },
-    { key: "seven_day_oauth_apps", label: "Claude apps · 7 day", minutes: 10_080, value: limits.seven_day_oauth_apps },
-    { key: "seven_day_opus", label: "Claude Opus · 7 day", minutes: 10_080, value: limits.seven_day_opus },
-    { key: "seven_day_sonnet", label: "Claude Sonnet · 7 day", minutes: 10_080, value: limits.seven_day_sonnet },
-  ];
-  const modelScoped = Array.isArray(limits.model_scoped) ? limits.model_scoped : [];
-  modelScoped.slice(0, 8).forEach((entry, index) => {
-    const model = objectValue(entry);
-    windows.push({
-      key: `model_${index}`,
-      label: stringValue(model?.display_name) ?? `Claude model ${index + 1}`,
-      minutes: 10_080,
-      value: model,
-    });
+  const windows: Array<{ id: string; label: string; minutes: number | null; value: unknown }> = [
+    "five_hour",
+    "seven_day",
+    "seven_day_oauth_apps",
+    "seven_day_opus",
+    "seven_day_sonnet",
+  ].map((key) => {
+    const { label, minutes } = claudeRateLimitWindow(key);
+    return { id: `claude:${key}`, label, minutes, value: limits[key] };
   });
+  for (const scoped of claudeModelScopedWindows(
+    Array.isArray(limits.model_scoped) ? limits.model_scoped : [],
+  )) {
+    windows.push({ ...scoped, minutes: 10_080 });
+  }
   return windows.flatMap((window) => {
     const current = objectValue(window.value);
     const utilization = clampProviderPercent(current?.utilization);
     if (utilization === null) return [];
+    const resetsAt = providerTimestamp(current?.resets_at);
+    if (resetsAt !== null && Date.parse(resetsAt) <= now - CLAUDE_ENDED_WINDOW_GRACE_MS) return [];
     return [{
-      id: `claude:${window.key}`,
+      id: window.id,
       label: window.label,
       usedPercent: utilization,
       remainingPercent: 100 - utilization,
       windowMinutes: window.minutes,
-      resetsAt: providerTimestamp(current?.resets_at),
+      resetsAt,
     }];
   }).slice(0, 12);
 }
@@ -189,7 +183,7 @@ export async function readClaudeAgentSdkMetadata(
     const reads = [
       fields.includes("models") ? query.supportedModels() : Promise.resolve(undefined),
       fields.includes("rateLimits") && typeof usageReader === "function"
-        ? usageReader.call(query)
+        ? usageReader.call(query, { skipBehaviors: true })
         : Promise.resolve(undefined),
       includeAccount && typeof query.accountInfo === "function" ? query.accountInfo() : Promise.resolve(undefined),
     ] as const;

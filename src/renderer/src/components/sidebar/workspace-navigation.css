@@ -263,9 +263,6 @@
 .sidebar-footer .sidebar-destination:has(.lucide-settings) {
   order: -1;
 }
-.sidebar-scrim {
-  display: none;
-}
 .sidebar-footer > .sidebar-update-button {
   margin-left: auto;
 }

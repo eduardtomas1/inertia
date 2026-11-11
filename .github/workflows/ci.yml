@@ -181,10 +181,9 @@ jobs:
 
       - name: Install Linux guardian toolchain
         timeout-minutes: 10
-        run: |
-          for sources in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do [ -f "$sources" ] && sudo sed -i '/azure\.archive\.ubuntu\.com/d' "$sources"; done
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
+        uses: ./.github/actions/install-linux-packages
+        with:
+          packages: binutils linux-libc-dev musl-tools=1.2.4-2
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
@@ -232,10 +231,9 @@ jobs:
 
       - name: Install Linux guardian toolchain
         timeout-minutes: 10
-        run: |
-          for sources in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do [ -f "$sources" ] && sudo sed -i '/azure\.archive\.ubuntu\.com/d' "$sources"; done
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+        uses: ./.github/actions/install-linux-packages
+        with:
+          packages: binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
@@ -508,10 +506,9 @@ jobs:
       - name: Install Linux guardian toolchain
         if: runner.os == 'Linux'
         timeout-minutes: 10
-        run: |
-          for sources in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do [ -f "$sources" ] && sudo sed -i '/azure\.archive\.ubuntu\.com/d' "$sources"; done
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+        uses: ./.github/actions/install-linux-packages
+        with:
+          packages: binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
@@ -823,10 +820,9 @@ jobs:
       - name: Install Linux guardian toolchain
         if: runner.os == 'Linux'
         timeout-minutes: 10
-        run: |
-          for sources in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do [ -f "$sources" ] && sudo sed -i '/azure\.archive\.ubuntu\.com/d' "$sources"; done
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+        uses: ./.github/actions/install-linux-packages
+        with:
+          packages: binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies

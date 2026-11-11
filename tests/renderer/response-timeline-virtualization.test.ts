@@ -1023,7 +1023,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(shouldFollowTimeline(1_200, 500, 2_000)).toBe(false);
   });
 
-  it("follows a reader's own scroll only at the latest content, with a downward rejoin margin while live or when aimed at the end", () => {
+  it("follows a reader's own scroll only at the latest content, with a downward rejoin margin while live", () => {
     const reach = (scrollTop: number, previousScrollTop: number | null, live: boolean) =>
       readerScrollReachesLatest({ scrollTop, clientHeight: 500, scrollHeight: 2_000, previousScrollTop, live });
 
@@ -1036,12 +1036,6 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(reach(1_460, 1_300, true)).toBe(false);
     expect(reach(1_490, 1_500, true)).toBe(false);
     expect(reach(1_499, 1_500, true)).toBe(true);
-    expect(readerScrollReachesLatest({
-      scrollTop: 1_400, clientHeight: 500, scrollHeight: 2_000, previousScrollTop: 1_300, live: true, aimedAtLatest: true,
-    })).toBe(true);
-    expect(readerScrollReachesLatest({
-      scrollTop: 1_400, clientHeight: 500, scrollHeight: 2_000, previousScrollTop: 1_450, live: true, aimedAtLatest: true,
-    })).toBe(false);
   });
 
   it("keeps hundreds of rows and thousands of events bounded, keyed, and memoizable", () => {

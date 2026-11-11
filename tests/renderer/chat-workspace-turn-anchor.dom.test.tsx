@@ -1975,6 +1975,7 @@ describe("transcript following motion", () => {
       transcript.scrollTop = 400;
       fireEvent.scroll(transcript);
       expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+      fireEvent.wheel(transcript, { deltaY: -100 });
       transcript.scrollTop = 300;
       fireEvent.scroll(transcript);
       transcript.scrollTop = 350;
@@ -1998,8 +1999,17 @@ describe("transcript following motion", () => {
       fireEvent.scroll(transcript);
       expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
       scrollTo.mockClear();
-      await act(async () => vi.advanceTimersByTime(750));
+      await act(async () => vi.advanceTimersByTime(1_000));
       expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: "auto" });
+    });
+
+    it("takes End to the latest content itself instead of leaving it to the browser's key scroll", async () => {
+      const { transcript, scrollTo } = await guardedFollow();
+      await readHistoryAtTop(transcript);
+      scrollTo.mockClear();
+      expect(fireEvent.keyDown(transcript, { key: "End" })).toBe(false);
+      expect(scrollTo).toHaveBeenCalledWith({ top: transcript.scrollHeight, behavior: "smooth" });
+      expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
     });
 
     it.each(["started", "positioned"] as const)("respects %s final-answer ownership when the guard expires", async (status) => {

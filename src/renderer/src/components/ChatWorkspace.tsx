@@ -479,7 +479,6 @@ export function ChatWorkspace({
     dispatchNavigation(action);
   }, []);
   const readerIntentRef = useRef(false);
-  const aimedAtLatestRef = useRef(false);
   const finalAnswerAutoScrollOwnerRef = useRef<string | null>(null);
   const pendingFinalAnswerNavigationRef = useRef<{
     conversationId: string;
@@ -592,7 +591,6 @@ export function ChatWorkspace({
 
   const clearReaderIntent = useCallback((): void => {
     readerIntentRef.current = false;
-    aimedAtLatestRef.current = false;
     endReaderIntentGuardRef.current?.();
     endReaderIntentGuardRef.current = null;
   }, []);
@@ -854,8 +852,16 @@ export function ChatWorkspace({
     event: React.KeyboardEvent<HTMLDivElement>,
   ): void => {
     if (!isTranscriptReaderNavigationKey(event.key)) return;
+    if (
+      event.key === "End"
+      && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      && !(event.target as Element).closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")
+    ) {
+      event.preventDefault();
+      scrollToLatest();
+      return;
+    }
     noteReaderIntent();
-    aimedAtLatestRef.current = !event.altKey && event.key === "End";
   };
 
   const onTranscriptScroll = (): void => {
@@ -865,9 +871,8 @@ export function ChatWorkspace({
     lastReaderScrollTopRef.current = element.scrollTop;
     continueTouchIntent();
     const intentional = readerIntentRef.current;
-    const { follows, movedUp } = readerScrollFollow({ scrollTop: element.scrollTop, clientHeight: element.clientHeight,
-      scrollHeight: element.scrollHeight, previousScrollTop, live: liveTurnRef.current, intentional, aimedAtLatest: aimedAtLatestRef.current });
-    if (movedUp) aimedAtLatestRef.current = false;
+    const follows = readerScrollFollow({ scrollTop: element.scrollTop, clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight, previousScrollTop, live: liveTurnRef.current, intentional });
     if (finalAnswerAutoScrollOwnerRef.current !== null) {
       onLatestContentVisibilityChange?.(follows);
       return;

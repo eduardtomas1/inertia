@@ -10,11 +10,10 @@ import {
 
 export interface UsageCommandDependencies {
   store: RuntimeStore;
-  priceList?: Pick<UsagePriceList, "ensure">;
+  priceList?: Pick<UsagePriceList, "current">;
   send(socket: WebSocket, event: ServerEvent): void;
 }
 
-const FIRST_PRICE_LIST_WAIT_MS = 4_000;
 
 export function createUsageCommandHandler(
   dependencies: UsageCommandDependencies,
@@ -41,7 +40,7 @@ export function createUsageCommandHandler(
           kind: "usage.dashboard",
           dashboard: dependencies.store.usageDashboard(
             command.payload,
-            await dependencies.priceList?.ensure(FIRST_PRICE_LIST_WAIT_MS),
+            await dependencies.priceList?.current(),
           ),
         },
       });

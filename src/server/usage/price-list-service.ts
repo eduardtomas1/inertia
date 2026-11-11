@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import bundledPriceList from "./bundled-price-list.json" with { type: "json" };
 import {
   MAX_PRICE_LIST_MODELS,
   parsePriceList,
@@ -14,6 +15,7 @@ export const USAGE_PRICE_LIST_TTL_MS = 24 * 60 * 60 * 1_000;
 export const USAGE_PRICE_LIST_RETRY_MS = 60 * 1_000;
 export const USAGE_PRICE_LIST_TEST_URL_ENVIRONMENT_KEY = "INERTIA_TEST_USAGE_PRICE_LIST_URL";
 const FETCH_TIMEOUT_MS = 10_000;
+const EMPTY_LIST_WAIT_MS = 4_000;
 const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024;
 const MAX_CACHE_BYTES = 8 * 1024 * 1024;
 
@@ -21,6 +23,7 @@ export interface UsagePriceListOptions {
   cachePath: string;
   signal: AbortSignal;
   url?: string | null;
+  bundled?: { fetchedAt: number; rates: ReadonlyMap<string, UsageModelRates> } | null;
   fetch?: typeof fetch;
   now?: () => number;
 }
@@ -58,9 +61,10 @@ function cachedTable(value: unknown): { fetchedAt: number; rates: Map<string, Us
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const models = record.models;
+  const fetchedAt = typeof record.fetchedAt === "string" ? Date.parse(record.fetchedAt) : record.fetchedAt;
   if (
-    typeof record.fetchedAt !== "number"
-    || !Number.isFinite(record.fetchedAt)
+    typeof fetchedAt !== "number"
+    || !Number.isFinite(fetchedAt)
     || models === null
     || typeof models !== "object"
     || Array.isArray(models)
@@ -76,12 +80,14 @@ function cachedTable(value: unknown): { fetchedAt: number; rates: Map<string, Us
     const [input, output, cacheRead, cacheWrite] = entry as [number, number, number, number];
     rates.set(id, { input, output, cacheRead, cacheWrite });
   }
-  return rates.size > 0 ? { fetchedAt: record.fetchedAt, rates } : null;
+  return rates.size > 0 ? { fetchedAt, rates } : null;
 }
 
+const BUNDLED = cachedTable(bundledPriceList);
+
 export class UsagePriceList {
-  private rates = new Map<string, UsageModelRates>();
-  private fetchedAt: number | null = null;
+  private rates: ReadonlyMap<string, UsageModelRates>;
+  private fetchedAt: number | null;
   private lastAttemptAt: number | null = null;
   private loaded: Promise<void> | null = null;
   private refreshing: Promise<void> | null = null;
@@ -93,6 +99,10 @@ export class UsagePriceList {
     this.fetcher = options.fetch ?? fetch;
     this.now = options.now ?? Date.now;
     this.url = options.url === undefined ? USAGE_PRICE_LIST_SOURCE : options.url;
+    const ownSource = this.url === null || this.url === USAGE_PRICE_LIST_SOURCE;
+    const bundled = options.bundled === undefined ? (ownSource ? BUNDLED : null) : options.bundled;
+    this.rates = bundled?.rates ?? new Map();
+    this.fetchedAt = bundled?.fetchedAt ?? null;
   }
 
   pricing(): UsagePricing {
@@ -107,22 +117,21 @@ export class UsagePriceList {
     };
   }
 
-  async ensure(maxWaitMs: number, force = false): Promise<UsagePricing> {
+  async current(): Promise<UsagePricing> {
     this.loaded ??= this.load();
     await this.loaded;
-    const age = this.fetchedAt === null ? Infinity : this.now() - this.fetchedAt;
-    const due = force ? age >= USAGE_PRICE_LIST_RETRY_MS : age >= USAGE_PRICE_LIST_TTL_MS;
+    const due = this.fetchedAt === null || this.now() - this.fetchedAt >= USAGE_PRICE_LIST_TTL_MS;
     const retryAllowed = this.lastAttemptAt === null
       || this.now() - this.lastAttemptAt >= USAGE_PRICE_LIST_RETRY_MS;
     if (this.url && due && retryAllowed && !this.options.signal.aborted) {
       this.refreshing ??= this.refresh().finally(() => { this.refreshing = null; });
     }
-    if (this.refreshing && (this.rates.size === 0 || force) && maxWaitMs > 0) {
+    if (this.rates.size === 0 && this.refreshing) {
       let timer: NodeJS.Timeout | undefined;
       await Promise.race([
         this.refreshing,
         new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, maxWaitMs);
+          timer = setTimeout(resolve, EMPTY_LIST_WAIT_MS);
           timer.unref();
         }),
       ]);
@@ -136,7 +145,7 @@ export class UsagePriceList {
       const text = await readFile(this.options.cachePath, "utf8");
       if (text.length > MAX_CACHE_BYTES) return;
       const cached = cachedTable(JSON.parse(text));
-      if (!cached || cached.fetchedAt > this.now()) return;
+      if (!cached || cached.fetchedAt > this.now() || cached.fetchedAt <= (this.fetchedAt ?? -Infinity)) return;
       this.rates = cached.rates;
       this.fetchedAt = cached.fetchedAt;
     } catch {

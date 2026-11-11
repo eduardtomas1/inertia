@@ -6,6 +6,13 @@
   --usage-series-opencode: #8a8583;
   --usage-series-antigravity: #7667c9;
   --usage-series-grok: color-mix(in srgb, var(--text) 72%, var(--bg));
+  --limit-fill-codex: color-mix(in srgb, var(--text) 55%, var(--bg));
+  --limit-fill-claude: color-mix(in srgb, var(--usage-series-claude) 85%, black);
+  --limit-fill-cursor: color-mix(in srgb, var(--usage-series-cursor) 75%, white);
+  --limit-fill-kimi: var(--usage-series-kimi);
+  --limit-fill-opencode: color-mix(in srgb, var(--usage-series-opencode) 88%, black);
+  --limit-fill-antigravity: var(--usage-series-antigravity);
+  --limit-fill-grok: color-mix(in srgb, var(--text) 55%, var(--bg));
 }
 
 :root[data-theme="dark"] {
@@ -14,10 +21,18 @@
   --usage-series-kimi: #7aa2ff;
   --usage-series-opencode: #9f9a98;
   --usage-series-antigravity: #a394e6;
+  --limit-fill-codex: color-mix(in srgb, var(--usage-series-codex) 38%, transparent);
+  --limit-fill-claude: color-mix(in srgb, var(--usage-series-claude) 38%, transparent);
+  --limit-fill-cursor: color-mix(in srgb, var(--usage-series-cursor) 38%, transparent);
+  --limit-fill-kimi: color-mix(in srgb, var(--usage-series-kimi) 38%, transparent);
+  --limit-fill-opencode: color-mix(in srgb, var(--usage-series-opencode) 38%, transparent);
+  --limit-fill-antigravity: color-mix(in srgb, var(--usage-series-antigravity) 38%, transparent);
+  --limit-fill-grok: color-mix(in srgb, var(--usage-series-grok) 38%, transparent);
 }
 
 .limit-bar {
   --limit-color: var(--text-muted);
+  --limit-fill: color-mix(in srgb, var(--limit-color) 38%, transparent);
   --limit-track: var(--fill-strong);
   --limit-at: clamp(3px, var(--limit-mark, 50%), calc(100% - 3px));
   position: relative;
@@ -33,14 +48,14 @@
   margin-block: 2px;
 }
 
-:is(.limit-bar, .limits-provider)[data-provider="codex"] { --limit-color: var(--usage-series-codex); }
-:is(.limit-bar, .limits-provider)[data-provider="claude"] { --limit-color: var(--usage-series-claude); }
-:is(.limit-bar, .limits-provider)[data-provider="cursor"] { --limit-color: var(--usage-series-cursor); }
-:is(.limit-bar, .limits-provider)[data-provider="kimi"] { --limit-color: var(--usage-series-kimi); }
-:is(.limit-bar, .limits-provider)[data-provider="opencode"] { --limit-color: var(--usage-series-opencode); }
-:is(.limit-bar, .limits-provider)[data-provider="antigravity"] { --limit-color: var(--usage-series-antigravity); }
-:is(.limit-bar, .limits-provider)[data-provider="grok"] { --limit-color: var(--usage-series-grok); }
-.limit-bar[data-due] { --limit-color: var(--text-muted); }
+:is(.limit-bar, .limits-provider)[data-provider="codex"] { --limit-color: var(--usage-series-codex); --limit-fill: var(--limit-fill-codex); }
+:is(.limit-bar, .limits-provider)[data-provider="claude"] { --limit-color: var(--usage-series-claude); --limit-fill: var(--limit-fill-claude); }
+:is(.limit-bar, .limits-provider)[data-provider="cursor"] { --limit-color: var(--usage-series-cursor); --limit-fill: var(--limit-fill-cursor); }
+:is(.limit-bar, .limits-provider)[data-provider="kimi"] { --limit-color: var(--usage-series-kimi); --limit-fill: var(--limit-fill-kimi); }
+:is(.limit-bar, .limits-provider)[data-provider="opencode"] { --limit-color: var(--usage-series-opencode); --limit-fill: var(--limit-fill-opencode); }
+:is(.limit-bar, .limits-provider)[data-provider="antigravity"] { --limit-color: var(--usage-series-antigravity); --limit-fill: var(--limit-fill-antigravity); }
+:is(.limit-bar, .limits-provider)[data-provider="grok"] { --limit-color: var(--usage-series-grok); --limit-fill: var(--limit-fill-grok); }
+.limit-bar[data-due] { --limit-color: var(--text-muted); --limit-fill: color-mix(in srgb, var(--text-muted) 38%, transparent); }
 
 .limit-bar-track,
 .limit-bar-layers {
@@ -67,8 +82,7 @@
 .limit-bar-fill {
   left: 0;
   border-radius: inherit;
-  background: var(--limit-color);
-  opacity: 0.38;
+  background: var(--limit-fill);
 }
 
 .limit-bar-hatch {
@@ -78,12 +92,7 @@
 }
 
 .limit-bar[data-muted] .limit-bar-fill {
-  opacity: 0.2;
-}
-
-:root:not([data-theme="dark"]) .limit-bar[data-provider="claude"]:not([data-muted], [data-due]) .limit-bar-fill {
-  background: color-mix(in srgb, var(--limit-color) 85%, black);
-  opacity: 1;
+  opacity: 0.5;
 }
 
 .limit-bar-mark {

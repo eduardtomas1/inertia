@@ -78,7 +78,11 @@ describe("Limits overview", () => {
   it("draws the bar from tokens: provider colour, hatched restore, pace slot and reduced motion", () => {
     const bar = readSourceText("src/renderer/src/components/usage/LimitBar.css");
     const panel = readSourceText("src/renderer/src/components/UsageLimitsPanel.css");
-    expect(bar).toMatch(/:is\(\.limit-bar, \.limits-provider\)\[data-provider="claude"\] \{ --limit-color: var\(--usage-series-claude\); \}/u);
+    expect(bar).toMatch(/:is\(\.limit-bar, \.limits-provider\)\[data-provider="claude"\] \{ --limit-color: var\(--usage-series-claude\); --limit-fill: var\(--limit-fill-claude\); \}/u);
+    for (const provider of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"]) {
+      expect(bar.match(new RegExp(`--limit-fill-${provider}:`, "gu"))).toHaveLength(2);
+    }
+    expect(bar).toMatch(/\.limit-bar-fill \{[^}]*background: var\(--limit-fill\);/u);
     expect(bar).toContain("repeating-linear-gradient(135deg, var(--limit-color) 0 1px, transparent 1px 5px)");
     expect(bar).toContain("--limit-at: clamp(3px, var(--limit-mark, 50%), calc(100% - 3px));");
     expect(bar).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{\n  \.limit-bar-fill,\n  \.limit-bar-hatch \{\n    transition:/u);

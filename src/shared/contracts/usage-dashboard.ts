@@ -23,7 +23,6 @@ export interface UsageTokenField extends UsageMeasuredValue {
 }
 
 export interface UsageCostValue extends UsageMeasuredValue {
-  /** US dollars at public API list prices, for the requests that could be priced. */
   value: number | null;
 }
 
@@ -70,7 +69,6 @@ export interface UsageDashboardBreakdown {
 export interface UsageDashboardModelBreakdown
   extends UsageDashboardBreakdown {
   model: string;
-  /** Price-list model the estimate used, or null when this model has no known price. */
   pricedAs: string | null;
   backendProfileId: string;
   backendLabel: string;

@@ -1142,8 +1142,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const captureLayoutAnchor = useCallback(() => captureLayoutAnchorRef.current(), []);
   const restoreLayoutAnchor = useCallback(() => restoreLayoutAnchorRef.current(), []);
   useMessageSearchFocus(props, timeline, beginReaderTimelineNavigation, focusTimelineItem,
-    captureLayoutAnchor, restoreLayoutAnchor);
-
+    virtualized ? undefined : captureLayoutAnchor, restoreLayoutAnchor);
 
   const navigateTimelineFromKeyboard = useEffectEvent((
     event: KeyboardEvent,

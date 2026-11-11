@@ -56,6 +56,9 @@ far less usage.
   translucent surface, solid under reduced transparency and forced colours.
   The sidebar's brand strip has a few slowly breathing stars, still under
   reduced motion.
+- In a narrow window the navigation drawer dims the chat behind it again, and
+  clicking the dimmed area closes the drawer. The chat used to look usable
+  while the drawer was open but ignored every click.
 
 ### Providers
 

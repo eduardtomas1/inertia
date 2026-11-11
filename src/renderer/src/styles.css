@@ -1101,7 +1101,8 @@ textarea {
   line-height: var(--leading-heading);
 }
 
-.mobile-close {
+.mobile-close,
+.sidebar-scrim {
   display: none;
 }
 

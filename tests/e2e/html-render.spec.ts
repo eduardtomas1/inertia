@@ -368,6 +368,7 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
     const selector = `[data-testid="html-render-frame"][title="${HOSTILE_PAGE_TITLE}"]`;
     await expect(page.getByRole("figure", { name: HOSTILE_PAGE_TITLE, exact: true }))
       .toHaveAttribute("data-html-render-state", "ready");
+    await expect(page.locator(selector)).toHaveCSS("opacity", "1");
     const content = page.frameLocator(selector);
     await expect(content.getByRole("heading", { name: HOSTILE_PAGE_TITLE })).toBeVisible();
     const frame = await inlineFrame(page, selector);

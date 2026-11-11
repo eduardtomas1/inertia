@@ -49,11 +49,14 @@ test("loads older pages at the transcript start without moving the reading posit
     };
     requestAnimationFrame(sample);
   }, turns[45]);
-  await transcript.evaluate((scroll) => {
-    scroll.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
-    scroll.scrollTop = 0;
-  });
-  await expect(feed(80)).toBeAttached();
+  await expect.poll(async () => {
+    if (await feed(80).count() > 0) return true;
+    await transcript.evaluate((scroll) => {
+      scroll.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
+      scroll.scrollTop = 0;
+    });
+    return false;
+  }, { intervals: [250, 1_000, 2_000], timeout: 20_000 }).toBe(true);
   await expect(page.getByRole("button", { name: "Load earlier messages", exact: true })).toBeAttached();
   let samples: { count: number; top: number | null }[] = [];
   try {

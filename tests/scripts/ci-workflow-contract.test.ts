@@ -291,8 +291,14 @@ it("release builds exclude Windows workspaces from Defender and download Electro
   expect(steps.filter((step) => step.name === "Prepare Electron end-to-end binary")).toHaveLength(1);
   expect(index("Prepare Electron end-to-end binary")).toBeLessThan(index("Measure release-candidate desktop workloads"));
   const targets = job.strategy.matrix.include as Array<{ label: string; timeout_minutes: number }>;
-  expect(targets.find(({ label }) => label === "Windows x64")!.timeout_minutes).toBe(130);
-  expect(targets.find(({ label }) => label === "Windows ARM64")!.timeout_minutes).toBe(180);
+  expect(Object.fromEntries(targets.map(({ label, timeout_minutes }) => [label, timeout_minutes]))).toEqual({
+    "macOS x64": 140,
+    "macOS arm64": 110,
+    "Windows x64": 170,
+    "Windows ARM64": 220,
+    "Linux x64": 90,
+    "Linux ARM64": 90,
+  });
 });
 
 it("keeps every Xvfb server alive across clients and its log as failure evidence", () => {

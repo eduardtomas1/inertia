@@ -62,6 +62,50 @@ export function measuredValue(value: unknown): boolean {
   return value.coverage === "unavailable" && value.value === null;
 }
 
+function nonNegativeNumber(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+export function costValue(value: unknown): boolean {
+  if (!record(value)) return false;
+  if (!((value.value === null || nonNegativeNumber(value.value))
+    && integerField(value, "measuredRequests")
+    && Number(value.measuredRequests) >= 0
+    && integerField(value, "totalRequests")
+    && Number(value.totalRequests) >= Number(value.measuredRequests)
+    && ["complete", "partial", "unavailable"].includes(String(value.coverage)))) {
+    return false;
+  }
+  if (value.coverage === "complete") {
+    return value.value !== null && value.measuredRequests === value.totalRequests;
+  }
+  if (value.coverage === "partial") {
+    return value.value !== null
+      && Number(value.measuredRequests) > 0
+      && Number(value.measuredRequests) < Number(value.totalRequests);
+  }
+  return value.value === null;
+}
+
+function costForRequests(value: unknown, requestCount: number): boolean {
+  return costValue(value) && record(value) && value.totalRequests === requestCount;
+}
+
+function costSummary(value: unknown): boolean {
+  if (!record(value) || !record(value.pricing) || !record(value.byType)) return false;
+  const pricing = value.pricing;
+  const byType = value.byType;
+  return ["estimated", "unavailable"].includes(String(value.status))
+    && (value.reason === null || stringField(value, "reason"))
+    && ["fresh", "cached", "unavailable"].includes(String(pricing.status))
+    && stringField(pricing, "source")
+    && (pricing.fetchedAt === null || stringField(pricing, "fetchedAt"))
+    && integerField(pricing, "modelCount")
+    && Number(pricing.modelCount) >= 0
+    && ["input", "cachedInput", "cacheWriteInput", "output"].every((key) => nonNegativeNumber(byType[key]))
+    && nonNegativeNumber(value.cacheSavings);
+}
+
 function statusCounts(value: UnknownRecord): boolean {
   const keys = [
     "completedCount",
@@ -89,8 +133,10 @@ function breakdown(value: unknown, model = false): boolean {
     && Number(value.requestCount) >= 0
     && metricForRequests(value.runtime, Number(value.requestCount))
     && metricForRequests(value.processedTokens, Number(value.requestCount))
+    && costForRequests(value.cost, Number(value.requestCount))
     && (!model || (
-      recordWithStrings(
+      (value.pricedAs === null || stringField(value, "pricedAs"))
+      && recordWithStrings(
         value,
         "model",
         "backendProfileId",
@@ -125,11 +171,13 @@ export function usageDashboardSchema(value: unknown): boolean {
     && Number(totals.activeDays) <= Number(totals.requestCount)
     && metricForRequests(totals.runtime, Number(totals.requestCount))
     && metricForRequests(totals.processedTokens, Number(totals.requestCount))
+    && costForRequests(totals.cost, Number(totals.requestCount))
     && arrayOf(value.daily, (entry) => {
       if (!recordWithStrings(entry, "date")) return false;
       return statusCounts(entry)
         && metricForRequests(entry.runtime, Number(entry.requestCount))
         && metricForRequests(entry.processedTokens, Number(entry.requestCount))
+        && costForRequests(entry.cost, Number(entry.requestCount))
         && arrayOf(entry.providers, (provider) => breakdown(provider))
         && uniqueRecordField(entry.providers as unknown[], "key")
         && uniqueRecordField(entry.providers as unknown[], "providerId")
@@ -163,7 +211,5 @@ export function usageDashboardSchema(value: unknown): boolean {
       entry,
       Number(totals.requestCount),
     ))
-    && record(value.cost)
-    && value.cost.status === "unavailable"
-    && stringField(value.cost, "reason");
+    && costSummary(value.cost);
 }

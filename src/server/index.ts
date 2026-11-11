@@ -98,6 +98,7 @@ import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler, type ConversationCompactionCommandDependencies } from "./runtime/commands/conversation-compaction-commands"; import { startIdleCompaction } from "./runtime/idle-compaction-scheduler";
 import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
+import { UsagePriceList, usagePriceListUrl } from "./usage/price-list-service";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
 import { createCustomAgentCommandHandler } from "./runtime/commands/custom-agent-commands";
 import { createWorktreeCommandHandler } from "./runtime/commands/worktree-commands";
@@ -769,7 +770,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         providers, providerMaintenance, terminals, defaultWorkspacePath: options.defaultWorkspacePath, currentSnapshot,
         refreshProviderInfo, refreshProviderUsage: createManualUsageRefresh(providerUsage), send,
       }),
-      ...createReadCommandHandlers({ store, send, databasePath, lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target), canStopWorkspaceRun }),
+      ...createReadCommandHandlers({ store, send, databasePath, priceList: new UsagePriceList({ cachePath: join(dataDirectory, "usage-price-list.json"), signal: runtimeLifetimeAbort.signal, url: usagePriceListUrl(process.env) }), lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target), canStopWorkspaceRun }),
       createConversationCommandHandler({
         store, conversationAttachments: initializedConversationAttachments,
         providers,

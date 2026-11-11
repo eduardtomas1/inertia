@@ -89,6 +89,7 @@ import { SystemSuspendRepository } from "./persistence/system-suspend-repository
 import { TranscriptRepository } from "./persistence/transcript-repository";
 import { QueuedMessageRepository } from "./persistence/queued-message-repository";
 import { TurnLedgerRepository, type DailyWorkRange, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
+import type { UsagePricing } from "./usage/price-list";
 import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
 import { backgroundTasks } from "./persistence/background-task-repository";
@@ -1024,7 +1025,7 @@ export class RuntimeStore {
   usageForConversation(conversationId: string): ThreadUsageSnapshot | null {
     return this.executionLedgerRepository.usageForConversation(conversationId);
   }
-  usageDashboard(range: UsageDashboardRange) { return this.turnLedgerRepository.usageDashboard(range); }
+  usageDashboard(range: UsageDashboardRange, pricing?: UsagePricing) { return this.turnLedgerRepository.usageDashboard(range, pricing); }
   dailyWork(range: DailyWorkRange) { return this.turnLedgerRepository.dailyWork(range); }
   checkpointCount(conversationId: string): number { return this.executionLedgerRepository.checkpointCount(conversationId); }
 

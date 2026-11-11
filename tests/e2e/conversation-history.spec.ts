@@ -49,23 +49,23 @@ test("loads older pages at the transcript start without moving the reading posit
     };
     requestAnimationFrame(sample);
   }, turns[45]);
-  await expect.poll(async () => {
-    if (await feed(80).count() > 0) return true;
-    await transcript.evaluate((scroll) => {
-      scroll.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
-      scroll.scrollTop = 0;
-    });
-    return false;
-  }, { intervals: [250, 1_000, 2_000], timeout: 20_000 }).toBe(true);
+  await transcript.evaluate((scroll) => {
+    scroll.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
+    scroll.scrollTop = 0;
+  });
+  await expect(feed(80)).toBeAttached();
   await expect(page.getByRole("button", { name: "Load earlier messages", exact: true })).toBeAttached();
   let samples: { count: number; top: number | null }[] = [];
   try {
     await expect.poll(async () => {
       samples = await page.evaluate(() => Reflect.get(window, "__historySamples") as { count: number; top: number | null }[]);
-      const before = samples.filter(({ count, top }) => count === 40 && top !== null).at(-1);
-      const after = samples.filter(({ count, top }) => count === 80 && top !== null).at(-1);
-      return before && after ? Math.abs(after.top! - before.top!) : Number.POSITIVE_INFINITY;
-    }).toBeLessThan(4);
+      return samples.filter(({ count }) => count === 80).length;
+    }).toBeGreaterThanOrEqual(30);
+    const before = samples.filter(({ count, top }) => count === 40 && top !== null).at(-1);
+    expect(before).toBeDefined();
+    const drift = samples.filter(({ count }) => count === 80)
+      .map(({ top }) => top === null ? Number.POSITIVE_INFINITY : Math.abs(top - before!.top!));
+    expect(Math.max(...drift)).toBeLessThan(4);
   } finally {
     await info.attach("prepend-positions", { body: JSON.stringify({ anchor: turns[45], samples }, null, 2), contentType: "application/json" });
     await info.attach("prepend-viewport", { body: await page.screenshot(), contentType: "image/png" });

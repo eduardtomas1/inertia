@@ -2,6 +2,19 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Chats
+
+- Earlier messages load without moving what you are reading. The message at
+  the top of the transcript used to jump for a moment when the page arrived,
+  could stay displaced if you touched the wheel or a key just then, and could
+  be thrown back and forth when the page arrived while the transcript was
+  still moving, for example after Home.
+- Going to the start of a long chat always loads the earlier messages. On a
+  busy computer the chat could snap back to the latest message, or stay at
+  the start with nothing loading until you pressed **Load earlier messages**.
+
 ## 0.0.83 — 2026-11-10
 
 Calmer chats, Grok, custom agents you call by name, secrets that never enter

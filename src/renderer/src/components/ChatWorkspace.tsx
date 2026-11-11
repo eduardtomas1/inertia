@@ -99,6 +99,7 @@ import type {
 } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
 import { TimelineJumpToLatest } from "./TimelineJumpToLatest";
+import { startReaderIntentGuard } from "../utils/readerIntentGuard";
 import { afterSmoothScroll } from "../utils/smoothScrollSettle";
 import { markComposerSent, noteRequestSent } from "../utils/requestLiftOff";
 import type { WatcherWakeSummary } from "@shared/watcher";
@@ -139,7 +140,6 @@ function StreamingResponseTimeline({
 const ProviderMaintenanceNotice = lazy(async () => ({
   default: (await import("./ProviderMaintenanceNotice")).ProviderMaintenanceNotice,
 }));
-const READER_INTENT_GUARD_MS = 750;
 const EMPTY_PROMPT_PRESETS: readonly PromptPreset[] = [];
 const EMPTY_CONTEXT_SOURCES: readonly ConversationContextSourceOption[] = [];
 const EMPTY_CONTEXT_PACKETS: readonly ConversationContextPacketSummary[] = [];
@@ -396,7 +396,7 @@ export function ChatWorkspace({
   const composerRegionRef = useRef<HTMLDivElement>(null);
   const followCorrectionFrameRef = useRef<number | null>(null);
   const smoothSettleRef = useRef<(() => void) | null>(null);
-  const readerIntentReleaseTimerRef = useRef<number | null>(null);
+  const endReaderIntentGuardRef = useRef<(() => void) | null>(null);
   const lastReaderScrollTopRef = useRef<number | null>(null);
   const liveTurnRef = useRef(false);
   const goalRef = useRef(goal);
@@ -593,10 +593,8 @@ export function ChatWorkspace({
   const clearReaderIntent = useCallback((): void => {
     readerIntentRef.current = false;
     aimedAtLatestRef.current = false;
-    if (readerIntentReleaseTimerRef.current !== null) {
-      window.clearTimeout(readerIntentReleaseTimerRef.current);
-      readerIntentReleaseTimerRef.current = null;
-    }
+    endReaderIntentGuardRef.current?.();
+    endReaderIntentGuardRef.current = null;
   }, []);
 
   const clearPendingFinalAnswerNavigation = useCallback((): void => {
@@ -816,7 +814,7 @@ export function ChatWorkspace({
       followCorrectionFrameRef.current = null;
     }
     const intentConversationId = navigationRef.current.conversationId;
-    readerIntentReleaseTimerRef.current = window.setTimeout(() => {
+    endReaderIntentGuardRef.current = startReaderIntentGuard(() => {
       clearReaderIntent();
       // Content may have finished growing while the gesture guard blocked
       // following. Retry only if this conversation still owns following.
@@ -824,7 +822,7 @@ export function ChatWorkspace({
         navigationRef.current.conversationId === intentConversationId
         && transcriptNavigationFollowsContent(navigationRef.current)
       ) performScrollToLatest("auto");
-    }, READER_INTENT_GUARD_MS);
+    });
   }, [clearPendingFinalAnswerNavigation, clearReaderIntent, performScrollToLatest]);
 
   const noteResponseTimelineNavigationIntent = useCallback((): void => {

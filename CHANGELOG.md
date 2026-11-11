@@ -56,7 +56,8 @@ The useful changes in each Inertia release, in plain language.
 - A quota row no longer keeps a value from an earlier week, from another
   account or from before a Claude Code update while the panel says *Fresh*.
 - Windows read **Session**, **Weekly**, **Weekly · Opus**… once, instead of
-  *Claude · 7 day · 7 days*.
+  *Claude · 7 day · 7 days*. The header meter and the quota warning use the
+  same names (*Claude Session limit*, *Claude Weekly limit · Fable*).
 - Reading limits in the Usage popup also refreshes the quota each chat shows.
 
 ### Window

@@ -28,6 +28,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "reader-position-fixture" } });
   if (message.method === "initialized") return;
   if (message.method === "config/read") return send({ id: message.id, result: { config: {} } });
+  if (message.method === "thread/goal/get") return send({ id: message.id, result: { goal: null } });
   if (message.method === "model/list") return send({ id: message.id, result: { data: [], nextCursor: null } });
   if (message.method === "account/rateLimits/read") {
     return send({ id: message.id, result: { rateLimits: null, rateLimitsByLimitId: null } });

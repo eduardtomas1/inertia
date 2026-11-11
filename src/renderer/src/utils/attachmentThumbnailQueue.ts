@@ -74,9 +74,9 @@ export function observeAttachmentThumbnail(
     entry.image?.remove();
     if (entry.image && !loading.has(entry.image)) entry.image = undefined;
   };
-  const observer = new IntersectionObserver(([observation]) => {
+  const observer = new IntersectionObserver((observations) => {
     if (disposed) return;
-    if (!observation!.isIntersecting) { hide(); return; }
+    if (!observations.at(-1)!.isIntersecting) { hide(); return; }
     entry.visible = true;
     if (entry.image) element.append(entry.image);
     else {

@@ -18,6 +18,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
   const message = JSON.parse(line);
   if (message.method === "initialize") send({ id: message.id, result: { userAgent: "text-fixture" } });
   if (message.method === "config/read") return send({ id: message.id, result: { config: {} } });
+  if (message.method === "thread/goal/get") return send({ id: message.id, result: { goal: null } });
   if (message.method === "model/list") send({ id: message.id, result: { data: [], nextCursor: null } });
   if (message.method === "account/rateLimits/read") send({ id: message.id, result: { rateLimits: null } });
   if (message.method === "thread/start" || message.method === "thread/resume") {

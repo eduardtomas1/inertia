@@ -2,20 +2,7 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Unreleased
-
-### Chats
-
-- Earlier messages load without moving what you are reading. The message at
-  the top of the transcript used to jump for a moment when the page arrived,
-  could stay displaced if you touched the wheel or a key just then, and could
-  be thrown back and forth when the page arrived while the transcript was
-  still moving, for example after Home.
-- Going to the start of a long chat always loads the earlier messages. On a
-  busy computer the chat could snap back to the latest message, or stay at
-  the start with nothing loading until you pressed **Load earlier messages**.
-
-## 0.0.83 — 2026-11-10
+## 0.0.83 — 2026-11-11
 
 Calmer chats, Grok, custom agents you call by name, secrets that never enter
 the chat, and long chats that spend far less usage.
@@ -42,6 +29,18 @@ the chat, and long chats that spend far less usage.
   refused with *Stop the active run*, leaving the old mode in place.
 - Pressing End while an answer is still arriving keeps following it, instead
   of sometimes stopping just short and leaving **Jump to latest** showing.
+- Earlier messages load without moving what you are reading. The message at
+  the top of the transcript used to jump for a moment when the page arrived,
+  could stay displaced if you touched the wheel or a key just then, and could
+  be thrown back and forth when the page arrived while the transcript was
+  still moving, for example after Home.
+- Going to the start of a long chat always loads the earlier messages. On a
+  busy computer the chat could snap back to the latest message, or stay at
+  the start with nothing loading until you pressed **Load earlier messages**.
+- Image thumbnails in a chat and in **Attachments** load when they come into
+  view and unload when they leave it, even on a busy computer. When an image
+  passed through the view faster than the app could keep up, it could stay
+  loaded out of sight, or stay an icon while you were looking at it.
 
 ### Composer and look
 

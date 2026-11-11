@@ -121,19 +121,19 @@ function emptySamples(band: WindowDragBand, from: number, count: number): number
 }
 
 async function tuckControlsUnderTopBar(target: Page, selector: string): Promise<DragPoint[]> {
-  return await target.evaluate(async ({ controls, height }) => {
+  const read = async (): Promise<{ points: DragPoint[]; center: DragPoint; forward: boolean } | null> => await target.evaluate(({ controls, height }) => {
     const scrolls = (element: Element): boolean => element.scrollHeight > element.clientHeight + height
       && /auto|scroll/u.test(getComputedStyle(element).overflowY);
-    let container: Element | null = null;
+    let scroller: Element | null = null;
     for (const control of document.querySelectorAll(controls)) {
-      for (let ancestor = control.parentElement; ancestor && !container; ancestor = ancestor.parentElement) {
-        if (scrolls(ancestor)) container = ancestor;
+      for (let ancestor = control.parentElement; ancestor && !scroller; ancestor = ancestor.parentElement) {
+        if (scrolls(ancestor)) scroller = ancestor;
       }
-      if (container) break;
+      if (scroller) break;
     }
-    if (!container) return [];
-    const scroller = container;
-    const hidden = (): { x: number; y: number }[] => [...scroller.querySelectorAll(controls)].flatMap((element) => {
+    if (!scroller) return null;
+    const bounds = scroller.getBoundingClientRect();
+    const points = [...scroller.querySelectorAll(controls)].flatMap((element) => {
       const rect = element.getBoundingClientRect();
       const top = Math.max(0, rect.top);
       const bottom = Math.min(height, rect.bottom);
@@ -142,13 +142,24 @@ async function tuckControlsUnderTopBar(target: Page, selector: string): Promise<
         .map((share) => ({ x: Math.round(rect.left + rect.width * share), y: Math.round((top + bottom) / 2) }))
         .filter((point) => !document.elementFromPoint(point.x, point.y)?.closest("button, input, textarea, a[href], [role='separator']"));
     });
-    scroller.scrollTop = Math.floor((scroller.scrollHeight - scroller.clientHeight) / 2);
-    for (let attempt = 0; attempt < 120 && hidden().length === 0; attempt += 1) {
-      scroller.scrollTop += 5;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    return hidden();
+    return {
+      points,
+      center: { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + Math.min(bounds.height, window.innerHeight - bounds.top) / 2) },
+      forward: scroller.scrollTop < (scroller.scrollHeight - scroller.clientHeight) / 2,
+    };
   }, { controls: selector, height: WINDOW_HEADER_HEIGHT });
+  const start = await read();
+  if (!start) return [];
+  const direction = start.forward ? 1 : -1;
+  await target.mouse.move(start.center.x, start.center.y);
+  await target.mouse.wheel(0, 420 * direction);
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    await target.waitForTimeout(40);
+    const state = await read();
+    if (state && state.points.length > 0) return state.points;
+    await target.mouse.wheel(0, 10 * direction);
+  }
+  return [];
 }
 
 test("drags the window from every empty part of the chat top bar", async () => {

@@ -38,7 +38,7 @@ A chat that stopped at a usage limit shows **Limited** in the sidebar, and its n
 
 ## Quota warnings
 
-Inertia shows a short notice when a 5-hour or weekly window drops below 25%, 15% and 5% remaining. In **Settings → Notifications**, turn off **Quota warnings**, or set **Warn when below** to 15% or 5% to be warned later.
+Inertia shows a short notice when a Session or Weekly limit, including a model's weekly limit such as Weekly · Fable, drops below 25%, 15% and 5% remaining. In **Settings → Notifications**, turn off **Quota warnings**, or set **Warn when below** to 15% or 5% to be warned later.
 
 The composer's usage indicator shows the context window. Its popover adds the selected account's quota with the same bars as Limits, says when another account of the same provider has more room, using the last Limits reading, and offers **All provider limits**, which opens the Usage popup on Limits without sending a message.
 

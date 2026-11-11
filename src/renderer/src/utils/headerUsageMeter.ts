@@ -1,4 +1,4 @@
-import { usageWindowTitle } from "@shared/usage-window-title";
+import { usageLimitName } from "@shared/usage-window-title";
 
 import type { EnvironmentUsageSummary } from "./environmentSummary";
 
@@ -15,11 +15,6 @@ export interface HeaderUsageMeterModel {
   valueLabel: string;
   accessibleLabel: string;
   freshness: EnvironmentUsageSummary["quota"]["freshness"];
-}
-
-export function quotaLimitName(limit: Pick<HeaderMeterLimit, "id" | "label" | "windowMinutes">): string {
-  const title = usageWindowTitle(limit);
-  return /limit$/iu.test(title) ? title : `${title} limit`;
 }
 
 export function isQuotaResetDue(
@@ -90,7 +85,7 @@ export function headerUsageMeterModel(
     limits,
     low: tightest.remainingPercent < HEADER_METER_LOW_REMAINING_PERCENT,
     valueLabel: `${remaining}%`,
-    accessibleLabel: `Usage: ${remaining}% of ${quotaLimitName(tightest)} left${qualifier}`,
+    accessibleLabel: `Usage: ${remaining}% of ${usageLimitName(tightest)} left${qualifier}`,
     freshness,
   };
 }

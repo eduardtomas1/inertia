@@ -1,3 +1,4 @@
+import { usageLimitName } from "@shared/usage-window-title";
 import { useEffect, useId, useState, type CSSProperties } from "react";
 
 import { useQuotaNow } from "../../hooks/useQuotaNow";
@@ -8,7 +9,6 @@ import {
   headerUsageMeterModel,
   isQuotaResetDue,
   quotaResetLabel,
-  quotaLimitName,
 } from "../../utils/headerUsageMeter";
 
 export function HeaderUsageMeter({
@@ -89,7 +89,7 @@ export function HeaderUsageMeter({
                 data-reset-due={resetDue || undefined}
               >
                 <span>
-                  {quotaLimitName(limit)}
+                  {usageLimitName(limit)}
                   <small>{quotaResetLabel(limit.resetsAt, now)}</small>
                 </span>
                 <b>{resetDue ? "Reset" : `${clampRemainingPercent(limit.remainingPercent)}% left`}</b>

@@ -42,7 +42,7 @@ export function ProviderQuotaNotices({
             <Gauge size={16} aria-hidden="true" />
             <span>
               <strong>
-                {notice.providerLabel} {notice.windowLabel} limit
+                {notice.providerLabel} {notice.limitName}
               </strong>
               <small>
                 {notice.remainingPercent}% remaining
@@ -50,7 +50,7 @@ export function ProviderQuotaNotices({
               </small>
             </span>
             <IconButton
-              label={`Dismiss ${notice.providerLabel} ${notice.windowLabel} quota notice`}
+              label={`Dismiss ${notice.providerLabel} ${notice.windowTitle} quota notice`}
               onClick={() => onDismiss(notice.id)}
             >
               <X size={14} />

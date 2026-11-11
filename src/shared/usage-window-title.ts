@@ -29,3 +29,15 @@ export function usageWindowTitle(window: UsageWindowTitleInput): string {
   if (!duration) return window.label;
   return name ? `${name} · ${duration}` : duration;
 }
+
+const DURATION_TITLE = /^(?:Session|Weekly|Daily|\d+-(?:hour|day|minute) window)$/u;
+
+export function usageLimitName(window: UsageWindowTitleInput): string {
+  const title = usageWindowTitle(window);
+  if (/limit$/iu.test(title)) return title;
+  const [head, ...rest] = title.split(" · ");
+  if (rest.length > 0 && DURATION_TITLE.test(head!)) {
+    return [`${head!.replace(/ window$/u, "")} limit`, ...rest].join(" · ");
+  }
+  return `${title.replace(/ window$/u, "")} limit`;
+}

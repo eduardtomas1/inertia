@@ -6,7 +6,6 @@ import {
   headerUsageMeterModel,
   isQuotaResetDue,
   quotaResetLabel,
-  quotaLimitName,
 } from "../../src/renderer/src/utils/headerUsageMeter";
 
 function usage(
@@ -93,11 +92,8 @@ describe("header usage meter", () => {
   });
 
   it("labels windows and resets", () => {
-    expect(quotaLimitName({ id: "claude:seven_day", label: "Weekly", windowMinutes: 10_080 })).toBe("Weekly limit");
-    expect(quotaLimitName({ id: "claude:seven_day_overage_included", label: "Weekly · Fable", windowMinutes: 10_080 })).toBe("Weekly · Fable limit");
-    expect(quotaLimitName({ id: "codex:primary", label: "Codex usage", windowMinutes: 300 })).toBe("Session limit");
-    expect(quotaLimitName({ id: "codex:secondary", label: "Codex usage · secondary", windowMinutes: 10_080 })).toBe("Weekly limit");
-    expect(quotaLimitName({ id: "five-hour", label: "Five-hour limit", windowMinutes: 300 })).toBe("Five-hour limit");
+    const fable = { id: "claude:seven_day_overage_included", label: "Weekly · Fable", remainingPercent: 14, windowMinutes: 10_080, resetsAt: weekly.resetsAt };
+    expect(headerUsageMeterModel(usage([weekly, fable]), NOW)?.accessibleLabel).toBe("Usage: 14% of Weekly limit · Fable left");
     const now = Date.parse("2026-09-21T12:00:00.000Z");
     expect(quotaResetLabel("2026-09-21T14:20:00.000Z", now)).toBe("Resets in 2h 20m");
     expect(quotaResetLabel("2026-09-21T12:30:00.000Z", now)).toBe("Resets in 30m");

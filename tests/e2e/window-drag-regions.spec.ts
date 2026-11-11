@@ -120,8 +120,18 @@ function emptySamples(band: WindowDragBand, from: number, count: number): number
   return band.points.slice(from, from + count).filter((point) => !point.overControl).length;
 }
 
+interface TuckState {
+  points: DragPoint[];
+  exposed: string[];
+  center: DragPoint;
+  forward: boolean;
+  scrollTop: number;
+  candidates: number;
+  distance: number | null;
+}
+
 async function tuckControlsUnderTopBar(target: Page, selector: string): Promise<DragPoint[]> {
-  const read = async (): Promise<{ points: DragPoint[]; center: DragPoint; forward: boolean } | null> => await target.evaluate(({ controls, height }) => {
+  const read = async (forward?: boolean): Promise<TuckState | null> => await target.evaluate(({ controls, height, direction }) => {
     const scrolls = (element: Element): boolean => element.scrollHeight > element.clientHeight + height
       && /auto|scroll/u.test(getComputedStyle(element).overflowY);
     let scroller: Element | null = null;
@@ -132,34 +142,63 @@ async function tuckControlsUnderTopBar(target: Page, selector: string): Promise<
       if (scroller) break;
     }
     if (!scroller) return null;
-    const bounds = scroller.getBoundingClientRect();
-    const points = [...scroller.querySelectorAll(controls)].flatMap((element) => {
-      const rect = element.getBoundingClientRect();
+    const owner = scroller;
+    const bounds = owner.getBoundingClientRect();
+    const headerControl = (x: number, y: number): boolean => {
+      const hit = document.elementFromPoint(x, y);
+      return Boolean(hit && !owner.contains(hit) && hit.closest("button, input, textarea, a[href], [role='separator'], .header-title-wrap h1"));
+    };
+    const elements = [...owner.querySelectorAll(controls)].map((element) => ({ element, rect: element.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.width >= 12 && rect.height >= 6);
+    const exposed: string[] = [];
+    const points = elements.flatMap(({ element, rect }) => {
       const top = Math.max(0, rect.top);
       const bottom = Math.min(height, rect.bottom);
-      if (bottom - top < 6 || rect.width < 12) return [];
+      if (bottom - top < 6) return [];
       return [0.2, 0.5, 0.8]
         .map((share) => ({ x: Math.round(rect.left + rect.width * share), y: Math.round((top + bottom) / 2) }))
-        .filter((point) => !document.elementFromPoint(point.x, point.y)?.closest("button, input, textarea, a[href], [role='separator']"));
+        .filter((point) => {
+          const hit = document.elementFromPoint(point.x, point.y);
+          if (hit && owner.contains(hit)) {
+            exposed.push(`${element.getAttribute("aria-label") ?? element.className} at ${point.x},${point.y}`);
+            return false;
+          }
+          return !headerControl(point.x, point.y);
+        });
     });
+    const moving = direction ?? owner.scrollTop < (owner.scrollHeight - owner.clientHeight) / 2;
+    const candidates = elements
+      .filter(({ rect }) => !headerControl(Math.round(rect.left + rect.width / 2), Math.round(height / 2)))
+      .map(({ rect }) => rect.top + rect.height / 2 - height / 2)
+      .filter((distance) => moving ? distance > 1 : distance < -1)
+      .sort((first, second) => Math.abs(first) - Math.abs(second));
     return {
       points,
+      exposed,
       center: { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + Math.min(bounds.height, window.innerHeight - bounds.top) / 2) },
-      forward: scroller.scrollTop < (scroller.scrollHeight - scroller.clientHeight) / 2,
+      forward: moving,
+      scrollTop: Math.round(owner.scrollTop),
+      candidates: candidates.length,
+      distance: candidates[0] ?? null,
     };
-  }, { controls: selector, height: WINDOW_HEADER_HEIGHT });
+  }, { controls: selector, height: WINDOW_HEADER_HEIGHT, direction: forward });
   const start = await read();
-  if (!start) return [];
-  const direction = start.forward ? 1 : -1;
+  if (!start) throw new Error(`No scrolling container holds ${selector}.`);
   await target.mouse.move(start.center.x, start.center.y);
-  await target.mouse.wheel(0, 420 * direction);
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    await target.waitForTimeout(40);
-    const state = await read();
-    if (state && state.points.length > 0) return state.points;
-    await target.mouse.wheel(0, 10 * direction);
+  const history: string[] = [];
+  let state: TuckState | null = start;
+  for (let attempt = 0; attempt < 12 && state; attempt += 1) {
+    expect(state.exposed, `A control under ${selector} shows through the top bar`).toEqual([]);
+    if (state.points.length > 0) return state.points;
+    history.push(`scrollTop ${state.scrollTop}, ${state.candidates} candidates, next ${state.distance ?? "none"}`);
+    if (state.distance === null) break;
+    const before = state.scrollTop;
+    await target.mouse.wheel(0, Math.round(state.distance));
+    await expect.poll(async () => (await read(start.forward))?.scrollTop ?? before, { timeout: 2_000 }).not.toBe(before);
+    await target.evaluate(async () => await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    state = await read(start.forward);
   }
-  return [];
+  throw new Error(`Could not scroll a control under ${selector} beneath the empty top bar: ${history.join("; ")}`);
 }
 
 test("drags the window from every empty part of the chat top bar", async () => {

@@ -65,7 +65,7 @@ async function expectDraggableTopBar(
     "Every top bar control stays outside the drag region",
   ).toEqual([]);
   expect(
-    band.points.filter((point) => point.region !== "drag"),
+    band.points.filter((point) => !point.overControl && point.region !== "drag"),
     `Every empty top bar sample drags the window: ${context}`,
   ).toEqual([]);
   expect(band.draggableShare, `Draggable share of the empty top bar area: ${context}`)
@@ -103,6 +103,21 @@ async function emptyHeaderPoints(target: Page, includeSidebar: boolean): Promise
       { x: (lockup.right + sidebar.right) / 2, y: Math.min(44, lockup.top + lockup.height / 2) },
     ];
   }, includeSidebar);
+}
+
+async function showTranscript(target: Page): Promise<void> {
+  const history = target.locator(".orphan-run-flow details");
+  if (!await history.evaluate((element) => (element as HTMLDetailsElement).open)) {
+    await history.locator("summary").click();
+  }
+  await expect(target.locator(".message-scroll .response-code-file-link").first()).toBeAttached();
+  await expect.poll(async () => await target.locator(".message-scroll").evaluate(
+    (element) => element.scrollHeight - element.clientHeight,
+  )).toBeGreaterThan(600);
+}
+
+function emptySamples(band: WindowDragBand, from: number, count: number): number {
+  return band.points.slice(from, from + count).filter((point) => !point.overControl).length;
 }
 
 async function tuckControlsUnderTopBar(target: Page, selector: string): Promise<DragPoint[]> {
@@ -149,13 +164,15 @@ test("drags the window from every empty part of the chat top bar", async () => {
 
 test("keeps the top bar draggable above scrolled chats and transcript", async () => {
   const underSidebar = await tuckControlsUnderTopBar(page, ".sidebar button:not(.drag-region *)");
+  await showTranscript(page);
   const underHeader = await tuckControlsUnderTopBar(page, ".message-scroll button");
-  expect(underSidebar.length, "A sidebar control is scrolled under the top bar").toBeGreaterThan(0);
-  await expectDraggableTopBar(page, [
+  const band = await expectDraggableTopBar(page, [
     ...underSidebar,
     ...underHeader,
     ...await emptyHeaderPoints(page, true),
   ]);
+  expect(emptySamples(band, 0, underSidebar.length), "A sidebar control is scrolled under the empty top bar").toBeGreaterThan(0);
+  expect(emptySamples(band, underSidebar.length, underHeader.length), "A transcript control is scrolled under the empty top bar").toBeGreaterThan(0);
 });
 
 test("keeps the header draggable with the sidebar collapsed", async () => {
@@ -193,11 +210,27 @@ test("drags the detached chat window from its header", async () => {
   const popup = await opened;
   await popup.locator(".detached-chat-shell").waitFor();
   await popup.getByRole("textbox", { name: "Message" }).waitFor();
+  await showTranscript(popup);
   const underHeader = await tuckControlsUnderTopBar(popup, ".message-scroll button");
   const band = await expectDraggableTopBar(popup, underHeader);
+  expect(emptySamples(band, 0, underHeader.length), "A transcript control is scrolled under the empty detached header").toBeGreaterThan(0);
   expect(band.longestRowSpan).toBeGreaterThan(80);
   await popup.getByRole("button", { name: "Return chat to main window" }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+});
+
+test("leaves the top of an open popup's backdrop to dismiss it instead of dragging", async () => {
+  await page.locator(".sidebar-footer").getByRole("button", { name: "Usage", exact: true }).click();
+  const popup = page.getByRole("dialog", { name: "Usage", exact: true });
+  await expect(popup).toBeVisible();
+  const above = await popup.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: Math.max(2, rect.top / 2) };
+  });
+  const reading = await measureWindowDragBand(page, { points: [above] });
+  expect(reading.points[0]?.region).toBe("no-drag");
+  await page.mouse.click(above.x, above.y);
+  await expect(popup).toHaveCount(0);
 });
 
 test("keeps a view title selectable while the rest of its header drags", async () => {

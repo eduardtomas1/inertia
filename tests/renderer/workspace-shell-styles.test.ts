@@ -361,9 +361,9 @@ describe("split view", () => {
 describe("detached chat window", () => {
   const detached = readSourceText("src/renderer/src/detached-chat.css");
 
-  it("reuses the workbench breadcrumb header, keeps it draggable and keeps the error bar plain", () => {
-    expect(block(".detached-chat-shell .workspace-header > .header-leading", detached)).toContain("-webkit-app-region: drag;");
-    expect(block(".detached-chat-shell .header-breadcrumb :is(button, input)", detached)).toContain("-webkit-app-region: no-drag;");
+  it("reuses the workbench breadcrumb header and its drag regions, and keeps the error bar plain", () => {
+    expect(detached).not.toContain("-webkit-app-region");
+    expect(css).toMatch(/\.drag-region \{\n  -webkit-app-region: drag;\n\}/u);
     expect(block(".detached-chat-error", detached)).not.toContain("background");
     const dismiss = block(".detached-chat-error > button", detached);
     expect(dismiss).toContain("border: 1px solid var(--line);");

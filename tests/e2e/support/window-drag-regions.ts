@@ -17,6 +17,7 @@ export interface DragPoint {
 export interface DragPointReading extends DragPoint {
   region: AppRegion;
   topElement: string;
+  overControl: boolean;
 }
 
 export interface DragControlReading {
@@ -195,13 +196,15 @@ export async function measureWindowDragBand(
       points: points.map((point) => {
         const cellX = Math.round(point.x) - left;
         const cellY = Math.round(point.y);
-        const cell = cellX >= 0 && cellX < width && cellY >= 0 && cellY < height ? cells[cellY * width + cellX] : 0;
+        const inBand = cellX >= 0 && cellX < width && cellY >= 0 && cellY < height;
+        const cell = inBand ? cells[cellY * width + cellX] : 0;
         const top = document.elementFromPoint(point.x, point.y);
         return {
           x: point.x,
           y: point.y,
           region: cell === DRAG ? "drag" as const : cell === NO_DRAG ? "no-drag" as const : "none" as const,
           topElement: top ? describe(top) : "",
+          overControl: !inBand || Boolean(top?.closest(controlSelector)),
         };
       }),
     };

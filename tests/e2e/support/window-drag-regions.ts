@@ -67,11 +67,13 @@ const CONTROL_SELECTOR = [
   ".workspace-corner-controls.no-drag",
 ].join(", ");
 
+const BACKDROP_SELECTOR = ".sidebar-scrim";
+
 export async function measureWindowDragBand(
   page: Page,
   options: { points?: readonly DragPoint[]; row?: number; height?: number } = {},
 ): Promise<WindowDragBand> {
-  return await page.evaluate(({ controlSelector, height, row, points }) => {
+  return await page.evaluate(({ controlSelector, backdropSelector, height, row, points }) => {
     const overlay = (navigator as Navigator & {
       windowControlsOverlay?: { visible: boolean; getTitlebarAreaRect(): DOMRect };
     }).windowControlsOverlay;
@@ -125,7 +127,7 @@ export async function measureWindowDragBand(
       for (let blockX = 0; blockX < width; blockX += BLOCK) {
         const hit = document.elementFromPoint(left + blockX + BLOCK / 2, blockY + BLOCK / 2);
         const control = hit?.closest(controlSelector);
-        if (!hit || !control) continue;
+        if (!hit || !control || control.matches(backdropSelector)) continue;
         const reading = controls.get(control) ?? { label: describe(control), left: left + blockX, right: left + blockX, draggableArea: 0, hitRegion: "no-drag" as const };
         controls.set(control, reading);
         reading.left = Math.min(reading.left, left + blockX);
@@ -204,12 +206,13 @@ export async function measureWindowDragBand(
           y: point.y,
           region: cell === DRAG ? "drag" as const : cell === NO_DRAG ? "no-drag" as const : "none" as const,
           topElement: top ? describe(top) : "",
-          overControl: !inBand || Boolean(top?.closest(controlSelector)),
+          overControl: !inBand || Boolean(top?.closest(controlSelector) && !top.closest(backdropSelector)),
         };
       }),
     };
   }, {
     controlSelector: CONTROL_SELECTOR,
+    backdropSelector: BACKDROP_SELECTOR,
     height: options.height ?? WINDOW_HEADER_HEIGHT,
     row: options.row ?? Math.floor((options.height ?? WINDOW_HEADER_HEIGHT) / 2),
     points: [...(options.points ?? [])],

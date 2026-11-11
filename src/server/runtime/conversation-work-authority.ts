@@ -11,11 +11,6 @@ export interface ConversationWorkspaceIdentity {
 interface ReservedConversationWorkspace extends ConversationWorkspaceIdentity {
   checkoutIdentity: string;
   kind: "provider" | "workspace" | "exclusive";
-  locksRunConfiguration: boolean;
-}
-
-export interface ConversationReservationOptions {
-  locksRunConfiguration?: boolean;
 }
 
 interface CheckoutReservations {
@@ -23,7 +18,7 @@ interface CheckoutReservations {
   reservationIds: Set<string>;
 }
 
-function canonicalCheckoutIdentity(path: string): string {
+export function canonicalCheckoutIdentity(path: string): string {
   const target = resolve(path);
   let existing = target;
   while (true) {
@@ -58,17 +53,13 @@ export class ConversationWorkAuthority {
     ) => ConversationWorkspaceIdentity,
   ) {}
 
-  reserve(
-    conversationId: string,
-    options: ConversationReservationOptions = {},
-  ): boolean {
+  reserve(conversationId: string): boolean {
     const workspace = this.workspaceForConversation(conversationId);
     return this.reserveIdentity(
       conversationId,
       workspace.projectId,
       workspace.checkoutPath,
       "provider",
-      options.locksRunConfiguration ?? true,
     );
   }
 
@@ -181,19 +172,6 @@ export class ConversationWorkAuthority {
     return this.hasCheckout(workspace.checkoutPath);
   }
 
-  locksRunConfiguration(conversationId: string): boolean {
-    if (this.workspaceByReservation.get(conversationId)?.locksRunConfiguration) {
-      return true;
-    }
-    const workspace = this.workspaceForConversation(conversationId);
-    const checkout = this.reservationsByCheckout.get(
-      canonicalCheckoutIdentity(workspace.checkoutPath),
-    );
-    return [...(checkout?.reservationIds ?? [])].some((reservationId) =>
-      this.workspaceByReservation.get(reservationId)?.locksRunConfiguration
-        !== false);
-  }
-
   isSoleProviderReservationAtConversationCheckout(
     reservationId: string,
     conversationId: string,
@@ -240,7 +218,6 @@ export class ConversationWorkAuthority {
     projectId: string,
     checkoutPath: string,
     kind: ReservedConversationWorkspace["kind"],
-    locksRunConfiguration = true,
   ): boolean {
     if (this.workspaceByReservation.has(reservationId)) return false;
     const checkoutIdentity = canonicalCheckoutIdentity(checkoutPath);
@@ -256,7 +233,6 @@ export class ConversationWorkAuthority {
       checkoutPath,
       checkoutIdentity,
       kind,
-      locksRunConfiguration,
     });
     if (checkout) {
       checkout.reservationIds.add(reservationId);
@@ -270,10 +246,11 @@ export class ConversationWorkAuthority {
   }
 }
 
+export function checkoutContains(root: string, path: string): boolean {
+  const child = relative(root, path);
+  return !child || (!isAbsolute(child) && child !== ".." && !child.startsWith(`..${sep}`));
+}
+
 function overlappingCheckout(left: string, right: string): boolean {
-  const contained = (root: string, path: string): boolean => {
-    const child = relative(root, path);
-    return !child || (!isAbsolute(child) && child !== ".." && !child.startsWith(`..${sep}`));
-  };
-  return contained(left, right) || contained(right, left);
+  return checkoutContains(left, right) || checkoutContains(right, left);
 }

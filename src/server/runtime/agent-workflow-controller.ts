@@ -20,6 +20,7 @@ import type { RuntimeStore } from "../database";
 import { normalizeIdentityPath } from "../project-identity";
 import type { ProviderManager } from "../providers";
 import type { ProviderGoalSnapshot } from "../provider/contracts";
+import { NativeGoalReads, type NativeGoalRead } from "./native-goal-reads";
 import { RuntimeRequestError } from "../runtime-errors";
 import { containsPotentialSkillInvocation, mentionedSkillNames, skillDiscoveryIsFresh } from "./agent-skill-invocation";
 
@@ -194,6 +195,7 @@ export class AgentWorkflowController {
   private readonly skillDiscoveryFlights =
     new Map<string, SkillDiscoveryFlight>();
   private nativeGoalRuntime: NativeGoalRuntime | null = null;
+  readonly nativeGoalReads = new NativeGoalReads();
   private readonly contact: ConversationProviderContact;
 
   constructor(
@@ -303,16 +305,26 @@ export class AgentWorkflowController {
               providerSessionId,
             );
           let response: JsonObject;
+          let read: NativeGoalRead | null = null;
+          let readError: unknown;
           try {
+            read = this.nativeGoalReads.begin(
+              conversationId,
+              this.store.conversationPath(conversationId),
+            );
+            if (!read) return;
             const context = await this.contact.codexControl(conversationId);
             response = await withCodexControlClient(
-              context,
+              { ...context, signal: read.signal },
               ({ request }) => request("thread/goal/get", {
                 threadId: providerSessionId,
               }),
-            );
-          } catch {
-            if (this.hasNativeGoalSession(
+            ).finally(() => {
+              context.installationUse.abandonBeforeSpawn();
+            });
+          } catch (error) {
+            readError = error;
+            if (!read?.signal.aborted && this.hasNativeGoalSession(
               conversationId,
               providerSessionId,
             ) && synchronizationGeneration
@@ -326,6 +338,8 @@ export class AgentWorkflowController {
               });
             }
             return;
+          } finally {
+            read?.finish(readError);
           }
           if (!this.hasNativeGoalSession(
             conversationId,

@@ -25,6 +25,57 @@ async function inlineFrame(page: Page, selector = INLINE_FRAME): Promise<Frame> 
   return frame;
 }
 
+async function recordFrameGeometry(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const samples: Record<string, unknown>[] = [];
+    Reflect.set(window, "__inertiaE2eFrameGeometry", samples);
+    let last = "";
+    const sample = (): void => {
+      const embedded = document.querySelector<HTMLIFrameElement>('[data-testid="html-render-frame"]');
+      const scroller = document.querySelector('[aria-label="Thread transcript"]');
+      const rect = embedded?.getBoundingClientRect();
+      const geometry = {
+        top: rect?.top ?? null, left: rect?.left ?? null, height: rect?.height ?? null,
+        opacity: embedded ? getComputedStyle(embedded).opacity : null,
+        state: embedded?.closest("figure")?.getAttribute("data-html-render-state") ?? null,
+        scrollTop: scroller?.scrollTop ?? null, scrollHeight: scroller?.scrollHeight ?? null,
+      };
+      const key = JSON.stringify(geometry);
+      if (key !== last) {
+        samples.push({ at: Math.round(performance.timeOrigin + performance.now()), ...geometry });
+        last = key;
+      }
+      if (!Reflect.get(window, "__inertiaE2eFrameGeometryDone")) requestAnimationFrame(sample);
+    };
+    sample();
+  });
+}
+
+async function stopFrameGeometry(page: Page): Promise<void> {
+  await page.evaluate(() => Reflect.set(window, "__inertiaE2eFrameGeometryDone", true));
+}
+
+async function markFrameGeometry(page: Page, mark: string): Promise<void> {
+  await page.evaluate((label) => {
+    (Reflect.get(window, "__inertiaE2eFrameGeometry") as Record<string, unknown>[])
+      .push({ at: Math.round(performance.timeOrigin + performance.now()), mark: label });
+  }, mark);
+}
+
+async function recordFramePresses(frame: Frame): Promise<void> {
+  await frame.evaluate(() => {
+    const presses: Record<string, unknown>[] = [];
+    Reflect.set(window, "__inertiaE2eFramePresses", presses);
+    for (const type of ["pointerdown", "mousedown", "pointerup", "click"]) {
+      window.addEventListener(type, (event) => {
+        const pointer = event as MouseEvent;
+        presses.push({ at: Math.round(performance.timeOrigin + performance.now()), type, trusted: event.isTrusted,
+          target: event.target instanceof Element ? event.target.tagName : null, x: pointer.clientX, y: pointer.clientY });
+      }, true);
+    }
+  });
+}
+
 /** The chat canvas color as the browser resolves it, in the same rgb() form as a computed background. */
 async function canvasColor(page: Page): Promise<string> {
   return await page.evaluate(() => {
@@ -307,6 +358,7 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
     beforeLaunch: seedHostileHtmlRenderConversation,
   });
   const { page } = app;
+  await recordFrameGeometry(page);
   const preconnect = await listener();
   const turn = await listener();
   const navigation = await listener();
@@ -320,6 +372,7 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
     await expect(content.getByRole("heading", { name: HOSTILE_PAGE_TITLE })).toBeVisible();
     const frame = await inlineFrame(page, selector);
     const frameUrl = frame.url();
+    await recordFramePresses(frame);
     await page.evaluate(() => {
       const links: { url: unknown; focused: boolean; activated: boolean }[] = [];
       Reflect.set(window, "__inertiaE2eFrameLinks", links);
@@ -334,15 +387,17 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
         const target = event.target instanceof Element ? event.target : null;
         const embedded = document.querySelector('[data-testid="html-render-frame"]')?.getBoundingClientRect();
         const scroller = document.querySelector('[aria-label="Thread transcript"]');
-        presses.push({ at: Math.round(performance.now()), target: target?.tagName ?? null, className: target?.getAttribute("class") ?? null,
+        presses.push({ at: Math.round(performance.timeOrigin + performance.now()), target: target?.tagName ?? null, className: target?.getAttribute("class") ?? null,
           x: event.clientX, y: event.clientY, frameTop: embedded?.top ?? null, frameHeight: embedded?.height ?? null,
           scrollTop: scroller?.scrollTop ?? null, scrollHeight: scroller?.scrollHeight ?? null, clientHeight: scroller?.clientHeight ?? null });
       }, true);
     });
 
+    await markFrameGeometry(page, "click Not a link");
     await content.getByRole("button", { name: "Not a link" }).click();
     await content.getByRole("textbox", { name: "Access token" }).fill("secret-token");
     await content.getByRole("textbox", { name: "Access token" }).press("Enter");
+    await markFrameGeometry(page, "click Real link");
     await content.getByRole("link", { name: "Real link" }).click();
     try {
       await expect.poll(() => page.evaluate(() => Reflect.get(window, "__inertiaE2eFrameLinks")))
@@ -350,8 +405,13 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
     } catch (error) {
       await test.info().attach("parent-pointer-presses", { contentType: "application/json",
         body: JSON.stringify(await page.evaluate(() => Reflect.get(window, "__inertiaE2eParentPresses")), null, 2) });
+      await test.info().attach("frame-pointer-presses", { contentType: "application/json",
+        body: JSON.stringify(await frame.evaluate(() => Reflect.get(window, "__inertiaE2eFramePresses")).catch((reason: unknown) => String(reason)), null, 2) });
+      await test.info().attach("frame-geometry", { contentType: "application/json",
+        body: JSON.stringify(await page.evaluate(() => Reflect.get(window, "__inertiaE2eFrameGeometry")), null, 2) });
       throw error;
     }
+    await stopFrameGeometry(page);
     await expect.poll(opened).toContain(HOSTILE_PAGE_LINK);
     expect(await opened()).toEqual([HOSTILE_PAGE_LINK]);
     expect(await frame.evaluate(() => Reflect.get(window, "parent") === window.top)).toBe(false);

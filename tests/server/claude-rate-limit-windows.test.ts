@@ -50,14 +50,14 @@ function summary(limits: readonly ProviderRateLimit[]): string[] {
 }
 
 describe("Claude rate limit windows (#723)", () => {
-  it("names the live overage-included window after the model it limits, never extra usage", () => {
+  it("names the live overage-included window as a model's weekly limit, never extra usage", () => {
     const limits = parseClaudeRateLimitEvents(liveEvent({
       seven_day: { utilization: 0.09, resetsAt: Date.parse(WEEK_RESET) / 1_000 },
       seven_day_overage_included: { utilization: 0.15, resetsAt: Date.parse(WEEK_RESET) / 1_000 },
     }));
     expect(limits.map(({ id, label, windowMinutes }) => ({ id, label, windowMinutes }))).toEqual([
       { id: "claude:seven_day", label: "Weekly", windowMinutes: 10_080 },
-      { id: CLAUDE_MODEL_WEEKLY_LIMIT_ID, label: "Weekly · Fable", windowMinutes: 10_080 },
+      { id: CLAUDE_MODEL_WEEKLY_LIMIT_ID, label: "Weekly · model", windowMinutes: 10_080 },
     ]);
     expect(limits.map(({ label }) => label).join(" ")).not.toMatch(/extra usage/iu);
   });
@@ -73,14 +73,16 @@ describe("Claude rate limit windows (#723)", () => {
     ]);
   });
 
-  it("keeps several model-scoped windows apart and maps only the default model to the live window", () => {
+  it("keeps several model-scoped windows apart and maps only the first to the live window", () => {
     const limits = parseClaudeRateLimits(usageRead([
-      { display_name: "Saga", utilization: 40, resets_at: WEEK_RESET },
       { display_name: "Fable", utilization: 19, resets_at: WEEK_RESET },
+      { display_name: "Saga", utilization: 40, resets_at: WEEK_RESET },
+      { utilization: 5, resets_at: WEEK_RESET },
     ]), NOW);
     expect(summary(limits).slice(1)).toEqual([
-      "claude:model_scoped:saga|Weekly · Saga|40",
       `${CLAUDE_MODEL_WEEKLY_LIMIT_ID}|Weekly · Fable|19`,
+      "claude:model_scoped:saga|Weekly · Saga|40",
+      "claude:model_scoped:2|Weekly · model 3|5",
     ]);
   });
 
@@ -120,9 +122,30 @@ describe("Claude rate limit windows (#723)", () => {
     };
     expect(resetQuota(account, "claude-fable-5-2", NOW)).toEqual({ kind: "exhausted", resetsAt: WEEK_RESET });
     expect(resetQuota(account, "fable", NOW)).toEqual({ kind: "exhausted", resetsAt: WEEK_RESET });
+    expect(resetQuota(account, "default", NOW, "Fable 5.2")).toEqual({ kind: "exhausted", resetsAt: WEEK_RESET });
     expect(resetQuota(account, "claude-sonnet-5-5", NOW)).toEqual({ kind: "available" });
+    expect(resetQuota(account, "default", NOW, "Opus 5.5")).toEqual({ kind: "available" });
     account.windows[1]!.remainingPercent = 40;
     expect(resetQuota(account, "claude-fable-5-2", NOW)).toEqual({ kind: "available" });
+    expect(resetQuota(account, "default", NOW)).toEqual({ kind: "available" });
+  });
+
+  it("does not call quota available while an exhausted model weekly window may cover the turn", () => {
+    const exhausted = (label: string): UsageAccount => ({
+      id: "native:claude", providerId: "claude", providerLabel: "Claude", label: "Claude account",
+      email: null, plan: "max", identityKey: null, sources: ["This computer"], status: "ready", detail: null,
+      updatedAt: new Date(NOW).toISOString(), checkedAt: new Date(NOW).toISOString(), credits: null, canReset: false,
+      windows: [
+        { id: "claude:seven_day", label: "Weekly", remainingPercent: 60, windowMinutes: 10_080, resetsAt: WEEK_RESET },
+        { id: CLAUDE_MODEL_WEEKLY_LIMIT_ID, label, remainingPercent: 0, windowMinutes: 10_080, resetsAt: WEEK_RESET },
+      ],
+    });
+    expect(resetQuota(exhausted("Weekly · Fable"), "default", NOW)).toEqual({ kind: "unknown" });
+    expect(resetQuota(exhausted("Weekly · Fable"), "default", NOW, "Default (recommended)")).toEqual({ kind: "unknown" });
+    expect(resetQuota(exhausted("Weekly · model"), "claude-opus-5-5", NOW)).toEqual({ kind: "unknown" });
+    expect(resetQuota(exhausted("Weekly · model 1"), "claude-opus-5-5", NOW)).toEqual({ kind: "unknown" });
+    expect(resetQuota(exhausted("Weekly · Saga"), "claude-opus-5-5", NOW)).toEqual({ kind: "unknown" });
+    expect(resetQuota(exhausted("Weekly · Fable"), "claude-opus-5-5", NOW)).toEqual({ kind: "available" });
   });
 });
 
@@ -218,6 +241,23 @@ describe("provider metadata cache quota replacement (#723)", () => {
     }, "session", { merge: true });
     expect(summary(merged.rateLimits)).toEqual(["claude:seven_day|Weekly|11"]);
     expect(merged.metadataState.rateLimits.freshness).toBe("fresh");
+  });
+
+  it("does not build on the rows of an earlier login it returns to", () => {
+    let now = NOW;
+    const metadata = cache(() => now);
+    const signedIn = { executable: claudeExecutable, version: "2.1.319", authState: "authenticated" as const };
+    metadata.correlate("claude", signedIn);
+    metadata.learn("claude", claudeExecutable, {
+      rateLimits: [window("claude:seven_day", 77, "2026-11-14T15:00:00.000Z", "Weekly"), window("claude:seven_day_opus", 53, "2026-11-14T15:00:00.000Z", "Weekly · Opus")],
+    }, "provider");
+    metadata.correlate("claude", { ...signedIn, authState: "unauthenticated" });
+    now += 20 * 60_000;
+    metadata.correlate("claude", signedIn);
+    const merged = metadata.learn("claude", claudeExecutable, {
+      rateLimits: [window("claude:five_hour", 4, "2026-11-11T12:00:00.000Z", "Session")],
+    }, "session", { merge: true });
+    expect(summary(merged.rateLimits)).toEqual(["claude:five_hour|Session|4"]);
   });
 
   it("renames windows persisted by an earlier version when the cache loads", () => {

@@ -702,7 +702,7 @@ export class ProviderMetadataCache {
     ) {
       entry.rateLimits.values = options.merge
         ? mergeSparseRateLimits(
-            entry.rateLimits.stale ? [] : entry.rateLimits.values,
+            this.isFresh("rateLimits", entry.rateLimits) ? entry.rateLimits.values : [],
             withKnownClaudeModelWeeklyLabel(entry.rateLimits.values, rateLimits),
             attemptedAt,
           ).slice(0, MAX_RATE_LIMITS)

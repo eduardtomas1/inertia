@@ -6,7 +6,8 @@ const LEGACY_MODEL_ID = /^claude:model_(\d+)$/u;
 const MODEL_SCOPED_ID_PREFIX = "claude:model_scoped:";
 
 export const CLAUDE_MODEL_WEEKLY_LIMIT_ID = "claude:seven_day_overage_included";
-export const CLAUDE_MODEL_WEEKLY_DEFAULT_MODEL = "Fable";
+const UNNAMED_MODEL = "model";
+const CLAUDE_FAMILIES = ["fable", "opus", "sonnet", "haiku"];
 
 const WINDOWS: Readonly<Record<string, { label: string; minutes: number | null }>> = {
   five_hour: { label: "Session", minutes: 300 },
@@ -28,7 +29,7 @@ function modelSlug(name: string): string {
 }
 
 export function claudeModelWeeklyLabel(model?: unknown): string {
-  return `${MODEL_WEEKLY_PREFIX}${modelName(model) ?? CLAUDE_MODEL_WEEKLY_DEFAULT_MODEL}`;
+  return `${MODEL_WEEKLY_PREFIX}${modelName(model) ?? UNNAMED_MODEL}`;
 }
 
 export function claudeRateLimitWindow(type: string): { label: string; minutes: number | null } {
@@ -52,15 +53,10 @@ export function claudeModelScopedWindows(
       ? [entry as Record<string, unknown>]
       : []
   ));
-  const named = models.map((value) => modelName(value.display_name));
-  const defaultIndex = named.findIndex((name) => (
-    name?.toLowerCase() === CLAUDE_MODEL_WEEKLY_DEFAULT_MODEL.toLowerCase()
-  ));
-  const liveIndex = models.length === 1 ? 0 : defaultIndex;
   return models.map((value, index) => {
-    const name = named[index] ?? null;
+    const name = modelName(value.display_name);
     return {
-      id: index === liveIndex
+      id: index === 0
         ? CLAUDE_MODEL_WEEKLY_LIMIT_ID
         : `${MODEL_SCOPED_ID_PREFIX}${(name && modelSlug(name)) || index}`,
       label: claudeModelWeeklyLabel(name ?? `model ${index + 1}`),
@@ -69,21 +65,30 @@ export function claudeModelScopedWindows(
   });
 }
 
-export function claudeModelWeeklyScope(window: { id: string; label: string }): string | null {
-  if (
-    window.id !== CLAUDE_MODEL_WEEKLY_LIMIT_ID
-    && !window.id.startsWith(MODEL_SCOPED_ID_PREFIX)
-  ) return null;
-  if (!window.label.startsWith(MODEL_WEEKLY_PREFIX)) return null;
-  return modelSlug(window.label.slice(MODEL_WEEKLY_PREFIX.length)) || null;
+function isModelWeeklyWindow(id: string): boolean {
+  return id === CLAUDE_MODEL_WEEKLY_LIMIT_ID || id.startsWith(MODEL_SCOPED_ID_PREFIX);
 }
 
-export function claudeModelWeeklyAppliesTo(
+function modelWeeklyScope(window: { id: string; label: string }): string | null {
+  if (!window.label.startsWith(MODEL_WEEKLY_PREFIX)) return null;
+  const scope = modelSlug(window.label.slice(MODEL_WEEKLY_PREFIX.length));
+  return scope && scope !== UNNAMED_MODEL ? scope : null;
+}
+
+export type ClaudeModelWeeklyRelation = "applies" | "other-model" | "unknown";
+
+export function claudeModelWeeklyRelation(
   window: { id: string; label: string },
-  model: string,
-): boolean {
-  const scope = claudeModelWeeklyScope(window);
-  return scope !== null && modelSlug(model).includes(scope);
+  modelNames: readonly (string | null | undefined)[],
+): ClaudeModelWeeklyRelation | null {
+  if (!isModelWeeklyWindow(window.id)) return null;
+  const scope = modelWeeklyScope(window);
+  const names = modelNames.flatMap((name) => name ? [modelSlug(name)] : []);
+  if (scope && names.some((name) => name.includes(scope))) return "applies";
+  const families = CLAUDE_FAMILIES.filter((family) => names.some((name) => name.split("-").includes(family)));
+  return scope && CLAUDE_FAMILIES.includes(scope) && families.length > 0 && !families.includes(scope)
+    ? "other-model"
+    : "unknown";
 }
 
 export function withKnownClaudeModelWeeklyLabel<T extends { id: string; label: string }>(
@@ -110,11 +115,7 @@ export function canonicalClaudeRateLimits(
       ? limit.label
       : claudeModelWeeklyLabel(limit.label)
   );
-  const primary = legacy.length === 1
-    ? legacy[0]!
-    : legacy.find(({ label }) => (
-      label.toLowerCase() === CLAUDE_MODEL_WEEKLY_DEFAULT_MODEL.toLowerCase()
-    ));
+  const primary = legacy.find(({ id }) => id === "claude:model_0");
   const result: ProviderRateLimit[] = [];
   for (const limit of limits) {
     if (!limit.id.startsWith("claude:")) {

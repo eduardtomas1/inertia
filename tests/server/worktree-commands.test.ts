@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import WebSocket from "ws";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { RunningRuntime } from "../../src/server";
 import { RuntimeStore } from "../../src/server/database";
@@ -341,10 +341,15 @@ describe("worktree commands", () => {
     });
     const owned = await test.owned("Reading goals");
     const read = reads.begin(owned.conversationId, owned.path)!;
-    read.signal.addEventListener("abort", () => events.push("read aborted"));
+    const aborted = new Promise<void>((resolve) => {
+      read.signal.addEventListener("abort", () => {
+        events.push("read aborted");
+        resolve();
+      });
+    });
 
     const removing = test.remove(owned.path);
-    await vi.waitFor(() => expect(events).toContain("read aborted"));
+    await aborted;
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(events).toEqual(["read aborted"]);
     expect(existsSync(owned.path)).toBe(true);

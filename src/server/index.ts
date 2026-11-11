@@ -749,7 +749,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     turnDiff: (turnId) => turnGitArtifacts.settledTurnDiff(turnId) });
   const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
     dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)), providerMaintenance, updatePreparation,
-  });
+  }, (providerId) => { applyProviderMetadata(providerId, providers.cachedMetadata(providerId)); flushSnapshot(); });
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send, secretValues: () => agentThreads?.secrets.output.values() ?? [] }),

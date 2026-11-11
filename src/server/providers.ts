@@ -909,6 +909,11 @@ export class ProviderManager {
     return this.metadataCache.current(providerId);
   }
 
+  learnAccountRateLimits(providerId: ProviderId, rateLimits: ProviderMetadata["rateLimits"]): void {
+    if (rateLimits.length === 0) return;
+    this.metadataCache.learn(providerId, this.metadataCache.nativeScope(providerId).executable, { rateLimits }, "provider");
+  }
+
   metadataReadTimedOut(providerId: ProviderId): boolean {
     return this.metadataCache.lastReadTimedOut(providerId);
   }

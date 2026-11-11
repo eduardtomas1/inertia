@@ -852,6 +852,15 @@ describe("estimated cost in the usage dashboard", () => {
     expect(dashboard.tokens.input).toMatchObject({ value: 1_000, coverage: "complete" });
     expect(dashboard.models[0]).toMatchObject({ pricedAs: null, cost: { value: null, coverage: "unavailable" } });
     expect(dashboard.cost.status).toBe("unavailable");
+    const legacy = {
+      ...cursor,
+      harnessId: "cursor-cli" as const,
+      modelSelection: { ...cursor.modelSelection, harnessId: "cursor-cli" as const },
+      continuationIdentity: { ...cursor.continuationIdentity, harnessId: "cursor-cli" as const },
+    };
+    const older = projectUsageDashboard([legacy], range, completedAt, everything);
+    expect(older.models[0]).toMatchObject({ providerId: "cursor", pricedAs: null, cost: { value: null, coverage: "unavailable" } });
+    expect(older.cost.status).toBe("unavailable");
   });
 
   it("says why nothing could be estimated", () => {

@@ -405,7 +405,7 @@ function measuredRuntime(turn: UsageDashboardTurn): number | null {
 }
 
 function priceTurn(turn: UsageDashboardTurn, pricing: UsagePricing): PricedTurn {
-  if (turn.modelSelection.harnessId === "cursor-acp") return { pricedAs: null, cost: null };
+  if (turn.providerId === "cursor") return { pricedAs: null, cost: null };
   const priced = pricing.resolve({
     providerId: turn.providerId,
     model: turn.model,

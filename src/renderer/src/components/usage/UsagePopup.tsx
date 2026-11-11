@@ -82,7 +82,7 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
     handledRevision.current = requestRevision;
     if (requestedTab) selectTab(requestedTab);
   }, [requestRevision, requestedTab, selectTab]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || event.isComposing) return;
       const target = event.target instanceof Element ? event.target : null;
@@ -181,7 +181,6 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
       closeLabel="Close usage"
       onClose={onClose}
       onDismiss={onClose}
-      onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}
       headerActions={(
         <>
           <nav className="usage-popup-crumbs" aria-label="Usage filters">
@@ -203,10 +202,14 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
               role="tablist"
               aria-label="Usage view"
               onKeyDown={(event) => {
-                const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-                if (step === 0) return;
+                const current = TABS.findIndex(({ id }) => id === tab);
+                const index = event.key === "ArrowRight" ? (current + 1) % TABS.length
+                  : event.key === "ArrowLeft" ? (current + TABS.length - 1) % TABS.length
+                    : event.key === "Home" ? 0
+                      : event.key === "End" ? TABS.length - 1 : -1;
+                if (index < 0) return;
                 event.preventDefault();
-                const next = TABS[(TABS.findIndex(({ id }) => id === tab) + step + TABS.length) % TABS.length]!;
+                const next = TABS[index]!;
                 selectTab(next.id);
                 event.currentTarget.querySelector<HTMLElement>(`#${tabsId}-${next.id}`)?.focus({ preventScroll: true });
               }}

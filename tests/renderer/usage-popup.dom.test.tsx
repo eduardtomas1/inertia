@@ -332,6 +332,12 @@ describe("Usage popup focus", () => {
     await key(screen.getByRole("tab", { name: "Tokens" }), "ArrowRight");
     expect(pressedTab()).toBe("Limits");
     expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("tabindex"))).toEqual(["-1", "-1", "0"]);
+    await key(screen.getByRole("tab", { name: "Limits" }), "Home");
+    expect(pressedTab()).toBe("Cost");
+    expect(screen.getByRole("tab", { name: "Cost" })).toHaveFocus();
+    await key(screen.getByRole("tab", { name: "Cost" }), "End");
+    expect(pressedTab()).toBe("Limits");
+    expect(screen.getByRole("tab", { name: "Limits" })).toHaveFocus();
 
     const confirmation = document.createElement("section");
     confirmation.className = "limit-reset-confirmation";

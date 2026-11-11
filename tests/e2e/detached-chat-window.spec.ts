@@ -190,9 +190,9 @@ test("moves one live chat between a remembered native window and the main app", 
     .toHaveCount(0);
   const checkoutContext = popup.getByRole("group", { name: "Chat checkout context", includeHidden: true });
   await expect(checkoutContext).toBeAttached();
-  if (!await checkoutContext.isVisible()) {
-    await expect(popup.locator(".composer-branch-control")).toHaveAttribute("data-folded", "true");
-  }
+  const branchControl = popup.locator(".composer-branch-control");
+  await expect.poll(async () => await checkoutContext.isVisible()
+    || await branchControl.getAttribute("data-folded") === "true").toBe(true);
   await expect(popup.getByText("Context from Reviewed context")).toBeVisible();
   await popup.getByRole("button", { name: "Copy final answer" }).click();
   const copiedAnswer = popup.getByRole("button", { name: "Answer copied" });

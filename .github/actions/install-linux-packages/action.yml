@@ -40,10 +40,19 @@ runs:
           amd64|i386) mirrors=(http://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://security.ubuntu.com/ubuntu/ http://mirrors.edge.kernel.org/ubuntu/ http://mirrors.ocf.berkeley.edu/ubuntu/) ;;
           *) mirrors=(http://azure.ports.ubuntu.com/ubuntu-ports/ http://ports.ubuntu.com/ubuntu-ports/ http://mirrors.ocf.berkeley.edu/ubuntu-ports/) ;;
         esac
-        printf '%s\n' "${mirrors[@]}" | sudo tee /etc/apt/inertia-mirrors.txt > /dev/null
+        reachable=()
+        for mirror in "${mirrors[@]}"; do
+          if curl --fail --silent --show-error --head --max-time 10 --output /dev/null "${mirror}dists/${codename}/InRelease"; then
+            reachable+=("$mirror")
+          else
+            echo "Skipping unreachable mirror $mirror" >&2
+          fi
+        done
+        [ "${#reachable[@]}" -gt 0 ] || { echo "No Ubuntu mirror is reachable." >&2; exit 1; }
+        printf '%s\n' "${reachable[@]}" | sudo tee /etc/apt/inertia-mirrors.txt > /dev/null
         [ -f /etc/apt/sources.list ] && sudo sed -i -E '/^deb .*ubuntu(-ports)?\/? /s/^/# /' /etc/apt/sources.list
         printf 'Types: deb\nURIs: mirror+file:/etc/apt/inertia-mirrors.txt\nSuites: %s %s-updates %s-security\nComponents: main universe\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n' "$codename" "$codename" "$codename" | sudo tee /etc/apt/sources.list.d/ubuntu.sources > /dev/null
-        sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+        sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Languages=none update
         sudo apt-get clean
         read -r -a packages <<< "$PACKAGES"
         sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=300 install --download-only --no-install-recommends --yes "${packages[@]}"

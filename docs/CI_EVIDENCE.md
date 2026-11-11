@@ -346,6 +346,40 @@ about 50 s on Linux x64, 35 s on Windows x64 and 90 s on macOS x64. The
 release build job also spends 26 to 42 s on the extra bundle build on macOS
 arm64, and 38 to 78 s on the other platforms.
 
+### Input-task proof instead of the median (2026-11-11)
+
+The median still failed a release. The v0.0.83 macOS arm64 build measured
+40.7, 100.8, 124.1, 106.1 and 62.5 ms, a median of 100.8 ms (run
+[42974272495](https://github.com/eduardtomas1/inertia/actions/runs/42974272495)).
+The same commit measured 60.5, 51.0, 51.2, 51.9 and 53.8 ms on the same runner
+type the day before (run
+[42820715797](https://github.com/eduardtomas1/inertia/actions/runs/42820715797)).
+Linux and Windows measured 40 to 57 ms in both runs. Startup, split and
+terminal timings in the failing report were no slower than the day before, so
+only the hosted macOS arm64 render time moved.
+
+The time was also a weak detector of what the gate is for. With Settings taken
+out of the idle prefetch list on Linux x64, its five opens took 67, 154, 72,
+101 and 57 ms: a median of 72 ms, which the old gate accepts.
+
+The benchmark now records, for every open, whether the surface appeared before
+the task that delivered the click or shortcut ended. A loaded surface renders
+inside that task. A surface that is not loaded has to wait for its chunk and a
+scheduled render, which run in later tasks. The gate is:
+
+- all five relaunches open Settings and the command palette in the input task;
+- the cold New duo dialog, measured the same way, opens in a later task, which
+  proves in every run that the detector can tell the two apart;
+- the fastest of the five relaunches is under the target, which bounds the
+  render cost without the host's jitter.
+
+Local proof on Linux x64 under Xvfb, 1-minute load 10 to 16:
+
+| Build | Settings, five relaunches (ms) | In the input task | Cold dialog in the input task | Result |
+| --- | --- | --- | --- | --- |
+| `main` | 55.0, 77.4, 45.1, 51.5, 90.7 | 5 of 5 | no | pass |
+| Settings not prefetched | 67, 154, 72, 101, 57 | 0 of 5 | no | fail |
+
 ## Measured baseline
 
 These are successful runs from the repository before this change:

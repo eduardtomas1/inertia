@@ -80,22 +80,35 @@ describe("desktop benchmark streaming summary", () => {
 });
 
 describe("desktop benchmark prefetched-surface first opens", () => {
-  function surfaceSamples(settings: readonly number[]) {
+  const warmUp = {
+    commandPaletteFirstOpenMs: 21.4,
+    commandPaletteOpenedInInputTask: true,
+    settingsFirstOpenMs: 162.5,
+    settingsOpenedInInputTask: true,
+  };
+
+  function surfaceSamples(
+    settings: readonly number[],
+    laterTask: { commandPalette?: number; settings?: number } = {},
+  ) {
     return settings.map((settingsFirstOpenMs, index) => ({
       commandPaletteFirstOpenMs: [10.6, 13.3, 10.8, 12.1, 9.4][index]!,
+      commandPaletteOpenedInInputTask: laterTask.commandPalette !== index,
       settingsFirstOpenMs,
+      settingsOpenedInInputTask: laterTask.settings !== index,
     }));
   }
 
-  it("gates the median of the measured relaunches and keeps the warm-up and every sample", () => {
-    const warmUp = { commandPaletteFirstOpenMs: 21.4, settingsFirstOpenMs: 162.5 };
+  it("gates the fastest measured relaunch and keeps the warm-up and every sample", () => {
     const samples = surfaceSamples([50.8, 119, 47.3, 98.1, 64.4]);
 
     const summary = summarizePrefetchedSurfaceSamples(warmUp, samples);
 
-    expect(summary.settingsFirstOpenMs).toBe(64.4);
+    expect(summary.settingsFirstOpenMs).toBe(47.3);
     expect(summary.settingsFirstOpenMs).toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
-    expect(summary.commandPaletteFirstOpenMs).toBe(10.8);
+    expect(summary.commandPaletteFirstOpenMs).toBe(9.4);
+    expect(summary.settingsOpenedInInputTask).toBe(true);
+    expect(summary.commandPaletteOpenedInInputTask).toBe(true);
     expect(summary.prefetchedSurfaces.warmUp).toEqual(warmUp);
     expect(summary.prefetchedSurfaces.samples).toEqual(samples);
     expect(summary.prefetchedSurfaces.settingsFirstOpenMs).toEqual({
@@ -108,18 +121,45 @@ describe("desktop benchmark prefetched-surface first opens", () => {
     expect(summary.prefetchedSurfaces.commandPaletteFirstOpenMs.sampleCount).toBe(5);
   });
 
-  it("still fails the gate when most measured relaunches are slow", () => {
+  it("passes the timing gate when a busy host slows most relaunches of a surface that still opens in the input task", () => {
     const summary = summarizePrefetchedSurfaceSamples(
-      { commandPaletteFirstOpenMs: 12, settingsFirstOpenMs: 60 },
+      warmUp,
+      surfaceSamples([40.7, 100.8, 124.1, 106.1, 62.5]),
+    );
+
+    expect(summary.prefetchedSurfaces.settingsFirstOpenMs.median).toBe(100.8);
+    expect(summary.settingsFirstOpenMs).toBe(40.7);
+    expect(summary.settingsFirstOpenMs).toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
+    expect(summary.settingsOpenedInInputTask).toBe(true);
+  });
+
+  it("still fails the timing gate when every measured relaunch is slow", () => {
+    const summary = summarizePrefetchedSurfaceSamples(
+      warmUp,
       surfaceSamples([131.8, 146.5, 211.7, 191.2, 117.5]),
     );
 
-    expect(summary.settingsFirstOpenMs).toBe(146.5);
+    expect(summary.settingsFirstOpenMs).toBe(117.5);
     expect(summary.settingsFirstOpenMs).toBeGreaterThan(CI_PREFETCHED_SURFACE_TARGET_MS);
   });
 
+  it("reports a surface that opened in a later task on any one relaunch, however fast it was", () => {
+    const settings = summarizePrefetchedSurfaceSamples(
+      warmUp,
+      surfaceSamples([44, 45, 43, 46, 44], { settings: 3 }),
+    );
+    expect(settings.settingsOpenedInInputTask).toBe(false);
+    expect(settings.commandPaletteOpenedInInputTask).toBe(true);
+
+    const commandPalette = summarizePrefetchedSurfaceSamples(
+      warmUp,
+      surfaceSamples([44, 45, 43, 46, 44], { commandPalette: 0 }),
+    );
+    expect(commandPalette.commandPaletteOpenedInInputTask).toBe(false);
+    expect(commandPalette.settingsOpenedInInputTask).toBe(true);
+  });
+
   it("requires an odd number of measured relaunches", () => {
-    const warmUp = { commandPaletteFirstOpenMs: 12, settingsFirstOpenMs: 60 };
     expect(() => summarizePrefetchedSurfaceSamples(warmUp, [])).toThrow(
       "Prefetched-surface first opens need an odd number of measured relaunches.",
     );

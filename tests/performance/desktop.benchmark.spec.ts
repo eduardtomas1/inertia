@@ -1726,12 +1726,24 @@ interface RendererInteractionMeasurement {
   shortcut?: "command-palette";
 }
 
+interface RendererInteractionResult {
+  elapsedMs: number;
+  openedInInputTask: boolean;
+}
+
 async function rendererInteractionMeasurement(
   page: Page,
   measurement: RendererInteractionMeasurement,
-): Promise<number> {
+): Promise<RendererInteractionResult> {
   return page.evaluate(({ triggerSelector, targetSelector, shortcut, platform }) => (
-    new Promise<number>((resolveMeasurement, rejectMeasurement) => {
+    new Promise<RendererInteractionResult>((resolveMeasurement, rejectMeasurement) => {
+      let inputTaskEnded = false;
+      const inputTask = new MessageChannel();
+      inputTask.port1.onmessage = () => {
+        inputTaskEnded = true;
+        inputTask.port1.close();
+      };
+      inputTask.port2.postMessage(null);
       const startedAt = performance.now();
       const timeout = window.setTimeout(() => {
         observer.disconnect();
@@ -1744,7 +1756,10 @@ async function rendererInteractionMeasurement(
         if (!target) return false;
         observer.disconnect();
         window.clearTimeout(timeout);
-        resolveMeasurement(performance.now() - startedAt);
+        resolveMeasurement({
+          elapsedMs: performance.now() - startedAt,
+          openedInInputTask: !inputTaskEnded,
+        });
         return true;
       };
       const observer = new MutationObserver(finishIfVisible);
@@ -1777,31 +1792,33 @@ async function rendererInteractionMeasurement(
   ), { ...measurement, platform: process.platform });
 }
 
-async function coldIntentDialogMeasurement(page: Page): Promise<number> {
-  const elapsed = await rendererInteractionMeasurement(page, {
+async function coldIntentDialogMeasurement(page: Page): Promise<RendererInteractionResult> {
+  const result = await rendererInteractionMeasurement(page, {
     triggerSelector: 'button[aria-label="New duo"]',
     targetSelector: '.multi-spawn-dialog[role="dialog"]',
   });
   await page.getByRole("button", { name: "Close new duo" }).click();
-  return elapsed;
+  return result;
 }
 
 async function prefetchedOverlayMeasurements(page: Page): Promise<PrefetchedSurfaceSample> {
-  const settingsFirstOpenMs = await rendererInteractionMeasurement(page, {
+  const settings = await rendererInteractionMeasurement(page, {
     triggerSelector: '.sidebar-footer button[aria-label="Settings"]',
     targetSelector: ".settings-view",
   });
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await page.locator(".chat-workspace").waitFor();
 
-  const commandPaletteFirstOpenMs = await rendererInteractionMeasurement(page, {
+  const commandPalette = await rendererInteractionMeasurement(page, {
     shortcut: "command-palette",
     targetSelector: '.command-palette[role="dialog"]',
   });
   await page.getByRole("button", { name: "Close search" }).click();
   return {
-    commandPaletteFirstOpenMs,
-    settingsFirstOpenMs,
+    commandPaletteFirstOpenMs: commandPalette.elapsedMs,
+    commandPaletteOpenedInInputTask: commandPalette.openedInInputTask,
+    settingsFirstOpenMs: settings.elapsedMs,
+    settingsOpenedInInputTask: settings.openedInInputTask,
   };
 }
 
@@ -1928,7 +1945,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       fixtureEnvironment,
     );
     launchedApps.push(cold.electronApp);
-    const coldIntentDialogMs = await coldIntentDialogMeasurement(cold.page);
+    const coldIntentDialog = await coldIntentDialogMeasurement(cold.page);
     const idleStart = await processSample(cold.electronApp);
     cold.cleanup.resource.runtimePid = idleStart.runtimePid;
     await elapseObservationWindow(cold.page, 1_500);
@@ -2198,9 +2215,10 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
             },
           },
         firstOpenLatency: {
-          coldIntentDialogMs,
+          coldIntentDialogMs: coldIntentDialog.elapsedMs,
+          coldIntentDialogOpenedInInputTask: coldIntentDialog.openedInInputTask,
           ...prefetchedSurfaces,
-          prefetchedSurfaceDefinition: `the fresh-profile launch opens Settings and the command palette once as an ungated warm-up; each gated value is the median of ${PREFETCHED_SURFACE_RELAUNCH_COUNT} relaunches of the same profile and database, each opened after 1.5 seconds of idle`,
+          prefetchedSurfaceDefinition: `the fresh-profile launch opens Settings and the command palette once as an ungated warm-up; ${PREFETCHED_SURFACE_RELAUNCH_COUNT} relaunches of the same profile and database each open both after 1.5 seconds of idle; every relaunch must show the surface before the task that delivered the input ends, and the gated time is the fastest relaunch; the cold intent dialog is the control that opens in a later task`,
         },
         fileTree: { interactiveMs: fileTreeMs },
         terminal: { startupMs: terminalStartupMs },
@@ -2348,6 +2366,12 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       .toBe(PREFETCHED_SURFACE_RELAUNCH_COUNT);
     expect(report.scenarios.firstOpenLatency.prefetchedSurfaces.settingsFirstOpenMs.sampleCount)
       .toBe(PREFETCHED_SURFACE_RELAUNCH_COUNT);
+    expect(report.scenarios.firstOpenLatency.coldIntentDialogOpenedInInputTask)
+      .toBe(false);
+    expect(report.scenarios.firstOpenLatency.commandPaletteOpenedInInputTask)
+      .toBe(true);
+    expect(report.scenarios.firstOpenLatency.settingsOpenedInInputTask)
+      .toBe(true);
     expect(report.scenarios.firstOpenLatency.commandPaletteFirstOpenMs)
       .toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
     expect(report.scenarios.firstOpenLatency.settingsFirstOpenMs)

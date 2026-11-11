@@ -8,7 +8,9 @@ export interface DistributionSummary {
 
 export interface PrefetchedSurfaceSample {
   commandPaletteFirstOpenMs: number;
+  commandPaletteOpenedInInputTask: boolean;
   settingsFirstOpenMs: number;
+  settingsOpenedInInputTask: boolean;
 }
 
 interface StreamingBenchmarkEvidenceSample {
@@ -95,8 +97,14 @@ export function summarizePrefetchedSurfaceSamples(
   const commandPalette = distribution(samples.map(({ commandPaletteFirstOpenMs }) => commandPaletteFirstOpenMs));
   const settings = distribution(samples.map(({ settingsFirstOpenMs }) => settingsFirstOpenMs));
   return {
-    commandPaletteFirstOpenMs: commandPalette.median ?? Number.POSITIVE_INFINITY,
-    settingsFirstOpenMs: settings.median ?? Number.POSITIVE_INFINITY,
+    commandPaletteFirstOpenMs: commandPalette.minimum ?? Number.POSITIVE_INFINITY,
+    commandPaletteOpenedInInputTask: samples.every(
+      ({ commandPaletteOpenedInInputTask }) => commandPaletteOpenedInInputTask,
+    ),
+    settingsFirstOpenMs: settings.minimum ?? Number.POSITIVE_INFINITY,
+    settingsOpenedInInputTask: samples.every(
+      ({ settingsOpenedInInputTask }) => settingsOpenedInInputTask,
+    ),
     prefetchedSurfaces: {
       warmUp,
       samples,

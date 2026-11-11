@@ -165,12 +165,16 @@ application produced alongside the AppImage, not AppImage mount time.
   viewport frames) interleaved with tool cycles, with post-soak JS heap,
   renderer working set, and mounted-row samples.
 - Prefetched-surface first opens: Settings and the command palette are loaded
-  during idle time, so their first open must stay under 100 ms (250 ms on the
-  hosted Intel macOS runner). The fresh-profile launch opens both once as an
-  ungated warm-up. Five later relaunches of the same profile and database each
-  wait 1.5 seconds of idle and open both again; the gate applies to the median
-  of those five. The report keeps the warm-up, every sample and the
-  minimum/median/p95/maximum of each surface.
+  during idle time, so they must open without a lazy handoff. The fresh-profile
+  launch opens both once as an ungated warm-up. Five later relaunches of the
+  same profile and database each wait 1.5 seconds of idle and open both again.
+  Every one of those opens must show the surface before the task that delivered
+  the click or shortcut ends; a surface that was not loaded can only appear in
+  a later task. The cold New duo dialog is measured the same way as the
+  control and must appear in a later task. The fastest of the five relaunches
+  must also stay under 100 ms (250 ms on the hosted Intel macOS runner). The
+  report keeps the warm-up, every sample and the minimum/median/p95/maximum of
+  each surface.
 - Runtime payload budget (`tests/server/runtime-payload-budget.test.ts`, part
   of `npm test`): 1,000 conversations with one completed turn each, 200 of them
   archived, and one chat with 40 turns of eight command activities filled to

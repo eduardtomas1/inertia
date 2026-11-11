@@ -14,6 +14,14 @@ The useful changes in each Inertia release, in plain language.
 - Going to the start of a long chat always loads the earlier messages. On a
   busy computer the chat could snap back to the latest message, or stay at
   the start with nothing loading until you pressed **Load earlier messages**.
+- Messages no longer wait while Inertia checks a Codex chat's goal. Opening
+  or reconnecting a Codex chat starts a short check, and while Codex was slow
+  to answer it your next message, in that chat or any other chat on the same
+  folder, could sit on **Sending** for up to about 12 seconds. Compacting,
+  restoring a checkpoint or deleting a chat during the check failed with a
+  message about a resumed terminal. A chat's first reply no longer starts a
+  check at all, and deleting a chat or removing its worktree stops a running
+  check first.
 
 ## 0.0.83 — 2026-11-10
 

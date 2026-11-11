@@ -584,21 +584,45 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
   await searchModels.evaluate((input) => {
-    Reflect.set(window, "__catalogMounted", new Promise<number>((resolve) => {
+    Reflect.set(window, "__catalogMounted", new Promise((resolve) => {
       input.addEventListener("input", () => {
         const startedAt = performance.now();
-        const mounted = (): void => {
-          const rows = document.querySelectorAll(".model-chooser-row-option");
-          if ([...rows].some((row) => row.textContent?.includes("Catalog Model"))) resolve(performance.now() - startedAt);
-          else requestAnimationFrame(mounted);
+        let inputTaskEnded = false;
+        const inputTask = new MessageChannel();
+        inputTask.port1.onmessage = () => {
+          inputTaskEnded = true;
+          inputTask.port1.close();
         };
-        mounted();
+        inputTask.port2.postMessage(null);
+        const results = input.closest('[role="dialog"]')!.querySelector('[role="grid"]')!;
+        const observer = new MutationObserver(() => {
+          const rows = [...results.querySelectorAll(":scope > li")];
+          if (!rows.some((row) => row.textContent?.includes("Catalog Model"))) return;
+          observer.disconnect();
+          resolve({
+            mountedInInputTask: !inputTaskEnded,
+            rowsInInputTask: rows.length,
+            elapsedMs: performance.now() - startedAt,
+          });
+        });
+        observer.observe(results, { childList: true, subtree: true, characterData: true });
       }, { once: true });
     }));
   });
   await searchModels.fill("Catalog Model");
   await expect(modelOptions.first()).toBeVisible();
-  expect(await page.evaluate(() => Reflect.get(window, "__catalogMounted") as Promise<number>)).toBeLessThan(1_000);
+  const catalogSearch = await page.evaluate(() => Reflect.get(window, "__catalogMounted") as Promise<{
+    mountedInInputTask: boolean;
+    rowsInInputTask: number;
+    elapsedMs: number;
+  }>);
+  await testInfo.attach("catalog-search", {
+    body: JSON.stringify(catalogSearch, null, 2),
+    contentType: "application/json",
+  });
+  expect(catalogSearch.mountedInInputTask).toBe(true);
+  expect(catalogSearch.rowsInInputTask).toBeGreaterThan(0);
+  expect(catalogSearch.rowsInInputTask).toBeLessThanOrEqual(40);
   const mountedCatalogRows = await modelResults.locator(":scope > li").count();
   expect(mountedCatalogRows).toBeGreaterThan(0);
   expect(mountedCatalogRows).toBeLessThanOrEqual(40);

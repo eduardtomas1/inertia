@@ -195,11 +195,11 @@ const steps: ScreenStep[] = [
     target: { selector: ".usage-popup .usage-limits-panel", text: "Usage sources", ready: "settled" },
     prepare: async (page) => {
       await page.locator(".sidebar-footer").getByRole("button", { name: "Usage", exact: true }).click();
-      await page.getByRole("group", { name: "Usage view" }).getByRole("button", { name: "Tokens", exact: true }).click();
+      await page.getByRole("tablist", { name: "Usage view" }).getByRole("tab", { name: "Tokens", exact: true }).click();
       await page.locator(".usage-popup .usage-overview:not([aria-busy='true'])").waitFor();
     },
-    act: async (page) => await page.getByRole("group", { name: "Usage view" })
-      .getByRole("button", { name: "Limits", exact: true }).click(),
+    act: async (page) => await page.getByRole("tablist", { name: "Usage view" })
+      .getByRole("tab", { name: "Limits", exact: true }).click(),
     reset: async (page) => await closeDialog(page, ".usage-popup"),
   },
   {

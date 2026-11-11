@@ -328,10 +328,10 @@ async function openUsageTab(tab: "Cost" | "Tokens"): Promise<Locator> {
     await page.getByRole("button", { name: "Usage", exact: true }).click();
   }
   await expect(dialog).toBeVisible();
-  const button = dialog.getByRole("group", { name: "Usage view" })
-    .getByRole("button", { name: tab, exact: true });
+  const button = dialog.getByRole("tablist", { name: "Usage view" })
+    .getByRole("tab", { name: tab, exact: true });
   await button.click();
-  await expect(button).toHaveAttribute("aria-pressed", "true");
+  await expect(button).toHaveAttribute("aria-selected", "true");
   const overview = dialog.getByRole("region", { name: tab, exact: true });
   await expect(overview).toBeVisible();
   await expect(overview).toHaveAttribute("aria-busy", "false");

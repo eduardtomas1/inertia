@@ -100,8 +100,8 @@ test("shows every account's limits in the Usage popup, the composer and the Usag
   const page = app.page; await app.resizeWindow(1360, 1000);
   const capture = async (name: string): Promise<void> => { const path = testInfo.outputPath(`${name}.png`); await page.screenshot({ path, animations: "disabled" }); await testInfo.attach(name, { path, contentType: "image/png" }); };
   const popup = page.getByRole("dialog", { name: "Usage", exact: true });
-  const tabs = popup.getByRole("group", { name: "Usage view", exact: true });
-  const tab = (name: string): Locator => tabs.getByRole("button", { name, exact: true });
+  const tabs = popup.getByRole("tablist", { name: "Usage view", exact: true });
+  const tab = (name: string): Locator => tabs.getByRole("tab", { name, exact: true });
   const trigger = page.locator(".usage-popover-trigger");
   const sidebarUsage = page.locator(".sidebar-footer").getByRole("button", { name: "Usage", exact: true });
 
@@ -109,7 +109,7 @@ test("shows every account's limits in the Usage popup, the composer and the Usag
   await page.getByRole("button", { name: "All provider limits", exact: true }).click();
   await expect(popup).toBeVisible();
   await expect(popup).toBeFocused();
-  await expect(tab("Limits")).toHaveAttribute("aria-pressed", "true");
+  await expect(tab("Limits")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Escape");
   await expect(popup).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -119,12 +119,12 @@ test("shows every account's limits in the Usage popup, the composer and the Usag
   await expect(popup).toBeVisible();
   await expect(page.locator("#workspace-content")).toHaveAttribute("data-view", "workspace");
   await page.keyboard.press("t");
-  await expect(tab("Tokens")).toHaveAttribute("aria-pressed", "true");
+  await expect(tab("Tokens")).toHaveAttribute("aria-selected", "true");
   await expect(popup.getByRole("button", { name: "Period: Last 30 days", exact: true })).toBeVisible();
   await page.keyboard.press("c");
-  await expect(tab("Cost")).toHaveAttribute("aria-pressed", "true");
+  await expect(tab("Cost")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("l");
-  await expect(tab("Limits")).toHaveAttribute("aria-pressed", "true");
+  await expect(tab("Limits")).toHaveAttribute("aria-selected", "true");
   await expect(popup.getByRole("button", { name: /^Sources:/u })).toHaveCount(0);
   await expect(popup.getByRole("button", { name: "Refresh limits", exact: true })).toBeEnabled();
   await popup.locator(".limits-sources summary").click();
@@ -210,7 +210,7 @@ test("shows every account's limits in the Usage popup, the composer and the Usag
   await expect(surface.locator(".limit-row-reset").first()).toHaveText(/^Resets in 1h \d+m$/u);
   await capture("usage-surface");
   await surface.getByRole("button", { name: "All accounts", exact: true }).click();
-  await expect(tab("Limits")).toHaveAttribute("aria-pressed", "true");
+  await expect(tab("Limits")).toHaveAttribute("aria-selected", "true");
   await expect(codex.locator(".limit-card").first().locator(".limit-segment")).toHaveCount(2);
 
   await app.resizeWindow(720, 900);
@@ -226,7 +226,7 @@ test("shows every account's limits in the Usage popup, the composer and the Usag
   await app.restart();
   const restarted = app.page.getByRole("dialog", { name: "Usage", exact: true });
   await app.page.locator(".sidebar-footer").getByRole("button", { name: "Usage", exact: true }).click();
-  await expect(restarted.getByRole("group", { name: "Usage view", exact: true }).getByRole("button", { name: "Limits", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(restarted.getByRole("tablist", { name: "Usage view", exact: true }).getByRole("tab", { name: "Limits", exact: true })).toHaveAttribute("aria-selected", "true");
   const restartedCodex = restarted.getByRole("region", { name: "Codex limits", exact: true });
   await expect(restartedCodex.locator(".limit-card").first().locator(".limit-segment")).toHaveCount(2);
   await restarted.locator(".limits-sources summary").click(); await restarted.getByRole("button", { name: "Remove", exact: true }).click();

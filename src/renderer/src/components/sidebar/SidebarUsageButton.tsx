@@ -1,16 +1,20 @@
 import { Gauge } from "lucide-react";
+import clsx from "clsx";
 
 import { IconButton } from "../ui";
-import { useUsagePopupOpener } from "../usage-limits-state";
+import { useUsagePopupOpen, useUsagePopupOpener } from "../usage-limits-state";
 import { preloadUsagePopup } from "../usageLimitsLoaders";
 
 export function SidebarUsageButton({ onOpen }: { onOpen(): void }): React.JSX.Element {
   const open = useUsagePopupOpener();
+  const showing = useUsagePopupOpen();
   return (
     <IconButton
       label="Usage"
-      className="sidebar-destination"
+      className={clsx("sidebar-destination", showing && "is-open")}
       aria-haspopup="dialog"
+      aria-expanded={showing}
+      data-usage-popup-opener=""
       onFocus={preloadUsagePopup}
       onPointerDown={preloadUsagePopup}
       onPointerEnter={preloadUsagePopup}

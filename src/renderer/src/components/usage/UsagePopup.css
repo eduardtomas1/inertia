@@ -1,5 +1,6 @@
 .usage-popup-backdrop {
   padding: 40px;
+  -webkit-app-region: no-drag;
 }
 
 .usage-popup {
@@ -147,7 +148,7 @@
   background: var(--fill);
 }
 
-.usage-popup-tabs > button[aria-pressed="true"] {
+.usage-popup-tabs > button[aria-selected="true"] {
   color: var(--text);
   background: var(--fill-strong);
 }

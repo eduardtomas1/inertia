@@ -22,9 +22,19 @@ const TABS: ReadonlyArray<{ id: UsagePopupTab; label: string; key: string }> = [
   { id: "limits", label: "Limits", key: "L" },
 ];
 const ALL_PROVIDERS = "all";
-const OTHER_SURFACE = "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='menu'], [role='listbox']";
+const OTHER_SURFACE = "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='menu'], [role='listbox'], .limit-reset-confirmation";
+const FOCUS_FALLBACKS = ["[data-usage-popup-opener]", "[data-composer-zone='input'] textarea", "#main-workspace"];
 
-export interface UsagePopupProps {
+function restoreFocus(previous: HTMLElement | null): void {
+  const candidates = [previous, ...FOCUS_FALLBACKS.map((selector) => document.querySelector<HTMLElement>(selector))];
+  for (const candidate of candidates) {
+    if (!candidate?.isConnected || candidate.closest("[inert], [aria-hidden='true']")) continue;
+    candidate.focus({ preventScroll: true });
+    if (document.activeElement === candidate) return;
+  }
+}
+
+interface UsagePopupProps {
   requestedTab: UsagePopupTab | null;
   requestRevision: number;
   returnFocusTo?: HTMLElement | null;
@@ -35,6 +45,7 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
   const context = useUsageLimitsContext();
   const dialog = useRef<HTMLElement>(null);
   const titleId = useId();
+  const tabsId = useId().replaceAll(":", "");
   const [preferences, setPreferences] = useState<UsagePopupPreferences>(() => {
     const stored = readUsagePopupPreferences();
     return requestedTab ? { ...stored, tab: requestedTab } : stored;
@@ -51,8 +62,12 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
   useLayoutEffect(() => {
     const previous = returnFocusTo ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     dialog.current?.focus({ preventScroll: true });
-    return () => { if (previous?.isConnected) previous.focus(); };
+    return () => restoreFocus(previous);
   }, [returnFocusTo]);
+  useLayoutEffect(() => {
+    if (dialog.current?.contains(document.activeElement)) return;
+    (dialog.current?.querySelector<HTMLElement>("[role='tab'][aria-selected='true']") ?? dialog.current)?.focus({ preventScroll: true });
+  }, [tab]);
   useEffect(() => {
     writeUsagePopupPreferences(preferences);
   }, [preferences]);
@@ -69,20 +84,33 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
   }, [requestRevision, requestedTab, selectTab]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.defaultPrevented || event.repeat || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
-      const next = TABS.find(({ key }) => key === event.key.toUpperCase());
-      if (!next) return;
+      if (event.defaultPrevented || event.isComposing) return;
       const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest(OTHER_SURFACE)) return;
       const owner = target?.closest("[role='dialog']");
       if (owner && owner !== dialog.current) return;
+      const outside = !dialog.current?.contains(document.activeElement);
+      if (event.key === "Escape") {
+        if (target?.closest("[role='menu'], [role='listbox']")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key === "Tab" && outside) {
+        event.preventDefault();
+        dialog.current?.focus({ preventScroll: true });
+        return;
+      }
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+      const next = TABS.find(({ key }) => key === event.key.toUpperCase());
+      if (!next || target?.closest(OTHER_SURFACE)) return;
       event.preventDefault();
       event.stopPropagation();
       selectTab(next.id);
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [selectTab]);
+  }, [onClose, selectTab]);
   const snapshot = context?.snapshot ?? null;
   const request = context?.request;
   const publish = context?.setSnapshot;
@@ -121,7 +149,7 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
   ];
   const toggleProvider = (id: string): void => setPreferences((current) => {
     const hidden = new Set(current.hiddenProviders.filter((hiddenId) => providers.some((provider) => provider.id === hiddenId)));
-    if (id === ALL_PROVIDERS) return { ...current, hiddenProviders: hidden.size === 0 ? providers.map((provider) => provider.id) : [] };
+    if (id === ALL_PROVIDERS) return { ...current, hiddenProviders: [] };
     if (!hidden.delete(id)) hidden.add(id);
     return { ...current, hiddenProviders: [...hidden] };
   });
@@ -135,7 +163,9 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
     label: `Last ${option} days`,
     checked: days === option,
   }));
+  const refreshUnavailable = busy || !online;
   const refresh = (): void => {
+    if (refreshUnavailable) return;
     if (showingLimits) setLimitsRefresh((token) => token + 1);
     else setUsageRefresh((token) => token + 1);
   };
@@ -168,9 +198,32 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
             <UsageFilterMenu label="Providers" value={providersLabel} options={providerOptions} multiple onSelect={toggleProvider} />
           </nav>
           <div className="usage-popup-controls">
-            <div className="usage-popup-tabs" role="group" aria-label="Usage view">
+            <div
+              className="usage-popup-tabs"
+              role="tablist"
+              aria-label="Usage view"
+              onKeyDown={(event) => {
+                const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+                if (step === 0) return;
+                event.preventDefault();
+                const next = TABS[(TABS.findIndex(({ id }) => id === tab) + step + TABS.length) % TABS.length]!;
+                selectTab(next.id);
+                event.currentTarget.querySelector<HTMLElement>(`#${tabsId}-${next.id}`)?.focus({ preventScroll: true });
+              }}
+            >
               {TABS.map(({ id, label, key }) => (
-                <TooltipButton key={id} tooltip={label} shortcut={key} aria-pressed={tab === id} onClick={() => selectTab(id)}>
+                <TooltipButton
+                  key={id}
+                  id={`${tabsId}-${id}`}
+                  role="tab"
+                  tooltip={label}
+                  shortcut={key}
+                  aria-selected={tab === id}
+                  aria-controls={`${tabsId}-panel`}
+                  aria-keyshortcuts={key}
+                  tabIndex={tab === id ? 0 : -1}
+                  onClick={() => selectTab(id)}
+                >
                   {label}
                 </TooltipButton>
               ))}
@@ -179,7 +232,7 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
               className="usage-popup-refresh"
               label={showingLimits ? "Refresh limits" : "Refresh usage"}
               aria-busy={busy}
-              disabled={busy || !online}
+              aria-disabled={refreshUnavailable}
               onClick={refresh}
             >
               <RefreshCw size={14} aria-hidden="true" />
@@ -188,7 +241,7 @@ export function UsagePopup({ requestedTab, requestRevision, returnFocusTo, onClo
         </>
       )}
     >
-      <div className="usage-popup-content">
+      <div className="usage-popup-content" id={`${tabsId}-panel`} role="tabpanel" aria-labelledby={`${tabsId}-${tab}`}>
         {showingLimits
           ? UsageLimitsPanel
             ? <UsageLimitsPanel request={context.request} status={context.status} hiddenProviderIds={hiddenProviderIds} source={activeSource} refreshToken={limitsRefresh} onBusyChange={setBusy} />

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarUsageButton } from "../../src/renderer/src/components/sidebar/SidebarUsageButton";
 import { UsageLimitsProvider } from "../../src/renderer/src/components/usage-limits-context";
@@ -49,7 +50,8 @@ function renderApp(request = limitsRequest(), children: React.ReactNode = <Opene
 }
 
 async function press(name: string | RegExp): Promise<void> {
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name })); await vi.dynamicImportSettled(); });
+  const target = screen.queryByRole("tab", { name }) ?? screen.getByRole("button", { name });
+  await act(async () => { fireEvent.click(target); await vi.dynamicImportSettled(); });
 }
 
 async function openPopup(name = "Open usage"): Promise<HTMLElement> {
@@ -57,7 +59,7 @@ async function openPopup(name = "Open usage"): Promise<HTMLElement> {
   return screen.findByRole("dialog", { name: "Usage" });
 }
 
-const pressedTab = (): string | null => screen.getAllByRole("button", { pressed: true }).find((button) => button.closest(".usage-popup-tabs"))?.textContent ?? null;
+const pressedTab = (): string | null => screen.getByRole("tab", { selected: true }).textContent;
 const key = async (target: Element, value: string, init: KeyboardEventInit = {}): Promise<void> => {
   await act(async () => { fireEvent.keyDown(target, { key: value, ...init }); await vi.dynamicImportSettled(); });
 };
@@ -76,8 +78,10 @@ describe("Usage popup", () => {
     expect(within(dialog).getByRole("heading", { level: 2, name: "Usage" })).toBeVisible();
     const crumbs = within(dialog).getByRole("navigation", { name: "Usage filters" });
     expect(crumbs).toHaveTextContent(/^\/All providers$/u);
-    expect(within(within(dialog).getByRole("group", { name: "Usage view" })).getAllByRole("button").map((tab) => tab.textContent)).toEqual(["Cost", "Tokens", "Limits"]);
-    expect(within(dialog).getByRole("button", { name: "Cost" })).toHaveAccessibleDescription("C");
+    expect(within(within(dialog).getByRole("tablist", { name: "Usage view" })).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Cost", "Tokens", "Limits"]);
+    expect(within(dialog).getByRole("tab", { name: "Cost" })).toHaveAccessibleDescription("C");
+    expect(within(dialog).getByRole("tab", { name: "Cost" })).toHaveAttribute("aria-keyshortcuts", "C");
+    expect(within(dialog).getByRole("tabpanel", { name: "Limits" })).toBeVisible();
     expect(pressedTab()).toBe("Limits");
     expect(await within(dialog).findByRole("region", { name: "Codex limits" })).toBeVisible();
     expect(within(dialog).getByRole("button", { name: "Refresh limits" })).toBeEnabled();
@@ -111,7 +115,8 @@ describe("Usage popup", () => {
     expect(within(dialog).getByRole("region", { name: "Cost" })).toHaveAttribute("data-refresh", "2");
     fireEvent.click(within(dialog).getByRole("button", { name: "Start loading" }));
     expect(refresh).toHaveAttribute("aria-busy", "true");
-    expect(refresh).toBeDisabled();
+    expect(refresh).toHaveAttribute("aria-disabled", "true");
+    expect(refresh).toBeEnabled();
     await press("Tokens");
     expect(within(dialog).getByRole("button", { name: "Refresh usage" })).toHaveAttribute("aria-busy", "false");
   });
@@ -144,9 +149,10 @@ describe("Usage popup", () => {
     fireEvent.click(within(dialog).getByRole("menuitemcheckbox", { name: "All providers" }));
     expect(within(dialog).getByRole("region", { name: "Cost" })).toHaveAttribute("data-hidden", "");
     fireEvent.click(within(dialog).getByRole("menuitemcheckbox", { name: "All providers" }));
-    expect(within(dialog).getByRole("button", { name: "Providers: No providers" })).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Providers: All providers" })).toBeVisible();
+    expect(within(dialog).getByRole("region", { name: "Cost" })).toHaveAttribute("data-hidden", "");
     fireEvent.click(within(dialog).getByRole("menuitemcheckbox", { name: "Codex" }));
-    expect(within(dialog).getByRole("button", { name: "Providers: Codex" })).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Providers: 6 providers" })).toBeVisible();
   });
 
   it("offers the sources crumb on Limits only when a hub exists", async () => {
@@ -186,7 +192,8 @@ describe("Usage popup", () => {
     ));
     fireEvent.click(refresh);
     await waitFor(() => expect(refresh).toHaveAttribute("aria-busy", "true"));
-    expect(refresh).toBeDisabled();
+    expect(refresh).toHaveAttribute("aria-disabled", "true");
+    expect(refresh).toBeEnabled();
     expect(request).toHaveBeenCalledWith({ type: "usage.limits.get", payload: { refresh: true, force: true } });
     expect(within(dialog).getByRole("region", { name: "Codex limits" })).toBeVisible();
     await act(async () => { finish(answer); });
@@ -277,6 +284,82 @@ describe("Usage popup keyboard", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Close usage" }));
     expect(screen.queryByRole("dialog", { name: "Usage" })).not.toBeInTheDocument();
     expect(opener).toHaveFocus();
+  });
+});
+
+describe("Usage popup focus", () => {
+  it("keeps Escape, Tab and focus working after a keyboard refresh and after a tab change removes the focused content", async () => {
+    let finish!: (event: ServerEvent) => void;
+    const answer: ServerEvent = { type: "request.result", requestId: "limits", result: { kind: "usage.limits", snapshot: { accounts: [usageAccount(), claude], sources: [], checkedAt: new Date().toISOString() } } };
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => (
+      command.type === "usage.limits.get" && command.payload.force ? new Promise<ServerEvent>((resolve) => { finish = resolve; }) : answer
+    ));
+    renderApp(request);
+    const dialog = await openPopup("Open limits");
+    await within(dialog).findByRole("region", { name: "Codex limits" });
+    const refresh = within(dialog).getByRole("button", { name: "Refresh limits" });
+    refresh.focus();
+    fireEvent.click(refresh);
+    await waitFor(() => expect(refresh).toHaveAttribute("aria-busy", "true"));
+    expect(refresh).toHaveFocus();
+    fireEvent.click(refresh);
+    expect(request.mock.calls.filter(([command]) => command.type === "usage.limits.get" && command.payload.force)).toHaveLength(1);
+    await act(async () => { finish(answer); });
+
+    const segment = within(dialog).getAllByRole("button", { name: /Codex account/u })[0]!;
+    segment.focus();
+    await key(segment, "t");
+    expect(pressedTab()).toBe("Tokens");
+    expect(screen.getByRole("tab", { name: "Tokens" })).toHaveFocus();
+
+    (document.activeElement as HTMLElement).blur();
+    expect(document.body).toHaveFocus();
+    await key(document.body, "Tab");
+    expect(dialog).toHaveFocus();
+    await key(document.body, "Escape");
+    expect(screen.queryByRole("dialog", { name: "Usage" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open limits" })).toHaveFocus();
+  });
+
+  it("moves between tabs with the arrow keys and leaves C, T and L alone inside a reset confirmation", async () => {
+    renderApp();
+    const dialog = await openPopup("Open limits");
+    const limits = screen.getByRole("tab", { name: "Limits" });
+    limits.focus();
+    await key(limits, "ArrowLeft");
+    expect(pressedTab()).toBe("Tokens");
+    expect(screen.getByRole("tab", { name: "Tokens" })).toHaveFocus();
+    await key(screen.getByRole("tab", { name: "Tokens" }), "ArrowRight");
+    expect(pressedTab()).toBe("Limits");
+    expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("tabindex"))).toEqual(["-1", "-1", "0"]);
+
+    const confirmation = document.createElement("section");
+    confirmation.className = "limit-reset-confirmation";
+    const confirm = document.createElement("button");
+    confirmation.append(confirm);
+    dialog.append(confirmation);
+    await key(confirm, "c");
+    expect(pressedTab()).toBe("Limits");
+    confirmation.remove();
+  });
+
+  it("returns focus to the sidebar Usage button when the control that opened the popup is gone", async () => {
+    function Vanishing(): React.JSX.Element {
+      const context = useUsageLimitsContext()!;
+      const [shown, setShown] = useState(true);
+      return <>{shown && <button type="button" onClick={(event) => { context.open(event.currentTarget, "limits"); setShown(false); }}>Help jump</button>}</>;
+    }
+    renderApp(limitsRequest(), <><Vanishing /><SidebarUsageButton onOpen={() => undefined} /></>);
+    const sidebar = screen.getByRole("button", { name: "Usage" });
+    expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    const dialog = await openPopup("Help jump");
+    expect(screen.queryByRole("button", { name: "Help jump" })).not.toBeInTheDocument();
+    expect(sidebar).toHaveAttribute("aria-expanded", "true");
+    expect(sidebar).toHaveClass("is-open");
+    await key(dialog, "Escape");
+    expect(sidebar).toHaveFocus();
+    expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    expect(sidebar).not.toHaveClass("is-open");
   });
 });
 

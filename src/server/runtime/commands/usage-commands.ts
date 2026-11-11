@@ -2,6 +2,7 @@ import type WebSocket from "ws";
 
 import type { ServerEvent } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
+import type { UsagePriceList } from "../../usage/price-list-service";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -9,8 +10,10 @@ import {
 
 export interface UsageCommandDependencies {
   store: RuntimeStore;
+  priceList?: Pick<UsagePriceList, "current">;
   send(socket: WebSocket, event: ServerEvent): void;
 }
+
 
 export function createUsageCommandHandler(
   dependencies: UsageCommandDependencies,
@@ -35,7 +38,10 @@ export function createUsageCommandHandler(
         requestId: command.requestId,
         result: {
           kind: "usage.dashboard",
-          dashboard: dependencies.store.usageDashboard(command.payload),
+          dashboard: dependencies.store.usageDashboard(
+            command.payload,
+            await dependencies.priceList?.current(),
+          ),
         },
       });
       return "handled";

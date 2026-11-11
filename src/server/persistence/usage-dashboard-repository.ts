@@ -14,6 +14,7 @@ import {
   providerModelSelectionFromLegacyFields,
 } from "./codecs";
 import type { AgentTurnRow } from "./rows";
+import type { UsagePricing } from "../usage/price-list";
 
 export type { UsageDashboardRange } from "../usage-dashboard";
 
@@ -86,7 +87,7 @@ export function usageDashboardTurnFromRow(
 export class UsageDashboardRepository {
   constructor(private readonly database: Database.Database) {}
 
-  read(range: UsageDashboardRange): UsageDashboard {
+  read(range: UsageDashboardRange, pricing?: UsagePricing): UsageDashboard {
     validateUsageDashboardRange(range);
     const fromInclusive = new Date(range.fromInclusive).toISOString();
     const toExclusive = new Date(range.toExclusive).toISOString();
@@ -100,6 +101,6 @@ export class UsageDashboardRepository {
         AND origin IS NULL
       ORDER BY completed_at ASC, id ASC
     `).all(fromInclusive, toExclusive) as UsageDashboardTurnRow[];
-    return projectUsageDashboard(rows.map(usageDashboardTurnFromRow), range);
+    return projectUsageDashboard(rows.map(usageDashboardTurnFromRow), range, undefined, pricing);
   }
 }

@@ -70,7 +70,7 @@ import { RuntimeConnectionBanner } from "./RuntimeConnectionBanner";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
 import type { MainWindowTargetAppActions } from "../hooks/useMainWindowTargets";
 import type { AppView } from "../appView";
-import type { UsageViewProps } from "./UsageView";
+import { useUsagePopupOpen, useUsagePopupOpener } from "./usage-limits-state";
 import {
   loadCommitDialog,
   loadDailyWorkDialog,
@@ -78,7 +78,6 @@ import {
   scheduleFrequentSurfacePrefetch,
   loadLibraryView,
   loadTasksView,
-  loadUsageView,
 } from "./lazySurfaceLoaders";
 
 const RootCommitDialog = lazy(async () => ({
@@ -211,7 +210,7 @@ interface AppLayoutProps {
   reviewStates: CommitDialogProps["reviewStates"];
   multiSpawn: MultiSpawnController;
   scene: WorkspaceSceneProps;
-  usage: UsageViewProps;
+  usage: { status: Connection["status"]; request(command: CommandWithoutId): Promise<ServerEvent> };
   providerAuth: Parameters<typeof AppStatusOverlays>[0]["providerAuth"];
   actions: AppLayoutActions;
 }
@@ -284,6 +283,7 @@ export function activeConversationIsVisible(input: {
   providerAuthOpen: boolean;
   mobileSidebarOpen: boolean;
   helpOpen?: boolean;
+  usageOpen?: boolean;
 }): boolean {
   return input.view === "workspace"
     && !input.commitDialogOpen
@@ -293,7 +293,8 @@ export function activeConversationIsVisible(input: {
     && !input.paletteOpen
     && !input.providerAuthOpen
     && !input.mobileSidebarOpen
-    && !input.helpOpen;
+    && !input.helpOpen
+    && !input.usageOpen;
 }
 
 export const AppLayout = memo(function AppLayout({
@@ -352,7 +353,7 @@ export const AppLayout = memo(function AppLayout({
     request: (command, options) => actions.run(command.type, command, options),
     onError: setActionError,
   });
-  const UsageView = useLoadedSurface(loadUsageView, view === "usage");
+  const openUsage = useUsagePopupOpener();
   const TasksView = useLoadedSurface(loadTasksView, view === "tasks");
   const LibraryView = useLoadedSurface(loadLibraryView, view === "library");
   const DailyWorkDialog = useLoadedSurface(loadDailyWorkDialog, dailyWorkOpen);
@@ -577,6 +578,7 @@ export const AppLayout = memo(function AppLayout({
     return scheduleFrequentSurfacePrefetch();
   }, [connection.status]);
   const helpOpen = useHelpGuideOpen();
+  const usageOpen = useUsagePopupOpen();
   const activeConversationVisible = !conversationSuppressedInMain
     && activeConversationIsVisible({
     view,
@@ -588,6 +590,7 @@ export const AppLayout = memo(function AppLayout({
     providerAuthOpen: Boolean(providerAuth.provider),
     mobileSidebarOpen: mobileNavigation && sidebarOpen,
     helpOpen,
+    usageOpen,
     });
 
   const splitActive = splitConversationIds.size > 0;
@@ -934,13 +937,7 @@ export const AppLayout = memo(function AppLayout({
               frameHasInlinePanel ? " has-tools" : ""
             }${frameHasSheetPanel ? " has-tools-sheet" : ""}`}
           >
-          {view === "usage" ? (
-              UsageView ? <UsageView {...usage} /> : (
-                <div className="workspace-tool-loading usage-surface-loading">
-                  <LoadingMark label="Loading usage" />
-                </div>
-              )
-            ) : view === "tasks" ? (
+          {view === "tasks" ? (
               TasksView ? (
                 <TasksView
                   snapshot={connection.snapshot}
@@ -1165,7 +1162,7 @@ export const AppLayout = memo(function AppLayout({
         commands={{
           "add-project": () => void actions.importProject(),
           search: () => setPaletteOpen(true),
-          usage: () => setView("usage"),
+          usage: () => openUsage?.(),
           "daily-work": () => setDailyWorkOpen(true),
           tasks: tasksActions.open,
           library: libraryActions.open,

@@ -68,6 +68,29 @@ describe("provider recovery limits", () => {
   });
 });
 
+describe("account reads feed the provider quota every chat shows", () => {
+  it("reports the limits of a Claude and a Codex account read to the provider metadata", async () => {
+    const f = await fixture();
+    const reset = new Date(Date.now() + 86_400_000).toISOString();
+    const claudeLimits = [
+      { id: "claude:seven_day", label: "Weekly", usedPercent: 11, remainingPercent: 89, windowMinutes: 10_080, resetsAt: reset },
+      { id: "claude:seven_day_overage_included", label: "Weekly · Fable", usedPercent: 19, remainingPercent: 81, windowMinutes: 10_080, resetsAt: reset },
+    ];
+    const providers = {
+      detect: f.detect,
+      claudeUsage: async () => ({ account: { email: "fixture@example.test", subscriptionType: "max", apiProvider: "firstParty" }, rateLimits: claudeLimits }),
+      codexControlContext: async () => ({ executable: "/fixture/codex", environment: { CODEX_HOME: f.directory }, cwd: f.directory, installationUse: { abandonBeforeSpawn: f.abandonBeforeSpawn } }),
+    } as unknown as ProviderManager;
+    const learned = vi.fn();
+    const reader = new NativeUsageReader(providers, f.directory, f.controller.signal, new NativeSubscriptionReader({ accountKey: async () => "per-install-identity-key" }), learned);
+    const claude = { ...initialProviderSnapshots(false).find(({ id }) => id === "claude")!, canRun: true };
+    expect((await reader.read(claude)).windows.map(({ label, remainingPercent }) => [label, remainingPercent])).toEqual([["Weekly", 89], ["Weekly · Fable", 81]]);
+    expect(learned).toHaveBeenCalledExactlyOnceWith("claude", claudeLimits);
+    await reader.read(f.info);
+    expect(learned).toHaveBeenLastCalledWith("codex", [expect.objectContaining({ id: "codex:primary", usedPercent: 30, windowMinutes: 300 })]);
+  });
+});
+
 describe("native Codex limits and reset protocol", () => {
   it("verifies a native account when Limits opens before startup detection, retaining two exact account identities", async () => {
     const f = await fixture();

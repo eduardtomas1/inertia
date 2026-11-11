@@ -296,6 +296,7 @@ export function WorkspacePanel({
         }
       }}
     >
+      <div className="window-drag-strip drag-region" aria-hidden="true" />
       <header className="workspace-panel-tabs drag-region">
         {visibleSurfaces.length > 0 && (
           <div
@@ -438,6 +439,7 @@ export function WorkspacePanel({
         )}
         <p className="visually-hidden" role="status">{moveAnnouncement}</p>
       </header>
+      <div className="window-drag-strip workspace-panel-corner-clearance no-drag" aria-hidden="true" />
       {!selected && (
         <Suspense fallback={<div className="workspace-panel-launcher" aria-busy="true" />}>
           <RightPanelLauncher actions={actions} onOpen={openSurface} active={visible} />

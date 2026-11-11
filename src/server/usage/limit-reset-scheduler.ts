@@ -99,7 +99,7 @@ export class LimitResetScheduler {
     const latest = this.store.latestAgentTurnForConversation(conversationId);
     if (!account || account.providerId !== conversation.providerId) return null;
     if (route !== queuedRouteIdentity(current) || latest?.id !== turn.id || !matchesFailedNativeTurn(current, latest)) return null;
-    const quota = resetQuota(account, turn.model);
+    const quota = resetQuota(account, turn.model, undefined, turn.modelSelection.alias);
     if (quota.kind !== "exhausted") return null;
     const accountIdentity = resumeAccountIdentity(account);
     return {
@@ -336,7 +336,7 @@ export class LimitResetScheduler {
     this.assertDispatch(plan);
     if (this.dependencies.busy(plan.conversationId)) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
     const conversation = this.store.conversation(plan.conversationId);
-    const model = this.store.latestAgentTurnForConversation(plan.conversationId)!.model;
+    const { model, modelSelection } = this.store.latestAgentTurnForConversation(plan.conversationId)!;
     const cwd = this.store.conversationPath(plan.conversationId);
     const account = await this.dependencies.readAccount(conversation.providerId, true, model, cwd, false).catch(() => null);
     this.assertDispatch(plan);
@@ -346,7 +346,7 @@ export class LimitResetScheduler {
       throw new RuntimeRequestError("The account changed. Resume this chat manually.");
     }
     if (!unread && identity === null) throw new RuntimeRequestError(ACCOUNT_UNCONFIRMED_AT_RESET);
-    if (unread || resetQuota(account, model).kind !== "available") {
+    if (unread || resetQuota(account, model, undefined, modelSelection.alias).kind !== "available") {
       if (quotaCheckedFor(plan.attempts) > MISSED_RESUME_AFTER_MS) this.store.limitResets.settle(plan, "missed", QUOTA_NOT_CONFIRMED);
       else this.store.limitResets.retry(plan, new Date(Date.now() + quotaCheckDelay(plan.attempts)).toISOString());
       return;

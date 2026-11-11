@@ -1,6 +1,7 @@
 import type { Query, SDKControlGetContextUsageResponse } from "@anthropic-ai/claude-agent-sdk";
 
 import type { ProviderRateLimit, ThreadUsageSnapshot } from "../../shared/contracts";
+import { claudeRateLimitWindow } from "./claude-rate-limit-windows";
 import { providerTimestamp } from "./usage-values";
 
 export type ClaudeUsageSnapshot = Omit<
@@ -304,18 +305,6 @@ export async function readClaudeContextUsage(
   }
 }
 
-const rateLimitLabels: Readonly<Record<string, { label: string; minutes: number | null }>> = {
-  five_hour: { label: "Claude · 5 hour", minutes: 300 },
-  seven_day: { label: "Claude · 7 day", minutes: 10_080 },
-  seven_day_opus: { label: "Claude Opus · 7 day", minutes: 10_080 },
-  seven_day_sonnet: { label: "Claude Sonnet · 7 day", minutes: 10_080 },
-  seven_day_overage_included: {
-    label: "Claude extra usage · 7 day",
-    minutes: 10_080,
-  },
-  overage: { label: "Claude extra usage", minutes: null },
-};
-
 function liveRateLimit(type: unknown, fraction: unknown, resetsAt: unknown): ProviderRateLimit | null {
   if (typeof type !== "string" || !type) return null;
   const utilization = typeof fraction === "number"
@@ -323,10 +312,7 @@ function liveRateLimit(type: unknown, fraction: unknown, resetsAt: unknown): Pro
     ? Math.min(fraction, 1) * 100
     : null;
   if (utilization === null) return null;
-  const presentation = rateLimitLabels[type] ?? {
-    label: `Claude · ${type.replaceAll("_", " ")}`,
-    minutes: null,
-  };
+  const presentation = claudeRateLimitWindow(type);
   return {
     id: `claude:${type}`,
     label: presentation.label,

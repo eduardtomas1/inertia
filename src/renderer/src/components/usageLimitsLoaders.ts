@@ -1,8 +1,13 @@
 import { createSurfaceLoader } from "../utils/surfaceLoader";
+import { loadUsageLimitsPanel, loadUsageOverview } from "./usage/usageTabLoaders";
 
-export const loadUsageLimitsPanel = createSurfaceLoader(async () => ({
-  default: (await import("./UsageLimitsPanel")).UsageLimitsPanel,
+export { loadUsageLimitsPanel, loadUsageOverview };
+export const loadUsagePopup = createSurfaceLoader(async () => ({
+  default: (await import("./usage/UsagePopup")).UsagePopup,
 }));
-export const loadUsageLimitsDialog = createSurfaceLoader(async () => ({
-  default: (await import("./UsageLimitsPanel")).UsageLimitsDialog,
-}));
+
+export function preloadUsagePopup(): void {
+  void loadUsagePopup();
+  void loadUsageLimitsPanel();
+  void loadUsageOverview();
+}

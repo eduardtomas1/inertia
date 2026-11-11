@@ -848,6 +848,36 @@ textarea {
   -webkit-app-region: no-drag;
 }
 
+:is(.sidebar, .workspace-body) :is(button, input, textarea):not(.drag-region *, .dialog-backdrop *, [popover] *, dialog *) {
+  -webkit-app-region: inherit;
+}
+
+.app-shell .header-title-wrap h1 {
+  -webkit-app-region: no-drag;
+}
+
+.app-shell .workspace-shell[inert] * {
+  -webkit-app-region: inherit;
+}
+
+.window-drag-strip {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 48px;
+  pointer-events: none;
+}
+
+.workspace-panel-corner-clearance {
+  right: calc(12px + var(--titlebar-overlay-inset, 0px));
+  left: auto;
+  width: var(--workspace-corner-controls-width, 0px);
+}
+
+.workspace-panel.is-stacked > .window-drag-strip,
+.sidebar-drawer-drag-strip {
+  display: none;
+}
+
 .primary-button,
 .secondary-button,
 .subtle-button,
@@ -4138,8 +4168,7 @@ button.header-breadcrumb-project:hover {
 }
 
 .usage-popover-section-heading,
-.usage-popover-value,
-.usage-popover-quota {
+.usage-popover-value {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -4229,76 +4258,6 @@ button.header-breadcrumb-project:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.usage-popover-quota-list {
-  display: grid;
-  gap: 12px;
-}
-
-.usage-popover-quota {
-  --quota-tone: var(--status-completed);
-  gap: 5px;
-}
-
-.usage-popover-quota[data-tone="low"] {
-  --quota-tone: var(--status-approval);
-}
-
-.usage-popover-quota[data-tone="critical"] {
-  --quota-tone: var(--danger);
-}
-
-.usage-popover-quota > span:first-child {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: var(--text-xs);
-}
-
-.usage-popover-quota > span:first-child strong {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.usage-popover-quota > span:first-child b {
-  flex: 0 0 auto;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-.usage-popover-quota[data-tone="low"] > span:first-child b,
-.usage-popover-quota[data-tone="critical"] > span:first-child b {
-  color: var(--quota-tone);
-}
-
-.usage-popover-meter {
-  height: 5px;
-  overflow: hidden;
-  border-radius: var(--radius-xs);
-  background: var(--fill-strong);
-}
-
-.usage-popover-meter > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--quota-tone);
-  transform-origin: left;
-}
-
-.usage-popover-quota > small {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
-
 .usage-popover-quality-detail {
   margin-top: 7px;
 }
@@ -4365,21 +4324,11 @@ button.header-breadcrumb-project:hover {
     transform-origin: bottom right;
     animation: usage-popover-enter var(--dur) var(--ease) backwards;
   }
-
-  .usage-popover:not([hidden]) .usage-popover-meter > span {
-    animation: usage-popover-meter-fill var(--dur-slow) var(--ease) var(--dur-fast) backwards;
-  }
 }
 
 @keyframes usage-popover-enter {
   from {
     opacity: 0;
-  }
-}
-
-@keyframes usage-popover-meter-fill {
-  from {
-    transform: scaleX(0);
   }
 }
 
@@ -4913,7 +4862,6 @@ button.header-breadcrumb-project:hover {
   place-items: center;
 }
 
-.usage-surface-loading,
 .tasks-view-loading, .library-view-loading { flex: 1; }
 
 .workspace-panel-launcher {
@@ -6471,7 +6419,6 @@ button.header-breadcrumb-project:hover {
 
 @keyframes view-swap-workspace { from { opacity: 0; transform: translateY(9px); } }
 @keyframes view-swap-settings { from { opacity: 0; transform: translateY(9px); } }
-@keyframes view-swap-usage { from { opacity: 0; transform: translateY(9px); } }
 @keyframes view-swap-tasks { from { opacity: 0; transform: translateY(9px); } }
 @keyframes view-swap-library { from { opacity: 0; transform: translateY(9px); } }
 @keyframes view-swap-home { from { opacity: 0; transform: translateY(9px); } }
@@ -6483,10 +6430,6 @@ button.header-breadcrumb-project:hover {
 
   #workspace-content[data-view="settings"] {
     animation: view-swap-settings var(--dur) var(--ease) backwards;
-  }
-
-  #workspace-content[data-view="usage"] {
-    animation: view-swap-usage var(--dur) var(--ease) backwards;
   }
 
   #workspace-content[data-view="tasks"] {
@@ -7963,6 +7906,11 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   .sidebar-scrim.is-open {
     pointer-events: auto;
     opacity: 1;
+  }
+
+  .sidebar-scrim.is-open + .sidebar-drawer-drag-strip {
+    position: fixed;
+    display: block;
   }
 
   .mobile-close,

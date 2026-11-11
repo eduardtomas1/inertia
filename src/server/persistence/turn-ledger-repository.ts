@@ -62,6 +62,7 @@ import {
   UsageDashboardRepository,
   type UsageDashboardRange,
 } from "./usage-dashboard-repository";
+import type { UsagePricing } from "../usage/price-list";
 import { DailyWorkRepository } from "./daily-work-repository";
 import type { DailyWorkRange } from "../daily-work";
 import {
@@ -84,8 +85,8 @@ type TurnLedgerPersistenceContext = Pick<
 export class TurnLedgerRepository {
   constructor(private readonly context: TurnLedgerPersistenceContext) {}
 
-  usageDashboard(range: UsageDashboardRange): UsageDashboard {
-    return new UsageDashboardRepository(this.context.database).read(range);
+  usageDashboard(range: UsageDashboardRange, pricing?: UsagePricing): UsageDashboard {
+    return new UsageDashboardRepository(this.context.database).read(range, pricing);
   }
 
   dailyWork(range: DailyWorkRange): DailyWorkDashboard {

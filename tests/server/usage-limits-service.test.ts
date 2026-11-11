@@ -317,6 +317,43 @@ describe("privileged usage limits", () => {
     expect(f.read).toHaveBeenCalledTimes(1);
     expect(f.read.mock.calls[0]?.[0]).toMatchObject({ id: "codex" });
   });
+  it("reads every provider at once and publishes each account as soon as it answers", async () => {
+    const f = setup();
+    const [codex, claude] = initialProviderSnapshots(false).filter(({ id }) => id === "codex" || id === "claude")
+      .map((info) => ({ ...info, available: true, canRun: true }));
+    f.deps.providers = () => [codex!, claude!];
+    let releaseCodex!: () => void;
+    const codexGate = new Promise<void>((done) => { releaseCodex = done; });
+    f.read.mockImplementation(async (info) => {
+      if (info.id === "codex") await codexGate;
+      return usageAccount({ id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, identityKey: `account-${info.id}` });
+    });
+    const refresh = f.service.refresh(true);
+    await vi.waitFor(() => expect(f.service.snapshot().accounts.map(({ id }) => id)).toEqual(["native:claude"]));
+    expect(f.read).toHaveBeenCalledTimes(2);
+    releaseCodex();
+    expect((await refresh).accounts.map(({ id }) => id)).toEqual(["native:codex", "native:claude"]);
+  });
+  it("shows the last reported quota at once and replaces it when the account answers", async () => {
+    const f = setup();
+    const reportedAt = new Date(Date.now() - 3_600_000).toISOString();
+    const reset = new Date(Date.now() + 86_400_000).toISOString();
+    const claude = { ...initialProviderSnapshots(false).find(({ id }) => id === "claude")!, available: true, canRun: true,
+      rateLimits: [{ id: "claude:seven_day", label: "Weekly", usedPercent: 40, remainingPercent: 60, windowMinutes: 10_080, resetsAt: reset }],
+      metadataState: { ...initialProviderSnapshots(false)[0]!.metadataState, rateLimits: { freshness: "stale" as const, provenance: "persistent-cache" as const, updatedAt: reportedAt, lastAttemptedAt: reportedAt, refreshing: false } } };
+    f.deps.providers = () => [claude];
+    expect(f.read).not.toHaveBeenCalled();
+    expect(f.service.snapshot()).toMatchObject({ checkedAt: null, accounts: [{
+      id: "native:claude", status: "stale", canReset: false, identityKey: null, updatedAt: reportedAt,
+      windows: [{ id: "claude:seven_day", label: "Weekly", remainingPercent: 60 }],
+    }] });
+    f.read.mockResolvedValueOnce(usageAccount({ id: "native:claude", providerId: "claude", providerLabel: "Claude",
+      windows: [{ id: "claude:seven_day", label: "Weekly", remainingPercent: 55, windowMinutes: 10_080, resetsAt: reset }] }));
+    const refreshed = await f.service.refresh(true);
+    expect(refreshed.accounts).toHaveLength(1);
+    expect(refreshed.accounts[0]).toMatchObject({ status: "ready", windows: [{ remainingPercent: 55 }] });
+    expect(f.service.snapshot().accounts).toHaveLength(1);
+  });
   it("records new sources without changing agent profiles or making network requests", async () => {
     const f = setup(); const profiles = vi.fn(() => []); f.deps.customProfiles = profiles;
     await f.service.saveSource({ id: crypto.randomUUID(), label: "Disabled hub", url: "https://hub.example.test", enabled: false });

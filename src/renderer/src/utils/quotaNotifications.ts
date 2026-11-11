@@ -1,3 +1,4 @@
+import { usageLimitName, usageWindowTitle } from "@shared/usage-window-title";
 import type {
   ProviderInfo,
   ProviderMetadataFieldState,
@@ -26,6 +27,8 @@ export interface QuotaNotification {
   providerLabel: string;
   limitId: string;
   windowLabel: "5-hour" | "weekly";
+  windowTitle: string;
+  limitName: string;
   threshold: QuotaWarningThreshold;
   remainingPercent: number;
   resetsAt: string | null;
@@ -217,6 +220,8 @@ export function evaluateQuotaNotifications(
           providerLabel: provider.label,
           limitId: limit.id,
           windowLabel,
+          windowTitle: usageWindowTitle(limit),
+          limitName: usageLimitName(limit),
           threshold,
           remainingPercent: Math.round(limit.remainingPercent),
           resetsAt: validTimestamp(limit.resetsAt)

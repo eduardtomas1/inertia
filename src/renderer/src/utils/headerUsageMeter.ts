@@ -1,3 +1,5 @@
+import { usageLimitName } from "@shared/usage-window-title";
+
 import type { EnvironmentUsageSummary } from "./environmentSummary";
 
 export const HEADER_METER_LOW_REMAINING_PERCENT = 20;
@@ -13,19 +15,6 @@ export interface HeaderUsageMeterModel {
   valueLabel: string;
   accessibleLabel: string;
   freshness: EnvironmentUsageSummary["quota"]["freshness"];
-}
-
-export function quotaWindowLabel(windowMinutes: number | null): string | null {
-  if (!windowMinutes || !Number.isSafeInteger(windowMinutes) || windowMinutes < 1) {
-    return null;
-  }
-  if (windowMinutes === 7 * 24 * 60) return "weekly";
-  if (windowMinutes % (24 * 60) === 0) {
-    const days = windowMinutes / (24 * 60);
-    return days === 1 ? "daily" : `${days}-day`;
-  }
-  if (windowMinutes % 60 === 0) return `${windowMinutes / 60}-hour`;
-  return `${windowMinutes}-minute`;
 }
 
 export function isQuotaResetDue(
@@ -86,7 +75,6 @@ export function headerUsageMeterModel(
     };
   }
   const remaining = clampRemainingPercent(tightest.remainingPercent);
-  const window = quotaWindowLabel(tightest.windowMinutes);
   const qualifier = freshness === "stale"
     ? ", may be out of date"
     : freshness === "refreshing" ? ", refreshing" : "";
@@ -97,7 +85,7 @@ export function headerUsageMeterModel(
     limits,
     low: tightest.remainingPercent < HEADER_METER_LOW_REMAINING_PERCENT,
     valueLabel: `${remaining}%`,
-    accessibleLabel: `Usage: ${remaining}% of ${window ? `${window} ` : ""}${window ? "limit" : tightest.label} left${qualifier}`,
+    accessibleLabel: `Usage: ${remaining}% of ${usageLimitName(tightest)} left${qualifier}`,
     freshness,
   };
 }

@@ -2,6 +2,8 @@ import type {
   AgentTurn,
   AgentTurnUsageSnapshot,
   ProviderId,
+  UsageCostByType,
+  UsageCostValue,
   UsageCoverage,
   UsageDashboard,
   UsageDashboardBreakdown,
@@ -11,6 +13,7 @@ import type {
   UsageRangeDays,
   UsageTokenField,
 } from "../shared/contracts";
+import { UNAVAILABLE_USAGE_PRICING, type UsagePricing } from "./usage/price-list";
 
 export interface UsageDashboardRange {
   days: UsageRangeDays;
@@ -43,6 +46,21 @@ interface MeasuredAccumulator {
   overflow: boolean;
 }
 
+interface CostAccumulator {
+  value: number;
+  measuredRequests: number;
+}
+
+interface TurnCost extends UsageCostByType {
+  total: number;
+  cacheSavings: number;
+}
+
+interface PricedTurn {
+  pricedAs: string | null;
+  cost: TurnCost | null;
+}
+
 interface UsageBucket {
   requestCount: number;
   completedCount: number;
@@ -51,6 +69,7 @@ interface UsageBucket {
   interruptedCount: number;
   runtime: MeasuredAccumulator;
   processedTokens: MeasuredAccumulator;
+  cost: CostAccumulator;
 }
 
 interface DailyBucket extends UsageBucket {
@@ -64,6 +83,7 @@ interface ProviderBucket extends UsageBucket {
 interface ModelBucket extends ProviderBucket {
   key: string;
   model: string;
+  pricedAs: string | null;
   backendProfileId: string;
   backendLabel: string;
   backendConfigurationRevision: number;
@@ -88,8 +108,10 @@ export const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   grok: "Grok",
 };
 
-const COST_UNAVAILABLE_REASON =
-  "Inertia does not persist versioned model pricing or provider invoice charges.";
+const PRICE_LIST_UNAVAILABLE_REASON =
+  "The model price list could not be downloaded, so there is nothing to estimate from.";
+const NOTHING_PRICED_REASON =
+  "No request in this range has both a known model price and measured tokens.";
 const DATE_KEY = /^(\d{4})-(\d{2})-(\d{2})$/u;
 
 function emptyMeasuredAccumulator(): MeasuredAccumulator {
@@ -105,6 +127,7 @@ function emptyUsageBucket(): UsageBucket {
     interruptedCount: 0,
     runtime: emptyMeasuredAccumulator(),
     processedTokens: emptyMeasuredAccumulator(),
+    cost: { value: 0, measuredRequests: 0 },
   };
 }
 
@@ -160,6 +183,26 @@ function measuredValue(
     coverage: accumulator.overflow
       ? "unavailable"
       : coverage(accumulator.measuredRequests, totalRequests),
+  };
+}
+
+function dollars(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function costValue(
+  accumulator: CostAccumulator,
+  totalRequests: number,
+  emptyIsZero = false,
+): UsageCostValue {
+  if (totalRequests === 0 && emptyIsZero) {
+    return { value: 0, measuredRequests: 0, totalRequests: 0, coverage: "complete" };
+  }
+  return {
+    value: accumulator.measuredRequests === 0 ? null : dollars(accumulator.value),
+    measuredRequests: accumulator.measuredRequests,
+    totalRequests,
+    coverage: coverage(accumulator.measuredRequests, totalRequests),
   };
 }
 
@@ -361,7 +404,41 @@ function measuredRuntime(turn: UsageDashboardTurn): number | null {
   return Number.isSafeInteger(duration) && duration >= 0 ? duration : null;
 }
 
-function addTurn(bucket: UsageBucket, turn: UsageDashboardTurn): void {
+function priceTurn(turn: UsageDashboardTurn, pricing: UsagePricing): PricedTurn {
+  if (turn.providerId === "cursor") return { pricedAs: null, cost: null };
+  const priced = pricing.resolve({
+    providerId: turn.providerId,
+    model: turn.model,
+    alias: turn.modelSelection.alias,
+  });
+  if (!priced) return { pricedAs: null, cost: null };
+  const input = measuredTokenField(turn, "inputTokens");
+  const output = measuredTokenField(turn, "outputTokens");
+  if (input === null || output === null) return { pricedAs: priced.id, cost: null };
+  const cached = Math.min(input, measuredTokenField(turn, "cachedInputTokens") ?? 0);
+  const written = Math.min(input - cached, measuredTokenField(turn, "cacheWriteInputTokens") ?? 0);
+  const { rates } = priced;
+  const cost = {
+    input: (input - cached - written) * rates.input,
+    cachedInput: cached * rates.cacheRead,
+    cacheWriteInput: written * rates.cacheWrite,
+    output: output * rates.output,
+  };
+  return {
+    pricedAs: priced.id,
+    cost: {
+      ...cost,
+      total: cost.input + cost.cachedInput + cost.cacheWriteInput + cost.output,
+      cacheSavings: Math.max(0, cached * (rates.input - rates.cacheRead)),
+    },
+  };
+}
+
+function addTurn(bucket: UsageBucket, turn: UsageDashboardTurn, cost: TurnCost | null): void {
+  if (cost) {
+    bucket.cost.value += cost.total;
+    bucket.cost.measuredRequests += 1;
+  }
   bucket.requestCount += 1;
   if (turn.status === "completed") bucket.completedCount += 1;
   else if (turn.status === "failed") bucket.failedCount += 1;
@@ -392,6 +469,7 @@ function breakdownValue(
       bucket.processedTokens,
       bucket.requestCount,
     ),
+    cost: costValue(bucket.cost, bucket.requestCount),
   };
 }
 
@@ -413,6 +491,7 @@ export function projectUsageDashboard(
   turns: readonly UsageDashboardTurn[],
   range: UsageDashboardRange,
   generatedAt = new Date().toISOString(),
+  pricing: UsagePricing = UNAVAILABLE_USAGE_PRICING,
 ): UsageDashboard {
   const validated = validateRange(range);
   const dailyBuckets = new Map(
@@ -428,6 +507,8 @@ export function projectUsageDashboard(
     output: emptyMeasuredAccumulator(),
     reasoningOutput: emptyMeasuredAccumulator(),
   };
+  const costByType: UsageCostByType = { input: 0, cachedInput: 0, cacheWriteInput: 0, output: 0 };
+  let cacheSavings = 0;
 
   for (const turn of turns) {
     if (
@@ -442,21 +523,29 @@ export function projectUsageDashboard(
     const day = dailyBuckets.get(dateKey(completedAt, validated.formatter));
     if (!day) continue;
 
-    addTurn(day, turn);
-    addTurn(totalBucket, turn);
+    const { pricedAs, cost } = priceTurn(turn, pricing);
+    if (cost) {
+      costByType.input += cost.input;
+      costByType.cachedInput += cost.cachedInput;
+      costByType.cacheWriteInput += cost.cacheWriteInput;
+      costByType.output += cost.output;
+      cacheSavings += cost.cacheSavings;
+    }
+    addTurn(day, turn, cost);
+    addTurn(totalBucket, turn, cost);
 
     const dailyProvider = day.providers.get(turn.providerId) ?? {
       ...emptyUsageBucket(),
       providerId: turn.providerId,
     };
-    addTurn(dailyProvider, turn);
+    addTurn(dailyProvider, turn, cost);
     day.providers.set(turn.providerId, dailyProvider);
 
     const provider = providerBuckets.get(turn.providerId) ?? {
       ...emptyUsageBucket(),
       providerId: turn.providerId,
     };
-    addTurn(provider, turn);
+    addTurn(provider, turn, cost);
     providerBuckets.set(turn.providerId, provider);
 
     const modelKey = JSON.stringify([
@@ -473,13 +562,15 @@ export function projectUsageDashboard(
       key: `model-${modelBuckets.size}`,
       providerId: turn.providerId,
       model: turn.model || "Unknown model",
+      pricedAs,
       backendProfileId: turn.modelSelection.backendProfileId,
       backendLabel: turn.modelSelection.backendProfileDisplayName
         || PROVIDER_LABELS[turn.providerId],
       backendConfigurationRevision:
         turn.modelSelection.backendConfigurationRevision,
     };
-    addTurn(model, turn);
+    addTurn(model, turn, cost);
+    model.pricedAs ??= pricedAs;
     modelBuckets.set(modelKey, model);
 
     addMeasured(tokenAccumulators.input, measuredTokenField(turn, "inputTokens"));
@@ -511,6 +602,7 @@ export function projectUsageDashboard(
       bucket.requestCount,
       true,
     ),
+    cost: costValue(bucket.cost, bucket.requestCount, true),
     providers: [...bucket.providers].map(([key, provider]) =>
       breakdownValue(key, provider)).sort(breakdownSort),
   }));
@@ -520,6 +612,7 @@ export function projectUsageDashboard(
     (bucket) => ({
       ...breakdownValue(bucket.key, bucket),
       model: bucket.model,
+      pricedAs: bucket.pricedAs,
       backendProfileId: bucket.backendProfileId,
       backendLabel: bucket.backendLabel,
       backendConfigurationRevision: bucket.backendConfigurationRevision,
@@ -544,6 +637,7 @@ export function projectUsageDashboard(
         totalBucket.processedTokens,
         totalBucket.requestCount,
       ),
+      cost: costValue(totalBucket.cost, totalBucket.requestCount),
     },
     daily,
     providers,
@@ -565,8 +659,23 @@ export function projectUsageDashboard(
       ),
     },
     cost: {
-      status: "unavailable",
-      reason: COST_UNAVAILABLE_REASON,
+      status: totalBucket.cost.measuredRequests > 0 ? "estimated" : "unavailable",
+      reason: totalBucket.cost.measuredRequests > 0 || totalBucket.requestCount === 0
+        ? null
+        : pricing.status === "unavailable" ? PRICE_LIST_UNAVAILABLE_REASON : NOTHING_PRICED_REASON,
+      pricing: {
+        status: pricing.status,
+        source: pricing.source,
+        fetchedAt: pricing.fetchedAt,
+        modelCount: pricing.modelCount,
+      },
+      byType: {
+        input: dollars(costByType.input),
+        cachedInput: dollars(costByType.cachedInput),
+        cacheWriteInput: dollars(costByType.cacheWriteInput),
+        output: dollars(costByType.output),
+      },
+      cacheSavings: dollars(cacheSavings),
     },
   };
 }

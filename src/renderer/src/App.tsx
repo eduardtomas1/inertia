@@ -869,7 +869,6 @@ export default function App(): React.JSX.Element {
       openProviderSetup,
       openBackendSetup,
       openSettings: (target?: SettingsTarget) => openSettings(target),
-      openUsageView: () => navigateToView("usage"),
       openConversation: (conversationId: string) => {
         const target = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
         if (!target || target.archivedAt !== null) return false;
@@ -993,7 +992,6 @@ export default function App(): React.JSX.Element {
         openProviderSetup,
         openBackendSetup,
         openSettings: (target?: SettingsTarget) => openSettings(target),
-        openUsageView: () => navigateToView("usage"),
         openProjectPath,
         sendMessageToConversation,
         compactConversation: compactConversationById,

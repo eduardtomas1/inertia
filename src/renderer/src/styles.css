@@ -848,6 +848,35 @@ textarea {
   -webkit-app-region: no-drag;
 }
 
+:is(.sidebar, .workspace-body) :is(button, input, textarea):not(.drag-region *, .dialog-backdrop *, [popover] *, dialog *) {
+  -webkit-app-region: inherit;
+}
+
+.app-shell .header-title-wrap h1 {
+  -webkit-app-region: no-drag;
+}
+
+.app-shell .workspace-shell[inert] * {
+  -webkit-app-region: none;
+}
+
+.window-drag-strip {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 48px;
+  pointer-events: none;
+}
+
+.workspace-panel-corner-clearance {
+  right: calc(12px + var(--titlebar-overlay-inset, 0px));
+  left: auto;
+  width: var(--workspace-corner-controls-width, 0px);
+}
+
+.workspace-panel.is-stacked > .window-drag-strip {
+  display: none;
+}
+
 .primary-button,
 .secondary-button,
 .subtle-button,

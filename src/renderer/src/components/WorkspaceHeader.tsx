@@ -345,7 +345,7 @@ export function WorkspaceHeader({
 
   return (
     <header ref={headerRef} className="workspace-header drag-region">
-      <div className="header-leading no-drag">
+      <div className="header-leading">
         {onOpenSidebar && (
           <IconButton label="Toggle project navigation" shortcut={sidebarShortcut} className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}

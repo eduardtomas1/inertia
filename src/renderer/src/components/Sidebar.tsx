@@ -1038,6 +1038,7 @@ function SidebarView({
         }}
       >
         <SidebarAurora moving={!reducedMotion && (!mobile || open)} activity={auroraActivity} />
+        <div className="window-drag-strip drag-region" aria-hidden="true" />
         <div className="sidebar-brand drag-region">
           {preview.preview}
           <button type="button" className="brand-lockup no-drag" aria-label="Start a new chat" onClick={onOpenHome}>

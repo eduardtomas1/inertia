@@ -59,8 +59,8 @@ for (const { mode, decision, title, cancelId } of [
         // A synchronous native alert cannot be cancelled by a main-thread
         // timer. Bound the external probe so that failure still reaches cleanup.
         const probe = await settleOperationBounded(snapshot(app), 1_000);
-        expect(probe.status).toBe("fulfilled");
-        return probe.status === "fulfilled" && probe.value.pending && probe.value.ticks >= 2;
+        expect(probe.status).not.toBe("rejected");
+        return probe.status === "fulfilled" && probe.value.pending && probe.value.pendingTicks >= 2;
       }).toBe(true);
       expect(await snapshot(app)).toMatchObject({
         parented: true, pending: true, completed: false,

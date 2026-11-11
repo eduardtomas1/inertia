@@ -16,7 +16,7 @@ export interface RecoveryFixture {
   closeParent(): void;
   snapshot(): {
     parented: boolean; pending: boolean; completed: boolean; authorized: boolean;
-    ticks: number; claims: number | null; authority: boolean; cancelId: number | undefined;
+    pendingTicks: number; claims: number | null; authority: boolean; cancelId: number | undefined;
     title: string | undefined;
   };
 }
@@ -46,7 +46,7 @@ let parented = false;
 let pending = false;
 let completed = false;
 let authorized = false;
-let ticks = 0;
+let pendingTicks = 0;
 let title: string | undefined;
 let cancelId: number | undefined;
 let clock: ReturnType<typeof setInterval> | null = null;
@@ -74,7 +74,7 @@ void app.whenReady().then(async () => {
   const window = new BrowserWindow({ width: 540, height: 320 });
   const controls: RecoveryFixture = {
     start: () => {
-      clock = setInterval(() => { ticks += 1; }, 25);
+      clock = setInterval(() => { if (pending && !completed) pendingTicks += 1; }, 25);
       void promptForLiveModernDarwinRuntimeRecovery(
         dataDirectory, bootId, guardianPath, window,
       ).then((authority) => {
@@ -83,7 +83,7 @@ void app.whenReady().then(async () => {
       });
     },
     snapshot: () => ({
-      parented, pending, completed, authorized, ticks, title, cancelId,
+      parented, pending, completed, authorized, pendingTicks, title, cancelId,
       claims: owned.records(generationId)?.length ?? null,
       authority: new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending() !== null,
     }),

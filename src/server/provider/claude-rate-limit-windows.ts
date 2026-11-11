@@ -28,7 +28,7 @@ function modelSlug(name: string): string {
   return name.toLowerCase().replaceAll(/[^a-z0-9]+/gu, "-").replaceAll(/^-|-$/gu, "");
 }
 
-export function claudeModelWeeklyLabel(model?: unknown): string {
+function claudeModelWeeklyLabel(model?: unknown): string {
   return `${MODEL_WEEKLY_PREFIX}${modelName(model) ?? UNNAMED_MODEL}`;
 }
 
@@ -75,7 +75,7 @@ function modelWeeklyScope(window: { id: string; label: string }): string | null 
   return scope && scope !== UNNAMED_MODEL ? scope : null;
 }
 
-export type ClaudeModelWeeklyRelation = "applies" | "other-model" | "unknown";
+type ClaudeModelWeeklyRelation = "applies" | "other-model" | "unknown";
 
 export function claudeModelWeeklyRelation(
   window: { id: string; label: string },

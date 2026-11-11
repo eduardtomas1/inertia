@@ -16,7 +16,7 @@ import { UsageSources } from "./usage/UsageSources";
 import { useUsageLimits } from "./usage/useUsageLimits";
 import "./UsageLimitsPanel.css";
 
-export interface UsageLimitsPanelProps {
+interface UsageLimitsPanelProps {
   request(command: CommandWithoutId): Promise<ServerEvent>;
   status: ConnectionStatus;
   hiddenProviderIds?: ReadonlySet<string>;

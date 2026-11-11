@@ -7,12 +7,12 @@ export interface UsageModelRates {
   cacheWrite: number;
 }
 
-export interface PricedModel {
+interface PricedModel {
   id: string;
   rates: UsageModelRates;
 }
 
-export interface PriceLookup {
+interface PriceLookup {
   providerId: string;
   model: string;
   alias: string | null;

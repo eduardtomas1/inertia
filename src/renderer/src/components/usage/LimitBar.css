@@ -81,6 +81,11 @@
   opacity: 0.2;
 }
 
+:root:not([data-theme="dark"]) .limit-bar[data-provider="claude"]:not([data-muted], [data-due]) .limit-bar-fill {
+  background: color-mix(in srgb, var(--limit-color) 85%, black);
+  opacity: 1;
+}
+
 .limit-bar-mark {
   position: absolute;
   top: 2px;

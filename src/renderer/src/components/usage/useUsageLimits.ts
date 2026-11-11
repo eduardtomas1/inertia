@@ -6,13 +6,13 @@ import type { ConnectionStatus } from "../../hooks/useInertiaConnection";
 import { resultEvent, type CommandWithoutId } from "../../lib/runtimeCommands";
 import { useUsageLimitsContext } from "../usage-limits-state";
 
-export const LIMITS_POLL_MS = 600;
+const LIMITS_POLL_MS = 600;
 const STALE_AFTER_MS = 180_000;
 const TICK_MS = 60_000;
 const REFRESH_EVERY_TICKS = 3;
 const NO_PENDING: ReadonlySet<string> = new Set();
 
-export interface UsageLimitsState {
+interface UsageLimitsState {
   snapshot: UsageLimitsSnapshot | null;
   accounts: UsageAccount[];
   busy: boolean;

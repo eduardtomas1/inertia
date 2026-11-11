@@ -3,7 +3,7 @@ import type { UsageAccount, UsageLimitsSnapshot } from "@shared/provider-usage-l
 export const ALL_USAGE_SOURCES = "all";
 export const LOCAL_USAGE_SOURCE = "local";
 
-export interface UsageProviderOption {
+interface UsageProviderOption {
   id: string;
   label: string;
 }

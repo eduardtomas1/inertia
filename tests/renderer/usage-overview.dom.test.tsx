@@ -559,7 +559,6 @@ describe("UsageOverview", () => {
     await user.keyboard("[Enter]");
     expect(day).toHaveAttribute("aria-pressed", "true");
     const table = screen.getByRole("region", { name: "Day usage table" });
-    expect(table).toHaveClass("is-day-mode");
     expect(table).toHaveAttribute("tabindex", "0");
     expect(within(table).getAllByRole("columnheader").map((header) => header.textContent))
       .toEqual(["Day", "Claude", "Codex", "Total cost", "Tokens", "Requests"]);

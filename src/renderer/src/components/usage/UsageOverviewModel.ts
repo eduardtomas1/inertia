@@ -26,7 +26,7 @@ export interface UsageOverviewDay {
   providers: UsageDashboardBreakdown[];
 }
 
-export interface UsageOverviewStatusCounts {
+interface UsageOverviewStatusCounts {
   completed: number;
   failed: number;
   cancelled: number;

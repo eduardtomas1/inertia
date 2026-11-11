@@ -1,4 +1,4 @@
-export interface UsageWindowTitleInput {
+interface UsageWindowTitleInput {
   id: string;
   label: string;
   windowMinutes: number | null;

@@ -3,7 +3,7 @@ import { USAGE_RANGE_DAYS, type UsageRangeDays } from "@shared/contracts/usage-d
 import type { UsagePopupTab } from "../usage-limits-state";
 
 export const USAGE_POPUP_PREFERENCES_KEY = "inertia:usage-popup-preferences:v1";
-export const USAGE_POPUP_TABS: readonly UsagePopupTab[] = ["cost", "tokens", "limits"];
+const USAGE_POPUP_TABS: readonly UsagePopupTab[] = ["cost", "tokens", "limits"];
 
 export interface UsagePopupPreferences {
   tab: UsagePopupTab;

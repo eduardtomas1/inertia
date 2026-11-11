@@ -3,7 +3,6 @@ import type { ComponentPropsWithoutRef, CSSProperties, ReactNode } from "react";
 import clsx from "clsx";
 
 import { usageWindowTitle } from "@shared/usage-window-title";
-import { INTERFACE_LOCALE } from "../../lib/locale";
 import {
   limitCountdown,
   limitPace,
@@ -14,6 +13,7 @@ import {
   type LimitPace,
   type LimitReading,
 } from "./limitMath";
+import { dateLabel } from "./limitText";
 import "./LimitBar.css";
 
 const PACE = {
@@ -22,8 +22,8 @@ const PACE = {
   under: { label: "Under pace: headroom left for the rest of the window", Icon: TrendingDown },
 } as const;
 
-export const LIMIT_LOW_REMAINING_PERCENT = 50;
-export const LIMIT_CRITICAL_REMAINING_PERCENT = 20;
+const LIMIT_LOW_REMAINING_PERCENT = 50;
+const LIMIT_CRITICAL_REMAINING_PERCENT = 20;
 
 export interface LimitRowValue {
   id: string;
@@ -31,18 +31,6 @@ export interface LimitRowValue {
   remainingPercent: number | null;
   windowMinutes: number | null;
   resetsAt: string | null;
-}
-
-export function limitResetDate(resetsAt: string | null): string | undefined {
-  const time = Date.parse(resetsAt ?? "");
-  if (!Number.isFinite(time)) return undefined;
-  return new Date(time).toLocaleString(INTERFACE_LOCALE, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  });
 }
 
 export function PaceIcon({ pace }: { pace: LimitPace }): React.JSX.Element {
@@ -149,7 +137,7 @@ export function LimitRows({
               aria-valuenow={reading.due || remaining === null ? undefined : remaining}
               aria-valuetext={reading.due ? "Reset due, usage not yet updated" : value}
             />
-            {reset && <small className="limit-row-reset" title={limitResetDate(reading.resetsAt)}>{reset}</small>}
+            {reset && <small className="limit-row-reset" title={reading.resetsAt ? dateLabel(reading.resetsAt) : undefined}>{reset}</small>}
           </li>
         );
       })}

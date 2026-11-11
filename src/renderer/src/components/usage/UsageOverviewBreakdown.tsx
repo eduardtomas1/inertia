@@ -203,7 +203,7 @@ export function UsageOverviewBreakdown({
         </div>
       </div>
       <div
-        className={`usage-overview-table-wrap usage-overview-figure${mode === "day" ? " is-day-mode" : ""}`}
+        className="usage-overview-table-wrap usage-overview-figure"
         role="region"
         tabIndex={0}
         aria-label={`${mode === "model" ? "Model" : "Day"} usage table`}

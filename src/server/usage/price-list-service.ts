@@ -11,16 +11,16 @@ import {
   type UsagePricing,
 } from "./price-list";
 
-export const USAGE_PRICE_LIST_TTL_MS = 24 * 60 * 60 * 1_000;
-export const USAGE_PRICE_LIST_RETRY_MS = 60 * 1_000;
-export const USAGE_PRICE_LIST_TEST_URL_ENVIRONMENT_KEY = "INERTIA_TEST_USAGE_PRICE_LIST_URL";
+const USAGE_PRICE_LIST_TTL_MS = 24 * 60 * 60 * 1_000;
+const USAGE_PRICE_LIST_RETRY_MS = 60 * 1_000;
+const USAGE_PRICE_LIST_TEST_URL_ENVIRONMENT_KEY = "INERTIA_TEST_USAGE_PRICE_LIST_URL";
 const FETCH_TIMEOUT_MS = 10_000;
 const EMPTY_LIST_WAIT_MS = 4_000;
 const MINIMUM_DOWNLOADED_MODELS = 50;
 const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024;
 const MAX_CACHE_BYTES = 8 * 1024 * 1024;
 
-export interface UsagePriceListOptions {
+interface UsagePriceListOptions {
   cachePath: string;
   signal: AbortSignal;
   url?: string | null;

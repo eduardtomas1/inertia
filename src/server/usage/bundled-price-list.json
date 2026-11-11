@@ -1,6 +1,6 @@
 {
- "fetchedAt": "2026-11-11T10:42:09.403Z",
- "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+ "fetchedAt": "2026-11-11T12:57:20.459Z",
+ "source": "https://raw.githubusercontent.com/BerriAI/litellm/8b8ec4e3a64facae7af657ab06bc214dd5bf9060/model_prices_and_context_window.json",
  "models": {
   "chat-latest": [0.000005,0.00003,5e-7,0.000005],
   "claude-fable-5": [0.00001,0.00005,0.000001,0.0000125],

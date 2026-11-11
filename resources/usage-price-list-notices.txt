@@ -4,8 +4,8 @@ The Usage popup estimates cost at public API list prices. Inertia ships a
 reduced copy of LiteLLM's model price table (model name and the per-token
 input, output, cache-read and cache-write prices of first-party chat models)
 in src/server/usage/bundled-price-list.json, written by
-scripts/update-usage-price-list.mjs, and downloads the current table from the
-same source at most once a day.
+scripts/update-usage-price-list.mjs from the commit recorded in that file, and
+downloads the current table from the same repository at most once a day.
 
 LiteLLM model_prices_and_context_window.json
 Source: https://github.com/BerriAI/litellm (file at the repository root)

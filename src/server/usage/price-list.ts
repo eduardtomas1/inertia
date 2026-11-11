@@ -44,7 +44,6 @@ const FIRST_PARTY_PROVIDERS = new Set([
   "mistral",
   "meta_llama",
 ]);
-const EFFORT_SUFFIX = /-(?:minimal|low|medium|high|xhigh|max)$/u;
 const VARIANT_SUFFIX = /\[[^\]]*\]$/u;
 const MAX_RATE = 1;
 
@@ -116,7 +115,6 @@ function candidates({ providerId, model, alias }: PriceLookup): string[] {
   const exact = model.trim().toLowerCase().replace(VARIANT_SUFFIX, "");
   const names = [exact];
   if (exact.includes("/")) names.push(exact.slice(exact.lastIndexOf("/") + 1));
-  names.push(...names.filter((name) => EFFORT_SUFFIX.test(name)).map((name) => name.replace(EFFORT_SUFFIX, "")));
   const named = alias ? slug(alias) : "";
   if (named && /\d/u.test(named)) {
     names.push(named);

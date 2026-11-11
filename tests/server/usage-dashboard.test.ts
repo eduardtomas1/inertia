@@ -837,6 +837,23 @@ describe("estimated cost in the usage dashboard", () => {
     expect(dashboard.cost.byType).toEqual({ input: 0.4, cachedInput: 0.16, cacheWriteInput: 0.5, output: 2 });
   });
 
+  it("leaves Cursor unpriced until its token categories are confirmed", () => {
+    const table = parsePriceList({ "cursor-priced": { input_cost_per_token: 0.000002, output_cost_per_token: 0.00001, litellm_provider: "openai" } });
+    const everything: UsagePricing = { ...pricing(), resolve: (lookup) => resolveModelRates(table, { ...lookup, model: "cursor-priced" }) };
+    const completedAt = "2026-06-20T10:00:00.000Z";
+    const cumulative = (inputTokens: number, outputTokens: number) => usage(completedAt, {
+      totalProcessedTokens: inputTokens + outputTokens, totalProcessedScope: "session", inputTokens, cachedInputTokens: 0, outputTokens,
+    });
+    const cursor = turn({
+      id: "cursor", providerId: "cursor", model: "cursor-model", completedAt,
+      providerSessionBefore: "cursor-session", startUsage: cumulative(100, 10), completionUsage: cumulative(1_100, 110),
+    });
+    const dashboard = projectUsageDashboard([cursor], range, completedAt, everything);
+    expect(dashboard.tokens.input).toMatchObject({ value: 1_000, coverage: "complete" });
+    expect(dashboard.models[0]).toMatchObject({ pricedAs: null, cost: { value: null, coverage: "unavailable" } });
+    expect(dashboard.cost.status).toBe("unavailable");
+  });
+
   it("says why nothing could be estimated", () => {
     const priced = codexTurn("priced", "gpt-priced", "20", { inputTokens: 10, outputTokens: 10 });
     expect(projectUsageDashboard([priced], range).cost).toMatchObject({

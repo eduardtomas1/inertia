@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -45,7 +45,9 @@ describe("usage price list", () => {
       resolveModelRates(table, { providerId, model, alias })?.id ?? null;
     expect(resolve("codex", "gpt-6.1-sol")).toBe("gpt-6.1-sol");
     expect(resolve("codex", "GPT-6.1-Sol")).toBe("gpt-6.1-sol");
-    expect(resolve("antigravity", "gemini-3.8-flash-high", "Gemini 3.8 Flash (High)")).toBe("gemini-3.8-flash");
+    expect(resolve("antigravity", "gemini-3.8-flash", "Gemini 3.8 Flash")).toBe("gemini-3.8-flash");
+    expect(resolve("antigravity", "gemini-3.8-flash-high", "Gemini 3.8 Flash (High)")).toBeNull();
+    expect(resolve("claude", "claude-opus-5-5-max", null)).toBeNull();
     expect(resolve("claude", "opus", "Opus 5.5")).toBe("claude-opus-5-5");
     expect(resolve("claude", "opus[1m]", "Opus (1M context)")).toBeNull();
     expect(resolve("claude", "opus", "Opus")).toBeNull();
@@ -67,6 +69,13 @@ describe("usage price list service", () => {
   }
   const answer = (body: unknown, status = 200) => vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status }));
   const signal = (): AbortSignal => new AbortController().signal;
+  const fullDocument = {
+    ...document,
+    ...Object.fromEntries(Array.from({ length: 60 }, (_, index) => [
+      `filler-model-${index}`,
+      { input_cost_per_token: 0.000001, output_cost_per_token: 0.000002, litellm_provider: "openai" },
+    ])),
+  };
 
   it("prices from the list shipped with the build at once, offline and while a download hangs", async () => {
     const hanging = vi.fn<typeof fetch>(() => new Promise(() => undefined));
@@ -83,20 +92,24 @@ describe("usage price list service", () => {
     expect((await offline.current()).modelCount).toBe(pricing.modelCount);
   });
 
-  it("replaces the shipped list with a download, stores a compact copy and serves it after a restart", async () => {
+  it("lays a download over the shipped list, stores a compact copy and serves it after a restart", async () => {
     const path = await cachePath();
     let now = Date.parse("2030-01-01T10:00:00.000Z");
-    const fetcher = answer(document);
+    const fetcher = answer(fullDocument);
     const first = new UsagePriceList({ cachePath: path, signal: signal(), fetch: fetcher, now: () => now });
     expect((await first.current()).status).toBe("cached");
     await vi.waitFor(() => expect(first.pricing()).toMatchObject({ status: "fresh", fetchedAt: "2030-01-01T10:00:00.000Z", source: USAGE_PRICE_LIST_SOURCE }));
     expect(first.pricing().resolve({ providerId: "codex", model: "gpt-6.1-sol", alias: null })?.rates.output).toBe(0.00001);
+    expect(first.pricing().resolve({ providerId: "codex", model: "filler-model-0", alias: null })?.rates.output).toBe(0.000002);
+    expect(first.pricing().resolve({ providerId: "claude", model: "claude-fable-5-2", alias: null })?.id).toBe("claude-fable-5-2");
     await first.current();
     expect(fetcher).toHaveBeenCalledExactlyOnceWith(USAGE_PRICE_LIST_SOURCE, expect.objectContaining({ method: "GET", redirect: "error" }));
     await vi.waitFor(async () => {
       const stored = JSON.parse(await readFile(path, "utf8")) as { models: Record<string, number[]> };
       expect(stored.models["claude-opus-5-5"]).toEqual([0.000004, 0.00002, 0.0000002, 0.000005]);
+      expect(stored.models["claude-fable-5-2"]).toBeUndefined();
     });
+    expect((await readdir(dirname(path))).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 
     now += 60 * 60 * 1_000;
     const offline = vi.fn<typeof fetch>(async () => { throw new Error("offline"); });
@@ -121,8 +134,21 @@ describe("usage price list service", () => {
     await vi.waitFor(() => expect(empty.pricing()).toMatchObject({ status: "cached", modelCount: shipped }));
   });
 
+  it("does not let a truncated download or stored copy replace the shipped list", async () => {
+    const path = await cachePath();
+    const now = Date.parse("2030-01-01T10:00:00.000Z");
+    const truncated = answer(document);
+    const list = new UsagePriceList({ cachePath: path, signal: signal(), fetch: truncated, now: () => now });
+    const shipped = (await list.current()).modelCount;
+    await vi.waitFor(() => expect(truncated).toHaveBeenCalledOnce());
+    expect(await list.current()).toMatchObject({ status: "cached", modelCount: shipped });
+    await writeFile(path, JSON.stringify({ fetchedAt: now - 1_000, models: { "gpt-6.1-sol": [1, 1, 1, 1] } }));
+    const restarted = new UsagePriceList({ cachePath: path, signal: signal(), url: null, now: () => now });
+    expect((await restarted.current()).resolve({ providerId: "codex", model: "gpt-6.1-sol", alias: null })?.rates.input).toBeLessThan(1);
+  });
+
   it("waits for a first download only when it has no list at all", async () => {
-    const list = new UsagePriceList({ cachePath: await cachePath(), signal: signal(), fetch: answer(document), bundled: null });
+    const list = new UsagePriceList({ cachePath: await cachePath(), signal: signal(), fetch: answer(fullDocument), bundled: null });
     expect(list.pricing()).toMatchObject({ status: "unavailable", modelCount: 0, fetchedAt: null });
     expect(await list.current()).toMatchObject({ status: "fresh" });
     const fixture = new UsagePriceList({ cachePath: await cachePath(), signal: signal(), fetch: answer(document), url: "http://127.0.0.1:43111/prices.json" });

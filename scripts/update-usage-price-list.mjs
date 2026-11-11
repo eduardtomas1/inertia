@@ -1,7 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const SOURCE = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
+const COMMIT = process.argv[2] ?? "";
+if (!/^[0-9a-f]{40}$/u.test(COMMIT)) throw new Error("Pass the BerriAI/litellm commit to copy prices from, as a full SHA.");
+const SOURCE = `https://raw.githubusercontent.com/BerriAI/litellm/${COMMIT}/model_prices_and_context_window.json`;
 const OUTPUT = fileURLToPath(new URL("../src/server/usage/bundled-price-list.json", import.meta.url));
 const PROVIDERS = new Set(["anthropic", "openai", "gemini", "xai", "moonshot", "deepseek", "mistral", "meta_llama"]);
 const MODES = new Set(["chat", "responses", "completion"]);

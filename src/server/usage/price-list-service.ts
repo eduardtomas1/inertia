@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import bundledPriceList from "./bundled-price-list.json" with { type: "json" };
@@ -16,6 +16,7 @@ export const USAGE_PRICE_LIST_RETRY_MS = 60 * 1_000;
 export const USAGE_PRICE_LIST_TEST_URL_ENVIRONMENT_KEY = "INERTIA_TEST_USAGE_PRICE_LIST_URL";
 const FETCH_TIMEOUT_MS = 10_000;
 const EMPTY_LIST_WAIT_MS = 4_000;
+const MINIMUM_DOWNLOADED_MODELS = 50;
 const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024;
 const MAX_CACHE_BYTES = 8 * 1024 * 1024;
 
@@ -88,6 +89,8 @@ const BUNDLED = cachedTable(bundledPriceList);
 export class UsagePriceList {
   private rates: ReadonlyMap<string, UsageModelRates>;
   private fetchedAt: number | null;
+  private readonly floor: ReadonlyMap<string, UsageModelRates>;
+  private readonly minimumModels: number;
   private lastAttemptAt: number | null = null;
   private loaded: Promise<void> | null = null;
   private refreshing: Promise<void> | null = null;
@@ -101,7 +104,9 @@ export class UsagePriceList {
     this.url = options.url === undefined ? USAGE_PRICE_LIST_SOURCE : options.url;
     const ownSource = this.url === null || this.url === USAGE_PRICE_LIST_SOURCE;
     const bundled = options.bundled === undefined ? (ownSource ? BUNDLED : null) : options.bundled;
-    this.rates = bundled?.rates ?? new Map();
+    this.floor = bundled?.rates ?? new Map();
+    this.minimumModels = ownSource ? MINIMUM_DOWNLOADED_MODELS : 1;
+    this.rates = this.floor;
     this.fetchedAt = bundled?.fetchedAt ?? null;
   }
 
@@ -145,8 +150,13 @@ export class UsagePriceList {
       const text = await readFile(this.options.cachePath, "utf8");
       if (text.length > MAX_CACHE_BYTES) return;
       const cached = cachedTable(JSON.parse(text));
-      if (!cached || cached.fetchedAt > this.now() || cached.fetchedAt <= (this.fetchedAt ?? -Infinity)) return;
-      this.rates = cached.rates;
+      if (
+        !cached
+        || cached.rates.size < this.minimumModels
+        || cached.fetchedAt > this.now()
+        || cached.fetchedAt <= (this.fetchedAt ?? -Infinity)
+      ) return;
+      this.rates = new Map([...this.floor, ...cached.rates]);
       this.fetchedAt = cached.fetchedAt;
     } catch {
       return;
@@ -165,18 +175,18 @@ export class UsagePriceList {
         headers: { Accept: "application/json" },
       });
       const rates = parsePriceList(JSON.parse(await boundedText(response)));
-      if (rates.size === 0) return;
-      this.rates = rates;
+      if (rates.size < this.minimumModels) return;
+      this.rates = new Map([...this.floor, ...rates]);
       this.fetchedAt = this.now();
-      await this.persist();
+      await this.persist(rates);
     } catch {
       return;
     }
   }
 
-  private async persist(): Promise<void> {
+  private async persist(downloaded: ReadonlyMap<string, UsageModelRates>): Promise<void> {
     const models: Record<string, [number, number, number, number]> = {};
-    for (const [id, rates] of this.rates) {
+    for (const [id, rates] of downloaded) {
       models[id] = [rates.input, rates.output, rates.cacheRead, rates.cacheWrite];
     }
     const temporary = `${this.options.cachePath}.${process.pid}.tmp`;
@@ -185,7 +195,7 @@ export class UsagePriceList {
       await writeFile(temporary, JSON.stringify({ fetchedAt: this.fetchedAt, models }), { mode: 0o600 });
       await rename(temporary, this.options.cachePath);
     } catch {
-      return;
+      await rm(temporary, { force: true }).catch(() => undefined);
     }
   }
 }

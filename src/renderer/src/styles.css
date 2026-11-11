@@ -857,7 +857,7 @@ textarea {
 }
 
 .app-shell .workspace-shell[inert] * {
-  -webkit-app-region: none;
+  -webkit-app-region: inherit;
 }
 
 .window-drag-strip {
@@ -873,7 +873,8 @@ textarea {
   width: var(--workspace-corner-controls-width, 0px);
 }
 
-.workspace-panel.is-stacked > .window-drag-strip {
+.workspace-panel.is-stacked > .window-drag-strip,
+.sidebar-drawer-drag-strip {
   display: none;
 }
 
@@ -7905,6 +7906,11 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   .sidebar-scrim.is-open {
     pointer-events: auto;
     opacity: 1;
+  }
+
+  .sidebar-scrim.is-open + .sidebar-drawer-drag-strip {
+    position: fixed;
+    display: block;
   }
 
   .mobile-close,

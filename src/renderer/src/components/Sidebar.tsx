@@ -1001,6 +1001,7 @@ function SidebarView({
         className={clsx("sidebar-scrim", open && "is-open")}
         onClick={onClose}
       />
+      <div className="window-drag-strip sidebar-drawer-drag-strip drag-region" aria-hidden="true" />
       <aside
         ref={sidebarRef}
         className={clsx(

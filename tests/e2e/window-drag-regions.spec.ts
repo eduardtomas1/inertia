@@ -196,7 +196,7 @@ test("drags the detached chat window from its header", async () => {
   const underHeader = await tuckControlsUnderTopBar(popup, ".message-scroll button");
   const band = await expectDraggableTopBar(popup, underHeader);
   expect(band.longestRowSpan).toBeGreaterThan(80);
-  await popup.close();
+  await popup.getByRole("button", { name: "Return chat to main window" }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
 });
 

@@ -61,6 +61,9 @@ const CONTROL_SELECTOR = [
   "[contenteditable='']",
   "[contenteditable='true']",
   "[draggable='true']",
+  ".header-title-wrap h1",
+  ".header-trailing.no-drag",
+  ".workspace-corner-controls.no-drag",
 ].join(", ");
 
 export async function measureWindowDragBand(
@@ -116,6 +119,7 @@ export async function measureWindowDragBand(
     }
     const controlCells = new Uint8Array(width * height);
     const controls = new Map<Element, { label: string; left: number; right: number; draggableArea: number; hitRegion: "drag" | "no-drag" | "none" }>();
+    const controlBoxes = new Map<Element, { x0: number; x1: number; y0: number; y1: number }[]>();
     for (let blockY = 0; blockY < height; blockY += BLOCK) {
       for (let blockX = 0; blockX < width; blockX += BLOCK) {
         const hit = document.elementFromPoint(left + blockX + BLOCK / 2, blockY + BLOCK / 2);
@@ -127,20 +131,20 @@ export async function measureWindowDragBand(
         reading.right = Math.max(reading.right, Math.min(right, left + blockX + BLOCK));
         const hitRegion = regionOf(hit);
         if (hitRegion !== "no-drag") reading.hitRegion = hitRegion;
+        const boxes = controlBoxes.get(control) ?? [...control.getClientRects()].map((rect) => ({
+          x0: Math.ceil(rect.left) - left,
+          x1: Math.floor(rect.right) - left,
+          y0: Math.ceil(rect.top),
+          y1: Math.floor(rect.bottom),
+        }));
+        controlBoxes.set(control, boxes);
         for (let y = blockY; y < Math.min(height, blockY + BLOCK); y += 1) {
-          controlCells.fill(1, y * width + blockX, y * width + Math.min(width, blockX + BLOCK));
-        }
-      }
-    }
-    for (const [control, reading] of controls) {
-      for (const rect of control.getClientRects()) {
-        const x0 = Math.max(0, Math.ceil(rect.left) - left);
-        const x1 = Math.min(width, Math.floor(rect.right) - left);
-        const y0 = Math.max(0, Math.ceil(rect.top));
-        const y1 = Math.min(height, Math.floor(rect.bottom));
-        for (let y = y0; y < y1; y += 1) {
-          for (let x = x0; x < x1; x += 1) {
-            if (cells[y * width + x] === DRAG) reading.draggableArea += 1;
+          for (let x = blockX; x < Math.min(width, blockX + BLOCK); x += 1) {
+            controlCells[y * width + x] = 1;
+            if (
+              cells[y * width + x] === DRAG
+              && boxes.some((box) => x >= box.x0 && x < box.x1 && y >= box.y0 && y < box.y1)
+            ) reading.draggableArea += 1;
           }
         }
       }

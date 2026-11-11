@@ -776,7 +776,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         backendProfileController,
         workspaceRuns,
         providerTerminalResumes,
-        duoLaunches: duoLaunchCoordinator, watchers,
+        duoLaunches: duoLaunchCoordinator, watchers, nativeGoalReads: agentWorkflows.nativeGoalReads,
         runtimeSync,
         deletedConversationIds,
         dataDirectory,
@@ -791,7 +791,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         agentSecrets: agentThreads.secrets,
         reportIncident: commandIncidents.report,
       }),
-      createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
+      createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, nativeGoalReads: agentWorkflows.nativeGoalReads, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
       queuedMessages.turnInteractionHandler,
       createConversationCompactionCommandHandler(compactionDependencies),
       createSourceControlCommandHandler({

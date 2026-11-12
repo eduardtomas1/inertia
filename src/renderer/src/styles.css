@@ -409,7 +409,6 @@ button:disabled,
   .turn-activity-group .agent-activity-disclosure,
   .turn-activity-group-summary,
   .turn-follow-up-row,
-  .usage-limits-panel .limits-account-trigger,
   .work-thread-section-toggle,
   .workspace-panel-launcher,
   .workspace-panel-launcher-list > .is-unavailable,
@@ -7963,14 +7962,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 @media (max-width: 560px) {
-  .app-update-notice {
-    grid-template-columns: 17px minmax(0, 1fr) auto 28px;
-  }
-
-  .app-update-notice small {
-    display: none;
-  }
-
   .welcome-card,
   .project-welcome {
     width: calc(100% - 24px);
@@ -11616,8 +11607,7 @@ button.sent-attachment-open:hover {
   overflow: hidden;
 }
 
-.conversation-pane-chat > .chat-workspace,
-.conversation-pane-chat > .conversation-detail-state {
+.conversation-pane-chat > .chat-workspace {
   width: 100%;
   min-height: 0;
   flex: 1 1 auto;

@@ -902,10 +902,8 @@ export function readerScrollReachesLatest(input: {
   scrollHeight: number;
   previousScrollTop: number | null;
   live: boolean;
-  aimedAtLatest?: boolean;
 }): boolean {
   const movedUp = input.previousScrollTop !== null && input.scrollTop < input.previousScrollTop;
-  if (input.aimedAtLatest && !movedUp) return true;
   return shouldFollowTimeline(
     input.scrollTop,
     input.clientHeight,
@@ -921,14 +919,10 @@ export function readerScrollFollow(input: {
   previousScrollTop: number | null;
   live: boolean;
   intentional: boolean;
-  aimedAtLatest: boolean;
-}): { follows: boolean; movedUp: boolean } {
-  return {
-    movedUp: input.previousScrollTop !== null && input.scrollTop < input.previousScrollTop,
-    follows: input.intentional
-      ? readerScrollReachesLatest(input)
-      : shouldFollowTimeline(input.scrollTop, input.clientHeight, input.scrollHeight),
-  };
+}): boolean {
+  return input.intentional
+    ? readerScrollReachesLatest(input)
+    : shouldFollowTimeline(input.scrollTop, input.clientHeight, input.scrollHeight);
 }
 
 export function shouldFollowTimeline(scrollTop: number, clientHeight: number, scrollHeight: number, threshold = 120): boolean {

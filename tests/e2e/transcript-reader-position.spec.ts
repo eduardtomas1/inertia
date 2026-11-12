@@ -69,6 +69,17 @@ function readPosition(transcript: Locator) {
   }));
 }
 
+async function settledTop(transcript: Locator): Promise<number> {
+  let previous = Number.NaN;
+  await expect.poll(async () => {
+    const current = (await readPosition(transcript)).top;
+    const settled = current === previous;
+    previous = current;
+    return settled;
+  }, { intervals: [150] }).toBe(true);
+  return previous;
+}
+
 async function expectReaderStaysAt(page: Page, transcript: Locator, top: number): Promise<void> {
   const deadline = Date.now() + 1_600;
   while (Date.now() < deadline) {
@@ -126,7 +137,7 @@ test("keeps the reader's position near the end of a completed or streaming answe
 
     await page.mouse.wheel(0, -100);
     await expect.poll(async () => (await readPosition(transcript)).gap).toBeGreaterThanOrEqual(98);
-    await expectReaderStaysAt(page, transcript, (await readPosition(transcript)).top);
+    await expectReaderStaysAt(page, transcript, await settledTop(transcript));
 
     await page.mouse.wheel(0, 400);
     await expect(jumpToLatest).toHaveCount(0);
@@ -136,14 +147,14 @@ test("keeps the reader's position near the end of a completed or streaming answe
       await page.waitForTimeout(60);
     }
     await expect.poll(async () => (await readPosition(transcript)).gap).toBeGreaterThanOrEqual(88);
-    await expectReaderStaysAt(page, transcript, (await readPosition(transcript)).top);
+    await expectReaderStaysAt(page, transcript, await settledTop(transcript));
 
     await page.mouse.wheel(0, -2_000);
     await page.waitForTimeout(300);
     const nearEnd = (await readPosition(transcript)).gap - 60;
     await page.mouse.wheel(0, nearEnd);
     await expect.poll(async () => (await readPosition(transcript)).gap).toBeLessThanOrEqual(62);
-    await expectReaderStaysAt(page, transcript, (await readPosition(transcript)).top);
+    await expectReaderStaysAt(page, transcript, await settledTop(transcript));
 
     await page.mouse.wheel(0, 400);
     await expect(jumpToLatest).toHaveCount(0);
@@ -159,7 +170,7 @@ test("keeps the reader's position near the end of a completed or streaming answe
     await transcript.hover({ position: { x: 400, y: 300 } });
     await page.mouse.wheel(0, -60);
     await expect(jumpToLatest).toBeVisible();
-    const streamingTop = (await readPosition(transcript)).top;
+    const streamingTop = await settledTop(transcript);
     await expectReaderStaysAt(page, transcript, streamingTop);
     expect((await readPosition(transcript)).gap).toBeGreaterThan(120);
 

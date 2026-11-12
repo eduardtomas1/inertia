@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { RuntimeStore } from "../../src/server/database";
 import { WINDOW_HEADER_HEIGHT } from "../../src/shared/window-chrome";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { measureWindowDragBand, type DragPoint, type WindowDragBand } from "./support/window-drag-regions";
+import { BACKDROP_SELECTOR, CONTROL_SELECTOR, measureWindowDragBand, type DragPoint, type WindowDragBand } from "./support/window-drag-regions";
 import { rightPanelToggle } from "./support/workspace-tools";
 
 const MINIMUM_DRAGGABLE_SHARE = 0.9;
@@ -120,8 +120,17 @@ function emptySamples(band: WindowDragBand, from: number, count: number): number
   return band.points.slice(from, from + count).filter((point) => !point.overControl).length;
 }
 
+interface TuckState {
+  points: DragPoint[];
+  exposed: string[];
+  center: DragPoint;
+  scrollTop: number;
+  candidates: number;
+  distance: number | null;
+}
+
 async function tuckControlsUnderTopBar(target: Page, selector: string): Promise<DragPoint[]> {
-  const read = async (): Promise<{ points: DragPoint[]; center: DragPoint; forward: boolean } | null> => await target.evaluate(({ controls, height }) => {
+  const read = async (): Promise<TuckState | null> => await target.evaluate(({ controls, headerControls, backdrop, height }) => {
     const scrolls = (element: Element): boolean => element.scrollHeight > element.clientHeight + height
       && /auto|scroll/u.test(getComputedStyle(element).overflowY);
     let scroller: Element | null = null;
@@ -132,34 +141,78 @@ async function tuckControlsUnderTopBar(target: Page, selector: string): Promise<
       if (scroller) break;
     }
     if (!scroller) return null;
-    const bounds = scroller.getBoundingClientRect();
-    const points = [...scroller.querySelectorAll(controls)].flatMap((element) => {
+    const owner = scroller;
+    const bounds = owner.getBoundingClientRect();
+    const middle = Math.round(height / 2);
+    const covered = new Map<string, boolean>();
+    const underHeaderControl = (x: number, y: number): boolean => {
+      const key = `${x},${y}`;
+      const known = covered.get(key);
+      if (known !== undefined) return known;
+      const hit = document.elementFromPoint(x, y);
+      const result = Boolean(hit && !owner.contains(hit) && hit.closest(headerControls) && !hit.closest(backdrop));
+      covered.set(key, result);
+      return result;
+    };
+    const exposed: string[] = [];
+    const points: { x: number; y: number }[] = [];
+    const distances: number[] = [];
+    const reach = { up: -owner.scrollTop, down: owner.scrollHeight - owner.clientHeight - owner.scrollTop };
+    for (const element of owner.querySelectorAll(controls)) {
       const rect = element.getBoundingClientRect();
+      if (rect.width < 12 || rect.height < 6) continue;
+      const xs = [0.2, 0.5, 0.8].map((share) => Math.round(rect.left + rect.width * share));
       const top = Math.max(0, rect.top);
       const bottom = Math.min(height, rect.bottom);
-      if (bottom - top < 6 || rect.width < 12) return [];
-      return [0.2, 0.5, 0.8]
-        .map((share) => ({ x: Math.round(rect.left + rect.width * share), y: Math.round((top + bottom) / 2) }))
-        .filter((point) => !document.elementFromPoint(point.x, point.y)?.closest("button, input, textarea, a[href], [role='separator']"));
-    });
+      if (bottom - top >= 6) {
+        const y = Math.round((top + bottom) / 2);
+        for (const x of xs) {
+          const hit = document.elementFromPoint(x, y);
+          if (hit && owner.contains(hit)) exposed.push(`${element.className || element.tagName} at ${x},${y}`);
+          else if (!underHeaderControl(x, y)) points.push({ x, y });
+        }
+      }
+      const half = Math.ceil(rect.height / 2);
+      const rows = half * 2 <= height
+        ? Array.from({ length: Math.floor((height - 2 * half) / 2) + 1 }, (_, index) => half + index * 2)
+        : [middle];
+      for (const row of rows) {
+        if (!xs.some((x) => !underHeaderControl(x, row))) continue;
+        const distance = rect.top + rect.height / 2 - row;
+        if (Math.abs(distance) > 1 && distance >= reach.up && distance <= reach.down) distances.push(distance);
+      }
+    }
+    distances.sort((first, second) => Math.abs(first) - Math.abs(second));
     return {
       points,
+      exposed,
       center: { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + Math.min(bounds.height, window.innerHeight - bounds.top) / 2) },
-      forward: scroller.scrollTop < (scroller.scrollHeight - scroller.clientHeight) / 2,
+      scrollTop: Math.round(owner.scrollTop),
+      candidates: distances.length,
+      distance: distances[0] ?? null,
     };
-  }, { controls: selector, height: WINDOW_HEADER_HEIGHT });
+  }, { controls: selector, headerControls: CONTROL_SELECTOR, backdrop: BACKDROP_SELECTOR, height: WINDOW_HEADER_HEIGHT });
   const start = await read();
-  if (!start) return [];
-  const direction = start.forward ? 1 : -1;
+  if (!start) throw new Error(`No scrolling container holds ${selector}.`);
   await target.mouse.move(start.center.x, start.center.y);
-  await target.mouse.wheel(0, 420 * direction);
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    await target.waitForTimeout(40);
-    const state = await read();
-    if (state && state.points.length > 0) return state.points;
-    await target.mouse.wheel(0, 10 * direction);
+  const history: string[] = [];
+  let state: TuckState | null = start;
+  for (let attempt = 0; attempt < 12 && state; attempt += 1) {
+    expect(state.exposed, `A control under ${selector} shows through the top bar`).toEqual([]);
+    if (state.points.length > 0) return state.points;
+    history.push(`scrollTop ${state.scrollTop}, ${state.candidates} candidates, next ${state.distance ?? "none"}`);
+    if (state.distance === null) break;
+    await target.mouse.wheel(0, Math.round(state.distance));
+    let previous = Number.NaN;
+    await expect.poll(async () => {
+      const current = (await read())?.scrollTop ?? Number.NaN;
+      const settled = current === previous;
+      previous = current;
+      return settled;
+    }, { intervals: [100], timeout: 5_000 }).toBe(true);
+    state = await read();
   }
-  return [];
+  throw new Error(`Could not scroll a control under ${selector} beneath an empty part of the top bar: ${history.join("; ")}`);
 }
 
 test("drags the window from every empty part of the chat top bar", async () => {

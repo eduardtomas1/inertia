@@ -10,7 +10,6 @@ import {
   shouldFoldSettledTurn,
   turnExecutionElapsedMs,
   turnQueueElapsedMs,
-  turnTimingLabels,
   workSummaryLabel,
   type ResponseTurn,
 } from "../../src/renderer/src/utils/responseTimeline";
@@ -211,7 +210,6 @@ describe("Quiet Ledger settled work summary", () => {
 
     expect(turnQueueElapsedMs(completed)).toBe(8_000);
     expect(turnExecutionElapsedMs(completed)).toBe(102_000);
-    expect(turnTimingLabels(completed)).toEqual(["Queued 8s", "Worked 1m 42s"]);
     expect(workSummaryLabel(completed)).toBe("Worked for 1m 42s · 2 actions");
   });
 
@@ -260,16 +258,11 @@ describe("Quiet Ledger settled work summary", () => {
     expect(turnExecutionElapsedMs(beforeStarting)).toBeNull();
     expect(turnQueueElapsedMs(beforeStarting)).toBe(4_000);
     expect(workSummaryLabel(beforeStarting)).toBe("Stopped before starting");
-    expect(turnTimingLabels(beforeStarting)).toEqual([
-      "Queued 4s",
-      "Stopped before starting",
-    ]);
     expect(noTools.toolCallCount).toBe(0);
     expect(workSummaryLabel(noTools)).toBe("Completed without tool activity");
     expect(turnExecutionElapsedMs(queued, queuedNow)).toBeNull();
     expect(turnQueueElapsedMs(queued, queuedNow)).toBe(12_000);
     expect(workSummaryLabel(queued, queuedNow)).toBe("Queued for 12s");
-    expect(turnTimingLabels(queued, queuedNow)).toEqual(["Queued 12s"]);
 
     const queuedHtml = renderTurn(queued.agentTurn, []);
     expect(queuedHtml).toContain('data-active-work-state="queued"');

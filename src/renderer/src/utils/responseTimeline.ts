@@ -10,8 +10,6 @@ export {
 export {
   ACTIVITY_GROUP_LIVE_WINDOW,
   activityCommandLine,
-  activitySummaryLabel,
-  activitySummaryParts,
   activitySentenceText,
   activitySummarySentence,
   activitySummarySentenceLabel,
@@ -46,7 +44,6 @@ export {
   turnExecutionElapsedMs,
   turnQueueElapsedMs,
   turnStatusLabel,
-  turnTimingLabels,
   workStatusLabel,
   workSummaryLabel,
 } from "./response-timeline/timing";

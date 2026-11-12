@@ -4,8 +4,6 @@ import {
   ACTIVITY_GROUP_LIVE_WINDOW,
   activityAttentionSeverity,
   activityCommandLine,
-  activitySummaryLabel,
-  activitySummaryParts,
   activityWorkKind,
   commandDisplayText,
   hostToolActivityTitle,
@@ -113,27 +111,6 @@ describe("activity group summaries", () => {
       editedFiles: null,
       readFiles: null,
     });
-    const parts = activitySummaryParts(summary);
-    expect(parts.map(({ count, label, tone }) => [count, label, tone])).toEqual([
-      [3, "commands", "neutral"],
-      [2, "files read", "neutral"],
-      [1, "search", "neutral"],
-      [1, "edit", "neutral"],
-      [1, "tool call", "neutral"],
-      [2, "failed", "failure"],
-      [1, "warning", "warning"],
-    ]);
-    expect(activitySummaryLabel(parts)).toBe(
-      "3 commands, 2 files read, 1 search, 1 edit, 1 tool call, 2 failed, 1 warning",
-    );
-    expect(activitySummaryLabel(activitySummaryParts(summarizeActivities([
-      command("failed-build", "ant compile", { status: "failed" }),
-      activity("provider-warning", { kind: "status", title: "Warning: fallback used" }),
-    ])))).toBe("1 command, 1 failed, 1 warning");
-    expect(activitySummaryLabel(activitySummaryParts(summarizeActivities([
-      activity("status-one", { kind: "status", title: "Connected" }),
-      activity("status-two", { kind: "status", title: "Reconnected" }),
-    ])))).toBe("2 updates");
   });
 
   it("keeps a bounded live window, folds settled groups, and reveals only the latest failure on request", () => {

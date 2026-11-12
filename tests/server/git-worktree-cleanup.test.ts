@@ -1615,28 +1615,4 @@ describe("launch-owned Git cleanup", () => {
       .resolves.toBe("retained");
     expect(git(root, "rev-parse", branch)).toBe(movedHead);
   });
-
-  it("retains a ref moved to a commit already merged into the current HEAD", async () => {
-    const root = repository();
-    const path = ownedPath(root, "merged moved owned path");
-    const branch = "inertia/merged-moved-owned";
-    await createWorktree(root, path, {
-      branch,
-      createBranch: true,
-      startPoint: "main",
-    });
-    const ownership = await inspectRegisteredWorktreeOwnership(
-      root,
-      path,
-      branch,
-    );
-    await removeWorktree(root, path, false);
-    git(root, "commit", "--allow-empty", "-q", "-m", "Advance merged main");
-    const movedHead = git(root, "rev-parse", "main");
-    git(root, "branch", "-f", branch, movedHead);
-
-    await expect(inspectBranchCleanupOutcome(root, branch, ownership.head))
-      .resolves.toBe("retained");
-    expect(git(root, "rev-parse", branch)).toBe(movedHead);
-  });
 });

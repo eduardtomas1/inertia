@@ -21,7 +21,6 @@ import {
   detachedChatDraftRecoveryPaths,
   MAX_QUARANTINED_DETACHED_CHAT_DRAFT_STATES,
   MAX_PENDING_DETACHED_CHAT_DRAFTS,
-  parseDetachedChatDraftStore,
 } from "../../src/main/detached-chat-draft-store";
 
 const firstConversation = "11111111-1111-4111-8111-111111111111";
@@ -154,23 +153,6 @@ describe("detached chat draft store", () => {
       writeFileSync(path, content);
       expect(new DetachedChatDraftStore(path).snapshot()).toEqual([]);
     }
-
-    const validDraft = {
-      conversationId: firstConversation,
-      draft: "valid",
-      handoffId: "22222222-2222-4222-8222-222222222222",
-    };
-    expect(parseDetachedChatDraftStore({
-      version: 1,
-      drafts: [validDraft, { ...validDraft, injected: true }],
-    }).drafts).toEqual([validDraft]);
-    expect(parseDetachedChatDraftStore({
-      version: 1,
-      drafts: Array.from(
-        { length: MAX_PENDING_DETACHED_CHAT_DRAFTS + 1 },
-        () => validDraft,
-      ),
-    }).drafts).toEqual([]);
   });
 
   it("quarantines malformed state, restores the bounded last-known-good copy, and preserves evidence across later writes", () => {

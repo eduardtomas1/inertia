@@ -7,6 +7,7 @@ export interface DistributionSummary {
 }
 
 export interface PrefetchedSurfaceSample {
+  prefetchedWithinIdleWindow: boolean;
   commandPaletteFirstOpenMs: number;
   commandPaletteOpenedInInputTask: boolean;
   settingsFirstOpenMs: number;
@@ -105,6 +106,9 @@ export function summarizePrefetchedSurfaceSamples(
     settingsOpenedInInputTask: samples.every(
       ({ settingsOpenedInInputTask }) => settingsOpenedInInputTask,
     ),
+    relaunchesPrefetchedWithinIdleWindow: samples.filter(
+      ({ prefetchedWithinIdleWindow }) => prefetchedWithinIdleWindow,
+    ).length,
     prefetchedSurfaces: {
       warmUp,
       samples,

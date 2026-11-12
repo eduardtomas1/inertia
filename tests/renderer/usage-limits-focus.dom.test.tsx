@@ -113,7 +113,7 @@ it("opens the Usage popup with its Limits tab on the first commit once the idle 
   const { UsageIndicator } = await import("../../src/renderer/src/components/UsageIndicator");
   const { prefetchFrequentSurfaces } = await import("../../src/renderer/src/components/lazySurfaceLoaders");
   await act(async () => {
-    prefetchFrequentSurfaces();
+    void prefetchFrequentSurfaces();
     await vi.dynamicImportSettled();
   });
   render(<UsageLimitsProvider request={request} status="online"><UsageIndicator usage={null} rateLimits={[]} rateLimitState={{ freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false }} quotaSource="selected-route" mode="expanded" providerLabel="Codex" onModeChange={() => undefined} /></UsageLimitsProvider>);

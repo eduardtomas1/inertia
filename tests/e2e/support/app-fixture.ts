@@ -695,11 +695,13 @@ export async function createAppFixture(
         options.claudeAuthSource,
         "utf8",
       ),
-      writeFile(
-        join(workspace.workspaceDirectory, ".git", "info", "exclude"),
-        "auth\n",
-        { encoding: "utf8", flag: "a" },
-      ),
+      ...(options.workspaceGit === false
+        ? []
+        : [writeFile(
+            join(workspace.workspaceDirectory, ".git", "info", "exclude"),
+            "auth\n",
+            { encoding: "utf8", flag: "a" },
+          )]),
     ]);
   }
   if (options.githubCliSources) {

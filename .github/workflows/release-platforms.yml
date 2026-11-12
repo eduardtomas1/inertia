@@ -780,13 +780,22 @@ jobs:
             phase: display-sensitive
             evidence: macos-x64-display-sensitive
             timeout_minutes: 40
-          - check: macOS arm64 (isolated)
+          - check: macOS arm64 (isolated 1/2)
             runner: macos-15
             platform: macos-arm64
             arch: arm64
             phase: isolated
-            evidence: macos-arm64-isolated
-            timeout_minutes: 50
+            shard: "1/2"
+            evidence: macos-arm64-isolated-1-of-2
+            timeout_minutes: 45
+          - check: macOS arm64 (isolated 2/2)
+            runner: macos-15
+            platform: macos-arm64
+            arch: arm64
+            phase: isolated
+            shard: "2/2"
+            evidence: macos-arm64-isolated-2-of-2
+            timeout_minutes: 45
           - check: macOS arm64 (display-sensitive)
             runner: macos-15
             platform: macos-arm64
@@ -884,7 +893,7 @@ jobs:
       - name: Run isolated Electron end-to-end tests
         if: runner.os != 'Linux' && matrix.phase == 'isolated'
         env:
-          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
+          INERTIA_E2E_WORKERS: ${{ matrix.shard && '1' || '2' }}
         run: npm exec -- playwright test --project=isolated ${{ matrix.shard && format('--shard={0}', matrix.shard) || '' }} --output=test-results/isolated
 
       - name: Run destructive runtime-recovery tests sequentially

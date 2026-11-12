@@ -21,6 +21,7 @@ export const ELECTRON_CHECK_SUFFIX = " Electron";
 
 export const PRIMARY_PLATFORM_ARTIFACTS = Object.freeze(["linux-x64", "windows-x64", "macos-arm64"]);
 const UNIT_SHARD_PLATFORM_ARTIFACTS = Object.freeze(["windows-x64", "macos-x64"]);
+const SINGLE_WORKER_ISOLATED_ARTIFACTS = Object.freeze(["windows-", "macos-arm64"]);
 const SHA = /^[0-9a-f]{40}$/u;
 
 function validReusedRun(reusedRun) {
@@ -67,7 +68,7 @@ export function createEvidencePlan({
     check: `${platform.label}${ELECTRON_CHECK_SUFFIX} (${shard ? `${phase} ${shard}` : phase})`,
     evidence_artifact: `${platform.artifact}-${phase}${shardSlug(shard)}`,
   });
-  const isolatedShards = (platform) => (platform.artifact.startsWith("windows-") ? ["1/2", "2/2"] : [null]);
+  const isolatedShards = (platform) => (SINGLE_WORKER_ISOLATED_ARTIFACTS.some((prefix) => platform.artifact.startsWith(prefix)) ? ["1/2", "2/2"] : [null]);
   const recoveryOnly = (platform) => !completeSiblings
     && !PRIMARY_PLATFORM_ARTIFACTS.includes(platform.artifact);
   const electronPlatforms = [

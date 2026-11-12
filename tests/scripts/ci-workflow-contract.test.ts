@@ -141,7 +141,7 @@ it("release builds prove exact packages while units and desktop phases run as se
   const entry = ({ platform, phase, shard }: { platform: string; phase: string; shard?: string }) =>
     `${platform}:${phase}${shard ? ` ${shard}` : ""}`;
   expect((electron.strategy.matrix.include as Array<{ platform: string; phase: string; shard?: string }>).map(entry).sort()).toEqual(
-    platforms.flatMap((platform) => platform.startsWith("windows-")
+    platforms.flatMap((platform) => platform.startsWith("windows-") || platform === "macos-arm64"
       ? [`${platform}:display-sensitive`, `${platform}:isolated 1/2`, `${platform}:isolated 2/2`]
       : [`${platform}:display-sensitive`, `${platform}:isolated`]).sort(),
   );
@@ -154,7 +154,7 @@ it("release builds prove exact packages while units and desktop phases run as se
   for (const step of playwright) expect(step.if).not.toMatch(/always\(|failure\(|cancelled\(/u);
   expect(playwright.map((step) => [...step.if!.matchAll(/matrix\.phase == '([a-z-]+)'/gu)].map((match) => match[1])))
     .toEqual([["display-sensitive"], ["isolated"], ["isolated"], ["display-sensitive"], ["isolated"], ["isolated"]]);
-  expect(playwright[1]!.env?.INERTIA_E2E_WORKERS).toBe("${{ runner.os == 'Windows' && '1' || '2' }}");
+  expect(playwright[1]!.env?.INERTIA_E2E_WORKERS).toBe("${{ matrix.shard && '1' || '2' }}");
   expect(playwright[1]!.run).toContain("${{ matrix.shard && format('--shard={0}', matrix.shard) || '' }}");
   expect(playwright[2]!.if).toContain("matrix.shard != '2/2'");
   const index = (run: string) => electronSteps.findIndex((step) => step.run === run);
@@ -191,7 +191,7 @@ it("CI runs native package proof and desktop Electron projects as separate same-
     expect(job.strategy.matrix).toBe(id === "electron"
       ? "${{ fromJSON(needs.classify.outputs.electron_matrix_json) }}"
       : "${{ fromJSON(needs.classify.outputs.matrix_json) }}");
-    expect(job.strategy["max-parallel"]).toBe(`\${{ github.event_name == 'schedule' && 2 || ${id === "electron" ? 10 : 6} }}`);
+    expect(job.strategy["max-parallel"]).toBe(`\${{ github.event_name == 'schedule' && 2 || ${id === "electron" ? 11 : 6} }}`);
     expect(job.steps[0].uses).toMatch(/^actions\/checkout@/u);
     expect(job.steps.some((step: { uses?: string }) => step.uses === "./.github/actions/install-dependencies")).toBe(true);
   }
@@ -211,13 +211,13 @@ it("splits every complete Electron target into display-sensitive and isolated-pl
   expect(pullRequest.electronMatrix.include.map(entry)).toEqual([
     "linux-x64:display-sensitive", "linux-x64:isolated",
     "windows-x64:display-sensitive", "windows-x64:isolated 1/2", "windows-x64:isolated 2/2",
-    "macos-arm64:display-sensitive", "macos-arm64:isolated",
+    "macos-arm64:display-sensitive", "macos-arm64:isolated 1/2", "macos-arm64:isolated 2/2",
     "linux-arm64:runtime-recovery", "windows-arm64:runtime-recovery", "macos-x64:runtime-recovery",
   ]);
   const nightly = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["README.md"], event: "schedule" });
   expect(nightly.electronMatrix.include.map(entry)).toEqual([
     "macos-x64:isolated", "macos-x64:display-sensitive",
-    "macos-arm64:isolated", "macos-arm64:display-sensitive",
+    "macos-arm64:isolated 1/2", "macos-arm64:isolated 2/2", "macos-arm64:display-sensitive",
     "windows-arm64:isolated 1/2", "windows-arm64:isolated 2/2", "windows-arm64:display-sensitive",
     "windows-x64:isolated 1/2", "windows-x64:isolated 2/2", "windows-x64:display-sensitive",
     "linux-arm64:isolated", "linux-arm64:display-sensitive",
@@ -225,6 +225,8 @@ it("splits every complete Electron target into display-sensitive and isolated-pl
   ]);
   expect(nightly.electronMatrix.include.filter(({ shard }) => shard).map(({ check, evidence_artifact }) => [check, evidence_artifact]))
     .toEqual([
+      ["macOS arm64 Electron (isolated 1/2)", "macos-arm64-isolated-1-of-2"],
+      ["macOS arm64 Electron (isolated 2/2)", "macos-arm64-isolated-2-of-2"],
       ["Windows ARM64 Electron (isolated 1/2)", "windows-arm64-isolated-1-of-2"],
       ["Windows ARM64 Electron (isolated 2/2)", "windows-arm64-isolated-2-of-2"],
       ["Windows x64 Electron (isolated 1/2)", "windows-x64-isolated-1-of-2"],
@@ -235,7 +237,7 @@ it("splits every complete Electron target into display-sensitive and isolated-pl
       .toBe(plan.electronMatrix.include.length);
     for (const { check } of plan.electronMatrix.include) expect(plan.requiredChecks).toContain(check);
   }
-  expect(pullRequest.electronMatrix.include.length).toBeLessThanOrEqual(10);
+  expect(pullRequest.electronMatrix.include.length).toBeLessThanOrEqual(11);
   const playwrightSteps = workflow.jobs.electron.steps.filter((entry: { run?: string }) => entry.run?.includes("playwright test"));
   const phasesFor = (project: string) => playwrightSteps.filter((step: { run: string }) => step.run.includes(`--project=${project} `));
   for (const [project, phases] of [
@@ -252,7 +254,7 @@ it("splits every complete Electron target into display-sensitive and isolated-pl
     }
   }
   const nativeIsolated = phasesFor("isolated").find((step: { if: string }) => step.if.startsWith("runner.os != 'Linux'"));
-  expect(nativeIsolated.env.INERTIA_E2E_WORKERS).toBe("${{ runner.os == 'Windows' && '1' || '2' }}");
+  expect(nativeIsolated.env.INERTIA_E2E_WORKERS).toBe("${{ matrix.shard && '1' || '2' }}");
   expect(nativeIsolated.run).toContain("${{ matrix.shard && format('--shard={0}', matrix.shard) || '' }}");
   for (const step of phasesFor("runtime-recovery")) {
     expect(step.if.includes("matrix.shard != '2/2'")).toBe(step.if.startsWith("runner.os != 'Linux'"));

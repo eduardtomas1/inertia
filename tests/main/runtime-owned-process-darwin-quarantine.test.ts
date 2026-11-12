@@ -105,7 +105,10 @@ afterEach(() => {
 
 describe("macOS per-process quarantine", () => {
   it("quarantines one macOS guardian closed by SIGUSR2 without tainting the registry", async () => {
-    const evidence = activate({ sessionEmpty: false, escapees: { absent: null, remaining: [] } });
+    const evidence = activate({
+      sessionEmpty: true,
+      escapees: { absent: false, remaining: [{ pid: 5_000, startTimeSeconds: "1756100001", startTimeMicroseconds: 1 }] },
+    });
     const { child } = await admittedGuardian();
 
     await expect(terminateProcessTreeAndWait(child, true, { platform: "darwin" })).resolves.toBe(false);
@@ -136,10 +139,6 @@ describe("macOS per-process quarantine", () => {
 
   it.each([
     ["the session stays occupied", { sessionEmpty: false, escapees: { absent: true, remaining: [] } }],
-    ["a marked escapee survives", {
-      sessionEmpty: true,
-      escapees: { absent: false, remaining: [{ pid: 5_000, startTimeSeconds: "1756100001", startTimeMicroseconds: 1 }] },
-    }],
     ["the escapee census is unknown", { sessionEmpty: true, escapees: { absent: null, remaining: [] } }],
   ] as const)("keeps a quarantined macOS claim when %s", async (_label, state) => {
     const evidence = activate(state);

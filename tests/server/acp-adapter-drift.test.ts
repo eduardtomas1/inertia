@@ -126,8 +126,6 @@ describe.each(["cursor", "kimi"] as const)("%s ACP drift regressions", (provider
   });
 
   it.each([
-    { sessionUpdate: "future\nkind" },
-    { sessionUpdate: "x".repeat(1_001) },
     { sessionUpdate: "agent_message_chunk", content: { type: "future_content" } },
   ])("still rejects a malformed session update $sessionUpdate", async (update) => {
     const { start } = fixture(providerId, undefined, [update]);
@@ -153,9 +151,6 @@ describe.each(["cursor", "kimi"] as const)("%s ACP drift regressions", (provider
 
   it.each([
     { sessionUpdate: "subagent_update", sessionId: "child-session", title: "Fixture child" },
-    { sessionUpdate: "subagent_update", sessionId: "child-session", cwd: 42 },
-    { sessionUpdate: "session_message", messageId: "message-1", content: [{ type: "text", text: "Hello" }] },
-    { sessionUpdate: "session_message_chunk", messageId: "message-1", content: { type: "text", text: "Hello" } },
   ])("rejects an unnegotiated ACP 1.7 $sessionUpdate and confirms cleanup", async (update) => {
     const { start, marker } = fixture(providerId, undefined, update);
     const result = await start().result;

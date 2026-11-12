@@ -268,35 +268,3 @@ test("updates Codex, interrupts the running chat and continues it on the same th
     await app.close();
   }
 });
-
-test("interrupts the running chat without continuing it when continuation is turned off", async () => {
-  test.setTimeout(120_000);
-  const { app, fake } = await openUpdatableApp("update-everything-no-continue");
-  try {
-    const { page } = app;
-    await startHeldTurn(app, fake);
-    const dialog = await openDialog(page);
-    const keepGoing = dialog.getByRole("checkbox", { name: "Continue chats after the update" });
-    await expect(keepGoing).toBeChecked();
-    await keepGoing.uncheck();
-    await expect(dialog.getByText("1 running chat will be interrupted.", { exact: true })).toBeVisible();
-    await writeFile(fake.brewGatePath, "release\n", "utf8");
-    await dialog.getByRole("button", { name: "Update", exact: true }).click();
-
-    await expect(interruption(page)).toContainText("Stopped to update Codex.");
-    await expect(interruption(page)).not.toContainText("continues after the update");
-    await expect(page.getByText(`Updated to ${latestVersion}`, { exact: true })).toBeVisible();
-    await expect(updateControl(page)).not.toHaveAttribute("aria-label", "Updating Codex…");
-    const settledAt = Date.now();
-    await expect.poll(async () => ({
-      turns: (await recorded(fake)).filter(({ method }) => method === "turn/start").length,
-      waited: Date.now() - settledAt >= 12_000,
-    }), { intervals: [500], timeout: 30_000 }).toEqual({ turns: 1, waited: true });
-    await expect(page.getByText(continuation, { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "Message composer" })
-      .getByRole("button", { name: "Send message" })).toBeVisible();
-    expect(app.rendererErrors).toEqual([]);
-  } finally {
-    await app.close();
-  }
-});

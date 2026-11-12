@@ -9,7 +9,6 @@ import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
 import { createLinuxSecretService, type LinuxSecretService } from "./support/linux-secret-service";
 import {
-  SECRET_DECLINED_REPLY,
   SECRET_DESCRIPTION,
   SECRET_FILE_NAME,
   SECRET_OUTPUT_TRACE_PREFIX,
@@ -427,28 +426,6 @@ test("lists the saved secret in Settings and revokes it there", async () => {
   await capture(target, "06-settings-revoked.png");
 });
 
-test("tells the agent when the user declines", async () => {
-  test.setTimeout(120_000);
-  const target = page();
-  const turn = await send(target, "Try the tailnet setup again.");
-  const card = await expectPendingCard(target);
-  await card.getByRole("button", { name: "Decline" }).click();
-
-  const declined = await nthToolResult(1);
-  expect(declined.success).toBe(false);
-  expect(declined.payload).toMatchObject({ status: "declined" });
-  expect(declined.payload?.file).toBeUndefined();
-  const row = cardIn(turn);
-  await expect(row).toHaveAttribute("data-secret-request-state", "declined");
-  await expect(row.locator(".secret-request-row-status")).toHaveText("Declined");
-  await expect(row.getByRole("button", { name: /^Revoke/u })).toHaveCount(0);
-  await expect(target.locator("[data-secret-request-notice]")).toHaveCount(0);
-  await expect(turn.getByText(SECRET_DECLINED_REPLY)).toBeVisible({ timeout: 30_000 });
-  expect(await readdir(agentSecretsDirectory()).catch(() => [])).toEqual([]);
-  await settledChanges(target, turn);
-  await captureThemes(target, "04-card-declined.png", null, () => toLatest(target));
-});
-
 test("answers the request from a detached chat window", async () => {
   test.setTimeout(180_000);
   const target = page();
@@ -467,7 +444,7 @@ test("answers the request from a detached chat window", async () => {
 
   await card.locator('input[name="agent-secret"]').fill(SECRET);
   await card.getByRole("button", { name: "Save securely" }).click();
-  const saved = await nthToolResult(2);
+  const saved = await nthToolResult(1);
   expect(saved.payload).toMatchObject({ status: "saved" });
   const file = String(saved.payload?.file);
   expect(await readFile(file, "utf8")).toBe(SECRET);

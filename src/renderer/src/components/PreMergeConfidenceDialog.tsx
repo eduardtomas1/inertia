@@ -458,5 +458,3 @@ export function PreMergeConfidenceDialog({
     </DialogShell>
   );
 }
-
-export default PreMergeConfidenceDialog;

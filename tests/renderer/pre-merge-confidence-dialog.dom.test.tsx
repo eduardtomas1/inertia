@@ -2,7 +2,7 @@ import { readSourceText } from "../helpers/source-text";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import PreMergeConfidenceDialog from "../../src/renderer/src/components/PreMergeConfidenceDialog";
+import { PreMergeConfidenceDialog } from"../../src/renderer/src/components/PreMergeConfidenceDialog";
 import type { GitPreMergeConfidence, ServerEvent } from "../../src/shared/contracts";
 
 function confidence(

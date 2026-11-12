@@ -92,10 +92,6 @@ export function cleanCustomAgentDraft(draft: CustomAgentDraft): CustomAgentDraft
   };
 }
 
-export function compiledCustomAgentLength(draft: CustomAgentDraft): number {
-  return compileCustomAgentInstructions(cleanCustomAgentDraft(draft)).length;
-}
-
 function invalid(field: CustomAgentField, message: string): CustomAgentValidation {
   return { agent: null, field, message };
 }

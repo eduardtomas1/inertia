@@ -184,15 +184,6 @@ export class ExecutionLedgerRepository {
     });
   }
 
-  clearAgentPlan(conversationId: string, runId: string, turnId: string | null): void {
-    this.context.requireConversation(conversationId);
-    if (turnId) this.context.assertAgentTurnIdentity(conversationId, runId, turnId);
-    this.context.database.prepare(`
-      DELETE FROM agent_plans
-      WHERE conversation_id = ? AND run_id = ? AND turn_id IS ?
-    `).run(conversationId, runId, turnId);
-  }
-
   addActivity(
     activity: Omit<AgentActivity, "id" | "createdAt" | "turnId"> & {
       turnId?: string | null;

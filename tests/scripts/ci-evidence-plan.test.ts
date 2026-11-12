@@ -71,7 +71,8 @@ describe("explainable CI plan", () => {
       "Linux x64 Electron (display-sensitive)", "Linux x64 Electron (isolated)",
       "Windows x64 Electron (display-sensitive)", "Windows x64 Electron (isolated 1/2)",
       "Windows x64 Electron (isolated 2/2)",
-      "macOS arm64 Electron (display-sensitive)", "macOS arm64 Electron (isolated)",
+      "macOS arm64 Electron (display-sensitive)", "macOS arm64 Electron (isolated 1/2)",
+      "macOS arm64 Electron (isolated 2/2)",
       "Windows unit tests (1/4)", "Windows unit tests (2/4)",
       "Windows unit tests (3/4)", "Windows unit tests (4/4)",
     ]);
@@ -81,7 +82,7 @@ describe("explainable CI plan", () => {
     expect(evaluateMergeEvidence(selected, evidence(selected))).toEqual([]);
     for (const missingName of [
       "Linux x64", "Windows x64", "macOS arm64", "Linux x64 Electron (display-sensitive)",
-      "Windows x64 Electron (isolated 2/2)", "macOS arm64 Electron (isolated)",
+      "Windows x64 Electron (isolated 2/2)", "macOS arm64 Electron (isolated 2/2)",
     ]) {
       const missingNative = evidence(selected);
       missingNative.jobs = missingNative.jobs.filter(({ name }) => name !== missingName);
@@ -101,7 +102,8 @@ describe("explainable CI plan", () => {
       "Linux x64 Electron (display-sensitive)", "Linux x64 Electron (isolated)",
       "Windows x64 Electron (display-sensitive)", "Windows x64 Electron (isolated 1/2)",
       "Windows x64 Electron (isolated 2/2)",
-      "macOS arm64 Electron (display-sensitive)", "macOS arm64 Electron (isolated)",
+      "macOS arm64 Electron (display-sensitive)", "macOS arm64 Electron (isolated 1/2)",
+      "macOS arm64 Electron (isolated 2/2)",
       "Linux ARM64 Electron (runtime-recovery)", "Windows ARM64 Electron (runtime-recovery)",
       "macOS x64 Electron (runtime-recovery)",
       "Windows unit tests (1/4)", "Windows unit tests (2/4)",
@@ -152,7 +154,7 @@ describe("explainable CI plan", () => {
       .toHaveLength(4);
     expect(selected.requiredChecks.filter((name: string) => name.startsWith("macOS x64 unit tests")))
       .toHaveLength(2);
-    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(10);
+    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(11);
   });
 
   it.each([
@@ -164,7 +166,7 @@ describe("explainable CI plan", () => {
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.requiredChecks.filter((name: string) => name.startsWith("Windows unit tests")))
       .toHaveLength(4);
-    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(7);
+    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(8);
   });
 
   it("missing baseline overrides an apparently harmless latest push", () => {
@@ -196,7 +198,7 @@ describe("explainable CI plan", () => {
     ]);
     expect(selected.electronMatrix.include.map(({ check }) => check)).toEqual(
       ["macOS x64", "macOS arm64", "Windows ARM64", "Windows x64", "Linux ARM64", "Linux x64"].flatMap((label) => [
-        ...(label.startsWith("Windows")
+        ...(label.startsWith("Windows") || label === "macOS arm64"
           ? [`${label} Electron (isolated 1/2)`, `${label} Electron (isolated 2/2)`]
           : [`${label} Electron (isolated)`]),
         `${label} Electron (display-sensitive)`,

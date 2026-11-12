@@ -138,7 +138,7 @@ async function renderPreloadedWorkbench(): Promise<HTMLElement> {
   await act(async () => { await vi.dynamicImportSettled(); });
   await waitFor(() => expect(view.container.querySelector(".sidebar-footer")).not.toBeNull());
   await act(async () => {
-    prefetchFrequentSurfaces();
+    void prefetchFrequentSurfaces();
     await vi.dynamicImportSettled();
   });
   return view.container;

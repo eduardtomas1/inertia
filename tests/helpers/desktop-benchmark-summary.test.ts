@@ -81,6 +81,7 @@ describe("desktop benchmark streaming summary", () => {
 
 describe("desktop benchmark prefetched-surface first opens", () => {
   const warmUp = {
+    prefetchedWithinIdleWindow: true,
     commandPaletteFirstOpenMs: 21.4,
     commandPaletteOpenedInInputTask: true,
     settingsFirstOpenMs: 162.5,
@@ -92,6 +93,7 @@ describe("desktop benchmark prefetched-surface first opens", () => {
     laterTask: { commandPalette?: number; settings?: number } = {},
   ) {
     return settings.map((settingsFirstOpenMs, index) => ({
+      prefetchedWithinIdleWindow: index !== 1,
       commandPaletteFirstOpenMs: [10.6, 13.3, 10.8, 12.1, 9.4][index]!,
       commandPaletteOpenedInInputTask: laterTask.commandPalette !== index,
       settingsFirstOpenMs,
@@ -109,6 +111,7 @@ describe("desktop benchmark prefetched-surface first opens", () => {
     expect(summary.commandPaletteFirstOpenMs).toBe(9.4);
     expect(summary.settingsOpenedInInputTask).toBe(true);
     expect(summary.commandPaletteOpenedInInputTask).toBe(true);
+    expect(summary.relaunchesPrefetchedWithinIdleWindow).toBe(4);
     expect(summary.prefetchedSurfaces.warmUp).toEqual(warmUp);
     expect(summary.prefetchedSurfaces.samples).toEqual(samples);
     expect(summary.prefetchedSurfaces.settingsFirstOpenMs).toEqual({

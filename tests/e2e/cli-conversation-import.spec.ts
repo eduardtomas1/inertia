@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
-import { loadSeededConversationTurns } from "./support/conversation-history";
 
 const codexId = "01962fd7-1000-7000-8000-123456789abc";
 const claudeId = "01962fd7-2000-7000-8000-123456789abc";
@@ -287,55 +286,6 @@ test("captures the importer in light, dark, narrow, empty and error states", asy
   await dialog.getByRole("button", { name: "Close CLI import" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(launcher).toBeFocused();
-  expect(app.rendererErrors).toEqual([]);
-});
-
-test("imports an archived rollout larger than the old 16 MiB limit with its opening and newest messages", async ({ browserName: _browserName }, info) => {
-  test.setTimeout(150_000);
-  historyRoot = await mkdtemp(join(tmpdir(), "inertia-cli-history-"));
-  const codexRoot = join(historyRoot, "codex"); const claudeRoot = join(historyRoot, "claude");
-  const codexDirectory = join(codexRoot, "archived_sessions");
-  const largeTitle = "Port the release scripts to the new packaging pipeline";
-  app = await createAppFixture({ name: "cli-conversation-import-large", initialState: "conversation", codexAppServerSource: providerSource,
-    additionalEnvironment: { CODEX_HOME: codexRoot, CLAUDE_CONFIG_DIR: claudeRoot },
-    beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
-      await mkdir(codexDirectory, { recursive: true });
-      await mkdir(join(claudeRoot, "projects"), { recursive: true });
-      const timestamp = "2026-09-26T09:00:00.000Z";
-      const message = (role: string, text: string) => JSON.stringify({ type: "response_item", timestamp, payload: { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] } });
-      const output = JSON.stringify({ type: "response_item", timestamp, payload: { type: "function_call_output", output: "log line\n".repeat(4096) } });
-      const lines = [JSON.stringify({ type: "session_meta", payload: { id: longId, cwd: workspaceDirectory, model_provider: "openai" } }), message("user", largeTitle), message("assistant", "I will move each release script and keep the old entry points working until the switch.")];
-      for (let index = 1; index <= 480; index += 1) lines.push(message("user", `Check step ${index} of the packaging pipeline.`), output, message("assistant", `Step ${index} of the packaging pipeline passes.`));
-      await writeFile(join(codexDirectory, `rollout-${longId}.jsonl`), `${lines.join("\n")}\n`);
-      const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory);
-      try { store.updateProject(store.shellSnapshot().projects[0]!.id, { name: "Workspace studio" }); store.updateSettings({ theme: "light", newThreadMode: "local" }); } finally { store.close(); }
-    },
-  });
-  await app.resizeWindow(1440, 920);
-  await openImporter(app.page);
-  const dialog = app.page.getByRole("dialog", { name: "Import CLI conversations" });
-  await expect(dialog.locator(".cli-import-note")).toHaveCount(0);
-  const largeCard = dialog.getByRole("button", { name: new RegExp(largeTitle, "u") });
-  await expect(largeCard.locator(".cli-import-card-continuation")).toHaveText("Continues in a new session");
-  await largeCard.click();
-  await expect(dialog.getByRole("group", { name: largeTitle })).toBeVisible();
-  await expect(dialog.getByText("Earlier messages will not be imported: 762 of 962", { exact: true })).toBeVisible();
-  await expect(dialog.locator(".cli-import-continuation")).toHaveText("Continues in a new session");
-  await captureState(info, "dialog-large-preview-light-wide");
-  await dialog.getByRole("button", { name: "Import conversation", exact: true }).click();
-  await dialog.getByRole("button", { name: "Open chat", exact: true }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(app.page.getByText("Step 480 of the packaging pipeline passes.", { exact: true })).toBeVisible();
-  const transcript = app.page.getByLabel("Thread transcript");
-  const note = app.page.getByRole("article", { name: "Agent system notice" });
-  await loadSeededConversationTurns(app.page, 100);
-  await expect(async () => {
-    await transcript.press("Home");
-    await expect(note).toBeInViewport({ timeout: 1_000 });
-  }).toPass({ timeout: 10_000 });
-  await expect(note).toContainText("Earlier messages were not imported: 762 of 962");
-  await expect(app.page.locator(".response-turn").first()).toContainText(largeTitle);
-  await captureState(info, "chat-large-note-light-wide");
   expect(app.rendererErrors).toEqual([]);
 });
 

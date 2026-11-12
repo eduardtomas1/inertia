@@ -63,10 +63,6 @@ export function secretRequestWaitMs(providerId: ProviderId): number {
   return Math.min(SECRET_REQUEST_DEFAULT_WAIT_MS, SECRET_REQUEST_WAIT_MS_BY_PROVIDER[providerId]);
 }
 
-export function secretRequestRoute(providerId: ProviderId): SecretRequestRoute {
-  return SECRET_REQUEST_ROUTES[providerId];
-}
-
 export function isSecretRequestProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && Object.hasOwn(SECRET_REQUEST_ROUTES, value);
 }
@@ -137,8 +133,6 @@ export const secretRequestToolInputSchema = z.strictObject({
   ttlHours: z.number().int().min(SECRET_REQUEST_MIN_TTL_HOURS).max(SECRET_REQUEST_MAX_TTL_HOURS)
     .default(SECRET_REQUEST_DEFAULT_TTL_HOURS),
 });
-
-export type SecretRequestToolInput = z.infer<typeof secretRequestToolInputSchema>;
 
 export interface NormalizedSecretRequestInput {
   title: string;

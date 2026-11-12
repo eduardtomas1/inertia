@@ -30,7 +30,6 @@ import {
   shouldVirtualizeTimeline,
   stabilizeResponseTimeline,
   turnExecutionElapsedMs,
-  turnTimingLabels,
   updateResponseTimelineForActivityDelta,
   workSummaryLabel,
   type ResponseTurn,
@@ -1146,11 +1145,9 @@ describe("authoritative response timeline", () => {
       }), turn.id);
     };
     expect(workSummaryLabel(failed(true))).toBe("Usage limit reached after 7s");
-    expect(turnTimingLabels(failed(true))).toEqual(["Queued 5s", "Usage limit reached after 7s"]);
     expect(workSummaryLabel(failed(false))).toBe("Failed after 7s");
     const unstarted = { ...failed(true), startedAt: null };
     expect(workSummaryLabel(unstarted)).toBe("Usage limit reached");
-    expect(turnTimingLabels(unstarted)[1]).toBe("Usage limit reached");
   });
 
   it("excludes persisted system suspend time from completed work duration", () => {
@@ -1167,7 +1164,6 @@ describe("authoritative response timeline", () => {
     }), turn.id);
 
     expect(turnExecutionElapsedMs(response)).toBe(2_000);
-    expect(turnTimingLabels(response)).toEqual(["Queued 5s", "Worked 2s"]);
   });
 
   it("renders plans only for their explicit owning turn and quarantines nullable legacy plans", () => {

@@ -217,50 +217,6 @@ export function summarizeActivities(
 
 type ActivityCountKey = Exclude<keyof ActivityGroupSummary, "editedFiles" | "readFiles">;
 
-export interface ActivitySummaryPart {
-  key: ActivityCountKey;
-  count: number;
-  label: string;
-  tone: "neutral" | "failure" | "warning";
-}
-
-const SUMMARY_PART_LABELS: ReadonlyArray<
-  readonly [ActivityCountKey, string, string, ActivitySummaryPart["tone"]]
-> = [
-  ["command", "command", "commands", "neutral"],
-  ["read", "file read", "files read", "neutral"],
-  ["search", "search", "searches", "neutral"],
-  ["edit", "edit", "edits", "neutral"],
-  ["browser", "browser action", "browser actions", "neutral"],
-  ["tool", "tool call", "tool calls", "neutral"],
-  ["failed", "failed", "failed", "failure"],
-  ["warnings", "warning", "warnings", "warning"],
-];
-
-export function activitySummaryParts(
-  summary: ActivityGroupSummary,
-): ActivitySummaryPart[] {
-  const parts = SUMMARY_PART_LABELS
-    .filter(([key]) => summary[key] > 0)
-    .map(([key, singular, plural, tone]) => ({
-      key,
-      count: summary[key],
-      label: summary[key] === 1 ? singular : plural,
-      tone,
-    }));
-  if (parts.length > 0 || summary.events === 0) return parts;
-  return [{
-    key: "events",
-    count: summary.events,
-    label: summary.events === 1 ? "update" : "updates",
-    tone: "neutral",
-  }];
-}
-
-export function activitySummaryLabel(parts: readonly ActivitySummaryPart[]): string {
-  return parts.map(({ count, label }) => `${count} ${label}`).join(", ");
-}
-
 export interface ActivitySentencePhrase {
   key: ActivityCountKey | "other";
   joiner: "" | ", " | " and ";

@@ -22,7 +22,8 @@ if (process.argv[2] === "--help") {
   process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n");
   process.exit(0);
 }
-const markerDirectory = path.join(process.cwd(), ".git");
+const markerDirectory = path.join(process.cwd(), "goal-read-markers");
+fs.mkdirSync(markerDirectory, { recursive: true });
 const markerPrefix = "${markerPrefix}";
 const alive = (pid) => {
   try { process.kill(pid, 0); return true; }
@@ -69,6 +70,7 @@ test("a send goes through while a Codex goal read is still unanswered", async ()
   const app = await createAppFixture({
     name: "stalled-goal-read-send",
     initialState: "conversation",
+    workspaceGit: false,
     claudeAuthSource: "process.exit(1);",
     codexAppServerSource: stalledGoalReadAppServer,
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
@@ -90,8 +92,8 @@ test("a send goes through while a Codex goal read is still unanswered", async ()
   });
   try {
     const { page } = app;
-    const markerDirectory = join(app.workspaceDirectory, ".git");
-    await expect.poll(async () => (await readdir(markerDirectory))
+    const markerDirectory = join(app.workspaceDirectory, "goal-read-markers");
+    await expect.poll(async () => (await readdir(markerDirectory).catch(() => []))
       .some((name) => name.startsWith(markerPrefix))).toBe(true);
 
     await page.getByRole("textbox", { name: "Message" })

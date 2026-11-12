@@ -112,28 +112,3 @@ export function workStatusLabel(turn: ResponseTurn, now = Date.now()): string {
           ? `${turn.isActive ? "Working" : "Worked"} for ${duration}`
           : turnStatusLabel(turn.agentTurn.status);
 }
-
-export function turnTimingLabels(turn: ResponseTurn, now = Date.now()): string[] {
-  const queue = `Queued ${formatElapsed(turnQueueElapsedMs(turn, now))}`;
-  const execution = turnExecutionElapsedMs(turn, now);
-  const status = turn.agentTurn.status;
-  if (execution === null) {
-    if (turn.isActive) return [queue];
-    if (status === "failed" && turn.agentTurn.usageLimited) return [queue, "Usage limit reached"];
-    if (status === "failed") {
-      return [queue, turn.startedAt ? "Failed" : "Failed before starting"];
-    }
-    if (status === "cancelled" || status === "interrupted") {
-      return [queue, turn.startedAt ? "Stopped" : "Stopped before starting"];
-    }
-    return [queue, turnStatusLabel(status)];
-  }
-  const work = status === "failed" && turn.agentTurn.usageLimited
-    ? `Usage limit reached after ${formatElapsed(execution)}`
-    : status === "failed"
-    ? `Failed after ${formatElapsed(execution)}`
-    : status === "cancelled" || status === "interrupted"
-      ? `Stopped after ${formatElapsed(execution)}`
-      : `${turn.isActive ? "Working" : "Worked"} ${formatElapsed(execution)}`;
-  return [queue, work];
-}

@@ -137,7 +137,10 @@ describe("watcher dock", () => {
     expect(await screen.findByRole("menuitem", { name: "Build · Supervised" })).toHaveAttribute("aria-disabled", "true");
   });
 
-  it("asks for approval and opens the watcher chat from the bar while a check waits on one", async () => {
+  it.each([
+    ["approval", "an approval", "Needs your approval"],
+    ["question", "a question", "Needs your answer"],
+  ])("asks for %s and opens the watcher chat from the bar while a check waits on %s", async (phase, _waitsOn, status) => {
     resetWatcherLiveStore();
     const current = link({ readOnly: false, status: "waking" });
     const runtime = watcherRuntime({ link: () => current });
@@ -151,38 +154,11 @@ describe("watcher dock", () => {
       linkId: current.id,
       watcherConversationId: WATCHER_ID,
       turnId: "watcher-turn",
-      phase: "approval",
+      phase: phase as WatcherLiveEvent["phase"],
       label: null,
       at: NOW,
     }));
-    expect(aside.querySelector(".watcher-bar-phase-text")).toHaveTextContent(/^Needs your approval$/u);
-    expect(primary).toHaveAccessibleName("Open chat");
-    expect(primary).toHaveFocus();
-    fireEvent.click(primary);
-    expect(openWatcherChat).toHaveBeenCalledExactlyOnceWith(WATCHER_ID);
-    expect(runtime.commands.some(({ type }) => type === "watcher.wake")).toBe(false);
-    resetWatcherLiveStore();
-  });
-
-  it("asks for an answer and opens the watcher chat from the bar while a check waits on a question", async () => {
-    resetWatcherLiveStore();
-    const current = link({ readOnly: false, status: "waking" });
-    const runtime = watcherRuntime({ link: () => current });
-    const openWatcherChat = vi.fn();
-    render(<Dock model={surfaceModel({ watchers: [current], request: runtime.request, openWatcherChat })} />);
-    const aside = await dock();
-    const primary = within(aside.querySelector<HTMLElement>(".watcher-bar-actions")!).getAllByRole("button")[0]!;
-    primary.focus();
-    act(() => publishWatcherLive({
-      type: "watcher.live",
-      linkId: current.id,
-      watcherConversationId: WATCHER_ID,
-      turnId: "watcher-turn",
-      phase: "question" as string as WatcherLiveEvent["phase"],
-      label: null,
-      at: NOW,
-    }));
-    expect(aside.querySelector(".watcher-bar-phase-text")).toHaveTextContent(/^Needs your answer$/u);
+    expect(aside.querySelector(".watcher-bar-phase-text")).toHaveTextContent(new RegExp(`^${status}$`, "u"));
     expect(primary).toHaveAccessibleName("Open chat");
     expect(primary).toHaveFocus();
     fireEvent.click(primary);

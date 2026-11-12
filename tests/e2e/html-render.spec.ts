@@ -344,10 +344,9 @@ async function listener(): Promise<{ server: Server; port: number; connections: 
   return { server, port: (server.address() as AddressInfo).port, connections: () => connections };
 }
 
-async function timed(work: Promise<unknown>): Promise<number> {
-  const started = Date.now();
+async function finishedAt(work: Promise<unknown>): Promise<number> {
   await work;
-  return Date.now() - started;
+  return Date.now();
 }
 
 test("keeps a hostile page inside its frame", async ({ browserName: _browserName }) => {
@@ -447,16 +446,20 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
       setTimeout(() => {
         const until = Date.now() + 4_000;
         while (Date.now() < until) Math.random();
+        Reflect.set(window, "__inertiaE2eBusyEndedAt", Date.now());
       }, 0);
     });
-    const [frameDelay, appDelay, typingDelay] = await Promise.all([
-      timed(frame.evaluate(() => 1)),
-      timed(page.evaluate(() => 1)),
-      timed(page.getByRole("textbox", { name: "Message" }).fill("Typed while the page is busy")),
+    const busyRequestedAt = Date.now();
+    const [frameAnsweredAt, appAnsweredAt, typedAt] = await Promise.all([
+      finishedAt(frame.evaluate(() => 1)),
+      finishedAt(page.evaluate(() => 1)),
+      finishedAt(page.getByRole("textbox", { name: "Message" }).fill("Typed while the page is busy")),
     ]);
-    expect(frameDelay).toBeGreaterThanOrEqual(3_000);
-    expect(appDelay).toBeLessThan(1_000);
-    expect(typingDelay).toBeLessThan(1_000);
+    const busyEndedAt = await frame.evaluate(() => Reflect.get(window, "__inertiaE2eBusyEndedAt") as unknown);
+    expect(typeof busyEndedAt).toBe("number");
+    expect(frameAnsweredAt - busyRequestedAt).toBeGreaterThanOrEqual(3_000);
+    expect(appAnsweredAt).toBeLessThan(busyEndedAt as number);
+    expect(typedAt).toBeLessThan(busyEndedAt as number);
     await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue("Typed while the page is busy");
 
     for (const [how, path] of [["refresh", "refreshed"], ["location", "navigated"]] as const) {

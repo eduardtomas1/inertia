@@ -115,6 +115,16 @@ describe("settings search matcher", () => {
     ["backends", "model-backends"],
     ["connections", "provider-accounts"],
     ["archive", "resource-health"],
+    ["1 hour", "model-backends"],
+    ["prompt cache", "model-backends"],
+    ["prompt cache", "compact-on-return"],
+    ["compact on return", "compact-on-return"],
+    ["summarize", "compact-on-return"],
+    ["subscription", "compact-on-return"],
+    ["auto-compact", "claude-auto-compact"],
+    ["context window", "claude-auto-compact"],
+    ["codex compaction", "codex-auto-compact"],
+    ["chatgpt compaction", "codex-auto-compact"],
   ])("finds %s in the real settings metadata", (query, id) => {
     expect(ids(query, SETTINGS_SECTION_ROWS)).toContain(id);
   });

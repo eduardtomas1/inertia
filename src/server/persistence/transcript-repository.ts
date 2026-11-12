@@ -293,31 +293,6 @@ export class TranscriptRepository {
     return message;
   }
 
-  associateMessageWithTurn(
-    messageId: string,
-    conversationId: string,
-    runId: string,
-    turnId: string,
-  ): ChatMessage {
-    const turn = this.context.assertAgentTurnIdentity(conversationId, runId, turnId);
-    const row = this.context.database.prepare(`
-      SELECT ${MESSAGE_PROJECTION_COLUMNS}
-      FROM messages
-      WHERE messages.id = ?
-    `).get(messageId) as MessageRow | undefined;
-    if (!row || row.conversation_id !== conversationId) throw new RecordNotFoundError("Message not found.");
-    if (row.role === "user" && turn.userMessageId !== messageId) {
-      throw new Error("The user message is owned by a different turn.");
-    }
-    if (row.turn_id !== null && row.turn_id !== turnId) {
-      throw new Error("The message is already owned by a different turn.");
-    }
-    if (row.turn_id === null) {
-      this.context.database.prepare("UPDATE messages SET turn_id = ? WHERE id = ?").run(turnId, messageId);
-    }
-    return { ...messageFromRow(row), turnId };
-  }
-
   updateMessageContent(messageId: string, content: string): void {
     if (replaceMessageContent(this.context.database, messageId, content) === 0) {
       throw new RecordNotFoundError("Message not found.");

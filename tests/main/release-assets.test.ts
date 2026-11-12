@@ -3,11 +3,11 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { finished } from "node:stream/promises";
 
 import { createPackage } from "@electron/asar";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -315,6 +315,22 @@ afterEach(async () => {
   await Promise.all([...temporaryDirectories].map(async (path) => await rm(path, { recursive: true, force: true })));
   temporaryDirectories.clear();
 });
+
+beforeAll(() => {
+  const npmEntryPoint = process.platform === "win32"
+    ? (isAbsolute(process.env.npm_execpath ?? "")
+      && basename(process.env.npm_execpath!).toLowerCase() === "npm-cli.js"
+      ? process.env.npm_execpath!
+      : join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"))
+    : null;
+  const warm = spawnSync(
+    npmEntryPoint ? process.execPath : "npm",
+    [...(npmEntryPoint ? [npmEntryPoint] : []), "sbom", "--omit=dev", "--package-lock-only", "--sbom-format", "cyclonedx"],
+    { cwd: root, encoding: "utf8", maxBuffer: 4 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 },
+  );
+  expect(warm.error).toBeUndefined();
+  expect(warm.status, warm.stderr).toBe(0);
+}, 75_000);
 
 describe("release asset staging", () => {
   it("publishes the exact 11-file unsigned canary union without desktop feed metadata or blockmaps", async () => {

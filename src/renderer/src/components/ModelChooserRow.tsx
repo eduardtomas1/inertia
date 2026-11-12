@@ -163,16 +163,6 @@ export function modelChooserCompatibilityLabel(
   return compatibilityLabels[compatibility.state];
 }
 
-export function isModelChooserSelectionKey(
-  event: Pick<KeyboardEvent, "altKey" | "ctrlKey" | "key" | "metaKey" | "shiftKey">,
-): boolean {
-  return !event.altKey
-    && !event.ctrlKey
-    && !event.metaKey
-    && !event.shiftKey
-    && (event.key === "Enter" || event.key === " ");
-}
-
 export function activateModelChooserFavorite(
   event: Pick<ReactMouseEvent, "preventDefault" | "stopPropagation">,
   row: ModelChooserRowData,

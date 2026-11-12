@@ -1063,23 +1063,6 @@ export class RuntimeOwnedProcessJournal {
     return true;
   }
 
-  clearRuntimeGenerationAfterConfirmedReboot(
-    runtimeGenerationId: string,
-  ): boolean {
-    if (!supportedRuntimeOwnedProcessPlatform(this.platform)) return true;
-    if (!validRuntimeGenerationId(runtimeGenerationId)) return false;
-    let sessions: RuntimeOwnedProcessSession[];
-    try { sessions = this.sessions.all().map(({ session }) => session); } catch { return false; }
-    if (!sessions.some((session) =>
-      session.runtimeGenerationId === runtimeGenerationId)) return true;
-    const records = this.records(runtimeGenerationId);
-    if (!records) return false;
-    for (const record of records) {
-      if (!this.release(record.ownershipId)) return false;
-    }
-    return this.finishSession(runtimeGenerationId);
-  }
-
   static identityMatches(
     claim: RuntimeOwnedProcessClaim,
     identity: ObservedRuntimeOwnedProcessIdentity,

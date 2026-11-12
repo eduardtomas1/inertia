@@ -1,8 +1,9 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import { TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "../../src/renderer/src/components/Tooltip";
 import type { AgentActivity, AgentTurn, ChatAttachment, ChatMessage } from "../../src/shared/contracts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
@@ -84,9 +85,16 @@ const notice: AgentActivity = {
 };
 
 describe("missing checkpoint notice", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_WARM_MS + 1);
+    });
+    vi.useRealTimers();
+    cleanup();
+  });
 
   it("gives keyboard and screen-reader users the reason, not only a hover title", () => {
+    vi.useFakeTimers();
     const { container } = render(createElement(ResponseTimeline, {
     turns: [turn()],
     messages: [message("Change the build.")],
@@ -120,5 +128,12 @@ describe("missing checkpoint notice", () => {
     expect(label?.textContent).toBe("No checkpoint for this turn: Checkpoint operation timed out.");
     expect(label?.getAttribute("title")).toBeNull();
     expect(screen.getByText(": Checkpoint operation timed out.").classList.contains("visually-hidden")).toBe(true);
+    fireEvent.pointerEnter(label!, { pointerType: "mouse" });
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("Checkpoint operation timed out.");
+    fireEvent.pointerLeave(label!, { pointerType: "mouse" });
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
   });
 });

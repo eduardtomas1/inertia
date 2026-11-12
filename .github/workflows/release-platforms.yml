@@ -112,21 +112,21 @@ jobs:
             platform: macos-x64
             arch: x64
             package_script: package:release:mac:x64
-            timeout_minutes: 140
+            timeout_minutes: 60
             app_path: release/mac/Inertia.app
           - label: macOS arm64
             runner: macos-15
             platform: macos-arm64
             arch: arm64
             package_script: package:release:mac
-            timeout_minutes: 110
+            timeout_minutes: 45
             app_path: release/mac-arm64/Inertia.app
           - label: Windows x64
             runner: windows-2025
             platform: windows-x64
             arch: x64
             package_script: package:release:win
-            timeout_minutes: 170
+            timeout_minutes: 45
             app_path: release/win-unpacked/Inertia.exe
             windows_asset_suffix: ""
           - label: Windows ARM64
@@ -134,7 +134,7 @@ jobs:
             platform: windows-arm64
             arch: arm64
             package_script: package:release:win:arm64
-            timeout_minutes: 220
+            timeout_minutes: 60
             app_path: release/win-arm64-unpacked/Inertia.exe
             windows_asset_suffix: .arm64
           - label: Linux x64
@@ -142,7 +142,7 @@ jobs:
             platform: linux-x64
             arch: x64
             package_script: package:release:linux
-            timeout_minutes: 90
+            timeout_minutes: 45
             app_path: release/linux-unpacked/inertia
             unpacked_dir: release/linux-unpacked
             docker_platform: linux/amd64
@@ -151,7 +151,7 @@ jobs:
             platform: linux-arm64
             arch: arm64
             package_script: package:release:linux:arm64
-            timeout_minutes: 90
+            timeout_minutes: 45
             app_path: release/linux-arm64-unpacked/inertia
             unpacked_dir: release/linux-arm64-unpacked
             docker_platform: linux/arm64
@@ -240,31 +240,6 @@ jobs:
       - name: Measure release-candidate desktop workloads under Xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run benchmark:desktop:built
-
-      - name: Run the complete release unit suite
-        if: runner.os != 'Windows'
-        run: |
-          # Keep native fixture contention aligned with PR CI.
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            npm test -- --maxWorkers=2
-          else
-            npm test
-          fi
-
-      # The guard test keeps its 90 s deadline for compile and native probes.
-      # Resolve electron-builder's checksum-verified compiler before Vitest so
-      # a cold tool download cannot consume that deadline.
-      - name: Prepare the checksum-verified NSIS test compiler
-        if: runner.os == 'Windows'
-        run: node -e "require('app-builder-lib/out/toolsets/windows').getMakeNsisPath(undefined).then(() => console.log('NSIS test compiler ready'))"
-
-      - name: Run the complete Windows release unit suite
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
-        run: npm test
 
       - name: Audit production dependencies
         if: runner.os == 'Linux'
@@ -503,38 +478,6 @@ jobs:
             }
           }
 
-      # These phases share the native desktop and must never overlap. Keep
-      # release certification aligned with PR/main CI: foreground first, then
-      # isolated apps, then destructive recovery, with distinct diagnostics.
-      - name: Run display-sensitive Electron end-to-end tests
-        if: runner.os != 'Linux'
-        run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
-
-      # Package evidence is already complete. Do not continue native work
-      # after a failed phase whose fixture cleanup may be unconfirmed.
-      - name: Run isolated Electron end-to-end tests
-        if: runner.os != 'Linux'
-        env:
-          # Bound Windows load after hosted socket-buffer exhaustion.
-          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
-        run: npm exec -- playwright test --project=isolated --output=test-results/isolated
-
-      - name: Run destructive runtime-recovery tests sequentially
-        if: runner.os != 'Linux'
-        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
-
-      - name: Run display-sensitive Electron end-to-end tests under Xvfb
-        if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
-
-      - name: Run isolated Electron end-to-end tests under Xvfb
-        if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=isolated --output=test-results/isolated
-
-      - name: Run destructive runtime-recovery tests sequentially under Xvfb
-        if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
-
       - name: Stage exact release assets and checksums
         env:
           INERTIA_RELEASE_STAGE_DIR: ${{ runner.temp }}/inertia-release-stage
@@ -577,9 +520,419 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  unit:
+    name: Release units ${{ matrix.label }}
+    needs: [release_identity, quality]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows ARM64 (1/6)
+            runner: windows-11-arm
+            platform: windows-arm64
+            arch: arm64
+            evidence: windows-arm64-1-of-6
+            unit_command: "npm run test:windows:shard -- --shard=1/6"
+            timeout_minutes: 45
+          - label: Windows ARM64 (2/6)
+            runner: windows-11-arm
+            platform: windows-arm64
+            arch: arm64
+            evidence: windows-arm64-2-of-6
+            unit_command: "npm run test:windows:shard -- --shard=2/6"
+            timeout_minutes: 45
+          - label: Windows ARM64 (3/6)
+            runner: windows-11-arm
+            platform: windows-arm64
+            arch: arm64
+            evidence: windows-arm64-3-of-6
+            unit_command: "npm run test:windows:shard -- --shard=3/6"
+            timeout_minutes: 45
+          - label: Windows ARM64 (4/6)
+            runner: windows-11-arm
+            platform: windows-arm64
+            arch: arm64
+            evidence: windows-arm64-4-of-6
+            unit_command: "npm run test:windows:shard -- --shard=4/6"
+            timeout_minutes: 45
+          - label: Windows ARM64 (5/6)
+            runner: windows-11-arm
+            platform: windows-arm64
+            arch: arm64
+            evidence: windows-arm64-5-of-6
+            unit_command: "npm run test:windows:shard -- --shard=5/6"
+            timeout_minutes: 45
+          - label: Windows ARM64 (6/6)
+            runner: windows-11-arm
+            platform: windows-arm64
+            arch: arm64
+            evidence: windows-arm64-6-of-6
+            unit_command: "npm run test:windows:shard -- --shard=6/6"
+            timeout_minutes: 45
+          - label: Windows x64 (1/4)
+            runner: windows-2025
+            platform: windows-x64
+            arch: x64
+            evidence: windows-x64-1-of-4
+            unit_command: "npm run test:windows:shard -- --shard=1/4"
+            timeout_minutes: 40
+          - label: Windows x64 (2/4)
+            runner: windows-2025
+            platform: windows-x64
+            arch: x64
+            evidence: windows-x64-2-of-4
+            unit_command: "npm run test:windows:shard -- --shard=2/4"
+            timeout_minutes: 40
+          - label: Windows x64 (3/4)
+            runner: windows-2025
+            platform: windows-x64
+            arch: x64
+            evidence: windows-x64-3-of-4
+            unit_command: "npm run test:windows:shard -- --shard=3/4"
+            timeout_minutes: 40
+          - label: Windows x64 (4/4)
+            runner: windows-2025
+            platform: windows-x64
+            arch: x64
+            evidence: windows-x64-4-of-4
+            unit_command: "npm run test:windows:shard -- --shard=4/4"
+            timeout_minutes: 40
+          - label: macOS x64 (1/2)
+            runner: macos-15-intel
+            platform: macos-x64
+            arch: x64
+            evidence: macos-x64-1-of-2
+            unit_command: "npm test -- --maxWorkers=2 --shard=1/2"
+            timeout_minutes: 40
+          - label: macOS x64 (2/2)
+            runner: macos-15-intel
+            platform: macos-x64
+            arch: x64
+            evidence: macos-x64-2-of-2
+            unit_command: "npm test -- --maxWorkers=2 --shard=2/2"
+            timeout_minutes: 40
+          - label: macOS arm64
+            runner: macos-15
+            platform: macos-arm64
+            arch: arm64
+            evidence: macos-arm64
+            unit_command: "npm test -- --maxWorkers=2"
+            timeout_minutes: 45
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux-x64
+            arch: x64
+            evidence: linux-x64
+            unit_command: "npm test"
+            timeout_minutes: 40
+          - label: Linux ARM64
+            runner: ubuntu-24.04-arm
+            platform: linux-arm64
+            arch: arm64
+            evidence: linux-arm64
+            unit_command: "npm test"
+            timeout_minutes: 40
+    env:
+      CI: "true"
+      INERTIA_RELEASE_CHANNEL: ${{ startsWith(inputs.release_tag || github.ref_name, 'canary-v') && 'canary' || 'stable' }}
+      RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}
+
+    steps:
+      - name: Check out frozen release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release_identity.outputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use the isolated Windows runner temporary directory
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-Content -Path $env:GITHUB_ENV -Value "TEMP=$env:RUNNER_TEMP"
+          Add-Content -Path $env:GITHUB_ENV -Value "TMP=$env:RUNNER_TEMP"
+
+      - name: Exclude the workspace from Microsoft Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.23.4
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Linux guardian toolchain
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-linux-packages
+        with:
+          packages: binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify native dependency architecture
+        env:
+          INERTIA_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: npm run test:native-architecture
+
+      - name: Prepare the checksum-verified NSIS test compiler
+        if: runner.os == 'Windows'
+        run: node scripts/ci/prepare-nsis-compiler.mjs
+
+      - name: Run the release unit suite
+        if: runner.os != 'Windows'
+        run: ${{ matrix.unit_command }}
+
+      - name: Run the Windows release unit suite
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ${{ matrix.unit_command }}
+
+      - name: Keep unit failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-unit-results-${{ matrix.evidence }}
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  electron:
+    name: Release Electron ${{ matrix.check }}
+    needs: [release_identity, quality]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: Windows ARM64 (isolated 1/2)
+            runner: windows-11-arm
+            platform: windows-arm64
+            arch: arm64
+            phase: isolated
+            shard: "1/2"
+            evidence: windows-arm64-isolated-1-of-2
+            timeout_minutes: 60
+          - check: Windows ARM64 (isolated 2/2)
+            runner: windows-11-arm
+            platform: windows-arm64
+            arch: arm64
+            phase: isolated
+            shard: "2/2"
+            evidence: windows-arm64-isolated-2-of-2
+            timeout_minutes: 60
+          - check: Windows ARM64 (display-sensitive)
+            runner: windows-11-arm
+            platform: windows-arm64
+            arch: arm64
+            phase: display-sensitive
+            evidence: windows-arm64-display-sensitive
+            timeout_minutes: 45
+          - check: Windows x64 (isolated 1/2)
+            runner: windows-2025
+            platform: windows-x64
+            arch: x64
+            phase: isolated
+            shard: "1/2"
+            evidence: windows-x64-isolated-1-of-2
+            timeout_minutes: 45
+          - check: Windows x64 (isolated 2/2)
+            runner: windows-2025
+            platform: windows-x64
+            arch: x64
+            phase: isolated
+            shard: "2/2"
+            evidence: windows-x64-isolated-2-of-2
+            timeout_minutes: 45
+          - check: Windows x64 (display-sensitive)
+            runner: windows-2025
+            platform: windows-x64
+            arch: x64
+            phase: display-sensitive
+            evidence: windows-x64-display-sensitive
+            timeout_minutes: 35
+          - check: macOS x64 (isolated)
+            runner: macos-15-intel
+            platform: macos-x64
+            arch: x64
+            phase: isolated
+            evidence: macos-x64-isolated
+            timeout_minutes: 60
+          - check: macOS x64 (display-sensitive)
+            runner: macos-15-intel
+            platform: macos-x64
+            arch: x64
+            phase: display-sensitive
+            evidence: macos-x64-display-sensitive
+            timeout_minutes: 40
+          - check: macOS arm64 (isolated 1/2)
+            runner: macos-15
+            platform: macos-arm64
+            arch: arm64
+            phase: isolated
+            shard: "1/2"
+            evidence: macos-arm64-isolated-1-of-2
+            timeout_minutes: 45
+          - check: macOS arm64 (isolated 2/2)
+            runner: macos-15
+            platform: macos-arm64
+            arch: arm64
+            phase: isolated
+            shard: "2/2"
+            evidence: macos-arm64-isolated-2-of-2
+            timeout_minutes: 45
+          - check: macOS arm64 (display-sensitive)
+            runner: macos-15
+            platform: macos-arm64
+            arch: arm64
+            phase: display-sensitive
+            evidence: macos-arm64-display-sensitive
+            timeout_minutes: 35
+          - check: Linux x64 (isolated)
+            runner: ubuntu-24.04
+            platform: linux-x64
+            arch: x64
+            phase: isolated
+            evidence: linux-x64-isolated
+            timeout_minutes: 45
+          - check: Linux x64 (display-sensitive)
+            runner: ubuntu-24.04
+            platform: linux-x64
+            arch: x64
+            phase: display-sensitive
+            evidence: linux-x64-display-sensitive
+            timeout_minutes: 35
+          - check: Linux ARM64 (isolated)
+            runner: ubuntu-24.04-arm
+            platform: linux-arm64
+            arch: arm64
+            phase: isolated
+            evidence: linux-arm64-isolated
+            timeout_minutes: 45
+          - check: Linux ARM64 (display-sensitive)
+            runner: ubuntu-24.04-arm
+            platform: linux-arm64
+            arch: arm64
+            phase: display-sensitive
+            evidence: linux-arm64-display-sensitive
+            timeout_minutes: 35
+    env:
+      CI: "true"
+      INERTIA_RELEASE_CHANNEL: ${{ startsWith(inputs.release_tag || github.ref_name, 'canary-v') && 'canary' || 'stable' }}
+      RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}
+
+    steps:
+      - name: Check out frozen release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release_identity.outputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use the isolated Windows runner temporary directory
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-Content -Path $env:GITHUB_ENV -Value "TEMP=$env:RUNNER_TEMP"
+          Add-Content -Path $env:GITHUB_ENV -Value "TMP=$env:RUNNER_TEMP"
+
+      - name: Exclude the workspace from Microsoft Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.23.4
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Linux guardian toolchain
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-linux-packages
+        with:
+          packages: binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify native dependency architecture
+        env:
+          INERTIA_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: npm run test:native-architecture
+
+      - name: Build the application bundle
+        run: npm run build:packaged
+
+      - name: Prepare Electron end-to-end binary
+        run: node scripts/ci/prepare-electron-binary.mjs
+
+      - name: Run display-sensitive Electron end-to-end tests
+        if: runner.os != 'Linux' && matrix.phase == 'display-sensitive'
+        run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+
+      - name: Run isolated Electron end-to-end tests
+        if: runner.os != 'Linux' && matrix.phase == 'isolated'
+        env:
+          INERTIA_E2E_WORKERS: ${{ matrix.shard && '1' || '2' }}
+        run: npm exec -- playwright test --project=isolated ${{ matrix.shard && format('--shard={0}', matrix.shard) || '' }} --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially
+        if: runner.os != 'Linux' && matrix.phase == 'isolated' && matrix.shard != '2/2'
+        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Run display-sensitive Electron end-to-end tests under Xvfb
+        if: runner.os == 'Linux' && matrix.phase == 'display-sensitive'
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+
+      - name: Run isolated Electron end-to-end tests under Xvfb
+        if: runner.os == 'Linux' && matrix.phase == 'isolated'
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=isolated --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially under Xvfb
+        if: runner.os == 'Linux' && matrix.phase == 'isolated'
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Keep Electron failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-electron-results-${{ matrix.evidence }}
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Keep Xvfb server log
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-electron-xvfb-log-${{ matrix.evidence }}
+          path: ${{ runner.temp }}/xvfb.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   upload:
     name: Publish exact-tag release
-    needs: [release_identity, build]
+    needs: [release_identity, build, unit, electron]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     # Builds remain parallel. One publisher per channel owns the final

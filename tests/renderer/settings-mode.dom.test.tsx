@@ -83,18 +83,14 @@ describe("Settings as a mode", () => {
     await waitFor(() => expect(opener).toHaveFocus());
   });
 
-  it("returns to the view that was showing before Settings opened", () => {
-    render(<Harness initialView="tasks" />);
+  it.each([
+    ["tasks", "tasks"],
+    ["home", "workspace"],
+  ] as const)("returns from Settings opened over %s to %s", (initialView, expected) => {
+    render(<Harness initialView={initialView} />);
     openFrom("Open settings");
     pressEscape();
-    expect(screen.getByLabelText("Current view")).toHaveTextContent("tasks");
-  });
-
-  it("returns to the workspace instead of the ended new chat view", () => {
-    render(<Harness initialView="home" />);
-    openFrom("Open settings");
-    pressEscape();
-    expect(screen.getByLabelText("Current view")).toHaveTextContent("workspace");
+    expect(screen.getByLabelText("Current view")).toHaveTextContent(expected);
   });
 
   it("focuses the composer when the opener is gone and a chat is shown again", async () => {

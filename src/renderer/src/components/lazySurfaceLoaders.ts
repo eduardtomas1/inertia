@@ -51,8 +51,10 @@ const frequentSurfaceLoads = [
   loadModelSourceRail,
 ] as const;
 
-export function prefetchFrequentSurfaces(): void {
-  for (const load of frequentSurfaceLoads) void load();
+export const SURFACES_PREFETCHED_ATTRIBUTE = "surfacesPrefetched";
+
+export async function prefetchFrequentSurfaces(): Promise<void> {
+  await Promise.allSettled(frequentSurfaceLoads.map((load) => load()));
 }
 
 export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
@@ -84,12 +86,15 @@ export function scheduleFrequentSurfacePrefetch(): () => void {
   const requestIdle = window.requestIdleCallback;
   const cancelIdle = window.cancelIdleCallback;
   let finished = false;
+  let cancelled = false;
   let idleHandle: number | null = null;
   let timeoutHandle: number | null = null;
   const run = (): void => {
     if (finished) return;
     finished = true;
-    prefetchFrequentSurfaces();
+    void prefetchFrequentSurfaces().then(() => {
+      if (!cancelled) document.documentElement.dataset[SURFACES_PREFETCHED_ATTRIBUTE] = "ready";
+    });
   };
   if (typeof requestIdle === "function" && typeof cancelIdle === "function") {
     idleHandle = requestIdle(run, {
@@ -103,6 +108,7 @@ export function scheduleFrequentSurfacePrefetch(): () => void {
   timeoutHandle = window.setTimeout(run, 750);
   return () => {
     finished = true;
+    cancelled = true;
     if (idleHandle !== null && typeof cancelIdle === "function") {
       cancelIdle(idleHandle);
     }

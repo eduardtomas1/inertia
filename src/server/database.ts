@@ -306,10 +306,6 @@ export class RuntimeStore {
     return this.recoveryReport;
   }
 
-  databaseBackupStatus(): ReturnType<DatabaseBackupManager["status"]> {
-    return this.backupManager.status();
-  }
-
   exportRecoveryData(): string {
     return exportDatabaseRecoveryData(
       this.database,
@@ -580,20 +576,6 @@ export class RuntimeStore {
     return this.pairedLaunchRepository.cancelComparison(launchId, now);
   }
 
-  updatePairedLaunchWorktree(
-    launchId: string,
-    ordinal: 0 | 1,
-    path: string | null,
-    branch: string | null,
-  ): void {
-    this.pairedLaunchRepository.updateWorktree(
-      launchId,
-      ordinal,
-      path,
-      branch,
-    );
-  }
-
   beginPairedLaunchWorktreeCreation(
     launchId: string,
     ordinal: 0 | 1,
@@ -648,13 +630,6 @@ export class RuntimeStore {
     ordinal: 0 | 1,
   ): void {
     this.pairedLaunchRepository.beginWorktreeRemoval(launchId, ordinal);
-  }
-
-  confirmPairedLaunchWorktreeRemoval(
-    launchId: string,
-    ordinal: 0 | 1,
-  ): void {
-    this.pairedLaunchRepository.confirmWorktreeRemoval(launchId, ordinal);
   }
 
   recordPairedLaunchBranchCleanupOutcome(
@@ -809,10 +784,6 @@ export class RuntimeStore {
     return this.gitArtifactRepository.revision();
   }
 
-  turnGitPatchDigests(): Set<string> {
-    return this.gitArtifactRepository.patchDigests();
-  }
-
   expireTurnGitPatch(digest: string): void {
     this.gitArtifactRepository.expirePatch(digest);
   }
@@ -877,15 +848,6 @@ export class RuntimeStore {
     );
   }
 
-  associateMessageWithTurn(messageId: string, conversationId: string, runId: string, turnId: string): ChatMessage {
-    return this.transcriptRepository.associateMessageWithTurn(
-      messageId,
-      conversationId,
-      runId,
-      turnId,
-    );
-  }
-
   updateMessageContent(messageId: string, content: string): void { this.transcriptRepository.updateMessageContent(messageId, content); }
 
   appendMessageContent(messageId: string, delta: string): void {
@@ -902,10 +864,6 @@ export class RuntimeStore {
 
   upsertAgentPlan(plan: AgentPlan): void {
     this.executionLedgerRepository.upsertAgentPlan(plan);
-  }
-
-  clearAgentPlan(conversationId: string, runId: string, turnId: string | null): void {
-    this.executionLedgerRepository.clearAgentPlan(conversationId, runId, turnId);
   }
 
   agentGoals(conversationId: string): AgentGoal[] {
@@ -1128,7 +1086,6 @@ export class RuntimeStore {
   hasRecordedActiveWorkspaceRun(excludeAgentRuns = false): boolean { return this.workspaceRunRepository.hasActive(excludeAgentRuns); }
   hasRecordedActiveWorkspaceRunForProject(projectId: string): boolean { return this.workspaceRunRepository.hasActiveForProject(projectId); }
   hasRecordedActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.workspaceRunRepository.hasActiveForConversation(conversationId); }
-  hasActiveWorkspaceRunForProject(projectId: string): boolean { return this.conversationWork.hasProject(projectId) || this.hasRecordedActiveWorkspaceRunForProject(projectId); }
   hasActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.conversationWork.hasConversation(conversationId) || this.hasRecordedActiveWorkspaceRunForConversation(conversationId); }
 
   markWorkspaceRunSeen(id: string): WorkspaceRun {

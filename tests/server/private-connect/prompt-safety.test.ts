@@ -1,19 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  PRIVATE_CONNECT_PROMPT_SAFETY_HARNESS_IDS,
   READ_ONLY_WATCHER_PROMPT_SAFETY_HEADLINE,
   UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY,
   privateConnectPromptSafetyForHarness,
   privateConnectPromptSafetyIsUsable,
-  privateConnectPromptSafetyLabel,
 } from "../../../src/shared/private-connect/prompt-safety";
 
 describe("Private Connect prompt safety", () => {
   it("advertises only known harness contracts", () => {
-    expect(PRIVATE_CONNECT_PROMPT_SAFETY_HARNESS_IDS).toContain("codex-app-server");
     expect(privateConnectPromptSafetyForHarness("codex-app-server").supported).toBe(true);
-    expect(PRIVATE_CONNECT_PROMPT_SAFETY_HARNESS_IDS).toContain("antigravity-cli");
     expect(privateConnectPromptSafetyForHarness("antigravity-cli")).toMatchObject({
       supported: false,
       permissionModel: "provider-controlled",
@@ -41,12 +37,6 @@ describe("Private Connect prompt safety", () => {
       ...supported,
       filesystemPolicy: "unrestricted",
     })).toBe(false);
-  });
-
-  it("labels prompt capability without exposing provider output", () => {
-    const safety = privateConnectPromptSafetyForHarness("opencode-sdk");
-    expect(privateConnectPromptSafetyLabel("OpenCode", safety)).toContain("OpenCode Private Connect prompt");
-    expect(privateConnectPromptSafetyLabel("OpenCode", safety)).toContain(safety.headline);
   });
 });
 

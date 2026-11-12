@@ -12,7 +12,6 @@ import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { expectBackendSetupFinished } from "./support/backend-accounts-endpoint";
 import { createLinuxSecretService, type LinuxSecretService } from "./support/linux-secret-service";
 import { openTerminalDock } from "./support/workspace-tools";
-import { setAppearance } from "./support/appearance";
 import { expectBorderlessSettingsRows, expectCardSettingsSections } from "./support/settings-assertions";
 import { expectContextRingFitsItsNumber } from "./support/usage-ring";
 
@@ -304,13 +303,6 @@ test("manages accounts and API keys across the responsive theme and scale matrix
   await expectBackendLayoutContained();
   await resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
-  expect(rendererErrors).toEqual([]);
-});
-
-test("changes the theme only from Settings", async () => {
-  await expect(page.getByRole("button", { name: /^Change theme/u })).toHaveCount(0);
-  await setAppearance(page, "light");
-  await setAppearance(page, "dark");
   expect(rendererErrors).toEqual([]);
 });
 

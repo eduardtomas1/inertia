@@ -215,7 +215,7 @@ describe("cross-platform packaged behavior contract", () => {
 
     for (const [jobId, prerequisite] of [
       ["build", "needs: [release_identity, quality]"],
-      ["upload", "needs: [release_identity, build]"],
+      ["upload", "needs: [release_identity, build, unit, electron]"],
       ["publish-canary-feed", "needs: [release_identity, upload]"],
     ] as const) {
       const job = workflowJob(workflow, jobId);
@@ -223,6 +223,13 @@ describe("cross-platform packaged behavior contract", () => {
       expect(job).toContain("ref: ${{ needs.release_identity.outputs.release_sha }}");
       expect(job).toContain("RELEASE_EXPECTED_COMMIT: ${{ needs.release_identity.outputs.release_sha }}");
       expect(job).toContain('event_sha="${PUSH_EVENT_SHA:-$RELEASE_EXPECTED_COMMIT}"');
+    }
+    for (const jobId of ["unit", "electron"]) {
+      const job = workflowJob(workflow, jobId);
+      expect(job).toContain("needs: [release_identity, quality]");
+      expect(job).toContain("ref: ${{ needs.release_identity.outputs.release_sha }}");
+      expect(job).toContain("RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}");
+      expect(job).not.toContain("secrets.");
     }
     expect(workflowJob(workflow, "build")).toContain(
       "RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}",
@@ -254,7 +261,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(releaseAssets).toContain("inertia:release-source-sha");
     expect(releaseAssets).toContain("inertia:package-lock-sha256");
     expect(releaseAssets).toContain("inertia:electron-version");
-    expect(workflow.match(/node-version: 22\.23\.4/gu)).toHaveLength(2);
+    expect(workflow.match(/node-version: 22\.23\.4/gu)).toHaveLength(4);
     expect(workflow).toContain(
       "group: release-${{ inputs.release_tag || github.ref_name }}",
     );
@@ -281,7 +288,9 @@ describe("cross-platform packaged behavior contract", () => {
       "Build the release application bundle once",
     );
     expect(releaseBundle).toContain("run: npm run build:packaged");
-    expect(workflow.match(/run: npm run build:packaged/gu)).toHaveLength(1);
+    expect(workflowJob(workflow, "build").match(/run: npm run build:packaged/gu)).toHaveLength(1);
+    expect(workflowJob(workflow, "electron").match(/run: npm run build:packaged/gu)).toHaveLength(1);
+    expect(workflowJob(workflow, "unit")).not.toContain("build:packaged");
     expect(workflow).not.toContain("dist:release:");
     expect(workflowStep(
       workflow,

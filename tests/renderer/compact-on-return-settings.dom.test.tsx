@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
@@ -46,29 +46,6 @@ describe("Compact large chats setting", () => {
     const group = await screen.findByRole("radiogroup", { name: "Compact large chats" });
     expect(within(group).getByRole("radio", { name: label })).toHaveAttribute("aria-checked", "true");
   });
-
-  it.each(["1 hour", "prompt cache"])("finds the Accounts and API keys row by searching for %s", async (query) => {
-    render(<SettingsView {...settingsViewProps({ target: { section: "appearance" } })} />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Search settings" }), { target: { value: query } });
-    const results = screen.getByRole("listbox", { name: "Matching settings" });
-    expect(within(within(results).getByRole("group", { name: "Agents" }))
-      .getByRole("option", { name: "Accounts and API keys" })).toBeInTheDocument();
-  });
-
-  it.each(["prompt cache", "compact on return", "summarize", "subscription"])("finds the setting by searching for %s", async (query) => {
-    render(<SettingsView {...settingsViewProps({ target: { section: "appearance" } })} />);
-    const field = screen.getByRole("combobox", { name: "Search settings" });
-    fireEvent.change(field, { target: { value: query } });
-    const results = screen.getByRole("listbox", { name: "Matching settings" });
-    const option = within(within(results).getByRole("group", { name: "Chats" }))
-      .getByRole("option", { name: "Compact large chats" });
-
-    fireEvent.click(option);
-    await waitFor(() => {
-      const row = document.querySelector<HTMLElement>('[data-setting-id="compact-on-return"]');
-      expect(row?.contains(document.activeElement)).toBe(true);
-    });
-  });
 });
 
 describe("Auto-compact Claude chats setting", () => {
@@ -94,14 +71,6 @@ describe("Auto-compact Claude chats setting", () => {
       settings: { ...defaultSettings, claudeAutoCompactWindow: null },
     })} />);
     expect(await screen.findByRole("combobox", { name: "Auto-compact Claude chats after" })).toHaveValue("claude-code-default");
-  });
-
-  it.each(["auto-compact", "context window"])("finds the setting by searching for %s", async (query) => {
-    render(<SettingsView {...settingsViewProps({ target: { section: "appearance" } })} />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Search settings" }), { target: { value: query } });
-    const results = screen.getByRole("listbox", { name: "Matching settings" });
-    expect(within(within(results).getByRole("group", { name: "Chats" }))
-      .getByRole("option", { name: /compact Claude chats after$/u })).toHaveTextContent("Auto-compact Claude chats after");
   });
 });
 
@@ -129,13 +98,5 @@ describe("Auto-compact Codex chats setting", () => {
       settings: { ...defaultSettings, codexAutoCompactTokenLimit: null },
     })} />);
     expect(await screen.findByRole("combobox", { name: "Auto-compact Codex chats after" })).toHaveValue("codex-default");
-  });
-
-  it.each(["codex", "chatgpt"])("finds the setting by searching for %s compaction", async (provider) => {
-    render(<SettingsView {...settingsViewProps({ target: { section: "appearance" } })} />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Search settings" }), { target: { value: `${provider} compaction` } });
-    const results = screen.getByRole("listbox", { name: "Matching settings" });
-    expect(within(within(results).getByRole("group", { name: "Chats" }))
-      .getByRole("option", { name: /Codex chats after$/u })).toHaveTextContent("Auto-compact Codex chats after");
   });
 });

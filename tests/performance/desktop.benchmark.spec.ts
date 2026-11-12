@@ -1802,6 +1802,9 @@ async function coldIntentDialogMeasurement(page: Page): Promise<RendererInteract
 }
 
 async function prefetchedOverlayMeasurements(page: Page): Promise<PrefetchedSurfaceSample> {
+  const prefetched = page.locator('html[data-surfaces-prefetched="ready"]');
+  const prefetchedWithinIdleWindow = await prefetched.count() === 1;
+  await prefetched.waitFor({ state: "attached", timeout: 15_000 });
   const settings = await rendererInteractionMeasurement(page, {
     triggerSelector: '.sidebar-footer button[aria-label="Settings"]',
     targetSelector: ".settings-view",
@@ -1815,6 +1818,7 @@ async function prefetchedOverlayMeasurements(page: Page): Promise<PrefetchedSurf
   });
   await page.getByRole("button", { name: "Close search" }).click();
   return {
+    prefetchedWithinIdleWindow,
     commandPaletteFirstOpenMs: commandPalette.elapsedMs,
     commandPaletteOpenedInInputTask: commandPalette.openedInInputTask,
     settingsFirstOpenMs: settings.elapsedMs,
@@ -2218,7 +2222,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
           coldIntentDialogMs: coldIntentDialog.elapsedMs,
           coldIntentDialogOpenedInInputTask: coldIntentDialog.openedInInputTask,
           ...prefetchedSurfaces,
-          prefetchedSurfaceDefinition: `the fresh-profile launch opens Settings and the command palette once as an ungated warm-up; ${PREFETCHED_SURFACE_RELAUNCH_COUNT} relaunches of the same profile and database each open both after 1.5 seconds of idle; every relaunch must show the surface before the task that delivered the input ends, and the gated time is the fastest relaunch; the cold intent dialog is the control that opens in a later task`,
+          prefetchedSurfaceDefinition: `the fresh-profile launch opens Settings and the command palette once as an ungated warm-up; ${PREFETCHED_SURFACE_RELAUNCH_COUNT} relaunches of the same profile and database each open both after 1.5 seconds of idle and, when the idle prefetch has not landed by then, once it has (relaunchesPrefetchedWithinIdleWindow counts the relaunches that did not wait); every relaunch must show the surface before the task that delivered the input ends, and the gated time is the fastest relaunch; the cold intent dialog is the control that opens in a later task`,
         },
         fileTree: { interactiveMs: fileTreeMs },
         terminal: { startupMs: terminalStartupMs },

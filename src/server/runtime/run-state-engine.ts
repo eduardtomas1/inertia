@@ -172,13 +172,6 @@ export class AuthoritativeRunStateEngine {
     return this.refresh(providerState) || before.state !== this.current.state;
   }
 
-  quarantine(providerState?: string | null): boolean {
-    if (this.terminal !== null) return false;
-    this.quarantined = true;
-    this.cancellationObserved = true;
-    return this.refresh(providerState);
-  }
-
   settle(
     outcome: AgentRunTerminalState,
     providerState?: string | null,

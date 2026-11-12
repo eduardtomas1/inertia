@@ -95,19 +95,72 @@ it("binds every checkout to the candidate and makes migration lineage part of th
   expect(source(".github/actions/install-dependencies/action.yml")).toContain('default: "22.23.4"');
 });
 
-it("release builds prove exact packages before desktop tests and never continue on unconfirmed cleanup", () => {
-  const job = parse(source(".github/workflows/release-platforms.yml")).jobs.build;
-  const steps = job.steps as Array<{ name: string; run?: string; if?: string }>;
-  const firstDesktop = steps.findIndex((step) => step.run?.includes("playwright test"));
-  const packageSmokes = steps.map((step, index) => ({ step, index }))
-    .filter(({ step }) => /npm run test:(?:package-smoke|release-container-smoke|windows-installer-smoke)/u.test(step.run ?? ""));
+it("release builds prove exact packages while units and desktop phases run as separate same-commit jobs", () => {
+  const release = parse(source(".github/workflows/release-platforms.yml"));
+  const build = release.jobs.build;
+  const steps = build.steps as Array<{ name: string; run?: string; if?: string }>;
+  const packageSmokes = steps.filter((step) =>
+    /npm run test:(?:package-smoke|release-container-smoke|windows-installer-smoke)/u.test(step.run ?? ""));
   expect(packageSmokes.length).toBeGreaterThanOrEqual(5);
-  for (const { index } of packageSmokes) expect(index).toBeLessThan(firstDesktop);
-  for (const step of steps.filter((step) => step.run?.includes("playwright test"))) {
-    expect(step.if).not.toMatch(/always\(|failure\(|cancelled\(/u);
-  }
-  expect(job.strategy["fail-fast"]).toBe(false);
+  expect(steps.some((step) => step.run?.includes("playwright test"))).toBe(false);
+  expect(steps.some((step) => /^npm (?:test|run test:windows:shard)\b/u.test(step.run ?? ""))).toBe(false);
   expect(steps.filter((step) => step.run === "npm run build:packaged")).toHaveLength(1);
+  for (const id of ["build", "unit", "electron"]) {
+    expect(release.jobs[id].strategy["fail-fast"]).toBe(false);
+    expect(release.jobs[id].steps[0].with.ref).toBe("${{ needs.release_identity.outputs.release_sha }}");
+  }
+  expect(release.jobs.upload.needs).toEqual(["release_identity", "build", "unit", "electron"]);
+
+  const platforms = (build.strategy.matrix.include as Array<{ platform: string }>).map(({ platform }) => platform).sort();
+  const units = release.jobs.unit.strategy.matrix.include as Array<{ platform: string; unit_command: string }>;
+  expect([...new Set(units.map(({ platform }) => platform))].sort()).toEqual(platforms);
+  for (const platform of platforms) {
+    const commands = units.filter((entry) => entry.platform === platform).map(({ unit_command }) => unit_command);
+    const shard = /--shard=(\d+)\/(\d+)$/u;
+    if (commands.length === 1) {
+      expect(commands[0]).not.toMatch(shard);
+      continue;
+    }
+    const parsed = commands.map((command) => shard.exec(command)!);
+    expect(parsed.map((match) => Number(match[1]))).toEqual(commands.map((_, index) => index + 1));
+    expect(new Set(parsed.map((match) => Number(match[2])))).toEqual(new Set([commands.length]));
+  }
+  for (const { platform, unit_command } of units) {
+    if (platform.startsWith("windows-")) expect(unit_command).toMatch(/^npm run test:windows:shard -- --shard=/u);
+    else if (platform.startsWith("macos-")) expect(unit_command).toMatch(/^npm test -- --maxWorkers=2\b/u);
+    else expect(unit_command).toBe("npm test");
+  }
+  const unitSteps = release.jobs.unit.steps as Array<{ name: string; run?: string; if?: string; shell?: string }>;
+  expect(unitSteps.filter((step) => step.run === "${{ matrix.unit_command }}").map(({ if: condition, shell }) => [condition, shell]))
+    .toEqual([["runner.os != 'Windows'", undefined], ["runner.os == 'Windows'", "pwsh"]]);
+  const nsis = unitSteps.findIndex((step) => step.run === "node scripts/ci/prepare-nsis-compiler.mjs");
+  expect(nsis).toBeGreaterThan(0);
+  expect(nsis).toBeLessThan(unitSteps.findIndex((step) => step.run === "${{ matrix.unit_command }}"));
+
+  const electron = release.jobs.electron;
+  const entry = ({ platform, phase, shard }: { platform: string; phase: string; shard?: string }) =>
+    `${platform}:${phase}${shard ? ` ${shard}` : ""}`;
+  expect((electron.strategy.matrix.include as Array<{ platform: string; phase: string; shard?: string }>).map(entry).sort()).toEqual([
+    ...platforms.flatMap((platform) => platform.startsWith("windows-")
+      ? [`${platform}:display-sensitive`, `${platform}:isolated 1/2`, `${platform}:isolated 2/2`]
+      : [`${platform}:display-sensitive`, `${platform}:isolated`]),
+  ].sort());
+  const electronSteps = electron.steps as Array<{ name: string; run?: string; if?: string; env?: Record<string, string> }>;
+  const playwright = electronSteps.filter((step) => step.run?.includes("playwright test"));
+  expect(playwright.map((step) => /--project=([a-z-]+)/u.exec(step.run!)![1])).toEqual([
+    "display-sensitive", "isolated", "runtime-recovery",
+    "display-sensitive", "isolated", "runtime-recovery",
+  ]);
+  for (const step of playwright) expect(step.if).not.toMatch(/always\(|failure\(|cancelled\(/u);
+  expect(playwright.map((step) => [...step.if!.matchAll(/matrix\.phase == '([a-z-]+)'/gu)].map((match) => match[1])))
+    .toEqual([["display-sensitive"], ["isolated"], ["isolated"], ["display-sensitive"], ["isolated"], ["isolated"]]);
+  expect(playwright[1]!.env?.INERTIA_E2E_WORKERS).toBe("${{ runner.os == 'Windows' && '1' || '2' }}");
+  expect(playwright[1]!.run).toContain("${{ matrix.shard && format('--shard={0}', matrix.shard) || '' }}");
+  expect(playwright[2]!.if).toContain("matrix.shard != '2/2'");
+  const index = (run: string) => electronSteps.findIndex((step) => step.run === run);
+  expect(index("npm run build:packaged")).toBeLessThan(index("node scripts/ci/prepare-electron-binary.mjs"));
+  expect(index("node scripts/ci/prepare-electron-binary.mjs"))
+    .toBeLessThan(electronSteps.findIndex((step) => step.run?.includes("playwright test")));
 });
 
 it("CI runs native package proof and desktop Electron projects as separate same-source jobs", () => {
@@ -232,7 +285,7 @@ it("measures desktop workloads on the prepared bundle before any Electron end-to
   );
 });
 
-it("measures release desktop workloads on a freshly built bundle before the unit suite and packaging", () => {
+it("measures release desktop workloads on a freshly built bundle before packaging", () => {
   const steps = parse(source(".github/workflows/release-platforms.yml")).jobs.build.steps as Array<{ name: string; if?: string; run?: string; "continue-on-error"?: boolean }>;
   const benchmarkBundle = steps.findIndex((step) => step.name === "Build the application bundle for the desktop benchmark");
   expect(steps[benchmarkBundle]!.run).toBe("npm run build:bundle");
@@ -244,12 +297,8 @@ it("measures release desktop workloads on a freshly built bundle before the unit
   for (const { step } of measurements) {
     expect(step["continue-on-error"]).not.toBe(true);
   }
-  const unitSuites = steps.map((step, index) => ({ step, index }))
-    .filter(({ step }) => /^npm test\b/u.test(step.run ?? "") || step.run?.includes("npm test -- --maxWorkers=2"));
-  expect(unitSuites).toHaveLength(2);
-  for (const { index } of unitSuites) expect(index).toBeGreaterThan(benchmarkBundle + 2);
   const releaseBundle = steps.findIndex((step) => step.run === "npm run build:packaged");
-  expect(releaseBundle).toBeGreaterThan(Math.max(...unitSuites.map(({ index }) => index)));
+  expect(releaseBundle).toBeGreaterThan(benchmarkBundle + 2);
   expect(steps.findIndex((step) => /^Build (?:macOS|Windows|Linux) release package$/u.test(step.name)))
     .toBeGreaterThan(releaseBundle);
 });
@@ -292,12 +341,12 @@ it("release builds exclude Windows workspaces from Defender and download Electro
   expect(index("Prepare Electron end-to-end binary")).toBeLessThan(index("Measure release-candidate desktop workloads"));
   const targets = job.strategy.matrix.include as Array<{ label: string; timeout_minutes: number }>;
   expect(Object.fromEntries(targets.map(({ label, timeout_minutes }) => [label, timeout_minutes]))).toEqual({
-    "macOS x64": 140,
-    "macOS arm64": 110,
-    "Windows x64": 170,
-    "Windows ARM64": 220,
-    "Linux x64": 90,
-    "Linux ARM64": 90,
+    "macOS x64": 60,
+    "macOS arm64": 45,
+    "Windows x64": 45,
+    "Windows ARM64": 60,
+    "Linux x64": 45,
+    "Linux ARM64": 45,
   });
 });
 
@@ -324,7 +373,7 @@ it("keeps every Xvfb server alive across clients and its log as failure evidence
       expect(index).toBeGreaterThan(xvfb.at(-1)!.index);
     }
   }
-  expect(jobsWithXvfb).toBe(4);
+  expect(jobsWithXvfb).toBe(5);
 });
 
 it("hands the main ref to the release validator for stable ancestry and compares migrations with the previous stable release", () => {

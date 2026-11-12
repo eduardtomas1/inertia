@@ -160,16 +160,6 @@ test("reveals a match in an existing split pane and in its detached window", asy
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("searches persisted history after a full application restart", async () => {
-  test.setTimeout(75_000);
-  ({ page } = await app.restart());
-  const input = await search();
-  await input.press("Enter");
-  await expect(finalAnswer(page)).toBeFocused();
-  await expect(finalAnswer(page)).toBeInViewport();
-  expect(app.rendererErrors).toEqual([]);
-});
-
 test("returns to a search-preserved new-chat draft after restart and later navigation", async ({ browserName: _browserName }, info) => {
   await page.locator(".activity-thread-select").filter({ hasText: "message-search fixture" }).click();
   await expect(page.getByRole("heading", { name: /message-search fixture/u, level: 1 })).toBeVisible();
@@ -181,6 +171,10 @@ test("returns to a search-preserved new-chat draft after restart and later navig
   await expect(finalAnswer(page)).toBeFocused();
   ({ page } = await app.restart());
   await expect(page.getByRole("heading", { name: targetTitle, level: 1 })).toBeVisible();
+  const restored = await search();
+  await restored.press("Enter");
+  await expect(finalAnswer(page)).toBeFocused();
+  await expect(finalAnswer(page)).toBeInViewport();
   await page.locator(".activity-thread-select").filter({ hasText: "message-search fixture" }).click();
   await page.getByRole("button", { name: "Start a new chat", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(unsent);

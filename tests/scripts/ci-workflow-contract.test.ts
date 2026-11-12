@@ -140,11 +140,11 @@ it("release builds prove exact packages while units and desktop phases run as se
   const electron = release.jobs.electron;
   const entry = ({ platform, phase, shard }: { platform: string; phase: string; shard?: string }) =>
     `${platform}:${phase}${shard ? ` ${shard}` : ""}`;
-  expect((electron.strategy.matrix.include as Array<{ platform: string; phase: string; shard?: string }>).map(entry).sort()).toEqual([
-    ...platforms.flatMap((platform) => platform.startsWith("windows-")
+  expect((electron.strategy.matrix.include as Array<{ platform: string; phase: string; shard?: string }>).map(entry).sort()).toEqual(
+    platforms.flatMap((platform) => platform.startsWith("windows-")
       ? [`${platform}:display-sensitive`, `${platform}:isolated 1/2`, `${platform}:isolated 2/2`]
-      : [`${platform}:display-sensitive`, `${platform}:isolated`]),
-  ].sort());
+      : [`${platform}:display-sensitive`, `${platform}:isolated`]).sort(),
+  );
   const electronSteps = electron.steps as Array<{ name: string; run?: string; if?: string; env?: Record<string, string> }>;
   const playwright = electronSteps.filter((step) => step.run?.includes("playwright test"));
   expect(playwright.map((step) => /--project=([a-z-]+)/u.exec(step.run!)![1])).toEqual([

@@ -148,9 +148,6 @@ export function claudeBackendRequiresCredential(
 
 export type HarnessBackendCompatibilityReasonCode =
   (typeof HARNESS_BACKEND_COMPATIBILITY_REASON_CODES)[number];
-export const harnessBackendCompatibilityReasonCodeSchema = z.enum(
-  HARNESS_BACKEND_COMPATIBILITY_REASON_CODES,
-);
 
 export interface HarnessBackendCompatibilityEvidence {
   modelId?: string | null;

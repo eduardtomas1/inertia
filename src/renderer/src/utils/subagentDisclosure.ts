@@ -123,14 +123,6 @@ export function subagentTraceLabel(trace: SubagentTrace): string {
   return `${subagentProviderLabel(trace)} delegated task`;
 }
 
-export function subagentMissionSummary(trace: SubagentTrace): string | null {
-  const mission = trace.description?.trim();
-  if (!mission) return null;
-  return mission.length <= MAX_SUBAGENT_SUMMARY_CHARS
-    ? mission
-    : `${mission.slice(0, MAX_SUBAGENT_SUMMARY_CHARS - 1).trimEnd()}…`;
-}
-
 const EQUIVALENT_PROVIDER_STATUSES: Readonly<
   Record<SubagentTrace["status"], readonly string[]>
 > = {

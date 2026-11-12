@@ -58,6 +58,25 @@ describe("automatic backup sidecar cleanup", () => {
     );
   });
 
+  it("keeps cleaning when a sidecar disappears between the check and the removal", () => {
+    filesystem.unlinkSync.mockImplementationOnce(() => {
+      const error = new Error("no such file or directory") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    });
+
+    expect(() => cleanAutomaticBackupSidecars(
+      databasePath,
+      backupsDirectory,
+    )).not.toThrow();
+    const partial = join(backupsDirectory, "inertia-20260101T000000000Z.sqlite.partial");
+    expect(filesystem.unlinkSync.mock.calls.map(([path]) => path)).toEqual([
+      partial,
+      `${partial}-wal`,
+      `${partial}-shm`,
+    ]);
+  });
+
   it("still fails closed for non-transient removal errors", () => {
     filesystem.unlinkSync.mockImplementationOnce(() => {
       const error = new Error("unexpected I/O failure") as NodeJS.ErrnoException;

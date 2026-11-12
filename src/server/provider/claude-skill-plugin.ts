@@ -55,6 +55,7 @@ const MAX_STAGED_DEPTH = 12;
 const MAX_SCANNED_SKILL_ENTRIES = 32_768;
 const MAX_SCANNED_UNSELECTED_SKILL_ENTRIES = 4_096;
 const VERSION_CONTROL_ENTRIES = new Set([".git", ".hg", ".svn"]);
+const REFUSED_SKILL_LINK = "A selected Claude skill links to a file or folder it may not use.";
 
 export const CLAUDE_ISOLATED_SKILL_PLUGIN_NAME = "inertia-selected-skills";
 
@@ -99,6 +100,7 @@ interface DiscoveredSkill {
   skill: ClaudeFilesystemSkill;
   stagedContent: Buffer;
   skillDirectory: string;
+  links: ClaudeLinkPolicy;
 }
 
 interface StagingEntry {
@@ -106,7 +108,18 @@ interface StagingEntry {
   skillContent: Buffer;
   sourceRoot: string;
   skillDirectory: string;
+  links: ClaudeLinkPolicy;
   selected: boolean;
+}
+
+interface SkillLinkContext {
+  skillDirectory: string;
+  links: ClaudeLinkPolicy;
+}
+
+interface SkillContentLink {
+  target: string;
+  kind: "file" | "directory";
 }
 
 export interface StagedClaudeSkillPlugin {
@@ -388,6 +401,7 @@ async function discoverRootSkills(
         },
         stagedContent: parsed.stagedContent,
         skillDirectory,
+        links: root.links,
       });
       state.skills += 1;
     }
@@ -463,12 +477,46 @@ async function matchingCapabilityRoot(
   return null;
 }
 
+async function resolveSkillContentLink(
+  link: string,
+  context: SkillLinkContext,
+  control: ClaudeSkillOperationControl,
+): Promise<SkillContentLink | null> {
+  try {
+    const target = await runClaudeSkillFilesystemOperation(
+      control,
+      "realpath",
+      link,
+      async () => await realpath(link),
+    );
+    const status = await runClaudeSkillFilesystemOperation(
+      control,
+      "lstat",
+      target,
+      async () => await lstat(target),
+    );
+    const kind = status.isSymbolicLink()
+      ? null
+      : status.isDirectory() ? "directory" : status.isFile() ? "file" : null;
+    if (!kind) return null;
+    if (target.split(/[\\/]/u).some((part) => VERSION_CONTROL_ENTRIES.has(part))) return null;
+    return isContainedPath(context.skillDirectory, target)
+      || claudeLinkTargetAllowed(target, context.links, "skills")
+      ? { target, kind }
+      : null;
+  } catch {
+    checkClaudeSkillOperation(control);
+    return null;
+  }
+}
+
 async function copyBoundedDirectory(
   sourceRoot: string,
   source: string,
   destination: string,
   budget: CopyBudget,
   depth: number,
+  context: SkillLinkContext,
   control: ClaudeSkillOperationControl,
 ): Promise<void> {
   checkClaudeSkillOperation(control);
@@ -516,25 +564,27 @@ async function copyBoundedDirectory(
         async () => await directory.read(),
       );
       if (!entry) break;
-      const sourcePath = join(source, entry.name);
-      const destinationPath = join(destination, entry.name);
-      if (entry.isSymbolicLink()) {
-        throw new Error("A selected Claude skill contains a symbolic link.");
-      }
       if (depth === 0 && entry.name.toLowerCase() === "skill.md") continue;
       if (VERSION_CONTROL_ENTRIES.has(entry.name)) continue;
-      if (entry.isDirectory()) {
+      const sourcePath = join(source, entry.name);
+      const destinationPath = join(destination, entry.name);
+      const linked = entry.isSymbolicLink()
+        ? await resolveSkillContentLink(sourcePath, context, control)
+        : null;
+      if (entry.isSymbolicLink() && !linked) throw new Error(REFUSED_SKILL_LINK);
+      if (entry.isDirectory() || linked?.kind === "directory") {
         await copyBoundedDirectory(
-          sourceRoot,
-          sourcePath,
+          linked?.target ?? sourceRoot,
+          linked?.target ?? sourcePath,
           destinationPath,
           budget,
           depth + 1,
+          context,
           control,
         );
         continue;
       }
-      if (!entry.isFile()) {
+      if (!entry.isFile() && linked?.kind !== "file") {
         throw new Error("A selected Claude skill contains an unsupported filesystem entry.");
       }
       budget.files += 1;
@@ -542,8 +592,8 @@ async function copyBoundedDirectory(
         throw new Error("Selected Claude skills exceed the file count limit.");
       }
       const content = await readBoundedRegularFile(
-        sourcePath,
-        sourceRoot,
+        linked?.target ?? sourcePath,
+        linked ? dirname(linked.target) : sourceRoot,
         MAX_STAGED_FILE_BYTES,
         control,
       );
@@ -610,6 +660,7 @@ async function selectedStagingEntries(
       skillContent: parsed.stagedContent,
       sourceRoot: matched.skillDirectory,
       skillDirectory: matched.skillDirectory,
+      links: matched.root.links,
       selected: true,
     });
   }
@@ -626,7 +677,7 @@ function unselectedStagingEntries(
   ];
   const names = new Set(selectedNames);
   const entries: StagingEntry[] = [];
-  for (const { skill, stagedContent, skillDirectory } of precedence) {
+  for (const { skill, stagedContent, skillDirectory, links } of precedence) {
     if (names.has(skill.name)) continue;
     names.add(skill.name);
     entries.push({
@@ -634,6 +685,7 @@ function unselectedStagingEntries(
       skillContent: stagedContent,
       sourceRoot: skillDirectory,
       skillDirectory,
+      links,
       selected: false,
     });
   }
@@ -673,6 +725,8 @@ async function scanSkillFootprint(
   budget: CopyBudget,
   depth: number,
   scan: SkillScan,
+  context: SkillLinkContext,
+  chain: readonly string[],
   control: ClaudeSkillOperationControl,
   counted = true,
 ): Promise<SkillFootprint> {
@@ -702,12 +756,6 @@ async function scanSkillFootprint(
       );
       if (!entry) return { kind: fits ? "copy" : "link" };
       if (depth === 0 && entry.name.toLowerCase() === "skill.md") continue;
-      if (entry.isSymbolicLink()) {
-        return {
-          kind: "unsupported",
-          reason: "A selected Claude skill contains a symbolic link.",
-        };
-      }
       const versionControl = VERSION_CONTROL_ENTRIES.has(entry.name);
       if (versionControl && depth === 0) continue;
       scan.entries += 1;
@@ -719,12 +767,27 @@ async function scanSkillFootprint(
       }
       const path = join(source, entry.name);
       const nestedCounted = counted && !versionControl;
-      if (entry.isDirectory()) {
+      const linked = entry.isSymbolicLink()
+        ? await resolveSkillContentLink(path, context, control)
+        : null;
+      if (entry.isSymbolicLink() && !linked) {
+        return { kind: "unsupported", reason: REFUSED_SKILL_LINK };
+      }
+      if (entry.isDirectory() || linked?.kind === "directory") {
+        const real = linked?.target ?? join(chain.at(-1) ?? source, entry.name);
+        if (linked && chain.some((ancestor) => isContainedPath(real, ancestor))) {
+          return {
+            kind: "unsupported",
+            reason: "A selected Claude skill links back into one of its own folders.",
+          };
+        }
         const nested = await scanSkillFootprint(
-          path,
+          linked?.target ?? path,
           budget,
           depth + 1,
           scan,
+          context,
+          [...chain, real],
           control,
           nestedCounted,
         );
@@ -732,18 +795,19 @@ async function scanSkillFootprint(
         if (nested.kind === "link") fits = false;
         continue;
       }
-      if (!entry.isFile()) {
+      if (!entry.isFile() && linked?.kind !== "file") {
         return {
           kind: "unsupported",
           reason: "A selected Claude skill contains an unsupported filesystem entry.",
         };
       }
       if (!fits || !nestedCounted) continue;
+      const filePath = linked?.target ?? path;
       const status = await runClaudeSkillFilesystemOperation(
         control,
         "lstat",
-        path,
-        async () => await lstat(path),
+        filePath,
+        async () => await lstat(filePath),
       );
       budget.files += 1;
       budget.bytes += status.size;
@@ -762,6 +826,7 @@ async function linkSkillDirectory(
   destination: string,
   budget: CopyBudget,
   state: StagingState,
+  context: SkillLinkContext,
   control: ClaudeSkillOperationControl,
 ): Promise<void> {
   const sourceStatus = await runClaudeSkillFilesystemOperation(
@@ -809,33 +874,35 @@ async function linkSkillDirectory(
       if (VERSION_CONTROL_ENTRIES.has(entry.name)) continue;
       const sourcePath = join(source, entry.name);
       const destinationPath = join(destination, entry.name);
-      if (entry.isSymbolicLink()) {
-        throw new Error("A selected Claude skill contains a symbolic link.");
-      }
-      if (entry.isDirectory()) {
-        await linkStagedEntry(sourcePath, destinationPath, "directory", state, control);
+      const linked = entry.isSymbolicLink()
+        ? await resolveSkillContentLink(sourcePath, context, control)
+        : null;
+      if (entry.isSymbolicLink() && !linked) throw new Error(REFUSED_SKILL_LINK);
+      if (entry.isDirectory() || linked?.kind === "directory") {
+        await linkStagedEntry(linked?.target ?? sourcePath, destinationPath, "directory", state, control);
         continue;
       }
-      if (!entry.isFile()) {
+      if (!entry.isFile() && linked?.kind !== "file") {
         throw new Error("A selected Claude skill contains an unsupported filesystem entry.");
       }
+      const filePath = linked?.target ?? sourcePath;
       const status = await runClaudeSkillFilesystemOperation(
         control,
         "lstat",
-        sourcePath,
-        async () => await lstat(sourcePath),
+        filePath,
+        async () => await lstat(filePath),
       );
       if (
         status.size > MAX_STAGED_FILE_BYTES
         || budget.files + 1 > budget.maxFiles
         || budget.bytes + status.size > budget.maxBytes
       ) {
-        await linkStagedEntry(sourcePath, destinationPath, "file", state, control);
+        await linkStagedEntry(filePath, destinationPath, "file", state, control);
         continue;
       }
       const content = await readBoundedRegularFile(
-        sourcePath,
-        source,
+        filePath,
+        linked ? dirname(filePath) : source,
         MAX_STAGED_FILE_BYTES,
         control,
       );
@@ -945,11 +1012,17 @@ async function stageSkillEntry(
       async () => await mkdir(destination, { mode: 0o700 }),
     );
   } else {
+    const context: SkillLinkContext = {
+      skillDirectory: skill.skillDirectory,
+      links: skill.links,
+    };
     const footprint = await scanSkillFootprint(
       skill.skillDirectory,
       { ...budget },
       0,
       { entries: 0, limit: scanLimit },
+      context,
+      [skill.skillDirectory],
       options,
     );
     if (footprint.kind === "unsupported") throw new Error(footprint.reason);
@@ -960,10 +1033,11 @@ async function stageSkillEntry(
         destination,
         budget,
         0,
+        context,
         options,
       );
     } else {
-      await linkSkillDirectory(skill.skillDirectory, destination, budget, state, options);
+      await linkSkillDirectory(skill.skillDirectory, destination, budget, state, context, options);
     }
   }
   const skillPath = join(destination, "SKILL.md");

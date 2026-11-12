@@ -6,7 +6,6 @@ import type {
   ModelBackendProfileDetail,
   ModelBackendProfileDraft,
   ModelBackendProfilePreset,
-  ModelBackendProfileView,
 } from "@shared/contracts";
 import { normalizeBackendBaseUrl } from "@shared/backend-presets";
 import {
@@ -97,26 +96,6 @@ export function backendProfileSemanticUpdate(
       ? { promptCacheTtl: next.promptCacheTtl }
       : {}),
   };
-}
-
-export function backendProfileIsReady(
-  profile: Pick<
-    ModelBackendProfileView,
-    "enabled" | "authState" | "connectionState"
-  > & {
-    compatibility: Pick<ModelBackendProfileView["compatibility"], "state">;
-  },
-): boolean {
-  const authReady = profile.authState === "configured"
-    || profile.authState === "harness-managed"
-    || profile.authState === "not-required";
-  const connectionReady = profile.connectionState === "connected"
-    || profile.connectionState === "limited";
-  return profile.enabled
-    && authReady
-    && connectionReady
-    && profile.compatibility.state !== "unknown"
-    && profile.compatibility.state !== "unavailable";
 }
 
 function replaceRoutedModel(

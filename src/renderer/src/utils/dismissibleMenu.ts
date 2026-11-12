@@ -44,16 +44,6 @@ export function outsidePointerShouldRestoreFocus(
     || !target.closest(OUTSIDE_POINTER_FOCUS_TARGET_SELECTOR);
 }
 
-export function chooseHorizontalSubmenuSide(
-  bounds: Pick<DOMRect, "left" | "right">,
-  viewportWidth: number,
-  requiredSpace: number,
-): HorizontalSubmenuSide | null {
-  if (viewportWidth - bounds.right >= requiredSpace) return "right";
-  if (bounds.left >= requiredSpace) return "left";
-  return null;
-}
-
 export function dismissibleMenuTransition<Menu extends string>(
   current: Menu | null,
   action: DismissibleMenuAction<Menu>,

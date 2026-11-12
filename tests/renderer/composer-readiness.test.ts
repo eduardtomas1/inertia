@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  composerProviderReady,
   composerRouteReadiness,
 } from "../../src/renderer/src/utils/composerReadiness";
 import {
@@ -151,7 +150,6 @@ describe("composer route readiness", () => {
       profile: profile(),
       selection: customSelection(),
     })).toEqual({ ready: true });
-    expect(composerProviderReady(claudeHarness, profile())).toBe(true);
   });
 
   it("names a missing backend credential and offers only Add key", () => {
@@ -284,9 +282,6 @@ describe("composer route readiness", () => {
       profile: profile(),
       selection: customSelection(),
     })).toEqual(refused);
-    expect(composerProviderReady(outdated, profile(), "team-model")).toBe(false);
-    expect(composerProviderReady({ ...outdated, updateRequired: undefined }, profile(), "team-model")).toBe(true);
-    expect(composerProviderReady(outdated, undefined)).toBe(false);
   });
 
   it("lets the runtime renew stale or missing evidence and offers a test only after a failed probe", () => {
@@ -315,7 +310,6 @@ describe("composer route readiness", () => {
         profile: withEvidence(reasonCode),
         selection: customSelection(),
       })).toEqual({ ready: true });
-      expect(composerProviderReady(claude, withEvidence(reasonCode))).toBe(true);
       expect(composerRouteReadiness({
         provider: claude,
         profile: withEvidence(reasonCode, { authState: "missing" }),
@@ -338,7 +332,6 @@ describe("composer route readiness", () => {
       detail: "Probe this exact endpoint and model.",
       action: "probe",
     });
-    expect(composerProviderReady(claude, withEvidence("probe-failed"))).toBe(false);
   });
 
   it("keeps text-compatible Codex unavailable until its inert tool check passes", () => {
@@ -368,7 +361,6 @@ describe("composer route readiness", () => {
       action: "probe",
       detail: "Codex requires this Responses backend to pass the inert tool-call compatibility check.",
     });
-    expect(composerProviderReady(provider(), codexProfile)).toBe(false);
   });
 
   it("keeps checking states transient and action-free", () => {

@@ -11,14 +11,6 @@ export function privateConnectConversationIdFromFragment(
   return isPrivateConnectUuid(conversationId) ? conversationId : null;
 }
 
-export function privateConnectConversationDeepLink(
-  conversationId: string,
-): string {
-  return isPrivateConnectUuid(conversationId)
-    ? `/${CONVERSATION_FRAGMENT_PREFIX}${conversationId}`
-    : "/";
-}
-
 export async function registerPrivateConnectServiceWorker(): Promise<
   ServiceWorkerRegistration | null
 > {

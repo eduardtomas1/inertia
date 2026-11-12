@@ -48,6 +48,8 @@ export async function expectComposerEndsAtDock(composer: Locator): Promise<void>
       directShellOnly: region?.children.length === 1
         && region.firstElementChild === shell
         && region.lastElementChild === shell,
+      regionChildren: [...(region?.children ?? [])].map((element) =>
+        `${element.tagName.toLowerCase()}.${[...element.classList].join(".")}${element.getAttribute("aria-label") ? `[${element.getAttribute("aria-label")}]` : ""}`),
       bottomPadding: Number.parseFloat(shellStyle?.paddingBottom ?? "NaN"),
       bottomGap: shellBounds ? shellBounds.bottom - dockBounds.bottom : Number.NaN,
       detachedContextRows: region?.querySelectorAll(
@@ -58,7 +60,7 @@ export async function expectComposerEndsAtDock(composer: Locator): Promise<void>
 
   expect(layout.dockEndsShell).toBe(true);
   expect(layout.preDockGoalOnly).toBe(true);
-  expect(layout.directShellOnly).toBe(true);
+  expect(layout.directShellOnly, `composer region children: ${layout.regionChildren.join(", ")}`).toBe(true);
   expect(layout.bottomPadding).toBeGreaterThanOrEqual(8);
   expect(layout.bottomPadding).toBeLessThanOrEqual(22);
   expect(Math.abs(layout.bottomGap - layout.bottomPadding)).toBeLessThanOrEqual(1);

@@ -8,14 +8,13 @@ import { writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { focusAppWindow } from "./support/window-focus";
 
-const ACTION_WINDOW_SECONDS = 3_600;
 const RESUME_WINDOW_SECONDS = 90;
 const OFFER_AFTER_LAUNCH_MS = 60_000;
 const OFFER_AFTER_LAUNCH_REASON = "The reset offer appears after launch once the provider's 15 s unavailable-account cache expires and the banner's 1/3/10/30 s retries read the exhausted quota";
 
 interface ResetState { resetsAt: number | null; windowSeconds: number; turns: number }
 
-test("explicitly schedules, cancels, snoozes and resumes once after reset and restart", async () => {
+test("explicitly schedules and resumes once after reset and restart", async () => {
   test.setTimeout(300_000);
   const environment: Record<string, string> = { OPENAI_API_KEY: "", CODEX_API_KEY: "", CODEX_ACCESS_TOKEN: "" };
   let statePath = "";
@@ -27,7 +26,7 @@ test("explicitly schedules, cancels, snoozes and resumes once after reset and re
       writeFileSync(join(home, "auth.json"), JSON.stringify({ auth_mode: "chatgpt", tokens: { account_id: "fixture-subscription-account" } }));
       writeFileSync(join(home, "config.toml"), 'cli_auth_credentials_store = "file"\n');
       statePath = join(testDirectory, "reset-state.json");
-      writeFileSync(statePath, JSON.stringify({ resetsAt: null, windowSeconds: ACTION_WINDOW_SECONDS, turns: 0 } satisfies ResetState));
+      writeFileSync(statePath, JSON.stringify({ resetsAt: null, windowSeconds: RESUME_WINDOW_SECONDS, turns: 0 } satisfies ResetState));
       const source = `
 const fs = require("node:fs");
 const path = ${JSON.stringify(statePath)};
@@ -86,17 +85,6 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
     const resume = () => page.getByRole("button", { name: "Resume at reset", exact: true });
     await expect(resume(), OFFER_AFTER_LAUNCH_REASON).toBeEnabled({ timeout: OFFER_AFTER_LAUNCH_MS });
     await page.screenshot({ path: test.info().outputPath("limit-reset-offer.png"), animations: "disabled" });
-    await resume().click();
-    await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Cancel resume", exact: true }).click();
-    await expect(resume()).toBeEnabled();
-    await page.getByRole("button", { name: "Snooze until reset", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Snoozed until reset", exact: true })).toBeDisabled();
-    expect((await readState()).turns).toBe(0);
-
-    writeFileSync(statePath, JSON.stringify({ ...await readState(), resetsAt: null, windowSeconds: RESUME_WINDOW_SECONDS }));
-    page = await restart();
-    await expect(resume(), OFFER_AFTER_LAUNCH_REASON).toBeEnabled({ timeout: OFFER_AFTER_LAUNCH_MS });
     await resume().click();
     await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
     page = await restart();

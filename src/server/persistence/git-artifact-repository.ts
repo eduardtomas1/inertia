@@ -293,14 +293,6 @@ export class GitArtifactRepository {
     `).all());
   }
 
-  patchDigests(): Set<string> {
-    return new Set((this.context.database.prepare(`
-      SELECT DISTINCT patch_digest AS digest
-      FROM turn_git_artifacts
-      WHERE patch_digest IS NOT NULL AND patch_state IN ('available', 'truncated')
-    `).all() as Array<{ digest: string }>).map(({ digest }) => digest));
-  }
-
   expirePatch(digest: string): void {
     const validated = optionalSha256(digest, "Artifact patch digest");
     this.context.database.prepare(`

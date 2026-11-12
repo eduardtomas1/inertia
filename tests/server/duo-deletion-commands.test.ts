@@ -425,7 +425,6 @@ describe("Duo deletion command preflights", () => {
       );
     });
     const store: Partial<RuntimeStore> = {
-      hasActiveWorkspaceRunForProject: vi.fn(() => false),
       assertProjectDeletionAllowed,
       shellSnapshot: vi.fn(() => ({ conversations: [] }) as never),
       removeProject: vi.fn(),
@@ -452,7 +451,6 @@ describe("Duo deletion command preflights", () => {
     const removeProject = vi.fn();
     const store: Partial<RuntimeStore> = {
       shellSnapshot: vi.fn(() => ({ conversations: [conversation] }) as never),
-      hasActiveWorkspaceRunForProject: vi.fn(() => false),
       assertProjectDeletionAllowed: vi.fn(),
       removeProject,
     };
@@ -483,7 +481,6 @@ describe("Duo deletion command preflights", () => {
     const removedAttachmentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const sharedAttachmentId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const store: Partial<RuntimeStore> = {
-      hasActiveWorkspaceRunForProject: vi.fn(() => false),
       assertProjectDeletionAllowed,
       shellSnapshot: vi.fn(() => ({
         conversations: [conversation],
@@ -601,7 +598,6 @@ describe("Duo deletion command preflights", () => {
   it("blocks project removal while one of its chats owns a resumed terminal", async () => {
     const removeProject = vi.fn();
     const store: Partial<RuntimeStore> = {
-      hasActiveWorkspaceRunForProject: vi.fn(() => false),
       assertProjectDeletionAllowed: vi.fn(),
       shellSnapshot: vi.fn(() => ({ conversations: [conversation] }) as AppSnapshot),
       removeProject,

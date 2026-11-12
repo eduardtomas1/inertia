@@ -1,4 +1,4 @@
-import { CURRENT_KNOWN_HARNESS_IDS, type HarnessId } from "../model-routing";
+import type { HarnessId } from "../model-routing";
 import { watcherAccessLabel } from "../access-labels";
 import type { AccessMode, InteractionMode } from "../contracts/app";
 
@@ -206,13 +206,3 @@ export function privateConnectPromptSafetyIsUsable(
   if (safety.filesystemPolicy === "unrestricted") return false;
   return safety.permissionModel !== "provider-controlled";
 }
-
-export function privateConnectPromptSafetyLabel(
-  providerName: string,
-  safety: PrivateConnectPromptSafety,
-): string {
-  return `${providerName} Private Connect prompt\n${safety.headline}`;
-}
-
-export const PRIVATE_CONNECT_PROMPT_SAFETY_HARNESS_IDS: readonly string[] =
-  CURRENT_KNOWN_HARNESS_IDS;

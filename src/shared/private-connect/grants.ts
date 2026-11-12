@@ -46,18 +46,6 @@ export function normalizePrivateConnectGrants(
   return [...byProject.values()].slice(0, PRIVATE_CONNECT_GRANT_LIMITS.projects);
 }
 
-export function privateConnectGrantsFromProjectIds(
-  projectIds: readonly string[],
-): PrivateConnectConversationGrant[] {
-  return normalizePrivateConnectGrants(
-    [...new Set(projectIds)].map((projectId) => ({
-      projectId,
-      conversationIds: [],
-      includeFutureConversations: true,
-    })),
-  );
-}
-
 export function privateConnectGrantsForSelectedProjects(
   projectIds: readonly string[],
   grants?: readonly PrivateConnectConversationGrant[],
@@ -84,16 +72,4 @@ export function privateConnectGrantedProjectIds(
   grants: readonly PrivateConnectConversationGrant[],
 ): string[] {
   return normalizePrivateConnectGrants(grants).map(({ projectId }) => projectId);
-}
-
-export function privateConnectGrantAllowsConversation(
-  grants: readonly PrivateConnectConversationGrant[],
-  projectId: string,
-  conversationId: string,
-): boolean {
-  const grant = grants.find((candidate) => candidate.projectId === projectId);
-  return Boolean(
-    grant
-    && (grant.includeFutureConversations || grant.conversationIds.includes(conversationId)),
-  );
 }

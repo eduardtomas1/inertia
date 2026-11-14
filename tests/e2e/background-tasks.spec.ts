@@ -704,7 +704,7 @@ test("shows each turn's agents as one group row whose agents open their cards in
 test("keeps the whole chat's tasks in the panel when the transcript loads only its newest turns", async ({ browserName: _browserName }, info) => {
   let longConversationId: string | null = null;
   try {
-    await app.resizeWindow(1000, 700);
+    await app.resizeWindow(1000, 1000); // Room for the two newest turns, opened, at the latest content.
     const page = app.page;
     const store = openStore(app);
     let chat: SeededChat;
@@ -732,10 +732,10 @@ test("keeps the whole chat's tasks in the panel when the transcript loads only i
     await expect(card(region, "Target writer")).not.toBeInViewport();
 
     const targetFold = turnWith(45).getByRole("button", { name: /^Worked/u });
-    await targetFold.scrollIntoViewIfNeeded();
+    await expect(targetFold).toBeInViewport({ ratio: 1 }); // Scrolling to it would be reading history.
     await targetFold.click();
     const group = page.getByRole("button", { name: "2 subagents, 2 done" });
-    await group.scrollIntoViewIfNeeded();
+    await expect(group).toBeInViewport({ ratio: 1 });
     await group.click();
     await page.getByRole("button", { name: "Open Target writer in Background tasks, Done" }).click();
     await expect(card(region, "Target writer")).toBeInViewport();

@@ -196,7 +196,9 @@ describe("model chooser active route", () => {
         callback(16);
       }
       expect(chooser).toHaveAttribute("data-popover-vertical", "below");
-      expect(chooser.style.maxHeight).toBe("415.46875px");
+      // The space below runs from the whole-pixel top edge (488) to the
+      // padded workspace bottom (903), so a chooser filling it stays inside.
+      expect(chooser.style.maxHeight).toBe("415px");
       expect(chooser.getBoundingClientRect().top).toBe(488);
       expect(screen.getByRole("combobox")).toHaveFocus();
       expect(pendingFrames.size).toBe(0);

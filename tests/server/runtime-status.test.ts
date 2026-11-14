@@ -78,7 +78,7 @@ describe("headless runtime status", () => {
       mutationSupport: "unsupported",
     }]);
     expect(JSON.stringify(report)).not.toContain("connection metadata");
-    expect(detectProvider).toHaveBeenCalledTimes(7);
+    expect(detectProvider).toHaveBeenCalledTimes(8);
     expect(detectProvider.mock.calls.every(([, options]) =>
       options?.probeAuthentication === false)).toBe(true);
   });
@@ -168,6 +168,7 @@ describe("headless runtime status", () => {
       "opencode",
       "antigravity",
       "grok",
+      "pi",
     ]);
     expect(report.providers[0]).toMatchObject({
       id: "codex",

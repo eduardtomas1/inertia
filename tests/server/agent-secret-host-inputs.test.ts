@@ -18,6 +18,9 @@ describe("active-secret host tool arguments", () => {
         { tool: "inertia_send_message", arguments: { conversationId: child, content: SURFACE_SECRET_VALUE } },
         { tool: "inertia_render_html", arguments: { html: `<p>${SURFACE_SECRET_VALUE}</p>`, title: "Page" } },
         { tool: "inertia_request_secret", arguments: { title: "New key", description: SURFACE_SECRET_VALUE } },
+        { tool: "inertia_delegate_task", arguments: { task: SURFACE_SECRET_VALUE } },
+        { tool: "inertia_delegate_task", arguments: { title: SURFACE_SECRET_VALUE, task: "Work" } },
+        { tool: "inertia_cancel_task", arguments: { taskId: "a".repeat(64), reason: SURFACE_SECRET_VALUE } },
       ];
       for (const call of calls) {
         const result = await runtime.bridge.invoke({
@@ -36,6 +39,27 @@ describe("active-secret host tool arguments", () => {
       for (const name of readdirSync(runtime.root).filter((entry) => entry.startsWith("inertia.sqlite"))) {
         expect(readFileSync(join(runtime.root, name)).includes(SURFACE_SECRET_VALUE), name).toBe(false);
       }
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("refuses a delegated task without delegation before it creates the child chat", async () => {
+    const runtime = await createSurfaceRuntime();
+    try {
+      const before = runtime.store.shellSnapshot().conversations.map(({ id }) => id);
+      const result = await runtime.bridge.invoke({
+        tool: "inertia_delegate_task",
+        arguments: { task: "Review the parser." },
+        providerThreadId: "thread",
+        providerTurnId: "turn",
+        toolCallId: randomUUID(),
+        signal: new AbortController().signal,
+        requestApproval: async () => "approve",
+      });
+      expect(result.success).toBe(false);
+      expect(result.text).toContain("Delegated tasks are unavailable in this runtime.");
+      expect(runtime.store.shellSnapshot().conversations.map(({ id }) => id)).toEqual(before);
     } finally {
       await runtime.close();
     }

@@ -13,17 +13,21 @@ describe("Cursor SDK append-only migration", () => {
   it("preserves all historical rows, indexes, triggers and foreign keys", () => {
     const db = new Database(":memory:");
     try {
-      db.pragma("foreign_keys=ON"); migrateRuntimeDatabase(db, 113);
+      db.pragma("foreign_keys=ON"); migrateRuntimeDatabase(db, 118);
       const beforeRows = rows(db); const beforeObjects = objects(db);
       const keys = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[])
         .map(({ name }) => [name, db.pragma(`foreign_key_list("${name}")`)] as const);
-      migrateRuntimeDatabase(db, 114);
+      migrateRuntimeDatabase(db, 119);
       expect(rows(db)).toEqual(beforeRows); expect(objects(db)).toEqual(beforeObjects);
       for (const [name, values] of keys) expect(db.pragma(`foreign_key_list("${name}")`)).toEqual(values);
       expect(db.pragma("foreign_key_check")).toEqual([]); expect(db.pragma("integrity_check", { simple: true })).toBe("ok");
       const schemas = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND sql LIKE '%harness_id%IN%cursor-acp%'").all() as { sql: string }[];
       expect(schemas.length).toBeGreaterThan(0);
-      for (const { sql } of schemas) expect(sql).toContain("'cursor-sdk'");
+      for (const { sql } of schemas) {
+        expect(sql).toContain("'cursor-sdk'");
+        expect(sql).toContain("'grok-acp'");
+        expect(sql).toContain("'pi-rpc'");
+      }
     } finally { db.close(); }
   });
 });

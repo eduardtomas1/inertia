@@ -1526,6 +1526,92 @@ new-chat skill previews remain Codex and Claude only; the orchestration tool
 definitions move to `src/server/runtime/agent-thread-tool-definitions.ts`. The
 agent surface budget is exactly the sum of both sides' additions.
 
+## Main sync onto 92e23166 — 2026-11-14
+
+Main released migrations 112 to 116 (`SupportNativeGrokProvider`,
+`PersistContextCompactionSettings`, `PersistCodexCompactionLimit`,
+`PersistCustomAgents`, `PersistAgentSecretRequests`), so the branch's
+unreleased migrations move up by five again. Earlier entries in this file use
+the old numbers:
+
+| Before | After | Migration |
+| --- | --- | --- |
+| 112 | 117 | `OrchestrationV2EventStore` |
+| 113 | 118 | `SupportNativePiProvider` |
+| 114 | 119 | `SupportCursorSdkHarness` |
+| 115 | 120 | `RaiseConversationContextSupplementBound` |
+| 116 | 121 | `PersistDelegatedTasks` |
+| 117 | 122 | `PersistDelegationAutomaticWakes` |
+| 118 | 123 | `OrchestrationV2ReceiptStatusAndProjectionMetadata` |
+
+Lineage entries 1 to 116 are byte-identical to main's. The Pi and Cursor SDK
+rebuilds read each table's current definition, so after Grok's 112 they keep
+`grok`, `grok-acp` and `grok-managed`, main's new `subagent_traces.custom_agent_id`
+column, its indexes, triggers and foreign keys; their tests now assert that.
+No branch migration rebuilds `messages`, `app_state`, `custom_agents` or
+`agent_secret_requests`.
+
+Integration points with main's work: Grok and Pi sit side by side in every
+provider list, registry, manifest, discovery, auth, metadata, routing,
+terminal-resume, diagnostics, issue-report and renderer table, Grok first.
+Pi joins main's provider menu, custom-agent routing (in role, like Grok),
+secret requests (remote MCP with a 270-second wait, under its bridge's
+300-second fetch limit), the Usage filter and colour series, and the
+unreported-usage accounts; Grok joins the observed-child stop matrix and the
+managed-chat route schema. The backend profile list now includes Pi, which the
+branch had left out, so a Pi chat's native selection validates instead of
+failing with "Model backend profile not found". `pi-rpc` and `cursor-sdk` get
+harness labels, and Pi's `mcp__inertia__` host-tool names get the friendly
+activity titles; Private Connect prompt safety still falls back to "unsupported"
+for both, so phone prompts to those harnesses stay refused. Main's custom-agent, secret-request and price-list handlers, goal-read
+holds and idle compaction join the branch's command handler module. Main
+replaced the turn agents line with the subagent group; the observed-children
+"Agent details" disclosure (`orchestration/observed-agents-details.tsx`) now
+sits under the group whenever the turn has any subagent, including turns whose
+only subagents are custom-agent calls, folds with the group in a settled turn,
+and is counted in the timeline row estimate. Observed children carry main's
+custom-agent attribution. The conversation configuration guard follows main's
+`hasConversation`.
+
+The branch's delegation tools join main's active-secret check:
+`inertia_delegate_task` (task and title) and `inertia_cancel_task` (reason)
+refuse a live secret value like `inertia_create_conversation` and
+`inertia_send_message`, and `inertia_delegate_task` confirms delegation is
+available before it creates the child chat. The other branch tools only read or
+take identifiers (`inertia_fork_history`, task status and wait); delegation
+results and follow-up sends travel through those checked paths.
+
+Restored history follows T3 Code: a fresh session gets at most
+`DEFAULT_PORTABLE_HISTORY_BUDGET` (16,000 bytes, T3's
+`DEFAULT_HANDOFF_TOKEN_CAP`), and routes with the host-tool bridge are told to
+page older turns with `inertia_request_context`. This supersedes main's #720
+budgets (64 KiB, or 192 KiB where the agent cannot retrieve more), which are
+removed; `@this-chat` references keep their own bound.
+
+A database written by an orchestrator-v2 build from before this sync recorded
+the branch's migrations as 112 to 118, so this build would skip main's 112 to
+116. Opening it now stops startup with the `orchestrator-v2-development-database`
+blocker before recovery or migrations run, leaving the database and its backups
+untouched; the connection message and support summary say to move it aside.
+
+The agent surface budget is the sum of both sides plus two interactions: Grok in
+the shared route enum adds 7 bytes to `inertia_delegate_task`, and main's
+38-byte Claude per-tool reduction applies to the branch's five Claude tools.
+Renderer growth was measured against builds of 852fd18b, the branch and main:
+each raised route is within 1 KB of base plus both sides' growth (transcript
++960 bytes, core +707, settings +370, the first-load routes about 300 smaller).
+
+Verification on macOS arm64 with Node 22.23.2: `npm run check:quality` passes
+and `npm run check:migrations` verifies 123 lineage entries, also against
+`origin/main` as the base. The full Vitest suite, run in isolated chunks, passes
+all 1,613 files: 20,329 tests passed and 174 skipped. `npm run test:portable`
+passes 4,282 tests with 31 skipped, and `npm run build:bundle` passes. The
+delegation-wake Electron scenarios pass, including the observed-child panel
+opened from a settled turn's fold. The macOS guardian, Antigravity, Claude
+metadata, Grok and Kimi cleanup tests need the runtime process guardian that
+`npm run build:bundle` builds first; without it they fail identically on
+`origin/main`.
+
 ## G5: command authority for sends, Stop, configuration and queue edits — 2026-11-02
 
 **Lanes.** `OrchestrationCommandLanes`

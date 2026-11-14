@@ -24,6 +24,7 @@ const resources: DetachedChatRuntimePolicyResources = {
   turnConversationId: () => null,
   duoLaunchConversationIds: () => null,
   savedAnswerConversationId: () => null,
+  secretRequestConversationId: () => null,
   delegatedTaskConversationIds: (taskId) => taskId === TASK ? [OTHER, CONVERSATION] : taskId === OTHER_TASK ? [OTHER] : null,
   pendingApproval: () => null,
   pendingInput: () => null,

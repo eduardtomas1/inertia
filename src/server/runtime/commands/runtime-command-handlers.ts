@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import type { ProviderInfo } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
 import { githubIssuePublisher } from "../../git/github-issue-report";
@@ -14,12 +16,14 @@ import { rollbackConversationHistory } from "../history-rollback-service";
 import { createManualUsageRefresh, type ProviderUsageRefreshDependencies } from "../provider-usage-refresh";
 import type { createQueuedMessageRuntime } from "../queued-message-runtime";
 import type { TurnController } from "../turns/turn-controller";
+import { UsagePriceList, usagePriceListUrl } from "../../usage/price-list-service";
 import type { WatcherRuntime } from "../watcher/watcher-runtime";
 import { createAgentWorkflowCommandHandler } from "./agent-workflow-commands";
 import { createCliConversationCommandHandler } from "./cli-conversation-commands";
 import type { RuntimeCommandHandler } from "./command-router";
 import { createConversationCommandHandler, type ConversationCommandDependencies } from "./conversation-commands";
-import { createConversationCompactionCommandHandler } from "./conversation-compaction-commands";
+import { createConversationCompactionCommandHandler, type ConversationCompactionCommandDependencies } from "./conversation-compaction-commands";
+import { createCustomAgentCommandHandler } from "./custom-agent-commands";
 import { createCursorSdkLoginCommandHandler } from "./cursor-sdk-login-commands";
 import { createDelegationCommandHandler } from "./delegation-commands";
 import { createObservedChildCommandHandler } from "./observed-child-commands";
@@ -35,6 +39,7 @@ import { createSettingsBackendCommandHandler } from "./settings-backend-commands
 import { createSourceControlCommandHandler } from "./source-control-commands";
 import { createTodoCommandHandler } from "./todo-commands";
 import { createLibraryCommandHandler } from "./library-commands";
+import { createSecretRequestCommandHandler } from "./secret-request-commands";
 import { createWorktreeCommandHandler } from "./worktree-commands";
 import { createTerminalLinkCommandHandler } from "./terminal-link-commands";
 import type { TurnInteractionCommandDependencies } from "./turn-interaction-commands";
@@ -58,7 +63,6 @@ export interface RuntimeCommandHandlerServices {
   broadcast: TurnInteractionCommandDependencies["broadcast"];
   broadcastSnapshot(): void;
   flushSnapshot(): void;
-  broadcastConversationShell(conversationId: string): void;
   currentSnapshot: Parameters<typeof createProviderCommandHandler>[0]["currentSnapshot"];
   providerInfo(): readonly ProviderInfo[];
   trackRuntimeOperation: CursorSdkLoginDependencies["track"];
@@ -77,7 +81,7 @@ export interface RuntimeCommandHandlerServices {
   deletedConversationIds: Set<string>;
   rememberDeletedConversation(conversationId: string): void;
   privateConnectTranscriptCache: PrivateConnectTranscriptCache;
-  compactions: Parameters<typeof createConversationCompactionCommandHandler>[0]["compactions"];
+  compactionDependencies: ConversationCompactionCommandDependencies;
   turnGitArtifacts: Parameters<typeof createSourceControlCommandHandler>[0]["turnGitArtifacts"];
   secureFiles: ProjectWorkspaceCommandDependencies["secureFiles"];
   secureFileAuthorities: ProjectWorkspaceCommandDependencies["secureFileAuthorities"];
@@ -111,7 +115,10 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       track: services.trackRuntimeOperation,
       send,
     }),
-    createCliConversationCommandHandler({ store, providers, signal: lifetimeSignal, broadcastSnapshot: flushSnapshot, send }),
+    createCliConversationCommandHandler({
+      store, providers, signal: lifetimeSignal, broadcastSnapshot: flushSnapshot, send,
+      secretValues: () => services.agentThreads.secrets.output.values(),
+    }),
     services.queuedMessages.handler,
     ...services.usageHandlers,
     createIssueReportCommandHandler({
@@ -133,7 +140,9 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
     createObservedChildCommandHandler({ observedChildren: store.observedChildren, send,
       activeTurn: (conversationId) => turns.activeIdentity(conversationId) }),
     createTodoCommandHandler({ ...services.turnInteraction, creation: services.agentThreads.creation, broadcastSnapshot: flushSnapshot }),
+    createCustomAgentCommandHandler({ store }),
     createLibraryCommandHandler({ store, broadcast, send }),
+    createSecretRequestCommandHandler({ service: () => services.agentThreads.secrets, send }),
     createAgentWorkflowCommandHandler({
       workflows: services.agentWorkflows,
       providerTerminalResumes,
@@ -155,6 +164,11 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       store,
       send,
       databasePath: services.databasePath,
+      priceList: new UsagePriceList({
+        cachePath: join(dataDirectory, "usage-price-list.json"),
+        signal: lifetimeSignal,
+        url: usagePriceListUrl(process.env),
+      }),
       lifetimeSignal,
       reveal: (target) => services.runtimeSync.focusDetachedMessage(target),
       canStopWorkspaceRun: services.canStopWorkspaceRun,
@@ -168,6 +182,7 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       providerTerminalResumes,
       duoLaunches: services.duoLaunches,
       watchers: services.watchers,
+      nativeGoalReads: services.agentWorkflows.nativeGoalReads,
       runtimeSync: services.runtimeSync,
       deletedConversationIds: services.deletedConversationIds,
       dataDirectory,
@@ -178,33 +193,19 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       send,
       creation: services.agentThreads.creation,
       contextRequests: services.agentThreads.contextRequests,
+      agentSecrets: services.agentThreads.secrets,
       reportIncident: services.reportIncident,
       decorateDelegation: (delegation) => services.delegation.service.decorateDetail(delegation),
       rollbackHistory: enableProviders
         ? (input) => rollbackConversationHistory({ store, providers, turns, providerTerminalResumes, terminals: services.terminals }, input, lifetimeSignal)
         : undefined,
     }),
-    createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
-    services.queuedMessages.turnInteractionHandler,
-    createConversationCompactionCommandHandler({
-      store,
-      providers,
-      backendProfileController,
-      turns,
-      isolatedRuns,
-      providerTerminalResumes,
-      enableProviders,
-      lifetimeSignal,
-      compactions: services.compactions,
-      instructions: turns,
-      interaction: services.turnInteraction,
-      settings: () => store.shellSnapshot().settings,
-      refreshProviderAccount: (providerId) => refreshProviderInfo(providerId),
-      providerInfo: services.providerInfo,
-      broadcast,
-      broadcastConversationShell: services.broadcastConversationShell,
-      send,
+    createWorktreeCommandHandler({
+      store, workspaceRuns, providerTerminalResumes, nativeGoalReads: services.agentWorkflows.nativeGoalReads,
+      dataDirectory, broadcastSnapshot: flushSnapshot, send,
     }),
+    services.queuedMessages.turnInteractionHandler,
+    createConversationCompactionCommandHandler(services.compactionDependencies),
     createSourceControlCommandHandler({
       store,
       workspaceRuns,
@@ -254,6 +255,7 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       duoLaunches: services.duoLaunches,
       watchers: services.watchers,
       terminals: services.terminals,
+      agentSecrets: services.agentThreads.secrets,
       secureFiles,
       secureFileAuthorities,
       workspacePath,

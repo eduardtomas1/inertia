@@ -4,7 +4,7 @@ export const MAX_MANAGED_PROMPT_CHARS = 32_768;
 export const SINGLE_LINE_PATTERN = "^[^\\S\\x00-\\x1f\\x7f]*[^\\s\\x00-\\x1f\\x7f][^\\x00-\\x1f\\x7f]*$";
 export const MULTILINE_PATTERN = "^\\s*[^\\s\\x00][^\\x00]*$";
 export const tokenPattern = (maximum: number) => `^[^\\s\\x00-\\x1f\\x7f]{1,${maximum}}$`;
-export const PROVIDER_ROUTE_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "pi"] as const;
+export const PROVIDER_ROUTE_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok", "pi"] as const;
 
 export const idSchema = z.string().uuid();
 export const safeSingleLineSchema = (maximum: number) => z.string()

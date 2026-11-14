@@ -31,20 +31,30 @@ describe("native Pi provider append-only upgrade", () => {
     const database = new Database(path);
     try {
       database.pragma("foreign_keys = ON");
-      migrateRuntimeDatabase(database, 112);
+      migrateRuntimeDatabase(database, 117);
       database.prepare("INSERT OR REPLACE INTO provider_metadata_cache (provider_id, executable, version, auth_state) VALUES ('codex', 'codex-test', '1', 'authenticated')").run();
       expect(() => database.prepare("INSERT INTO provider_metadata_cache (provider_id) VALUES ('pi')").run()).toThrow();
       const rows = tableData(database);
       const objects = schemaObjects(database);
       const foreignKeys = database.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
         .map((row) => { const { name } = row as { name: string }; return [name, database.pragma(`foreign_key_list("${name.replaceAll('"', '""')}")`)]; });
-      migrateRuntimeDatabase(database, 113);
+      migrateRuntimeDatabase(database, 118);
       expect(tableData(database)).toEqual(rows);
       expect(schemaObjects(database)).toEqual(objects);
       for (const [name, keys] of foreignKeys) expect(database.pragma(`foreign_key_list("${String(name).replaceAll('"', '""')}")`)).toEqual(keys);
       expect(database.pragma("foreign_key_check")).toEqual([]);
       expect(database.pragma("integrity_check", { simple: true })).toBe("ok");
       database.prepare("INSERT INTO provider_metadata_cache (provider_id) VALUES ('pi')").run();
+      const constrained = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND sql LIKE '%''antigravity%'")
+        .all() as { sql: string }[];
+      expect(constrained).toHaveLength(6);
+      for (const { sql } of constrained) {
+        for (const values of sql.match(/\b(?:provider_id|harness_id|protocol)\s+IN\s*\([^)]*\)/giu) ?? []) {
+          expect(values).toMatch(/'grok(?:-acp|-managed)?'/u);
+          expect(values).toMatch(/'pi(?:-rpc|-native)?'/u);
+        }
+      }
+      database.prepare("INSERT OR REPLACE INTO provider_metadata_cache (provider_id) VALUES ('grok')").run();
     } finally { database.close(); }
     const store = new RuntimeStore(path, directory);
     try {
@@ -64,11 +74,11 @@ describe("native Pi provider append-only upgrade", () => {
   it("rolls back rebuilt tables and schema history if a later constraint cannot be widened", () => {
     const database = new Database(":memory:");
     try {
-      migrateRuntimeDatabase(database, 112);
+      migrateRuntimeDatabase(database, 117);
       database.exec("ALTER TABLE subagent_traces RENAME TO unexpected_subagents");
       const objects = schemaObjects(database);
-      expect(() => migrateRuntimeDatabase(database, 113)).toThrow();
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 112 });
+      expect(() => migrateRuntimeDatabase(database, 118)).toThrow();
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 117 });
       expect(schemaObjects(database)).toEqual(objects);
       expect(database.prepare("SELECT name FROM sqlite_master WHERE name LIKE '%_v108'").all()).toEqual([]);
       expect(() => database.prepare("INSERT INTO provider_metadata_cache (provider_id) VALUES ('pi')").run()).toThrow();

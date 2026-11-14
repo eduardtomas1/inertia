@@ -13,6 +13,8 @@ import {
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "../../src/server/persistence/migrations/turn-scoped-indexes";
 import { DUO_COMPARISON_BRIEFS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/duo-comparison-briefs";
+import { ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/orchestration-v2-receipt-status";
+import { removeDelegatedTasksFromFixture } from "../support/legacy-project-settings-schema";
 import { CUSTOM_AGENTS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/custom-agents";
 import { LIBRARY_SCHEMA_VERSION } from "../../src/server/persistence/migrations/library";
 import { AGENT_CONTEXT_READ_MANAGED_ACCESS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/agent-context-read-managed-access";
@@ -77,6 +79,21 @@ function narrowAgentContextReadAccess(database: Database.Database, version: numb
 }
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION) {
+    database.exec(`
+      DROP TABLE orchestration_v2_projection_metadata;
+      ALTER TABLE orchestration_v2_receipts DROP COLUMN command_type;
+      ALTER TABLE orchestration_v2_receipts DROP COLUMN error;
+      ALTER TABLE orchestration_v2_receipts DROP COLUMN status;
+    `);
+  }
+  if (version < 121) removeDelegatedTasksFromFixture(database);
+  if (version < 117) database.exec(`
+    DROP TABLE orchestration_v2_effects;
+    DROP TABLE orchestration_v2_receipts;
+    DROP TABLE orchestration_v2_entities;
+    DROP TABLE orchestration_v2_events;
+  `);
   if (version < AGENT_SECRET_REQUESTS_SCHEMA_VERSION) {
     database.exec(`
       DROP TABLE agent_secret_requests;
@@ -230,6 +247,9 @@ describe("database health check for settings and subagent columns", () => {
     { version: TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, sql: "DROP INDEX todos_source_conversation_idx" },
     { version: CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, sql: "DROP INDEX codex_thread_tool_packs_registered_idx" },
     ...taskShapeColumns.map((column) => ({ version: SUBAGENT_TASK_SHAPE_SCHEMA_VERSION, sql: `ALTER TABLE subagent_traces DROP COLUMN ${column}` })),
+    { version: ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, sql: "DROP TABLE orchestration_v2_projection_metadata" },
+    ...["status", "error", "command_type"].map((column) => ({ version: ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION,
+      sql: `ALTER TABLE orchestration_v2_receipts DROP COLUMN ${column}` })),
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "ALTER TABLE custom_agents DROP COLUMN skills_json" },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "DROP INDEX custom_agents_position_idx" },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "DROP TRIGGER custom_agents_count_limit" },
@@ -246,7 +266,8 @@ describe("database health check for settings and subagent columns", () => {
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each(Array.from({ length: AGENT_SECRET_REQUESTS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index))("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each([...Array.from({ length: AGENT_SECRET_REQUESTS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index), 122,
+    ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

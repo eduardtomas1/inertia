@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ObservedChildView } from "../../src/renderer/src/components/orchestration/observed-child-view";
 import { DelegationSurfaceProvider } from "../../src/renderer/src/components/orchestration/delegation-surface";
 import type { DelegationCommandRunner } from "../../src/renderer/src/components/orchestration/delegation-model";
-import { TurnAgentsLine } from "../../src/renderer/src/components/response-timeline/TurnAgentsLine";
+import { SubagentGroup } from "../../src/renderer/src/components/response-timeline/SubagentGroup";
+import { ObservedAgentsDetails } from "../../src/renderer/src/components/orchestration/observed-agents-details";
 import { SubagentTraceDetails } from "../../src/renderer/src/components/SubagentTraceDetails";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import {
@@ -126,12 +127,13 @@ describe("observed child view", () => {
       "agent.subagent.stop:trace-root", `observed-child.read:${conversationId}:${turnId}`]);
   });
 
-  it("opens from the turn agents line by keyboard and reaches Stop with Tab", async () => {
+  it("opens from the turn subagent group by keyboard and reaches Stop with Tab", async () => {
     const run = vi.fn<DelegationCommandRunner>().mockResolvedValue(readResult());
     render(<DelegationSurfaceProvider conversationId={conversationId} delegation={undefined}
       conversations={undefined} run={run} openConversation={undefined}>
-      <TurnAgentsLine conversationId={conversationId} turnId={turnId} turnIndex={2}
+      <SubagentGroup conversationId={conversationId} turnId={turnId}
         subagents={[taskTrace({ id: "a", conversationId, turnId })]} onOpenSurface={() => undefined} />
+      <ObservedAgentsDetails conversationId={conversationId} turnId={turnId} turnIndex={2} />
     </DelegationSurfaceProvider>);
     const user = userEvent.setup();
     const toggle = screen.getByRole("button", { name: "Agent details" });
@@ -146,21 +148,23 @@ describe("observed child view", () => {
     expect(within(view).getByRole("button", { name: "Stop Evidence scout" })).toHaveFocus();
   });
 
-  it("keeps one agents line per turn beside the details disclosure", () => {
+  it("keeps one subagent group row per turn beside the details disclosure", () => {
     const run = vi.fn<DelegationCommandRunner>().mockResolvedValue(readResult());
     const { container } = render(<DelegationSurfaceProvider conversationId={conversationId} delegation={undefined}
       conversations={undefined} run={run} openConversation={undefined}>
-      <TurnAgentsLine conversationId={conversationId} turnId={turnId} turnIndex={2}
+      <SubagentGroup conversationId={conversationId} turnId={turnId}
         subagents={[taskTrace({ id: "a", conversationId, turnId })]} onOpenSurface={() => undefined} />
+      <ObservedAgentsDetails conversationId={conversationId} turnId={turnId} turnIndex={2} />
     </DelegationSurfaceProvider>);
-    const line = screen.getByRole("button", { name: /^Open Background tasks, / });
+    const row = screen.getByRole("button", { name: /^1 subagent, / });
     const details = screen.getByRole("button", { name: "Agent details" });
-    expect([...container.querySelectorAll(".turn-agents-line")]).toEqual([line]);
-    expect(details).toHaveClass("turn-agents-inspect");
+    expect([...container.querySelectorAll(".subagent-group-row")]).toEqual([row]);
+    expect(details).toHaveClass("subagent-group-inspect");
   });
 
-  it("keeps the turn agents line unchanged without a command runner", () => {
-    render(<TurnAgentsLine conversationId={conversationId} turnId={turnId} subagents={[taskTrace({ id: "a" })]} />);
+  it("keeps the turn subagent group unchanged without a command runner", () => {
+    render(<><SubagentGroup conversationId={conversationId} turnId={turnId} subagents={[taskTrace({ id: "a" })]} />
+      <ObservedAgentsDetails conversationId={conversationId} turnId={turnId} /></>);
     expect(screen.queryByRole("button", { name: "Agent details" })).toBeNull();
   });
 

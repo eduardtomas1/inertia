@@ -14,6 +14,7 @@ export const ADD_PROVIDER_MENU_ORDER = [
   "opencode",
   "antigravity",
   "kimi",
+  "pi",
 ] as const satisfies readonly ProviderId[];
 
 export const ADD_PROVIDER_MENU_LABELS: Readonly<Record<ProviderId, string>> = {
@@ -24,6 +25,7 @@ export const ADD_PROVIDER_MENU_LABELS: Readonly<Record<ProviderId, string>> = {
   antigravity: "Antigravity",
   kimi: "Kimi Code",
   grok: "Grok",
+  pi: "Pi",
 };
 
 export type AddProviderMenuStep = 0 | 1 | 2;
@@ -84,6 +86,7 @@ const API_KEY_VENDORS: Readonly<Partial<Record<ProviderId, string>>> = {
 };
 
 const ANTIGRAVITY_POLICY = "Google says wrapping agy in another app isn't supported on consumer plans.";
+const PI_ACCOUNTS = "Pi keeps its own accounts and API keys. Use Pi's /login command or its native configuration.";
 
 export function addProviderMenuItems(
   providers: readonly ProviderInfo[],
@@ -185,6 +188,9 @@ export function addProviderNote(
         more: null,
       };
   }
+  if (id === "pi") {
+    return { text: PI_ACCOUNTS, more: null };
+  }
   return {
     text: "Kimi Code signs in with its own account. Usage is not reported to Inertia.",
     more: null,
@@ -233,6 +239,12 @@ export function addProviderFacts(id: ProviderId): readonly AddProviderFact[] {
       { label: "Usage", value: "Not reported to Inertia." },
     ];
   }
+  if (id === "pi") {
+    return [
+      { label: "Sign-in", value: "Pi's /login command, or its native configuration." },
+      { label: "API key", value: "Kept by Pi. Inertia does not store it." },
+    ];
+  }
   return [
     { label: "Sign-in", value: "Kimi Code's own login." },
     { label: "API key", value: "Add a key on the Kimi Code card. It runs on Claude Code." },
@@ -247,6 +259,7 @@ function accountRouteDescription(id: ProviderId): string {
   if (id === "cursor") return "Uses the account stored by Cursor.";
   if (id === "antigravity") return "Uses the account stored by Antigravity.";
   if (id === "grok") return "Uses the account stored by Grok.";
+  if (id === "pi") return "Uses the accounts and keys stored by Pi.";
   return "Uses the account stored by Kimi Code.";
 }
 

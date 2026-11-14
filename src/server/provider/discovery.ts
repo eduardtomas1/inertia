@@ -26,6 +26,7 @@ import {
 import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
 import type { ProviderAccountKind } from "../../shared/provider";
 import { providerAuthStatusArgs } from "./auth";
+import { probePiProtocol, type PiProtocolProbe } from "./pi-discovery";
 import { grokCredentialPresence } from "./grok-acp-auth";
 import { PROVIDER_INFO } from "./catalog";
 import {
@@ -160,6 +161,7 @@ function scheduleProviderProbeDeadline(
 }
 
 interface ProviderDiscoveryDependencies {
+  probePiProtocol?: PiProtocolProbe;
   executableCandidates?: typeof executableCandidates;
   probeOpenCodePureIsolation?: OpenCodePureIsolationProbe;
   probeProcess?: ProviderProbeProcess;
@@ -554,6 +556,9 @@ async function detectProviderRecordingCleanup(
   const discoveredEnvironment = await providerEnvironment(
     options.refreshEnvironment === true,
   );
+  const selectedCommand = providerId === "pi" && !options.command?.trim()
+    ? environmentValue(discoveredEnvironment.env, "INERTIA_PI_EXECUTABLE", process.platform)?.trim() || command
+    : command;
   requireActive();
   const probeAuthentication = options.probeAuthentication !== false;
   const probeEnvironment: ProviderEnvironment = {
@@ -583,7 +588,7 @@ async function detectProviderRecordingCleanup(
     : probeEnvironment;
   const candidateCommands = providerId === "cursor" && command === PROVIDER_INFO.cursor.command
     ? [command, "agent"]
-    : [command];
+    : [selectedCommand];
   const candidates = providerId === "codex"
     && process.platform === "win32"
     && command.toLocaleLowerCase("en-US") === PROVIDER_INFO.codex.command
@@ -661,7 +666,9 @@ async function detectProviderRecordingCleanup(
       serveProbe.started
       && !serveProbe.timedOut
       && serveProbe.exitCode === 0
-      && /(?:^|\s)--pure(?:\s|,|$)/mu.test(serveProbe.output)
+      && ((version ?? "").startsWith("2.")
+        ? /--hostname\b/u.test(serveProbe.output) && /--port\b/u.test(serveProbe.output)
+        : /(?:^|\s)--pure(?:\s|,|$)/mu.test(serveProbe.output))
     );
     const versionResponded = probe.started && !probe.timedOut && probe.exitCode === 0;
     return {
@@ -685,6 +692,8 @@ async function detectProviderRecordingCleanup(
       versionReady: (providerId === "antigravity"
         ? antigravityCandidateIsIdentified(executable)
           && antigravityVersionSupportsHeadless(version)
+        : providerId === "pi"
+          ? (version ?? "").startsWith("1.")
         : providerId === "opencode"
           ? openCodeVersionIsSupported(version)
           : true)
@@ -881,6 +890,20 @@ async function detectProviderRecordingCleanup(
     };
   }
 
+  if (providerId === "pi") {
+    const protocol = versionProbeCleanupConfirmed && (selected.version ?? "").startsWith("1.")
+      ? await (dependencies.probePiProtocol ?? probePiProtocol)({ executable: selected.executable,
+          environment: probeEnvironment.env, cwd, signal: options.signal, timeoutMs, terminateProcessTree: dependencies.terminateProcessTree })
+      : { ready: false, cleanupConfirmed: versionProbeCleanupConfirmed };
+    requireActive(protocol.cleanupConfirmed);
+    return { provider, available: true, executable: selected.executable, ...(selected.version ? { version: selected.version } : {}),
+      installState: "installed", authState: "unknown", canRun: probeAuthentication && protocol.ready && protocol.cleanupConfirmed,
+      protocolVerified: protocol.ready && protocol.cleanupConfirmed, cleanupConfirmed: protocol.cleanupConfirmed,
+      statusMessage: !protocol.cleanupConfirmed ? "Pi discovery process cleanup could not be confirmed"
+        : !protocol.ready ? "Pi 1.x RPC is required; update the selected executable"
+        : "Installed; Pi verifies native authentication when a request starts" };
+  }
+
   if (!probeAuthentication) {
     const cleanupConfirmed = openCodeIsolation.cleanupConfirmed
       && versionProbeCleanupConfirmed;
@@ -919,7 +942,9 @@ async function detectProviderRecordingCleanup(
     };
   }
 
-  const providerAuthArgs = providerAuthStatusArgs(providerId);
+  // V2 auth list can launch the shared background service. The owned run's
+  // model catalog is the authentication authority instead of a passive probe.
+  const providerAuthArgs = providerId === "opencode" && (selected.version ?? "").startsWith("2.") ? null : providerAuthStatusArgs(providerId);
   if (providerAuthArgs === null) {
     const grokSignedIn = providerId === "grok"
       && grokCredentialPresence(providerChildEnvironment(providerId, discoveredEnvironment.env)) === "present";
@@ -938,6 +963,7 @@ async function detectProviderRecordingCleanup(
           : "Installed. Sign in with grok login before the first chat."
         : providerId === "antigravity"
           ? "Installed; Antigravity checks your sign-in when a turn starts"
+          : providerId === "opencode" ? "Installed; OpenCode verifies authentication when a request starts"
           : `Installed; ${providerShortName(provider.name)} ACP will verify authentication when a session starts`,
     };
   }

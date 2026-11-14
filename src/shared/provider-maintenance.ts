@@ -11,6 +11,7 @@ export const PROVIDER_MAINTENANCE_PROVIDER_IDS = [
   "opencode",
   "antigravity",
   "grok",
+  "pi",
 ] as const;
 
 export const providerMaintenanceProviderIdSchema = z.enum(

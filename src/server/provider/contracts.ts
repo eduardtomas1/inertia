@@ -43,6 +43,7 @@ export const PROVIDER_IDS = [
   "opencode",
   "antigravity",
   "grok",
+  "pi",
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -115,6 +116,7 @@ interface ProviderRunRequest {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
+  nativeContinuation?: import("./native-conversation-operations").NativeConversationContinuation;
   /**
    * Exact native Fast value advertised for the selected model. Presence means
    * both Fast and Standard can be requested explicitly and must be attested by
@@ -223,12 +225,50 @@ export interface ProviderRunFailure {
   activityId?: string;
   sessionUnavailable?: true;
   resumeRejected?: true;
+  /**
+   * Definite: the provider refused before the request reached the native
+   * session, so no prompt, handoff or rollback cursor was delivered.
+   */
+  notDelivered?: true;
   usageLimited?: true;
   failureKind?: TurnFailureKind;
 }
 
+/**
+ * What the provider layer asserts about the rejected attempt when it asks for
+ * a fresh session: its process tree has ended (cleanup was confirmed).
+ */
+export interface ProviderFreshSessionPrior {
+  readonly priorCleanup: "confirmed";
+}
+
 export interface ProviderFreshSessionFallback {
   prompt: string;
+  /**
+   * Receives the replacement attempt's events. Without it they go to the
+   * run's `onEvent`, as the rejected attempt's did.
+   */
+  onEvent?: (event: ProviderEvent) => void;
+}
+
+export type ProviderBackgroundWork = "none" | "pending";
+
+export interface ProviderBackgroundWorkSession {
+  conversationId: string;
+  providerId: ProviderId;
+  harnessId: string;
+  nativeSessionId: string;
+}
+
+export interface ProviderBackgroundWorkProbe {
+  pendingBackgroundWork?(session: ProviderBackgroundWorkSession): ProviderBackgroundWork;
+}
+
+export function providerBackgroundWork(
+  probe: ProviderBackgroundWorkProbe,
+  session: ProviderBackgroundWorkSession,
+): ProviderBackgroundWork {
+  return probe.pendingBackgroundWork?.(session) ?? "none";
 }
 
 export interface ProviderEventBase {
@@ -290,6 +330,16 @@ export interface ProviderStatusEvent extends ProviderEventBase {
 export interface ProviderSessionEvent extends ProviderEventBase {
   type: "session";
   sessionId: string;
+}
+
+/** Provider-authored inclusive history anchor; null means unproved, never an inferred application ID. */
+export interface ProviderNativeBoundaryEvent extends ProviderEventBase {
+  type: "native-boundary";
+  nativeConversationId: string;
+  nativeSessionId: string | null;
+  nativeTurnId: string | null;
+  persistedHeadId: string | null;
+  phase: "started" | "settled";
 }
 
 export interface ProviderSessionTitleEvent extends ProviderEventBase {
@@ -430,6 +480,7 @@ export type ProviderEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
+  | ProviderNativeBoundaryEvent
   | ProviderSessionTitleEvent
   | ProviderApprovalEvent
   | ProviderApprovalResolvedEvent
@@ -446,7 +497,7 @@ export type ProviderEvent =
 export interface ProviderRunCallbacks {
   /** Fires only after the selected harness has synchronously accepted the run. */
   onStarted?: () => void;
-  freshSessionFallback?: () => ProviderFreshSessionFallback | null;
+  freshSessionFallback?: (prior: ProviderFreshSessionPrior) => ProviderFreshSessionFallback | null;
   onEvent?: (event: ProviderEvent) => void;
   onText?: (event: ProviderTextEvent) => void;
   onTextSnapshot?: (event: ProviderTextSnapshotEvent) => void;
@@ -748,6 +799,7 @@ export function isProviderRunRefusal(
 }
 
 export interface ProviderManagerOptions {
+  cursorSdk?: import("./cursor-sdk-service").CursorSdkConfiguration;
   /** Durable maintenance recovery blocks every launch for this provider. */
   providerRecoveryPending?: (providerId: ProviderId) => boolean;
   commands?: Partial<Record<ProviderId, string>>;

@@ -43,7 +43,7 @@ export function removeDelegatedTasksFromFixture(database: Database.Database): vo
       database.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
     }
   }
-  database.exec("DELETE FROM schema_migrations WHERE version >= 116");
+  database.exec("DELETE FROM schema_migrations WHERE version >= 121");
 }
 
 export function removeOrchestratorV2FromFixture(database: Database.Database): void {
@@ -55,7 +55,7 @@ export function removeOrchestratorV2FromFixture(database: Database.Database): vo
     DROP TABLE IF EXISTS orchestration_v2_entities;
     DROP TABLE IF EXISTS orchestration_v2_events;
   `);
-  database.exec("DELETE FROM schema_migrations WHERE version >= 112");
+  database.exec("DELETE FROM schema_migrations WHERE version >= 117");
 }
 
 export function removeWatcherLinksFromLegacyFixture(database: Database.Database): void {

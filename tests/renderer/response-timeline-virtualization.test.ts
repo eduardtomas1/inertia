@@ -34,6 +34,7 @@ import {
   type ResponseTurn,
 } from "../../src/renderer/src/utils/responseTimeline";
 import {
+  AGENT_DETAILS_ROW_HEIGHT,
   groupSubagentsByTurn,
   subagentEstimateSignature,
 } from "../../src/renderer/src/utils/response-timeline/virtualization";
@@ -805,7 +806,22 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimateTimelineRowSize(settled, { subagents: [codex] }) - estimateTimelineRowSize(settled))
       .toBeGreaterThanOrEqual(50);
     const legacy = taskTrace({ id: "trace-legacy", turnId: "turn-codex", activityId: null, status: "completed" });
-    expect(estimateTimelineRowSize(settled, { subagents: [legacy] })).toBe(estimateTimelineRowSize(settled));
+    // A legacy trace adds no rows of its own, only the Agent details line under the turn's subagents.
+    const legacyDelta = estimateTimelineRowSize(settled, { subagents: [legacy] }) - estimateTimelineRowSize(settled);
+    expect(legacyDelta).toBeGreaterThanOrEqual(AGENT_DETAILS_ROW_HEIGHT);
+    expect(legacyDelta).toBeLessThan(AGENT_DETAILS_ROW_HEIGHT + 20);
+  });
+
+  it("counts the Agent details line only while a turn's subagents are visible", () => {
+    const owner = "turn-agent-details";
+    const settled = buildItem({ id: owner });
+    const trace = taskTrace({ id: "trace-details", turnId: owner, activityId: null, status: "completed" });
+    const folded = { subagents: [trace], settledSubagentsFoldable: true };
+    const closed = estimateTimelineRowSize(settled, folded);
+    expect(closed).toBe(estimateTimelineRowSize(settled, { settledSubagentsFoldable: true }));
+    const opened = estimateTimelineRowSize(settled, { ...folded, turnFoldExpanded: true });
+    const openedWithoutAgents = estimateTimelineRowSize(settled, { settledSubagentsFoldable: true, turnFoldExpanded: true });
+    expect(opened - openedWithoutAgents).toBe(AGENT_DETAILS_ROW_HEIGHT);
   });
 
   it("groups delegated tasks by turn and keeps an unchanged turn's array", () => {

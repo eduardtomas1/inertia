@@ -442,7 +442,7 @@ describe("library migration", () => {
       ).pluck().all() as string[]);
       expect(objects()).toEqual([]);
       const messageColumns = (database.pragma("table_info(messages)") as Array<{ name: string }>)
-        .map(({ name }) => name).join(", ");
+        .map(({ name }) => `"${name}"`).join(", ");
       const messages = database.prepare(`SELECT ${messageColumns} FROM messages ORDER BY rowid`).all();
       expect(messages).not.toHaveLength(0);
       const history = database.prepare("SELECT * FROM schema_migrations ORDER BY version").all();

@@ -126,8 +126,12 @@
 .observed-child-facts dd { margin: 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .observed-child-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .observed-child-reason { font-size: var(--text-xs); }
-.turn-agents-row > .turn-agents-line { display: inline-block; vertical-align: baseline; }
-.turn-agents-inspect {
+.subagent-group-details {
+  min-width: 0;
+  max-width: var(--final-answer-max-width);
+  margin: 0 0 4px max(0px, calc((100% - var(--final-answer-max-width)) / 2));
+}
+.subagent-group-inspect {
   display: inline-block;
   max-width: 100%;
   margin: 7px 0 3px 2px;
@@ -142,8 +146,8 @@
   vertical-align: baseline;
   cursor: pointer;
 }
-.turn-agents-inspect:hover { color: var(--text); background: var(--fill); }
-.turn-agents-observed { margin-left: max(0px, calc((100% - var(--final-answer-max-width)) / 2)); }
+.subagent-group-inspect:hover { color: var(--text); background: var(--fill); }
+.subagent-group-observed[hidden] { display: none; }
 .delegation-full-result { flex-basis: 100%; }
 .delegation-full-result > p { margin: 0; }
 .delegation-full-result > pre {

@@ -6,6 +6,7 @@
   --usage-series-opencode: #8a8583;
   --usage-series-antigravity: #7667c9;
   --usage-series-grok: color-mix(in srgb, var(--text) 72%, var(--bg));
+  --usage-series-pi: #0f7f74;
   --limit-fill-codex: color-mix(in srgb, var(--text) 55%, var(--bg));
   --limit-fill-claude: color-mix(in srgb, var(--usage-series-claude) 85%, black);
   --limit-fill-cursor: color-mix(in srgb, var(--usage-series-cursor) 75%, white);
@@ -13,6 +14,7 @@
   --limit-fill-opencode: color-mix(in srgb, var(--usage-series-opencode) 88%, black);
   --limit-fill-antigravity: var(--usage-series-antigravity);
   --limit-fill-grok: color-mix(in srgb, var(--text) 55%, var(--bg));
+  --limit-fill-pi: var(--usage-series-pi);
 }
 
 :root[data-theme="dark"] {
@@ -21,6 +23,7 @@
   --usage-series-kimi: #7aa2ff;
   --usage-series-opencode: #9f9a98;
   --usage-series-antigravity: #a394e6;
+  --usage-series-pi: #5cc4b8;
   --limit-fill-codex: color-mix(in srgb, var(--usage-series-codex) 38%, transparent);
   --limit-fill-claude: color-mix(in srgb, var(--usage-series-claude) 38%, transparent);
   --limit-fill-cursor: color-mix(in srgb, var(--usage-series-cursor) 38%, transparent);
@@ -28,6 +31,7 @@
   --limit-fill-opencode: color-mix(in srgb, var(--usage-series-opencode) 38%, transparent);
   --limit-fill-antigravity: color-mix(in srgb, var(--usage-series-antigravity) 38%, transparent);
   --limit-fill-grok: color-mix(in srgb, var(--usage-series-grok) 38%, transparent);
+  --limit-fill-pi: color-mix(in srgb, var(--usage-series-pi) 38%, transparent);
 }
 
 .limit-bar {
@@ -55,6 +59,7 @@
 :is(.limit-bar, .limits-provider)[data-provider="opencode"] { --limit-color: var(--usage-series-opencode); --limit-fill: var(--limit-fill-opencode); }
 :is(.limit-bar, .limits-provider)[data-provider="antigravity"] { --limit-color: var(--usage-series-antigravity); --limit-fill: var(--limit-fill-antigravity); }
 :is(.limit-bar, .limits-provider)[data-provider="grok"] { --limit-color: var(--usage-series-grok); --limit-fill: var(--limit-fill-grok); }
+:is(.limit-bar, .limits-provider)[data-provider="pi"] { --limit-color: var(--usage-series-pi); --limit-fill: var(--limit-fill-pi); }
 .limit-bar[data-due] { --limit-color: var(--text-muted); --limit-fill: color-mix(in srgb, var(--text-muted) 38%, transparent); }
 
 .limit-bar-track,

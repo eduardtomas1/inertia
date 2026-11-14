@@ -36,6 +36,7 @@ import {
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { CONTEXT_COMPACTION_ACTIVITY_TITLES } from "../provider/context-compaction-activity";
 import { assertConversationProvider } from "./conversation-provider-policy";
+import { assertNativeControlIdle } from "../orchestration-v2/native-control-fence";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import { completeRestartContinuationPlan } from "./restart-continuation-repository";
 import {
@@ -262,6 +263,7 @@ export class TurnLedgerRepository {
    */
   begin(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
     return this.context.database.transaction(() => {
+      assertNativeControlIdle(this.context.database, input.conversationId);
       assertConversationProvider(this.context, input.conversationId, input.providerId);
       if (input.providerSessionInvalidation) {
         if ((input.providerSessionBefore ?? null) !== null) {
@@ -292,7 +294,7 @@ export class TurnLedgerRepository {
         input.attachments ?? [],
         null,
         input.requestedAt,
-        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, duoComparison: input.duoComparison, customAgentCall: input.customAgentCall },
+        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, delegatedCompletion: input.delegatedCompletion, duoComparison: input.duoComparison, customAgentCall: input.customAgentCall },
       );
       const turn = this.create({
         ...input,
@@ -1019,6 +1021,21 @@ export class TurnLedgerRepository {
     const current = this.get(turnId);
     if (isAgentTurnTerminalStatus(current.status)) return { settled: false, turn: current };
     try {
+      // Nothing reached the provider, so no history was restored: drop the
+      // restored-history record. A withheld count stays, with nothing restored,
+      // because it records an endpoint crossing (historyStayedOnEndpoint), not a
+      // delivery. The harness-changed guard is never reached today (such a turn
+      // starts a session, and neither not-delivered case does); it protects the
+      // route-handoff marker that record also is (latestProviderHandoffOnRoute).
+      if (update.providerDelivery === "not-delivered") {
+        this.context.database.prepare(`UPDATE agent_turns SET session_recovery_json = CASE
+            WHEN (CASE WHEN json_valid(session_recovery_json)
+              THEN json_extract(session_recovery_json, '$.withheldMessageCount') END) IS NOT NULL
+            THEN json_set(session_recovery_json, '$.restoredMessageCount', 0, '$.omittedMessageCount', 0)
+            ELSE NULL END
+          WHERE id = ? AND session_recovery_json IS NOT NULL
+            AND continuation_reason_code IS NOT 'harness-changed'`).run(turnId);
+      }
       return {
         settled: true,
         turn: this.updateLifecycle(turnId, update),

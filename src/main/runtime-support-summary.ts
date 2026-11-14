@@ -104,7 +104,9 @@ export function renderSupportSummary(
             ? "prior-runtime-cleanup-unconfirmed"
             : startupBlockerCode === "orchestration-projection-invalid"
               ? "orchestration-projection-rebuild-failed"
-              : "provider-maintenance-recovery-required"}`,
+              : startupBlockerCode === "orchestrator-v2-development-database"
+                ? "orchestrator-v2-development-database"
+                : "provider-maintenance-recovery-required"}`,
           `Cleanup proof: ${startupBlockerCode === "prior-runtime-cleanup-unconfirmed"
             ? "unconfirmed"
             : "unavailable"}`,

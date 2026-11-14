@@ -64,6 +64,10 @@ describe("runtime supervisor connection", () => {
       "orchestration-projection-invalid",
       "Runtime startup is blocked because the orchestration projection could not be rebuilt from saved chat history. Your saved data was not changed and the automatic database backups are kept. Review Runtime diagnostics in Settings → Help and copy the support summary.",
     ],
+    [
+      "orchestrator-v2-development-database",
+      "Runtime startup is blocked because this database was created by an earlier orchestrator-v2 development build, whose migration numbers changed. Move the data folder's inertia.sqlite and its backups aside, or start with a fresh data folder; Inertia left both unchanged.",
+    ],
   ] as const)(
     "classifies %s as a finite non-retryable blocker",
     (startupBlockerCode, message) => {

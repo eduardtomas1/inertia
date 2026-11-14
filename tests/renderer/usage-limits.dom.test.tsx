@@ -79,7 +79,7 @@ describe("Limits overview", () => {
     const bar = readSourceText("src/renderer/src/components/usage/LimitBar.css");
     const panel = readSourceText("src/renderer/src/components/UsageLimitsPanel.css");
     expect(bar).toMatch(/:is\(\.limit-bar, \.limits-provider\)\[data-provider="claude"\] \{ --limit-color: var\(--usage-series-claude\); --limit-fill: var\(--limit-fill-claude\); \}/u);
-    for (const provider of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"]) {
+    for (const provider of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok", "pi"]) {
       expect(bar.match(new RegExp(`--limit-fill-${provider}:`, "gu"))).toHaveLength(2);
     }
     expect(bar).toMatch(/\.limit-bar-fill \{[^}]*background: var\(--limit-fill\);/u);

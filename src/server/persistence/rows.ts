@@ -204,6 +204,7 @@ export interface TurnGitArtifactRow {
 export interface MessageRow {
   private_connect_device_id?: string | null;
   watcher_note_json?: string | null;
+  delegated_completion_json?: string | null;
   duo_comparison_json?: string | null;
   custom_agent_call_json?: string | null;
   compaction_json?: string | null;
@@ -376,6 +377,7 @@ export interface StateRow {
   compact_before_cache_expires?: number;
   claude_auto_compact_window?: number | null;
   codex_auto_compact_token_limit?: number | null;
+  delegation_automatic_wakes?: number;
   attachment_storage_gib?: number;
   auto_remove_old_attachments?: number;
   active_project_id: string | null;

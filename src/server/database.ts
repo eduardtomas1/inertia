@@ -73,6 +73,7 @@ import {
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
+import { assertNotPreMergeOrchestratorV2Database } from "./persistence/orchestrator-v2-development-database";
 import { openRuntimeConnection } from "./persistence/runtime-connection-pragmas";
 import { requireRow } from "./persistence/required-row";
 import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
@@ -171,6 +172,7 @@ export class RuntimeStore {
         options.recoveryExportMaxBytes ?? DATABASE_RECOVERY_EXPORT_MAX_BYTES,
       )),
     );
+    assertNotPreMergeOrchestratorV2Database(databasePath);
     this.recoveryReport = recoverDatabaseOnStartup(databasePath);
     this.database = new Database(databasePath);
     this.backupManager = new DatabaseBackupManager(

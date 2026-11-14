@@ -11,6 +11,7 @@ const CUSTOM_AGENT_DELIVERY_BY_PROVIDER: Readonly<Record<ProviderId, CustomAgent
   kimi: "in-role",
   antigravity: "in-role",
   grok: "in-role",
+  pi: "in-role",
 };
 
 export function customAgentDelivery(providerId: ProviderId): CustomAgentDelivery {

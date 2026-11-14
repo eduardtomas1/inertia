@@ -74,7 +74,7 @@ describe("composer checkout branch while Git status loads", () => {
     const current: Conversation = { ...conversation("unbranched-chat"), branch: null, worktreePath: null };
     const view = render(composerFor(current, null));
     const strip = await screen.findByRole("group", { name: "Chat checkout context" });
-    expect(strip).toHaveClass("is-branch-only");
+    expect(strip).toHaveAttribute("data-checkout-context", "branch");
     expect(strip).not.toHaveTextContent("Detached HEAD");
     expect(within(strip).queryByRole("button")).toBeNull();
 

@@ -8,6 +8,7 @@ export const MODEL_SOURCE_PROVIDER_ORDER = [
   "claude",
   "cursor",
   "antigravity",
+  "pi",
   "kimi",
   "opencode",
   "grok",
@@ -21,6 +22,7 @@ export const MODEL_SOURCE_PROVIDER_LABELS: Readonly<Record<ProviderId, string>> 
   opencode: "OpenCode",
   antigravity: "Antigravity",
   grok: "Grok",
+  pi: "Pi",
 };
 
 export type ModelSourceFilter =

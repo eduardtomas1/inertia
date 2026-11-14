@@ -13,6 +13,7 @@ export const harnessByProvider = {
   kimi: "kimi-acp",
   antigravity: "antigravity-cli",
   grok: "grok-acp",
+  pi: "pi-rpc",
 } as const;
 
 export function taskUsage(

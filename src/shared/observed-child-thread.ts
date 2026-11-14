@@ -25,6 +25,7 @@ const PROVIDER_OPTIONS = {
   kimi: true,
   opencode: true,
   antigravity: true,
+  grok: true,
   pi: true,
 } as const satisfies Record<ProviderId, true>;
 
@@ -160,6 +161,8 @@ export const observedChildThreadSchema = z.object({
   usage: observedChildUsageSchema.nullable(),
   toolUseCount: z.number().int().min(0).max(MAX_OBSERVED_CHILD_TOOL_USE_COUNT).nullable(),
   durationMs: z.number().int().min(0).max(MAX_OBSERVED_CHILD_DURATION_MS).nullable(),
+  /** The saved custom agent the user called, when this child carries that call. */
+  customAgentId: z.string().uuid().optional(),
   controls: observedChildControlSetSchema,
   createdAt: timestampSchema,
   updatedAt: timestampSchema,

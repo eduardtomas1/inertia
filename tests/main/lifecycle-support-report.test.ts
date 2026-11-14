@@ -195,6 +195,10 @@ describe("lifecycle support report boundary", () => {
       "orchestration-projection-invalid",
       "recovery-requires-manual-attention",
     ],
+    [
+      "orchestrator-v2-development-database",
+      "recovery-requires-manual-attention",
+    ],
   ] as const)(
     "prefers the main-owned %s blocker over a stale renderer snapshot",
     async (startupBlockerCode, expectedState) => {
@@ -221,7 +225,9 @@ describe("lifecycle support report boundary", () => {
         ? "prior-runtime-cleanup-unconfirmed"
         : startupBlockerCode === "orchestration-projection-invalid"
           ? "orchestration-projection-rebuild-failed"
-          : "provider-maintenance-recovery-required"}`);
+          : startupBlockerCode === "orchestrator-v2-development-database"
+            ? "orchestrator-v2-development-database"
+            : "provider-maintenance-recovery-required"}`);
       expect(report).not.toContain("Lifecycle state: safe-and-ready");
     },
   );

@@ -559,5 +559,89 @@
     },
     "attribution": "Growth over fc010d52 is main's: the update strip, quota polling, reader scroll, compact-on-return composer and detached chat terminal fixes of #688 and the disclosure follow-latest guard of #692. The merged growth (1,030 / 679 / 90 / 1,708 bytes) matches main's recorded increments (1,017 / 679 / 90 / 1,695) to within 13 bytes on each budget. The sidebar update control chunk measures exactly main's cap. Contributions were not isolated individually and are not additive.",
     "headroomDecision": "Branch cap plus main's measured increments on the four conflicting budgets; no other limit changed and no closure accounting changed."
+  },
+  "mainSync92e23166": {
+    "date": "2026-11-14",
+    "checkpoint": "Merge of origin/main 92e23166 (#706 Grok and the provider menu through #733) into 652ba6c1",
+    "platform": "macOS arm64, Node 22.23.2 (the branch's earlier Windows x64 measurements reproduce byte for byte here)",
+    "measurement": "electron-vite renderer output of the merged tree after the review fixes, and of 852fd18b (the previous sync base), 652ba6c1 (the branch) and 92e23166 (main), each built on the same machine with its own dependency tree; npm run build:bundle passes on the merged tree after the re-cap. Route closures and core inclusions or exclusions are unchanged.",
+    "capResolution": "Each of the five raised caps is the merged measurement plus the branch's 512-byte cross-platform headroom, as in the earlier main syncs; settingsJavaScript, which only main capped, also carries Pi's Add provider entry and the branch's settings rows. previousLimit is the cap the merged tree would otherwise inherit: the branch's for the two first-load routes and core, main's for settingsJavaScript and transcriptJavaScript (main's 652,032 is the larger of the two; the branch's was 649,783). filesFirstLoadJavaScript, detachedChatJavaScript and deferredMarkdownJavaScript keep the branch's caps, which still cover their measurement. deferredThreadActionsJavaScript moves from the branch's 9,551 to 9,577: the branch's increments plus main's +26 (its 256-byte headroom term became 282).",
+    "raised": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 948193,
+        "previousLimit": 932264,
+        "limit": 948705,
+        "headroom": 512
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 830455,
+        "previousLimit": 812440,
+        "limit": 830967,
+        "headroom": 512
+      },
+      "settingsJavaScript": {
+        "bytes": 106789,
+        "previousLimit": 105871,
+        "limit": 107301,
+        "headroom": 512
+      },
+      "transcriptJavaScript": {
+        "bytes": 697252,
+        "previousLimit": 652032,
+        "branchLimit": 649783,
+        "limit": 697764,
+        "headroom": 512
+      },
+      "coreJavaScript": {
+        "bytes": 2746069,
+        "previousLimit": 2618655,
+        "limit": 2746581,
+        "headroom": 512
+      },
+      "deferredThreadActionsJavaScript": {
+        "bytes": 9321,
+        "previousLimit": 9551,
+        "limit": 9577,
+        "headroom": 256
+      }
+    },
+    "growthAccounting": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "base": 973679,
+        "branchGrowth": -41927,
+        "mainGrowth": 16746,
+        "merged": 948193,
+        "mergeInteraction": -305
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "base": 854072,
+        "branchGrowth": -42144,
+        "mainGrowth": 18827,
+        "merged": 830455,
+        "mergeInteraction": -300
+      },
+      "settingsJavaScript": {
+        "base": 78665,
+        "branchGrowth": 548,
+        "mainGrowth": 27206,
+        "merged": 106789,
+        "mergeInteraction": 370
+      },
+      "transcriptJavaScript": {
+        "base": 603030,
+        "branchGrowth": 44516,
+        "mainGrowth": 48746,
+        "merged": 697252,
+        "mergeInteraction": 960
+      },
+      "coreJavaScript": {
+        "base": 2545921,
+        "branchGrowth": 72222,
+        "mainGrowth": 127219,
+        "merged": 2746069,
+        "mergeInteraction": 707
+      }
+    },
+    "transcriptNote": "Measured, the merged transcript is only 960 bytes above base plus both sides' growth (ResponseTimeline +279 where main's fold and subagent group and the branch's fork and delegation code meet, the delegation chunk +177 from Grok and Pi provider maps, the rest in small shared chunks). Compared through caps it looks about 10 KB larger because the base's 600 KiB cap sat 11,370 bytes above its 603,030-byte measurement, and both sides' caps were raised from that cap rather than from the measurement."
   }
 }

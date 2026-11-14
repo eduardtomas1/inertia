@@ -458,6 +458,17 @@ describe("observed native child threads", () => {
     )).toMatchObject({ supported: false, code: "not-active-turn" });
   });
 
+  it("keeps a called custom agent's attribution on its observed child", () => {
+    const agentId = "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1";
+    const derived = deriveObservedChildren([
+      syntheticTrace({ id: "called-agent", customAgentId: agentId }),
+      syntheticTrace({ id: "plain-agent" }),
+    ], ACTIVE_ONE);
+    expect(derived.children.map(({ id, customAgentId }) => [id, customAgentId ?? null]))
+      .toEqual([["called-agent", agentId], ["plain-agent", null]]);
+    expect(observedChildThreadSchema.safeParse({ ...derived.children[0], customAgentId: "not-a-uuid" }).success).toBe(false);
+  });
+
   it("bounds nesting depth and survives parent cycles", () => {
     const chain = Array.from({ length: 12 }, (_, index) => syntheticTrace({
       id: `chain-${index}`,

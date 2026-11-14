@@ -290,6 +290,13 @@ describe("background task rows", () => {
     expect(subagentProviderLabel(trace)).toBe("Antigravity");
     expect(subagentHarnessLabel(trace, [taskTurn({ providerId: "antigravity" })])).toBe("CLI");
   });
+
+  it("names the Pi RPC and Cursor SDK harnesses", () => {
+    const pi = taskTrace({ providerId: "pi", providerName: null, providerRole: null });
+    expect(subagentHarnessLabel(pi, [taskTurn({ providerId: "pi" })])).toBe("RPC");
+    const cursor = taskTrace({ providerId: "cursor", providerName: null, providerRole: null });
+    expect(subagentHarnessLabel(cursor, [taskTurn({ providerId: "cursor", harnessId: "cursor-sdk" })])).toBe("SDK");
+  });
 });
 
 describe("background commands", () => {

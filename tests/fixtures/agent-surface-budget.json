@@ -98,6 +98,12 @@
       "cursorKimi": 519,
       "opencode": 518
     },
+    "inertia_fork_history": {
+      "claude": 586,
+      "codex": 482,
+      "cursorKimi": 586,
+      "opencode": 586
+    },
     "inertia_list_conversations": {
       "claude": 477,
       "codex": 373,
@@ -117,10 +123,10 @@
       "opencode": 933
     },
     "inertia_create_conversation": {
-      "claude": 1409,
-      "codex": 1303,
-      "cursorKimi": 1409,
-      "opencode": 1409
+      "claude": 1414,
+      "codex": 1308,
+      "cursorKimi": 1414,
+      "opencode": 1414
     },
     "inertia_send_message": {
       "claude": 546,
@@ -157,6 +163,30 @@
       "codex": 378,
       "cursorKimi": 484,
       "opencode": 484
+    },
+    "inertia_delegate_task": {
+      "claude": 1800,
+      "codex": 1694,
+      "cursorKimi": 1800,
+      "opencode": 1800
+    },
+    "inertia_get_task_status": {
+      "claude": 421,
+      "codex": 317,
+      "cursorKimi": 421,
+      "opencode": 421
+    },
+    "inertia_wait_for_task": {
+      "claude": 508,
+      "codex": 404,
+      "cursorKimi": 508,
+      "opencode": 508
+    },
+    "inertia_cancel_task": {
+      "claude": 599,
+      "codex": 494,
+      "cursorKimi": 600,
+      "opencode": 599
     },
     "inertia_request_secret": {
       "claude": 1178,
@@ -216,20 +246,20 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 24589,
-      "withoutBrowser": 13168
+      "withBrowser": 28508,
+      "withoutBrowser": 17087
     },
     "codex": {
-      "withBrowser": 21028,
-      "withoutBrowser": 11284
+      "withBrowser": 24424,
+      "withoutBrowser": 14680
     },
     "cursorKimi": {
-      "withBrowser": 24598,
-      "withoutBrowser": 13168
+      "withBrowser": 28518,
+      "withoutBrowser": 17088
     },
     "opencode": {
-      "withBrowser": 24589,
-      "withoutBrowser": 13168
+      "withBrowser": 28508,
+      "withoutBrowser": 17087
     }
   }
 }

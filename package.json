@@ -299,6 +299,7 @@
   },
   "devDependencies": {
     "@babel/parser": "7.29.13",
+    "@cursor/sdk": "1.0.38",
     "@playwright/test": "^1.65.0",
     "@tailwindcss/vite": "^4.3.4",
     "@testing-library/dom": "10.4.2",

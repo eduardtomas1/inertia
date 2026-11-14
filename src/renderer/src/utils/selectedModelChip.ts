@@ -9,6 +9,7 @@ export type SelectedModelChipGlyph =
   | "opencode"
   | "antigravity"
   | "grok"
+  | "pi"
   | "custom"
   | "unknown";
 

@@ -54,6 +54,7 @@ export const OBSERVED_CHILD_STOP_MATRIX: Readonly<Record<ProviderId, ObservedChi
   cursor: "unsupported",
   kimi: "unsupported",
   antigravity: "unsupported",
+  grok: "unsupported",
   pi: "unsupported",
 });
 
@@ -64,6 +65,7 @@ const STOP_UNSUPPORTED_REASONS: Readonly<Record<ProviderId, string>> = Object.fr
   cursor: "This provider does not offer individual agent stop.",
   kimi: "This provider does not offer individual agent stop.",
   antigravity: "This provider does not offer individual agent stop.",
+  grok: "This provider does not offer individual agent stop.",
   pi: "This provider does not offer individual agent stop.",
 });
 
@@ -267,6 +269,7 @@ export function observedChildFromTrace(
     usage: validateSubagentTaskUsage(trace.usage),
     toolUseCount: boundedSubagentCount(trace.toolUseCount, MAX_OBSERVED_CHILD_TOOL_USE_COUNT),
     durationMs: boundedSubagentCount(trace.durationMs, MAX_OBSERVED_CHILD_DURATION_MS),
+    ...(trace.customAgentId ? { customAgentId: trace.customAgentId } : {}),
     controls: observedChildControls(trace, active),
     createdAt: trace.createdAt,
     updatedAt: trace.updatedAt,

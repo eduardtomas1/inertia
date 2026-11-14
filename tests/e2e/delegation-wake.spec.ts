@@ -390,11 +390,19 @@ test("shows the automatic wake setting in Settings", async ({ browserName: _brow
   await expect(page.getByRole("heading", { name: TITLE, level: 1 })).toBeVisible();
 });
 
-test("opens the observed child panel from a turn's agents line", async ({ browserName: _browserName }, info) => {
+test("opens the observed child panel from a turn's subagent group", async ({ browserName: _browserName }, info) => {
   const { page } = app;
   await sendPrompt(NATIVE_PROMPT);
-  await expect(page.getByText("The helper found three parsers.", { exact: true })).toBeVisible();
-  const details = page.getByRole("button", { name: "Agent details" }).last();
+  const answer = page.getByText("The helper found three parsers.", { exact: true });
+  await expect(answer).toBeVisible();
+  // A settled turn folds its work, subagent group and Agent details behind "Worked for".
+  const turn = page.locator("[data-turn-id]").filter({ has: answer }).last();
+  const fold = turn.locator(".turn-fold-toggle");
+  if (await fold.count() > 0 && await fold.getAttribute("aria-expanded") === "false") {
+    await fold.click();
+    await expect(fold).toHaveAttribute("aria-expanded", "true");
+  }
+  const details = turn.getByRole("button", { name: "Agent details" });
   await details.click();
   const observed = page.getByRole("region", { name: "Provider-managed agents" }).last();
   await expect(observed).toContainText("Provider-managed · read-only");

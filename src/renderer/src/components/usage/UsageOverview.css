@@ -19,6 +19,7 @@
 .usage-overview [data-provider="opencode"] { --usage-provider-series: var(--usage-series-opencode); }
 .usage-overview [data-provider="antigravity"] { --usage-provider-series: var(--usage-series-antigravity); }
 .usage-overview [data-provider="grok"] { --usage-provider-series: var(--usage-series-grok); }
+.usage-overview [data-provider="pi"] { --usage-provider-series: var(--usage-series-pi); }
 
 .usage-overview h2 {
   margin: 0;

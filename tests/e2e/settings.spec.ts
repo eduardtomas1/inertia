@@ -168,7 +168,7 @@ test("manages accounts and API keys across the responsive theme and scale matrix
     });
     expect(containment.right).toBeLessThanOrEqual(containment.viewportRight + 1);
     expect(containment.cardsRight).toBeLessThanOrEqual(containment.right + 1);
-    expect(containment.cardCount).toBe(7);
+    expect(containment.cardCount).toBe(8);
     expect(containment.workspaceHeader).not.toBeNull();
     expect(containment.workspaceHeader?.top).toBeGreaterThanOrEqual(0);
     expect(containment.workspaceHeader?.bottom).toBeGreaterThan(20);

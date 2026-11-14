@@ -333,6 +333,10 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.invoke(COMPLETION_SOUND_IPC, "read", file) as ReturnType<DesktopBridge["readCompletionSound"]>,
   removeCompletionSound: (file: string) =>
     ipcRenderer.invoke(COMPLETION_SOUND_IPC, "remove", file) as Promise<void>,
+  exportCustomAgents: (payload: Parameters<DesktopBridge["exportCustomAgents"]>[0]) =>
+    ipcRenderer.invoke(IPC.customAgentFile, "export", payload) as ReturnType<DesktopBridge["exportCustomAgents"]>,
+  importCustomAgents: () =>
+    ipcRenderer.invoke(IPC.customAgentFile, "import") as ReturnType<DesktopBridge["importCustomAgents"]>,
   getAppHealth: () =>
     ipcRenderer.invoke(IPC.getAppHealth) as ReturnType<DesktopBridge["getAppHealth"]>,
   clearAppCache: () =>
@@ -372,6 +376,8 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.invoke(IPC.clearBackendCredential, request) as ReturnType<DesktopBridge["clearBackendCredential"]>,
   getBackendCredentialState: (request: Parameters<DesktopBridge["getBackendCredentialState"]>[0]) =>
     ipcRenderer.invoke(IPC.getBackendCredentialState, request) as ReturnType<DesktopBridge["getBackendCredentialState"]>,
+  saveAgentSecret: (request: Parameters<DesktopBridge["saveAgentSecret"]>[0]) =>
+    ipcRenderer.invoke(IPC.saveAgentSecret, request) as ReturnType<DesktopBridge["saveAgentSecret"]>,
   getPrivateConnectState: () =>
     ipcRenderer.invoke(PRIVATE_CONNECT_IPC.getState) as ReturnType<DesktopBridge["getPrivateConnectState"]>,
   onPrivateConnectState: (listener: Parameters<DesktopBridge["onPrivateConnectState"]>[0]) => {

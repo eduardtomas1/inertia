@@ -43,11 +43,18 @@ import {
   routeRepairLabel,
 } from "./config";
 import type { ComposerCommandMenuItem } from "./ComposerCommandMenu";
+import type { ComposerAgentCall } from "./useComposerAgentCall";
 
 type RouteReadiness = ReturnType<typeof composerRouteReadiness>;
 
 const ComposerCommandMenu = lazy(async () => ({
   default: (await import("./ComposerCommandMenu")).ComposerCommandMenu,
+}));
+const ComposerAgentCallMenu = lazy(async () => ({
+  default: (await import("./ComposerAgentCallMenu")).ComposerAgentCallMenu,
+}));
+const ComposerCalledAgentChip = lazy(async () => ({
+  default: (await import("./ComposerCalledAgentChip")).ComposerCalledAgentChip,
 }));
 
 interface ComposerSlashCommand extends ComposerCommandMenuItem {
@@ -80,11 +87,9 @@ export interface ComposerInputZoneProps {
   onImportAttachments: (files: File[]) => Promise<boolean>;
   onSubmit: () => Promise<void>;
   canQueue: boolean;
-  queueBlocked: boolean;
   onQueue: () => void;
   running: boolean;
-  stopsBeforeSending: boolean;
-  hasHistory: boolean;
+  placeholder: string;
   submissionPending: boolean;
   followUpPending: boolean;
   typedMessageLimit: number;
@@ -105,6 +110,7 @@ export interface ComposerInputZoneProps {
   acceptSkill: (skill: AgentSkillSummary) => void;
   dismissSkills: () => void;
   slashMatch: RegExpExecArray | null;
+  agentCall?: ComposerAgentCall;
   onCompactCommand: () => void;
   compactUnavailableReason: string | null;
   /** Announces that the next turn hands this chat's history to another provider. */
@@ -144,11 +150,9 @@ export function ComposerInputZone({
   onImportAttachments,
   onSubmit,
   canQueue,
-  queueBlocked,
   onQueue,
   running,
-  stopsBeforeSending,
-  hasHistory,
+  placeholder,
   submissionPending,
   followUpPending,
   typedMessageLimit,
@@ -169,6 +173,7 @@ export function ComposerInputZone({
   acceptSkill,
   dismissSkills,
   slashMatch,
+  agentCall,
   onCompactCommand,
   compactUnavailableReason,
   compactNotice,
@@ -193,6 +198,7 @@ export function ComposerInputZone({
     { id: "goal", description: "View or set this chat's goal", section: "built-in", action: onOpenGoal, disabled: disabled || !goalAvailable },
     { id: "plan", description: "Switch this chat into plan mode", section: "built-in", mode: "plan", disabled: modeChangesDisabled },
     { id: "build", description: "Switch this chat back to build mode", section: "built-in", mode: "build", disabled: modeChangesDisabled },
+    ...(agentCall ? [{ id: "calling", description: "Call a custom agent", section: "built-in" as const, action: agentCall.openPicker, disabled }] : []),
     { id: "resume", description: "Resume a provider chat from this folder", section: "provider", action: onOpenResume, disabled },
     {
       id: "compact",
@@ -219,8 +225,10 @@ export function ComposerInputZone({
     ?? selectableSlashCommands[0]
     ?? null;
   const slashMenuVisible = Boolean(
-    slashMatch && dismissedSuggestionValue !== message,
+    slashMatch && dismissedSuggestionValue !== message && agentCall?.query == null,
   );
+  const slashListboxId = `${skillListboxId}-commands`;
+  const agentMenuVisible = agentCall?.menuVisible ?? false;
   const mentionListboxId = `${skillListboxId}-files`;
   const mentionQuery = (mentionMatch?.[1] ?? "").toLowerCase();
   const chatMentionResults = mentionMatch ? chatSuggestions
@@ -260,7 +268,7 @@ export function ComposerInputZone({
   const contextKind = reviewNoteContext ? "review note" : "diff";
   const previewDismissLabel = previewContextSelected
     ? "Remove attached preview" : "Dismiss preview suggestion";
-  const suggestionMenuVisible = skillOpen || mentionMenuVisible;
+  const suggestionMenuVisible = skillOpen || mentionMenuVisible || slashMenuVisible || agentMenuVisible;
   const compactWorking = compactNotice?.kind === "working";
   const compactError = compactNotice?.kind === "error";
   const compactNoticeRef = usePhaseLockedAnimations<HTMLDivElement>(compactWorking);
@@ -446,6 +454,11 @@ export function ComposerInputZone({
             </button>
           </div>
         )}
+        {(agentCall?.calledAgent || agentCall?.calledAgentDeleted) && (
+          <Suspense fallback={null}>
+            <ComposerCalledAgentChip agent={agentCall.calledAgent} delivery={agentCall.delivery} onRemove={agentCall.remove} />
+          </Suspense>
+        )}
         {previewContextUrl && (
           <div
             className={clsx(
@@ -518,6 +531,7 @@ export function ComposerInputZone({
           value={message}
           onFocus={() => {
             void import("./ComposerCommandMenu");
+            if (agentCall) void import("./ComposerAgentCallMenu");
           }}
           onSelect={(event) => onSkillSelectionChange?.(event.currentTarget)}
           onChange={(event) => {
@@ -577,6 +591,7 @@ export function ComposerInputZone({
               moveMentionHighlight,
               () => acceptMention(activeMention),
             )) return;
+            if (agentCall?.handleKey(event)) return;
             if (slashMenuVisible && slashMatch && handleComposerSuggestionKey(
               event,
               dismissSuggestions,
@@ -640,18 +655,21 @@ export function ComposerInputZone({
           aria-expanded={suggestionMenuVisible || undefined}
           aria-controls={skillOpen
             ? skillListboxId
-            : mentionMenuVisible ? mentionListboxId : undefined}
+            : mentionMenuVisible ? mentionListboxId
+            : agentMenuVisible ? agentCall?.listboxId
+            : slashMenuVisible ? slashListboxId : undefined}
           aria-activedescendant={skillOpen && activeSkill
             ? `${skillListboxId}-${activeSkill.id}`
             : mentionMenuVisible && activeMention
               ? `${mentionListboxId}-${mentionOptions.indexOf(activeMention)}`
-              : undefined}
+              : agentMenuVisible ? agentCall?.activeOptionId
+              : slashMenuVisible && activeSlashCommand
+                ? `${slashListboxId}-${activeSlashCommand.id}`
+                : undefined}
           aria-label="Message"
-          placeholder={stopsBeforeSending && !queueBlocked
-            ? "Enter stops and sends · Tab queues"
-            : running && !queueBlocked
-            ? "Enter sends · Tab queues"
-            : hasHistory ? "Follow up" : "Message"}
+          placeholder={agentCall?.calledAgent
+            ? `What should ${agentCall.calledAgent.name} do?`
+            : placeholder}
         />
         {!messageFits && (
           <p className="composer-limit-warning" role="alert">
@@ -687,6 +705,7 @@ export function ComposerInputZone({
         <div className="composer-command-layer">
           <Suspense fallback={null}>
             <ComposerCommandMenu
+              listboxId={slashListboxId}
               items={matchingSlashCommands}
               activeItemId={activeSlashCommand?.id ?? null}
               grouped={slashMatch[1] === ""}
@@ -696,6 +715,23 @@ export function ComposerInputZone({
                   candidate.id === id);
                 if (item) activateSlashCommand(item);
               }}
+            />
+          </Suspense>
+        </div>
+      )}
+      {agentMenuVisible && agentCall && (
+        <div className="composer-command-layer">
+          <Suspense fallback={null}>
+            <ComposerAgentCallMenu
+              listboxId={agentCall.listboxId}
+              agents={agentCall.agents}
+              query={agentCall.query ?? ""}
+              hasAgents={agentCall.hasAgents}
+              activeAgentId={agentCall.activeAgentId}
+              canOpenSettings={agentCall.canOpenSettings}
+              onActiveAgentChange={agentCall.setActiveAgentId}
+              onPick={agentCall.pick}
+              onOpenSettings={agentCall.openSettings}
             />
           </Suspense>
         </div>

@@ -1,0 +1,88 @@
+name: Install Linux packages
+description: Install pinned apt packages from a per-image cache, downloading them only when the runner image changes.
+
+inputs:
+  packages:
+    description: Space-separated apt packages, optionally pinned with =version.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the package cache key
+      id: key
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -euo pipefail
+        digest="$(printf '%s' "$PACKAGES" | tr -s ' ' '\n' | sort | sha256sum | cut -c1-16)"
+        printf 'key=linux-packages-v2-%s-%s-%s-%s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}" "$RUNNER_ARCH" "$digest" >> "$GITHUB_OUTPUT"
+        printf 'dir=%s\n' "$RUNNER_TEMP/linux-packages" >> "$GITHUB_OUTPUT"
+
+    - name: Restore cached packages
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Download packages
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        PACKAGE_DIR: ${{ steps.key.outputs.dir }}
+      run: |
+        set -euo pipefail
+        codename="$(. /etc/os-release && printf '%s' "$VERSION_CODENAME")"
+        case "$(dpkg --print-architecture)" in
+          amd64|i386) mirrors=(http://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ http://mirrors.edge.kernel.org/ubuntu/ http://mirrors.ocf.berkeley.edu/ubuntu/) ;;
+          *) mirrors=(http://azure.ports.ubuntu.com/ubuntu-ports/ http://ports.ubuntu.com/ubuntu-ports/ http://mirrors.ocf.berkeley.edu/ubuntu-ports/) ;;
+        esac
+        reachable=()
+        for mirror in "${mirrors[@]}"; do
+          if curl --fail --silent --show-error --head --max-time 10 --output /dev/null "${mirror}dists/${codename}/InRelease"; then
+            reachable+=("$mirror")
+          else
+            echo "Skipping unreachable mirror $mirror" >&2
+          fi
+        done
+        [ "${#reachable[@]}" -gt 0 ] || { echo "No Ubuntu mirror is reachable." >&2; exit 1; }
+        mkdir -p "$PACKAGE_DIR/apt" "$PACKAGE_DIR/lists" "$PACKAGE_DIR/archives"
+        printf '%s\n' "${reachable[@]}" > "$PACKAGE_DIR/apt/inertia-mirrors.txt"
+        printf 'Types: deb\nURIs: mirror+file:/etc/apt/inertia-mirrors.txt\nSuites: %s %s-updates %s-security\nComponents: main universe\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n' "$codename" "$codename" "$codename" > "$PACKAGE_DIR/apt/ubuntu.sources"
+        sudo cp "$PACKAGE_DIR/apt/inertia-mirrors.txt" /etc/apt/inertia-mirrors.txt
+        sudo cp "$PACKAGE_DIR/apt/ubuntu.sources" /etc/apt/sources.list.d/ubuntu.sources
+        if [ -f /etc/apt/sources.list ]; then sudo sed -i -E '/^deb .*ubuntu(-ports)?\/? /s/^/# /' /etc/apt/sources.list; fi
+        sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Languages=none update
+        sudo apt-get clean
+        read -r -a packages <<< "$PACKAGES"
+        sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=300 install --download-only --no-install-recommends --yes "${packages[@]}"
+        sudo find /var/lib/apt/lists -maxdepth 1 -type f ! -name lock -exec cp {} "$PACKAGE_DIR/lists/" \;
+        sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec cp {} "$PACKAGE_DIR/archives/" \;
+        sudo chown -R "$(id -u):$(id -g)" "$PACKAGE_DIR"
+        touch "$PACKAGE_DIR/.complete"
+
+    - name: Save downloaded packages
+      if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Install packages
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        PACKAGE_DIR: ${{ steps.key.outputs.dir }}
+      run: |
+        set -euo pipefail
+        [ -f "$PACKAGE_DIR/.complete" ] || { echo "The package cache is incomplete." >&2; exit 1; }
+        sudo cp "$PACKAGE_DIR/apt/inertia-mirrors.txt" /etc/apt/inertia-mirrors.txt
+        sudo cp "$PACKAGE_DIR/apt/ubuntu.sources" /etc/apt/sources.list.d/ubuntu.sources
+        if [ -f /etc/apt/sources.list ]; then sudo sed -i -E '/^deb .*ubuntu(-ports)?\/? /s/^/# /' /etc/apt/sources.list; fi
+        sudo find "$PACKAGE_DIR/lists" -maxdepth 1 -type f -exec cp {} /var/lib/apt/lists/ \;
+        sudo find "$PACKAGE_DIR/archives" -maxdepth 1 -name '*.deb' -exec cp {} /var/cache/apt/archives/ \;
+        read -r -a packages <<< "$PACKAGES"
+        sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install --no-download --no-install-recommends --yes "${packages[@]}"

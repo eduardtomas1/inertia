@@ -268,6 +268,7 @@ function startClaudeRun(
       ? { fastMode: requestedFastMode === "fast", fastModePerSessionOptIn: true }
       : {}),
     ...(promptCacheTtl ? { promptCacheTtl } : {}),
+    ...(options.input.autoCompactWindow ? { autoCompactWindow: options.input.autoCompactWindow } : {}),
   };
   let sessionUnavailable = false;
   const ownedProcess = createClaudeOwnedQueryProcess(
@@ -373,6 +374,7 @@ function startClaudeRun(
       }
       const identity = await prepareClaudeTurnIdentity({
         skills: options.input.skills ?? [],
+        ...(options.input.customAgent ? { customAgent: options.input.customAgent } : {}),
         cwd: options.input.cwd,
         environment: options.environment,
         timeoutMs: CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS,

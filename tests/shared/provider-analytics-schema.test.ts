@@ -59,6 +59,7 @@ describe("Antigravity analytics schemas", () => {
         activeDays: 0,
         runtime: measured,
         processedTokens: measured,
+        cost: measured,
       },
       daily: [
         "2029-12-26",
@@ -77,6 +78,7 @@ describe("Antigravity analytics schemas", () => {
         interruptedCount: 0,
         runtime: measured,
         processedTokens: measured,
+        cost: measured,
         providers: [],
       })),
       providers: [{
@@ -86,6 +88,7 @@ describe("Antigravity analytics schemas", () => {
         requestCount: 0,
         runtime: measured,
         processedTokens: measured,
+        cost: measured,
       }],
       models: [],
       tokens: {
@@ -97,7 +100,10 @@ describe("Antigravity analytics schemas", () => {
       },
       cost: {
         status: "unavailable",
-        reason: "No pricing provenance.",
+        reason: null,
+        pricing: { status: "unavailable", source: "https://prices.example.test/list.json", fetchedAt: null, modelCount: 0 },
+        byType: { input: 0, cachedInput: 0, cacheWriteInput: 0, output: 0 },
+        cacheSavings: 0,
       },
     })).toBe(true);
   });

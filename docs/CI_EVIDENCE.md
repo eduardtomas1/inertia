@@ -24,7 +24,7 @@ It does not select only tests whose filenames changed.
 | --- | --- | --- |
 | Draft feedback | Shared quality/lineage, full canonical Linux coverage for code, selected native interaction/provider sentinels; clean minimum Node when its contract changes | `merge-ready` deliberately fails: draft feedback is not merge approval. |
 | Merge validation | Quality/lineage once; canonical Linux coverage for code; contract-selected interaction, provider/native and package evidence | Ready-for-review and every subsequent head run the required plan. |
-| Main validation | Quality/lineage only when the squash commit's tree equals the head of its merged PR, whose CI run has a successful `merge-ready`, and the previous main commit is an ancestor of that head; performance changes still run the complete plan | Any missing PR, run, tree match, ancestry or API answer requires the complete plan. |
+| Main validation | Quality/lineage only when the squash commit's tree equals the head of its merged PR, whose CI run has a successful `merge-ready`, and the previous main commit is an ancestor of that head; a change to `benchmarks/` or `tests/performance/` still runs the complete plan so its measurement lands on main | Any missing PR, run, tree match, ancestry or API answer requires the complete plan. |
 | Nightly certification | All six native targets with every Electron project, full units/portable contracts, packages and the Linux x64 desktop benchmark | Each native matrix (package and Electron) is limited to two simultaneous target jobs; every failed attempt still fails certification. |
 | Release certification | Shared quality once on frozen release SHA; every shipped native target, exact packages/signatures/fuses/upgrades/checksums/provenance | Separate non-cancellable tag owner; no PR artifact reuse or trust-policy change. |
 
@@ -37,9 +37,12 @@ portable contracts, and Windows retains native Codex shim/discovery proof.
 OS-specific package paths select both architectures of that OS plus canonical
 coverage. Shared lifecycle, startup, containment, migrations, shared contracts,
 test infrastructure and native Electron verifier changes under `tests/e2e/`
-require the primary targets (Linux x64, Windows x64, macOS arm64). Dependency
+require the primary targets (Linux x64, Windows x64, macOS arm64), and so do
+unmodeled files under `src/` and `tests/`: they still fail open to every domain,
+but TypeScript is compiled identically for every architecture, and the
+architecture-specific sources are enumerated separately. Dependency
 graphs, workflows, CI scripts, native and packaging sources, updater and guardian
-code, and unknown changes require all six targets; outside the nightly, the
+code, and other unknown changes require all six targets; outside the nightly, the
 sibling architectures (Linux ARM64, Windows ARM64, macOS x64) run only the
 runtime-recovery Electron project. Nightly and release run every project on all
 six. This rule precedes
@@ -342,6 +345,40 @@ The five relaunches add 30 to 60 s to the macOS arm64 benchmark step (181 to
 about 50 s on Linux x64, 35 s on Windows x64 and 90 s on macOS x64. The
 release build job also spends 26 to 42 s on the extra bundle build on macOS
 arm64, and 38 to 78 s on the other platforms.
+
+### Input-task proof instead of the median (2026-11-11)
+
+The median still failed a release. The v0.0.83 macOS arm64 build measured
+40.7, 100.8, 124.1, 106.1 and 62.5 ms, a median of 100.8 ms (run
+[42974272495](https://github.com/eduardtomas1/inertia/actions/runs/42974272495)).
+The same commit measured 60.5, 51.0, 51.2, 51.9 and 53.8 ms on the same runner
+type the day before (run
+[42820715797](https://github.com/eduardtomas1/inertia/actions/runs/42820715797)).
+Linux and Windows measured 40 to 57 ms in both runs. Startup, split and
+terminal timings in the failing report were no slower than the day before, so
+only the hosted macOS arm64 render time moved.
+
+The time was also a weak detector of what the gate is for. With Settings taken
+out of the idle prefetch list on Linux x64, its five opens took 67, 154, 72,
+101 and 57 ms: a median of 72 ms, which the old gate accepts.
+
+The benchmark now records, for every open, whether the surface appeared before
+the task that delivered the click or shortcut ended. A loaded surface renders
+inside that task. A surface that is not loaded has to wait for its chunk and a
+scheduled render, which run in later tasks. The gate is:
+
+- all five relaunches open Settings and the command palette in the input task;
+- the cold New duo dialog, measured the same way, opens in a later task, which
+  proves in every run that the detector can tell the two apart;
+- the fastest of the five relaunches is under the target, which bounds the
+  render cost without the host's jitter.
+
+Local proof on Linux x64 under Xvfb, 1-minute load 10 to 16:
+
+| Build | Settings, five relaunches (ms) | In the input task | Cold dialog in the input task | Result |
+| --- | --- | --- | --- | --- |
+| `main` | 55.0, 77.4, 45.1, 51.5, 90.7 | 5 of 5 | no | pass |
+| Settings not prefetched | 67, 154, 72, 101, 57 | 0 of 5 | no | fail |
 
 ## Measured baseline
 

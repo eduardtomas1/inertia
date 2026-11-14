@@ -219,6 +219,11 @@ test("adds, orders, schedules and finishes tasks from the sidebar", async ({ bro
   await detail.getByRole("button", { name: "Due date", exact: true }).click();
   const picker = page.getByRole("dialog", { name: "Due" });
   await expect(picker).toBeVisible();
+  const box = (await picker.boundingBox())!;
+  const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  expectWithinPixel(box.x + box.width / 2, viewport.width / 2);
+  expect(box.y).toBeGreaterThan(0);
+  expect(box.y + box.height).toBeLessThan(viewport.height);
   await expect(page.getByRole("menu", { name: "Due date" })).toHaveCount(0);
   await picker.getByRole("button", { name: "Tomorrow, Tue 13 Oct", exact: true }).click();
   await expect(picker).toBeHidden();
@@ -447,54 +452,3 @@ test("Try again hands a failed task to a second chat", async ({ browserName: _br
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("the due picker sets a day and a time", async ({ browserName: _browserName }, info) => {
-  const page = app.page;
-  const title = "Book the dentist";
-  const { view, detail, row } = await openTasksWithNewTask(title);
-  const chip = detail.getByRole("button", { name: "Due date", exact: true });
-  await chip.click();
-  const picker = page.getByRole("dialog", { name: "Due" });
-  await expect(picker).toBeVisible();
-  const box = (await picker.boundingBox())!;
-  const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-  expectWithinPixel(box.x + box.width / 2, viewport.width / 2);
-  expect(box.y).toBeGreaterThan(0);
-  expect(box.y + box.height).toBeLessThan(viewport.height);
-  await expect(picker.getByRole("grid", { name: "October 2026" })).toBeVisible();
-  await expect(picker.getByRole("button", { name: "Monday 12 October 2026", exact: true })).toBeFocused();
-  const time = picker.getByRole("textbox", { name: "Time" });
-  await expect(time).toBeDisabled();
-
-  await page.keyboard.press("Escape");
-  await expect(picker).toBeHidden();
-  await expect(chip).toBeFocused();
-  await expect.poll(() => readTodo(title).dueDate).toBeNull();
-
-  await chip.click();
-  await picker.getByRole("button", { name: "Friday 16 October 2026", exact: true }).click();
-  await expect(time).toBeEnabled();
-  await time.fill("15:00");
-  await capture(info, "tasks-due-picker-light");
-  await picker.getByRole("button", { name: "Done", exact: true }).click();
-  await expect(picker).toBeHidden();
-
-  const label = /^Fri 3:00\sPM$/u;
-  await expect(row.locator(".task-due")).toHaveText(label);
-  await expect(detail.locator(".task-chip").first()).toHaveText(label);
-  await expect(row.getByRole("checkbox")).toHaveAttribute("aria-label", /^Mark as done: Book the dentist \(Fri 3:00\sPM\)$/u);
-  await expect.poll(() => readTodo(title)).toMatchObject({ dueDate: "2026-10-16", dueTime: "15:00" });
-
-  await detail.getByRole("button", { name: /^Due date: Fri/u }).click();
-  await expect(picker.getByRole("button", { name: "Friday 16 October 2026", exact: true })).toBeFocused();
-  await expect(time).toHaveValue(/^3:00\sPM$/u);
-  await time.fill("25:00");
-  await time.press("Enter");
-  await expect(picker.getByRole("alert")).toHaveText("Use a time like 15:00");
-  await expect(picker.getByRole("button", { name: "Done", exact: true })).toBeDisabled();
-  await picker.getByRole("button", { name: "Clear time", exact: true }).click();
-  await picker.getByRole("button", { name: "Done", exact: true }).click();
-  await expect(row.locator(".task-due")).toHaveText("Fri");
-  await expect.poll(() => readTodo(title)).toMatchObject({ dueDate: "2026-10-16", dueTime: null });
-  await expect(view.locator(".task-row", { hasText: title })).toHaveCount(1);
-  expect(app.rendererErrors).toEqual([]);
-});

@@ -75,3 +75,65 @@ it.each([
 ])("rejects a malformed Duo comparison brief %j", (malformed) => {
   expect(chatMessageSchema({ ...message, duoComparison: malformed })).toBe(false);
 });
+
+const customAgentCall = {
+  agentId: "77777777-7777-4777-8777-777777777777",
+  revision: 2,
+  handle: "reviewer",
+  name: "Reviewer",
+  icon: { kind: "symbol", name: "shield" },
+  accent: "teal",
+  delivery: "subagent",
+};
+
+it("accepts custom agent call attribution on user messages", () => {
+  expect(chatMessageSchema({ ...message, customAgentCall })).toBe(true);
+  expect(chatMessageSchema({ ...message, customAgentCall: { ...customAgentCall, accent: null, delivery: "in-role" } })).toBe(true);
+});
+
+it.each(["assistant", "system"])("rejects custom agent call attribution on a %s message", (role) => {
+  expect(chatMessageSchema({ ...message, role, customAgentCall })).toBe(false);
+});
+
+it.each([
+  null,
+  "reviewer",
+  {},
+  { ...customAgentCall, agentId: "agent-1" },
+  { ...customAgentCall, revision: 0 },
+  { ...customAgentCall, handle: "Bad Handle" },
+  { ...customAgentCall, delivery: "inline" },
+  { ...customAgentCall, icon: { kind: "symbol", name: "unknown" } },
+  { ...customAgentCall, instructions: "# Reviewer" },
+])("rejects malformed custom agent call attribution %j", (malformed) => {
+  expect(chatMessageSchema({ ...message, customAgentCall: malformed })).toBe(false);
+});
+
+const secretRequest = {
+  requestId: "77777777-7777-4777-8777-777777777777",
+  title: "Tailscale auth key",
+  description: "Create a reusable key.\nSettings > Keys.",
+  ttlHours: 24,
+  status: "pending",
+  answeredAt: null,
+  expiresAt: null,
+  storage: null,
+};
+
+it("accepts a secret request only on a turn-scoped system message", () => {
+  expect(chatMessageSchema({ ...message, role: "system", secretRequest })).toBe(true);
+  expect(chatMessageSchema({ ...message, role: "system", turnId: null, secretRequest })).toBe(false);
+  expect(chatMessageSchema({ ...message, secretRequest })).toBe(false);
+  expect(chatMessageSchema({ ...message, role: "assistant", secretRequest })).toBe(false);
+});
+
+it.each([
+  null,
+  {},
+  { ...secretRequest, secret: "fixture-abc" },
+  { ...secretRequest, status: "saved" },
+  { ...secretRequest, title: "" },
+  { ...secretRequest, ttlHours: 48 },
+])("rejects a malformed secret request %j", (malformed) => {
+  expect(chatMessageSchema({ ...message, role: "system", secretRequest: malformed })).toBe(false);
+});

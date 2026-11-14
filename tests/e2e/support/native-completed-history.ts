@@ -23,7 +23,7 @@ export async function checkNativeCompletedHistory(): Promise<string> {
       tsconfig: "tsconfig.web.json", jsx: "automatic", conditions: ["style"],
       define: { "process.env.NODE_ENV": '"development"' },
       external: ["/inertia-logo.svg"],
-      loader: { ".woff": "file", ".woff2": "file", ".ttf": "file", ".svg": "file", ".png": "file" },
+      loader: { ".woff": "file", ".woff2": "file", ".ttf": "file", ".svg": "file", ".png": "file", ".webp": "file" },
       plugins: [{ name: "file-url", setup(builder) {
         builder.onResolve({ filter: /\?url$/ }, (args) => ({
           path: require.resolve(args.path.slice(0, -4), { paths: [args.resolveDir] }), namespace: "file-url",

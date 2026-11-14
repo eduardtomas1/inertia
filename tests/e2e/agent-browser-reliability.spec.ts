@@ -1,6 +1,5 @@
 // @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
-import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -63,13 +62,7 @@ function refFor(snapshot: PageSnapshot, name: string): string {
   return ref!;
 }
 
-async function closedPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return port;
-}
+const UNASSIGNED_LOW_PORT = 4;
 
 async function pageValue<Value>(url: string, expression: string): Promise<Value> {
   return await app.electronApp.evaluate(async ({ webContents }, request) => {
@@ -246,7 +239,7 @@ test("an agent can browse without the Browser panel, through a login, and on pag
     action: "wait", text: "Saved", state: "present", timeoutMs: 4_000,
   }))).toMatchObject({ matched: true });
 
-  await expect(browser(conversationId, { action: "navigate", url: `http://127.0.0.1:${await closedPort()}/` }))
+  await expect(browser(conversationId, { action: "navigate", url: `http://127.0.0.1:${UNASSIGNED_LOW_PORT}/` }))
     .resolves.toMatchObject({
       ok: false,
       code: "unavailable",

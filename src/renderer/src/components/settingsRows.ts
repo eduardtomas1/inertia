@@ -60,7 +60,11 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["auto-open-plan", "Open plan automatically", ["plan panel", "general"]],
       ["confirm-destructive-actions", "Confirm destructive actions", ["delete", "warning", "confirmation", "general"]],
       ["usage-display", "Usage display", ["quota", "token", "tokens", "limit", "limits", "context", "usage and context", "general"]],
-      ["compact-on-return", "Compact large API chats when you return", ["compact on return", "compaction", "compact", "summarize", "prompt cache", "cache", "api key", "tokens", "cost", "context"]],
+    ],
+    Context: [
+      ["compact-on-return", "Compact large chats", ["compact on return", "compaction", "compact", "summarize", "prompt cache", "cache", "idle", "before the cache expires", "subscription", "api key", "tokens", "usage", "cost", "context"]],
+      ["claude-auto-compact", "Auto-compact Claude chats after", ["auto-compact", "autocompact", "compaction", "compact", "context window", "claude", "tokens", "usage", "cost", "context"]],
+      ["codex-auto-compact", "Auto-compact Codex chats after", ["auto-compact", "autocompact", "compaction", "compact", "context window", "codex", "openai", "chatgpt", "tokens", "usage", "cost", "context"]],
     ],
     "Delegated tasks": [
       ["delegation-automatic-wakes", "Continue chats automatically when delegated tasks finish", ["delegation", "delegated tasks", "delegate", "subagents", "agents", "wake", "automatic", "continue", "results", "orchestration"]],
@@ -69,6 +73,14 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["wrap-diffs", "Wrap long diff lines", ["diff", "wrap", "review", "source control"]],
       ["ignore-whitespace", "Ignore whitespace", ["diff", "whitespace", "review", "source control"]],
       ["terminal-font-size", "Terminal font size", ["font", "text size", "zoom", "terminal"]],
+    ],
+  }),
+  section("custom-agents", "Custom agents", {
+    "Your agents": [
+      ["custom-agent-new", "New agent", ["custom agents", "calling", "/calling", "subagent", "create agent", "add agent", "persona", "instructions", "handle"]],
+      ["custom-agent-import", "Import agents", ["custom agents", "import", "json", "file", "share"]],
+      ["custom-agent-export", "Export all agents", ["custom agents", "export", "backup", "json", "file", "share"]],
+      ["custom-agent-presets", "Presets", ["custom agents", "starter", "template", "reviewer", "test writer", "docs writer", "refactorer"]],
     ],
   }),
   section("notifications", "Notifications", {
@@ -139,6 +151,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
   section("agents", "Agents", {
     Providers: [
       ["provider-accounts", "Providers", ["agents", "accounts", "connect", "sign in", "refresh", "codex", "claude", "model", "connections"]],
+      ["add-provider", "Add provider", ["add account", "provider menu", "chatgpt", "sign in", "api key", "codex", "claude", "cursor", "grok", "opencode", "antigravity", "kimi"]],
       ["provider-display-name", "Account name", ["alias", "display name", "provider"]],
       ["provider-binary-path", "Executable", ["binary path", "codex path", "use automatic", "cli"]],
       ["provider-updates", "Provider updates", ["maintenance", "upgrade", "update", "version"]],
@@ -170,6 +183,9 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["attachment-storage-limit", "Attachment storage limit", ["budget", "disk", "storage", "limit"]],
       ["attachment-auto-remove", "Free space automatically when full", ["cleanup", "evict", "disk", "storage"]],
       ["attachment-remove-oldest", "Remove oldest files", ["cleanup", "delete attachments", "disk", "storage"]],
+    ],
+    "Agent secrets": [
+      ["agent-secrets", "Agent secrets", ["secret", "token", "api key", "auth key", "password", "credential", "revoke", "keychain"]],
     ],
     "Export and import": [
       ["recovery-export", "Portable conversation recovery export", ["import", "export", "backup", "recovery", "archive"]],

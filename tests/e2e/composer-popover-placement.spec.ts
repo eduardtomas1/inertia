@@ -333,7 +333,9 @@ test("keeps every composer utility popover inside both split panes", async (
   await app.resizeWindow(1_880, 720);
   await separator.focus();
   await separator.press("Enter");
-  await expect(separator).toHaveAttribute("aria-valuenow", "50");
+  await separator.press("Shift+ArrowLeft");
+  await separator.press("Shift+ArrowLeft");
+  await expect(separator).toHaveAttribute("aria-valuenow", "40");
 
   const primaryMore = primary.getByRole("button", {
     name: "More composer options",
@@ -343,30 +345,29 @@ test("keeps every composer utility popover inside both split panes", async (
   const primaryRoot = primary.getByRole("menu", {
     name: "More composer options",
   });
-  const primaryLayer = primary.locator(".composer-more-layer");
   const primaryRootSurface = primary.locator(".composer-more-popover");
   await expect(primaryRoot).toBeVisible();
   await expectContained(primaryRoot);
-  await expect(primaryLayer).toHaveAttribute(
-    "data-composer-submenu-side",
-    /^(left|right)$/u,
-  );
-  const reasoningItem = primaryRoot.getByRole("menuitem", {
-    name: /^Reasoning\b/u,
+  const primarySpeedItem = primaryRoot.getByRole("menuitem", {
+    name: /^Response speed\b/u,
   });
-  await expect(reasoningItem).toBeEnabled();
-  await reasoningItem.focus();
-  await reasoningItem.press("ArrowRight");
-  const reasoningMenu = primary.locator(
-    '.composer-more-submenu[aria-label="Reasoning options"]',
-  );
-  await expect(reasoningMenu).toBeVisible();
-  await expect(reasoningMenu.getByRole("menuitemradio").first()).toBeFocused();
+  await expect(primarySpeedItem).toBeEnabled();
+  await primarySpeedItem.focus();
+  await primarySpeedItem.press("ArrowRight");
+  const primarySpeedMenu = primary.getByRole("menu", {
+    name: "Response speed options",
+    exact: true,
+  });
+  await expect(primarySpeedMenu).toBeVisible();
+  await expect(primarySpeedMenu.getByRole("menuitemradio").first()).toBeFocused();
   await expectContained(primaryRootSurface);
-  await expectContained(reasoningMenu);
-  await capture(testInfo, "pr-221-popover-center-left-reasoning");
+  await expectContained(primarySpeedMenu);
+  await capture(testInfo, "pr-221-popover-center-left-response-speed");
   await page.keyboard.press("Escape");
   await expect(primaryMore).toBeFocused();
+  await separator.focus();
+  for (let step = 0; step < 4; step += 1) await separator.press("Shift+ArrowRight");
+  await expect(separator).toHaveAttribute("aria-valuenow", "60");
 
   const secondaryMore = secondary.getByRole("button", {
     name: "More composer options",
@@ -376,12 +377,7 @@ test("keeps every composer utility popover inside both split panes", async (
   const secondaryRoot = secondary.getByRole("menu", {
     name: "More composer options",
   });
-  const secondaryLayer = secondary.locator(".composer-more-layer");
   const secondaryRootSurface = secondary.locator(".composer-more-popover");
-  await expect(secondaryLayer).toHaveAttribute(
-    "data-composer-submenu-side",
-    /^(left|right)$/u,
-  );
   const speedItem = secondaryRoot.getByRole("menuitem", {
     name: /^Response speed\b/u,
   });

@@ -10,19 +10,27 @@ export {
 export {
   ACTIVITY_GROUP_LIVE_WINDOW,
   activityCommandLine,
-  activitySummaryLabel,
-  activitySummaryParts,
+  activitySentenceText,
+  activitySummarySentence,
+  activitySummarySentenceLabel,
   activityWorkKind,
   commandDisplayText,
   hostToolActivityTitle,
   resolveActivityGroupWindow,
   summarizeActivities,
+  type ActivitySentencePhrase,
   type ActivityWorkKind,
 } from "./response-timeline/activity-summary";
 export {
+  isQuietSettledTurn,
+  needsStaticFoldRow,
+  shouldFoldSettledTurn,
+  turnFoldLabel,
+  turnHasFoldableWork,
+} from "./response-timeline/fold";
+export {
   answerTailCommentary,
   buildResponseTimeline,
-  shouldConsolidateSettledWorkIntoRunDetails,
   stabilizeResponseTimeline,
   updateResponseTimelineForActivityDelta,
   type BuildResponseTimelineInput,
@@ -36,7 +44,6 @@ export {
   turnExecutionElapsedMs,
   turnQueueElapsedMs,
   turnStatusLabel,
-  turnTimingLabels,
   workStatusLabel,
   workSummaryLabel,
 } from "./response-timeline/timing";

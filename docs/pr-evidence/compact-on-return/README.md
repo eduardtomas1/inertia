@@ -1,6 +1,8 @@
 # Compact on return
 
-Screenshots of the built Electron app on Windows (x64), taken by
+Screenshots of the built Electron app on Windows (x64), and for the
+subscription scenario, idle compaction and Context settings on Linux (x64),
+taken by
 `tests/e2e/compact-on-return.spec.ts` at 1280 × 820 with
 `animations: "disabled"` and the pointer moved away. The fixture is synthetic:
 a seeded project and one chat, "Billing service migration", with one completed
@@ -69,11 +71,10 @@ so the composer offers the plain send button again.
 
 `chats-setting-light.png`
 
-Settings → Chats, under **Usage display**: **Compact large API chats when you
-return**, "Offers Compact and send when you return to a chat of 200K tokens
-or more on an Anthropic or OpenAI API key after its prompt cache has expired.
-Later turns then cost less. Enter follows the button.", with **Offer** chosen
-and **Never** beside it.
+Settings → Chats → **Context**: **Compact large chats**, with **When you
+return** chosen, **Before the cache expires** and **Never** beside it, and
+**Auto-compact Claude chats after** below it. The second scenario in the same
+spec shows both settings changed (see below).
 
 ## Prompt cache on an Anthropic key
 
@@ -84,6 +85,34 @@ now ends with **Prompt cache**: **5 minutes (default)**, chosen, or **1 hour**,
 and "A 1-hour cache costs more to write and less to resume after a break;
 worth it when you return to a chat after 5 to 60 minutes." Escape closes it
 and returns focus to **Add API key**.
+
+## On a Claude subscription
+
+`subscription-compact-and-send-light.png`, `subscription-compact-and-send-dark.png`,
+`subscription-usage-meter-dark.png`
+
+The second scenario signs Claude Code in with a **Claude account** and reports
+412K of 1M tokens with a 1-hour prompt cache last used 75 minutes ago. The send
+button reads **Compact and send** with "Summarize 412K tokens of history, then
+send", and the usage meter reads "Prompt cache expired 15 min ago".
+
+## Compacted while idle
+
+`compacted-while-idle-light.png`, `compacted-while-idle-dark.png`
+
+The chat detail then carries an idle compaction receipt (412K → 21.4K tokens),
+as the runtime records it when **Before the cache expires** compacts a chat two
+minutes before its cache expires. The timeline shows one divider, "Compacted
+while idle · 412K → 21.4K tokens", with no `/compact` request bubble, and the
+composer offers the plain send button.
+
+## Context settings
+
+`context-settings-light.png`, `context-settings-dark.png`
+
+Settings → Chats → **Context** after choosing **Before the cache expires** and
+**300K tokens** for **Auto-compact Claude chats after**. The spec reloads the
+window and checks both choices were saved.
 
 The spec also asserts no viewport overflow at the chat captures and no
 renderer errors.

@@ -568,7 +568,7 @@ describe("model chooser active route", () => {
     const { prefetchFrequentSurfaces } = await import("../../src/renderer/src/components/lazySurfaceLoaders");
     const current = currentRoute();
     await act(async () => {
-      prefetchFrequentSurfaces();
+      void prefetchFrequentSurfaces();
       await vi.dynamicImportSettled();
     });
     render(<FreshModelChooser routes={[current]} selectedRoute={current} onSelect={vi.fn()} />);

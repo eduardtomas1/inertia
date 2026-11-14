@@ -1,18 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  CLAUDE_INTERNAL_TIER_IDS,
   KIMI_CODING_BASE_URL,
   KIMI_CODING_MODEL_IDS,
   claudeCodeModelIdentifier,
   claudeCompatibleBackendProfileSchema,
   createCustomClaudeBackendProfile,
   createKimiClaudeBackendProfile,
-  migrateClaudeCompatibleBackendProfile,
   nativeAnthropicBackendProfile,
   normalizeClaudeCompatibleBaseUrl,
   resolveClaudeModelRouting,
-  safeClaudeBackendBaseUrl,
   type ClaudeAdvancedModelRouting,
 } from "../src/shared/claude-backend-profiles";
 
@@ -150,7 +147,6 @@ describe("Claude-compatible backend profiles", () => {
     });
 
     expect(profile.secretReference).toBe(SECRET_REFERENCE);
-    expect(safeClaudeBackendBaseUrl(profile)).toBe("https://gateway.example.test/anthropic/");
     expect(JSON.stringify(profile)).not.toContain("Bearer ");
     expect(() => claudeCompatibleBackendProfileSchema.parse({
       ...profile,
@@ -197,60 +193,5 @@ describe("Claude-compatible backend profiles", () => {
       }],
     });
     expect(declared.capabilityOverrides[0]?.state).toBe("user-declared");
-  });
-
-  it("migrates incomplete draft tier maps to the visible model without native fallbacks", () => {
-    const migrated = migrateClaudeCompatibleBackendProfile({
-      id: "kimi:migrated",
-      displayName: "Kimi",
-      protocol: "anthropic-messages",
-      authenticationMode: "api-key",
-      source: "built-in",
-      enabled: true,
-      configurationRevision: 3,
-      schemaVersion: 0,
-      preset: "kimi-code",
-      baseUrl: KIMI_CODING_BASE_URL,
-      secretReference: SECRET_REFERENCE,
-      primaryModelId: "k3-256k",
-      routingMode: "advanced",
-      tierModels: {
-        opus: "k3",
-        sonnet: "k3-256k",
-      },
-      contextWindowTokens: 262_144,
-      autoCompactionWindowTokens: 262_144,
-    });
-
-    expect(migrated.configurationRevision).toBe(4);
-    expect(migrated.routing.mode).toBe("advanced");
-    if (migrated.routing.mode !== "advanced") throw new Error("Expected advanced routing.");
-    expect(migrated.routing.tierModels).toEqual({
-      fable: "k3-256k",
-      opus: "k3",
-      sonnet: "k3-256k",
-      haiku: "k3-256k",
-    });
-    expect(migrated.routing.subagentModelId).toBe("k3-256k");
-    expect(CLAUDE_INTERNAL_TIER_IDS.every((tier) => Boolean(migrated.routing.mode === "advanced"
-      && migrated.routing.tierModels[tier]))).toBe(true);
-    expect(migrateClaudeCompatibleBackendProfile(migrated)).toEqual(migrated);
-  });
-
-  it("never migrates a draft profile containing a plaintext credential", () => {
-    expect(() => migrateClaudeCompatibleBackendProfile({
-      id: "custom:legacy-secret",
-      displayName: "Legacy",
-      protocol: "anthropic-messages",
-      authenticationMode: "api-key",
-      source: "custom",
-      enabled: true,
-      configurationRevision: 0,
-      preset: "custom",
-      baseUrl: "https://gateway.example.test/",
-      secretReference: SECRET_REFERENCE,
-      primaryModelId: "model",
-      apiKey: "sk-plaintext",
-    })).toThrow();
   });
 });

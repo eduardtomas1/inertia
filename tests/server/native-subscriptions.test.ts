@@ -46,7 +46,7 @@ describe("native subscription adapters", () => {
     }
     expect(request).not.toHaveBeenCalled();
   });
-  it.each([["cursor", "composer-2"], ["kimi", "kimi-code/k2"]])("reports that %s does not expose usage without reading its login", async (provider, model) => {
+  it.each([["cursor", "composer-2"], ["kimi", "kimi-code/k2"], ["grok", "grok-4.7"]])("reports that %s does not expose usage without reading its login", async (provider, model) => {
     const environment = vi.fn(async () => ({ HOME: "/home/person", CURSOR_AUTH_TOKEN: "token", KIMI_API_KEY: "key" }));
     const request = fetcher(go);
     const openCodeAccount = goAccount();

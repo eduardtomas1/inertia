@@ -120,7 +120,7 @@ describe("detached chat tools panel", () => {
     expect(screen.queryByRole("complementary", { name: "Workspace tools" })).toBeNull();
   });
 
-  it("opens Background tasks from a turn's agents line", async () => {
+  it("opens Background tasks from an agent in a turn's subagent group", async () => {
     const turn = taskTurn({
       id: "detached-turn",
       conversationId,
@@ -145,7 +145,9 @@ describe("detached chat tools panel", () => {
       ],
     });
     await renderWindow(live);
-    fireEvent.click(await screen.findByRole("button", { name: /^Open Background tasks/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Worked/u }));
+    fireEvent.click(await screen.findByRole("button", { name: "1 subagent, 1 done" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Open Evidence scout in Background tasks/u }));
     await act(async () => { await vi.dynamicImportSettled(); });
     const panel = await screen.findByRole("complementary", { name: "Workspace tools" });
     expect(within(panel).getByRole("tab", { name: /^Background tasks/u }))

@@ -61,10 +61,6 @@ export class DiagnosticJournalFiles {
     this.pattern = new RegExp(`^${options.baseName}(?:\\.\\d+)?\\.log$`, "u");
   }
 
-  owns(name: string): boolean {
-    return this.pattern.test(name);
-  }
-
   appendRecord(line: string, durable = true): void {
     this.rotateIfNeeded(Buffer.byteLength(line));
     this.append(line, durable);

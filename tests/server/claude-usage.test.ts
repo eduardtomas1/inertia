@@ -334,7 +334,7 @@ describe("Claude Agent SDK usage accounting", () => {
       },
     })).toEqual({
       id: "claude:five_hour",
-      label: "Claude · 5 hour",
+      label: "Session",
       usedPercent: 72.5,
       remainingPercent: 27.5,
       windowMinutes: 300,
@@ -361,8 +361,8 @@ describe("Claude Agent SDK usage accounting", () => {
         },
       },
     })).toEqual([
-      { id: "claude:five_hour", label: "Claude · 5 hour", usedPercent: expect.closeTo(18), remainingPercent: expect.closeTo(82), windowMinutes: 300, resetsAt: "2026-10-19T13:50:00.000Z" },
-      { id: "claude:seven_day", label: "Claude · 7 day", usedPercent: expect.closeTo(28), remainingPercent: expect.closeTo(72), windowMinutes: 10_080, resetsAt: "2026-10-24T15:00:00.000Z" },
+      { id: "claude:five_hour", label: "Session", usedPercent: expect.closeTo(18), remainingPercent: expect.closeTo(82), windowMinutes: 300, resetsAt: "2026-10-19T13:50:00.000Z" },
+      { id: "claude:seven_day", label: "Weekly", usedPercent: expect.closeTo(28), remainingPercent: expect.closeTo(72), windowMinutes: 10_080, resetsAt: "2026-10-24T15:00:00.000Z" },
     ]);
   });
 

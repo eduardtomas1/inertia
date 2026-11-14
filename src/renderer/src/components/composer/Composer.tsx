@@ -36,6 +36,7 @@ import {
   type PromptStashEntry,
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
+import { composerPlaceholder } from "./composerPlaceholder";
 import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps } from "./types";
 import { useRuntimeQueueLength } from "./runtimeQueueEvents";
@@ -55,6 +56,7 @@ import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
 import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
+import { useComposerAgentCall } from "./useComposerAgentCall";
 import { harnessImageInputUnavailableReason } from "../../../../shared/provider";
 import { clearPersistedComposerDraft, persistComposerDraft, readComposerDraft } from "../../utils/composerDraftPersistence";
 import { TurnFailureNotice } from "./TurnFailureNotice";
@@ -116,7 +118,7 @@ export const Composer = memo(function Composer({
   compaction: shellCompaction = null,
   compactOnReturnSetting = DEFAULT_COMPACT_ON_RETURN,
   onCompactAndSend,
-  onListSkills, promptPresets = [], promptPresetsEnabled = true,
+  onListSkills, promptPresets = [], promptPresetsEnabled = true, customAgents, onOpenCustomAgentSettings,
   promptStashEnabled = true,
   onPromptPresetCommand = ignorePromptPresetMutation,
   onUpdateConversation,
@@ -197,6 +199,7 @@ export const Composer = memo(function Composer({
   useNativePreviewSuspension(menu !== null || conversationContext.previewPacketId !== null || conversationContext.confirmation !== null || agentContextRequest !== null);
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const focusInput = useCallback(() => textareaRef.current?.focus(), []);
   const skillCompletion = useComposerSkillCompletion(skills, message, menu === "skills");
   const { setMenuTrigger } = menuController;
   useLayoutEffect(() => {
@@ -429,6 +432,7 @@ export const Composer = memo(function Composer({
     canRestoreStoppedPrompt: () => draftValueRef.current.length === 0 && attachmentsRef.current.length === 0 && pendingAttachmentIdsRef.current.size === 0 && !attachmentImportingRef.current && !submittingRef.current && !promptContext && selectedPreviewUrlRef.current === null && fileReferences.length === 0 && contextPacketIds.length === 0, textareaRef,
   });
   const updateMessage = promptHistoryController.replaceMessage;
+  const agentCall = useComposerAgentCall({ conversationId: conversation.id, providerId: conversation.providerId, message, customAgents, replaceMessage: updateMessage, textareaRef, onOpenSettings: onOpenCustomAgentSettings });
 
   const addFileReference = (path: string): void => {
     if (fileReferences.includes(path)) return;
@@ -479,18 +483,21 @@ export const Composer = memo(function Composer({
       setAttachmentError("Follow-ups while the agent is working cannot include a referenced chat. Send this after the turn ends, or remove the reference.");
       return;
     }
+    const call = agentCall.resolveSubmit(message, running);
+    if (call.kind === "hold") { if (call.error) setAttachmentError(call.error); return; }
     const request = running
       ? {
           visibleContent: message.trim(),
           context: undefined,
         }
       : buildComposerTurnRequest(
-          message,
+          call.content,
           attachments,
           promptContext,
           fileReferences,
           selectedPreviewUrlRef.current,
           contextPacketIds,
+          call.agentId,
         );
     if ((!canSend && followUpState !== "ready") || submittingRef.current || stopClaimRef.current || stopping) return;
     const compactAndSend = !running && onCompactAndSend !== undefined && (
@@ -593,6 +600,7 @@ export const Composer = memo(function Composer({
       if (editorUnchanged) {
         clearPersistedComposerDraft(submittedConversationId, submittedDraft);
       }
+      agentCall.clearSent(submittedConversationId, request.context?.calledAgent?.agentId);
       if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
       const acceptedIds = new Set(submittedAttachments.map(({ id }) => id));
       setAttachments((current) => current.filter(({ id }) => !acceptedIds.has(id)));
@@ -687,13 +695,9 @@ export const Composer = memo(function Composer({
   const composedLength = (message.trim() || (attachments.length > 0 ? attachmentFallback : selectedPreviewUrlRef.current ? "Please inspect the current preview." : contextPacketIds.length > 0 ? "Please use the selected chat context." : "Please review the selected diff context.")).length;
   const typedMessageLimit = MAX_CHAT_MESSAGE_CHARS;
   const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
-  const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext) || previewContextSelected || contextPacketIds.length > 0)
-    && messageFits
-    && routeReadiness.ready
-    && !disabled
-    && !attachmentImporting
-    && !conversationContext.referencing
-    && !conversationUpdatePending;
+  const draftHasContent = Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext) || previewContextSelected || contextPacketIds.length > 0;
+  const sendBlocked = !messageFits || !routeReadiness.ready || disabled || attachmentImporting || conversationContext.referencing || conversationUpdatePending;
+  const sendEligible = draftHasContent && !sendBlocked;
   const compaction = shellCompaction ?? conversation.compaction ?? null;
   const shellCompacting = compaction?.state === "compacting";
   const primaryAction = composerPrimaryActionState({
@@ -738,7 +742,7 @@ export const Composer = memo(function Composer({
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:
       attachmentsAreImages
-      && !promptContext
+      && !promptContext && !agentCall.calledAgentId
       && !previewContextSelected
       && fileReferences.length === 0
       && messageFits
@@ -747,7 +751,7 @@ export const Composer = memo(function Composer({
     submitting,
     sending,
   });
-  const queueBlocked = !attachmentsAreImages || Boolean(promptContext) || previewContextSelected
+  const queueBlocked = !attachmentsAreImages || Boolean(promptContext) || Boolean(agentCall.calledAgentId) || agentCall.invocationPending || previewContextSelected
     || fileReferences.length > 0 || contextPacketIds.length > 0;
   const canQueue = running && sendEligible && !queueBlocked && !submitting && !sending;
   const documentBlocksFollowUp = running && !attachmentsAreImages;
@@ -1037,7 +1041,7 @@ export const Composer = memo(function Composer({
         ref={composerRef}
         className={clsx(
           "composer",
-          (menu || slashMatch || commandSurface) && "has-open-menu",
+          (menu || slashMatch || commandSurface || agentCall.menuVisible) && "has-open-menu",
         )}
         aria-label="Message composer"
         aria-busy={submissionPending || followUpPending || attachmentImporting || running || stopping || conversationUpdatePending}
@@ -1110,10 +1114,10 @@ export const Composer = memo(function Composer({
           onImportAttachments={importAttachments}
           onSubmit={submit}
           canQueue={canQueue}
-          queueBlocked={queueBlocked}
           onQueue={() => void queueCurrentMessage()}
-          running={running} hasHistory={hasVisibleHistory || latestKnownTurn !== null}
-          stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}
+          running={running}
+          placeholder={composerPlaceholder({ disabled, running, queueBlocked, hasHistory: hasVisibleHistory || latestKnownTurn !== null, skillsAvailable: Boolean(skillsCapability?.available),
+            stopsBeforeSending: running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null) })}
           submissionPending={submissionPending}
           followUpPending={followUpPending}
           typedMessageLimit={typedMessageLimit}
@@ -1127,7 +1131,7 @@ export const Composer = memo(function Composer({
           {...skillCompletion}
           acceptSkill={insertSkill}
           dismissSkills={() => dismissMenu("context-change")}
-          slashMatch={slashMatch}
+          slashMatch={slashMatch} agentCall={agentCall}
           onCompactCommand={() => void compact({ kind: "compact" })}
           compactUnavailableReason={compactUnavailableReason}
           compactNotice={compactOnReturn.notice(compactNotice)}
@@ -1236,6 +1240,8 @@ export const Composer = memo(function Composer({
           onReleaseAttachment={onReleaseAttachment}
           onSubmit={submit}
           onStop={stopAndKeepFocus}
+          onFocusInput={focusInput}
+          awaitingInput={!draftHasContent && !sendBlocked}
         />
       </section>
     </div>

@@ -56,7 +56,7 @@ export class NativeSubscriptionReader {
   }
   async read(base: UsageAccount, model: string | undefined, lifetime: AbortSignal, cwd: string): Promise<NativeUsageAccount> {
     const provider = base.providerId as ProviderId;
-    if (provider === "cursor" || provider === "kimi") return { ...base, windows: [], status: "unavailable", detail: UNREPORTED_DETAIL };
+    if (provider === "cursor" || provider === "kimi" || provider === "grok") return { ...base, windows: [], status: "unavailable", detail: UNREPORTED_DETAIL };
     if (provider === "antigravity") {
       return { ...base, windows: [], status: "unsupported", detail: "Antigravity's current CLI protocol does not report subscription reset times." };
     }

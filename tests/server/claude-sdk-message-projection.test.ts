@@ -398,6 +398,52 @@ describe("Claude Agent SDK message projection", () => {
     ]));
   });
 
+  it.each([
+    [
+      "ENOSPC",
+      ["transcript", "global_config"],
+      "Claude couldn't save part of this chat",
+      "The disk is full.\nFree up space before continuing, or Claude may miss part of the conversation.\nChanges to ~/.claude.json weren't saved.",
+    ],
+    [
+      "EDQUOT",
+      ["global_config"],
+      "Claude Code couldn't save its settings",
+      "The disk quota is used up.\nChanges to ~/.claude.json weren't saved.",
+    ],
+    [
+      "EIO",
+      ["transcript"],
+      "Claude couldn't save part of this chat",
+      "Claude Code couldn't write to the disk.\nFree up space before continuing, or Claude may miss part of the conversation.",
+    ],
+  ] as const)("reports lost %s session writes without failing the completed turn", async (errorCode, lost, label, detail) => {
+    const lostWrites: readonly string[] = lost;
+    const { events, result } = await run([
+      claudeSystem("session_writes_lost", {
+        uuid: `writes-lost-${errorCode}`,
+        error_code: errorCode,
+        lost,
+        ...(lostWrites.includes("transcript")
+          ? { transcript_session_ids: [CLAUDE_PROTOCOL_SESSION_ID] }
+          : {}),
+      }),
+      claudeSuccessResult("Done", "completed"),
+    ]);
+
+    expect(result).toMatchObject({ status: "completed", text: "Done" });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      activityId: `writes-lost-${errorCode}`,
+      phase: "failed",
+      label,
+      detail,
+    }));
+    expect(events.some((event) =>
+      event.type === "activity"
+      && event.label === "Claude sent an unsupported SDK update")).toBe(false);
+  });
+
   it("projects ExitPlanMode input through the provider plan contract", async () => {
     const { events, result } = await run([
       assistantMessage({

@@ -89,7 +89,7 @@ test("keeps provider commands in a full-width floating command surface", async (
 ) => {
   await app.resizeWindow(1440, 920);
   const composer = page.locator(".composer");
-  const input = page.getByRole("textbox", { name: "Message" });
+  const input = page.getByLabel("Message", { exact: true });
 
   await page.mouse.move(1, 1);
   await input.fill("/");

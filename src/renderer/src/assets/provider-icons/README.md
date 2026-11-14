@@ -46,6 +46,16 @@ property of their respective owners.
   monochrome marks, Inertia inverts it in dark themes. The mark belongs to
   Google LLC and is used only to identify the provider, without implying any
   affiliation or endorsement.
+- `grok.svg`: the Grok mark from `agentclientprotocol/registry` at commit
+  `85f5518ced505fdbb044ba9daafa79b43c37a625`, file `grok-build/icon.svg`,
+  from xAI's official Grok Build registry entry (PRs #307 and #342). The
+  registry is licensed Apache-2.0; the Grok Build entry itself declares a
+  proprietary license with terms at <https://x.ai/legal/terms-of-service>.
+  Local SHA-256
+  `b8fe2866adbbfb6352af9a3138916e79c90086566cede68e724c3e19e663b51e`. The
+  16×16 single-color `currentColor` glyph is unmodified, and Inertia inverts
+  it in dark themes. The mark belongs to xAI and is used only to identify the
+  provider, without implying any affiliation or endorsement.
 
 These assets are emitted into the packaged renderer for offline use; the
 application does not request vendor-hosted images at runtime. The imports use

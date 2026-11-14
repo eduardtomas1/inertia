@@ -19,6 +19,7 @@ import type { AppView } from "../appView";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { TranscriptMessageSendAcceptance } from "../utils/transcriptNavigation";
 import { readPersistedDraftConversation, writePersistedDraftConversation } from "../utils/draftConversationPersistence";
+import { focusNewChatComposer } from "../utils/focusNewChatComposer";
 
 type DraftConversationNavigation = {
   changeProject: (projectId: string) => void;
@@ -91,6 +92,7 @@ export function useProjectChatNavigation({
     setView("home");
     setSidebarOpen(false);
     setGlobalChatActive(true);
+    if (!pendingScratch.change) focusNewChatComposer();
   }, [pendingScratch, projects, draftConversation, setView, setSidebarOpen, clearSplitPanes]);
 
   const openNoProjectChat = useCallback(() => requestScratch(false), [requestScratch]);
@@ -158,6 +160,7 @@ export function useProjectChatNavigation({
     else draftConversation.start(targetProject.id, true);
     resumeSearchDraftRef.current = false;
     setGlobalChatActive(true);
+    focusNewChatComposer();
   }, [
     conversationSelectionGenerationRef,
     draftConversation,

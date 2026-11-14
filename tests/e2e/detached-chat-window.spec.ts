@@ -188,8 +188,11 @@ test("moves one live chat between a remembered native window and the main app", 
   })).toHaveCount(0);
   await expect(popup.getByRole("searchbox", { name: "Search chats" }))
     .toHaveCount(0);
-  await expect(popup.getByRole("group", { name: "Chat checkout context" }))
-    .toBeVisible();
+  const checkoutContext = popup.getByRole("group", { name: "Chat checkout context", includeHidden: true });
+  await expect(checkoutContext).toBeAttached();
+  const branchControl = popup.locator(".composer-branch-control");
+  await expect.poll(async () => await checkoutContext.isVisible()
+    || await branchControl.getAttribute("data-folded") === "true").toBe(true);
   await expect(popup.getByText("Context from Reviewed context")).toBeVisible();
   await popup.getByRole("button", { name: "Copy final answer" }).click();
   const copiedAnswer = popup.getByRole("button", { name: "Answer copied" });

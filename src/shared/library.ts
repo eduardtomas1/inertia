@@ -188,7 +188,3 @@ export function savedAnswerDefaultTitle(request: string, answer = ""): string {
 export function librarySerializedBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
-
-export function emptyLibrarySnapshot(): LibrarySnapshot {
-  return { categories: [], savedAnswers: [] };
-}

@@ -87,10 +87,7 @@ export function createClaudeHostTools(
     );
   }
   config.instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: providerMcpTools(runtime.definitions(), { destructiveHints: true }).map((tool) => ({
-      ...tool,
-      _meta: { "anthropic/alwaysLoad": true },
-    })),
+    tools: providerMcpTools(runtime.definitions(), { destructiveHints: true }),
   }));
   let closePromise: Promise<void> | undefined;
   return {

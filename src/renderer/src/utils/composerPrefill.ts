@@ -34,10 +34,6 @@ export function registerComposerPrefillTarget(target: ComposerPrefillTarget): ()
   };
 }
 
-export function hasComposerPrefillTarget(conversationId: string): boolean {
-  return currentTarget(conversationId) !== undefined;
-}
-
 /**
  * Adds text to the chat's open message box and reports whether one received
  * it. Callers keep their selection when nothing did. The window event stays

@@ -419,12 +419,6 @@ export class DetachedChatMain {
     return this.#manager.isFocused(conversationId(conversationIdValue));
   }
 
-  windowForConversation(conversationIdValue: string): BrowserWindow | null {
-    return this.#manager.windowForConversation(
-      conversationId(conversationIdValue),
-    );
-  }
-
   sendToDetached(channel: string, ...args: unknown[]): void {
     this.#manager.sendToAll(channel, ...args);
   }
@@ -438,10 +432,6 @@ export class DetachedChatMain {
       const window = this.#manager.windowForConversation(id);
       if (liveWindow(window)) applyWindowTheme(window, this.#platform, theme);
     }
-  }
-
-  flushWindowState(): void {
-    this.#manager.flushWindowState();
   }
 
   async closeAll(): Promise<void> {

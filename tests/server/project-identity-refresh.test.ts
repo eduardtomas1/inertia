@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  inspectProjectIdentityWithDeadline,
-  ProjectIdentityTimeout,
-  type ProjectIdentity,
-} from "../../src/server/project-identity";
+import type { ProjectIdentity } from "../../src/server/project-identity";
 import {
   PROJECT_IDENTITY_REFRESH_CONCURRENCY,
   ProjectIdentityRefresher,
@@ -35,36 +31,6 @@ function never(): Promise<never> {
 }
 
 describe("project identity deadline", () => {
-  it("rejects when inspection outlives its deadline", async () => {
-    let expire!: () => void;
-    const setDeadline = ((callback: () => void) => {
-      expire = callback;
-      return {} as NodeJS.Timeout;
-    }) as typeof setTimeout;
-    const clearDeadline = vi.fn() as unknown as typeof clearTimeout;
-    const pending = inspectProjectIdentityWithDeadline(
-      "/definitely/missing/inertia-timeout-test",
-      50,
-      setDeadline,
-      clearDeadline,
-    );
-    const assertion = expect(pending).rejects.toBeInstanceOf(
-      ProjectIdentityTimeout,
-    );
-
-    expire();
-
-    await assertion;
-    expect(clearDeadline).toHaveBeenCalledOnce();
-  });
-
-  it("surfaces pre-Git filesystem failures instead of hanging", async () => {
-    await expect(inspectProjectIdentityWithDeadline(
-      "/definitely/missing/inertia-test-path",
-      5_000,
-    )).rejects.toThrow();
-  });
-
   it("bounds the whole inspection, including realpath", async () => {
     const refresher = new ProjectIdentityRefresher({
       deadlineMs: 40,

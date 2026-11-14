@@ -1,0 +1,238 @@
+:root {
+  --usage-series-codex: #202124;
+  --usage-series-claude: #d97757;
+  --usage-series-cursor: #575650;
+  --usage-series-kimi: #2563eb;
+  --usage-series-opencode: #8a8583;
+  --usage-series-antigravity: #7667c9;
+  --usage-series-grok: color-mix(in srgb, var(--text) 72%, var(--bg));
+  --limit-fill-codex: color-mix(in srgb, var(--text) 55%, var(--bg));
+  --limit-fill-claude: color-mix(in srgb, var(--usage-series-claude) 85%, black);
+  --limit-fill-cursor: color-mix(in srgb, var(--usage-series-cursor) 75%, white);
+  --limit-fill-kimi: var(--usage-series-kimi);
+  --limit-fill-opencode: color-mix(in srgb, var(--usage-series-opencode) 88%, black);
+  --limit-fill-antigravity: var(--usage-series-antigravity);
+  --limit-fill-grok: color-mix(in srgb, var(--text) 55%, var(--bg));
+}
+
+:root[data-theme="dark"] {
+  --usage-series-codex: #ececea;
+  --usage-series-cursor: #c9c7c4;
+  --usage-series-kimi: #7aa2ff;
+  --usage-series-opencode: #9f9a98;
+  --usage-series-antigravity: #a394e6;
+  --limit-fill-codex: color-mix(in srgb, var(--usage-series-codex) 38%, transparent);
+  --limit-fill-claude: color-mix(in srgb, var(--usage-series-claude) 38%, transparent);
+  --limit-fill-cursor: color-mix(in srgb, var(--usage-series-cursor) 38%, transparent);
+  --limit-fill-kimi: color-mix(in srgb, var(--usage-series-kimi) 38%, transparent);
+  --limit-fill-opencode: color-mix(in srgb, var(--usage-series-opencode) 38%, transparent);
+  --limit-fill-antigravity: color-mix(in srgb, var(--usage-series-antigravity) 38%, transparent);
+  --limit-fill-grok: color-mix(in srgb, var(--usage-series-grok) 38%, transparent);
+}
+
+.limit-bar {
+  --limit-color: var(--text-muted);
+  --limit-fill: color-mix(in srgb, var(--limit-color) 38%, transparent);
+  --limit-track: var(--fill-strong);
+  --limit-at: clamp(3px, var(--limit-mark, 50%), calc(100% - 3px));
+  position: relative;
+  display: block;
+  min-width: 0;
+  height: 32px;
+  border-radius: var(--radius-xs);
+  container: limit-bar / inline-size;
+}
+
+.limit-bar[data-compact] {
+  height: 8px;
+  margin-block: 2px;
+}
+
+:is(.limit-bar, .limits-provider)[data-provider="codex"] { --limit-color: var(--usage-series-codex); --limit-fill: var(--limit-fill-codex); }
+:is(.limit-bar, .limits-provider)[data-provider="claude"] { --limit-color: var(--usage-series-claude); --limit-fill: var(--limit-fill-claude); }
+:is(.limit-bar, .limits-provider)[data-provider="cursor"] { --limit-color: var(--usage-series-cursor); --limit-fill: var(--limit-fill-cursor); }
+:is(.limit-bar, .limits-provider)[data-provider="kimi"] { --limit-color: var(--usage-series-kimi); --limit-fill: var(--limit-fill-kimi); }
+:is(.limit-bar, .limits-provider)[data-provider="opencode"] { --limit-color: var(--usage-series-opencode); --limit-fill: var(--limit-fill-opencode); }
+:is(.limit-bar, .limits-provider)[data-provider="antigravity"] { --limit-color: var(--usage-series-antigravity); --limit-fill: var(--limit-fill-antigravity); }
+:is(.limit-bar, .limits-provider)[data-provider="grok"] { --limit-color: var(--usage-series-grok); --limit-fill: var(--limit-fill-grok); }
+.limit-bar[data-due] { --limit-color: var(--text-muted); --limit-fill: color-mix(in srgb, var(--text-muted) 38%, transparent); }
+
+.limit-bar-track,
+.limit-bar-layers {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.limit-bar-track {
+  background: var(--limit-track);
+}
+
+.limit-bar-layers {
+  overflow: hidden;
+}
+
+.limit-bar-fill,
+.limit-bar-hatch {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.limit-bar-fill {
+  left: 0;
+  border-radius: inherit;
+  background: var(--limit-fill);
+}
+
+.limit-bar-hatch {
+  right: 0;
+  background-image: repeating-linear-gradient(135deg, var(--limit-color) 0 1px, transparent 1px 5px);
+  opacity: 0.32;
+}
+
+.limit-bar[data-muted] .limit-bar-fill {
+  opacity: 0.5;
+}
+
+.limit-bar-mark {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: var(--limit-at);
+  width: 2px;
+  border-radius: 999px;
+  background: var(--text);
+  translate: -50% 0;
+}
+
+.limit-bar[data-compact] .limit-bar-mark {
+  top: -2px;
+  bottom: -2px;
+}
+
+.limit-bar[data-marked] .limit-bar-track {
+  background: linear-gradient(
+    to right,
+    var(--limit-track) calc(var(--limit-at) - 3px),
+    transparent calc(var(--limit-at) - 3px),
+    transparent calc(var(--limit-at) + 3px),
+    var(--limit-track) calc(var(--limit-at) + 3px)
+  );
+}
+
+.limit-bar[data-marked] .limit-bar-layers {
+  clip-path: polygon(
+    -1px -1px,
+    calc(var(--limit-at) - 3px) -1px,
+    calc(var(--limit-at) - 3px) calc(100% + 1px),
+    calc(var(--limit-at) + 3px) calc(100% + 1px),
+    calc(var(--limit-at) + 3px) -1px,
+    calc(100% + 1px) -1px,
+    calc(100% + 1px) calc(100% + 1px),
+    -1px calc(100% + 1px)
+  );
+}
+
+@container limit-bar (max-width: 5.9px) {
+  .limit-bar-mark {
+    display: none;
+  }
+
+  .limit-bar[data-marked] .limit-bar-track {
+    background: var(--limit-track);
+  }
+
+  .limit-bar[data-marked] .limit-bar-layers {
+    clip-path: none;
+  }
+}
+
+.limit-pace {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.limit-rows {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.limit-row {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.limit-row-head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.limit-row-label {
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.limit-row-value {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.limit-row-value b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.limit-row[data-tone="low"] .limit-row-value b {
+  color: var(--warning);
+}
+
+.limit-row[data-tone="critical"] .limit-row-value b {
+  color: var(--danger);
+}
+
+.limit-row[data-reset-due] .limit-row-value b {
+  color: var(--text-muted);
+}
+
+.limit-row-reset {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .limit-bar-fill,
+  .limit-bar-hatch {
+    transition: width var(--dur-slow) var(--ease);
+  }
+}
+
+@media (forced-colors: active) {
+  .limit-bar-track {
+    border: 1px solid CanvasText;
+  }
+
+  .limit-bar-fill {
+    background: Highlight;
+    opacity: 1;
+  }
+
+  .limit-bar-mark {
+    background: CanvasText;
+  }
+}

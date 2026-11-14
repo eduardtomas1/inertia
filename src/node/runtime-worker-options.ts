@@ -14,6 +14,7 @@ export interface RuntimeWorkerOptions extends RuntimeRecoveryWorkerOptions {
   codexBinaryPath?: string;
   /** Main-owned import root used to revalidate brokered attachment capabilities. */
   attachmentRoot?: string;
+  agentSecretDirectory?: string;
   /** Safe configuration only; credential values remain in the main-process vault. */
   kimiClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
   /** Test-only packaged-runtime proof that the native PDF stack can execute. */

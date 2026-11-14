@@ -133,7 +133,7 @@ export function MainWindowTargets(props: {
       else props.activateConversation(conversation);
     },
     openUsageLimits: () => {
-      if (usageLimits) usageLimits.open();
+      if (usageLimits) usageLimits.open(null, "limits");
       else props.actions.reportUnavailable("Provider limits are unavailable.");
     },
   });

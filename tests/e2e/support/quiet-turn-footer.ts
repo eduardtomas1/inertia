@@ -20,7 +20,8 @@ export async function verifyQuietTurnFooter(input: {
   await runDetailsToggle.focus();
   await expect.poll(footerOpacity).toBe("1");
   await expect(turnMetaPrimary).not.toContainText("Completed");
-  await expect(turnMetaPrimary).toContainText("Worked 42s");
+  await expect(turnMetaPrimary).not.toContainText("Worked");
+  await expect(turnMetaPrimary.locator("time")).toHaveCount(1);
   await expect(turnMetaPrimary).not.toContainText(selection.harnessId);
   await expect(turnMetaPrimary).not.toContainText(selection.backendProfileId);
   await expect(turnMetaPrimary).not.toContainText(selection.modelId);
@@ -28,7 +29,7 @@ export async function verifyQuietTurnFooter(input: {
   await runDetailsToggle.click();
   await expect(runDetailsToggle).toHaveAttribute("aria-expanded", "true");
   await expect(runDetails).toBeVisible();
-  await expect(runDetails.getByRole("list", { name: "Agent work transcript" })).toBeVisible();
+  await expect(runDetails.getByRole("list", { name: "Agent work transcript" })).toHaveCount(0);
   await expect(runDetails).not.toContainText("Harness ID");
   const diagnosticsToggle = runDetails.getByRole("button", { name: "Diagnostics" });
   await expect(diagnosticsToggle).toHaveAttribute("aria-expanded", "false");

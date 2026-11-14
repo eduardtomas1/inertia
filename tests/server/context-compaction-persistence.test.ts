@@ -38,3 +38,31 @@ it.each([69, 70])("upgrades schema%s and retains a compaction receipt across res
     expect(reopened.latestAgentTurnForConversation(chat.id)).toBeNull();
   } finally { reopened.close(); }
 });
+
+it("keeps a chat's place when a receipt is written without touching the conversation", () => {
+  const root = mkdtempSync(join(tmpdir(), "inertia-compaction-silent-")); directories.push(root);
+  const workspace = join(root, "workspace"); mkdirSync(workspace);
+  const store = new RuntimeStore(join(root, "inertia.sqlite"), workspace, { recoverInterruptedRuns: false });
+  try {
+    const project = store.createProject("Compaction", workspace);
+    const chat = store.createConversation(project.id, "Keep context");
+    store.createMessage(chat.id, "Earlier work", "user", [], null, "2026-11-09T08:00:00.000Z");
+    store.settleConversation(chat.id, true);
+    const before = store.conversation(chat.id);
+    const projectBefore = store.shellSnapshot().projects.find(({ id }) => id === project.id)?.updatedAt;
+    const receipt = store.createMessage(chat.id, "/compact", "system", [], null, "2026-11-09T08:58:30.000Z", {
+      compaction: { providerId: "claude", beforeTokens: 240000, afterTokens: 9000, instructionForwarded: false, trigger: "idle", sessionInstructionDigest: null },
+      touchConversation: false,
+    });
+    expect(store.message(receipt.id)).toEqual(receipt);
+    const after = store.conversation(chat.id);
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(after.settledAt ?? null).toBe(before.settledAt ?? null);
+    expect(after.lastViewedAt ?? null).toBe(before.lastViewedAt ?? null);
+    expect(store.shellSnapshot().projects.find(({ id }) => id === project.id)?.updatedAt).toBe(projectBefore);
+    store.createMessage(chat.id, "/compact", "system", [], null, "2026-11-09T09:30:00.000Z", {
+      compaction: { providerId: "claude", beforeTokens: 9000, afterTokens: 8000, instructionForwarded: false, trigger: "manual", sessionInstructionDigest: null },
+    });
+    expect(store.conversation(chat.id).updatedAt).toBe("2026-11-09T09:30:00.000Z");
+  } finally { store.close(); }
+});

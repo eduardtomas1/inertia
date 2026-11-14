@@ -7,6 +7,7 @@ import { providerIconDefinition } from "../../utils/providerIcons";
 import { DUO_COMPARISON_REQUEST_LABEL } from "../../utils/response-timeline/virtualization";
 import { messageContextMenu } from "./messageContextMenu";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
+import { useTaskCreator } from "../tasks/taskCreation";
 import "./DuoComparisonRequest.css";
 
 const STATUS: Record<DuoComparisonBriefSide["status"], { label: string; icon: LucideIcon }> = {
@@ -63,6 +64,7 @@ export function DuoComparisonRequest({
   onAfterToggle?: () => void;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
+  const taskCreator = useTaskCreator();
   const headingId = useId();
   const briefId = useId();
   const toggle = (): void => {
@@ -79,7 +81,7 @@ export function DuoComparisonRequest({
       data-turn-jump-target="request"
       data-message-search-id={turn.userMessage.id}
       tabIndex={-1}
-      {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
+      {...messageContextMenu(turn.userMessage, turn.userMessage.content, taskCreator)}
     >
       {meta}
       <p id={headingId} className="duo-comparison-heading">{DUO_COMPARISON_REQUEST_LABEL}</p>

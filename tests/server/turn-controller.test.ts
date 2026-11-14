@@ -5,16 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { FULL_HARNESS_CAPABILITY_OFFER } from "../../src/server/runtime/harness-capabilities";
-import {
-  continuationIdentityForSelection,
-  modelSelectionSchema,
-  providerNativeBackendProfile,
-  providerNativeModelSelection,
-  resolveHarnessBackendCompatibility,
-} from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import type { ProviderGoalSnapshot } from "../../src/server/provider/contracts";
 import { recoverInterruptedTurns } from "../../src/server/runtime/turns/turn-recovery";
-import { BUILD_MODE_INSTRUCTION } from "../../src/server/runtime/turns/request-context";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 import {
   cleanupTurnControllerTestDirectories,
@@ -557,133 +550,6 @@ describe("TurnController authoritative lifecycle", () => {
         sequence: 2,
       }));
     reopened.close();
-  });
-
-  it("injects one Build instruction before every native or custom adapter and never in Plan mode", async () => {
-    const nativeProviders = ["codex", "claude", "cursor", "kimi", "opencode"] as const;
-    for (const providerId of nativeProviders) {
-      const runtime = await testRuntime({}, {
-        modelSelection: providerNativeModelSelection({
-          providerId,
-          modelId: "provider-default",
-        }),
-      });
-      const visibleContent = `Implement through ${providerId}.`;
-      const queued = runtime.controller.queue({
-        conversationId: runtime.conversationId,
-        content: visibleContent,
-      });
-      expect(runtime.controller.start(queued.turn.id)).toBe(true);
-      expect(runtime.provider.input).toMatchObject({
-        providerId,
-        prompt: expect.stringContaining(BUILD_MODE_INSTRUCTION),
-      });
-      expect(runtime.provider.input?.prompt.startsWith(`${visibleContent}\n\n`))
-        .toBe(true);
-      expect(runtime.provider.input?.prompt.split(BUILD_MODE_INSTRUCTION))
-        .toHaveLength(2);
-      runtime.provider.resolve();
-      await flushPromises();
-      runtime.store.close();
-    }
-
-    const customProfile = {
-      ...providerNativeBackendProfile("codex"),
-      id: "custom:responses-task-51",
-      displayName: "Task 51 custom Responses",
-      protocol: "openai-responses" as const,
-      authenticationMode: "api-key" as const,
-      source: "custom" as const,
-      configurationRevision: 51,
-      endpointIdentity: "endpoint:task-51",
-    };
-    const customHarnessId = "codex-app-server" as const;
-    const customSelection = modelSelectionSchema.parse({
-      ...providerNativeModelSelection({
-        providerId: "codex",
-        modelId: "custom-model",
-      }),
-      harnessId: customHarnessId,
-      backendProfileId: customProfile.id,
-      backendProfileDisplayName: customProfile.displayName,
-      backendConfigurationRevision: customProfile.configurationRevision,
-    });
-    const customCompatibility = resolveHarnessBackendCompatibility(
-      customHarnessId,
-      customProfile,
-    );
-    const customRuntime = await testRuntime({}, {
-      modelSelection: customSelection,
-      resolveModelRoute: () => ({
-        providerId: "codex",
-        harnessId: customHarnessId,
-        backendProfile: customProfile,
-        compatibility: customCompatibility,
-        continuationIdentity: continuationIdentityForSelection(
-          customSelection,
-          customProfile.endpointIdentity,
-          !customCompatibility.allowsModelSwitchWithinSession,
-        ),
-      }),
-    });
-    const customQueued = customRuntime.controller.queue({
-      conversationId: customRuntime.conversationId,
-      content: "Implement through the custom adapter.",
-    });
-    expect(customRuntime.controller.start(customQueued.turn.id)).toBe(true);
-    expect(customRuntime.provider.input).toMatchObject({
-      backendProfile: { id: customProfile.id, source: "custom" },
-      prompt: expect.stringContaining(BUILD_MODE_INSTRUCTION),
-    });
-    expect(customRuntime.provider.input?.prompt.split(BUILD_MODE_INSTRUCTION))
-      .toHaveLength(2);
-    customRuntime.provider.resolve();
-    await flushPromises();
-    customRuntime.store.close();
-
-    const planRuntime = await testRuntime({}, { interactionMode: "plan" });
-    const planQueued = planRuntime.controller.queue({
-      conversationId: planRuntime.conversationId,
-      content: "Plan this change without acting.",
-    });
-    expect(planRuntime.controller.start(planQueued.turn.id)).toBe(true);
-    expect(planRuntime.provider.input?.prompt).toBe(
-      "Plan this change without acting.",
-    );
-    expect(planRuntime.provider.input?.prompt).not.toContain(
-      BUILD_MODE_INSTRUCTION,
-    );
-    planRuntime.provider.resolve();
-    await flushPromises();
-    planRuntime.store.close();
-  }, 30_000);
-
-  it("adds the Build instruction on the session's first turn and not again on a resumed follow-up", async () => {
-    const runtime = await testRuntime();
-    const first = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Implement the first change.",
-    });
-    expect(runtime.controller.start(first.turn.id)).toBe(true);
-    expect(runtime.provider.input?.prompt.split(BUILD_MODE_INSTRUCTION)).toHaveLength(2);
-    runtime.provider.emit({
-      ...identity(runtime),
-      type: "session",
-      sessionId: "task-51-session",
-    });
-    runtime.provider.resolve();
-    await flushPromises();
-
-    const followUp = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Now validate the follow-up.",
-    });
-    expect(runtime.controller.start(followUp.turn.id)).toBe(true);
-    expect(runtime.provider.input?.sessionId).toBe("task-51-session");
-    expect(runtime.provider.input?.prompt).toBe("Now validate the follow-up.");
-    runtime.provider.resolve();
-    await flushPromises();
-    runtime.store.close();
   });
 
   it("settles and broadcasts the provider terminal state before slow Git finalization", async () => {

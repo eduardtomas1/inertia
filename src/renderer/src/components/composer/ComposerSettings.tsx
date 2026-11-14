@@ -1,11 +1,5 @@
 import { accessModeUnavailableReason, effectiveAccessMode } from "@shared/access-modes";
-import {
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Hammer,
-  ListChecks,
-} from "lucide-react";
+import { Check, ChevronDown, Gauge } from "lucide-react";
 import clsx from "clsx";
 import type {
   Conversation,
@@ -19,6 +13,17 @@ import {
 import { ComposerResponseSpeedOptions } from "./ComposerResponseSpeedOptions";
 import { useWatcherRunLock, WATCHER_RUN_LOCK_LABEL } from "../watcher/watcherContext";
 import type { ComposerMenuController } from "./useComposerMenus";
+import type { ComposerFoldKey } from "./useComposerChipFolding";
+
+export function SettingChevron(): React.JSX.Element {
+  return (
+    <ChevronDown
+      className="composer-setting-chevron"
+      size={12}
+      aria-hidden="true"
+    />
+  );
+}
 
 export interface ComposerSettingsModel {
   reasoningOptions: ReadonlyArray<{
@@ -53,7 +58,10 @@ export interface ComposerSettingsProps {
     >>,
   ) => Promise<void>;
   conversationUpdatePending: boolean;
+  folded?: ReadonlySet<ComposerFoldKey>;
 }
+
+const NOTHING_FOLDED: ReadonlySet<ComposerFoldKey> = new Set();
 
 export function ComposerSettings({
   selectedModel,
@@ -68,6 +76,7 @@ export function ComposerSettings({
   onUpdateFastMode,
   onUpdateConversation,
   conversationUpdatePending,
+  folded = NOTHING_FOLDED,
 }: ComposerSettingsProps): React.JSX.Element {
   const {
     menu,
@@ -82,15 +91,16 @@ export function ComposerSettings({
   const access = accessOptions.find(
     (item) => item.value === effectiveAccess,
   ) ?? accessOptions[2]!;
-  const ModeIcon = conversation.interactionMode === "build"
-    ? Hammer
-    : ListChecks;
   const fastMode = selectedModel?.fastMode ?? null;
   const showResponseSpeed = fastMode !== null || selectedFastMode;
   const responseSpeedLabel = selectedFastMode
     ? "Fast"
     : "Standard";
   const runLocked = useWatcherRunLock(conversation.id);
+  const fold = (key: ComposerFoldKey) => ({
+    "data-composer-fold": key,
+    "data-folded": folded.has(key) ? "true" : undefined,
+  });
 
   return (
     <div
@@ -99,12 +109,12 @@ export function ComposerSettings({
       aria-label="Composer settings"
     >
       {selectedModel && selectedModel.reasoningOptions.length > 0 && (
-        <div className="popover-anchor composer-setting-control composer-reasoning-control">
+        <div className="popover-anchor composer-setting-control composer-reasoning-control" {...fold("reasoning")}>
           <button
             ref={(node) => setMenuTrigger("reasoning", node)}
             type="button"
             className={clsx(
-              "composer-pill composer-setting-trigger",
+              "composer-pill composer-setting-trigger composer-chip",
               menu === "reasoning" && "is-active",
             )}
             aria-label={`Choose reasoning level. Current level: ${reasoningLabel}.`}
@@ -116,12 +126,13 @@ export function ComposerSettings({
             onClick={() => toggleMenu("reasoning")}
             onKeyDown={(event) => handleComposerMenuTriggerKeyDown("reasoning", event)}
           >
-            <span className="composer-setting-value">{reasoningLabel}</span>
-            <ChevronDown
-              className="composer-setting-chevron"
-              size={14}
+            <Gauge
+              className="composer-setting-icon"
+              size={16}
               aria-hidden="true"
             />
+            <span className="composer-setting-value">{reasoningLabel}</span>
+            <SettingChevron />
           </button>
           {menu === "reasoning" && (
             <div
@@ -162,12 +173,12 @@ export function ComposerSettings({
         </div>
       )}
       {showResponseSpeed && (
-        <div className="popover-anchor composer-setting-control composer-speed-control">
+        <div className="popover-anchor composer-setting-control composer-speed-control" {...fold("speed")}>
           <button
             ref={(node) => setMenuTrigger("speed", node)}
             type="button"
             className={clsx(
-              "composer-pill composer-setting-trigger",
+              "composer-pill composer-setting-trigger composer-chip",
               menu === "speed" && "is-active",
             )}
             aria-label={`Choose response speed. Current speed: ${responseSpeedLabel}.`}
@@ -179,17 +190,8 @@ export function ComposerSettings({
             onClick={() => toggleMenu("speed")}
             onKeyDown={(event) => handleComposerMenuTriggerKeyDown("speed", event)}
           >
-            <ChevronRight
-              className="composer-setting-icon"
-              size={14}
-              aria-hidden="true"
-            />
             <span className="composer-setting-value">{responseSpeedLabel}</span>
-            <ChevronDown
-              className="composer-setting-chevron"
-              size={14}
-              aria-hidden="true"
-            />
+            <SettingChevron />
           </button>
           {menu === "speed" && (
             <div
@@ -212,16 +214,16 @@ export function ComposerSettings({
         </div>
       )}
       {runLocked ? (
-        <span className="composer-pill composer-run-lock" data-composer-setting="run-lock">
+        <span className="composer-pill composer-chip composer-run-lock" data-composer-setting="run-lock">
           {WATCHER_RUN_LOCK_LABEL}
         </span>
       ) : <>
-      <div className="popover-anchor composer-setting-control access-control composer-access-control">
+      <div className="popover-anchor composer-setting-control access-control composer-access-control" {...fold("access")}>
         <button
           ref={(node) => setMenuTrigger("access", node)}
           type="button"
           className={clsx(
-            "composer-pill composer-setting-trigger",
+            "composer-pill composer-setting-trigger composer-chip",
             menu === "access" && "is-active",
           )}
           aria-label={`Choose project access. Current access: ${access.label}.`}
@@ -235,11 +237,7 @@ export function ComposerSettings({
             handleComposerMenuTriggerKeyDown("access", event)}
         >
           <span className="composer-setting-value">{access.label}</span>
-          <ChevronDown
-            className="composer-setting-chevron"
-            size={14}
-            aria-hidden="true"
-          />
+          <SettingChevron />
         </button>
         {menu === "access" && (
           <div
@@ -277,12 +275,12 @@ export function ComposerSettings({
           </div>
         )}
       </div>
-      <div className="popover-anchor composer-setting-control composer-mode-control">
+      <div className="popover-anchor composer-setting-control composer-mode-control" {...fold("mode")}>
         <button
           ref={(node) => setMenuTrigger("mode", node)}
           type="button"
           className={clsx(
-            "composer-pill composer-setting-trigger",
+            "composer-pill composer-setting-trigger composer-chip",
             menu === "mode" && "is-active",
           )}
           aria-label={`Choose work mode. Current mode: ${
@@ -297,19 +295,10 @@ export function ComposerSettings({
           onKeyDown={(event) =>
             handleComposerMenuTriggerKeyDown("mode", event)}
         >
-          <ModeIcon
-            className="composer-setting-icon"
-            size={14}
-            aria-hidden="true"
-          />
           <span className="composer-setting-value">
             {conversation.interactionMode === "build" ? "Build" : "Plan"}
           </span>
-          <ChevronDown
-            className="composer-setting-chevron"
-            size={14}
-            aria-hidden="true"
-          />
+          <SettingChevron />
         </button>
         {menu === "mode" && (
           <div

@@ -92,7 +92,7 @@ describe("Background tasks for the whole chat", () => {
     act(() => screen.getByRole("button", { name: "Show 5 more finished tasks" }).click());
     await flush();
     expect(within(list).getAllByRole("listitem")).toHaveLength(45);
-    expect(new Set(within(list).getAllByRole("listitem").map((item) => item.textContent)).size).toBe(45);
+    expect(new Set(within(list).getAllByRole("listitem").map((item) => item.dataset.focusRow)).size).toBe(45);
     expect(screen.getByRole("button", { name: "Show fewer finished tasks" })).toHaveAttribute("aria-expanded", "true");
     expect(within(list).getAllByRole("listitem")[44]).toHaveTextContent("Old 0");
   });

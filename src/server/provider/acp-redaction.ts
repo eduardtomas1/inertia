@@ -3,7 +3,7 @@ import { redactHostToolPayload } from "./host-tool-redaction";
 
 const CREDENTIAL_ENVIRONMENT_KEY =
   /(?:^|[._-])(?:api[._-]?key|auth(?:entication|orization|[._-]key)|cookie|credentials?|(?:access|client|encryption|private|secret|service|signing|subscription)[._-]?key(?:[._-]?id)?|pass(?:code|phrase|word)?|passwd|private[._-]?key|pwd|secret|token)(?:$|[._-])/iu;
-const SIGNIFICANT_SECRET_PREFIX_CHARS = 6;
+export const SIGNIFICANT_SECRET_PREFIX_CHARS = 6;
 const FILE_REFERENCE_ENVIRONMENT_KEY =
   /(?:^|[._-])(?:dir(?:ectory)?|file|home|path|root|sock(?:et)?)$/iu;
 
@@ -19,28 +19,25 @@ export function acpEnvironmentSecretValues(
 }
 
 export class AcpSecretRedactor {
-  private readonly secrets: string[];
+  private matcher: SecretMatcher;
   private readonly assistant: BoundarySecretRedactor;
   private readonly reasoning: BoundarySecretRedactor;
   private readonly stderr: BoundarySecretRedactor;
 
   constructor(environment: NodeJS.ProcessEnv) {
-    this.secrets = acpEnvironmentSecretValues(environment);
-    this.assistant = new BoundarySecretRedactor(() => this.secrets);
-    this.reasoning = new BoundarySecretRedactor(() => this.secrets);
-    this.stderr = new BoundarySecretRedactor(() => this.secrets);
+    this.matcher = new SecretMatcher(acpEnvironmentSecretValues(environment));
+    this.assistant = new BoundarySecretRedactor(() => this.matcher);
+    this.reasoning = new BoundarySecretRedactor(() => this.matcher);
+    this.stderr = new BoundarySecretRedactor(() => this.matcher);
   }
 
   addSecrets(values: readonly string[]): void {
-    const merged = normalizedSecrets([...this.secrets, ...values]);
-    this.secrets.splice(0, this.secrets.length, ...merged);
-    this.assistant.invalidate();
-    this.reasoning.invalidate();
-    this.stderr.invalidate();
+    const merged = normalizedSecrets([...this.matcher.secrets, ...values]);
+    if (!this.matcher.matches(merged)) this.matcher = new SecretMatcher(merged);
   }
 
   payload<T>(value: T): T {
-    return redactHostToolPayload(value, this.secrets);
+    return redactHostToolPayload(value, this.matcher.secrets);
   }
 
   /** Stream text must reach assistantChunk/reasoningChunk before masking. */
@@ -80,6 +77,10 @@ export class AcpSecretRedactor {
     return this.assistant.finish("significant");
   }
 
+  flushAssistant(): string {
+    return this.assistant.flush("significant");
+  }
+
   finishReasoning(): string {
     return this.reasoning.finish("significant");
   }
@@ -105,12 +106,29 @@ function normalizedSecrets(values: readonly string[]): string[] {
     .sort((left, right) => right.length - left.length);
 }
 
-class BoundarySecretRedactor {
+export class SecretMatcher {
+  static readonly empty = new SecretMatcher([]);
+  readonly secrets: readonly string[];
+  private trie: SecretTrieNode | undefined;
+
+  constructor(secrets: readonly string[]) {
+    this.secrets = Object.freeze([...secrets]);
+  }
+
+  get root(): SecretTrieNode {
+    return this.trie ??= secretTrie(this.secrets);
+  }
+
+  matches(secrets: readonly string[]): boolean {
+    return secrets.length === this.secrets.length && secrets.every((secret, index) => secret === this.secrets[index]);
+  }
+}
+
+export class BoundarySecretRedactor {
   private pending = "";
   private finished = false;
-  private root: SecretTrieNode | undefined;
 
-  constructor(private readonly secrets: () => readonly string[]) {}
+  constructor(private readonly matcher: () => SecretMatcher) {}
 
   push(value: string): string {
     if (this.finished || !value) return "";
@@ -124,17 +142,17 @@ class BoundarySecretRedactor {
     return this.drain(true, redactPartial);
   }
 
+  flush(redactPartial: PartialSecretRedaction): string {
+    return this.finished ? "" : this.drain(true, redactPartial);
+  }
+
   discard(): void {
     this.pending = "";
     this.finished = true;
   }
 
-  invalidate(): void {
-    this.root = undefined;
-  }
-
   private drain(final: boolean, redactPartial?: PartialSecretRedaction): string {
-    const root = this.root ??= secretTrie(this.secrets());
+    const root = this.matcher().root;
     const text = this.pending;
     if (root.children.size === 0) {
       this.pending = "";
@@ -195,7 +213,7 @@ function isLowSurrogate(text: string, index: number): boolean {
   return unit >= 0xdc00 && unit <= 0xdfff;
 }
 
-type PartialSecretRedaction = "all" | "significant";
+export type PartialSecretRedaction = "all" | "significant";
 
 interface SecretTrieNode {
   readonly children: Map<string, SecretTrieNode>;

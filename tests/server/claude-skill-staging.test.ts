@@ -231,7 +231,7 @@ describe("Claude selected-skill staging", () => {
       name: "linked",
       path: realpathSync(join(linked, "SKILL.md")),
     }], root, { HOME: home }, { includeDiscovered: true }))
-      .rejects.toThrow("A selected Claude skill contains a symbolic link.");
+      .rejects.toThrow("A selected Claude skill links to a file or folder it may not use.");
   });
 
   it("links the folders of a selected skill too large to copy", async () => {
@@ -315,7 +315,7 @@ describe("Claude selected-skill staging", () => {
       source: "claude-native",
       name: "large-linked",
       path: realpathSync(skillPath),
-    }], root, {})).rejects.toThrow("A selected Claude skill contains a symbolic link.");
+    }], root, {})).rejects.toThrow("A selected Claude skill links to a file or folder it may not use.");
   });
 
   it("keeps later discovered skills when one is too large to check", async () => {
@@ -361,7 +361,7 @@ describe("Claude selected-skill staging", () => {
       source: "claude-native",
       name: "nested-git",
       path: realpathSync(skillPath),
-    }], root, {})).rejects.toThrow("A selected Claude skill contains a symbolic link.");
+    }], root, {})).rejects.toThrow("A selected Claude skill links to a file or folder it may not use.");
   });
 
   it("never removes original files when a staged skill folder was replaced by a link", async () => {
@@ -389,6 +389,154 @@ describe("Claude selected-skill staging", () => {
     expect(statSync(join(skill, "archive.bin")).size).toBe(2 * 1024 * 1024);
     expect(readdirSync(join(skill, "wiki"))).toHaveLength(300);
     expect(existsSync(skillPath)).toBe(true);
+  });
+
+  describe("links inside a skill", () => {
+    const REFUSED = "A selected Claude skill links to a file or folder it may not use.";
+
+    function userSkill(home: string, name: string): { skillPath: string; skill: string } {
+      const skillPath = realpathSync.native(writeClaudeSkill(home, name));
+      return { skillPath, skill: join(skillPath, "..") };
+    }
+
+    function sharedDocs(home: string): string {
+      const shared = join(home, "shared-docs");
+      mkdirSync(join(shared, "guides"), { recursive: true });
+      writeFileSync(join(shared, "guides", "modules.md"), "Shared modules guide.");
+      return realpathSync.native(shared);
+    }
+
+    it("copies folders a user skill links to inside itself and outside it", async () => {
+      const home = realpathSync.native(portableFixtureRoot("Claude skill inner links home"));
+      const project = realpathSync.native(portableFixtureRoot("Claude skill inner links project"));
+      roots.push(home, project);
+      const { skillPath, skill } = userSkill(home, "openbravo-expert");
+      mkdirSync(join(skill, "docs"));
+      writeFileSync(join(skill, "docs", "translations.md"), "Translation modules.");
+      symlinkSync(join(skill, "docs"), join(skill, "reference"), "junction");
+      symlinkSync(sharedDocs(home), join(skill, "shared"), "junction");
+
+      const staged = await stageClaudeSkillPlugin([{
+        source: "claude-native",
+        name: "openbravo-expert",
+        path: skillPath,
+      }], project, { HOME: home });
+      try {
+        const stagedSkill = join(staged!.path, "skills", "openbravo-expert");
+        expect(staged!.selectedSkillNames).toEqual(["inertia-selected-skills:openbravo-expert"]);
+        expect(lstatSync(join(stagedSkill, "reference")).isSymbolicLink()).toBe(false);
+        expect(readFileSync(join(stagedSkill, "reference", "translations.md"), "utf8"))
+          .toBe("Translation modules.");
+        expect(lstatSync(join(stagedSkill, "shared")).isSymbolicLink()).toBe(false);
+        expect(readFileSync(join(stagedSkill, "shared", "guides", "modules.md"), "utf8"))
+          .toBe("Shared modules guide.");
+      } finally {
+        await staged!.cleanup();
+      }
+      expect(readFileSync(join(home, "shared-docs", "guides", "modules.md"), "utf8"))
+        .toBe("Shared modules guide.");
+    });
+
+    it.skipIf(process.platform === "win32")("copies a file a skill links to", async () => {
+      const home = realpathSync.native(portableFixtureRoot("Claude skill file link home"));
+      const project = realpathSync.native(portableFixtureRoot("Claude skill file link project"));
+      roots.push(home, project);
+      const { skillPath, skill } = userSkill(home, "linked-file");
+      writeFileSync(join(skill, "v2.md"), "Version two.");
+      symlinkSync(join(skill, "v2.md"), join(skill, "latest.md"), "file");
+      symlinkSync(join(sharedDocs(home), "guides", "modules.md"), join(skill, "modules.md"), "file");
+
+      const staged = await stageClaudeSkillPlugin([{
+        source: "claude-native",
+        name: "linked-file",
+        path: skillPath,
+      }], project, { HOME: home });
+      try {
+        const stagedSkill = join(staged!.path, "skills", "linked-file");
+        expect(lstatSync(join(stagedSkill, "latest.md")).isSymbolicLink()).toBe(false);
+        expect(readFileSync(join(stagedSkill, "latest.md"), "utf8")).toBe("Version two.");
+        expect(readFileSync(join(stagedSkill, "modules.md"), "utf8")).toBe("Shared modules guide.");
+      } finally {
+        await staged!.cleanup();
+      }
+    });
+
+    it("links a linked folder of a user skill too large to copy", async () => {
+      const home = realpathSync.native(portableFixtureRoot("Claude large skill inner link home"));
+      const project = realpathSync.native(portableFixtureRoot("Claude large skill inner link project"));
+      roots.push(home, project);
+      const { skillPath, skill } = userSkill(home, "large-expert");
+      mkdirSync(join(skill, "wiki"));
+      for (let index = 0; index < 300; index += 1) {
+        writeFileSync(join(skill, "wiki", `page-${index}.md`), "x");
+      }
+      const shared = sharedDocs(home);
+      symlinkSync(shared, join(skill, "shared"), "junction");
+
+      const staged = await stageClaudeSkillPlugin([{
+        source: "claude-native",
+        name: "large-expert",
+        path: skillPath,
+      }], project, { HOME: home });
+      try {
+        const stagedSkill = join(staged!.path, "skills", "large-expert");
+        expect(lstatSync(join(stagedSkill, "shared")).isSymbolicLink()).toBe(true);
+        expect(realpathSync(join(stagedSkill, "shared"))).toBe(shared);
+        expect(readFileSync(join(stagedSkill, "shared", "guides", "modules.md"), "utf8"))
+          .toBe("Shared modules guide.");
+      } finally {
+        await staged!.cleanup();
+      }
+      expect(existsSync(join(shared, "guides", "modules.md"))).toBe(true);
+    });
+
+    it("refuses a repository skill link that leaves the repository", async () => {
+      const project = realpathSync.native(portableFixtureRoot("Claude repo skill outside link"));
+      const outside = realpathSync.native(portableFixtureRoot("Claude repo skill outside target"));
+      roots.push(project, outside);
+      mkdirSync(join(project, ".git"));
+      writeFileSync(join(outside, "notes.md"), "Outside.");
+      const skillPath = writeClaudeSkill(project, "leaving");
+      symlinkSync(outside, join(skillPath, "..", "outside"), "junction");
+
+      await expect(stageClaudeSkillPlugin([{
+        source: "claude-native",
+        name: "leaving",
+        path: realpathSync(skillPath),
+      }], project, {})).rejects.toThrow(REFUSED);
+    });
+
+    it("refuses a link from a skill back into one of its own folders", async () => {
+      const home = realpathSync.native(portableFixtureRoot("Claude skill loop home"));
+      const project = realpathSync.native(portableFixtureRoot("Claude skill loop project"));
+      roots.push(home, project);
+      const { skillPath, skill } = userSkill(home, "looping");
+      mkdirSync(join(skill, "docs"));
+      symlinkSync(skill, join(skill, "docs", "back"), "junction");
+
+      await expect(stageClaudeSkillPlugin([{
+        source: "claude-native",
+        name: "looping",
+        path: skillPath,
+      }], project, { HOME: home })).rejects.toThrow(
+        "A selected Claude skill links back into one of its own folders.",
+      );
+    });
+
+    it("refuses a link into the personal Claude configuration outside its skills", async () => {
+      const home = realpathSync.native(portableFixtureRoot("Claude skill config link home"));
+      const project = realpathSync.native(portableFixtureRoot("Claude skill config link project"));
+      roots.push(home, project);
+      const { skillPath, skill } = userSkill(home, "config-reader");
+      mkdirSync(join(home, ".claude", "agents"), { recursive: true });
+      symlinkSync(join(home, ".claude", "agents"), join(skill, "agents"), "junction");
+
+      await expect(stageClaudeSkillPlugin([{
+        source: "claude-native",
+        name: "config-reader",
+        path: skillPath,
+      }], project, { HOME: home })).rejects.toThrow(REFUSED);
+    });
   });
 
   describe("symlinked skill folders", () => {
@@ -464,7 +612,7 @@ describe("Claude selected-skill staging", () => {
         source: "claude-native",
         name: "nested",
         path: discovered[0]!.path,
-      }], project, { HOME: home })).rejects.toThrow("A selected Claude skill contains a symbolic link.");
+      }], project, { HOME: home })).rejects.toThrow("A selected Claude skill links to a file or folder it may not use.");
       const staged = await stageClaudeSkillPlugin([], project, { HOME: home }, { includeDiscovered: true });
       expect(staged).toBeNull();
     });

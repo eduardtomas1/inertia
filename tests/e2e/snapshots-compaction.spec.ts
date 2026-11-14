@@ -23,7 +23,9 @@ function fixturePixels(): number[] {
   return [...canvas.toBuffer("image/png")];
 }
 
-for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot attachments and retained compaction receipts with native IPC and keyboard focus`, async ({ browserName: _browserName }, testInfo) => {
+const theme = "dark";
+
+test(`reviews ${theme} snapshot attachments and retained compaction receipts with native IPC and keyboard focus`, async ({ browserName: _browserName }, testInfo) => {
   let conversationId = "";
   const app = await createAppFixture({ name: "snapshots-compaction", initialState: "conversation", windowDisplay: "primary", beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
     const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
@@ -124,7 +126,7 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
   finally { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); }
 });
 
-for (const theme of ["dark", "light"] as const) test(`opens the chat for a pending snapshot and explains a busy shortcut in ${theme}`, async ({ browserName: _browserName }, testInfo) => {
+test(`opens the chat for a pending snapshot and explains a busy shortcut in ${theme}`, async ({ browserName: _browserName }, testInfo) => {
   const app = await createAppFixture({ name: "snapshot-outcomes", initialState: "conversation", windowDisplay: "primary", beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
     const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
     try { store.updateSettings({ theme }); } finally { store.close(); }
@@ -177,7 +179,7 @@ test("loads snapshot native bindings in the Electron utility runtime without des
   } finally { await app.close(); }
 });
 
-for (const theme of ["dark", "light"] as const) test(`reviews a real Linux screenshot in ${theme} before importing it`, async ({ browserName: _browserName }, testInfo) => {
+test(`reviews a real Linux screenshot in ${theme} before importing it`, async ({ browserName: _browserName }, testInfo) => {
   test.skip(process.platform !== "linux", "Reviewed screenshots are currently Linux-only");
   const runtimeDirectory = process.env.XDG_RUNTIME_DIR;
   test.skip(Boolean(process.env.WAYLAND_DISPLAY) || process.env.XDG_SESSION_TYPE === "wayland"

@@ -13,11 +13,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  FolderPlus,
-  MessageCircleQuestion,
-  SquarePen,
-} from "lucide-react";
+import { FolderPlus, SquarePen } from "lucide-react";
 import clsx from "clsx";
 import type {
   AgentActivity,
@@ -58,6 +54,7 @@ import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
+import type { CustomAgent } from "@shared/custom-agents";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useReaderScrollIntent } from "../hooks/useReaderScrollIntent";
@@ -66,11 +63,9 @@ import {
   EMPTY_STREAMING_AGENT_SOURCE,
   type StreamingAgentSource,
 } from "../hooks/useStreamingAgentState";
-import {
-  turnEventOwner,
-  type TerminalTurnProjections,
-} from "../utils/terminalTurnProjection";
-import { revealAgentInputRequest } from "../utils/agentInputNavigation";
+import { turnEventOwner, type TerminalTurnProjections } from "../utils/terminalTurnProjection";
+import { PendingRequestNotices } from "./PendingRequestNotices";
+import { pendingSecretRequest, type SecretRequestCommandRunner } from "../utils/response-timeline/secretRequests";
 import { DuoJudgeNoticeSlot } from "./DuoJudgeNoticeContext";
 import {
   initialTranscriptNavigation,
@@ -98,6 +93,7 @@ import type {
 } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
 import { TimelineJumpToLatest } from "./TimelineJumpToLatest";
+import { startReaderIntentGuard } from "../utils/readerIntentGuard";
 import { afterSmoothScroll } from "../utils/smoothScrollSettle";
 import { markComposerSent, noteRequestSent } from "../utils/requestLiftOff";
 import type { WatcherWakeSummary } from "@shared/watcher";
@@ -113,7 +109,6 @@ import "./ChatWorkspace.css";
 const ProviderMaintenanceNotice = lazy(async () => ({
   default: (await import("./ProviderMaintenanceNotice")).ProviderMaintenanceNotice,
 }));
-const READER_INTENT_GUARD_MS = 750;
 const EMPTY_PROMPT_PRESETS: readonly PromptPreset[] = [];
 const EMPTY_CONTEXT_SOURCES: readonly ConversationContextSourceOption[] = [];
 const EMPTY_CONTEXT_PACKETS: readonly ConversationContextPacketSummary[] = [];
@@ -153,6 +148,9 @@ type ChatWorkspaceProps = {
   skillsError: string | null;
   promptPresets?: readonly PromptPreset[];
   promptPresetsEnabled?: boolean;
+  customAgents?: readonly CustomAgent[];
+  onOpenCustomAgentSettings?: () => void;
+  onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
   promptStashEnabled?: boolean;
   conversationContextHandoffEnabled?: boolean;
   agentContextRequestEnabled?: boolean;
@@ -183,6 +181,7 @@ type ChatWorkspaceProps = {
   onDelegationCommand?: DelegationCommandRunner;
   onOpenConversation?: (conversationId: string) => boolean;
   onConversationContextCommand?: ConversationContextCommandRunner;
+  onSecretRequestCommand?: SecretRequestCommandRunner;
   onQueueCommand?: QueueCommandRunner;
   onForkCommand?: ForkCommandRunner;
   onLimitResetCommand?: LimitResetCommandRunner;
@@ -277,7 +276,7 @@ export function ChatWorkspace({
   skillsLoading,
   skillsError,
   promptPresets = EMPTY_PROMPT_PRESETS,
-  promptPresetsEnabled = true,
+  promptPresetsEnabled = true, customAgents, onOpenCustomAgentSettings, onStopSubagent,
   promptStashEnabled = true,
   conversationContextHandoffEnabled = true,
   agentContextRequestEnabled = conversationContextHandoffEnabled,
@@ -308,6 +307,7 @@ export function ChatWorkspace({
   onDelegationCommand,
   onOpenConversation,
   onConversationContextCommand,
+  onSecretRequestCommand,
   onQueueCommand,
   onForkCommand,
   onLimitResetCommand,
@@ -377,7 +377,7 @@ export function ChatWorkspace({
   const composerRegionRef = useRef<HTMLDivElement>(null);
   const followCorrectionFrameRef = useRef<number | null>(null);
   const smoothSettleRef = useRef<(() => void) | null>(null);
-  const readerIntentReleaseTimerRef = useRef<number | null>(null);
+  const endReaderIntentGuardRef = useRef<(() => void) | null>(null);
   const lastReaderScrollTopRef = useRef<number | null>(null);
   const liveTurnRef = useRef(false);
   const goalRef = useRef(goal);
@@ -460,7 +460,6 @@ export function ChatWorkspace({
     dispatchNavigation(action);
   }, []);
   const readerIntentRef = useRef(false);
-  const aimedAtLatestRef = useRef(false);
   const finalAnswerAutoScrollOwnerRef = useRef<string | null>(null);
   const pendingFinalAnswerNavigationRef = useRef<{
     conversationId: string;
@@ -568,15 +567,13 @@ export function ChatWorkspace({
     ? { conversationId, turn: latestTurnSummary }
     : null, [conversationId, latestTurnSummary]);
   const pendingInputRequest = visibleInputRequests.at(-1) ?? null;
+  const pendingSecret = useMemo(() => pendingSecretRequest(ownedMessages), [ownedMessages]);
   const contentSignal = `${ownedTurns.length}:${ownedTurns.at(-1)?.updatedAt ?? ""}:${ownedMessages.length}:${ownedMessages.at(-1)?.content.length ?? 0}:${ownedActivities.length}:${ownedSubagents.length}:${ownedSubagents.at(-1)?.updatedAt ?? ""}:${ownedPlans.length}:${ownedCheckpoints.length}:${ownedTurnGitArtifacts.length}:${ownedTurnGitArtifacts.at(-1)?.status ?? ""}:${ownedTurnGitArtifacts.at(-1)?.capturedAt ?? ""}:${ownedApprovals.length}:${ownedInputRequests.length}`;
 
   const clearReaderIntent = useCallback((): void => {
     readerIntentRef.current = false;
-    aimedAtLatestRef.current = false;
-    if (readerIntentReleaseTimerRef.current !== null) {
-      window.clearTimeout(readerIntentReleaseTimerRef.current);
-      readerIntentReleaseTimerRef.current = null;
-    }
+    endReaderIntentGuardRef.current?.();
+    endReaderIntentGuardRef.current = null;
   }, []);
 
   const clearPendingFinalAnswerNavigation = useCallback((): void => {
@@ -693,21 +690,18 @@ export function ChatWorkspace({
     onLatestContentVisibilityChange?.(event.followsLatest);
   }, [clearPendingFinalAnswerNavigation, navigate, onLatestContentVisibilityChange]);
 
-  const revealPendingInput = useCallback((): void => {
-    if (!pendingInputRequest) return;
+  const revealPendingRequest = useCallback((reveal: () => boolean): void => {
     let remainingFrames = 4;
-    const reveal = (): boolean => {
-      if (revealAgentInputRequest(pendingInputRequest.id)) return true;
+    const attempt = (): boolean => {
+      if (reveal()) return true;
       remainingFrames -= 1;
-      if (remainingFrames > 0) {
-        window.requestAnimationFrame(() => reveal());
-      }
+      if (remainingFrames > 0) window.requestAnimationFrame(() => attempt());
       return false;
     };
-    reveal();
+    attempt();
     scrollToLatest("auto");
-    window.requestAnimationFrame(() => reveal());
-  }, [pendingInputRequest, scrollToLatest]);
+    window.requestAnimationFrame(() => attempt());
+  }, [scrollToLatest]);
 
   useLayoutEffect(() => {
     smoothSettleRef.current?.();
@@ -799,7 +793,7 @@ export function ChatWorkspace({
       followCorrectionFrameRef.current = null;
     }
     const intentConversationId = navigationRef.current.conversationId;
-    readerIntentReleaseTimerRef.current = window.setTimeout(() => {
+    endReaderIntentGuardRef.current = startReaderIntentGuard(() => {
       clearReaderIntent();
       // Content may have finished growing while the gesture guard blocked
       // following. Retry only if this conversation still owns following.
@@ -807,7 +801,7 @@ export function ChatWorkspace({
         navigationRef.current.conversationId === intentConversationId
         && transcriptNavigationFollowsContent(navigationRef.current)
       ) performScrollToLatest("auto");
-    }, READER_INTENT_GUARD_MS);
+    });
   }, [clearPendingFinalAnswerNavigation, clearReaderIntent, performScrollToLatest]);
 
   const noteResponseTimelineNavigationIntent = useCallback((): void => {
@@ -839,8 +833,16 @@ export function ChatWorkspace({
     event: React.KeyboardEvent<HTMLDivElement>,
   ): void => {
     if (!isTranscriptReaderNavigationKey(event.key)) return;
+    if (
+      event.key === "End"
+      && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      && !(event.target as Element).closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")
+    ) {
+      event.preventDefault();
+      scrollToLatest();
+      return;
+    }
     noteReaderIntent();
-    aimedAtLatestRef.current = !event.altKey && event.key === "End";
   };
 
   const onTranscriptScroll = (): void => {
@@ -850,9 +852,8 @@ export function ChatWorkspace({
     lastReaderScrollTopRef.current = element.scrollTop;
     continueTouchIntent();
     const intentional = readerIntentRef.current;
-    const { follows, movedUp } = readerScrollFollow({ scrollTop: element.scrollTop, clientHeight: element.clientHeight,
-      scrollHeight: element.scrollHeight, previousScrollTop, live: liveTurnRef.current, intentional, aimedAtLatest: aimedAtLatestRef.current });
-    if (movedUp) aimedAtLatestRef.current = false;
+    const follows = readerScrollFollow({ scrollTop: element.scrollTop, clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight, previousScrollTop, live: liveTurnRef.current, intentional });
     if (finalAnswerAutoScrollOwnerRef.current !== null) {
       onLatestContentVisibilityChange?.(follows);
       return;
@@ -1070,7 +1071,8 @@ export function ChatWorkspace({
                 ? onConversationContextCommand
                 : undefined}
               activities={ownedActivities}
-              subagents={ownedSubagents}
+              subagents={ownedSubagents} customAgents={customAgents} onStopSubagent={onStopSubagent}
+              onSecretRequestCommand={onSecretRequestCommand}
               reasonings={ownedReasonings}
               plans={ownedPlans}
               checkpoints={ownedCheckpoints}
@@ -1125,28 +1127,7 @@ export function ChatWorkspace({
 
       <div ref={composerRegionRef} className="composer-region">
         <TimelineJumpToLatest visible={showJump} scrollElementRef={scrollRef} onJump={scrollToLatest} />
-        {pendingInputRequest && (
-          <div
-            className="pending-input-notice"
-            role="status"
-            aria-live="polite"
-          >
-            <MessageCircleQuestion size={14} aria-hidden="true" />
-            <span>
-              <strong>Agent needs your answer</strong>
-              <small>{pendingInputRequest.questions.length === 1
-                ? "1 question is waiting"
-                : `${pendingInputRequest.questions.length} questions are waiting`}</small>
-            </span>
-            <button
-              type="button"
-              aria-controls={`agent-input-request-${pendingInputRequest.id}`}
-              onClick={revealPendingInput}
-            >
-              Answer
-            </button>
-          </div>
-        )}
+        <PendingRequestNotices inputRequest={pendingInputRequest} secretRequest={pendingSecret} onReveal={revealPendingRequest} />
         <DuoJudgeNoticeSlot
           conversationId={conversation.id}
           conversationStatus={conversation.status}
@@ -1211,7 +1192,7 @@ export function ChatWorkspace({
           compactOnReturnSetting={compactOnReturnSetting}
           onListSkills={onListSkills}
           promptPresets={promptPresets}
-          promptPresetsEnabled={promptPresetsEnabled}
+          promptPresetsEnabled={promptPresetsEnabled} customAgents={customAgents} onOpenCustomAgentSettings={onOpenCustomAgentSettings}
           promptStashEnabled={promptStashEnabled}
           onPromptPresetCommand={onPromptPresetCommand}
           onUpdateConversation={onUpdateConversation}

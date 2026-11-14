@@ -175,7 +175,7 @@ describe("every schema-valid browser input is accepted by the runtime and by mai
       await tools.config.instance.connect(serverTransport);
       await client.connect(clientTransport);
       const listed = await client.listTools();
-      for (const tool of listed.tools) expect(tool._meta).toEqual({ "anthropic/alwaysLoad": true });
+      for (const tool of listed.tools) expect(tool._meta?.["anthropic/alwaysLoad"]).toBeUndefined();
       const found = divergences(new Map(listed.tools.map((tool) => [tool.name, tool.inputSchema as Schema])));
       expect(found.filter((entry) => !KNOWN.has(entry))).toEqual([]);
     } finally {

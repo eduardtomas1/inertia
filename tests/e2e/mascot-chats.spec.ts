@@ -88,6 +88,8 @@ test("mascot follows three provider chats by priority, lists the others and spea
     await expect(message).toBeVisible();
     await expect(overlay.locator(".mascot-speech-dots")).toBeVisible();
     await expect(overlay.locator(".mascot-detail")).toHaveText("1 of 4 steps");
+    await expect(overlay.locator(".mascot-steps")).toBeVisible();
+    expect(await overlay.locator(".mascot-action").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     await gate("A-2");
     await expect(message).toHaveText("The publisher overwrites the preview with every tool title, so I'm going to keep the assistant's own words instead.");
     await expect(rows).toBeHidden();

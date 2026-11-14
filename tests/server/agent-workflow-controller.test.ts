@@ -193,6 +193,10 @@ function harness(options: {
       executable: "/fake/codex",
       environment: {},
       cwd: "/workspace/project",
+      installationUse: {
+        accept: vi.fn(() => null),
+        abandonBeforeSpawn: vi.fn(() => true),
+      },
     })),
     claudeSkills: vi.fn(async (_cwd: string, forceReload: boolean) => {
       const skills = options.claudeSkillsImplementation

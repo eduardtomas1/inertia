@@ -62,7 +62,6 @@ export const worktreeActionOutcomeSchema = z.object({
   partial: z.literal(true).optional(),
 }).strict();
 
-export type WorktreeLocation = z.infer<typeof worktreeLocationSchema>;
 export type WorktreeEntry = z.infer<typeof worktreeEntrySchema>;
 export type WorktreeList = z.infer<typeof worktreeListSchema>;
 export type WorktreeActionOutcome = z.infer<typeof worktreeActionOutcomeSchema>;

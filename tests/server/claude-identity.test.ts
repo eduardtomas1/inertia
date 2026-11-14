@@ -247,6 +247,119 @@ describe("Claude turn identity in the harness", () => {
     expect(captured?.skills).toBeUndefined();
   });
 
+  it("registers the called custom agent over a same-named discovered agent with only staged skills", async () => {
+    const home = fixtureRoot("Claude harness custom agent home");
+    const project = fixtureRoot("Claude harness custom agent project");
+    mkdirSync(join(project, ".git"));
+    write(join(project, ".claude", "agents", "clash.md"), "---\nname: inertia-reviewer\ndescription: Repository impostor.\n---\nIMPOSTOR");
+    write(join(project, ".claude", "agents", "helper.md"), "---\nname: helper\ndescription: Helps.\n---\nYou help.");
+    writeClaudeSkill(home, "delegate");
+    let captured: ClaudeOptions | undefined;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        captured = options;
+        return fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSystem("init", { plugins: [], skills: [] });
+          yield claudeSuccessResult("Done", "completed");
+        })());
+      },
+    });
+
+    const run = harness.start({
+      input: {
+        ...nativeProviderRunInput({
+          providerId: "claude",
+          conversationId: "claude-identity-custom-agent",
+          cwd: project,
+          prompt: "Review",
+          interactionMode: "build",
+          access: "supervised",
+        }),
+        skills: [],
+        customAgent: {
+          nativeName: "inertia-reviewer",
+          description: "Reads the patch before it ships.",
+          instructions: "# Reviewer\n\nYou review patches.\n",
+          skills: ["delegate", "not-installed"],
+        },
+      },
+      executable: process.execPath,
+      environment: { HOME: home },
+      providerNativeToolsAvailable: true,
+    });
+
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+    expect(captured?.skills).toContain(`${CLAUDE_ISOLATED_SKILL_PLUGIN_NAME}:delegate`);
+    expect(captured?.agents).toEqual({
+      helper: { description: "Helps.", prompt: "You help." },
+      "inertia-reviewer": {
+        description: "Reads the patch before it ships.",
+        prompt: "# Reviewer\n\nYou review patches.\n",
+        skills: [`${CLAUDE_ISOLATED_SKILL_PLUGIN_NAME}:delegate`],
+        background: false,
+      },
+    });
+  });
+
+  it("still stages the custom agent's project skill when the user skills folder cannot be read", async () => {
+    const home = fixtureRoot("Claude harness custom agent unreadable home");
+    const project = fixtureRoot("Claude harness custom agent unreadable project");
+    mkdirSync(join(project, ".git"));
+    writeClaudeSkill(home, "personal");
+    writeClaudeSkill(project, "review");
+    writeClaudeSkill(project, "unrelated");
+    const userSkills = join(home, ".claude", "skills");
+    let captured: ClaudeOptions | undefined;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        captured = options;
+        return fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSystem("init", { plugins: [], skills: [] });
+          yield claudeSuccessResult("Done", "completed");
+        })());
+      },
+      skillFilesystem: {
+        beforeOperation: (operation, path) => {
+          if (operation === "opendir" && path === userSkills) {
+            throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+          }
+        },
+      },
+    });
+
+    const run = harness.start({
+      input: {
+        ...nativeProviderRunInput({
+          providerId: "claude",
+          conversationId: "claude-identity-custom-agent-unreadable",
+          cwd: project,
+          prompt: "Review",
+          interactionMode: "build",
+          access: "supervised",
+        }),
+        skills: [],
+        customAgent: {
+          nativeName: "inertia-reviewer",
+          description: "Reviews.",
+          instructions: "# Reviewer\n",
+          skills: ["review", "personal"],
+        },
+      },
+      executable: process.execPath,
+      environment: { HOME: home },
+      providerNativeToolsAvailable: true,
+    });
+
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+    expect(captured?.skills).toEqual([`${CLAUDE_ISOLATED_SKILL_PLUGIN_NAME}:review`]);
+    expect(captured?.agents?.["inertia-reviewer"]).toEqual({
+      description: "Reviews.",
+      prompt: "# Reviewer\n",
+      skills: [`${CLAUDE_ISOLATED_SKILL_PLUGIN_NAME}:review`],
+      background: false,
+    });
+  });
+
   it("still requires Claude to confirm the picked skills", async () => {
     const project = fixtureRoot("Claude harness picked skill confirmation");
     const picked = writeClaudeSkill(project, "review");

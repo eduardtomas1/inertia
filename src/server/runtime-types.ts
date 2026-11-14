@@ -5,6 +5,7 @@ import type { ClaudeCompatibleBackendProfile } from "../shared/claude-backend-pr
 import type { AgentTurn } from "../shared/contracts.js";
 import type { OpenProjectPathRequest } from "../shared/desktop.js";
 import type { RuntimeHtmlRenderReader } from "./runtime-html-render-reads.js";
+import type { RuntimeAgentSecretDeliverer } from "./runtime-agent-secret-delivery.js";
 import type {
   PrivateConnectRuntimeAuthorization,
   PrivateConnectRuntimeRequest,
@@ -42,6 +43,7 @@ export interface RuntimeOptions {
   kimiClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
   backendCredentials?: RuntimeBackendCredentialBroker;
   attachmentRoot?: string;
+  agentSecretDirectory?: string;
   attachments?: RuntimeAttachmentBroker;
   conversationAttachmentStoreOperations?: ConversationAttachmentStoreAnyOperationRunner;
   prepareDocumentAttachments?: typeof import("./runtime/attachments/document-attachment-context").prepareDocumentAttachments;
@@ -92,7 +94,7 @@ export interface RuntimeBackendCredentialBroker {
   forget(secretReference: string, signal?: AbortSignal): Promise<boolean>;
 }
 
-export interface RunningRuntime extends RuntimeHtmlRenderReader {
+export interface RunningRuntime extends RuntimeHtmlRenderReader, RuntimeAgentSecretDeliverer {
   runPackageSmokeImage?: (
     inputPath: string,
     resultPath: string,

@@ -26,7 +26,7 @@ describe("OpenCode interaction reply deadlines", () => {
   function stalledReplyRun(
     scenario: StalledReplyScenario,
     access: "supervised" | "full" = "supervised",
-    deadlines: { initializationTimeoutMs?: number; runDeadlineMs?: number } = {},
+    deadlines: { interactionReplyTimeoutMs?: number; runDeadlineMs?: number } = {},
   ) {
     const root = portableFixtureRoot(`OpenCode stalled ${scenario.protocol} ${scenario.interaction}`);
     roots.push(root);
@@ -36,7 +36,7 @@ describe("OpenCode interaction reply deadlines", () => {
     const manager = ProviderManager.createForTests(
       { commands: { opencode: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        initializationTimeoutMs: REPLY_DEADLINE_MS,
+        interactionReplyTimeoutMs: REPLY_DEADLINE_MS,
         eventInactivityDeadlineMs: 5_000,
         ...deadlines,
       })]),
@@ -93,7 +93,7 @@ describe("OpenCode interaction reply deadlines", () => {
     const { result, replies } = stalledReplyRun(
       { protocol: "legacy", interaction: "permission" },
       "full",
-      { initializationTimeoutMs: 8_000, runDeadlineMs: 2_500 },
+      { interactionReplyTimeoutMs: 8_000, runDeadlineMs: 2_500 },
     );
 
     await expect(result).resolves.toMatchObject({
@@ -117,7 +117,7 @@ describe("OpenCode interaction reply deadlines", () => {
     const { manager, conversationId, result, replies } = stalledReplyRun(
       { protocol: "legacy", interaction: "permission" },
       "supervised",
-      { initializationTimeoutMs: UNSETTLED_REPLY_DEADLINE_MS },
+      { interactionReplyTimeoutMs: UNSETTLED_REPLY_DEADLINE_MS },
     );
 
     await waitFor("the approval reply to reach OpenCode", () => replies().length === 1, 8_000);

@@ -479,10 +479,10 @@ describe("composer asynchronous ownership", () => {
     const usage = within(toolbar).getByRole("group", { name: "Usage" });
     const precedes = (first: Element, second: Element): boolean =>
       Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(precedes(attach, model)).toBe(true);
-    expect(precedes(model, presets)).toBe(true);
-    expect(precedes(presets, usage)).toBe(true);
-    expect(precedes(usage, send)).toBe(true);
+    expect(precedes(model, usage)).toBe(true);
+    expect(precedes(usage, presets)).toBe(true);
+    expect(precedes(presets, attach)).toBe(true);
+    expect(precedes(attach, send)).toBe(true);
     attach.focus();
     await userEvent.setup().tab();
     expect(attach).not.toHaveFocus();
@@ -594,18 +594,18 @@ describe("composer asynchronous ownership", () => {
     }>();
     const onCompact = vi.fn(() => operation.promise);
     const view = render(<Composer {...composerProps(first, { onCompact })} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+    fireEvent.change(screen.getByLabelText("Message"), {
       target: { value: "/compact" },
     });
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+    fireEvent.keyDown(screen.getByLabelText("Message"), {
       key: "Enter",
     });
 
     view.rerender(<Composer {...composerProps(second, { onCompact })} />);
     view.rerender(<Composer {...composerProps(first, { onCompact })} />);
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" }))
+    await waitFor(() => expect(screen.getByLabelText("Message"))
       .toHaveValue("/compact"));
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+    fireEvent.keyDown(screen.getByLabelText("Message"), {
       key: "Enter",
     });
     expect(onCompact).toHaveBeenCalledTimes(1);
@@ -616,7 +616,7 @@ describe("composer asynchronous ownership", () => {
     }));
     await waitFor(() => expect(screen.getByText("Original compaction completed."))
       .toBeVisible());
-    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");
+    expect(screen.getByLabelText("Message")).toHaveValue("");
   });
 
   it("settles a hidden compaction failure only on its owning chat", async () => {
@@ -637,10 +637,10 @@ describe("composer asynchronous ownership", () => {
       })} />;
     };
     const view = render(<RuntimeComposer owner={first} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+    fireEvent.change(screen.getByLabelText("Message"), {
       target: { value: "/compact" },
     });
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+    fireEvent.keyDown(screen.getByLabelText("Message"), {
       key: "Enter",
     });
 
@@ -663,7 +663,7 @@ describe("composer asynchronous ownership", () => {
     }));
     const onSend = vi.fn(async () => undefined);
     render(<Composer {...composerProps(current, { onCompact, onSend })} />);
-    const input = screen.getByRole("textbox", { name: "Message" });
+    const input = screen.getByLabelText("Message");
 
     fireEvent.change(input, { target: { value: "/comp" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
@@ -682,7 +682,7 @@ describe("composer asynchronous ownership", () => {
       onCompact,
       promptContext: "Selected diff context",
     })} />);
-    const input = screen.getByRole("textbox", { name: "Message" });
+    const input = screen.getByLabelText("Message");
 
     fireEvent.change(input, { target: { value: "/compact" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -931,7 +931,7 @@ describe("composer asynchronous ownership", () => {
     await screen.findByRole("button", { name: "Remove attachment spec.pdf" });
     view.rerender(<Composer {...props} running latestTurn={{ ...latestTurn, id: "queued-turn", status: "running" }} />);
 
-    expect(input).toHaveAttribute("placeholder", "Follow up");
+    expect(input).toHaveAttribute("placeholder", "Follow up. / commands");
     expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
 
     expect(screen.queryByRole("alert")).toBeNull();
@@ -1075,6 +1075,9 @@ describe("composer asynchronous ownership", () => {
     expect(screen.getByRole("option", { name: /\/plan/u })).toBeDisabled();
     expect(screen.getByRole("option", { name: /\/build/u })).toBeDisabled();
 
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { name: /\/calling/u }))
+      .toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(screen.getByRole("option", { name: /\/resume/u }))
       .toHaveAttribute("aria-selected", "true");

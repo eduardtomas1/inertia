@@ -40,6 +40,7 @@ import { SecureFileAuthorityRegistry } from "../../src/server/runtime/secure-fil
 import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
 import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
 import { WorkspaceRunController } from "../../src/server/runtime/workspace-run-controller";
+import { removeTemporaryDirectory } from "../helpers/temporary-directory";
 import { clientCommandSchema } from "../../src/shared/contracts";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
@@ -316,9 +317,9 @@ async function nestedCommitHarness(
   };
 }
 
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
   inspections.args.length = 0;
+  await Promise.all(roots.splice(0).map(removeTemporaryDirectory));
 });
 
 describe("nested source-control command scope", () => {

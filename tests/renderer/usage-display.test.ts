@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   contextUsageQualityForTurn,
   contextUsageDisplayValue,
-  RECOMMENDED_USAGE_DISPLAY_MODE,
-  resolveUsageDisplayPreference,
   usageDisplayBehavior,
 } from "../../src/renderer/src/utils/usageDisplay";
 
@@ -28,22 +26,6 @@ describe("usage display behavior", () => {
       showCircle: true,
       showPermanentStrip: false,
     });
-    expect(RECOMMENDED_USAGE_DISPLAY_MODE).toBe("compact");
-  });
-
-  it("preserves every v0.0.8 preference while supporting its legacy boolean", () => {
-    expect(resolveUsageDisplayPreference({ usageDisplayMode: "hidden", showUsage: true })).toBe("hidden");
-    expect(resolveUsageDisplayPreference({ usageDisplayMode: "compact", showUsage: false })).toBe("compact");
-    expect(resolveUsageDisplayPreference({ usageDisplayMode: "expanded", showUsage: false })).toBe("expanded");
-    expect(resolveUsageDisplayPreference({ showUsage: false })).toBe("hidden");
-    expect(resolveUsageDisplayPreference({ showUsage: true })).toBe("expanded");
-  });
-
-  it("uses compact only for new, missing, or malformed preferences", () => {
-    expect(resolveUsageDisplayPreference({})).toBe("compact");
-    expect(resolveUsageDisplayPreference({ usageDisplayMode: null })).toBe("compact");
-    expect(resolveUsageDisplayPreference({ usageDisplayMode: "strip" })).toBe("compact");
-    expect(resolveUsageDisplayPreference({ usageDisplayMode: "expanded " })).toBe("compact");
   });
 });
 

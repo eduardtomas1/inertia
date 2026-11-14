@@ -32,8 +32,14 @@ async function releaseModule() {
       accept: string,
       timeouts: { bodyTimeoutMs: number; connectTimeoutMs: number },
     ) => Promise<string>;
+    isTransientGitHubFailure: (error: unknown) => boolean;
     main: (arguments_: string[]) => Promise<string>;
     releaseAssetChecksum: (contents: string, assetName: string) => string;
+    retryTransientGitHub: <T>(
+      operation: () => Promise<T>,
+      delaysMs?: readonly number[],
+      wait?: (milliseconds: number) => Promise<void>,
+    ) => Promise<T>;
     selectWindowsNMinusOneRelease: (
       releases: unknown[],
       currentVersion: string,
@@ -331,4 +337,50 @@ test("bounds a stalled installer body and removes its partial file", async () =>
     vi.unstubAllGlobals();
     await rm(temporaryRoot, { force: true, recursive: true });
   }
+});
+
+test("retries only transient GitHub failures, within its bounded schedule", async () => {
+  const { fetchBoundedText, isTransientGitHubFailure, retryTransientGitHub } = await releaseModule();
+  const statuses = [504, 502, 200];
+  const fetchMock = vi.fn(async () => {
+    const status = statuses.shift()!;
+    return new Response(status === 200 ? "ok" : "", { status });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const waits: number[] = [];
+  const wait = async (milliseconds: number) => { waits.push(milliseconds); };
+  const timeouts = { bodyTimeoutMs: 1_000, connectTimeoutMs: 1_000 };
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    await expect(retryTransientGitHub(
+      () => fetchBoundedText("https://api.github.com/x", 64, "", "application/json", timeouts),
+      [1, 2, 3],
+      wait,
+    )).resolves.toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(waits).toEqual([1, 2]);
+
+    fetchMock.mockImplementation(async () => new Response("", { status: 404 }));
+    await expect(retryTransientGitHub(
+      () => fetchBoundedText("https://api.github.com/x", 64, "", "application/json", timeouts),
+      [1, 2, 3],
+      wait,
+    )).rejects.toThrow("GitHub returned HTTP 404.");
+    expect(waits).toEqual([1, 2]);
+
+    fetchMock.mockImplementation(async () => new Response("", { status: 503 }));
+    await expect(retryTransientGitHub(
+      () => fetchBoundedText("https://api.github.com/x", 64, "", "application/json", timeouts),
+      [1, 2],
+      wait,
+    )).rejects.toThrow("GitHub returned HTTP 503.");
+    expect(waits).toEqual([1, 2, 1, 2]);
+  } finally {
+    warn.mockRestore();
+    vi.unstubAllGlobals();
+  }
+  expect(isTransientGitHubFailure(new TypeError("fetch failed"))).toBe(true);
+  expect(isTransientGitHubFailure(new Error("The GitHub connection timed out."))).toBe(true);
+  expect(isTransientGitHubFailure(new Error("The downloaded N-1 installer checksum does not match the release."))).toBe(false);
+  expect(isTransientGitHubFailure(new Error("The N-1 installer download exceeded its declared size."))).toBe(false);
 });

@@ -6,6 +6,7 @@ import {
   loadWorkspaceTerminal,
   prefetchFrequentSurfaces,
   scheduleFrequentSurfacePrefetch,
+  SURFACES_PREFETCHED_ATTRIBUTE,
 } from "../../src/renderer/src/components/lazySurfaceLoaders";
 
 afterEach(() => {
@@ -52,10 +53,33 @@ describe("lazy surface prefetching", () => {
   });
 
   it("leaves the workspace terminal to load on intent", async () => {
-    prefetchFrequentSurfaces();
-    await vi.dynamicImportSettled();
+    await prefetchFrequentSurfaces();
 
     expect(loadTasksView.peek()).toHaveProperty("default");
     expect(loadWorkspaceTerminal.peek()).toBeNull();
   });
+
+  it("marks the document once the idle prefetch has loaded, and not after cleanup", async () => {
+    vi.useFakeTimers();
+    const dataset: Record<string, string> = {};
+    vi.stubGlobal("document", { documentElement: { dataset } });
+    vi.stubGlobal("window", { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout });
+    try {
+      const cancel = scheduleFrequentSurfacePrefetch();
+      cancel();
+      await vi.advanceTimersByTimeAsync(750);
+      await prefetchFrequentSurfaces();
+      expect(dataset[SURFACES_PREFETCHED_ATTRIBUTE]).toBeUndefined();
+
+      scheduleFrequentSurfacePrefetch();
+      expect(dataset[SURFACES_PREFETCHED_ATTRIBUTE]).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(750);
+      await prefetchFrequentSurfaces();
+      expect(dataset[SURFACES_PREFETCHED_ATTRIBUTE]).toBe("ready");
+      expect(loadCommandPalette.peek()).toHaveProperty("default");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 });

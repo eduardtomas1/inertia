@@ -270,5 +270,3 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
     {confirmingClear && <DiagnosticsClearDialog onClear={clearHistory} onClose={() => setConfirmingClear(false)} />}
   </div>;
 }
-
-export default DiagnosticsSettings;

@@ -11,7 +11,6 @@ import {
   normalizePrivateConnectRuntimeGrants,
   privateConnectRuntimeGrantsFromProjectIds,
   privateConnectRuntimeGrantAllowsConversation,
-  privateConnectRuntimeGrantsNeedReview,
   type PrivateConnectRuntimeGrant,
 } from "../../../src/shared/private-connect/runtime-grants";
 import type {
@@ -339,7 +338,6 @@ describe("Private Connect grant migration", () => {
         "any-conversation",
       )).toBe(true);
     }
-    expect(privateConnectRuntimeGrantsNeedReview(grants)).toBe(true);
   });
 
   it("does not reach conversations in projects that were never granted", () => {
@@ -347,14 +345,13 @@ describe("Private Connect grant migration", () => {
     expect(privateConnectRuntimeGrantAllowsConversation(grants, "project-b", "c")).toBe(false);
   });
 
-  it("marks new explicit grants as needing no review", () => {
+  it("limits new explicit grants to their listed conversations", () => {
     const grants = normalizePrivateConnectRuntimeGrants([{
       projectId: "project-a",
       conversationIds: ["c1"],
       includeFutureConversations: false,
       legacyProjectWide: false,
     }]);
-    expect(privateConnectRuntimeGrantsNeedReview(grants)).toBe(false);
     expect(privateConnectRuntimeGrantAllowsConversation(grants, "project-a", "c1")).toBe(true);
     expect(privateConnectRuntimeGrantAllowsConversation(grants, "project-a", "c2")).toBe(false);
   });

@@ -23,6 +23,43 @@ const GITHUB_JSON_ACCEPT = "application/vnd.github+json";
 const GITHUB_ASSET_ACCEPT = "application/octet-stream";
 const VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
+const TRANSIENT_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const TRANSIENT_FAILURE_MESSAGES = new Set([
+  "fetch failed",
+  "terminated",
+  "The GitHub connection timed out.",
+  "The GitHub response body timed out.",
+  "The N-1 installer download was truncated.",
+]);
+const TRANSIENT_RETRY_DELAYS_MS = Object.freeze([5_000, 20_000, 60_000]);
+
+class GitHubHttpError extends Error {
+  constructor(status) {
+    super(`GitHub returned HTTP ${status}.`);
+    this.status = status;
+  }
+}
+
+export function isTransientGitHubFailure(error) {
+  if (error instanceof GitHubHttpError) return TRANSIENT_HTTP_STATUSES.has(error.status);
+  return error instanceof Error && TRANSIENT_FAILURE_MESSAGES.has(error.message);
+}
+
+export async function retryTransientGitHub(
+  operation,
+  delaysMs = TRANSIENT_RETRY_DELAYS_MS,
+  wait = (milliseconds) => new Promise((resolveWait) => setTimeout(resolveWait, milliseconds)),
+) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt >= delaysMs.length || !isTransientGitHubFailure(error)) throw error;
+      console.warn(`${error.message} Retrying in ${delaysMs[attempt] / 1_000} s.`);
+      await wait(delaysMs[attempt]);
+    }
+  }
+}
 
 function versionTuple(version) {
   if (!VERSION_PATTERN.test(version)) {
@@ -250,7 +287,7 @@ export async function fetchBoundedText(
     connectTimeoutMs,
   );
   try {
-    if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}.`);
+    if (!response.ok) throw new GitHubHttpError(response.status);
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > maximumBytes) {
       throw new Error("The GitHub response exceeds its bounded size.");
@@ -300,7 +337,7 @@ export async function downloadBoundedFile(
   );
   try {
     if (!response.ok || !response.body) {
-      throw new Error(`GitHub returned HTTP ${response.status}.`);
+      throw new GitHubHttpError(response.status);
     }
     const declared = Number(response.headers.get("content-length"));
     if (
@@ -379,24 +416,24 @@ export async function main(arguments_ = process.argv.slice(2)) {
   const architecture = exactOption(arguments_, "--architecture");
   const outputDirectory = resolve(exactOption(arguments_, "--output-directory"));
   const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "";
-  const releasesSource = await fetchBoundedText(
+  const releasesSource = await retryTransientGitHub(() => fetchBoundedText(
     `https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`,
     MAX_RELEASE_RESPONSE_BYTES,
     token,
     GITHUB_JSON_ACCEPT,
-  );
+  ));
   const selected = selectWindowsNMinusOneRelease(
     JSON.parse(releasesSource),
     currentVersion,
     channel,
     architecture,
   );
-  const checksumSource = await fetchBoundedText(
+  const checksumSource = await retryTransientGitHub(() => fetchBoundedText(
     selected.checksumsUrl,
     MAX_CHECKSUM_BYTES,
     token,
     GITHUB_ASSET_ACCEPT,
-  );
+  ));
   const checksum = releaseAssetChecksum(checksumSource, selected.assetName);
   await mkdir(outputDirectory, { recursive: true });
   const outputMetadata = await lstat(outputDirectory);
@@ -407,12 +444,12 @@ export async function main(arguments_ = process.argv.slice(2)) {
   if (dirname(installerPath) !== outputDirectory) {
     throw new Error("The N-1 installer escaped its output directory.");
   }
-  await downloadBoundedFile(
+  await retryTransientGitHub(() => downloadBoundedFile(
     selected.installerUrl,
     installerPath,
     selected.assetSize,
     token,
-  );
+  ));
   const actualChecksum = await sha256File(installerPath);
   if (actualChecksum !== checksum) {
     await rm(installerPath, { force: true });

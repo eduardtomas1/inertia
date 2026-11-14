@@ -87,16 +87,6 @@ function limitRow(page: Page): Locator {
   return page.getByRole("region", { name: "Message composer" }).getByRole("group", { name: "Usage limit" });
 }
 
-async function dismissQuotaNotice(page: Page): Promise<void> {
-  await expect.poll(() => page.evaluate(
-    (key) => window.localStorage.getItem(key) ?? "",
-    "inertia:provider-quota-notifications:v1",
-  )).toContain("codex:builtin:");
-  const dismiss = page.getByRole("button", { name: "Dismiss Codex 5-hour quota notice", exact: true });
-  await dismiss.click({ timeout: 2_000 }).catch(() => undefined);
-  await expect(dismiss).toHaveCount(0);
-}
-
 async function capture(page: Page, info: TestInfo, name: string): Promise<void> {
   const path = info.outputPath(`${name}.png`);
   await page.mouse.move(0, 0);
@@ -190,7 +180,7 @@ test.beforeAll(async () => {
         failTurn(store, store.conversation(fourth.id), "Draft the migration steps and list what needs a backfill.");
         store.updateConversation(fourth.id, { accessMode: store.conversation(fourth.id).accessMode === "full" ? "supervised" : "full" });
         seeded.limited = { conversationId: fourth.id, title: "Plan the schema migration" };
-        store.updateSettings({ theme: "dark", codexBinaryPath: binary });
+        store.updateSettings({ theme: "dark", codexBinaryPath: binary, quotaWarnings: { enabled: false } });
       } finally {
         store.close();
       }
@@ -260,7 +250,6 @@ test("offers, schedules and snoozes from a row inside the composer dock", async 
     await app.resizeWindow(1440, 920);
     const row = await showChat(app, seed.offer);
     const page = app.page;
-    await dismissQuotaNotice(page);
     const resume = row.getByRole("button", { name: "Resume at reset", exact: true });
     const snooze = row.getByRole("button", { name: "Snooze until reset", exact: true });
     await expect(row.getByText("Usage limit reached", { exact: true })).toBeVisible();

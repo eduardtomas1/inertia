@@ -11,7 +11,7 @@ import { join } from "node:path";
 
 import { expect, it, vi } from "vitest";
 
-import { writePackagedPdfSmokeResult } from "../../src/server/runtime/attachments/package-smoke-pdf";
+import { writePackagedSmokeResult } from "../../src/server/runtime/attachments/package-smoke-pdf";
 
 it("publishes a complete packaged PDF receipt only after durable close", async () => {
   const directory = mkdtempSync(join(tmpdir(), "inertia-package-smoke-result-"));
@@ -36,7 +36,7 @@ it("publishes a complete packaged PDF receipt only after durable close", async (
     });
   }) as typeof open;
   try {
-    const writing = writePackagedPdfSmokeResult(
+    const writing = writePackagedSmokeResult(
       resultPath,
       { ok: true, content: "Packaged PDF extraction works" },
       { operations: { open: delayedOpen } },

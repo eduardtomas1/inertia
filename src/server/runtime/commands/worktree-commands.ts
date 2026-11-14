@@ -24,6 +24,7 @@ import {
 } from "../../git/worktree-inventory";
 import type { ProjectWorktreeRecord } from "../../persistence/conversation-worktree-repository";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
+import type { NativeGoalReads } from "../native-goal-reads";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import {
@@ -35,6 +36,7 @@ export interface WorktreeCommandDependencies {
   store: RuntimeStore;
   workspaceRuns: Pick<WorkspaceRunController<WebSocket>, "trackSourceControl">;
   providerTerminalResumes: Pick<ProviderTerminalResumeRegistry, "isActive">;
+  nativeGoalReads?: Pick<NativeGoalReads, "quiesce">;
   dataDirectory: string;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -558,11 +560,14 @@ export function createWorktreeCommandHandler(
             );
             if (refusal) throw new RuntimeRequestError(refusal);
             let removalFailed = false;
+            const releaseGoalReads = await dependencies.nativeGoalReads?.quiesce({ checkoutPath: target });
             try {
               await removeWorktree(checked.context.root, checked.worktree.path);
             } catch (error) {
               if (isGitProcessTreeTerminationFailure(error)) throw error;
               removalFailed = true;
+            } finally {
+              releaseGoalReads?.();
             }
             const after = await inspectCleanup(checked.context.root, checked.ownership)
               .catch(() => null);

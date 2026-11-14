@@ -9,6 +9,7 @@ export function agentRequestProviderName(providerId: AgentInputRequest["provider
     case "antigravity": return "Antigravity";
     case "pi": return "Pi";
     case "kimi": return "Kimi Code";
+    case "grok": return "Grok";
     case "opencode": return "OpenCode";
     case "codex": return "Codex";
     default: return "The agent";

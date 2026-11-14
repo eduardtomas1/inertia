@@ -1,20 +1,61 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { useLayoutEffect, useRef } from "react";
 
 import type { Conversation, ServerEvent } from "../../src/shared/contracts";
 import { useDraftSkills } from "../../src/renderer/src/hooks/useDraftSkills";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
+import { ComposerSkillsMenu } from "../../src/renderer/src/components/composer/ComposerSkillsMenu";
+import { useComposerMenus } from "../../src/renderer/src/components/composer/useComposerMenus";
 
 const draftId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
 
-function draft(providerId: string, harnessId: string, id = draftId): Conversation {
+function draft(providerId: string, harnessId: string, id = draftId, project = projectId): Conversation {
   return {
     id,
-    projectId,
+    projectId: project,
     providerId,
     modelSelection: { harnessId },
   } as unknown as Conversation;
+}
+
+function DraftComposer({
+  current,
+  request,
+}: {
+  current: Conversation;
+  request: (command: CommandWithoutId) => Promise<ServerEvent>;
+}): React.JSX.Element {
+  const draftSkills = useDraftSkills({ draft: current, status: "online", request });
+  const menuController = useComposerMenus();
+  const editor = useRef<HTMLTextAreaElement>(null);
+  const { setMenuTrigger } = menuController;
+  useLayoutEffect(() => {
+    setMenuTrigger("skills", editor.current);
+    return () => setMenuTrigger("skills", null);
+  }, [setMenuTrigger]);
+  return <><textarea ref={editor} aria-label="Message" />
+    <ComposerSkillsMenu
+      skills={draftSkills.skills}
+      capability={draftSkills.capability}
+      loading={draftSkills.loading}
+      error={draftSkills.error}
+      completion=""
+      listboxId="draft-skills"
+      disabled={false}
+      running={false}
+      menuController={menuController}
+      onList={draftSkills.list}
+      onInsert={() => undefined}
+    /></>;
+}
+
+function emptySkillsResult(conversationId: string): ServerEvent {
+  const event = skillsResult(conversationId);
+  return event.type === "request.result" && event.result.kind === "agent.skills"
+    ? { ...event, result: { ...event.result, skills: [] } }
+    : event;
 }
 
 function skillsResult(conversationId: string, name = "review"): ServerEvent {
@@ -100,5 +141,23 @@ describe("useDraftSkills", () => {
 
     expect(result.current.error).toBe("Codex did not return skills for this project.");
     expect(result.current.skills).toEqual([]);
+  });
+
+  it("lists the new project's skills when an open dollar query follows the draft to another project", async () => {
+    const otherProjectId = "33333333-3333-4333-8333-333333333333";
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> =>
+      command.type === "agent.skills.preview" && command.payload.projectId === otherProjectId
+        ? skillsResult(draftId)
+        : emptySkillsResult(draftId));
+    const view = render(<DraftComposer current={draft("codex", "codex-app-server")} request={request} />);
+    expect(await screen.findByText("No enabled skills")).toBeInTheDocument();
+
+    view.rerender(<DraftComposer current={draft("codex", "codex-app-server", draftId, otherProjectId)} request={request} />);
+
+    expect(await screen.findByRole("option", { name: /\$review/u })).toBeInTheDocument();
+    expect(request).toHaveBeenLastCalledWith({
+      type: "agent.skills.preview",
+      payload: { draftConversationId: draftId, projectId: otherProjectId, harnessId: "codex-app-server", forceReload: false },
+    });
   });
 });

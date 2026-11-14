@@ -67,6 +67,7 @@ function harnessLabel(harnessId: string): string {
   if (harnessId.startsWith("cursor")) return "Cursor harness";
   if (harnessId === "pi-rpc") return "Pi";
   if (harnessId.startsWith("antigravity")) return "Antigravity";
+  if (harnessId.startsWith("grok")) return "Grok";
   if (harnessId.startsWith("opencode")) return "OpenCode harness";
   return "Selected harness";
 }
@@ -328,32 +329,4 @@ export function composerRouteReadiness(input: {
   return native
     ? nativeReadiness(input.provider, input.selection)
     : externalReadiness(input.provider, input.profile, input.selection);
-}
-
-export function composerProviderReady(
-  provider: ProviderInfo | undefined,
-  profile: ComposerBackendReadiness | undefined,
-  modelId?: string,
-): boolean {
-  if (!profile || profile.preset === "native") {
-    return provider?.canRun === true;
-  }
-  if (
-    !profile.enabled
-    || !READY_BACKEND_AUTH_STATES.has(profile.authState)
-  ) return false;
-  if (
-    !provider
-    || provider.installState !== "installed"
-    || !provider.available
-    || !provider.executable
-    || provider.updateRequired
-  ) return false;
-  if (profile.preset === "kimi-code") return true;
-  const compatibility = backendModelCompatibility(profile, modelId);
-  return profile.connectionState !== "testing"
-    && (
-      backendCompatibilityUsable(compatibility)
-      || backendServerChecksBeforeSending(compatibility, profile)
-    );
 }

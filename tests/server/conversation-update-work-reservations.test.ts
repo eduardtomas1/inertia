@@ -74,7 +74,7 @@ function modeUpdate(
 }
 
 describe("conversation updates during background provider work", () => {
-  it("applies a work-mode choice while a provider workflow refresh holds the checkout", async () => {
+  it("applies a work-mode choice while a provider workflow refresh is pending", async () => {
     const { store, conversationId } = codexConversation();
     let settleRefresh!: () => void;
     const refresh = vi.fn(async () => await new Promise<AgentWorkflowState>((resolve) => {
@@ -98,7 +98,7 @@ describe("conversation updates during background provider work", () => {
       payload: { conversationId, refresh: true },
     });
     await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
-    expect(store.conversationWork.reserve(conversationId)).toBe(false);
+    expect(store.conversationWork.hasConversation(conversationId)).toBe(false);
 
     await expect(conversations({} as never, modeUpdate(conversationId, "plan", "11111111-1111-4111-8111-111111111111")))
       .resolves.toBe("mutation");

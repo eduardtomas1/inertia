@@ -62,6 +62,7 @@ export function buildComposerTurnRequest(
   fileReferences: readonly string[] = [],
   previewUrl?: string | null,
   conversationContextPacketIds: readonly string[] = [],
+  calledAgentId: string | null = null,
 ): { visibleContent: string; context?: TurnRequestContext } {
   const visibleContent = message.trim()
     || (attachments.length > 0
@@ -78,6 +79,7 @@ export function buildComposerTurnRequest(
     || selectedFileReferences.length > 0
     || previewUrl
     || conversationContextPacketIds.length > 0
+    || calledAgentId
     ? {
         ...promptRequestContext,
         ...(selectedFileReferences.length > 0
@@ -87,6 +89,7 @@ export function buildComposerTurnRequest(
         ...(conversationContextPacketIds.length > 0
           ? { conversationContextPacketIds: [...conversationContextPacketIds] }
           : {}),
+        ...(calledAgentId ? { calledAgent: { agentId: calledAgentId } } : {}),
       }
     : undefined;
   return { visibleContent, ...(context ? { context } : {}) };

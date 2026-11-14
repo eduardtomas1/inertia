@@ -137,6 +137,33 @@ describe("provider compatibility status", () => {
     expect(providerStateDetail(outdated)).toBe(statusMessage);
   });
 
+  it("asks for Grok sign-in when the CLI is installed and no account is saved", () => {
+    const metadataState: ProviderInfo["metadataState"] = {
+      models: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+      rateLimits: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+    };
+    const unsigned: ProviderInfo = {
+      id: "grok",
+      label: "Grok",
+      command: "grok",
+      available: true,
+      version: "1.0.70",
+      installState: "installed",
+      authState: "unknown",
+      canRun: true,
+      statusMessage: "Installed. Sign in with grok login before the first chat.",
+      models: [],
+      rateLimits: [],
+      metadataState,
+    };
+    expect(providerStateLabel(unsigned)).toBe("Sign in required");
+    expect(providerSetupAction(unsigned)).toBe("connect");
+    expect(providerStateLabel({ ...unsigned, authState: "authenticated" })).toBe("Connected");
+    expect(providerSetupAction({ ...unsigned, authState: "authenticated" })).toBe("refresh");
+    expect(providerStateLabel({ ...unsigned, installState: "not-installed", canRun: false })).toBe("Not installed");
+    expect(providerSetupAction({ ...unsigned, installState: "not-installed", canRun: false })).toBe("refresh");
+  });
+
   it("prefixes exactly one v whether or not the CLI printed one", () => {
     expect(providerVersionLabel("26.5.0")).toBe("v26.5.0");
     expect(providerVersionLabel("v26.5.0")).toBe("v26.5.0");

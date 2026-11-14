@@ -9,9 +9,24 @@ import type {
   ChatMessage,
   SubagentTrace,
 } from "../../src/shared/contracts";
+import type { CustomAgent } from "../../src/shared/custom-agents";
 import { taskTrace } from "./background-task-fixtures";
 
 const conversationId = "44444444-4444-4444-8444-444444444444";
+const reviewer: CustomAgent = {
+  id: "6f1c2a64-5d1e-4c55-9d43-1a2b3c4d5e6f",
+  name: "Code reviewer",
+  handle: "code-reviewer",
+  description: "Reviews diffs",
+  icon: { kind: "symbol", name: "shield" },
+  accent: null,
+  blocks: [],
+  skills: [],
+  position: 0,
+  revision: 1,
+  createdAt: "2026-08-12T11:00:00.000Z",
+  updatedAt: "2026-08-12T11:00:00.000Z",
+};
 
 function turn(providerId: "claude" | "codex", status: AgentTurn["status"] = "completed"): AgentTurn {
   const harnessId = providerId === "claude" ? "claude-agent-sdk" : "codex-app-server";
@@ -89,8 +104,9 @@ function agentRow(owner: AgentTurn): AgentActivity {
   };
 }
 
-function renderTurn(owner: AgentTurn, subagents: SubagentTrace[], activities: AgentActivity[]) {
+function renderTurn(owner: AgentTurn, subagents: SubagentTrace[], activities: AgentActivity[], customAgents: CustomAgent[] = []) {
   return render(<ResponseTimeline
+    customAgents={customAgents}
     turns={[owner]}
     messages={messages(owner)}
     activities={activities}
@@ -162,6 +178,31 @@ describe("delegated task rows in a whole turn", () => {
     const rows = document.querySelectorAll('[data-subagent-trace="trace-codex"]');
     expect(rows).toHaveLength(1);
     expect(rows[0]!.closest(".subagent-unlinked-rows")).not.toBeNull();
+  });
+});
+
+describe("called custom agents in a whole turn", () => {
+  it.each([
+    ["Claude, by the Agent row it replaces", "claude", "activity-agent-call"],
+    ["Codex, which has no tool row", "codex", null],
+  ] as const)("draws a called agent from %s once, as its call block", (_label, providerId, activityId) => {
+    const owner = turn(providerId);
+    const called = taskTrace({
+      id: "trace-called",
+      conversationId,
+      runId: owner.runId,
+      turnId: owner.id,
+      providerId,
+      activityId,
+      customAgentId: reviewer.id,
+      description: "Review the parser change",
+      status: "completed",
+    });
+    renderTurn(owner, [called], activityId ? [agentRow(owner)] : [], [reviewer]);
+    expect(screen.getAllByRole("region", { name: "Called agent Code reviewer" })).toHaveLength(1);
+    expect(document.querySelector('[data-subagent-trace="trace-called"]')).toBeNull();
+    expect(document.querySelector(".subagent-unlinked-rows")).toBeNull();
+    expect(document.querySelector(".agent-activity")).toBeNull();
   });
 });
 

@@ -976,7 +976,7 @@ export function startGuardianBuildLockHeartbeat(
 }
 
 export function cleanGuardianLockArtifacts(stateDirectory, lock) {
-  const fixed = lstatSync(lock.lockPath, { throwIfNoEntry: false });
+  const fixed = lstatSync(lock.lockPath, { bigint: true, throwIfNoEntry: false });
   for (const name of readdirSync(stateDirectory)) {
     const path = join(stateDirectory, name);
     if (name.startsWith("claimant-")) {
@@ -993,7 +993,7 @@ export function cleanGuardianLockArtifacts(stateDirectory, lock) {
       continue;
     }
     if (!name.startsWith("reclaim-")) continue;
-    const candidate = lstatSync(path, { throwIfNoEntry: false });
+    const candidate = lstatSync(path, { bigint: true, throwIfNoEntry: false });
     if (
       !candidate ||
       !fixed ||

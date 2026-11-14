@@ -322,6 +322,10 @@ class PdfNodeCanvasFactory {
     return { canvas, context: canvas.getContext("2d") };
   }
 
+  getNoAlphaContext(canvas: import("@napi-rs/canvas").Canvas): unknown {
+    return canvas.getContext("2d", { alpha: false, willReadFrequently: true });
+  }
+
   reset(target: PdfCanvasAndContext, width: number, height: number): void {
     if (!target.canvas) throw new Error("Canvas is not specified");
     if (width <= 0 || height <= 0) throw new Error("Invalid canvas size");

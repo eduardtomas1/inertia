@@ -241,7 +241,7 @@ describe("provider quota notifications", () => {
 
   it("renders a small provider-scoped polite notification with a dismiss action", () => {
     const evaluation = evaluateQuotaNotifications([
-      provider("claude", [limit("claude:seven_day", 14, 10_080)]),
+      provider("claude", [{ ...limit("claude:seven_day", 14, 10_080), label: "Weekly" }]),
     ], emptyState);
     const html = renderToStaticMarkup(
       <ProviderQuotaNotices
@@ -250,8 +250,21 @@ describe("provider quota notifications", () => {
       />,
     );
     expect(html).toContain('aria-live="polite"');
-    expect(html).toContain("Claude weekly limit");
+    expect(html).toContain("Claude Weekly limit");
     expect(html).toContain("14% remaining");
-    expect(html).toContain("Dismiss Claude weekly quota notice");
+    expect(html).toContain("Dismiss Claude Weekly quota notice");
+    const named = evaluateQuotaNotifications([
+      provider("claude", [
+        { ...limit("claude:five_hour", 4, 300), label: "Session" },
+        { ...limit("claude:seven_day_overage_included", 14, 10_080), label: "Weekly · Fable" },
+      ]),
+      provider("codex", [limit("codex:primary", 4, 300)]),
+    ], emptyState);
+    const text = renderToStaticMarkup(<ProviderQuotaNotices notices={named.notices} onDismiss={() => undefined} />);
+    expect(text).toContain("Claude Session limit");
+    expect(text).toContain("Claude Weekly limit · Fable");
+    expect(text).toContain("Codex Session limit");
+    expect(text.replaceAll(/<[^>]*>/gu, " ")).not.toMatch(/5-hour/u);
+    expect(text).toContain('aria-label="Dismiss Claude Weekly · Fable quota notice"');
   });
 });

@@ -605,9 +605,9 @@ describe("provider info refresh ownership", () => {
       const runtime = setup({ retryDelaysMs: [30], detect: async () => timedOut(), gate, activity });
 
       await runtime.refresh("codex");
-      const startedAt = Date.now();
+      expect(runtime.codex().authState).toBe("checking");
       await expect(gate.prepare("update")).resolves.toEqual({ ready: true });
-      expect(Date.now() - startedAt).toBeLessThan(20);
+      expect(runtime.codex().authState).toBe("checking");
       await vi.waitFor(() => {
         expect(runtime.codex().authState).toBe("error");
       });

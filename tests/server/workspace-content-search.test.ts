@@ -339,6 +339,7 @@ describe("workspace.search.content command", () => {
         duoLaunchConversationIds: () => null,
         pendingApproval: () => null,
         pendingInput: () => null,
+        secretRequestConversationId: () => null,
         savedAnswerConversationId: () => null,
       },
     );

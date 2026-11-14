@@ -14,15 +14,6 @@ export function compactTokenCount(value: number): string {
   }).format(value);
 }
 
-export const RECOMMENDED_USAGE_DISPLAY_MODE: UsageDisplayMode = "compact";
-
-export interface PersistedUsageDisplayPreference {
-  /** The v0.0.8 preference. Unknown values are treated as missing. */
-  usageDisplayMode?: unknown;
-  /** Compatibility input for databases that predate usageDisplayMode. */
-  showUsage?: unknown;
-}
-
 export type UsageDisplaySurface = "hidden" | "circle";
 
 export interface UsageDisplayBehavior {
@@ -92,26 +83,6 @@ export function usageQuotaSourceForSelection(
   return profile.id === selection.backendProfileId && profile.preset === "native"
     ? "selected-route"
     : "isolated";
-}
-
-function isUsageDisplayMode(value: unknown): value is UsageDisplayMode {
-  return value === "hidden" || value === "compact" || value === "expanded";
-}
-
-/**
- * Keeps every v0.0.8 mode intact. A legacy enabled boolean maps to the former
- * expanded presentation, while genuinely new or malformed preferences use the
- * recommended compact default.
- */
-export function resolveUsageDisplayPreference(
-  preference: PersistedUsageDisplayPreference,
-): UsageDisplayMode {
-  if (isUsageDisplayMode(preference.usageDisplayMode)) {
-    return preference.usageDisplayMode;
-  }
-  if (preference.showUsage === false) return "hidden";
-  if (preference.showUsage === true) return "expanded";
-  return RECOMMENDED_USAGE_DISPLAY_MODE;
 }
 
 export function usageDisplayBehavior(mode: UsageDisplayMode): UsageDisplayBehavior {

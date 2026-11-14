@@ -38,10 +38,6 @@ export function registerComposerReattachTarget(
   };
 }
 
-export function hasComposerReattachTarget(conversationId: string): boolean {
-  return (targets.get(conversationId)?.length ?? 0) > 0;
-}
-
 export async function requestComposerReattach(
   conversationId: string,
   item: ConversationAttachmentGalleryItem,

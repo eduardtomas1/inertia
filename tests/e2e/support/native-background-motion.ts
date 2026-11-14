@@ -29,7 +29,7 @@ export async function checkNativeBackgroundMotion(): Promise<void> {
       outfile: join(root, "renderer.js"), bundle: true, platform: "browser", format: "iife",
       tsconfig: "tsconfig.web.json", jsx: "automatic",
       define: { "process.env.NODE_ENV": '"development"' },
-      loader: { ".woff": "file", ".woff2": "file", ".ttf": "file", ".svg": "file", ".png": "file" },
+      loader: { ".woff": "file", ".woff2": "file", ".ttf": "file", ".svg": "file", ".png": "file", ".webp": "file" },
     });
     const styles = await readFile(fileURLToPath(new URL("../../../src/renderer/src/styles.css", import.meta.url)), "utf8");
     const spin = /@keyframes spin \{[^{}]*\{[^{}]*\}\s*\}/u.exec(styles)?.[0];

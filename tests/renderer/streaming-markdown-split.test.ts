@@ -51,10 +51,12 @@ describe("streaming Markdown split", () => {
     expect(splitStreamingMarkdown("~~~\ncode\n```\n\nmore").blocks).toEqual([]);
   });
 
-  it("produces the same result incrementally as in one pass, whatever the chunking", () => {
-    const content = "# Title\n\nA paragraph with `code`.\n\n```js\nlet x;\n\nx = 1;\n```\n\n- one\n- two\n\nTail text";
+  it.each([
+    ["headings, code spans, fences and lists", "# Title\n\nA paragraph with `code`.\n\n```js\nlet x;\n\nx = 1;\n```\n\n- one\n- two\n\nTail text", [1, 2, 3, 7, 13]],
+    ["lists, indented fences and HTML", "- a\n\n  ```\n  x\n\n  y\n  ```\n\n- b\n\n<div>\n\nz\n\n</div>\n\n1. c\n\n2. d\n\nEnd", [1, 2, 3, 5, 11]],
+  ])("matches one pass for %s whatever the chunking", (_label, content, sizes) => {
     const whole = splitStreamingMarkdown(content);
-    for (const size of [1, 2, 3, 7, 13]) {
+    for (const size of sizes) {
       const chunks = Array.from({ length: Math.ceil(content.length / size) }, (_, index) =>
         content.slice(index * size, (index + 1) * size));
       const incremental = streamed(chunks);
@@ -105,18 +107,6 @@ describe("streaming Markdown split", () => {
     expect(split.blocks).toEqual(["<details>\n<summary>Log</summary>\n\nbody\n\n<details>\ninner\n\n</details>\n\nstill\n</details>"]);
     expect(streamingMarkdownTail(split)).toBe("After");
     expect(splitStreamingMarkdown("<kbd>Ctrl</kbd> first\n\nSecond").blocks).toEqual(["<kbd>Ctrl</kbd> first"]);
-  });
-
-  it("matches one pass for lists, indented fences and HTML whatever the chunking", () => {
-    const content = "- a\n\n  ```\n  x\n\n  y\n  ```\n\n- b\n\n<div>\n\nz\n\n</div>\n\n1. c\n\n2. d\n\nEnd";
-    const whole = splitStreamingMarkdown(content);
-    for (const size of [1, 2, 3, 5, 11]) {
-      const chunks = Array.from({ length: Math.ceil(content.length / size) }, (_, index) =>
-        content.slice(index * size, (index + 1) * size));
-      const incremental = streamed(chunks);
-      expect(incremental.blocks).toEqual(whole.blocks);
-      expect(streamingMarkdownTail(incremental)).toBe(streamingMarkdownTail(whole));
-    }
   });
 
   it("starts over when the first character of a pending line is replaced", () => {

@@ -156,7 +156,7 @@ describe("watcher link coordinator", () => {
   });
 
   it("attaches a read-only watcher on every provider with a read-only tier", async () => {
-    for (const providerId of ["codex", "claude", "opencode", "cursor", "kimi", "antigravity"] as const) {
+    for (const providerId of ["codex", "claude", "opencode", "cursor", "kimi", "antigravity", "grok"] as const) {
       const f = await createWatcherFixture();
       try {
         const link = await f.attach({ modelSelection: watcherTestSelection(providerId) });

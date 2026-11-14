@@ -76,6 +76,8 @@ describe("harness-specific backend compatibility", () => {
       ["cursor-acp", "cursor", "cursor-managed"],
       ["kimi-acp", "kimi", "kimi-managed"],
       ["opencode-sdk", "opencode", "opencode-native-catalog"],
+      ["antigravity-cli", "antigravity", "antigravity-managed"],
+      ["grok-acp", "grok", "grok-managed"],
     ];
     for (const [harnessId, providerId, reasonCode] of matrix) {
       expect(resolveHarnessBackendCompatibility(

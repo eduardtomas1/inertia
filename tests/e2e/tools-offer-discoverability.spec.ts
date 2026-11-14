@@ -201,35 +201,6 @@ test("the open-surface shortcut opens the surface menu and its letters choose a 
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("Settings → Keyboard lists the open-surface shortcut", async ({ browserName: _browserName }, info) => {
-  const page = app.page;
-  await app.resizeWindow(1440, 920);
-  await setAppearanceInPlace(app, "light");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const settings = page.getByRole("main", { name: "Settings" });
-  await expect(settings).toBeVisible();
-  const keyboard = page.getByRole("navigation", { name: "Settings sections" })
-    .getByRole("button", { name: "Keyboard", exact: true });
-  await keyboard.click();
-  await expect(keyboard).toHaveAttribute("aria-current", "page");
-
-  const row = page.locator('[data-setting-id="shortcut-open-surface"]');
-  await expect(row).toBeVisible();
-  await expect(row).toContainText("Open a surface");
-  await expect(row.locator("kbd")).toHaveText(process.platform === "darwin" ? "⌘" : "Ctrl");
-  const key = row.getByRole("combobox", { name: "Open a surface key" });
-  await expect(key).toHaveValue("g");
-  await expect(key.locator("option:checked")).toHaveText("G");
-  await row.scrollIntoViewIfNeeded();
-  await blurActiveElement();
-  await capture(info, "keyboard-open-surface-light");
-
-  await page.getByRole("button", { name: "Close settings", exact: true }).click();
-  await expect(settings).toBeHidden();
-  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible();
-  expect(app.rendererErrors).toEqual([]);
-});
-
 test("the Plan tab derives steps only from Plan-mode replies and never tracks them", async ({ browserName: _browserName }, info) => {
   const page = app.page;
   await app.resizeWindow(1440, 1100);

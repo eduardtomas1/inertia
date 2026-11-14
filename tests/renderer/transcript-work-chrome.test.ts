@@ -74,7 +74,6 @@ describe("transcript work log chrome", () => {
     expect(followUp.get("border-radius")).toBe("var(--radius-md)");
     expect(declarationsFor(rules, ".turn-follow-up-row > p").get("line-height")).toBe("var(--leading-prose)");
     expect(declarationsFor(rules, ".timeline-jump .icon-button:hover").get("background")).toBe("var(--fill-solid)");
-    expect(declarationsFor(rules, "button.turn-agents-line:hover").get("color")).toBe("var(--text)");
     expect(declarationsFor(rules, ".orphan-run-flow > details > summary").get("list-style")).toBe("none");
   });
 });

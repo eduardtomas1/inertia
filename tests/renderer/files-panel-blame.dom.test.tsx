@@ -107,6 +107,21 @@ describe("FilesPanel blame", () => {
     expect(container.querySelector(".file-preview-blame")).toBeNull();
   });
 
+  it("names uncommitted lines without inventing a commit", async () => {
+    const file = preview("src/app.ts", "one\ntwo");
+    const load = vi.fn<FilePreviewBlameLoader>(async ({ path, startLine, endLine }) =>
+      page(path, startLine, Math.min(endLine, 2), 2, (number) => number === 1
+        ? { ...line(number, "0", ""), uncommitted: true }
+        : line(number, "a", "Add the second line")));
+    renderPanel(file, load);
+
+    fireEvent.click(screen.getByRole("button", { name: "Blame" }));
+    const pending = await screen.findByRole("button", { name: "Line 1: Not committed. Uncommitted change" });
+    expect(pending.querySelector(".file-preview-blame-sha")).toBeNull();
+    expect(pending.querySelector(".file-preview-blame-author")).toHaveTextContent("Not committed");
+    expect(screen.getByRole("button", { name: /^Line 2: aaaaaaa · Author a/u })).toBeInTheDocument();
+  });
+
   it("is disabled for untracked files and turns off when the runtime reports one", async () => {
     const file = preview("notes.txt", "draft");
     const untrackedSnapshot = {

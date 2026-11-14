@@ -42,28 +42,6 @@ export class ProjectIdentityTimeout extends Error {
   }
 }
 
-export async function inspectProjectIdentityWithDeadline(
-  projectPath: string,
-  deadlineMs = PROJECT_IDENTITY_DEADLINE_MS,
-  setTimer: typeof setTimeout = setTimeout,
-  clearTimer: typeof clearTimeout = clearTimeout,
-): Promise<ProjectIdentity> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      inspectProjectIdentity(projectPath),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimer(
-          () => reject(new ProjectIdentityTimeout(deadlineMs)),
-          deadlineMs,
-        );
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimer(timer);
-  }
-}
-
 export async function inspectProjectIdentity(projectPath: string): Promise<ProjectIdentity> {
   const canonicalPath = await canonicalDirectory(projectPath);
   const normalizedPath = normalizeIdentityPath(canonicalPath);

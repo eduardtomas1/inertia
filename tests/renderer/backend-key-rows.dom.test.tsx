@@ -184,47 +184,6 @@ describe("Route editor", () => {
     expect(screen.getByRole("button", { name: "Edit Profile A" })).toHaveFocus();
   });
 
-  it("re-tests a changed connection and turns a route that was on back on", async () => {
-    const user = userEvent.setup();
-    const profileA = profile("custom:a", "Profile A", 1, { authState: "configured", enabled: true });
-    const saved = { ...profileA, configurationRevision: 2, enabled: false };
-    const tested = {
-      ...saved,
-      models: saved.models.map((model) => ({
-        ...model,
-        compatibility: { ...model.compatibility, state: "verified" as const, provenance: "probe" as const, reasonCode: "anthropic-probe-verified" as const },
-        latestProbe: {
-          profileId: saved.id,
-          backendConfigurationRevision: 2,
-          endpointIdentity: "endpoint:custom:a:2",
-          protocol: "anthropic-messages" as const,
-          modelId: model.id,
-          compatibility: "protocol-compatible" as const,
-          protocolVerified: true,
-          modelVerified: true,
-          capabilities: [],
-          contextWindow: { tokens: null, state: "unknown" as const, provenance: "unknown" as const, detail: null, checkedAt: "2026-10-24T10:00:00.000Z" },
-          failure: null,
-          checkedAt: "2026-10-24T10:00:00.000Z",
-        },
-      })),
-    };
-    const onUpdate = vi.fn(async (_id: string, update: { enabled?: boolean }) => update.enabled ? { ...tested, enabled: true } : saved);
-    const onProbe = vi.fn(async () => tested);
-    const onSetCredential = vi.fn(async () => saved);
-    render(<ModelBackendsSettings {...props([profileA], { onUpdate, onProbe, onSetCredential })} />);
-    await user.click(screen.getByRole("button", { name: "Edit Profile A" }));
-    const form = await screen.findByRole("form", { name: "Edit Profile A" });
-    const url = within(form).getByRole("textbox", { name: "Base URL" });
-    await user.clear(url);
-    await user.type(url, "https://moved.example.test");
-    await user.type(within(form).getByLabelText("API key"), "moved-key{Enter}");
-    await waitFor(() => expect(onUpdate).toHaveBeenLastCalledWith("custom:a", { enabled: true }));
-    expect(onSetCredential).toHaveBeenCalledWith("custom:a", "moved-key");
-    expect(onUpdate).toHaveBeenNthCalledWith(1, "custom:a", { baseUrl: "https://moved.example.test" });
-    expect(onProbe).toHaveBeenCalledWith("custom:a");
-  });
-
   it("keeps the harness choice state and a keyboard-operable model mapping radio group", async () => {
     const user = userEvent.setup();
     render(<ModelBackendsSettings {...props([])} />);

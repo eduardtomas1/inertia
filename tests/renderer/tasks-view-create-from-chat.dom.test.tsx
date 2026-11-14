@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -138,6 +140,11 @@ describe("creating tasks from a chat", () => {
     fireEvent.click(button);
     expect(props.request).toHaveBeenCalledTimes(2);
     await act(async () => finish());
+  });
+
+  it("keeps the task creation source a plain text file", () => {
+    const source = readFileSync("src/renderer/src/components/tasks/taskCreation.ts");
+    expect(source.includes(0)).toBe(false);
   });
 
   it("allows another attempt after a failed creation", async () => {

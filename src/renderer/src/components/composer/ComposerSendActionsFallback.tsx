@@ -4,19 +4,24 @@ export function ComposerSendActionsFallback({
   primaryAction,
   compactOnReturnMode = null,
   compacting = false,
+  awaitingInput = false,
   onSubmit,
   onStop,
+  onFocusInput,
 }: {
   primaryAction: ComposerPrimaryActionState;
   compactOnReturnMode?: "compact" | "full" | null;
   compacting?: boolean;
+  awaitingInput?: boolean;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
+  onFocusInput?: () => void;
 }): React.JSX.Element {
   const stopping = primaryAction === "stop-pending";
   const stopAndSend = primaryAction === "stop-and-send";
   const stop = primaryAction === "stop-ready" || stopping;
   const submitting = primaryAction === "submitting";
+  const resting = primaryAction === "send-disabled" && awaitingInput;
   const primaryLabel = stopAndSend
     ? "Stop and send"
     : stop
@@ -35,8 +40,13 @@ export function ComposerSendActionsFallback({
         }`}
         data-composer-action-state={primaryAction}
         aria-busy={stopping || submitting}
-        onClick={() => void (stop ? onStop() : onSubmit())}
-        disabled={submitting || primaryAction === "send-disabled"}
+        aria-disabled={resting || undefined}
+        onClick={() => {
+          if (stop) void onStop();
+          else if (resting) onFocusInput?.();
+          else void onSubmit();
+        }}
+        disabled={submitting || (primaryAction === "send-disabled" && !resting)}
       >
         <span aria-hidden="true">{stop || stopAndSend ? "■" : submitting ? "…" : "↑"}</span>
     </button>

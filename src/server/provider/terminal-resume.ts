@@ -120,6 +120,8 @@ export function providerTerminalResumeArguments(
       throw new Error("Open this Pi session through Inertia so its exact session directory remains scoped.");
     case "antigravity":
       return ["--conversation", sessionId];
+    case "grok":
+      return ["--resume", sessionId];
   }
 }
 

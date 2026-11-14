@@ -14,7 +14,7 @@ import type { UpdatesRunResult } from "../../src/shared/updates";
 import type { AgentRunState } from "../../src/shared/run-state";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { useUpdateEverything } from "../../src/renderer/src/hooks/useUpdateEverything";
-import { updateEverythingPlan, updateEverythingProgress } from "../../src/renderer/src/components/sidebar/updateEverythingPlan";
+import { updateEverythingPlan } from "../../src/renderer/src/components/sidebar/updateEverythingPlan";
 import { updateStatus } from "../support/app-update-fixture";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -171,16 +171,6 @@ describe("update everything plan", () => {
     expect(updateEverythingPlan({ snapshot: snapshot(conversations, [...runs]), statuses, operations: NO_OPERATIONS, appStatus: null }))
       .toMatchObject({ workspaceRuns: 0, runningChats: 1 });
   });
-
-  it("names the provider being updated, then the app", () => {
-    const phase = { kind: "providers", providerIds: ["codex", "claude"] } as const;
-    expect(updateEverythingProgress(phase, NO_OPERATIONS, snapshot())).toBe("Updating Codex…");
-    expect(updateEverythingProgress(phase, new Map([["claude", operation("claude", "queued")]]), snapshot())).toBe("Updating Claude Code…");
-    expect(updateEverythingProgress(phase, new Map([
-      ["codex", operation("codex", "queued")], ["claude", operation("claude", "running")],
-    ]), snapshot())).toBe("Updating Claude Code…");
-    expect(updateEverythingProgress({ kind: "app" }, NO_OPERATIONS, snapshot())).toBe("Updating Inertia…");
-  });
 });
 
 function harness(appStatus: AppUpdateStatus | null, request: (command: CommandWithoutId) => Promise<ServerEvent>) {
@@ -234,7 +224,6 @@ describe("update everything run", () => {
     expect(request).not.toHaveBeenCalled();
     expect(install).not.toHaveBeenCalled();
     expect(hook.result.current.phase).toEqual({ kind: "download" });
-    expect(updateEverythingProgress({ kind: "download" }, NO_OPERATIONS, snapshot())).toBe("Downloading Inertia…");
     await act(async () => { statusListener?.(updateStatus({ state: "downloaded" })); await running; });
     expect(finished).toBe(true);
     expect(order).toEqual(["download", "updates.run", "install"]);

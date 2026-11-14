@@ -327,6 +327,38 @@ for (const size of [
       await expect(page.locator(".workspace-shell")).not.toHaveAttribute("inert", "");
       await expect(page.locator(".sidebar-scrim")).toHaveAttribute("tabindex", "-1");
       await expect(page.locator(".sidebar-scrim")).toHaveAttribute("aria-hidden", "true");
+
+      await navigationToggle.click();
+      await expect(mobileSidebar).toBeVisible();
+      const scrim = page.locator(".sidebar-scrim");
+      await expect(scrim).toBeVisible();
+      await expect(scrim).toHaveCSS("opacity", "1");
+      const cover = await page.evaluate(() => {
+        const scrimBounds = document.querySelector(".sidebar-scrim")?.getBoundingClientRect();
+        const drawerBounds = document.querySelector("aside.sidebar")?.getBoundingClientRect();
+        const x = window.innerWidth - 40;
+        const y = Math.round(window.innerHeight / 2);
+        return {
+          scrim: scrimBounds ? { left: scrimBounds.left, top: scrimBounds.top, right: scrimBounds.right, bottom: scrimBounds.bottom } : null,
+          drawerRight: drawerBounds?.right ?? Number.POSITIVE_INFINITY,
+          width: window.innerWidth,
+          height: window.innerHeight,
+          x,
+          y,
+          hitsScrim: document.elementFromPoint(x, y)?.classList.contains("sidebar-scrim") ?? false,
+        };
+      });
+      expect(cover.scrim).toEqual({ left: 0, top: 0, right: cover.width, bottom: cover.height });
+      expect(cover.drawerRight).toBeLessThan(cover.x);
+      expect(cover.hitsScrim).toBe(true);
+      await page.mouse.click(cover.x, cover.y);
+      await expect(mobileSidebar).toBeHidden();
+      await expect(navigationToggle).toBeFocused();
+      await expect(page.locator(".workspace-shell")).not.toHaveAttribute("inert", "");
+      await expect(scrim).toHaveCSS("pointer-events", "none");
+      await expect(scrim).toHaveAttribute("aria-hidden", "true");
+    } else {
+      await expect(page.locator(".sidebar-scrim")).toBeHidden();
     }
 
     const geometry = await page.evaluate(() => {

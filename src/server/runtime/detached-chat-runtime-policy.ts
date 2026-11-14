@@ -25,6 +25,7 @@ export interface DetachedChatRuntimePolicyResources {
     conversationId: string,
     requestId: string,
   ): AgentInputRequest | null;
+  secretRequestConversationId(requestId: string): string | null;
 }
 
 function exactConversation(
@@ -203,6 +204,20 @@ export function detachedChatCommandRejection(
         ? null
         : REJECTION;
     }
+    case "secret-request.decline":
+      return ownsExistingConversation(command.payload.conversationId)
+        && resources.secretRequestConversationId(command.payload.requestId)
+          === authority.conversationId
+        ? null
+        : REJECTION;
+    case "secret-request.revoke":
+      return shell()
+        && resources.secretRequestConversationId(command.payload.requestId)
+          === authority.conversationId
+        ? null
+        : REJECTION;
+    case "secret-request.list":
+      return REJECTION;
     case "checkpoint.revert":
       return ownsExistingConversation(command.payload.conversationId)
         && resources.checkpointConversationId(command.payload.checkpointId)

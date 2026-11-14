@@ -132,11 +132,11 @@ describe("dialog shell", () => {
       "PreMergeConfidenceDialog.tsx",
       "PullRequestDialog.tsx",
       "ReviewNoteDialog.tsx",
-      "UsageLimitsPanel.tsx",
       "composer/ReviewedScreenshotControl.tsx",
       "composer/SnapshotControl.tsx",
       "response-timeline/html-render-dialog.tsx",
       "sidebar/UpdateRestartConfirmation.tsx",
+      "usage/UsagePopup.tsx",
     ]) {
       const source = readSourceText(`src/renderer/src/components/${file}`);
       expect(source, file).toMatch(/<Dialog(?:Shell|Header)\b/u);

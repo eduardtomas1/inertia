@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { ModelBackendProfileDraft } from "../../src/shared/contracts";
 import {
   backendProfileSemanticUpdate,
-  backendProfileIsReady,
   setBackendDraftAdvancedRouting,
   updateBackendDraftModel,
 } from "../../src/renderer/src/utils/backendProfileDraft";
@@ -67,30 +66,6 @@ describe("model backend editor routing", () => {
     expect(backendProfileSemanticUpdate(current, next)).toEqual({
       models: next.models,
     });
-  });
-
-  it("shows readiness only with usable auth and a tested usable connection", () => {
-    const base = {
-      enabled: true,
-      authState: "configured" as const,
-      connectionState: "connected" as const,
-      compatibility: { state: "verified" as const },
-    };
-
-    expect(backendProfileIsReady(base)).toBe(true);
-    expect(backendProfileIsReady({
-      ...base,
-      authState: "unavailable",
-    })).toBe(false);
-    expect(backendProfileIsReady({
-      ...base,
-      connectionState: "not-tested",
-    })).toBe(false);
-    expect(backendProfileIsReady({
-      ...base,
-      connectionState: "limited",
-      compatibility: { state: "partially-compatible" },
-    })).toBe(true);
   });
 
   it("renames a non-primary model without silently making it primary", () => {

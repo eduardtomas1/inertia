@@ -139,7 +139,7 @@ describe("historical execution disclosure performance", () => {
     expect(screen.queryByText("Ran performance fixture")).toBeNull();
     expect(document.body.textContent).not.toContain("UNMOUNTED_SENTINEL");
 
-    fireEvent.click(screen.getByRole("button", { name: "Run details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Worked for 8s" }));
 
     expect(document.querySelector(".agent-activity")).toHaveTextContent(/Ran performance fixture/u);
     expect(document.body.textContent).not.toContain("UNMOUNTED_SENTINEL");

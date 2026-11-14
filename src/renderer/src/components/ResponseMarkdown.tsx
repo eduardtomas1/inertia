@@ -51,6 +51,11 @@ import {
 } from "./markdown/MarkdownImageScheduler";
 import { TooltipButton } from "./TooltipButton";
 import { TooltipText } from "./TooltipText";
+import { FileChip } from "./response-timeline/FileChip";
+import {
+  fileChipReference,
+  MAX_FILE_CHIPS_PER_DOCUMENT,
+} from "../utils/fileChipReference";
 
 export const RESPONSE_MARKDOWN_TAG_NAMES = [
   "a", "blockquote", "br", "code", "dd", "del", "details", "div", "dl", "dt",
@@ -99,7 +104,7 @@ const REMARK_PLUGINS: NonNullable<
 > = [remarkGfm, preserveCodeMeta];
 const REHYPE_PLUGINS: NonNullable<
   ComponentProps<typeof ReactMarkdown>["rehypePlugins"]
-> = [rehypeRaw, stableHeadingIds, [rehypeSanitize, sanitizeSchema]];
+> = [rehypeRaw, stableHeadingIds, [rehypeSanitize, sanitizeSchema], markFileChips];
 type ResponseMarkdownProps = {
   content: string;
   projectRoot: string;
@@ -109,6 +114,7 @@ type ResponseMarkdownProps = {
   defaultCodeWrap: boolean;
   streaming?: boolean;
   announceCopyFeedback?: boolean;
+  fileChips?: boolean;
   onOpenProjectFile?: (
     path: string,
     location?: WorkspaceFileLocation,
@@ -190,6 +196,36 @@ function stableHeadingIds() {
           ...node.properties,
           id: uniqueGithubHeadingSlug(markdownHtmlText(node), occurrences),
         };
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
+}
+
+const FILE_CHIP_PROPERTY = "dataResponseFileChip";
+const FILE_CHIP_BOUNDARIES = new Set(["a", "pre", "summary"]);
+
+function markFileChips() {
+  return (tree: MarkdownHtmlNode) => {
+    let chips = 0;
+    const visit = (node: MarkdownHtmlNode): void => {
+      if (chips >= MAX_FILE_CHIPS_PER_DOCUMENT) return;
+      if (node.type === "element") {
+        if (FILE_CHIP_BOUNDARIES.has(node.tagName ?? "")) return;
+        if (node.tagName === "code") {
+          const [text, ...rest] = node.children ?? [];
+          if (
+            rest.length === 0
+            && text?.type === "text"
+            && typeof text.value === "string"
+            && fileChipReference(text.value)
+          ) {
+            node.properties = { ...node.properties, [FILE_CHIP_PROPERTY]: "" };
+            chips += 1;
+          }
+          return;
+        }
       }
       node.children?.forEach(visit);
     };
@@ -649,6 +685,7 @@ interface MarkdownRenderContextValue {
   defaultCodeWrap: boolean;
   streaming: boolean;
   announceCopyFeedback: boolean;
+  fileChips: boolean;
   onOpenProjectFile?: (
     path: string,
     location?: WorkspaceFileLocation,
@@ -940,6 +977,49 @@ function MarkdownCodeBlock({ children }: ComponentProps<"pre">): React.JSX.Eleme
   );
 }
 
+function MarkdownCode({
+  children,
+  node,
+  ...props
+}: ComponentProps<"code"> & ExtraProps): React.JSX.Element {
+  const {
+    projectRoot,
+    projectId,
+    conversationId,
+    announceCopyFeedback,
+    fileChips,
+    onOpenProjectFile,
+  } = useMarkdownRenderContext();
+  const { "data-response-file-chip": _marker, ...codeProps } = props as typeof props & {
+    "data-response-file-chip"?: unknown;
+  };
+  const reference = fileChips
+    && node?.properties?.[FILE_CHIP_PROPERTY] !== undefined
+    && typeof children === "string"
+    ? fileChipReference(children)
+    : null;
+  const target = reference && projectRoot && onOpenProjectFile
+    ? resolveResponseLink(projectRoot, reference.path, "file")
+    : null;
+  const relativePath = target?.kind === "project" && target.relativePath !== "."
+    ? target.relativePath
+    : null;
+  if (!reference || relativePath === null || !onOpenProjectFile) {
+    return <code {...codeProps}>{children}</code>;
+  }
+  return (
+    <FileChip
+      reference={reference}
+      relativePath={relativePath}
+      projectRoot={projectRoot}
+      projectId={projectId}
+      conversationId={conversationId}
+      announceCopyFeedback={announceCopyFeedback}
+      onOpenProjectFile={onOpenProjectFile}
+    />
+  );
+}
+
 function MarkdownDetails({
   children,
   node: _node,
@@ -952,6 +1032,7 @@ const RESPONSE_MARKDOWN_COMPONENTS: NonNullable<
   ComponentProps<typeof ReactMarkdown>["components"]
 > = {
   a: MarkdownLink,
+  code: MarkdownCode,
   pre: MarkdownCodeBlock,
   table: MarkdownTable,
   details: MarkdownDetails,
@@ -1002,6 +1083,7 @@ function ResponseMarkdownComponent({
   defaultCodeWrap,
   streaming = false,
   announceCopyFeedback = true,
+  fileChips = true,
   onOpenProjectFile,
 }: ResponseMarkdownProps): React.JSX.Element {
   const renderedContent = streaming ? stabilizeStreamingMarkdown(content) : content;
@@ -1023,11 +1105,13 @@ function ResponseMarkdownComponent({
     defaultCodeWrap,
     streaming,
     announceCopyFeedback,
+    fileChips,
     onOpenProjectFile,
   }), [
     announceCopyFeedback,
     conversationId,
     defaultCodeWrap,
+    fileChips,
     markdownBasePath,
     onOpenProjectFile,
     projectId,

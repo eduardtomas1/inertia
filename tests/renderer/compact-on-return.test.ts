@@ -34,7 +34,7 @@ function profile(overrides: Record<string, unknown>) {
 }
 
 describe("compact on return route", () => {
-  it("treats native Claude as eligible only with a Console API key", () => {
+  it("treats native Claude as eligible on a Console API key and on a Claude subscription", () => {
     const consoleKey = compactOnReturnRoute({
       selection: claudeNative,
       profile: undefined,
@@ -48,7 +48,7 @@ describe("compact on return route", () => {
       profile: undefined,
       provider: { accountKind: "Claude account" },
     });
-    expect(compactOnReturnEligibility(account!).eligible).toBe(false);
+    expect(compactOnReturnEligibility(account!)).toEqual({ eligible: true, lifetimeMs: 3_600_000 });
   });
 
   it("keeps native Codex and ChatGPT accounts quiet", () => {

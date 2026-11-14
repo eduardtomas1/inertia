@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { ModelChooserRow, modelChooserRowFromRoute, modelChooserSecondaryIdentity } from "../../src/renderer/src/components/ModelChooserRow";
 import { searchModelRoutes } from "../../src/renderer/src/utils/modelSearch";
-import { composerProviderReady, composerRouteReadiness } from "../../src/renderer/src/utils/composerReadiness";
+import { composerRouteReadiness } from "../../src/renderer/src/utils/composerReadiness";
 import { buildComposerModelRoutes, readyModelChooserRoutes } from "../../src/renderer/src/utils/modelChooserRoutes";
 import { modelFavoriteKey, resolveModelFavorites } from "../../src/renderer/src/utils/modelFavorites";
 import { deriveModelSourceRailItems, filterModelRoutesBySource } from "../../src/renderer/src/utils/modelSourceRail";
@@ -247,8 +247,6 @@ describe("API key routes in the composer", () => {
       profile: anthropicKey(),
       selection: selection("claude-opus-5-5"),
     })).toEqual({ ready: true });
-    expect(composerProviderReady(provider("claude"), anthropicKey(), "claude-opus-5-5")).toBe(true);
-    expect(composerProviderReady(provider("claude"), anthropicKey(), "claude-haiku-5-5")).toBe(false);
   });
 
   it("judges the selected model rather than the profile", () => {

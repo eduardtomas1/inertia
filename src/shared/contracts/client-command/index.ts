@@ -11,6 +11,8 @@ import { gitCommandSchemas, gitHistoryCommandSchemas } from "./git";
 import { workspaceCommandSchemas } from "./workspace";
 import { terminalLinkCommandSchemas } from "./terminal-links";
 import { promptPresetCommandSchema } from "./prompt-presets";
+import { customAgentCommandSchemas } from "./custom-agents";
+import { secretRequestCommandSchemas } from "./secret-requests";
 import { todoCommandSchemas } from "./todos";
 import { libraryCommandSchemas } from "./library";
 import { updatesCommandSchemas } from "./updates";
@@ -28,6 +30,8 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...agentCommandSchemas,
   ...configurationCommandSchemas,
   ...promptPresetCommandSchema.options,
+  ...customAgentCommandSchemas,
+  ...secretRequestCommandSchemas,
   ...todoCommandSchemas,
   ...libraryCommandSchemas,
   ...updatesCommandSchemas,
@@ -44,3 +48,10 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
+export type {
+  SecretRequestCommandResult,
+  SecretRequestDeclineResult,
+  SecretRequestListEntry,
+  SecretRequestListResult,
+  SecretRequestRevokeResult,
+} from "../secret-request-results";

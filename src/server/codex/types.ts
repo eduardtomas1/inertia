@@ -41,6 +41,7 @@ export interface CodexAppServerOptions {
   /** Exact App Server service tier advertised by the selected model. */
   serviceTier?: "priority" | null;
   modelProvider?: CodexResponsesHarnessConfiguration;
+  autoCompactTokenLimit?: number;
   reasoningEffort?: string;
   sessionId?: string;
   imagePaths?: readonly string[];

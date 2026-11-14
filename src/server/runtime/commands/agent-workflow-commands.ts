@@ -6,10 +6,7 @@ import type {
 } from "../../../shared/contracts";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
-import type {
-  ConversationReservationOptions,
-  ConversationWorkAuthority,
-} from "../conversation-work-authority";
+import type { ConversationWorkAuthority } from "../conversation-work-authority";
 import { RuntimeRequestError } from "../../runtime-errors";
 import {
   defineRuntimeCommandHandler,
@@ -27,20 +24,15 @@ export interface AgentWorkflowCommandDependencies {
 export function createAgentWorkflowCommandHandler(
   dependencies: AgentWorkflowCommandDependencies,
 ): RuntimeCommandHandler {
-  const reserveNativeSession = (
-    conversationId: string,
-    options?: ConversationReservationOptions,
-  ): boolean => (
-    !dependencies.providerTerminalResumes.isActive(conversationId)
-    && dependencies.conversationWork.reserve(conversationId, options)
-  );
-
   const withNativeSessionReservation = async <T>(
     conversationId: string,
     blockedMessage: string,
     operation: () => Promise<T>,
   ): Promise<T> => {
-    if (!reserveNativeSession(conversationId)) {
+    if (
+      dependencies.providerTerminalResumes.isActive(conversationId)
+      || !dependencies.conversationWork.reserve(conversationId)
+    ) {
       throw new RuntimeRequestError(blockedMessage);
     }
     try {
@@ -51,21 +43,17 @@ export function createAgentWorkflowCommandHandler(
   };
 
   const refreshWorkflow = async (conversationId: string) => {
-    if (!reserveNativeSession(conversationId, { locksRunConfiguration: false })) {
-      const saved = dependencies.workflows.state(conversationId);
-      return saved.goalCapability.kind === "codex-native"
-        ? {
-            ...saved,
-            goalRefreshWarning: saved.goalRefreshWarning
-              ?? "Showing saved native goal data while this checkout is busy. It may be out of date.",
-          }
-        : saved;
-    }
-    try {
+    if (!dependencies.providerTerminalResumes.isActive(conversationId)) {
       return await dependencies.workflows.refresh(conversationId);
-    } finally {
-      dependencies.conversationWork.release(conversationId);
     }
+    const saved = dependencies.workflows.state(conversationId);
+    return saved.goalCapability.kind === "codex-native"
+      ? {
+          ...saved,
+          goalRefreshWarning: saved.goalRefreshWarning
+            ?? "Showing saved native goal data while this chat is busy. It may be out of date.",
+        }
+      : saved;
   };
 
   return defineRuntimeCommandHandler([

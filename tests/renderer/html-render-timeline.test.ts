@@ -11,7 +11,7 @@ import {
   answerTailCommentary,
   buildResponseTimeline,
   estimateTimelineRowSize,
-  shouldConsolidateSettledWorkIntoRunDetails,
+  isQuietSettledTurn,
   stabilizeResponseTimeline,
   type ResponseTimelineItem,
   type ResponseTurn,
@@ -115,14 +115,14 @@ function onlyTurn(items: ResponseTimelineItem[]): ResponseTurn {
 }
 
 describe("visual replies in the response timeline model", () => {
-  it("splits renders from system notices so clean work still consolidates", () => {
+  it("splits renders from system notices so clean work stays quiet", () => {
     const second = render("render-2", 6, 480, "Error budget");
     const first = render("render-1", 5);
     const turn = onlyTurn(timeline([second, first]));
 
     expect(turn.htmlRenders).toEqual([first, second]);
     expect(turn.systemMessages).toEqual([]);
-    expect(shouldConsolidateSettledWorkIntoRunDetails(turn)).toBe(true);
+    expect(isQuietSettledTurn(turn, false)).toBe(true);
   });
 
   it("keeps plain and malformed system messages as notices and never quarantines renders", () => {
@@ -136,7 +136,7 @@ describe("visual replies in the response timeline model", () => {
 
     expect(turn.systemMessages).toEqual([notice, malformed]);
     expect(turn.htmlRenders).toEqual([valid]);
-    expect(shouldConsolidateSettledWorkIntoRunDetails(turn)).toBe(false);
+    expect(isQuietSettledTurn(turn, false)).toBe(false);
     expect(items.some(({ kind }) => kind === "compatibility")).toBe(false);
   });
 

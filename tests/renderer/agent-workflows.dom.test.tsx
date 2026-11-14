@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  agentWorkflowFirstProviderThread,
   agentWorkflowRouteIdentity,
   agentWorkflowTargetConversation,
   useAgentWorkflows,
@@ -127,7 +128,66 @@ describe("useAgentWorkflows", () => {
     expect(request).toHaveBeenCalledTimes(requestCount);
   });
 
-  it("reloads capability state when a provider session appears in place", async () => {
+  it("recognises only a chat's first provider thread as an in-place session start", () => {
+    const route = {
+      modelSelection: {
+        harnessId: "codex-app-server",
+        backendProfileId: "builtin:openai",
+        backendConfigurationRevision: 2,
+      },
+      providerSessionId: null,
+      worktreePath: null,
+    } as Conversation;
+    const project = { path: "/workspace/project" } as Project;
+    const fresh = agentWorkflowRouteIdentity(route, project);
+    const started = agentWorkflowRouteIdentity({ ...route, providerSessionId: "thread-1" }, project);
+    const replaced = agentWorkflowRouteIdentity({ ...route, providerSessionId: "thread-2" }, project);
+    const moved = agentWorkflowRouteIdentity({
+      ...route,
+      providerSessionId: "thread-1",
+      worktreePath: "/workspace/worktrees/feature",
+    }, project);
+
+    expect(agentWorkflowFirstProviderThread(fresh, started)).toBe(true);
+    expect(agentWorkflowFirstProviderThread(started, replaced)).toBe(false);
+    expect(agentWorkflowFirstProviderThread(fresh, moved)).toBe(false);
+    expect(agentWorkflowFirstProviderThread(undefined, started)).toBe(false);
+    expect(agentWorkflowFirstProviderThread(started, fresh)).toBe(false);
+  });
+
+  it("still reads the provider when a chat's provider thread is replaced", async () => {
+    const request = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result",
+      requestId: "request-1",
+      result: {
+        kind: "agent.workflow",
+        workflow: workflow({ kind: "codex-native", available: true, label: "Codex native goal" }),
+      },
+    }));
+    const hook = renderHook(
+      ({ routeIdentity }: { routeIdentity: string }) => useAgentWorkflows({
+        conversationId: "conversation-1",
+        routeIdentity,
+        status: "online",
+        request,
+        subscribe: vi.fn(() => () => undefined),
+      }),
+      { initialProps: { routeIdentity: "codex-app-server\0thread-1" } },
+    );
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+
+    act(() => hook.rerender({ routeIdentity: "codex-app-server\0thread-2" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    for (const call of [1, 2]) {
+      expect(request).toHaveBeenNthCalledWith(call, {
+        type: "agent.workflow.load",
+        payload: { conversationId: "conversation-1", refresh: true },
+      });
+    }
+  });
+
+  it("loads saved state instead of reading the provider when a chat's first provider thread appears", async () => {
     let native = false;
     const request = vi.fn(async (
       _command: CommandWithoutId,
@@ -184,7 +244,7 @@ describe("useAgentWorkflows", () => {
       type: "agent.workflow.load",
       payload: {
         conversationId: "conversation-1",
-        refresh: true,
+        refresh: false,
       },
     });
   });

@@ -459,15 +459,16 @@ describe("Linux runtime process guardian", () => {
     });
     try {
       const delays = await Promise.all(children.map(async (child) => {
-        let outputClosedAt = 0;
         child.stdout!.resume();
         child.stderr!.resume();
-        child.stdout!.once("close", () => { outputClosedAt = performance.now(); });
-        const exitedAt = await new Promise<number>((resolve) => {
+        const outputClosed = new Promise<number>((resolve) => {
+          child.stdout!.once("close", () => resolve(performance.now()));
+        });
+        const exited = new Promise<number>((resolve) => {
           child.once("exit", () => resolve(performance.now()));
         });
+        const [outputClosedAt, exitedAt] = await Promise.all([outputClosed, exited]);
         expect(child.exitCode).toBe(0);
-        expect(outputClosedAt).toBeGreaterThan(0);
         return exitedAt - outputClosedAt;
       }));
       expect(Math.max(...delays)).toBeLessThan(200);

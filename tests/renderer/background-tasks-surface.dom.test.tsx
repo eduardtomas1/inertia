@@ -116,7 +116,8 @@ function surface(overrides: Partial<BackgroundTasksSurfaceProps> = {}): React.JS
 }
 
 function card(title: string): HTMLElement {
-  return screen.getByText(title, { selector: ".background-task-title" }).closest("li")!;
+  const transcript = screen.queryByRole("button", { name: `View transcript for ${title}` });
+  return (transcript ?? screen.getByText(title, { selector: ".background-task-title" })).closest("li")!;
 }
 
 async function openTranscript(title: string): Promise<HTMLElement> {
@@ -558,6 +559,11 @@ describe("Background tasks stylesheets", () => {
   it("lifts the two-line clamp on what a task is doing only while its transcript is open", () => {
     expect(css).toMatch(/\.background-task-line \{[^}]*-webkit-line-clamp: 2;/u);
     expect(css).toMatch(/\.background-task-doing:has\(\[aria-expanded="true"\]\) \.background-task-line \{[^}]*-webkit-line-clamp: unset;/u);
+  });
+
+  it("clamps a card's heading to two lines and shows all of it while its transcript is open", () => {
+    expect(css).toMatch(/\.background-task-title \{[^}]*-webkit-line-clamp: 2;/u);
+    expect(css).toMatch(/\.background-task-card:has\(\.background-task-transcript-toggle\[aria-expanded="true"\]\) \.background-task-title \{[^}]*-webkit-line-clamp: unset;/u);
   });
 
   it("stays plain: no shadows, uppercase labels or pill shapes", () => {

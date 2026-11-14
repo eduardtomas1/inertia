@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentActivity, AgentApprovalRequest, AgentInputRequest, ChatMessage } from "../../src/shared/contracts/agent";
 import type { WorkspaceRun } from "../../src/shared/contracts/app";
+import type { SecretRequestReference } from "../../src/shared/agent-secrets";
 import { AGENT_RUN_STATES } from "../../src/shared/run-state";
 import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, parseMascotStatus } from "../../src/shared/mascot";
 import { mascotFeedViolation, parseMascotFeed } from "../../src/shared/mascot-feed";
@@ -420,6 +421,41 @@ describe("mascot bubble words", () => {
     publisher.observe({ type: "agent.input.requested", request: secret });
     expect(feed().status).toMatchObject({ message: "Sensitive information is needed. Answer privately in the chat.", progress: "2 questions to answer" });
     expect(JSON.stringify(feed())).not.toContain("PRIVATE");
+  });
+
+  it("asks privately while a secret request card is pending and clears it once the card settles", () => {
+    let shell = conversation("chat", "running");
+    const { publisher, feed } = mascotPublisher({ lookup: () => shell });
+    publisher.replace([shell]);
+    const pending: SecretRequestReference = {
+      requestId: "0c9c8d7e-6f5a-4b3c-9d2e-1f0a9b8c7d6e", title: "PRIVATE TITLE", description: "PRIVATE DESCRIPTION",
+      ttlHours: 24, status: "pending", answeredAt: null, expiresAt: null, storage: null,
+    };
+    const card = (secretRequest: SecretRequestReference, turnId = "chat-turn") => ({
+      type: "conversation.message.persisted" as const,
+      message: { id: "secret-card", conversationId: "chat", turnId, role: "system", attachments: [],
+        content: "Asked for a secret: PRIVATE TITLE", createdAt: "2026-09-06T10:30:00.000Z", secretRequest } as ChatMessage,
+    });
+    publisher.observe(card(pending, "older-turn"));
+    publisher.observe(card(pending));
+    shell = conversation("chat", "waiting-for-input");
+    publisher.update(shell);
+    expect(feed().status).toMatchObject({
+      phase: "waiting-for-input", message: "Sensitive information is needed. Answer privately in the chat.", progress: null,
+      since: "2026-09-06T10:30:00.000Z",
+    });
+    expect(feed().counts).toMatchObject({ attention: 1 });
+    expect(JSON.stringify(feed())).not.toContain("PRIVATE");
+    publisher.observe(card({ ...pending, status: "saved", answeredAt: "2026-09-06T10:31:00.000Z",
+      expiresAt: "2026-09-07T10:31:00.000Z", storage: "keychain" }));
+    expect(feed().status).toMatchObject({ phase: "waiting-for-input", message: null });
+    shell = conversation("chat", "running");
+    publisher.update(shell);
+    expect(feed().status).toMatchObject({ phase: "running", message: null });
+    shell = conversation("chat", "completed");
+    publisher.update(shell);
+    publisher.observe(card(pending));
+    expect(feed().status).toMatchObject({ phase: "completed", message: null });
   });
 
   it("times a question or approval from when it arrived rather than from the start of the turn", () => {

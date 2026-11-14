@@ -17,7 +17,12 @@ export function regularOwnedFile(path: string): boolean {
 }
 
 export function removeIfRegularFile(path: string): void {
-  if (regularOwnedFile(path)) unlinkSync(path);
+  if (!regularOwnedFile(path)) return;
+  try {
+    unlinkSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
 }
 
 export function removeDatabaseFileFamily(path: string): void {

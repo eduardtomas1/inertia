@@ -103,6 +103,7 @@ export function projectDetachedChatSnapshot(
     backendDefaults: [],
     settings: projectedSettings(snapshot.settings),
     promptPresets: snapshot.promptPresets ?? [],
+    customAgents: snapshot.customAgents ?? [],
     todos: [],
     ...(snapshot.library ? { library: projectDetachedLibrary(snapshot.library, conversationId) } : {}),
     ...(snapshot.watchers ? {

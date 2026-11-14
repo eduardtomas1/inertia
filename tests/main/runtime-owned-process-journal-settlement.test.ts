@@ -502,13 +502,11 @@ describe("runtime-owned journal settlement", () => {
         this: RuntimeOwnedProcessJournal,
         ownershipId: string,
       ) {
-        // Linux can observe a concurrent claim transition. Darwin has already
-        // fenced the crashed writer, so its old capability cannot publish one.
-        expect(this.sessionCapabilityCurrent(capability!)).toBe(platform === "linux");
-        expect(this.retire(ownershipId, capability!)).toBe(platform === "linux");
+        expect(this.sessionCapabilityCurrent(capability!)).toBe(false);
+        expect(this.retire(ownershipId, capability!)).toBe(false);
         expect(this.records(runtimeGenerationId)).toMatchObject([{
           ownershipId,
-          state: platform === "linux" ? "retiring" : "owned",
+          state: "owned",
         }]);
         return false;
       })
@@ -563,7 +561,7 @@ describe("runtime-owned journal settlement", () => {
     expect(now).toBe(10_200);
     expect(waitForProcessGroupDrain).toHaveBeenCalledTimes(10);
     expect(journal.records(runtimeGenerationId)).toMatchObject([{
-      state: "retiring",
+      state: "owned",
       process: identity,
     }]);
   });

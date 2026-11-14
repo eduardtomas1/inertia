@@ -21,6 +21,7 @@ const vendoredNoticesPaths = [
   join(repositoryRoot, "resources", "provider-icon-notices.txt"),
   join(repositoryRoot, "resources", "runtime-process-guardian-notices.txt"),
   join(repositoryRoot, "resources", "thinking-orbs-notices.txt"),
+  join(repositoryRoot, "resources", "usage-price-list-notices.txt"),
 ];
 
 function fail(message) {

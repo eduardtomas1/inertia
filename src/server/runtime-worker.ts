@@ -36,6 +36,7 @@ import {
 import { observeRuntimeStartup } from "./runtime-worker-startup-failure.js";
 import { answerRuntimeHtmlRenderRead } from "./runtime-html-render-reads.js";
 import { answerRuntimeAttachmentConversations } from "./runtime-attachment-conversation-reads.js";
+import { answerRuntimeAgentSecretDelivery, answerRuntimeAgentSecretReconcile } from "./runtime-agent-secret-delivery.js";
 import {
   installRuntimeWorkerFaultHandlers,
   runtimeOwnedProcessFaultIncidentCode,
@@ -366,6 +367,14 @@ parentPort.on("message", (messageEvent) => {
         });
       },
     );
+    return;
+  }
+  if (command.type === "runtime.agent-secret-deliver") {
+    void answerRuntimeAgentSecretDelivery(stopping ? null : runtime, command).then(post).catch(() => undefined);
+    return;
+  }
+  if (command.type === "runtime.agent-secret-reconcile") {
+    post(answerRuntimeAgentSecretReconcile(stopping ? null : runtime, command));
     return;
   }
   if (command.type === "runtime.resolve-project-path") {

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { SentMessageAttachmentList } from "../../src/renderer/src/components/SentMessageAttachmentList";
 
-const observations = new Map<Element, (visible: boolean) => void>();
+const observations = new Map<Element, (...visible: boolean[]) => void>();
 const created: HTMLImageElement[] = [];
 const attachments = Array.from({ length: 8 }, (_, index) => ({
   id: `image-${index}`, name: `image-${index}.png`, mimeType: "image/png" as const, size: 1024,
@@ -13,8 +13,8 @@ function tile(container: HTMLElement, index: number): Element {
   return container.querySelectorAll(".sent-attachment-thumbnail")[index]!;
 }
 
-function setVisible(container: HTMLElement, index: number, visible: boolean): void {
-  observations.get(tile(container, index))?.(visible);
+function setVisible(container: HTMLElement, index: number, ...visible: boolean[]): void {
+  observations.get(tile(container, index))?.(...visible);
 }
 
 function readIssued(index: number): boolean {
@@ -32,9 +32,10 @@ beforeEach(() => {
   vi.stubGlobal("IntersectionObserver", class {
     constructor(private callback: IntersectionObserverCallback) {}
     observe(target: Element): void {
-      observations.set(target, (visible) => this.callback([
-        { target, isIntersecting: visible } as IntersectionObserverEntry,
-      ], this as unknown as IntersectionObserver));
+      observations.set(target, (...visible) => this.callback(
+        visible.map((isIntersecting) => ({ target, isIntersecting }) as IntersectionObserverEntry),
+        this as unknown as IntersectionObserver,
+      ));
     }
     disconnect(): void {}
   });
@@ -64,6 +65,19 @@ it("admits newly visible tiles within 15 seconds when two hidden reads never set
   expect([2, 3].filter(readIssued)).toEqual([2, 3]);
   expect(created[0]).toHaveAttribute("src", "");
   expect(created[1]).toHaveAttribute("src", "");
+});
+
+it("follows the newest visibility when one callback reports a tile entering and leaving the viewport", () => {
+  const view = render(<SentMessageAttachmentList attachments={attachments.slice(0, 2)} />);
+  act(() => setVisible(view.container, 0, true, false));
+  expect(readIssued(0)).toBe(false);
+  expect(tile(view.container, 0).querySelector("img")).toBeNull();
+  act(() => setVisible(view.container, 1, false, true));
+  expect(readIssued(1)).toBe(true);
+  fireEvent.load(view.container.querySelector("img")!);
+  expect(tile(view.container, 1)).toHaveAttribute("data-thumbnail-state", "ready");
+  act(() => setVisible(view.container, 1, false, true, false));
+  expect(tile(view.container, 1).querySelector("img")).toBeNull();
 });
 
 it("shows an image or a placeholder when a loaded tile re-enters the viewport behind busy slots", () => {

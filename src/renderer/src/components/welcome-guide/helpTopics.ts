@@ -155,7 +155,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Background tasks",
-        detail: "Background tasks in the right panel lists the chat's delegated agents and the commands Inertia started, with what each is doing and the tokens it reports. A turn with agents shows one line, such as 2 agents working; choose it to open those tasks.",
+        detail: "Background tasks in the right panel lists the chat's delegated agents and the commands Inertia started, with what each is doing and the tokens it reports. A turn with agents shows one row, such as 3 subagents; expand it to open an agent's task.",
       },
       {
         name: "Daily work",
@@ -365,13 +365,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     demo: "limits",
     entries: [
       {
-        name: "History",
-        detail: "Usage in the sidebar shows locally recorded usage across chats and providers.",
+        name: "Cost and Tokens",
+        detail: "Usage in the sidebar opens one popup with Cost, Tokens and Limits, on the tab you used last. Cost and Tokens show locally recorded usage across chats and providers for the period and providers you pick in its header; Cost is an estimate at public API list prices, not a bill. Press C, T or L to switch.",
         jump: "Open Usage",
       },
       {
         name: "Limits",
-        detail: "Each provider shows the remaining quota for every reported window with a countdown to its reset. A window whose reset has passed shows Reset due · updating until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset, even during a running turn. Refresh limits asks the providers right away.",
+        detail: "On the Limits tab (press L), each provider shows a card for every reported window: the percentage left, a bar whose hatched part is what the next reset restores, a line for an even pace and a countdown to the reset. Several equivalent accounts sit side by side in the same bar; select one for its details and banked resets. A window whose reset has passed shows Reset due until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset, even during a running turn. Refresh limits asks the providers right away.",
         jump: "Open Usage",
       },
       {

@@ -76,6 +76,7 @@ function plainText(node: Node): string {
   }
   if (!(node instanceof HTMLElement)) return "";
   if (node.dataset.markdownImageSource !== undefined) return imageText(node);
+  if (node.dataset.fileChipText !== undefined) return node.dataset.fileChipText;
   if (node.matches(SKIPPED)) return "";
   if (node instanceof HTMLInputElement) {
     return node.type === "checkbox" ? `[${node.checked ? "x" : " "}]` : "";

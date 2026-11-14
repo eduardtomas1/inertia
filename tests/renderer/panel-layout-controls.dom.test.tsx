@@ -59,7 +59,7 @@ describe("corner panel controls and header meter", () => {
   it("shows the tightest limit and explains both windows on focus", async () => {
     const props = controls();
     render(<PanelLayoutControls {...props} />);
-    const meter = await screen.findByRole("button", { name: "Usage: 62% of 5-hour limit left" });
+    const meter = await screen.findByRole("button", { name: "Usage: 62% of Session limit left" });
     expect(meter).toHaveTextContent("62%");
     expect(meter).not.toHaveClass("is-low");
     expect(meter.querySelectorAll(".header-usage-meter-bars > i")).toHaveLength(2);
@@ -67,7 +67,7 @@ describe("corner panel controls and header meter", () => {
     fireEvent.focus(meter);
     const popover = screen.getByRole("tooltip");
     expect(meter).toHaveAccessibleDescription(/Claude/u);
-    expect(within(popover).getByText("5-hour limit")).toBeVisible();
+    expect(within(popover).getByText("Session limit")).toBeVisible();
     expect(within(popover).getByText("Weekly limit")).toBeVisible();
     expect(within(popover).getByText("62% left")).toBeVisible();
     expect(within(popover).getByText("81% left")).toBeVisible();
@@ -82,7 +82,7 @@ describe("corner panel controls and header meter", () => {
 
   it("turns the meter amber under 20% and hides it without shared quota", async () => {
     const view = render(<PanelLayoutControls {...controls({ usage: usage(19) })} />);
-    const meter = await screen.findByRole("button", { name: "Usage: 19% of 5-hour limit left" });
+    const meter = await screen.findByRole("button", { name: "Usage: 19% of Session limit left" });
     expect(meter).toHaveClass("is-low");
 
     view.rerender(<PanelLayoutControls {...controls({ usage: null })} />);

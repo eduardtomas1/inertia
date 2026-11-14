@@ -53,6 +53,30 @@ describe("provider activity detail boundary", () => {
     expect(detail).not.toContain("/Users/alice");
   });
 
+  it.each([
+    [
+      "a quoted macOS path with a space",
+      `KEY="$(cat '/Users/bob/Library/Application Support/Inertia/agent-secrets/0123456789abcdef0123456789abcdef/key')" tailscale up`,
+      `KEY="$(cat '<path>')" tailscale up`,
+    ],
+    [
+      "a double-quoted Linux path",
+      `cat "/home/bob/.config/Inertia/agent-secrets/0123456789abcdef0123456789abcdef/key" | wc -c`,
+      `cat "<path>" | wc -c`,
+    ],
+    [
+      "a quoted Windows path with a space",
+      `$key = Get-Content -Raw 'C:\\Users\\Bob Smith\\AppData\\Roaming\\Inertia\\agent-secrets\\0123\\key'; login`,
+      `$key = Get-Content -Raw '<path>'; login`,
+    ],
+    ["an unquoted temporary path before a quote", `echo '/tmp/build/out' done`, `echo '<path>' done`],
+    ["an unquoted POSIX path ending at a quote", `printf %s /private/tmp/a/b"x"`, `printf %s <path>"x"`],
+    ["an escaped space in a POSIX path", `cat /Users/bob/Library/Application\\ Support/x.json; ls`, `cat <path>; ls`],
+    ["an unquoted Windows path before a quote", `type C:\\Temp\\a\\b.txt"`, `type <path>"`],
+  ])("hides %s and keeps the quotes around it", (_label, input, expected) => {
+    expect(sanitizeProviderActivityDetail(input, { homeDirectory: "/nonexistent-home" })).toBe(expected);
+  });
+
   it("redacts credentials passed as environment assignments and command-line options", () => {
     const detail = sanitizeProviderActivityDetail([
       "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG aws s3 ls",

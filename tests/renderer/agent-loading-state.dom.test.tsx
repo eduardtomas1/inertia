@@ -255,7 +255,7 @@ describe("agent loading and trace DOM", () => {
     const group = container.querySelector(".turn-activity-group");
     const rows = () => [...(group?.querySelectorAll<HTMLElement>(".turn-activity-group-row") ?? [])];
     const summary = screen.getByRole("button", {
-      name: "2 files read, 1 search, 3 tool calls",
+      name: "Did 2 reads, searched 1 time and 3 other actions",
     });
 
     expect(group).toHaveAttribute("data-activity-group-state", "live");

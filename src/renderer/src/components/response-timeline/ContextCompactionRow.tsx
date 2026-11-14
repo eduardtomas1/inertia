@@ -10,6 +10,11 @@ import "./ContextCompactionRow.css";
 
 const COMPACTED_CONTEXT = "Compacted context";
 const COMPACTED_ON_RETURN = "Compacted on return";
+const COMPACTED_WHILE_IDLE = "Compacted while idle";
+const AUTOMATIC_TITLES: Partial<Record<ContextCompactionTrigger, string>> = {
+  "on-return": COMPACTED_ON_RETURN,
+  idle: COMPACTED_WHILE_IDLE,
+};
 const COMPACTING_CONTEXT = "Compacting context";
 const COMPACTING_BEFORE_SENDING = "Compacting before sending";
 const BEFORE_TOKENS = /^Before: (\d+) tokens$/mu;
@@ -27,13 +32,16 @@ export function contextCompactionRowLabel(
   compaction: Pick<ContextCompaction, "beforeTokens" | "afterTokens" | "trigger">,
 ): string {
   const label = contextCompactionLabel(compaction);
-  return compaction.trigger === "on-return"
-    ? `${COMPACTED_ON_RETURN}${label.slice(COMPACTED_CONTEXT.length)}`
-    : label;
+  const title = compaction.trigger ? AUTOMATIC_TITLES[compaction.trigger] : undefined;
+  return title ? `${title}${label.slice(COMPACTED_CONTEXT.length)}` : label;
+}
+
+export function automaticContextCompaction(trigger: ContextCompactionTrigger | null | undefined): boolean {
+  return trigger !== null && trigger !== undefined && AUTOMATIC_TITLES[trigger] !== undefined;
 }
 
 function settledTitle(label: string): string {
-  return label.startsWith(COMPACTED_ON_RETURN) ? COMPACTED_ON_RETURN : COMPACTED_CONTEXT;
+  return Object.values(AUTOMATIC_TITLES).find((title) => label.startsWith(title)) ?? COMPACTED_CONTEXT;
 }
 
 export function ContextCompactionMarker({
@@ -116,7 +124,7 @@ export function PendingContextCompaction({
 export function ContextCompactionRow({ message }: { message: ChatMessage }): React.JSX.Element | null {
   if (!message.compaction) return null;
   const label = contextCompactionRowLabel(message.compaction);
-  const onReturn = message.compaction.trigger === "on-return";
+  const automatic = automaticContextCompaction(message.compaction.trigger);
   return (
     <section
       className="context-compaction-row"
@@ -125,7 +133,7 @@ export function ContextCompactionRow({ message }: { message: ChatMessage }): Rea
       tabIndex={-1}
       aria-label={label}
     >
-      {!onReturn && (
+      {!automatic && (
         <article className="message is-user turn-user-request">
           <div className="message-body">{message.content}</div>
         </article>

@@ -74,28 +74,67 @@ describe("deferred message-search focus", () => {
     expect(focus).toHaveBeenCalledWith(0, { messageId: followUp.id, turnId: "turn" });
   });
 
-  it.each(["work", "legacy", "ledger"])("expands %s history and waits for the exact message to mount", (kind) => {
+  it.each(["fold", "work", "legacy", "ledger"])("expands %s history and waits for the exact message to mount", (kind) => {
     const row = document.createElement("section");
-    row.innerHTML = kind === "work" ? '<div class="turn-work-log is-settled"><details></details></div>'
+    row.innerHTML = kind === "fold" ? '<div class="turn-fold-row"><button class="turn-fold-toggle" aria-expanded="false"></button></div><button class="turn-run-details-toggle" aria-expanded="false"></button>'
+      : kind === "work" ? '<div class="turn-work-log is-settled"><details></details></div>'
       : kind === "legacy" ? "<details></details>"
         : '<button class="turn-run-details-toggle" aria-expanded="false"></button>';
     const button = row.querySelector("button");
     const click = vi.fn(() => button?.setAttribute("aria-expanded", "true"));
     button?.addEventListener("click", click);
     const id = 'opaque-"[]\\-message';
-    expect(resolveMessageSearchDestination(row, id)).toBeNull();
+    const folded = kind === "fold" ? [id] : [];
+    expect(resolveMessageSearchDestination(row, id, undefined, folded)).toBeNull();
     if (button) expect(click).toHaveBeenCalledOnce();
     else expect(row.querySelector("details")?.open).toBe(true);
     const other = document.createElement("article");
     other.dataset.followUpMessageId = "other";
     row.append(other);
-    expect(resolveMessageSearchDestination(row, id)).toBeNull();
+    expect(resolveMessageSearchDestination(row, id, undefined, folded)).toBeNull();
     const exact = document.createElement("article");
     if (kind === "legacy") exact.dataset.messageSearchId = id;
+    else if (kind === "fold") exact.dataset.assistantCommentaryId = id;
     else exact.dataset.followUpMessageId = id;
     row.append(exact);
-    expect(resolveMessageSearchDestination(row, id)).toBe(exact);
+    expect(resolveMessageSearchDestination(row, id, undefined, folded)).toBe(exact);
     if (button) expect(click).toHaveBeenCalledOnce();
+  });
+
+  function foldedRow(): { row: HTMLElement; fold: ReturnType<typeof vi.fn>; runDetails: ReturnType<typeof vi.fn>; failure: HTMLDetailsElement } {
+    const row = document.createElement("section");
+    row.dataset.turnId = "turn";
+    row.innerHTML = [
+      '<div class="turn-work-log is-settled is-folded">',
+      '<div class="turn-fold-row"><button class="turn-fold-toggle" aria-expanded="false"></button></div>',
+      '<div class="turn-work-log turn-fold-body" hidden></div>',
+      '<details class="turn-fold-failure"><summary>Failed</summary></details>',
+      "</div>",
+      '<footer><button class="turn-run-details-toggle" aria-expanded="false"></button></footer>',
+    ].join("");
+    const fold = vi.fn();
+    const runDetails = vi.fn();
+    row.querySelector(".turn-fold-toggle")!.addEventListener("click", fold);
+    row.querySelector(".turn-run-details-toggle")!.addEventListener("click", runDetails);
+    return { row, fold, runDetails, failure: row.querySelector<HTMLDetailsElement>(".turn-fold-failure")! };
+  }
+
+  it("leaves the fold closed for a system notice hit and opens Run details instead", () => {
+    const { row, fold, runDetails, failure } = foldedRow();
+    expect(resolveMessageSearchDestination(row, "system-notice", "turn", ["interim-commentary"])).toBeNull();
+    expect(fold).not.toHaveBeenCalled();
+    expect(failure.open).toBe(false);
+    expect(runDetails).toHaveBeenCalledOnce();
+  });
+
+  it("opens the fold only for one of the turn's commentary messages", () => {
+    const { row, fold, runDetails } = foldedRow();
+    expect(resolveMessageSearchDestination(row, "not-commentary", "turn", [])).toBeNull();
+    expect(fold).not.toHaveBeenCalled();
+    expect(runDetails).toHaveBeenCalledOnce();
+    expect(resolveMessageSearchDestination(row, "interim-commentary", "turn", ["interim-commentary"])).toBeNull();
+    expect(fold).toHaveBeenCalledOnce();
+    expect(runDetails).toHaveBeenCalledOnce();
   });
 
   it("opens recovered history before resolving the owning inferred turn", () => {

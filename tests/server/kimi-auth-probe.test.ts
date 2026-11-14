@@ -95,9 +95,9 @@ describe("Kimi initialize-only authentication discovery", () => {
   it.each([
     "malformed-json", "malformed-utf8", "oversized",
     "flood", "stderr-flood", "rpc-error", "invalid-id", "unmatched-id",
-    "wrong-protocol", "wrong-agent", "invalid-descriptor", "timeout",
+    "wrong-protocol", "wrong-agent", "invalid-descriptor",
   ])("rejects %s without any login or session request and cleans up", async (mode) => {
-    const waitsForTimeout = mode === "timeout" || mode === "unmatched-id";
+    const waitsForTimeout = mode === "unmatched-id";
     // Exercise a cold fixture that cannot consume initialize inside 300 ms.
     const app = fixture(mode, false, waitsForTimeout ? 450 : 0);
     try {

@@ -50,10 +50,6 @@ export class RuntimeSupervisorRecycle {
     return this.pending?.source === record;
   }
 
-  replacementIs(record: RuntimeProcessRecord): boolean {
-    return this.pending?.replacement === record;
-  }
-
   bindReplacement(record: RuntimeProcessRecord): boolean {
     const pending = this.pending;
     if (

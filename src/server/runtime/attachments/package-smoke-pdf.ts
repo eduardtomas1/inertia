@@ -85,8 +85,6 @@ export async function writePackagedSmokeResult(
   if (primaryError !== undefined) throw primaryError;
 }
 
-export const writePackagedPdfSmokeResult = writePackagedSmokeResult;
-
 export async function runPackagedPdfSmoke(
   inputPath: string,
   resultPath: string,

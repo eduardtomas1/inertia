@@ -63,12 +63,6 @@ export function privateConnectRuntimeGrantsFromProjectIds(
   })));
 }
 
-export function privateConnectRuntimeGrantedProjectIds(
-  grants: readonly PrivateConnectRuntimeGrant[],
-): string[] {
-  return [...new Set(grants.map(({ projectId }) => projectId))].sort();
-}
-
 export function privateConnectRuntimeGrantAllowsConversation(
   grants: readonly PrivateConnectRuntimeGrant[],
   projectId: string,
@@ -79,38 +73,4 @@ export function privateConnectRuntimeGrantAllowsConversation(
   return grant.includeFutureConversations
     || grant.legacyProjectWide
     || grant.conversationIds.includes(conversationId);
-}
-
-export function privateConnectRuntimeGrantIsProjectWide(
-  grants: readonly PrivateConnectRuntimeGrant[],
-  projectId: string,
-): boolean {
-  const grant = grants.find((candidate) => candidate.projectId === projectId);
-  return Boolean(
-    grant && (grant.includeFutureConversations || grant.legacyProjectWide),
-  );
-}
-
-export function privateConnectRuntimeGrantsNeedReview(
-  grants: readonly PrivateConnectRuntimeGrant[],
-): boolean {
-  return grants.some(({ legacyProjectWide }) => legacyProjectWide);
-}
-
-export function samePrivateConnectRuntimeGrants(
-  left: readonly PrivateConnectRuntimeGrant[],
-  right: readonly PrivateConnectRuntimeGrant[],
-): boolean {
-  if (left.length !== right.length) return false;
-  return left.every((grant, index) => {
-    const other = right[index]!;
-    return grant.projectId === other.projectId
-      && grant.includeFutureConversations === other.includeFutureConversations
-      && grant.legacyProjectWide === other.legacyProjectWide
-      && grant.conversationIds.length === other.conversationIds.length
-      && grant.conversationIds.every(
-        (conversationId, position) =>
-          conversationId === other.conversationIds[position],
-      );
-  });
 }

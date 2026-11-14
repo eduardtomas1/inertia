@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
+import { closeWorkspaceTools, ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 const largeId = randomUUID();
 const requestedPreviewIds = new Set<string>();
@@ -61,7 +61,13 @@ test.beforeAll(async () => {
   });
 });
 
-test.afterAll(async () => { await app?.close(); });
+test.afterAll(async () => {
+  if (app) {
+    await closeWorkspaceTools(app.page).catch(() => undefined);
+    await expect(app.page.locator(`img[src$="${largeId}"]`)).toHaveCount(0).catch(() => undefined);
+  }
+  await app?.close();
+});
 
 test("keeps offscreen gallery originals unloaded and opens a retained 40-megapixel image by keyboard", async ({ browserName: _browserName }, testInfo) => {
   const { page } = app;

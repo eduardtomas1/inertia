@@ -56,9 +56,16 @@ test("starts without a project, runs in separate folders, and restores after res
   };
   try {
     await app.resizeWindow(1440, 1000);
-    await page.getByRole("button", { name: "Start without a project", exact: true }).click();
+    const start = page.getByRole("button", { name: "Start without a project", exact: true });
+    await expect(start).toBeVisible();
+    await app.expectNoViewportOverflow();
+    await app.resizeWindow(1000, 800);
+    await app.expectNoViewportOverflow();
+    await app.resizeWindow(1440, 1000);
+    await start.click();
     await expect(page.getByRole("heading", { name: "What should we work on?" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Project", exact: true })).toHaveText("No project");
+    await expect(page.locator(".chat-workspace .loading-mark")).toHaveCount(0);
     expect(await readdir(join(app.testDirectory, "data", "scratch"))).toEqual([]);
     await page.getByRole("textbox", { name: "Message" }).fill("Help me plan a relaxed weekend in a new city.");
     await page.screenshot({ path: info.outputPath("scratch-draft-light.png"), animations: "disabled" });

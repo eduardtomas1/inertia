@@ -156,6 +156,7 @@ export interface BeginAgentTurnInput
   watcherNote?: WatcherNoteAttribution;
   delegatedCompletion?: import("../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   duoComparison?: DuoComparisonBrief;
+  customAgentCall?: import("../../shared/custom-agents").CustomAgentCallAttribution;
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
   /**
@@ -178,10 +179,13 @@ export interface CreateMessageOptions {
   watcherNote?: WatcherNoteAttribution;
   delegatedCompletion?: import("../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   duoComparison?: DuoComparisonBrief;
+  customAgentCall?: import("../../shared/custom-agents").CustomAgentCallAttribution;
   compaction?: import("../../shared/context-compaction").ContextCompaction;
   /** Turn-scoped system messages only; written with its html_renders row. */
   htmlRender?: import("../../shared/html-render").HtmlRenderReference;
+  secretRequest?: import("../../shared/agent-secrets").SecretRequestReference;
   activateConversation?: boolean;
+  touchConversation?: boolean;
 }
 
 export interface AgentTurnSettlementUpdate
@@ -278,6 +282,7 @@ export interface UpsertSubagentTraceInput {
   providerToolUseId: string | null;
   providerRole: string | null;
   providerName: string | null;
+  customAgentId?: string | null;
   providerStatus?: string | null;
   status: SubagentTraceStatus;
   isLive: boolean;

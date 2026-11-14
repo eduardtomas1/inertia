@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { usageSourceOrigin, type UsageAccount, type UsageSource, type UsageResetOutcome } from "../../shared/provider-usage-limits";
+import { usageWindowTitle } from "../../shared/usage-window-title";
 import { createHash } from "node:crypto";
 import { providerTimestamp } from "../provider/usage-values";
 import { parseCodexRateLimits } from "../codex-metadata";
@@ -15,9 +16,7 @@ const CREDIT_URL = `${CODEX_BASE}/rate-limit-reset-credits`;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 export const usageWindows = (limits: ReturnType<typeof parseCodexRateLimits>): UsageAccount["windows"] => limits.map(({ id, label, remainingPercent, windowMinutes, resetsAt }) => {
   const duration = windowMinutes && Number.isFinite(windowMinutes) && windowMinutes > 0 && windowMinutes <= 525600 ? windowMinutes : null;
-  const title = id.startsWith("codex:") && duration
-    ? duration === 10080 ? "Weekly" : duration % 60 === 0 ? `${duration / 60}-hour window` : `${duration}-minute window`
-    : label;
+  const title = usageWindowTitle({ id, label, windowMinutes: duration });
   return { id: id.slice(0, 256), label: title.slice(0, 200), remainingPercent, windowMinutes: duration, resetsAt };
 });
 

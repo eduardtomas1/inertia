@@ -10,7 +10,6 @@ import {
   ModelChooserRow,
   activateModelChooserFavorite,
   activateModelChooserRow,
-  isModelChooserSelectionKey,
   modelChooserCompatibilityLabel,
   modelChooserRowFromRoute,
   type ModelChooserRowData,
@@ -220,19 +219,6 @@ describe("ModelChooserRow", () => {
     expect(event.stopPropagation).toHaveBeenCalledOnce();
     expect(onFavoriteToggle).toHaveBeenCalledWith(disabled);
     expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  it("accepts unmodified Enter and Space as option selection keys", () => {
-    const event = {
-      altKey: false,
-      ctrlKey: false,
-      metaKey: false,
-      shiftKey: false,
-    };
-    expect(isModelChooserSelectionKey({ ...event, key: "Enter" })).toBe(true);
-    expect(isModelChooserSelectionKey({ ...event, key: " " })).toBe(true);
-    expect(isModelChooserSelectionKey({ ...event, key: "ArrowDown" })).toBe(false);
-    expect(isModelChooserSelectionKey({ ...event, key: "Enter", metaKey: true })).toBe(false);
   });
 
   it("sizes result rows from the shared control target height", () => {

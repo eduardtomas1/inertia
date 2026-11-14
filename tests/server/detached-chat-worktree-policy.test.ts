@@ -25,6 +25,7 @@ const resources: DetachedChatRuntimePolicyResources = {
   duoLaunchConversationIds: () => null,
   pendingApproval: () => null,
   pendingInput: () => null,
+  secretRequestConversationId: () => null,
   savedAnswerConversationId: () => null,
 };
 

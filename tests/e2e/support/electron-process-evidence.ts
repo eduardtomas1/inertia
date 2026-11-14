@@ -5,6 +5,7 @@ type ProcessStage = "launcher-exit" | "launcher-close" | "main-window-page-close
   | "quit-requested" | "quit-request-fulfilled" | "quit-request-rejected"
   | "graceful-exit" | "abnormal-exit" | "force-stop-started"
   | "force-stop-confirmed" | "force-stop-unconfirmed"
+  | "unexited-main-sample-started" | "unexited-main-alive-after-sample" | "unexited-main-exited-during-sample"
   | "transport-started" | "transport-settled" | "transport-timed-out"
   | "directory-remove-started" | "directory-remove-fulfilled"
   | "directory-remove-rejected" | "directory-remove-timed-out"

@@ -328,6 +328,14 @@ describe("quota reset row inside the composer", () => {
     expect(run).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("group", { name: "Usage limit" })).toBeInTheDocument();
   });
+  it("offers a later reset again after a snooze until an earlier one", async () => {
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue(result());
+    render(<LimitResetBanner conversationId={conversationId} latestTurnId={failedTurnId} snoozedUntil="2026-10-02T01:16:55.000Z" disabled={false} providerState="ready" onCommand={run} />);
+    const resume = await screen.findByRole("button", { name: "Resume at reset" });
+    expect(resume).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Snooze until reset" })).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("button", { name: "Snoozed until reset" })).toBeNull();
+  });
   it("reports a failed action as an alert without the diagnostic reference", async () => {
     const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue(result()).mockResolvedValueOnce(result())
       .mockRejectedValueOnce(new Error("The reported limit changed. Check the new reset time and try again. [incident:21feb702-c9bc-4896-a470-8cb97fd58d25]"));

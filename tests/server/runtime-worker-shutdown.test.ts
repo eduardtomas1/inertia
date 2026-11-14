@@ -44,6 +44,8 @@ function runtimeWithClose(
     resolveProjectPath: vi.fn(),
     readHtmlRender: vi.fn(() => null),
     attachmentConversations: vi.fn(() => []),
+    deliverAgentSecret: vi.fn(async () => ({ status: "rejected" as const, reason: "ended" as const })),
+    orphanedAgentSecrets: vi.fn(() => []),
     privateConnectRequest: vi.fn(async () => {
       throw new Error("unused");
     }),

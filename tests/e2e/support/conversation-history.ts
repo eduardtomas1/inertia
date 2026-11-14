@@ -3,10 +3,16 @@ import { expect, type Page } from "@playwright/test";
 export async function readFromTranscriptStart(page: Page): Promise<void> {
   const transcript = page.getByLabel("Thread transcript", { exact: true });
   const latest = page.getByRole("button", { name: "Jump to latest", exact: true });
+  const loadedLabel = () => transcript.evaluate((element) =>
+    element.querySelector('[role="feed"]')?.getAttribute("aria-label") ?? "");
+  const before = await loadedLabel();
   await expect(async () => {
     await transcript.press("Home");
-    await expect(latest).toBeVisible({ timeout: 1_000 });
+    await expect.poll(async () =>
+      await transcript.evaluate((element) => element.scrollTop) < 8 || await loadedLabel() !== before,
+    { timeout: 1_000 }).toBe(true);
   }).toPass({ timeout: 10_000 });
+  await expect(latest).toBeVisible();
 }
 
 export async function loadSeededConversationTurns(page: Page, expectedCount: number): Promise<void> {

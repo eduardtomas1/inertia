@@ -5,6 +5,8 @@ import { ACCEPTED_ATTACHMENT_MIME_TYPES } from "../attachments";
 import { watcherNoteAttributionSchema } from "../watcher";
 import { delegatedCompletionAttributionSchema } from "../orchestration-delegation";
 import { isDuoComparisonBrief } from "../duo-comparison-brief";
+import { customAgentCallAttributionSchema } from "../custom-agents";
+import { isSecretRequestReference } from "../agent-secrets";
 import type { ChatMessage } from "./agent";
 
 type UnknownRecord = Record<string, unknown>;
@@ -50,6 +52,8 @@ export function chatMessageSchema(value: unknown): value is ChatMessage {
   return (value.compaction === undefined || (value.role === "system" && value.turnId === null && isContextCompaction(value.compaction)))
     && (value.htmlRender === undefined
       || (value.role === "system" && typeof value.turnId === "string" && isHtmlRenderReference(value.htmlRender)))
+    && (value.secretRequest === undefined
+      || (value.role === "system" && typeof value.turnId === "string" && isSecretRequestReference(value.secretRequest)))
     && (value.privateConnectDeviceId === undefined
       || (value.role === "user" && isMessageOriginDeviceId(value.privateConnectDeviceId)))
     && (value.watcherNote === undefined
@@ -59,6 +63,8 @@ export function chatMessageSchema(value: unknown): value is ChatMessage {
         && delegatedCompletionAttributionSchema.safeParse(value.delegatedCompletion).success))
     && (value.duoComparison === undefined
       || (value.role === "user" && isDuoComparisonBrief(value.duoComparison)))
+    && (value.customAgentCall === undefined
+      || (value.role === "user" && customAgentCallAttributionSchema.safeParse(value.customAgentCall).success))
     && (value.turnId === null || stringField(value, "turnId"))
     && ["user", "assistant", "system"].includes(value.role as string)
     && Array.isArray(value.attachments)

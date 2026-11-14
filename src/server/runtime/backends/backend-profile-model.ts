@@ -22,6 +22,7 @@ import {
 } from "../../../shared/model-routing";
 import type { ProviderId, ProviderInfo } from "../../../shared/contracts";
 import type { StoredModelBackendProfile } from "../../database";
+import { grokStaticModels } from "../../provider/grok-models";
 import { BackendProfileControllerError } from "./backend-profile-types";
 
 const BUILT_IN_TIMESTAMP = "1970-01-01T00:00:00.000Z";
@@ -33,6 +34,7 @@ export const PROVIDER_IDS: readonly ProviderId[] = [
   "kimi",
   "opencode",
   "antigravity",
+  "grok",
 ];
 
 export function normalizedBaseUrl(
@@ -71,8 +73,11 @@ export function normalizedBaseUrl(
 function nativeModelDefinitions(
   provider: ProviderInfo | undefined,
 ): BackendModelDefinition[] {
-  const currentDefault = provider?.models.find(({ isDefault }) => isDefault)
-    ?? provider?.models[0];
+  const advertised = provider?.id === "grok" && (provider.models.length ?? 0) === 0
+    ? grokStaticModels()
+    : provider?.models ?? [];
+  const currentDefault = advertised.find(({ isDefault }) => isDefault)
+    ?? advertised[0];
   return [{
     id: "provider-default",
     displayName: "Provider default",
@@ -81,7 +86,7 @@ function nativeModelDefinitions(
       ...option,
     })) ?? [],
     capabilities: [],
-  }, ...(provider?.models ?? [])
+  }, ...advertised
     .filter(({ id }) => id !== "provider-default")
     .map((model) => ({
     id: model.id,

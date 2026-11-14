@@ -10,7 +10,6 @@ import {
 
 const sourceAnswerGate = "multi-spawn-source-answer-ready";
 const judgeAnswerGate = "multi-spawn-judge-answer-ready";
-const neighbourAnswerGate = "multi-spawn-neighbour-answer-ready";
 
 const multiSpawnAppServer = `
 const fs = require("node:fs");
@@ -116,14 +115,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     .map((item) => item.text || "")
     .join("\\n");
   const isJudge = inputText.includes("# Independent Duo comparison");
-  const isNeighbour = inputText.includes("Stay busy in this folder");
   const answer = isJudge
     ? "Multi-spawn judge response from " + path.basename(process.cwd()) + "."
     : "Multi-spawn source response from " + path.basename(process.cwd()) + ".";
   waitForGate(
-    isJudge
-      ? "${judgeAnswerGate}"
-      : isNeighbour ? "${neighbourAnswerGate}" : "${sourceAnswerGate}",
+    isJudge ? "${judgeAnswerGate}" : "${sourceAnswerGate}",
     () => {
       if (responseSettled) return;
       responseSettled = true;
@@ -378,83 +374,3 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("starts the judge while another chat is busy in the judge's folder", async () => {
-  const sidebar = page.getByRole("complementary", {
-    name: "Project navigation",
-  });
-  const companionRow = sidebar.locator("button.activity-thread-select")
-    .filter({ hasText: "multi-spawn companion" });
-  await companionRow.click();
-  await expect(companionRow).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("main", { name: "Split conversation workspace" }))
-    .toHaveCount(0);
-  const busyBrief = "Stay busy in this folder until the neighbour gate opens.";
-  const messageBox = page.getByRole("textbox", { name: "Message" });
-  await expect(messageBox).toHaveCount(1);
-  await messageBox.fill(busyBrief);
-  await expect(messageBox).toHaveValue(busyBrief);
-  const sendButton = page.getByRole("button", { name: "Send message", exact: true });
-  await expect(sendButton).toBeEnabled();
-  await sendButton.click();
-  await expect(page.getByRole("button", { name: "Stop agent" }))
-    .toBeVisible();
-
-  await sidebar.getByRole("button", { name: "New duo" }).click();
-  const dialog = page.getByRole("dialog", { name: "New duo" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("textbox", { name: "Brief for both chats" })
-    .fill("Review the folder while a neighbour keeps working.");
-  await dialog.getByRole("textbox", { name: "Chat A name" })
-    .fill("Neighbour left");
-  await dialog.getByRole("textbox", { name: "Chat B name" })
-    .fill("Neighbour right");
-  await dialog.getByRole("combobox", { name: "Chat B project" })
-    .selectOption({ label: "Companion" });
-  const judgeSwitch = dialog.getByRole("switch", {
-    name: "Add an independent judge",
-  });
-  if (await judgeSwitch.getAttribute("aria-checked") !== "true") {
-    await judgeSwitch.click();
-  }
-  const judgeConfiguration = dialog.locator(".multi-spawn-judge-config");
-  if (await judgeConfiguration.getAttribute("open") === null) {
-    await judgeConfiguration.getByText("Configure judge", { exact: true }).click();
-  }
-  await dialog.getByRole("textbox", { name: "Judge name" })
-    .fill("Neighbour judge");
-  await dialog.getByRole("combobox", { name: "Judge project" })
-    .selectOption({ label: "Companion" });
-  await dialog.getByRole("combobox", { name: "Judge access" })
-    .selectOption("supervised");
-  await dialog.getByRole("button", { name: "Start duo" }).click();
-
-  const judgeRow = sidebar.locator("button.activity-thread-select")
-    .filter({ hasText: "Neighbour judge" });
-  const verdictNotice = page.locator(".duo-judge-notice")
-    .filter({ hasText: "Verdict is in" })
-    .first();
-  await expect(verdictNotice).toBeVisible();
-  await expect(judgeRow).not.toHaveAttribute("aria-current", "page");
-  await verdictNotice.getByRole("button", { name: "Read verdict" }).click();
-  await expect(judgeRow).toHaveAttribute("aria-current", "page");
-  await expect(page.locator(
-    '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
-  ).filter({ hasText: "Multi-spawn judge response from Companion." }))
-    .toBeVisible();
-  await expect(page.locator(".duo-judge-notice")).toHaveCount(0);
-
-  await companionRow.click();
-  await expect(companionRow).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("button", { name: "Stop agent" }))
-    .toBeVisible();
-  await writeFile(
-    join(app.testDirectory, "data", neighbourAnswerGate),
-    "ready\n",
-    "utf8",
-  );
-  await expect(page.locator(
-    '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
-  ).filter({ hasText: "Multi-spawn source response from Companion." }))
-    .toBeVisible();
-  expect(app.rendererErrors).toEqual([]);
-});

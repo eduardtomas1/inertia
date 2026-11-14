@@ -23,13 +23,16 @@ interface ResumeRuntimeOptions {
 }
 
 export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManager, backends: BackendProfileController, providerInfo: () => ProviderInfo[], cwd: string, signal: AbortSignal, enabled: boolean, credentials: BackendCredentialBroker | undefined, send: (socket: WebSocket, event: ServerEvent) => void,
-  resume: ResumeRuntimeOptions) {
+  resume: ResumeRuntimeOptions, onProviderRateLimits: (providerId: ProviderInfo["id"]) => void = () => undefined) {
   const service = new UsageLimitsService({
     repository: store.usageLimits, credentials,
     native: new NativeUsageReader(providers, cwd, signal, new NativeSubscriptionReader({
       openCodeAccount: (directory, model, lifetime) => providers.openCodeUsageAccount(directory, model, lifetime),
       accountKey: async (lifetime) => await credentials?.resolve(USAGE_ACCOUNT_IDENTITY_SECRET_REFERENCE, lifetime) ?? null,
-    })), providers: providerInfo,
+    }), (providerId, rateLimits) => {
+      providers.learnAccountRateLimits(providerId, rateLimits);
+      onProviderRateLimits(providerId);
+    }), providers: providerInfo,
     customProfiles: () => backends.profiles(providerInfo()).filter((profile) => profile.preset !== "native").map((profile) => ({ id: profile.id, label: profile.displayName, routeKind: profile.routeKind })),
     signal, enabled,
   });

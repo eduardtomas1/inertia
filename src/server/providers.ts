@@ -27,7 +27,6 @@ import {
 } from "./provider/agent-harness-registry";
 import type {
   ProviderCapabilityId,
-  ProviderCapabilityManifest,
 } from "./provider/capability-manifest";
 import type {
   AgentHarnessCapabilities,
@@ -369,12 +368,6 @@ export class ProviderManager {
 
   harnessCapabilities(providerId?: ProviderId): readonly AgentHarnessCapabilities[] {
     return this.harnessRegistry.capabilities(providerId);
-  }
-
-  providerCapabilityManifests(
-    providerId?: ProviderId,
-  ): readonly ProviderCapabilityManifest[] {
-    return this.harnessRegistry.capabilityManifests(providerId);
   }
 
   providerCapabilityContract(
@@ -905,6 +898,11 @@ export class ProviderManager {
 
   cachedMetadata(providerId: ProviderId): ProviderMetadata {
     return this.metadataCache.current(providerId);
+  }
+
+  learnAccountRateLimits(providerId: ProviderId, rateLimits: ProviderMetadata["rateLimits"]): void {
+    if (rateLimits.length === 0) return;
+    this.metadataCache.learn(providerId, this.metadataCache.nativeScope(providerId).executable, { rateLimits }, "provider");
   }
 
   metadataReadTimedOut(providerId: ProviderId): boolean {

@@ -1,3 +1,4 @@
+import { usageLimitName } from "@shared/usage-window-title";
 import { useEffect, useId, useState, type CSSProperties } from "react";
 
 import { useQuotaNow } from "../../hooks/useQuotaNow";
@@ -8,7 +9,6 @@ import {
   headerUsageMeterModel,
   isQuotaResetDue,
   quotaResetLabel,
-  quotaWindowLabel,
 } from "../../utils/headerUsageMeter";
 
 export function HeaderUsageMeter({
@@ -80,7 +80,6 @@ export function HeaderUsageMeter({
             )}
           </span>
           {model.limits.map((limit) => {
-            const window = quotaWindowLabel(limit.windowMinutes);
             const resetDue = isQuotaResetDue(limit, now);
             return (
               <span
@@ -90,7 +89,7 @@ export function HeaderUsageMeter({
                 data-reset-due={resetDue || undefined}
               >
                 <span>
-                  {window ? `${window.slice(0, 1).toUpperCase()}${window.slice(1)} limit` : limit.label}
+                  {usageLimitName(limit)}
                   <small>{quotaResetLabel(limit.resetsAt, now)}</small>
                 </span>
                 <b>{resetDue ? "Reset" : `${clampRemainingPercent(limit.remainingPercent)}% left`}</b>

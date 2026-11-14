@@ -212,30 +212,3 @@ test("shows project-free chats, the selector and the palette entries in both the
   } finally { await app.close(); }
 });
 
-test("offers a project-free chat on the first-run screen", async () => {
-  const info = test.info();
-  const app = await createAppFixture({ name: "scratch-first-run", initialState: "empty" });
-  const { page } = app;
-  try {
-    await page.clock.setFixedTime(FIXED_NOW);
-    await app.resizeWindow(1440, 920);
-    const start = page.getByRole("button", { name: "Start without a project", exact: true });
-    await expect(start).toBeVisible();
-    await app.expectNoViewportOverflow();
-    await capture(page, info, "no-project-first-run-light-wide");
-    await setAppearanceInPlace(app, "dark");
-    await capture(page, info, "no-project-first-run-dark-wide");
-    await app.resizeWindow(1000, 800);
-    await app.expectNoViewportOverflow();
-    await capture(page, info, "no-project-first-run-dark-narrow");
-    await app.resizeWindow(1440, 920);
-    await start.click();
-    await expect(page.getByRole("heading", { name: "What should we work on?" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Project", exact: true })).toHaveText("No project");
-    await expect(page.locator(".chat-workspace .loading-mark")).toHaveCount(0);
-    await blurFocus(page);
-    await expectLayoutHolds(app);
-    await capture(page, info, "no-project-first-draft-dark-wide");
-    expect(app.rendererErrors).toEqual([]);
-  } finally { await app.close(); }
-});

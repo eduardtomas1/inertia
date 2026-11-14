@@ -53,7 +53,9 @@ export function composerHarnessLabel(harnessId: string): string {
             ? "Antigravity"
             : harnessId.startsWith("kimi")
               ? "Kimi Code"
-              : "OpenCode";
+              : harnessId.startsWith("grok")
+                ? "Grok"
+                : "OpenCode";
 }
 
 export function routeRepairLabel(action: ComposerRouteRepair): string {

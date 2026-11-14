@@ -317,6 +317,69 @@ describe("Electron E2E application lifecycle", () => {
     expect(process.kill).not.toHaveBeenCalled();
   });
 
+  it("samples a macOS main process that outlived its quit deadline before forcing it", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      pid: 4_321,
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn((signal: NodeJS.Signals) => {
+        process.signalCode = signal;
+        process.emit("exit", null, signal);
+        return true;
+      }),
+    });
+    let finishSample!: () => void;
+    const sampleUnexitedMain = vi.fn(async () => {
+      await new Promise<void>((resolve) => { finishSample = resolve; });
+      return "attached" as const;
+    });
+    const quitting = quitElectronAppBounded({
+      process: () => process,
+      close: async () => undefined,
+    } as unknown as ElectronApplication, async () => undefined, {
+      platform: "darwin",
+      gracefulTimeoutMs: 5,
+      forcedExitTimeoutMs: 50,
+      protocolSettleTimeoutMs: 50,
+      sampleUnexitedMain,
+    });
+
+    await vi.waitFor(() => expect(sampleUnexitedMain).toHaveBeenCalledExactlyOnceWith(4_321, { platform: "darwin" }));
+    expect(process.kill).not.toHaveBeenCalled();
+    finishSample();
+
+    await expect(quitting).resolves.toMatchObject({ outcome: "forced" });
+    expect(process.kill).toHaveBeenCalledExactlyOnceWith("SIGKILL");
+  });
+
+  it.each([
+    { platform: "linux" as const, gracefulTimeoutMs: 5 },
+    { platform: "darwin" as const, gracefulTimeoutMs: 0 },
+  ])("does not sample on $platform after a $gracefulTimeoutMs ms quit window", async ({ platform, gracefulTimeoutMs }) => {
+    const process = Object.assign(new EventEmitter(), {
+      pid: 4_321,
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn((signal: NodeJS.Signals) => {
+        process.signalCode = signal;
+        process.emit("exit", null, signal);
+        return true;
+      }),
+    });
+    const sampleUnexitedMain = vi.fn(async () => "attached" as const);
+    await expect(quitElectronAppBounded({
+      process: () => process,
+      close: async () => undefined,
+    } as unknown as ElectronApplication, async () => undefined, {
+      platform,
+      gracefulTimeoutMs,
+      forcedExitTimeoutMs: 50,
+      protocolSettleTimeoutMs: 50,
+      sampleUnexitedMain,
+    })).resolves.toMatchObject({ outcome: "forced" });
+    expect(sampleUnexitedMain).not.toHaveBeenCalled();
+  });
+
   it("reports an abnormal native exit instead of permitting restart", async () => {
     const process = Object.assign(new EventEmitter(), {
       exitCode: 1,

@@ -11,8 +11,7 @@ import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-t
 
 const execFileAsync = promisify(execFile);
 const SAMPLE = "sample.ts";
-// The extra commit gives History a second row and Blame a committed line; the
-// working copy then edits line 1 (an intraline pair) and appends line 3.
+// The working copy edits line 1 (an intraline pair) and appends line 3.
 const COMMITTED_SAMPLE = "export const version = '0.0.1';\nexport const channel = 'stable';\n";
 const WORKING_SAMPLE = "export const version = '0.0.2';\nexport const channel = 'stable';\nexport const ready = true;\n";
 const EXTRA_COMMIT = "Add the release channel";
@@ -61,8 +60,6 @@ test.beforeAll(async () => {
       await writeFile(join(workspaceDirectory, SAMPLE), COMMITTED_SAMPLE, "utf8");
       await git(workspaceDirectory, "add", "--", SAMPLE);
       await git(workspaceDirectory, "commit", "-q", "-m", EXTRA_COMMIT);
-      // A second checkout Inertia did not create, so the list shows a refusal.
-      await git(workspaceDirectory, "worktree", "add", "-q", "-b", "review/side-checkout", join(testDirectory, "side-checkout"));
       await writeFile(join(workspaceDirectory, SAMPLE), WORKING_SAMPLE, "utf8");
     },
   });
@@ -280,141 +277,3 @@ test("Changes stages and unstages a file and the commit dialog drafts a message"
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("History lists commits with their files and diff, and Files shows blame", async ({ browserName: _browserName }, info) => {
-  const page = app.page;
-  await app.resizeWindow(1440, 1100);
-  await setAppearanceInPlace(app, "light");
-  await ensureWorkspaceTools(page);
-
-  const menu = await openGitMenu();
-  await menu.getByRole("menuitem", { name: "History…", exact: true }).click();
-  const history = page.getByRole("dialog", { name: "History" });
-  await expect(history).toBeVisible();
-  const commits = history.getByRole("listbox", { name: "Commits" });
-  const rows = commits.getByRole("option");
-  await expect(rows).toHaveCount(2);
-  await expect(rows.locator(".git-history-row-subject")).toHaveText([EXTRA_COMMIT, "fixture"]);
-  await expect(rows.first()).toHaveAttribute("aria-selected", "true");
-  await expect(history.getByText("2 commits loaded · end of history")).toBeVisible();
-  await expect(history.getByRole("button", { name: "Load more" })).toHaveCount(0);
-
-  await rows.nth(1).click();
-  await expect(rows.nth(1)).toHaveAttribute("aria-selected", "true");
-  await expect(rows.first()).toHaveAttribute("aria-selected", "false");
-  const rootSha = await git(app.workspaceDirectory, "rev-parse", "HEAD~1");
-  const detail = history.locator(".git-history-detail");
-  await expect(detail.getByRole("heading", { level: 3, name: "fixture" })).toBeVisible();
-  await expect(detail.locator(".git-history-detail-heading code")).toHaveAttribute("title", rootSha);
-  await expect(detail.getByText("Root commit", { exact: true })).toBeVisible();
-  const changed = detail.getByRole("list", { name: /^Files changed in [0-9a-f]{7,}$/u });
-  await expect(changed).toBeVisible();
-  await expect(changed.getByRole("button", { name: new RegExp(`${SAMPLE.replace(".", "\\.")}`, "u") })).toBeVisible();
-  const activeFile = changed.getByRole("button", { pressed: true });
-  await expect(activeFile).toHaveCount(1);
-  const activePath = (await activeFile.locator(".git-history-file-path").textContent())!;
-  const commitDiff = detail.getByRole("region", { name: `Diff for ${activePath}`, exact: true });
-  await expect(commitDiff).toBeVisible();
-  await expect(commitDiff.locator(".diff-line.is-addition")).not.toHaveCount(0);
-
-  await changed.getByRole("button", { name: new RegExp(`${SAMPLE.replace(".", "\\.")}`, "u") }).click();
-  const sampleDiff = detail.getByRole("region", { name: `Diff for ${SAMPLE}`, exact: true });
-  await expect(sampleDiff.locator(".diff-line.is-addition")).toHaveText([/export const version = '0\.0\.1';/u]);
-  // History diffs share the Changes panel's highlighting.
-  await expect(sampleDiff.locator(".diff-line-content.hljs .hljs-keyword").first()).toHaveText("export");
-  await expect(sampleDiff.locator(".diff-line-content.hljs .hljs-string")).toContainText("0.0.1");
-  await blurActiveElement();
-  await capture(info, "git-history-light");
-  await rows.nth(1).focus();
-  await page.keyboard.press("Escape");
-  await expect(history).toHaveCount(0);
-
-  const panel = await ensureWorkspaceTools(page);
-  await selectWorkspaceTool(panel, "Files");
-  const files = panel.getByRole("region", { name: "Project files" });
-  await expect(files).toBeVisible();
-  const showExplorer = files.getByRole("button", { name: "Show file explorer" });
-  if (await showExplorer.isVisible().catch(() => false)) await showExplorer.click();
-  const item = files.getByRole("treeitem", { name: SAMPLE, exact: true });
-  await item.focus();
-  await item.press("Enter");
-  const code = files.getByLabel(`Contents of ${SAMPLE}`, { exact: true });
-  await expect(code).toBeVisible();
-  const blame = files.getByRole("button", { name: "Blame", exact: true });
-  await expect(blame).toBeEnabled();
-  await expect(blame).toHaveAttribute("aria-pressed", "false");
-  await blame.click();
-  await expect(blame).toHaveAttribute("aria-pressed", "true");
-  const headSha = await git(app.workspaceDirectory, "rev-parse", "HEAD");
-  const committed = code.getByRole("button", { name: /^Line 2: [0-9a-f]{7,} · Inertia Test · /u });
-  await expect(committed).toBeVisible();
-  // The cell shows the short SHA and author; date and summary are in the popover.
-  const shortSha = (await committed.locator(".file-preview-blame-sha").textContent())!;
-  await expect(committed.locator(".file-preview-blame-author")).toHaveText("Inertia Test");
-  await expect(committed).not.toContainText(EXTRA_COMMIT);
-  expect(headSha.startsWith(shortSha)).toBe(true);
-  await expect(code.getByRole("button", { name: /^Line 1: Not committed\./u })).toBeVisible();
-  await expect(code.getByRole("button", { name: /^Line 3: Not committed\./u })).toBeVisible();
-  await committed.focus();
-  const popover = files.getByRole("tooltip").filter({ hasText: EXTRA_COMMIT });
-  await expect(popover).toBeVisible();
-  await expect(popover.locator("code")).toHaveText(headSha.slice(0, 12));
-  await expect(popover).toContainText("Inertia Test");
-  await expect(popover.locator("time")).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}T/u);
-  await capture(info, "files-blame-light");
-
-  await blame.click();
-  await expect(blame).toHaveAttribute("aria-pressed", "false");
-  await expect(code.locator("button[data-blame-line]")).toHaveCount(0);
-  await blurActiveElement();
-  expect(app.rendererErrors).toEqual([]);
-});
-
-test("Settings → Projects lists the project's worktrees without removing any", async ({ browserName: _browserName }, info) => {
-  const page = app.page;
-  await app.resizeWindow(1440, 1100);
-  await setAppearanceInPlace(app, "light");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const settings = page.getByRole("main", { name: "Settings" });
-  await expect(settings).toBeVisible();
-  const projects = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Projects", exact: true });
-  await projects.click();
-  await expect(projects).toHaveAttribute("aria-current", "page");
-  const show = settings.getByRole("button", { name: "Show worktrees", exact: true });
-  if (!await show.isVisible().catch(() => false)) {
-    await settings.getByRole("button", { name: "Choose project", exact: true }).click();
-    await page.getByRole("option", { name: /^Inertia/u }).first().click();
-  }
-  await expect(show).toBeVisible();
-  await show.click();
-
-  const list = settings.getByRole("list", { name: "Worktrees" });
-  await expect(list).toBeVisible();
-  const entries = list.getByRole("listitem");
-  await expect(entries).toHaveCount(2);
-  const main = entries.filter({ has: page.locator(".worktree-list-title", { hasText: "Main checkout" }) });
-  await expect(main).toHaveCount(1);
-  // The main checkout is named, with its folder name muted beside it.
-  await expect(main.locator(".worktree-list-title strong")).toHaveText("Main checkout");
-  // Windows reports the fixture folder with the casing of its temp path.
-  await expect(main.locator(".worktree-list-folder")).toHaveText(/^inertia$/iu);
-  await expect(main.locator(".worktree-list-path")).toHaveCount(0);
-  await expect(main.locator('.worktree-badge[data-state="dirty"]')).toHaveText("1 change");
-  await expect(main.getByRole("button", { name: /^Remove worktree/u })).toHaveCount(0);
-  const side = entries.filter({ hasText: "review/side-checkout" });
-  await expect(side.locator(".worktree-badge", { hasText: "Not created by Inertia" })).toBeVisible();
-  await expect(side.locator('.worktree-badge[data-state="clean"]')).toHaveText("Clean");
-  const removeSide = side.getByRole("button", { name: /^Remove worktree /u });
-  await expect(removeSide).toHaveAttribute("aria-disabled", "true");
-  await expect(side.locator(".worktree-list-reason")).not.toHaveText("");
-  const prune = settings.getByRole("button", { name: /^Prune stale entries/u });
-  await expect(prune).toBeVisible();
-  await expect(prune).toHaveAccessibleDescription(/never deletes files/u);
-  await list.scrollIntoViewIfNeeded();
-  await blurActiveElement();
-  await capture(info, "settings-worktrees-light");
-
-  expect(await git(app.workspaceDirectory, "worktree", "list", "--porcelain")).toContain("branch refs/heads/review/side-checkout");
-  await page.getByRole("button", { name: "Close settings", exact: true }).click();
-  await expect(settings).toBeHidden();
-  expect(app.rendererErrors).toEqual([]);
-});

@@ -19,6 +19,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "opencode-sdk": "OpenCode",
   "opencode-cli": "OpenCode",
   "antigravity-cli": "Antigravity",
+  "grok-acp": "Grok",
 };
 
 const STRUCTURAL_BACKEND_LABELS: Readonly<Record<string, string>> = {
@@ -30,6 +31,7 @@ const STRUCTURAL_BACKEND_LABELS: Readonly<Record<string, string>> = {
   "builtin:antigravity": "Google Antigravity",
   "builtin:kimi": "Kimi Code",
   "builtin:opencode": "OpenCode",
+  "builtin:grok": "Grok",
 };
 
 function persistedBackendLabel(selection: ModelSelection): string {

@@ -179,4 +179,9 @@
   .composer-history-chip {
     border-color: ButtonText;
   }
+
+  .send-button[aria-disabled="true"] {
+    border-color: GrayText;
+    color: GrayText;
+  }
 }

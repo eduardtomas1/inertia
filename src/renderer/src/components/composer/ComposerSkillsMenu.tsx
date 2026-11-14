@@ -7,6 +7,7 @@ import type {
 } from "@shared/contracts";
 import { LoadingMark } from "../ui";
 import type { ComposerMenuController } from "./useComposerMenus";
+import { skillsMenuEnabled } from "./composerPlaceholder";
 import "./ComposerSkillsMenu.css";
 import { TooltipText } from "../TooltipText";
 
@@ -41,9 +42,9 @@ export function ComposerSkillsMenu({
 }: ComposerSkillsMenuProps): React.JSX.Element | null {
   const activeOption = useRef<HTMLButtonElement>(null);
   const openedQuery = useRef<string | null>(null);
-  const discoveryRequested = useRef(false);
+  const discoveryRequested = useRef<ComposerSkillsMenuProps["onList"] | null>(null);
   const { menu, toggleMenu, dismissMenu, setMenuPopover } = menuController;
-  const available = Boolean(capability?.available) && !disabled && !running;
+  const available = skillsMenuEnabled({ skillsAvailable: Boolean(capability?.available), disabled, running });
   const showCompletion = completion !== null && available;
   const visibleSkills = skills.filter((skill) => skill.enabled
     && skill.name.toLowerCase().startsWith(completion ?? ""));
@@ -51,7 +52,7 @@ export function ComposerSkillsMenu({
   useEffect(() => {
     if (!showCompletion) {
       openedQuery.current = null;
-      discoveryRequested.current = false;
+      discoveryRequested.current = null;
       if (menu === "skills") dismissMenu("context-change");
       return;
     }
@@ -61,8 +62,8 @@ export function ComposerSkillsMenu({
       openedQuery.current = completion;
       if (menu !== "skills") toggleMenu("skills");
     }
-    if (!discoveryRequested.current && !loading && skills.length === 0 && !error) {
-      discoveryRequested.current = true;
+    if (discoveryRequested.current !== onList && !loading && skills.length === 0 && !error) {
+      discoveryRequested.current = onList;
       void onList(false).catch(() => undefined);
     }
   }, [completion, dismissMenu, error, loading, menu, onList, showCompletion, skills.length, toggleMenu]);

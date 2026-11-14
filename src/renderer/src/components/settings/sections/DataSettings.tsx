@@ -16,6 +16,7 @@ import { RestoreDefaults } from "../RestoreDefaults";
 import { SettingsSectionFallback } from "../SettingsSectionFallback";
 import { SettingActionRow, SettingsGroup } from "../SettingsLayout";
 import { useSettingAction } from "../useSettingAction";
+import { AgentSecretsSettings } from "./AgentSecretsSettings";
 import { ArchivedChats } from "./ArchivedChats";
 import "./DataSettings.css";
 
@@ -30,6 +31,7 @@ export interface DataSettingsProps {
   onReportCommand?: IssueReportSettingsProps["request"];
   onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
   onUnarchive: (conversation: Conversation) => void;
+  onOpenConversation?: (conversationId: string) => boolean;
   onRestoreDefaults: () => Promise<void>;
 }
 
@@ -42,6 +44,7 @@ export function DataSettings({
   onReportCommand,
   onUpdate,
   onUnarchive,
+  onOpenConversation,
   onRestoreDefaults,
 }: DataSettingsProps): React.JSX.Element {
   const AttachmentStorageSettings = useLoadedSurface(loadAttachmentStorageSettings, Boolean(onReportCommand));
@@ -130,6 +133,7 @@ export function DataSettings({
           ? <AttachmentStorageSettings settings={settings} disabled={disabled} request={onReportCommand} onUpdate={onUpdate} />
           : <SettingsSectionFallback />)}
       </SettingsGroup>
+      {onReportCommand && <AgentSecretsSettings disabled={disabled} request={onReportCommand} onOpenConversation={onOpenConversation} />}
       <SettingsGroup title="Export and import" headingId="recovery-heading">
         <SettingActionRow
           id="recovery-export"

@@ -348,6 +348,63 @@ describe("older history prepend restoration", () => {
 
     expect(scroll.scrollTop).toBe(1_400);
   });
+
+  it("leaves an older page in a virtualized transcript to the virtualizer when the rendered rows lag the scroll position", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(200);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+    const minute = (index: number) => `2030-01-01T00:${String(index).padStart(2, "0")}:00.000Z`;
+    const recent = Array.from({ length: 16 }, (_, index) => historyTurn(`recent-${index}`, minute(index + 10)));
+    const older = Array.from({ length: 5 }, (_, index) => historyTurn(`older-${index}`, minute(index)));
+    const scrollElementRef = { current: null as HTMLDivElement | null };
+    const timelineElementRef = { current: null as HTMLDivElement | null };
+    let laggingRowTop = 5_000;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const top = this === scrollElementRef.current || !this.dataset.responseRowId ? 0 : laggingRowTop;
+      const height = this === scrollElementRef.current ? 600 : 200;
+      return { x: 0, y: top, top, left: 0, right: 800, bottom: top + height, width: 800, height, toJSON: () => ({}) };
+    });
+    const timeline = (turns: { turn: AgentTurn; request: ChatMessage }[]) => (
+      <div ref={scrollElementRef}>
+        <div ref={timelineElementRef}>
+          <ResponseTimeline turns={turns.map(({ turn }) => turn)} messages={turns.map(({ request }) => request)}
+            activities={[]} reasonings={[]} plans={[]} checkpoints={[]} projectRoot="/workspace" projectId="project"
+            conversationId="chat" streamingText="" streamingReasoning="" approvals={[]} inputRequests={[]}
+            showTimestamps={false} showThinking={false} defaultCodeWrap={false} autoCollapseWorkLog
+            showChangedFileSummaries={false} checkpointRestoreDisabled followsLatest={false}
+            scrollElementRef={scrollElementRef} timelineElementRef={timelineElementRef}
+            onRespondToApproval={async () => undefined} onRespondToInput={async () => undefined}
+            onRevertCheckpoint={() => undefined} onOpenTurnDiff={() => undefined}
+            onCompareTurnArtifacts={() => undefined} onOpenTurnFile={() => undefined} onStop={() => undefined} />
+        </div>
+      </div>
+    );
+    const runFrames = async (): Promise<void> => {
+      await act(async () => { while (frames.length > 0) frames.shift()!(performance.now()); });
+    };
+    const view = render(timeline(recent));
+    view.rerender(timeline(recent));
+    await runFrames();
+    const scroll = scrollElementRef.current!;
+    expect(screen.getByRole("feed", { name: "16 conversation turns" })).toBeInTheDocument();
+    expect(scroll.querySelectorAll("[data-response-row-id]").length).toBeGreaterThan(0);
+    Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: 100_000 });
+    scroll.scrollTop = 0;
+    fireEvent.scroll(scroll);
+
+    act(() => prepareConversationHistoryPrepend("chat"));
+    view.rerender(timeline([...older, ...recent]));
+    expect(screen.getByRole("feed", { name: "21 conversation turns" })).toBeInTheDocument();
+    laggingRowTop = 90;
+    const anchored = scroll.scrollTop;
+    await runFrames();
+
+    expect(anchored).toBeGreaterThan(0);
+    expect(scroll.scrollTop).toBe(anchored);
+  });
 });
 
 type PageCursor = { at: string; id: string; kind: "turn" };

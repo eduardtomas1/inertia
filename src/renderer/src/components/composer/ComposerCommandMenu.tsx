@@ -11,6 +11,7 @@ export interface ComposerCommandMenuItem {
 }
 
 interface ComposerCommandMenuProps {
+  listboxId: string;
   items: readonly ComposerCommandMenuItem[];
   activeItemId: string | null;
   grouped: boolean;
@@ -24,6 +25,7 @@ const sections = [
 ] as const;
 
 export function ComposerCommandMenu({
+  listboxId,
   items,
   activeItemId,
   grouped,
@@ -45,6 +47,7 @@ export function ComposerCommandMenu({
     return (
       <button
         key={item.id}
+        id={`${listboxId}-${item.id}`}
         type="button"
         role="option"
         aria-selected={active}
@@ -71,6 +74,7 @@ export function ComposerCommandMenu({
     <div className="composer-command-menu">
       <div
         ref={listRef}
+        id={listboxId}
         className="composer-command-list"
         role="listbox"
         aria-label="Composer commands"

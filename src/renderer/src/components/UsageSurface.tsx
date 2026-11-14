@@ -4,22 +4,16 @@ import { Gauge, RefreshCw, Users } from "lucide-react";
 import type { EnvironmentUsageSummary } from "../utils/environmentSummary";
 import { API_KEY_USAGE_UNAVAILABLE } from "../utils/usageDisplay";
 import { formatUpdatedAge } from "../utils/quotaAge";
-import {
-  clampRemainingPercent,
-  HEADER_METER_LOW_REMAINING_PERCENT,
-  isQuotaResetDue,
-  quotaResetLabel,
-  quotaWindowLabel,
-} from "../utils/headerUsageMeter";
+import { clampRemainingPercent } from "../utils/headerUsageMeter";
 import { useQuotaNow } from "../hooks/useQuotaNow";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
-import { useUsageLimitsContext } from "./usage-limits-state";
+import { LimitRows } from "./usage/LimitBar";
+import { useUsageLimitsContext, useUsagePopupOpener } from "./usage-limits-state";
 import "./WorkspaceSurfaces.css";
 
 export interface UsageSurfaceProps {
   usage: EnvironmentUsageSummary | null;
   onRefreshUsage?: () => Promise<void> | void;
-  onOpenUsageView?: () => void;
 }
 
 interface RefreshAttempt {
@@ -45,16 +39,12 @@ function freshnessLabel(
   return "Unavailable";
 }
 
-function capitalized(value: string): string {
-  return value.slice(0, 1).toUpperCase() + value.slice(1);
-}
-
 export function UsageSurface({
   usage,
   onRefreshUsage,
-  onOpenUsageView,
 }: UsageSurfaceProps): React.JSX.Element {
   const usageLimits = useUsageLimitsContext();
+  const openUsage = useUsagePopupOpener();
   const [now] = useQuotaNow(usage?.quota.limits ?? []);
   const [attempt, setAttempt] = useState<RefreshAttempt | null>(null);
   const context = usage?.context ?? null;
@@ -96,40 +86,7 @@ export function UsageSurface({
               </small>
             </header>
             {usage.quota.limits.length > 0 ? (
-              <ul className="usage-surface-limits">
-                {usage.quota.limits.map((limit) => {
-                  const remaining = clampRemainingPercent(limit.remainingPercent);
-                  const window = quotaWindowLabel(limit.windowMinutes);
-                  const resetDue = isQuotaResetDue(limit, now);
-                  return (
-                    <li
-                      key={limit.id}
-                      data-low={(!resetDue && limit.remainingPercent < HEADER_METER_LOW_REMAINING_PERCENT) || undefined}
-                      data-reset-due={resetDue || undefined}
-                    >
-                      <span className="usage-surface-limit-row">
-                        <span>
-                          {limit.label}
-                          {window && <small>{capitalized(window)}</small>}
-                        </span>
-                        <b>{resetDue ? "Reset" : `${remaining}% left`}</b>
-                      </span>
-                      <span
-                        className="usage-surface-track"
-                        role="meter"
-                        aria-label={`${limit.label} remaining`}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={resetDue ? undefined : remaining}
-                        aria-valuetext={resetDue ? "Reset due, usage not yet updated" : `${remaining}% left`}
-                      >
-                        <i style={{ "--usage-remaining": `${resetDue ? 100 : remaining}%` } as CSSProperties} />
-                      </span>
-                      <small>{quotaResetLabel(limit.resetsAt, now)}</small>
-                    </li>
-                  );
-                })}
-              </ul>
+              <LimitRows providerId={usage.providerId} limits={usage.quota.limits} now={now} />
             ) : (
               <p className="workspace-surface-empty">
                 {freshness === "refreshing"
@@ -200,17 +157,17 @@ export function UsageSurface({
             <button
               type="button"
               className="workspace-surface-button"
-              onClick={(event) => usageLimits.open(event.currentTarget)}
+              onClick={(event) => usageLimits.open(event.currentTarget, "limits")}
             >
               <Users size={14} aria-hidden="true" />
               <span>All accounts</span>
             </button>
           )}
-          {onOpenUsageView && (
+          {openUsage && (
             <button
               type="button"
               className="workspace-surface-button"
-              onClick={onOpenUsageView}
+              onClick={(event) => openUsage(event.currentTarget, "tokens")}
             >
               <Gauge size={14} aria-hidden="true" />
               <span>Usage history</span>

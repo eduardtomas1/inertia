@@ -1910,6 +1910,39 @@ describe("transcript following motion", () => {
       expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: "auto" });
     });
 
+    it("keeps the reader at the transcript start and loads earlier messages when the scroll is reported after the guard time", async () => {
+      const history = { hasOlder: true, loading: false, error: null, loadOlder: vi.fn(), online: true };
+      const { transcript, scrollTo } = await guardedFollow({ history });
+      await act(async () => vi.advanceTimersByTime(750));
+      scrollTo.mockClear();
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
+      fireEvent.wheel(transcript, { deltaY: -400 });
+      transcript.scrollTop = 0;
+      await act(async () => vi.advanceTimersByTime(2_000));
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(transcript.scrollTop).toBe(0);
+
+      fireEvent.scroll(transcript);
+      expect(history.loadOlder).toHaveBeenCalledOnce();
+      expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+      const runFrames = async (): Promise<void> => {
+        await act(async () => { while (frames.length > 0) frames.shift()!(0); });
+      };
+      await runFrames();
+      await act(async () => vi.advanceTimersByTime(750));
+      await runFrames();
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(transcript.scrollTop).toBe(0);
+
+      history.loadOlder.mockClear();
+      transcript.scrollTop = 40;
+      fireEvent.scroll(transcript);
+      transcript.scrollTop = 0;
+      fireEvent.scroll(transcript);
+      expect(history.loadOlder).not.toHaveBeenCalled();
+    });
+
     async function readHistoryAtTop(transcript: HTMLElement): Promise<void> {
       await act(async () => vi.advanceTimersByTime(750));
       fireEvent.wheel(transcript, { deltaY: -400 });
@@ -1942,6 +1975,7 @@ describe("transcript following motion", () => {
       transcript.scrollTop = 400;
       fireEvent.scroll(transcript);
       expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+      fireEvent.wheel(transcript, { deltaY: -100 });
       transcript.scrollTop = 300;
       fireEvent.scroll(transcript);
       transcript.scrollTop = 350;
@@ -1965,8 +1999,17 @@ describe("transcript following motion", () => {
       fireEvent.scroll(transcript);
       expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
       scrollTo.mockClear();
-      await act(async () => vi.advanceTimersByTime(750));
+      await act(async () => vi.advanceTimersByTime(1_000));
       expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: "auto" });
+    });
+
+    it("takes End to the latest content itself instead of leaving it to the browser's key scroll", async () => {
+      const { transcript, scrollTo } = await guardedFollow();
+      await readHistoryAtTop(transcript);
+      scrollTo.mockClear();
+      expect(fireEvent.keyDown(transcript, { key: "End" })).toBe(false);
+      expect(scrollTo).toHaveBeenCalledWith({ top: transcript.scrollHeight, behavior: "smooth" });
+      expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
     });
 
     it.each(["started", "positioned"] as const)("respects %s final-answer ownership when the guard expires", async (status) => {

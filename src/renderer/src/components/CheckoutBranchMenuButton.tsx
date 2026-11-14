@@ -7,16 +7,19 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, GitBranch, TriangleAlert } from "lucide-react";
+import { FolderGit2, GitBranch, TriangleAlert } from "lucide-react";
 import type { GitStatusSnapshot } from "@shared/contracts";
 
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
 import { onCheckoutBranchMenuRequest } from "../utils/checkoutBranchMenu";
+import { checkoutBranchChip, ISOLATED_WORKTREE, type CheckoutBranchMenuOpener } from "./checkoutBranchChip";
 import type { CheckoutBranchControlModel } from "./checkoutBranchControlModel";
+import { SettingChevron } from "./composer/ComposerSettings";
 import "./CheckoutBranchControl.css";
 
 const WorkspaceBranchMenu = lazy(() => import("./WorkspaceBranchMenu"));
@@ -25,12 +28,21 @@ export default function CheckoutBranchMenuButton({
   branch,
   model,
   gitStatus,
+  worktree = false,
+  menuRef,
+  fallbackAnchor,
 }: {
   branch: string;
   model: CheckoutBranchControlModel;
   gitStatus: GitStatusSnapshot;
+  worktree?: boolean;
+  menuRef?: RefObject<CheckoutBranchMenuOpener | null>;
+  fallbackAnchor?: () => HTMLButtonElement | null;
 }): React.JSX.Element {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const anchorRef = useRef<HTMLButtonElement | null>(null);
+  const fallbackAnchorRef = useRef(fallbackAnchor);
+  fallbackAnchorRef.current = fallbackAnchor;
   const [position, setPosition] = useState<CSSProperties | null>(null);
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
     useDismissibleMenu<"branch">();
@@ -40,11 +52,29 @@ export default function CheckoutBranchMenuButton({
     const handleFocusIn = (event: FocusEvent): void => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      if (triggerRef.current?.contains(target) || anchorRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
       dismissMenu("context-change");
     };
     document.addEventListener("focusin", handleFocusIn);
     return () => document.removeEventListener("focusin", handleFocusIn);
+  }, [dismissMenu, menu]);
+  useEffect(() => {
+    if (menu !== "branch") return;
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    const close = (): void => dismissMenu("context-change");
+    const borrowed = anchor !== triggerRef.current;
+    if (borrowed) anchor.addEventListener("pointerdown", close);
+    const hidden = typeof ResizeObserver === "function"
+      ? new ResizeObserver(() => {
+          if (anchor.getClientRects().length === 0) close();
+        })
+      : null;
+    hidden?.observe(anchor);
+    return () => {
+      if (borrowed) anchor.removeEventListener("pointerdown", close);
+      hidden?.disconnect();
+    };
   }, [dismissMenu, menu]);
   useEffect(() => {
     dismissMenu("context-change");
@@ -52,21 +82,39 @@ export default function CheckoutBranchMenuButton({
   useNativePreviewSuspension(menu !== null);
   const refreshBranchesRef = useRef(model.onRefreshBranches);
   refreshBranchesRef.current = model.onRefreshBranches;
-  const detached = gitStatus.branch === null;
-  const contextMismatch = conversationContextMismatch(model.project, model.conversation, gitStatus);
+  const chip = checkoutBranchChip(
+    branch,
+    model,
+    worktree,
+    conversationContextMismatch(model.project, model.conversation, gitStatus) !== null,
+  );
+  const detached = chip.detached;
 
   const open = useCallback((): boolean => {
-    if (!triggerRef.current?.isConnected) return false;
+    const trigger = triggerRef.current;
+    if (!trigger?.isConnected) return false;
+    const anchor = trigger.getClientRects().length > 0 ? trigger : fallbackAnchorRef.current?.() ?? null;
+    if (!anchor) return false;
+    anchorRef.current = anchor;
+    setMenuTrigger("branch", anchor);
     refreshBranchesRef.current();
     if (menu !== "branch") toggleMenu("branch");
-    triggerRef.current.focus({ preventScroll: true });
+    anchor.focus({ preventScroll: true });
     return true;
-  }, [menu, toggleMenu]);
+  }, [menu, setMenuTrigger, toggleMenu]);
 
   useEffect(() => {
     if (!model.respondsToHeaderRequests) return;
     return onCheckoutBranchMenuRequest(open);
   }, [model.respondsToHeaderRequests, open]);
+
+  useEffect(() => {
+    if (!menuRef) return;
+    menuRef.current = open;
+    return () => {
+      if (menuRef.current === open) menuRef.current = null;
+    };
+  }, [menuRef, open]);
 
   useLayoutEffect(() => {
     if (menu !== "branch") {
@@ -74,7 +122,7 @@ export default function CheckoutBranchMenuButton({
       return;
     }
     const place = (): void => {
-      const bounds = triggerRef.current?.getBoundingClientRect();
+      const bounds = (anchorRef.current ?? triggerRef.current)?.getBoundingClientRect();
       if (!bounds) return;
       const width = Math.min(380, window.innerWidth - 24);
       setPosition({
@@ -89,34 +137,39 @@ export default function CheckoutBranchMenuButton({
 
   const label = detached
     ? "Detached HEAD, create or check out a branch"
-    : contextMismatch
+    : chip.mismatch
       ? `Checkout context differs, current branch ${branch}`
       : `Branch ${branch}`;
+  const Icon = detached ? TriangleAlert : worktree ? FolderGit2 : GitBranch;
 
   return (
     <span className="checkout-branch-anchor">
       <button
         ref={(node) => {
           triggerRef.current = node;
-          setMenuTrigger("branch", node);
+          if (!node) return;
+          if (!anchorRef.current?.isConnected) anchorRef.current = node;
+          setMenuTrigger("branch", anchorRef.current);
         }}
         type="button"
-        className={`composer-checkout-branch checkout-branch-button${detached ? " is-detached" : ""}`}
+        className={`composer-checkout-branch checkout-branch-button composer-chip${detached ? " is-detached" : ""}`}
         aria-label={label}
-        title={detached ? "Detached HEAD · Create branch" : branch}
+        data-attention={chip.attention ? "true" : undefined}
+        aria-description={worktree && !detached ? ISOLATED_WORKTREE : undefined}
+        title={chip.title}
         aria-haspopup="menu"
         aria-expanded={menu === "branch"}
         aria-controls="workspace-header-branch-menu"
-        onClick={() => {
+        onClick={(event) => {
+          anchorRef.current = event.currentTarget;
+          setMenuTrigger("branch", event.currentTarget);
           if (menu !== "branch") refreshBranchesRef.current();
           toggleMenu("branch");
         }}
       >
-        {detached
-          ? <TriangleAlert size={14} aria-hidden="true" />
-          : <GitBranch size={14} aria-hidden="true" />}
-        <code translate="no">{detached ? "Detached HEAD · Create branch" : contextMismatch ? `Current checkout · ${branch}` : branch}</code>
-        <ChevronDown size={14} aria-hidden="true" className="checkout-branch-chevron" />
+        <Icon className="composer-setting-icon" size={16} aria-hidden="true" />
+        <code translate="no">{chip.text}</code>
+        <SettingChevron />
       </button>
       {menu === "branch" && position && createPortal(
         <div

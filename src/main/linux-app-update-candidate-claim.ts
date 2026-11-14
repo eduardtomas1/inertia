@@ -375,13 +375,6 @@ export class LinuxAppUpdateCandidateClaimJournal {
     return committed && equal(committed, proposed) ? committed : null;
   }
 
-  terminalProved(
-    expected: LinuxAppUpdateCandidateInstanceClaim,
-  ): boolean {
-    const proof = this.terminalRecord();
-    return !!proof && equal(proof.claim, expected);
-  }
-
   publishTerminalProof(
     expected: LinuxAppUpdateCandidateInstanceClaim,
   ): boolean {

@@ -43,6 +43,7 @@ import {
   todoSchema,
   todosSerializedBytes,
 } from "../todos";
+import { customAgentSchema, MAX_CUSTOM_AGENTS } from "../custom-agents";
 import {
   MAX_LIBRARY_SERIALIZED_BYTES,
   libraryCategoryNameKey,
@@ -142,6 +143,13 @@ export const SERVER_EVENT_OPTIONS = Object.freeze({
 
 type IdentityRecord = Record<string, unknown>;
 
+export function syncCursor(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as IdentityRecord;
+  return typeof candidate.runtimeGeneration === "string" && candidate.runtimeGeneration.length > 0
+    && Number.isSafeInteger(candidate.latestSequence) && (candidate.latestSequence as number) >= 0;
+}
+
 function uniqueIdentity(entries: IdentityRecord[], key = "id"): boolean {
   return new Set(entries.map((entry) => entry[key])).size === entries.length;
 }
@@ -171,6 +179,20 @@ export function todoCollectionCoherent(value: unknown): boolean {
     : []);
   return new Set(todos.map(({ id }) => id)).size === todos.length
     && todosSerializedBytes(todos) <= MAX_TODOS_SERIALIZED_BYTES;
+}
+
+export function customAgentCollectionCoherent(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > MAX_CUSTOM_AGENTS) return false;
+  const parsed = value.map((entry) => customAgentSchema.safeParse(entry));
+  if (parsed.some((result) => !result.success)) return false;
+  const agents = parsed.flatMap((result) => result.success
+    ? [result.data]
+    : []);
+  return new Set(agents.map(({ id }) => id)).size === agents.length
+    && new Set(agents.map(({ handle }) => handle)).size === agents.length
+    && agents.every(({ position }, index) =>
+      index === 0 || position > (agents[index - 1]?.position ?? -1));
 }
 
 export function libraryCoherent(
@@ -302,6 +324,7 @@ export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): bool
       || conversationProjects.get(value.activeConversationId) === value.activeProjectId)
     && promptPresetCollectionCoherent(value.promptPresets)
     && todoCollectionCoherent(value.todos)
+    && customAgentCollectionCoherent(value.customAgents)
     && libraryCoherent(value.library, conversationProjects)
     && watcherLinkCollectionCoherent(value.watchers, conversationProjects, projectIds);
 }

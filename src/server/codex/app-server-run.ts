@@ -1037,7 +1037,9 @@ export async function openCodexTurn({
       ? { serviceTier: options.serviceTier }
       : {}),
     ...(modelProvider ? { modelProvider: modelProvider.providerId } : {}),
-    ...(providerConfig || watcherConfig ? { config: { ...watcherConfig, ...providerConfig } } : {}),
+    ...(providerConfig || watcherConfig || options.autoCompactTokenLimit
+      ? { config: { ...(options.autoCompactTokenLimit ? { model_auto_compact_token_limit: options.autoCompactTokenLimit } : {}), ...watcherConfig, ...providerConfig } }
+      : {}),
     ...(developerInstructions ? { developerInstructions } : {}),
   };
   let opened: JsonObject;

@@ -4,9 +4,15 @@ import {
   Suspense,
   useContext,
   type ReactNode,
+  type RefObject,
 } from "react";
-import { GitBranch } from "lucide-react";
+import { FolderGit2, GitBranch } from "lucide-react";
 
+import {
+  checkoutBranchChip,
+  ISOLATED_WORKTREE,
+  type CheckoutBranchMenuOpener,
+} from "./checkoutBranchChip";
 import type { CheckoutBranchControlModel } from "./checkoutBranchControlModel";
 
 export type { CheckoutBranchControlModel } from "./checkoutBranchControlModel";
@@ -29,22 +35,42 @@ export function CheckoutBranchControlProvider({
   );
 }
 
-function StaticCheckoutBranch({ branch }: { branch: string }): React.JSX.Element {
+function StaticCheckoutBranch({ branch, worktree }: { branch: string; worktree: boolean }): React.JSX.Element {
+  const chip = checkoutBranchChip(branch, null, worktree);
+  const Icon = worktree ? FolderGit2 : GitBranch;
   return (
-    <span className="composer-checkout-branch" title={branch}>
-      <GitBranch size={14} aria-hidden="true" />
-      <code translate="no">{branch}</code>
+    <span className="composer-checkout-branch composer-chip" title={chip.title}>
+      <Icon className="composer-setting-icon" size={16} aria-hidden="true" />
+      <code translate="no">{chip.text}</code>
+      {worktree && <span className="visually-hidden">{`, ${ISOLATED_WORKTREE}`}</span>}
     </span>
   );
 }
 
-export function CheckoutBranchSlot({ branch }: { branch: string }): React.JSX.Element {
+export function CheckoutBranchSlot({
+  branch,
+  worktree = false,
+  menuRef,
+  fallbackAnchor,
+}: {
+  branch: string;
+  worktree?: boolean;
+  menuRef?: RefObject<CheckoutBranchMenuOpener | null>;
+  fallbackAnchor?: () => HTMLButtonElement | null;
+}): React.JSX.Element {
   const model = useContext(CheckoutBranchControlContext);
   const gitStatus = model?.gitStatus ?? null;
-  if (!model || !gitStatus?.isRepository) return <StaticCheckoutBranch branch={branch} />;
+  if (!model || !gitStatus?.isRepository) return <StaticCheckoutBranch branch={branch} worktree={worktree} />;
   return (
-    <Suspense fallback={<StaticCheckoutBranch branch={branch} />}>
-      <CheckoutBranchMenuButton branch={branch} model={model} gitStatus={gitStatus} />
+    <Suspense fallback={<StaticCheckoutBranch branch={branch} worktree={worktree} />}>
+      <CheckoutBranchMenuButton
+        branch={branch}
+        model={model}
+        gitStatus={gitStatus}
+        worktree={worktree}
+        menuRef={menuRef}
+        fallbackAnchor={fallbackAnchor}
+      />
     </Suspense>
   );
 }

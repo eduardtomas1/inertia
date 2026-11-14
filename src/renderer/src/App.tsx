@@ -4,7 +4,7 @@ import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SettingsProfilePanel, SettingsSection } from "./lib/settingsTarget";
+import type { SettingsProfilePanel, SettingsSection, SettingsTarget } from "./lib/settingsTarget";
 import { useSettingsMode } from "./hooks/useSettingsMode";
 import { useDiagnosticNavigation } from "./hooks/useDiagnosticNavigation";
 import {
@@ -92,6 +92,7 @@ import { requestSubagentFollowUp, SUBAGENT_FOLLOW_UP_UNAVAILABLE } from "./utils
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import { liveTerminalIdsForHandoff } from "./components/terminalTabStorage";
 import type { AppView } from "./appView";
+import { focusNewChatComposer } from "./utils/focusNewChatComposer";
 import { useWatcherSurfaceController } from "./hooks/useWatcherSurface";
 import { WatcherContext } from "./components/watcher/watcherContext";
 import { WatcherAttachHost } from "./components/watcher/WatcherAttachHost";
@@ -714,7 +715,7 @@ export default function App(): React.JSX.Element {
         ) {
           discardDraftConversation();
           setView("workspace");
-          setSidebarOpen(false);
+          setSidebarOpen(false); focusNewChatComposer();
         }
       })
       .catch((error: unknown) => {
@@ -865,8 +866,7 @@ export default function App(): React.JSX.Element {
       connectProvider,
       openProviderSetup,
       openBackendSetup,
-      openSettings: () => openSettings(),
-      openUsageView: () => navigateToView("usage"),
+      openSettings: (target?: SettingsTarget) => openSettings(target),
       openConversation: (conversationId: string) => {
         const target = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
         if (!target || target.archivedAt !== null) return false;
@@ -989,8 +989,7 @@ export default function App(): React.JSX.Element {
         connectProvider,
         openProviderSetup,
         openBackendSetup,
-        openSettings: () => openSettings(),
-        openUsageView: () => navigateToView("usage"),
+        openSettings: (target?: SettingsTarget) => openSettings(target),
         openProjectPath,
         sendMessageToConversation,
         compactConversation: compactConversationById,

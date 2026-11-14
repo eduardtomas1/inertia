@@ -53,6 +53,20 @@ function isRecoverySafetyError(error: unknown): boolean {
   return publicMessage(error).includes("recovery safety mode");
 }
 
+const NEW_PROVIDER_THREAD = "new-thread";
+
+export function agentWorkflowFirstProviderThread(
+  previous: string | null | undefined,
+  next: string | null,
+): boolean {
+  if (!previous || !next) return false;
+  const before = previous.split("\0");
+  const after = next.split("\0");
+  if (before.length !== after.length) return false;
+  const changed = before.filter((part, index) => part !== after[index]);
+  return changed.length === 1 && changed[0] === NEW_PROVIDER_THREAD;
+}
+
 export function agentWorkflowRouteIdentity(
   conversation: Conversation | null,
   project: Project | null,
@@ -62,7 +76,7 @@ export function agentWorkflowRouteIdentity(
     conversation.modelSelection.harnessId,
     conversation.modelSelection.backendProfileId,
     conversation.modelSelection.backendConfigurationRevision,
-    conversation.providerSessionId ?? "new-thread",
+    conversation.providerSessionId ?? NEW_PROVIDER_THREAD,
     conversation.worktreePath ?? project.path,
   ].join("\0");
 }
@@ -152,7 +166,8 @@ export function useAgentWorkflows({
     const identity = activeConversationId
       ? `${activeConversationId}\0${routeIdentity ?? ""}`
       : null;
-    const identityChanged = lifecycleRef.current.identity !== identity;
+    const previousIdentity = lifecycleRef.current.identity;
+    const identityChanged = previousIdentity !== identity;
     const statusChanged = lifecycleRef.current.status !== status;
     lifecycleRef.current = { identity, status };
     if (!identityChanged && !statusChanged) return;
@@ -165,7 +180,8 @@ export function useAgentWorkflows({
       setError(null);
     }
     if (activeConversationId && status === "online") {
-      void load(true);
+      void load(statusChanged
+        || !agentWorkflowFirstProviderThread(previousIdentity, identity));
     }
   }, [activeConversationId, load, routeIdentity, status]);
 

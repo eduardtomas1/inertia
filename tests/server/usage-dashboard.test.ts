@@ -17,6 +17,12 @@ import {
   projectUsageDashboard,
   type UsageDashboardRange,
 } from "../../src/server/usage-dashboard";
+import {
+  parsePriceList,
+  resolveModelRates,
+  USAGE_PRICE_LIST_SOURCE,
+  type UsagePricing,
+} from "../../src/server/usage/price-list";
 
 const directories: string[] = [];
 const range: UsageDashboardRange = {
@@ -317,8 +323,12 @@ describe("usage dashboard projection", () => {
     });
     expect(dashboard.cost).toEqual({
       status: "unavailable",
-      reason: "Inertia does not persist versioned model pricing or provider invoice charges.",
+      reason: "The model price list could not be downloaded, so there is nothing to estimate from.",
+      pricing: { status: "unavailable", source: USAGE_PRICE_LIST_SOURCE, fetchedAt: null, modelCount: 0 },
+      byType: { input: 0, cachedInput: 0, cacheWriteInput: 0, output: 0 },
+      cacheSavings: 0,
     });
+    expect(dashboard.totals.cost).toEqual({ value: null, measuredRequests: 0, totalRequests: dashboard.totals.requestCount, coverage: "unavailable" });
     expect(JSON.stringify(dashboard)).not.toContain("conversation-codex");
   });
 
@@ -758,6 +768,114 @@ describe("usage dashboard projection", () => {
         return withoutProviders;
       }),
     })).toBe(false);
+  });
+});
+
+describe("estimated cost in the usage dashboard", () => {
+  const pricing = (status: UsagePricing["status"] = "fresh"): UsagePricing => {
+    const table = parsePriceList({
+      "gpt-priced": { input_cost_per_token: 0.000002, output_cost_per_token: 0.00001, cache_read_input_token_cost: 0.0000002, litellm_provider: "openai" },
+      "claude-opus-5-5": { input_cost_per_token: 0.000004, output_cost_per_token: 0.00002, cache_read_input_token_cost: 0.0000002, cache_creation_input_token_cost: 0.000005, litellm_provider: "anthropic" },
+    });
+    return {
+      status,
+      source: USAGE_PRICE_LIST_SOURCE,
+      fetchedAt: "2026-06-30T00:00:00.000Z",
+      modelCount: table.size,
+      resolve: (lookup) => resolveModelRates(table, lookup),
+    };
+  };
+  const codexTurn = (id: string, model: string, day: string, tokens: Partial<AgentTurnUsageSnapshot> | null) => turn({
+    id,
+    providerId: "codex",
+    model,
+    completedAt: `2026-06-${day}T10:00:00.000Z`,
+    completionUsage: tokens ? usage(`2026-06-${day}T10:00:00.000Z`, tokens) : null,
+  });
+
+  it("prices measured tokens per category at list prices and reports what it could not price", () => {
+    const priced = codexTurn("priced", "gpt-priced", "20", {
+      inputTokens: 1_000_000, cachedInputTokens: 600_000, outputTokens: 100_000, reasoningOutputTokens: 40_000,
+    });
+    const unknownModel = codexTurn("unknown", "gpt-unknown-preview", "20", { inputTokens: 500, outputTokens: 500 });
+    const unmeasured = codexTurn("unmeasured", "gpt-priced", "21", null);
+    const dashboard = projectUsageDashboard([priced, unknownModel, unmeasured], range, "2026-06-30T12:00:00.000Z", pricing());
+
+    expect(dashboard.totals.cost).toEqual({ value: 1.92, measuredRequests: 1, totalRequests: 3, coverage: "partial" });
+    expect(dashboard.cost).toEqual({
+      status: "estimated",
+      reason: null,
+      pricing: { status: "fresh", source: USAGE_PRICE_LIST_SOURCE, fetchedAt: "2026-06-30T00:00:00.000Z", modelCount: 2 },
+      byType: { input: 0.8, cachedInput: 0.12, cacheWriteInput: 0, output: 1 },
+      cacheSavings: 1.08,
+    });
+    expect(dashboard.daily.find(({ date }) => date === "2026-06-20")?.cost).toMatchObject({ value: 1.92, coverage: "partial" });
+    expect(dashboard.daily.find(({ date }) => date === "2026-06-21")?.cost).toMatchObject({ value: null, coverage: "unavailable" });
+    expect(dashboard.daily.find(({ date }) => date === "2026-06-22")?.cost).toEqual({ value: 0, measuredRequests: 0, totalRequests: 0, coverage: "complete" });
+    expect(dashboard.providers[0]?.cost).toMatchObject({ value: 1.92, measuredRequests: 1, totalRequests: 3 });
+    expect(dashboard.models.map(({ model, pricedAs, cost }) => [model, pricedAs, cost.value, cost.coverage])).toEqual(expect.arrayContaining([
+      ["gpt-priced", "gpt-priced", 1.92, "partial"],
+      ["gpt-unknown-preview", null, null, "unavailable"],
+    ]));
+    expect(usageDashboardSchema(dashboard)).toBe(true);
+  });
+
+  it("prices a Claude family alias through the version recorded with the turn, and leaves a bare alias unpriced", () => {
+    const completedAt = "2026-06-20T10:00:00.000Z";
+    const tokens = usage(completedAt, {
+      totalProcessedTokens: 1_100_000, totalProcessedScope: "run",
+      inputTokens: 1_000_000, cachedInputTokens: 800_000, cacheWriteInputTokens: 100_000, outputTokens: 100_000,
+    });
+    const base = turn({ id: "opus", providerId: "claude", model: "opus", completedAt, completionUsage: tokens });
+    const versioned = { ...base, modelSelection: { ...base.modelSelection, alias: "Opus 5.5" } };
+    const bare = { ...turn({ id: "bare", providerId: "claude", model: "sonnet", completedAt, completionUsage: tokens }) };
+    const dashboard = projectUsageDashboard([versioned, bare], range, completedAt, pricing());
+    expect(dashboard.models.map(({ model, pricedAs, cost }) => [model, pricedAs, cost.value])).toEqual(expect.arrayContaining([
+      ["opus", "claude-opus-5-5", 3.06],
+      ["sonnet", null, null],
+    ]));
+    expect(dashboard.cost.byType).toEqual({ input: 0.4, cachedInput: 0.16, cacheWriteInput: 0.5, output: 2 });
+  });
+
+  it("leaves Cursor unpriced until its token categories are confirmed", () => {
+    const table = parsePriceList({ "cursor-priced": { input_cost_per_token: 0.000002, output_cost_per_token: 0.00001, litellm_provider: "openai" } });
+    const everything: UsagePricing = { ...pricing(), resolve: (lookup) => resolveModelRates(table, { ...lookup, model: "cursor-priced" }) };
+    const completedAt = "2026-06-20T10:00:00.000Z";
+    const cumulative = (inputTokens: number, outputTokens: number) => usage(completedAt, {
+      totalProcessedTokens: inputTokens + outputTokens, totalProcessedScope: "session", inputTokens, cachedInputTokens: 0, outputTokens,
+    });
+    const cursor = turn({
+      id: "cursor", providerId: "cursor", model: "cursor-model", completedAt,
+      providerSessionBefore: "cursor-session", startUsage: cumulative(100, 10), completionUsage: cumulative(1_100, 110),
+    });
+    const dashboard = projectUsageDashboard([cursor], range, completedAt, everything);
+    expect(dashboard.tokens.input).toMatchObject({ value: 1_000, coverage: "complete" });
+    expect(dashboard.models[0]).toMatchObject({ pricedAs: null, cost: { value: null, coverage: "unavailable" } });
+    expect(dashboard.cost.status).toBe("unavailable");
+    const legacy = {
+      ...cursor,
+      harnessId: "cursor-cli" as const,
+      modelSelection: { ...cursor.modelSelection, harnessId: "cursor-cli" as const },
+      continuationIdentity: { ...cursor.continuationIdentity, harnessId: "cursor-cli" as const },
+    };
+    const older = projectUsageDashboard([legacy], range, completedAt, everything);
+    expect(older.models[0]).toMatchObject({ providerId: "cursor", pricedAs: null, cost: { value: null, coverage: "unavailable" } });
+    expect(older.cost.status).toBe("unavailable");
+  });
+
+  it("says why nothing could be estimated", () => {
+    const priced = codexTurn("priced", "gpt-priced", "20", { inputTokens: 10, outputTokens: 10 });
+    expect(projectUsageDashboard([priced], range).cost).toMatchObject({
+      status: "unavailable",
+      reason: "The model price list could not be downloaded, so there is nothing to estimate from.",
+    });
+    const unknown = codexTurn("unknown", "gpt-unknown-preview", "20", { inputTokens: 10, outputTokens: 10 });
+    expect(projectUsageDashboard([unknown], range, undefined, pricing("cached")).cost).toMatchObject({
+      status: "unavailable",
+      reason: "No request in this range has both a known model price and measured tokens.",
+      pricing: { status: "cached" },
+    });
+    expect(projectUsageDashboard([], range, undefined, pricing()).cost).toMatchObject({ status: "unavailable", reason: null });
   });
 });
 

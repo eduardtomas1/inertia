@@ -20,11 +20,13 @@ import { RuntimeStore } from "../../src/server/database";
 import { startTestRuntime } from "../support/test-runtime";
 import { createWorktreeWithOwnershipReceipt } from "../../src/server/git";
 import { GitError } from "../../src/server/git/types";
+import { removeRegisteredWorktree } from "../../src/server/git/worktree-inventory";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
 import {
   createWorktreeCommandHandler,
   type WorktreeCommandDependencies,
 } from "../../src/server/runtime/commands/worktree-commands";
+import { NativeGoalReads } from "../../src/server/runtime/native-goal-reads";
 import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
 import type { WorktreeActionOutcome, WorktreeList } from "../../src/shared/worktrees";
 import { removeTemporaryDirectory } from "../helpers/temporary-directory";
@@ -61,7 +63,7 @@ afterEach(async () => {
 });
 
 async function fixture(
-  overrides: Pick<WorktreeCommandDependencies, "removeRegisteredWorktree"> = {},
+  overrides: Pick<WorktreeCommandDependencies, "removeRegisteredWorktree" | "nativeGoalReads"> = {},
 ): Promise<Fixture> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "inertia-worktree-commands-")));
   directories.push(root);
@@ -325,6 +327,39 @@ describe("worktree commands", () => {
     expect(git(test.workspace, "worktree", "list", "--porcelain")).not.toContain("worktrees");
     expect((await test.list()).worktrees).toHaveLength(1);
     await expect(test.remove(unchanged.path)).rejects.toThrow(/does not list this worktree/u);
+  });
+
+  it("stops a goal read inside the worktree and waits for it before Git removes the folder", async () => {
+    const reads = new NativeGoalReads();
+    const events: string[] = [];
+    const test = await fixture({
+      nativeGoalReads: reads,
+      removeRegisteredWorktree: async (root, registeredPath) => {
+        events.push("git removal");
+        await removeRegisteredWorktree(root, registeredPath);
+      },
+    });
+    const owned = await test.owned("Reading goals");
+    const read = reads.begin(owned.conversationId, owned.path)!;
+    const aborted = new Promise<void>((resolve) => {
+      read.signal.addEventListener("abort", () => {
+        events.push("read aborted");
+        resolve();
+      });
+    });
+
+    const removing = test.remove(owned.path);
+    await aborted;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(events).toEqual(["read aborted"]);
+    expect(existsSync(owned.path)).toBe(true);
+    events.push("read finished");
+    read.finish();
+
+    await expect(removing).resolves.toMatchObject({ action: "remove", branchDeleted: true });
+    expect(events).toEqual(["read aborted", "read finished", "git removal"]);
+    expect(existsSync(owned.path)).toBe(false);
+    expect(reads.begin(owned.conversationId, owned.path)).not.toBeNull();
   });
 
   it("prunes only stale entries inside Inertia's worktree folder, one at a time", async () => {

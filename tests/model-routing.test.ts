@@ -24,6 +24,8 @@ describe("model routing contracts", () => {
       ["cursor", "cursor-acp", "builtin:cursor"],
       ["kimi", "kimi-acp", "builtin:kimi"],
       ["opencode", "opencode-sdk", "builtin:opencode"],
+      ["antigravity", "antigravity-cli", "builtin:antigravity"],
+      ["grok", "grok-acp", "builtin:grok"],
     ];
 
     for (const [providerId, harnessId, backendProfileId] of routes) {

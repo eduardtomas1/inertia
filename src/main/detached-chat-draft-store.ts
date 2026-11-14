@@ -84,32 +84,6 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Public parsing remains entry-tolerant for callers inspecting untrusted
- * values. Durable loading below is strict so invalid state is preserved rather
- * than silently rewritten as an empty queue.
- */
-export function parseDetachedChatDraftStore(
-  value: unknown,
-): DetachedChatDraftStoreSnapshot {
-  if (
-    !plainObject(value)
-    || Object.keys(value).length !== 2
-    || value.version !== STORE_VERSION
-    || !Array.isArray(value.drafts)
-    || value.drafts.length > MAX_PENDING_DETACHED_CHAT_DRAFTS
-  ) return { version: STORE_VERSION, drafts: [] };
-
-  const drafts = new Map<string, PendingDetachedChatDraft>();
-  for (const candidate of value.drafts) {
-    const draft = parsePendingDetachedChatDraft(candidate);
-    if (!draft) continue;
-    drafts.delete(draft.conversationId);
-    drafts.set(draft.conversationId, draft);
-  }
-  return { version: STORE_VERSION, drafts: [...drafts.values()] };
-}
-
 function parseStrictSnapshot(
   value: unknown,
 ): DetachedChatDraftStoreSnapshot | null {

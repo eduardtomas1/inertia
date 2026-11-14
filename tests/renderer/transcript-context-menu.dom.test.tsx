@@ -109,12 +109,17 @@ const bridge = {
   getPlatform: () => "darwin" as NodeJS.Platform,
 };
 
-function renderTimeline(onOpenTurnFile = vi.fn(), content = answer.content, taskCreator: TaskCreator | null = null) {
+function renderTimeline(
+  onOpenTurnFile = vi.fn(),
+  content = answer.content,
+  taskCreator: TaskCreator | null = null,
+  userMessage: ChatMessage = request,
+) {
   render(
     <TaskCreationContext.Provider value={taskCreator}>
       <div ref={createRef<HTMLDivElement>()}>
         <ResponseTimeline
-          turns={[turn]} messages={[request, { ...answer, content }]}
+          turns={[turn]} messages={[userMessage, { ...answer, content }]}
           activities={[]} reasonings={[]} plans={[]} checkpoints={[]}
           projectRoot="/workspace/app" projectId={projectId} conversationId={conversationId}
           streamingText="" streamingReasoning="" approvals={[]} inputRequests={[]}
@@ -182,6 +187,29 @@ describe("transcript context menus", () => {
     expect(linked).toBe(conversationId);
     expect(compose(chat)).toEqual({ title: request.content, note: "" });
     expect(document.activeElement).toBe(article);
+  });
+
+  it("creates a task from a Duo comparison request", async () => {
+    const taskCreator = creator();
+    renderTimeline(vi.fn(), answer.content, taskCreator, {
+      ...request,
+      content: "Compare the two attributed results.",
+      duoComparison: {
+        launchId: "launch-1",
+        sides: [
+          { conversationId: "side-a", providerId: "codex", title: "Sign-up", status: "completed", filesChanged: 2 },
+          { conversationId: "side-b", providerId: "claude", title: "Sign-up", status: "completed", filesChanged: 1 },
+        ],
+      },
+    });
+    bridge.showContextMenu.mockResolvedValueOnce("create-task");
+    fireEvent.contextMenu(await screen.findByRole("article", { name: "Comparing A and B" }));
+    await settleMenu();
+    expect(lastRequest()).toMatchObject({ kind: "message", role: "user", conversationId });
+    expect(taskCreator.create).toHaveBeenCalledOnce();
+    const [linked, compose] = taskCreator.create.mock.calls[0]!;
+    expect(linked).toBe(conversationId);
+    expect(compose(chat)).toEqual({ title: "Compare the two attributed results.", note: "" });
   });
 
   it("ignores Create task where no task surface is available", async () => {

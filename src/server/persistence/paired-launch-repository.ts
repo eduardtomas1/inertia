@@ -466,20 +466,6 @@ export class PairedLaunchRepository {
     }
   }
 
-  updateWorktree(
-    launchId: string,
-    ordinal: 0 | 1,
-    worktreePath: string | null,
-    branch: string | null,
-  ): void {
-    const result = this.database.prepare(`
-      UPDATE paired_launch_sides
-      SET planned_worktree_path = ?, planned_branch = ?
-      WHERE launch_id = ? AND ordinal = ?
-    `).run(worktreePath, branch, launchId, ordinal);
-    if (result.changes !== 1) throw new RecordNotFoundError("Duo launch side not found.");
-  }
-
   beginWorktreeCreation(
     launchId: string,
     ordinal: 0 | 1,
@@ -604,27 +590,6 @@ export class PairedLaunchRepository {
     if (result.changes !== 1) {
       throw new Error(
         "The Duo worktree removal attempt did not match its durable ownership proof.",
-      );
-    }
-  }
-
-  confirmWorktreeRemoval(
-    launchId: string,
-    ordinal: 0 | 1,
-  ): void {
-    const result = this.database.prepare(`
-      UPDATE paired_launch_sides
-      SET worktree_removal_confirmed = 1
-      WHERE launch_id = ? AND ordinal = ?
-        AND owns_worktree = 1
-        AND conversation_id IS NULL
-        AND worktree_creation_state = 'created'
-        AND cleanup_branch_head IS NOT NULL
-        AND worktree_removal_started = 1
-    `).run(launchId, ordinal);
-    if (result.changes !== 1) {
-      throw new Error(
-        "The Duo worktree removal receipt did not match its durable ownership proof.",
       );
     }
   }

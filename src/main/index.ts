@@ -87,6 +87,7 @@ import type { MainFailureCode } from "./runtime-diagnostic-events.js";
 import { attachRuntimeStderr, RuntimeStderrJournal } from "./runtime-stderr-journal.js";
 import { setDiagnosticsReportSource } from "./diagnostic-export.js";
 import { registerCompletionSoundIpc } from "./completion-sound-main.js";
+import { registerCustomAgentFileIpc } from "./custom-agent-file-main.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { parsePreviewAppShortcutKeys, setPreviewAppShortcutKeys } from "./preview-keyboard.js";
@@ -99,6 +100,7 @@ import { applyRuntimeConnectionRequest } from "./runtime-connection-request.js";
 import { RuntimeSystemSuspendDelivery } from "./runtime-system-suspend-delivery.js";
 import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
+import { agentSecretDataPath } from "./agent-secret-data-path.js";
 import { prepareRuntimeBootstrapRecovery } from "./runtime-bootstrap-recovery.js";
 import { RuntimeLiveDarwinRecoveryCoordinator } from "./runtime-live-darwin-recovery.js";
 import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
@@ -107,6 +109,7 @@ import { finishPrivilegedExit, RetryablePrivilegedCleanup } from "./privileged-s
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { registerContextMenuIpc } from "./context-menu-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
+import { registerAgentSecretIpc } from "./agent-secret-ipc.js";
 import { runtimeCredentialBroker } from "./runtime-credential-broker.js";
 import { runtimeIssueEvidenceBroker } from "./runtime-issue-evidence-broker.js";
 import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-bootstrap.js";
@@ -394,6 +397,7 @@ function registerIpcHandlers(): void {
     directory: join(app.getPath("userData"), "completion-sounds"),
     defaultPath: () => app.getPath("music"),
   });
+  registerCustomAgentFileIpc({ ipcMain, assertTrusted: assertTrustedIpc, window: () => mainWindow, dialog, defaultPath: () => app.getPath("documents") });
   ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     const context = assertTrustedChatIpc(event, args.length, Math.min(args.length, 1));
@@ -681,6 +685,7 @@ function registerIpcHandlers(): void {
 
   registerCredentialVaultIpc(ipcMain, () => credentialVault, assertTrustedIpc,
     (incident) => runtimeDiagnostics?.recordIncident(incident));
+  registerAgentSecretIpc({ ipcMain, assertTrusted: assertTrustedChatIpc, vault: () => credentialVault, runtime: () => runtimeSupervisor });
 }
 
 async function createMainWindow(): Promise<void> {
@@ -1032,6 +1037,7 @@ async function bootstrap(safetyAssets: ReturnType<typeof resolveDesktopRuntimePr
       dataDirectory,
       defaultWorkspacePath,
       attachmentRoot: attachmentDirectory(),
+      agentSecretDirectory: agentSecretDataPath({ platform: process.platform, dataDirectory, userDataPath: app.getPath("userData") }),
       enableProviders: process.env.NODE_ENV !== "test" || Boolean(packageSmokeCodexExecutable),
       ...(modernDarwinRecoveryAuthority
         ? { manualModernDarwinRecovery: modernDarwinRecoveryAuthority }

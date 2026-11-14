@@ -261,13 +261,11 @@ export function WorkspaceHeader({
     ? "New chat"
     : view === "settings"
       ? "Settings"
-      : view === "usage"
-        ? "Usage"
-        : view === "tasks"
-          ? "Tasks"
-          : view === "library"
-            ? "Library"
-            : conversation?.title ?? project?.name ?? "Workspace";
+      : view === "tasks"
+        ? "Tasks"
+        : view === "library"
+          ? "Library"
+          : conversation?.title ?? project?.name ?? "Workspace";
   const showProjectCrumb = view === "workspace" && project !== null && conversation !== null;
   const newChatInProjectLabel = project?.workspaceKind === "scratch" ? "New chat without a project" : `New chat in ${project?.name}`;
   const titleMenuAvailable = view === "workspace"
@@ -345,7 +343,7 @@ export function WorkspaceHeader({
 
   return (
     <header ref={headerRef} className="workspace-header drag-region">
-      <div className="header-leading no-drag">
+      <div className="header-leading">
         {onOpenSidebar && (
           <IconButton label="Toggle project navigation" shortcut={sidebarShortcut} className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}

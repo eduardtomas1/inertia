@@ -632,4 +632,22 @@ describe("supervised runtime process environment", () => {
       }, "linux")).toEqual({ NODE_ENV: "test" });
     }
   });
+
+  it("forwards only a loopback test-mode usage price list", () => {
+    const url = "http://127.0.0.1:43111/prices.json";
+    expect(runtimeProcessEnvironment({
+      INERTIA_TEST_USAGE_PRICE_LIST_URL: url,
+      NODE_ENV: "test",
+    }, "linux")).toEqual({ NODE_ENV: "test", INERTIA_TEST_USAGE_PRICE_LIST_URL: url });
+    expect(runtimeProcessEnvironment({
+      INERTIA_TEST_USAGE_PRICE_LIST_URL: url,
+      NODE_ENV: "production",
+    }, "linux")).toEqual({});
+    for (const value of ["off", "https://prices.example.test/list.json", "http://127.0.0.1/prices.json", "http://127.0.0.1:1/a?b=c"]) {
+      expect(runtimeProcessEnvironment({
+        INERTIA_TEST_USAGE_PRICE_LIST_URL: value,
+        NODE_ENV: "test",
+      }, "linux")).toEqual({ NODE_ENV: "test" });
+    }
+  });
 });

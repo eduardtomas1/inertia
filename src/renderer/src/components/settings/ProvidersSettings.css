@@ -12,6 +12,12 @@
   flex: 1;
 }
 
+.provider-settings-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .provider-settings-heading > .icon-button {
   margin-left: auto;
 }
@@ -60,6 +66,30 @@
 
 .provider-settings-list-row.is-selected {
   background: var(--fill-strong);
+}
+
+.provider-settings-add-row {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.provider-settings-add-row:hover:not([aria-disabled="true"]) {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.provider-settings-add-row:focus-visible {
+  outline-offset: -2px;
 }
 
 .provider-settings-list-row > :first-child {
@@ -411,10 +441,6 @@
     margin-bottom: 0;
     border-right: 0;
     border-bottom: 1px solid var(--line-soft);
-  }
-
-  .provider-settings-rail:empty {
-    border-bottom: 0;
   }
 
   .provider-settings-list-row {

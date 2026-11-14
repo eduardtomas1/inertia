@@ -7,7 +7,6 @@ import type {
 import type { AppUpdateStatus } from "@shared/desktop";
 import { PROVIDER_MAINTENANCE_PROVIDER_IDS } from "@shared/provider-maintenance";
 import { agentRunStateForTurn, agentTurnStatusForRunState, isAgentRunTerminalState } from "@shared/run-state";
-import type { UpdateEverythingPhase } from "../../utils/updateEverythingRun";
 import { pendingReleaseCount } from "./appUpdatePresentation";
 
 export interface UpdateEverythingProvider {
@@ -95,17 +94,4 @@ export function updateEverythingPlan({ snapshot, statuses, operations, appStatus
     continuingChats,
     workspaceRuns,
   };
-}
-
-export function updateEverythingProgress(
-  phase: UpdateEverythingPhase,
-  operations: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>,
-  snapshot: AppSnapshot | null,
-): string {
-  if (phase.kind === "download") return "Downloading Inertia…";
-  if (phase.kind === "app") return "Updating Inertia…";
-  const current = phase.providerIds.find((providerId) => operations.get(providerId)?.status === "running")
-    ?? phase.providerIds.find((providerId) => activeOperation(operations.get(providerId)))
-    ?? phase.providerIds[0];
-  return current ? `Updating ${providerLabel(snapshot, current)}…` : "Updating…";
 }

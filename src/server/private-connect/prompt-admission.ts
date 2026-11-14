@@ -1,8 +1,10 @@
 import type { RuntimeStore } from "../database";
+import type { BackendProfileController } from "../runtime/backends/backend-profile-controller";
 import { isUntitledConversationTitle, quickConversationTitle } from "../runtime/conversation-title";
 import type { TurnController } from "../runtime/turns/turn-controller";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "../runtime/update-hold";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
+import type { Conversation, ProviderInfo } from "../../shared/contracts";
 
 interface PrivateConnectPromptAuthority {
   acquire(conversationId: string): boolean;
@@ -84,5 +86,39 @@ export function queuePrivateConnectPrompt(
     throw error;
   } finally {
     if (reserved) dependencies.authority.release(conversationId);
+  }
+}
+
+export interface PrivateConnectPromptReadinessDependencies {
+  enableProviders: boolean;
+  providerInfo(): readonly ProviderInfo[];
+  backends: Pick<BackendProfileController, "readiness" | "validateSelection">;
+}
+
+export async function assertPrivateConnectPromptRunnable(
+  dependencies: PrivateConnectPromptReadinessDependencies,
+  conversation: Conversation,
+): Promise<void> {
+  if (!dependencies.enableProviders) {
+    throw new Error("Provider execution is disabled.");
+  }
+  const selectedProvider = dependencies.providerInfo().find(
+    ({ id }) => id === conversation.providerId,
+  );
+  dependencies.backends.validateSelection(conversation.modelSelection);
+  const backendReadiness = await dependencies.backends.readiness(
+    conversation.modelSelection,
+    selectedProvider,
+  );
+  if (backendReadiness && !backendReadiness.ready) {
+    throw new Error(
+      backendReadiness.message ?? "The selected model backend is unavailable.",
+    );
+  }
+  if (!backendReadiness && !selectedProvider?.canRun) {
+    throw new Error(
+      selectedProvider?.statusMessage
+        ?? "This agent is not ready on the desktop.",
+    );
   }
 }

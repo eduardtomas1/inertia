@@ -1,6 +1,6 @@
 # Provider handoff evidence
 
-`handoff-dark.png` and `handoff-light.png` are 1440 x 920 captures written by
+`handoff-dark.png` and `handoff-light.png` are 1440 x 920 captures written by the former
 `tests/e2e/provider-handoff.spec.ts` (Playwright `isolated` project) when
 `INERTIA_CAPTURE_PR_ASSETS=1` is set. The database, workspace and Electron
 profile are synthetic, and no provider turn runs: before launch the spec seeds

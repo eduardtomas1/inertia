@@ -3,10 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   PRIVATE_CONNECT_GRANT_LIMITS,
   normalizePrivateConnectGrants,
-  privateConnectGrantAllowsConversation,
   privateConnectGrantedProjectIds,
   privateConnectGrantsForSelectedProjects,
-  privateConnectGrantsFromProjectIds,
 } from "../../../src/shared/private-connect/grants";
 import {
   privateConnectRuntimeAuthorizationSchema,
@@ -14,11 +12,6 @@ import {
 import {
   normalizePrivateConnectRuntimeGrants,
   privateConnectRuntimeGrantAllowsConversation,
-  privateConnectRuntimeGrantIsProjectWide,
-  privateConnectRuntimeGrantsFromProjectIds,
-  privateConnectRuntimeGrantsNeedReview,
-  privateConnectRuntimeGrantedProjectIds,
-  samePrivateConnectRuntimeGrants,
 } from "../../../src/shared/private-connect/runtime-grants";
 import {
   hasPrivateConnectScope,
@@ -38,9 +31,6 @@ describe("Private Connect grants and scopes", () => {
       { projectId: "other", conversationIds: [], includeFutureConversations: false },
     ]);
     expect(privateConnectGrantedProjectIds(grants)).toEqual(["project", "other"]);
-    expect(privateConnectGrantAllowsConversation(grants, "project", "future")).toBe(true);
-    expect(privateConnectGrantAllowsConversation(grants, "missing", "future")).toBe(false);
-    expect(privateConnectGrantsFromProjectIds(["b", "a", "b"])).toHaveLength(2);
     expect(privateConnectGrantsForSelectedProjects(["a", "b"], [
       { projectId: "outside", conversationIds: ["leaked"], includeFutureConversations: true },
       { projectId: "a", conversationIds: ["one"], includeFutureConversations: false },
@@ -57,16 +47,8 @@ describe("Private Connect grants and scopes", () => {
       { projectId: "z", conversationIds: ["a"], includeFutureConversations: true, legacyProjectWide: false },
     ]);
     expect(grants.map(({ projectId }) => projectId)).toEqual(["a", "z"]);
-    expect(privateConnectRuntimeGrantedProjectIds(grants)).toEqual(["a", "z"]);
     expect(privateConnectRuntimeGrantAllowsConversation(grants, "z", "future")).toBe(true);
     expect(privateConnectRuntimeGrantAllowsConversation(grants, "missing", "future")).toBe(false);
-    expect(privateConnectRuntimeGrantIsProjectWide(grants, "a")).toBe(true);
-    expect(privateConnectRuntimeGrantIsProjectWide(grants, "z")).toBe(true);
-    expect(privateConnectRuntimeGrantsNeedReview(grants)).toBe(true);
-    const legacy = privateConnectRuntimeGrantsFromProjectIds(["a"]);
-    expect(samePrivateConnectRuntimeGrants(legacy, [...legacy])).toBe(true);
-    expect(samePrivateConnectRuntimeGrants(legacy, [])).toBe(false);
-    expect(samePrivateConnectRuntimeGrants(legacy, [{ ...legacy[0]!, projectId: "different" }])).toBe(false);
   });
 
   it("accepts the desktop grant limit across the runtime boundary", () => {

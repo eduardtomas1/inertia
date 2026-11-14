@@ -13,6 +13,34 @@ export const COMPACT_ON_RETURN_SETTINGS = ["offer", "never"] as const;
 export type CompactOnReturnSetting = (typeof COMPACT_ON_RETURN_SETTINGS)[number];
 export const DEFAULT_COMPACT_ON_RETURN: CompactOnReturnSetting = "offer";
 
+export const DEFAULT_COMPACT_BEFORE_CACHE_EXPIRES = false;
+export const IDLE_COMPACTION_LEAD_MS = 2 * 60_000;
+export const IDLE_COMPACTION_SAFETY_MS = 30_000;
+export const IDLE_COMPACTION_MIN_LIFETIME_MS = PROMPT_CACHE_LIFETIMES_MS.anthropic1h;
+
+export const AUTO_COMPACT_TOKENS_MIN = 100_000;
+export const AUTO_COMPACT_TOKENS_MAX = 1_000_000;
+export const CLAUDE_AUTO_COMPACT_WINDOWS = [200_000, 300_000, 400_000, 600_000] as const;
+export const DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW = 400_000;
+
+export const CODEX_AUTO_COMPACT_LIMITS = [200_000, 300_000, 400_000] as const;
+export const DEFAULT_CODEX_AUTO_COMPACT_LIMIT = 300_000;
+export const CODEX_AUTO_COMPACT_WINDOW_SHARE = 0.9;
+
+export function codexAutoCompactTokenLimit(setting: number | null, contextWindow: number | null): number | null {
+  if (setting === null || contextWindow === null || !Number.isSafeInteger(contextWindow) || contextWindow <= 0) return null;
+  const limit = Math.min(setting, Math.floor(contextWindow * CODEX_AUTO_COMPACT_WINDOW_SHARE));
+  return limit >= AUTO_COMPACT_TOKENS_MIN ? limit : null;
+}
+
+export function validAutoCompactTokenCount(value: unknown): value is number | null {
+  return value === null
+    || (typeof value === "number"
+      && Number.isSafeInteger(value)
+      && value >= AUTO_COMPACT_TOKENS_MIN
+      && value <= AUTO_COMPACT_TOKENS_MAX);
+}
+
 export const PROMPT_CACHE_TTLS = ["5m", "1h"] as const;
 export type PromptCacheTtl = (typeof PROMPT_CACHE_TTLS)[number];
 export const PROMPT_CACHE_TTL_UNAVAILABLE_MESSAGE =
@@ -74,10 +102,10 @@ export interface CompactOnReturnOffer {
   idleMs: number | null;
 }
 
-const API_KEYS_ONLY = "Compact on return is available only for chats on an Anthropic or OpenAI API key.";
+const API_KEYS_ONLY = "Compact on return is available only on Claude Code's own sign-in, an Anthropic API key or an OpenAI API key.";
 const KIMI_EXCLUDED = "Kimi manages its own context, so compact on return is not offered.";
 const CUSTOM_EXCLUDED = "Custom gateways do not publish a prompt cache lifetime, so compact on return is not offered.";
-const CLAUDE_ACCOUNT_EXCLUDED = "Claude chats are compacted on return only when signed in with a Console API key.";
+const CLAUDE_SIGN_IN_UNKNOWN = "Inertia could not confirm how Claude is signed in, so compact on return is not offered.";
 
 export function promptCacheTtlAllowed(route: {
   harnessId: HarnessId;
@@ -107,9 +135,13 @@ export function compactOnReturnEligibility(route: CompactOnReturnRoute): Compact
     if (route.preset === "anthropic-api-key") return anthropicLifetime(route.promptCacheTtl);
     const native = route.preset === "native" || (route.preset === null && route.routeKind === "account");
     if (!native) return ineligible(API_KEYS_ONLY);
-    return route.accountKind === "Console API key"
-      ? anthropicLifetime(route.promptCacheTtl)
-      : ineligible(CLAUDE_ACCOUNT_EXCLUDED);
+    if (route.accountKind === "Console API key") return anthropicLifetime(route.promptCacheTtl);
+    if (route.accountKind === "Claude account") {
+      return route.promptCacheTtl
+        ? anthropicLifetime(route.promptCacheTtl)
+        : { eligible: true, lifetimeMs: PROMPT_CACHE_LIFETIMES_MS.anthropic1h };
+    }
+    return ineligible(CLAUDE_SIGN_IN_UNKNOWN);
   }
   if (
     route.harnessId === "codex-app-server"
@@ -139,4 +171,41 @@ export function compactOnReturnOffer(input: CompactOnReturnOfferInput): CompactO
     && idleMs !== null
     && idleMs >= input.lifetimeMs;
   return { offer, usedTokens: input.usedTokens, idleMs };
+}
+
+export interface IdleCompactionWindowInput {
+  enabled: boolean;
+  setting: CompactOnReturnSetting;
+  harnessId: HarnessId;
+  eligible: boolean;
+  lifetimeMs: number | null;
+  usedTokens: number | null;
+  lastRequestStartedAt: string | null;
+  now: number;
+}
+
+export interface IdleCompactionWindow {
+  opensAt: number;
+  closesAt: number;
+}
+
+export function idleCompactionWindow(input: IdleCompactionWindowInput): IdleCompactionWindow | null {
+  if (!input.enabled || input.setting !== "offer" || !input.eligible) return null;
+  if (input.harnessId !== "claude-agent-sdk") return null;
+  if (input.lifetimeMs === null || input.lifetimeMs < IDLE_COMPACTION_MIN_LIFETIME_MS) return null;
+  if (input.usedTokens === null || input.usedTokens < COMPACT_ON_RETURN_TOKEN_THRESHOLD) return null;
+  if (input.lastRequestStartedAt === null) return null;
+  const startedAt = Date.parse(input.lastRequestStartedAt);
+  if (!Number.isFinite(startedAt)) return null;
+  const expiresAt = startedAt + input.lifetimeMs;
+  const window = { opensAt: expiresAt - IDLE_COMPACTION_LEAD_MS, closesAt: expiresAt - IDLE_COMPACTION_SAFETY_MS };
+  return input.now < window.closesAt ? window : null;
+}
+
+export function promptCacheLifetimeFor(
+  facts: Pick<PromptCacheFacts, "lifetimeMs" | "source"> | null | undefined,
+  eligibility: Pick<CompactOnReturnEligibility, "lifetimeMs"> | null | undefined,
+): number | null {
+  if (facts && facts.source !== "assumed" && facts.lifetimeMs !== null) return facts.lifetimeMs;
+  return eligibility?.lifetimeMs ?? facts?.lifetimeMs ?? null;
 }

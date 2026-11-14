@@ -3,7 +3,7 @@ import type { AttemptObserver } from "./orchestration-v2/attempt-fence";
 import { OrchestratedTurnRepository } from "./orchestration-v2/turn-repository";
 import type { CommandSource } from "./orchestration-v2/types";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository"; import { WorkspaceToolReads } from "./persistence/workspace-tool-reads";
-import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository"; import { CodexThreadToolPackRepository } from "./persistence/codex-thread-tool-pack-repository";
+import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository"; import { CodexThreadToolPackRepository } from "./persistence/codex-thread-tool-pack-repository"; import { IdleCompactionCandidateRepository } from "./persistence/idle-compaction-candidate-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
@@ -93,6 +93,7 @@ import { SystemSuspendRepository } from "./persistence/system-suspend-repository
 import { TranscriptRepository } from "./persistence/transcript-repository";
 import { QueuedMessageRepository } from "./persistence/queued-message-repository";
 import { TurnLedgerRepository, type DailyWorkRange, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
+import type { UsagePricing } from "./usage/price-list";
 import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
 import { backgroundTasks } from "./persistence/background-task-repository";
@@ -145,7 +146,7 @@ export class RuntimeStore {
   readonly limitResets: LimitResetRepository;
   readonly queuedMessages: QueuedMessageRepository;
   readonly htmlRenders: HtmlRenderRepository;
-  readonly codexThreadToolPacks = new CodexThreadToolPackRepository(() => this.database);
+  readonly codexThreadToolPacks = new CodexThreadToolPackRepository(() => this.database); readonly idleCompactionCandidates = new IdleCompactionCandidateRepository(() => this.database);
   readonly watcherLinks: WatcherLinkRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
   readonly orchestration: OrchestratedTurnRepository;
@@ -254,23 +255,7 @@ export class RuntimeStore {
       database: this.database,
     });
     this.turnLedgerRepository = new TurnLedgerRepository({
-      createMessage: (
-        conversationId,
-        content,
-        role,
-        attachments,
-        turnId,
-        createdAt,
-        options,
-      ) => this.createMessage(
-        conversationId,
-        content,
-        role,
-        attachments,
-        turnId,
-        createdAt,
-        options,
-      ),
+      createMessage: (...message) => this.createMessage(...message),
       database: this.database,
       requireAgentTurn: (turnId) => this.requireAgentTurn(turnId),
       requireConversation: (conversationId) => this.requireConversation(conversationId),
@@ -329,10 +314,6 @@ export class RuntimeStore {
     return this.recoveryReport;
   }
 
-  databaseBackupStatus(): ReturnType<DatabaseBackupManager["status"]> {
-    return this.backupManager.status();
-  }
-
   exportRecoveryData(): string {
     return exportDatabaseRecoveryData(
       this.database,
@@ -370,6 +351,7 @@ export class RuntimeStore {
 
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
+  customAgents() { return this.snapshotRepository.customAgents; }
   get library() { return this.snapshotRepository.library; }
   get restartContinuations() { return RestartContinuationRepository.for(this.database); }
   get workspaceToolReads() { return new WorkspaceToolReads(this.database); }
@@ -594,20 +576,6 @@ export class RuntimeStore {
     return this.pairedLaunchRepository.cancelComparison(launchId, now);
   }
 
-  updatePairedLaunchWorktree(
-    launchId: string,
-    ordinal: 0 | 1,
-    path: string | null,
-    branch: string | null,
-  ): void {
-    this.pairedLaunchRepository.updateWorktree(
-      launchId,
-      ordinal,
-      path,
-      branch,
-    );
-  }
-
   beginPairedLaunchWorktreeCreation(
     launchId: string,
     ordinal: 0 | 1,
@@ -662,13 +630,6 @@ export class RuntimeStore {
     ordinal: 0 | 1,
   ): void {
     this.pairedLaunchRepository.beginWorktreeRemoval(launchId, ordinal);
-  }
-
-  confirmPairedLaunchWorktreeRemoval(
-    launchId: string,
-    ordinal: 0 | 1,
-  ): void {
-    this.pairedLaunchRepository.confirmWorktreeRemoval(launchId, ordinal);
   }
 
   recordPairedLaunchBranchCleanupOutcome(
@@ -823,10 +784,6 @@ export class RuntimeStore {
     return this.gitArtifactRepository.revision();
   }
 
-  turnGitPatchDigests(): Set<string> {
-    return this.gitArtifactRepository.patchDigests();
-  }
-
   expireTurnGitPatch(digest: string): void {
     this.gitArtifactRepository.expirePatch(digest);
   }
@@ -889,15 +846,6 @@ export class RuntimeStore {
     );
   }
 
-  associateMessageWithTurn(messageId: string, conversationId: string, runId: string, turnId: string): ChatMessage {
-    return this.transcriptRepository.associateMessageWithTurn(
-      messageId,
-      conversationId,
-      runId,
-      turnId,
-    );
-  }
-
   updateMessageContent(messageId: string, content: string): void { this.transcriptRepository.updateMessageContent(messageId, content); }
 
   appendMessageContent(messageId: string, delta: string): void {
@@ -914,10 +862,6 @@ export class RuntimeStore {
 
   upsertAgentPlan(plan: AgentPlan): void {
     this.executionLedgerRepository.upsertAgentPlan(plan);
-  }
-
-  clearAgentPlan(conversationId: string, runId: string, turnId: string | null): void {
-    this.executionLedgerRepository.clearAgentPlan(conversationId, runId, turnId);
   }
 
   agentGoals(conversationId: string): AgentGoal[] {
@@ -1037,7 +981,7 @@ export class RuntimeStore {
   usageForConversation(conversationId: string): ThreadUsageSnapshot | null {
     return this.executionLedgerRepository.usageForConversation(conversationId);
   }
-  usageDashboard(range: UsageDashboardRange) { return this.turnLedgerRepository.usageDashboard(range); }
+  usageDashboard(range: UsageDashboardRange, pricing?: UsagePricing) { return this.turnLedgerRepository.usageDashboard(range, pricing); }
   dailyWork(range: DailyWorkRange) { return this.turnLedgerRepository.dailyWork(range); }
   checkpointCount(conversationId: string): number { return this.executionLedgerRepository.checkpointCount(conversationId); }
 
@@ -1140,7 +1084,6 @@ export class RuntimeStore {
   hasRecordedActiveWorkspaceRun(excludeAgentRuns = false): boolean { return this.workspaceRunRepository.hasActive(excludeAgentRuns); }
   hasRecordedActiveWorkspaceRunForProject(projectId: string): boolean { return this.workspaceRunRepository.hasActiveForProject(projectId); }
   hasRecordedActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.workspaceRunRepository.hasActiveForConversation(conversationId); }
-  hasActiveWorkspaceRunForProject(projectId: string): boolean { return this.conversationWork.hasProject(projectId) || this.hasRecordedActiveWorkspaceRunForProject(projectId); }
   hasActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.conversationWork.hasConversation(conversationId) || this.hasRecordedActiveWorkspaceRunForConversation(conversationId); }
 
   markWorkspaceRunSeen(id: string): WorkspaceRun {
@@ -1214,6 +1157,7 @@ export class RuntimeStore {
       this.backendProfileRepository.clearDefault(null);
     })();
   }
+  settings(): AppSettings { return this.settingsRepository.settings(); }
   updateSettings(update: AppSettingsUpdate): void {
     this.settingsRepository.update(update);
   }

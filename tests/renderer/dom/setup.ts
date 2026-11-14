@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 
+import { clearTurnFoldChoices } from "../../../src/renderer/src/components/response-timeline/turn-fold-store";
 import { forgetExpandedFolders } from "../../../src/renderer/src/utils/filesPanelExpandedFolders";
 
 if (!window.localStorage) {
@@ -20,4 +21,5 @@ if (!window.localStorage) {
 afterEach(() => {
   cleanup();
   forgetExpandedFolders();
+  clearTurnFoldChoices();
 });

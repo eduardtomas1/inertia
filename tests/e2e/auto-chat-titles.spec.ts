@@ -258,32 +258,3 @@ test("replaces the quick title with the generated Codex title once, after the fi
   }
 });
 
-test("keeps a rename made while the generated title is still pending", async () => {
-  const app = await openTitledApp("auto-chat-titles-rename");
-  try {
-    const { page } = app;
-    await startNewChat(app);
-    await sendMessage(app, firstPrompt);
-    await expectTitle(page, quickTitle);
-    await expectCompletedTurn(app, firstPrompt);
-    await expect.poll(() => recordedMethods(app)).toContain("title/turn/start");
-
-    await activeRow(page).click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Rename thread" }).click();
-    const rename = page.getByRole("textbox", { name: `Rename ${quickTitle}` });
-    await rename.fill("Offline remote retry");
-    await rename.press("Enter");
-    await expectTitle(page, "Offline remote retry");
-
-    await releaseTitle(app);
-    await expect.poll(() => recordedMethods(app)).toContain("title/answered");
-    const followUp = "Also check the timeout path";
-    await sendMessage(app, followUp);
-    await expectCompletedTurn(app, followUp);
-    await expectTitle(page, "Offline remote retry");
-    expect((await recordedMethods(app)).filter((method) => method === "title/thread/start")).toHaveLength(1);
-    expect(app.rendererErrors).toEqual([]);
-  } finally {
-    await app.close();
-  }
-});

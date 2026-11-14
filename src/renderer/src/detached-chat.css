@@ -19,14 +19,6 @@
   padding-left: var(--mac-titlebar-brand-safe-inset);
 }
 
-.detached-chat-shell .workspace-header > .header-leading {
-  -webkit-app-region: drag;
-}
-
-.detached-chat-shell .header-breadcrumb :is(button, input) {
-  -webkit-app-region: no-drag;
-}
-
 @media (max-width: 760px) {
   .detached-chat-shell .workspace-header {
     padding-right: calc(14px + var(--workspace-corner-controls-width, 0px));

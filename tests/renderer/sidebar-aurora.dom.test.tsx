@@ -2,10 +2,12 @@ import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  SIDEBAR_AURORA_EMPTY_CAPTURE_LIMIT,
   SIDEBAR_AURORA_STEP_MS,
   SIDEBAR_AURORA_WORKING_BREATH_RATE,
   SidebarAurora,
 } from "../../src/renderer/src/components/sidebar/SidebarAurora";
+import { SIDEBAR_STARFIELD } from "../../src/renderer/src/components/sidebar/sidebarStarLayout";
 
 interface FakeLayer {
   currentTime: number;
@@ -45,12 +47,108 @@ async function step(count = 1): Promise<void> {
 }
 
 describe("sidebar aurora", () => {
-  it("is inert decoration with three light layers", () => {
+  it("is inert decoration with four light layers under one starfield", () => {
     const view = render(<SidebarAurora moving />);
     const aurora = view.container.querySelector(".sidebar-aurora")!;
     expect(aurora).toHaveAttribute("aria-hidden", "true");
-    expect(aurora.children).toHaveLength(3);
+    expect([...aurora.children].map((child) => child.getAttribute("class"))).toEqual([
+      "sidebar-aurora-far",
+      "sidebar-aurora-band",
+      "sidebar-aurora-near",
+      "sidebar-aurora-glow",
+      "sidebar-aurora-stars",
+    ]);
     expect(aurora.querySelectorAll("a, button, input, [tabindex]")).toHaveLength(0);
+  });
+
+  it("draws each seeded star as its own element with its depth and breathing seeds", () => {
+    const view = render(<SidebarAurora moving />);
+    const stars = [...view.container.querySelectorAll<HTMLElement>(".sidebar-aurora-stars > .sidebar-star")];
+    expect(stars).toHaveLength(SIDEBAR_STARFIELD.length);
+    stars.forEach((star, index) => {
+      const seed = SIDEBAR_STARFIELD[index]!;
+      expect(star.tagName).toBe("SPAN");
+      expect(star.style.left).toBe(`${seed.x}%`);
+      expect(star.style.top).toBe(`${seed.y}px`);
+      expect(star.getAttribute("data-depth")).toBe(seed.depth);
+      expect(star.getAttribute("data-macos")).toBe(seed.macos ? null : "hidden");
+      expect(star.style.getPropertyValue("--star-t")).toBe(String(seed.period));
+      expect(star.style.getPropertyValue("--star-phase")).toBe(String(seed.phase));
+      expect(star.childElementCount).toBe(0);
+    });
+    expect(view.container.querySelector("svg, filter")).toBeNull();
+  });
+
+  it("lets the stars breathe only while moving in a focused, visible window", async () => {
+    const view = render(<SidebarAurora moving />);
+    const aurora = view.container.querySelector(".sidebar-aurora")!;
+    expect(aurora).toHaveClass("sidebar-aurora", "is-moving", "is-live");
+    expect(aurora).not.toHaveClass("is-still");
+
+    focused = false;
+    await act(async () => window.dispatchEvent(new Event("blur")));
+    expect(aurora).toHaveClass("is-moving");
+    expect(aurora).not.toHaveClass("is-live");
+    focused = true;
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(aurora).toHaveClass("is-live");
+
+    visibility = "hidden";
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    expect(aurora).not.toHaveClass("is-live");
+    visibility = "visible";
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+
+    view.rerender(<SidebarAurora moving={false} />);
+    expect(aurora).toHaveClass("sidebar-aurora", "is-still");
+    expect(aurora).not.toHaveClass("is-moving");
+    expect(aurora).not.toHaveClass("is-live");
+  });
+
+  it("leaves the star breathing to the browser and steps only the drifting layers", async () => {
+    const breathing: FakeLayer[] = [
+      { currentTime: 40, playState: "running", animationName: "sidebar-star-breathe-near" },
+      { currentTime: 80, playState: "running", animationName: "sidebar-star-breathe-far" },
+    ];
+    layers[2]!.animationName = "sidebar-sky-parallax";
+    layers = [...layers, ...breathing];
+    render(<SidebarAurora moving />);
+    await step(2);
+    expect(times()).toEqual([250, 1_250, 750, 40, 80]);
+  });
+
+  it("never starts while colours are forced", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query === "(forced-colors: active)",
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }));
+    const getAnimations = vi.mocked(HTMLElement.prototype.getAnimations);
+    getAnimations.mockClear();
+    const view = render(<SidebarAurora moving />);
+    expect(vi.getTimerCount()).toBe(0);
+    await step(8);
+    expect(getAnimations).not.toHaveBeenCalled();
+    expect(times()).toEqual([0, 1_000, 500]);
+    expect(view.container.querySelector(".sidebar-aurora")).not.toHaveClass("is-live");
+  });
+
+  it("stops retrying when the strip never shows any layers", async () => {
+    layers = [];
+    const getAnimations = vi.mocked(HTMLElement.prototype.getAnimations);
+    render(<SidebarAurora moving />);
+    expect(vi.getTimerCount()).toBe(1);
+    await step(SIDEBAR_AURORA_EMPTY_CAPTURE_LIMIT + 2);
+    expect(vi.getTimerCount()).toBe(0);
+    const calls = getAnimations.mock.calls.length;
+    await step(40);
+    expect(getAnimations.mock.calls.length).toBe(calls);
+    expect(calls).toBeLessThanOrEqual(SIDEBAR_AURORA_EMPTY_CAPTURE_LIMIT + 1);
   });
 
   it("advances every layer on a coarse timer while the window is focused", async () => {

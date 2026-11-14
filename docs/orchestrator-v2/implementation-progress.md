@@ -1467,11 +1467,12 @@ Deliberate differences from T3 Code:
   64,000 bytes that are skipped before selection, are counted in the omitted
   number but never listed. They are therefore not recorded as covered, and a
   later delta can still offer an older item that fits.
-- A move retires the old checkout's backing. Moving the chat back to that
+- ~~A move retires the old checkout's backing. Moving the chat back to that
   checkout starts a fresh session with the full portable history; T3 would
-  resume the native thread there. The first turn after a move still resumes
-  the conversation's session without reading the old backing's status, as it
-  did before. The carried `uncertain` status makes the turn after it fresh.
+  resume the native thread there.~~ Closed by "G11 completion" below: the
+  backing follows its native session with `provider.backing-relocated`, so
+  moving back resumes the session for a harness that resumes across checkouts,
+  and the first turn after a move reads the session's status.
 
 Tests: `tests/server/orchestration-backings.test.ts` gains four cases. The
 first is the inline variant of T3 `ContextHandoffBudget.test.ts:401`: an
@@ -2631,3 +2632,351 @@ Open risks:
   before this package.
 - *Approval time on Cursor, Kimi Code and Pi.* An approval longer than the
   bridge's 300 s can still lose the call. That predates this package.
+
+## G11 completion: occupancy, omitted ids and checkout return — 2026-11-14
+
+Status: uncommitted on top of `26e42678` (PR #686), macOS arm64, Node 22.
+T3 anchors are at `b05c505b`. Codex native history injection (brief C6) is
+the next package and is not part of this entry; nothing here changes the
+handoff `method`, which stays `inline`.
+
+### 1. Native occupancy at bytes / 4 (T3 `b53cd6768`)
+
+When a resumed session reported no usage, `coveredHistoryOccupancy`
+(`src/server/orchestration-v2/portable-history-occupancy.ts:18`) estimated its
+occupancy at one UTF-8 byte per token. It now follows T3's
+`estimateTextTokens` (`packages/provider-core/src/server/handoffBudget.ts:99`,
+used at `apps/server/src/orchestration-v2/ProviderTurnStartService.ts:920`):
+each covered item's text bytes divided by 4 and rounded up per item (`:10`),
+for messages (content plus stream chunks), inherited fork items (all parts of
+one item together), command and error activity (still capped per item),
+plans and file-change lists. Attachment allowances of covered user messages
+stay whole (8,192 per image, 4,096 per other file), as in T3. The new prompt,
+its attachments and the restored history are still budgeted at one byte per
+token (`portableHistoryBudget`, unchanged). The effect is that a session whose
+stored prose is far below its window keeps resuming instead of being replaced
+as `context-exhausted`.
+
+### 2. Omitted item ids and item-scoped retrieval (T3 `9f1e97de6`)
+
+`selectPortableHistory` (`src/server/orchestration-v2/portable-history.ts:134`)
+lists the newest omitted candidates in the coverage line, in T3's words: "N
+intact historical items included; M omitted. Omitted item IDs, newest last:
+a, b, c. K older omitted items are not listed." (T3 `selectHistory`,
+`handoffBudget.ts:219-276`). At most 20 ids are listed (`MAX_LISTED_OMITTED_ITEMS`,
+`:123`). Before selection the widest 20 candidate ids are reserved, popping the
+widest until the list fits in an eighth of the budget, so the final list can
+never outgrow its reservation; ids are measured as JSON bytes. K counts every
+other omitted item, including those outside the bounded window. The retrieval
+hint now names one item instead of paging from the chat's start:
+`Recover an omitted item only when the request needs it, with
+inertia_request_context({conversationId:"…",itemId:"<omitted item ID>"});
+continue long text with cursor=nextCursor until null. Items included below
+need no read.` (T3 `handoffCoverage`, `handoffBudget.ts:286`, and the condensed
+form in `ContextHandoffDelivery.ts:53`).
+
+Coverage accounting is unchanged: listed ids are omitted ids. They are in the
+handoff's `omittedItemIds`, never in `itemIds`, and count as covered once the
+handoff is delivered (G11 part 1). Only candidates of G11's 256-item window can
+be listed, because older items have no id at selection.
+
+`inertia_request_context` accepts `itemId` (`src/server/runtime/agent-context-tool.ts:57`,
+`readItem` at `:306`). The item comes from the handoff's own source,
+`portableHistoryItem` (`src/server/orchestration-v2/portable-history-source.ts:237`):
+the chat's own messages and terminal-turn command, error, plan, file-change
+and interruption items, outside rolled-back turns (G1), on the reading turn's
+endpoint route, plus the chat's inherited fork snapshot (its parts joined).
+Text is read up to 1 MiB, redacted and neutralized like a turn page, and paged
+at 30 KiB with a character-offset cursor (`agentContextItemPage`,
+`src/server/runtime/agent-context-pages.ts:352`). Scope: an `itemId` with
+another chat's `conversationId` fails with `item_not_in_this_chat` before any
+approval card; another chat's id passed with this chat's id reads as
+`item_not_found`; an item from another endpoint fails with `item_withheld`
+and shows none of its text; a watcher may read items only of its own chat,
+and each read counts against its per-check budget. The read is recorded as an
+own-chat context read. The tool description grew by 31 bytes and the schema by
+one property; the agent surface budget was re-measured (`inertia_request_context`
+933 → 1,021 bytes for Claude, Cursor/Kimi and OpenCode, 827 → 915 for Codex;
+every total +88) and the description stays under its 520-byte test bound.
+
+### 3. The backing follows the native session across checkouts (G11 part 1b, brief C5)
+
+T3 keeps one current native conversation per provider thread and resumes it
+in the new cwd on a workspace change (`restart_and_resume`,
+`ProviderSessionTransitionPolicy.ts:73-75`; `ProviderSwitchService.ts:122-178`;
+`ProviderTurnStartService.ts:726-744`, `:1255-1276`), with coverage keyed by
+provider thread and native thread (`:851-861`), and holds the queue while the
+replaced session runs background work (`Orchestrator.ts:2655-2681`).
+
+Inertia's equivalent:
+
+- **Current native conversation.** `ProviderBackingRepository.current`
+  (`src/server/orchestration-v2/backing-repository.ts:50`) is the newest
+  backing of the chat's provider instance that is not retired, in any
+  checkout.
+- **Per-harness capability.** `sessionCwdMobility`
+  (`src/server/provider/session-cwd-mobility.ts`) is a table over every
+  `AgentHarnessId`, so a new harness must choose. `resume` only for
+  `codex-app-server`; every other harness is `fresh`.
+- **Lookup** (`src/server/runtime/turns/turn-request-preparation.ts:397-409`).
+  When the current backing lives in another checkout: a `resume` harness
+  relocates it if it is `ready`, coverage-complete, not the exhausted backing
+  and has no pending native rollback continuation; otherwise the turn starts
+  fresh with the full portable history. A `fresh` harness keeps a live
+  backing of this checkout (moving back to A resumes A's own session with a
+  delta) and otherwise starts fresh instead of resuming another checkout's
+  session. The first turn after a move therefore reads the moved-from status.
+- **Relocation event.** `provider.backing-relocated {runId, attemptId,
+  fromBackingId, backingId, workspaceKey}` (`src/shared/orchestration-backings.ts:53`)
+  commits in the admission, after `run.accepted` and before
+  `context.handoff-prepared` (`src/server/orchestration-v2/turn-repository.ts:138-187`).
+  The projector derives the new row from the source row (same native session,
+  coverage, status, selection, `lastRunId`), retires the source in the same
+  write, and refuses a source that is not `ready` and complete, another
+  instance or project, the run's own checkout, an attempt on another session,
+  or a forged id (`backing-projector.ts:97-121`). The new id is
+  `fingerprint(threadId, instanceId, workspaceKey, nativeSessionId, fromBackingId)`,
+  so A → B → A never collides with A's retired row, which is never recorded
+  again. The move turn's handoff targets the relocated id and offers only
+  items the session has not covered. `observeSession` now looks the session's
+  row up instead of deriving its id (`:130`, `:161`), so a relocated row is
+  updated in place; its workspace carry stays as the fallback for older data.
+- **Busy session.** If the harness reports background work for the session
+  being relocated, preparation refuses with `CheckoutMoveBackgroundWorkError`
+  (`turn-context-handoff.ts:26`), before any write, as the G2 exhaustion path
+  does. No harness implements the background-work probe yet.
+- **Containment and cleanup.** `conversationPath` re-validates the checkout's
+  path receipt (canonical realpath, directory identity, repository) at
+  preparation and again at admission. No transcript is copied or moved. The
+  replaced session's process tree was already confirmed ended by the earlier
+  run's cleanup; admission still refuses while any cleanup is pending.
+- **Event sourcing.** One new event type with its own projection; no existing
+  event is reinterpreted, so `ORCHESTRATION_V2_PROJECTION_VERSION` stays 2 and
+  no migration is needed (next free number stays 124). Older databases with
+  G11 part 1 moves (`workspace-changed` retirement plus a carried row) read
+  unchanged; the carried row is the current conversation and relocates
+  normally.
+
+Per-provider findings (verified in Inertia's code, not by running providers):
+
+| Harness | Finding | Mobility |
+| --- | --- | --- |
+| `codex-app-server` | `thread/resume` sends `cwd: options.cwd` (`src/server/codex/app-server-run.ts:1030-1058`); App Server finds threads by id under `CODEX_HOME`. New portable fixture `tests/server/codex-app-server-moved-checkout.test.ts` | resume |
+| `claude-agent-sdk`, `claude-cli` | Claude Code keeps transcripts under the project folder named after the cwd; `readClaudePersistedNativeHead` reads with `dir: cwd`, and imported sessions resume from their original cwd (`src/server/cli-import/resume-cwd.ts:22-30`). Resume from another cwd is unverified (T3 `543ee27fa` concerns native fork, not CLI resume) | fresh |
+| `pi-rpc` | `findPiSessionFile` refuses a session whose header names another workspace (`src/server/provider/pi-session.ts:79-81`). T3 forks the file into the new cwd (`bebaf3ec0`) | fresh |
+| `cursor-sdk` | `CursorSdkSession.execute` refuses a stored agent whose cwd is another workspace (`src/server/provider/cursor-sdk-session.ts:57-60`). T3 resumes from the recorded store cwd (`a18a458f2`) | fresh |
+| `cursor-acp`, `kimi-acp`, `grok-acp`, `opencode-sdk`, `codex-cli`, `cursor-cli`, `opencode-cli`, `antigravity-cli` | not proven | fresh |
+
+Before this entry every harness resumed the conversation's session in the new
+checkout on the first turn after a move; Pi and the Cursor SDK then refused
+it. They now start fresh with the portable history.
+
+Deliberate differences from T3 Code:
+
+- Only Codex App Server resumes across checkouts. Claude, Pi, Cursor SDK and
+  the rest start fresh with the full portable history until resume from
+  another cwd is proven by code and fixtures; Pi forking and the Cursor SDK
+  store cwd are follow-ups.
+- A `fresh` harness keeps one live session per checkout: moving back resumes
+  the checkout's own session with a delta, where T3 has a single current
+  conversation.
+- A busy session is refused with a typed, user-correctable error instead of
+  holding the queue, as in the G2 exhaustion path.
+- Omitted ids are listed only where the route's host-tool bridge is attested;
+  without retrieval the list is left out. Items outside the 256-candidate
+  window are counted but never listed (T3 also lists earlier handoffs'
+  omitted ids; Inertia prepares one handoff per turn).
+- `itemId` reads only the reading chat's own history, on its endpoint route;
+  T3's `t3_thread_read` takes any thread id.
+- The occupancy estimate counts attachment allowances for every covered user
+  message; T3 counts them only for natively accepted turns.
+- A session that no V2 run, native fork or import records keeps resuming
+  after a move on a `fresh` harness, because its checkout is unknown (review
+  fix 1).
+
+Tests:
+
+- `tests/server/orchestration-context-exhaustion.test.ts`: the T3 case "keeps a
+  native session whose stored prose is far below an unreported window" (about
+  112 KB of prose, about 28k tokens) and the exact per-item estimate; the
+  existing unreported-usage exhaustion case now uses 400,000 bytes. The new
+  case fails against the unchanged estimate.
+- `tests/server/orchestration-portable-history.test.ts`: T3's "points history
+  recovery at the omitted items" case; at most 20 ids, newest last, with the
+  older count; the list within budget/8 and the block within budget; every
+  budget from 1,024 to 12,000 bytes in steps of 7; no list without retrieval;
+  the rollback case now also reads items by id (rolled-back items not found,
+  retained ones found, none readable from another chat).
+- `tests/server/orchestration-forks.test.ts`: an inherited item read by id in
+  the fork only, all parts joined, truncated at the byte bound.
+- `tests/server/agent-context-tool.test.ts`: item read with paging, redaction,
+  neutralization and the own-chat read record; another chat, a smuggled id,
+  an unknown id and another endpoint; argument combinations; watcher scope and
+  budget; the schema lists `itemId`.
+- `tests/server/orchestration-backing-relocation.test.ts` (new, 9 cases):
+  harness mobility table; A → B → A on the original session with only the
+  intervening items, event order in the admission commit, retired rows never
+  recorded again, rebuild and reopened-store equality; an uncertain backing
+  starts fresh; a `fresh` harness starts fresh in B and resumes A's own session
+  on return; background work refuses without writing; a not-delivered refusal
+  keeps the relocation and redelivers the delta; an exhausted session is
+  replaced, not relocated; a chat moved under G11 part 1's carry upgrades
+  without rewriting its rows; forged or mismatched relocation events are
+  refused. All 8 behavioural cases fail against the unchanged sources (run with
+  the new helpers inlined).
+- `tests/server/orchestration-backings.test.ts`: the two G11 part 1 move cases
+  now expect a relocation (no `workspace-changed` invalidation; the backing
+  exists in B before the run starts; the provider gets `cwd` = B) and a fresh
+  start for an uncertain session. Both fail against the unchanged sources.
+- `tests/server/codex-app-server-moved-checkout.test.ts` (portable): a resume
+  in a moved checkout sends `thread/resume` with the original thread id and
+  the new `cwd`, and no `thread/start`.
+
+### Review fixes (two independent reviews, 2026-11-14)
+
+1. **A session without a backing no longer resumes in another checkout on a
+   `fresh` harness** (MEDIUM). When neither the checkout's backing nor the
+   current backing exists, preparation used to resume
+   `conversation.providerSessionId` for every harness. Now a `fresh` harness
+   resumes it only when its recorded checkout matches the chat's
+   (`unbackedSessionRanHere`, `src/server/runtime/turns/turn-request-preparation.ts`;
+   `sameCheckoutPath`, `src/server/cli-import/resume-cwd.ts`): an imported
+   session's cwd, else the workspace of the newest V2 run whose turn ended on
+   the session, else the target checkout of the native fork that created it
+   (`ProviderBackingRepository.sessionWorkspaceKey`). A recorded mismatch
+   starts fresh with the portable history. A native fork's inherited coverage
+   now belongs to its native conversation, not to its checkout
+   (`nativeForkCoverage` no longer compares `targetWorkspaceKey`), so a Codex
+   fork moved before its first send resumes there without re-sending its
+   inherited history; a Claude fork moved the same way starts fresh. Decision:
+   a session that nothing records (a turn from before V2 runs, never resumed
+   since) keeps resuming as before. Inertia has no per-turn cwd for such
+   turns, and treating every one as foreign would drop the native session of
+   every existing non-Codex chat once on upgrade. A chat moved before its
+   first V2 turn can therefore still try its old session in the new checkout,
+   as before this package; the G9 fallback covers a provider that reports the
+   session missing.
+2. **Native rollback and fork follow a relocated session** (LOW).
+   `HistoryRollbackRepository.physicalHead` keys the head by provider instance
+   and native conversation only, and `nativeTarget` no longer requires a
+   boundary's or a native fork's checkout to equal the current one
+   (`src/server/runtime/history-rollback-service.ts`,
+   `src/server/runtime/fork-session-service.ts`). After A → B, a rollback to a
+   turn from A runs natively against B's newest head and rewinds the relocated
+   backing in place; A → B → A sees B's head, not a stale one.
+3. **A checkout change between preparation and admission is a typed,
+   user-correctable conflict** (LOW). Preparation passes the checkout it
+   resolved (`preparedWorkspaceKey`, excluded from the receipt intent);
+   admission refuses with `OrchestrationConflict("checkout-changed")` before
+   any write ("This chat moved to another checkout while the message was being
+   prepared. Send it again.", `src/server/runtime-errors.ts`). The handoff
+   projector also refuses a missing target backing with `scope-conflict`
+   instead of a schema error.
+4. **Inherited commands and errors are redacted** (MEDIUM). Fork parts of kind
+   `command` or `error` go through `scrubCommandSecrets` before the usual
+   scrub and neutralization on every read path: `portableHistoryItem`,
+   `portableForkHistory` (`forkItemText`, `src/server/orchestration-v2/portable-fork-history.ts`)
+   and `inertia_fork_history` (`src/server/runtime/fork-history-tool.ts`, per
+   64K-character part).
+5. **An incomplete inherited item is not returned** (LOW).
+   `portableHistoryItem` applies the handoff's integrity rule: the stored part
+   count must equal the item's `parts`, at most 4,096 (`MAX_FORK_ITEM_PARTS`).
+6. **Item lookup is keyed** (LOW). The id's prefix names the source
+   (`activity:`, `plan:`, `files:`, `interrupt:`, else a message id) and the
+   lookup queries that one source by its own key, with explicit column
+   aliases on every candidate arm; query plans start with
+   `SEARCH <table> USING INDEX`. The withheld re-check is the same keyed
+   lookup without the route.
+7. **Known risk, decided (no code change).** Native occupancy follows T3's
+   bytes / 4. Chats without usage reports whose history is mostly CJK text,
+   emoji or base64 have fewer bytes per token, so the estimate can count too
+   few tokens and keep resuming a fuller session than it is. T3 has the same
+   risk. Providers that report usage are unaffected.
+
+Review-fix tests:
+
+- `tests/server/orchestration-backing-relocation-edges.test.ts` (new, 7 cases):
+  an imported Claude session moved to another checkout starts fresh while an
+  imported Codex session resumes there; a session whose producing run ran in
+  another checkout and whose backing was retired starts fresh; an unrecorded
+  session keeps resuming; a native fork moved before its first send (Codex
+  resumes with inherited coverage, Claude starts fresh); a native rollback of a
+  relocated Codex session to a turn from before the move, against the newest
+  head; a checkout change at admission refuses with `checkout-changed`,
+  writes nothing, and the retry relocates; forged relocation events with a
+  retired source, another chat's source and incomplete coverage are refused.
+  Against the sources before these fixes, the five behavioural cases fail
+  (the unrecorded-session and forged-event cases are guards).
+- `tests/server/orchestration-forks.test.ts`: inherited `DEPLOY_TOKEN=…`,
+  `mysql --password`, `curl -u` and `gh secret set --body` commands are redacted
+  by id, in the restored fork history and through `inertia_fork_history`; an
+  inherited item with a missing part reads as not found. Both fail before.
+- `tests/server/orchestration-history-retrieval.test.ts` (new, 3 cases): the
+  newest id listed in a real Codex restore after ten Claude turns is in the
+  handoff's `omittedItemIds`, absent from the prompt, and reads back through
+  `inertia_request_context` exactly as stored; item lookups use keyed index
+  searches, and unknown prefixes or keys read as not found (fails before);
+  occupancy rounds an inherited item once over all its parts and a capped
+  activity at its cap.
+- `tests/server/orchestration-history-rollback.test.ts`: `physicalHead` calls
+  drop the checkout argument.
+
+### Second review fixes (2026-11-14)
+
+1. **A retired session stays retired after a move** (MEDIUM-LOW). With no
+   candidate backing, preparation used to let a `resume` harness resume the
+   conversation's session, so a Codex session whose backing was retired
+   (`uncertain-delivery` after a restart mid-dispatch, or a retired relocated
+   row) was resumed in another checkout without history. Now any retired
+   backing for the same thread, provider instance and native session
+   (`ProviderBackingRepository.sessionRetired`) makes the turn start fresh, for
+   every harness.
+2. **`checkout-changed` stays user-correctable on the send path** (LOW).
+   `classifiedMessageSendError` maps it to a `RuntimeRequestError` with
+   `USER_CORRECTABLE_REQUEST`, like `cleanup-pending`
+   (`src/server/runtime/commands/message-send-support.ts`), so
+   `commandRejection` records no rejected receipt and no `command.failed`
+   incident is filed.
+3. **Checkout comparison uses `realpathSync.native`** (LOW), so a different
+   letter case on a case-insensitive volume is the same checkout
+   (`sameCheckoutPath`, `src/server/cli-import/resume-cwd.ts`).
+4. **`inertia_fork_history` redacts a multi-part command or error as one
+   text** (LOW). The first part carries the whole item, joined before
+   redaction (`ForkRepository.itemText`, at most 4,096 parts, empty if a part
+   is missing); later parts of that item return empty text. The case is
+   reachable: a command activity longer than 65,536 characters splits.
+
+Second-review tests (each fails against the code before its fix, except the
+two guards marked):
+
+- `orchestration-backing-relocation-edges`: a Codex session whose backing was
+  retired starts fresh in a moved checkout, and a retired relocated row keeps
+  its session retired in a third checkout; the checkout-change case asserts
+  the send-path classification (`commandRejection(...) === null`, user
+  correctable); the native rollback after a move asserts the provider call's
+  `cwd` is the moved checkout; a new A → B → A case checks the head in A
+  before and after a turn there and rolls back natively in A against the
+  newest head (guard); a Claude chat with a fresh session in B rolls back to a
+  turn from A portably without a native call (guard).
+- `tests/server/resume-cwd.test.ts` (new): symlink, missing folder and letter
+  case; the case test fails with plain `realpathSync`.
+- `orchestration-forks`: a command whose part boundary falls inside
+  `--password supersecretvalue` is fully redacted through
+  `inertia_fork_history`; per-part redaction leaks the second half.
+
+Verification (2026-11-14, macOS arm64, Node 22.23.2, after the second review
+fixes): the full Vitest suite passed 20,397 tests with 174 skipped in 1,618
+files (1,604 passed, 14 skipped). `npm run test:portable` passed 4,341 tests with
+31 skipped in 264 files (2 skipped).
+`typecheck`, `lint` and `check:architecture` passed. The full `npm run check`,
+the Electron scenarios and a packaged build were not run.
+
+Not exercised: real Codex, Claude, Pi or Cursor accounts (the per-provider
+findings come from Inertia's code and fixtures), Windows and Linux, and a
+provider that implements the background-work probe. Open: Pi relocation by
+forking the session file and Cursor SDK resume from the store cwd; a Claude
+check of `--resume` from another cwd under the same `CLAUDE_CONFIG_DIR`; a
+native rollback started in a checkout other than the one the session last ran
+in (it still needs the session's backing in that checkout); and the C6
+injection package, which will credit native-delivered ids through the same
+coverage path.

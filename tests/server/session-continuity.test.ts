@@ -634,6 +634,7 @@ describe("restored history on a custom backend", () => {
       expect(result.recovery!.restoredMessageCount + result.recovery!.omittedMessageCount).toBe(42);
       expect(result.prompt).toContain("Omitted history cannot be retrieved in this session");
       expect(result.prompt).not.toContain("inertia_request_context");
+      expect(result.prompt).not.toContain("Omitted item IDs");
       expect(result.prompt).toContain("The export must preserve accented names.");
       expect(result.prompt).toContain(`message-38: ${"x".repeat(4_000)}`);
       expect(result.prompt).toContain(`message-39: ${"x".repeat(4_000)}`);
@@ -658,7 +659,8 @@ describe("restored history on a custom backend", () => {
     expect(hostTools.bytes).toBeGreaterThan(0);
     expect(hostTools.bytes).toBeLessThanOrEqual(DEFAULT_PORTABLE_HISTORY_BUDGET);
     expect(hostTools.recovery!.omittedMessageCount).toBeGreaterThan(0);
-    expect(hostTools.prompt).toContain(`Retrieve omitted turns with inertia_request_context({conversationId:${JSON.stringify(f.conversation.id)}})`);
+    expect(hostTools.prompt).toContain(`Recover an omitted item only when the request needs it, with inertia_request_context({conversationId:${JSON.stringify(f.conversation.id)},itemId:"<omitted item ID>"})`);
+    expect(hostTools.prompt).toMatch(/omitted\. Omitted item IDs, newest last: [^\n]+\./u);
     expect(hostTools.prompt).not.toContain("Omitted history cannot be retrieved in this session");
   });
 });

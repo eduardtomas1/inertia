@@ -44,6 +44,16 @@ export const orchestrationBackingEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("provider.backing-restored"), payload: z.object({
     backing: providerBackingSchema, runId: id,
   }).strict() }).strict(),
+  /**
+   * The chat's native session continues in the run's checkout (T3 `restart_and_resume`
+   * on a workspace change). Projected from the source row: a new backing for
+   * `workspaceKey` with the source's session, coverage and status, and the
+   * source retired, in one write. Committed with the run, before its handoff.
+   */
+  z.object({ type: z.literal("provider.backing-relocated"), payload: z.object({
+    runId: id, attemptId: id, fromBackingId: id, backingId: id,
+    workspaceKey: z.string().min(1).max(4_096),
+  }).strict() }).strict(),
   z.object({ type: z.literal("provider.backing-invalidated"), payload: z.object({
     backingId: id, reason: z.enum(["uncertain-delivery", "native-resume-failed", "workspace-changed", "rolled-back", "context-exhausted"]),
   }).strict() }).strict(),
@@ -62,6 +72,11 @@ export const orchestrationBackingEventSchema = z.discriminatedUnion("type", [
 export type ProviderBacking = z.infer<typeof providerBackingSchema>;
 export type ContextHandoff = z.infer<typeof contextHandoffSchema>;
 export type OrchestrationBackingEvent = z.infer<typeof orchestrationBackingEventSchema>;
+
+/** Privileged preparation output: resume the source backing's native session in the run's checkout. */
+export interface PreparedBackingRelocation {
+  fromBackingId: string;
+}
 
 /** Privileged preparation output; never accepted directly from renderer/provider input. */
 export interface PreparedContextHandoff {

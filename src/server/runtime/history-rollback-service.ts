@@ -140,22 +140,23 @@ function nativeTarget(store: RuntimeStore, threadId: string, turnId: string | nu
   let nativeSessionId: string | null = null;
   if (turnId === null) {
     const fork = store.orchestration.nativeControls.forkBacking(threadId);
+    // Boundaries belong to the native conversation; a backing that followed it to this checkout keeps them.
     if (fork?.state !== "completed" || fork.backing?.nativeConversationId !== backing.nativeSessionId
-      || fork.request.source.identity.providerInstanceId !== instanceId || fork.targetWorkspaceKey !== workspaceKey
+      || fork.request.source.identity.providerInstanceId !== instanceId
       || fork.backing.headId === null) return { reason: "native-start-unavailable" };
     boundary = { kind: "start", inheritedHeadId: fork.backing.headId };
     nativeSessionId = fork.backing.nativeSessionId ?? null;
   } else {
     const run = store.orchestration.nativeBoundaries.forRun(store.agentTurn(turnId).runId);
     if (run?.phase !== "settled" || run.nativeTurnId === null || run.providerInstanceId !== instanceId
-      || run.workspaceKey !== workspaceKey || run.nativeConversationId !== backing.nativeSessionId) {
+      || run.nativeConversationId !== backing.nativeSessionId) {
       return { reason: "native-boundary-unavailable" };
     }
     boundary = { kind: "turn", nativeTurnId: run.nativeTurnId };
     nativeSessionId = run.nativeSessionId;
   }
   const expectedHeadId = store.orchestration.history.physicalHead({ threadId, providerInstanceId: instanceId,
-    workspaceKey, nativeConversationId: backing.nativeSessionId });
+    nativeConversationId: backing.nativeSessionId });
   return expectedHeadId === null ? { reason: "native-head-unavailable" }
     : { boundary, nativeConversationId: backing.nativeSessionId, nativeSessionId, expectedHeadId };
 }

@@ -1,7 +1,9 @@
 import {
-  contextHandoffSchema, providerBackingSchema, type OrchestrationBackingEvent,
+  contextHandoffSchema, providerBackingSchema, type OrchestrationBackingEvent, type ProviderBacking,
 } from "../../shared/orchestration-backings";
-import { orchestrationAttemptSchema, orchestrationRunSchema } from "../../shared/orchestration-v2";
+import {
+  orchestrationAttemptSchema, orchestrationRunSchema, type OrchestrationAttempt, type OrchestrationRun,
+} from "../../shared/orchestration-v2";
 import { nativeControlSchema } from "../../shared/orchestration-native-control";
 import { commandFingerprint } from "./json";
 import { OrchestrationConflict, type OrchestrationEvent, type ProjectionReader, type ProjectionWrite } from "./types";
@@ -33,6 +35,7 @@ export function projectBackingEvent(event: OrchestrationBackingEvent, envelope: 
   const attempt = orchestrationAttemptSchema.parse(read("attempt", event.payload.attemptId)?.value);
   if (run.threadId !== envelope.threadId || run.projectId !== envelope.projectId
     || attempt.id !== run.attemptId || attempt.runId !== run.id) throw new OrchestrationConflict("scope-conflict");
+  if (event.type === "provider.backing-relocated") return relocated(event.payload, envelope, read, run, attempt);
   if (event.type === "provider.session-cleared") {
     if (attempt.nativeSessionId !== event.payload.expectedNativeSessionId) throw new OrchestrationConflict("revision-conflict");
     return [{ kind: "attempt", id: attempt.id, value: { ...attempt, nativeSessionId: null,
@@ -64,7 +67,9 @@ export function projectBackingEvent(event: OrchestrationBackingEvent, envelope: 
       throw new OrchestrationConflict("scope-conflict");
     }
     if (handoff.targetBackingId) {
-      const backing = providerBackingSchema.parse(read("provider-backing", handoff.targetBackingId)?.value);
+      const target = read("provider-backing", handoff.targetBackingId);
+      if (!target) throw new OrchestrationConflict("scope-conflict");
+      const backing = providerBackingSchema.parse(target.value);
       if (backing.threadId !== run.threadId || backing.workspaceKey !== run.workspaceKey
         || backing.providerInstanceId !== run.providerInstanceId || backing.status !== "ready"
         || handoff.nativeSessionId !== backing.nativeSessionId) throw new OrchestrationConflict("scope-conflict");
@@ -88,6 +93,29 @@ export function projectBackingEvent(event: OrchestrationBackingEvent, envelope: 
   }
   return [{ kind: "context-handoff", id: prior.id, value: { ...prior, state, targetBackingId, nativeSessionId,
     updatedAt: envelope.createdAt } }];
+}
+
+/** The backing id of a native session relocated into `workspaceKey`; never the id of an earlier row. */
+export function relocatedBackingId(source: ProviderBacking, workspaceKey: string): string {
+  return commandFingerprint({ threadId: source.threadId, instanceId: source.providerInstanceId, workspaceKey,
+    nativeSessionId: source.nativeSessionId, fromBackingId: source.id });
+}
+
+function relocated(payload: Extract<OrchestrationBackingEvent, { type: "provider.backing-relocated" }>["payload"],
+  envelope: OrchestrationEvent, read: ProjectionReader, run: OrchestrationRun, attempt: OrchestrationAttempt): ProjectionWrite[] {
+  const row = read("provider-backing", payload.fromBackingId);
+  if (!row || row.threadId !== envelope.threadId) throw new OrchestrationConflict("scope-conflict");
+  const source = providerBackingSchema.parse(row.value);
+  if (source.providerInstanceId !== run.providerInstanceId || source.projectId !== run.projectId
+    || payload.workspaceKey !== run.workspaceKey || source.workspaceKey === payload.workspaceKey
+    || attempt.nativeSessionId !== source.nativeSessionId
+    || payload.backingId !== relocatedBackingId(source, payload.workspaceKey)) throw new OrchestrationConflict("scope-conflict");
+  if (source.status !== "ready" || !source.coverageComplete || read("provider-backing", payload.backingId)) {
+    throw new OrchestrationConflict("revision-conflict");
+  }
+  return [{ kind: "provider-backing", id: source.id, value: { ...source, status: "retired", updatedAt: envelope.createdAt } },
+    { kind: "provider-backing", id: payload.backingId, value: providerBackingSchema.parse({ ...source, id: payload.backingId,
+      workspaceKey: payload.workspaceKey, createdAt: envelope.createdAt, updatedAt: envelope.createdAt }) }];
 }
 
 function rewound(payload: Extract<OrchestrationBackingEvent, { type: "provider.backing-rewound" }>["payload"],

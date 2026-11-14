@@ -17,7 +17,7 @@ import {
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
 import { officialPresetEndpoint } from "../backends/backend-profile-presets";
-import { importedFollowUpNote, importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
+import { importedFollowUpNote, importedResumeCwd, importedSession, sameCheckoutPath } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import { codexAutoCompactTokenLimit } from "../../../shared/compact-on-return";
 import type { BeginAgentTurnInput } from "../../persistence/types";
@@ -27,6 +27,8 @@ import {
   type ProviderActivityEvent,
 } from "../../provider/contracts";
 import { PortableHistoryBudgetError } from "../../orchestration-v2/portable-history";
+import { relocatedBackingId as relocatedProviderBackingId } from "../../orchestration-v2/backing-projector";
+import { sessionCwdMobility } from "../../provider/session-cwd-mobility";
 import { AuthoritativeRunStateEngine } from "../run-state-engine";
 import {
   assembleTurnRequest,
@@ -36,6 +38,7 @@ import {
   type HiddenProviderInstruction,
 } from "./request-context";
 import {
+  CheckoutMoveBackgroundWorkError,
   ContextHandoffBackgroundWorkError,
   appendedContextHandoff,
   exhaustedBackingSession,
@@ -385,11 +388,33 @@ export function resolveTurnRequest(
   const latestTurnOwnsProviderSession = latestTurn !== null
     && conversation.providerSessionId !== null
     && latestTurn.providerSessionAfter === conversation.providerSessionId;
-  const candidateBacking = dependencies.store.orchestration.backings.find({ threadId: conversation.id,
-    providerId: route.providerId, workspaceKey: dependencies.store.conversationPath(conversation.id),
-    identity: route.continuationIdentity });
-  const reusableBacking = candidateBacking?.status === "ready" && candidateBacking.coverageComplete
-    && candidateBacking.id !== exhaustedBacking?.id ? candidateBacking : null;
+  const checkout = dependencies.store.conversationPath(conversation.id);
+  const backingLookup = { threadId: conversation.id, providerId: route.providerId, identity: route.continuationIdentity };
+  const localBacking = dependencies.store.orchestration.backings.find({ ...backingLookup, workspaceKey: checkout });
+  // The chat's current native conversation for this provider instance may live in a checkout it used
+  // before. A harness that resumes across checkouts continues it here (T3 restart_and_resume); any other
+  // harness keeps a live session of this checkout, or starts fresh with the portable history.
+  const mobility = sessionCwdMobility(route.harnessId);
+  const currentBacking = dependencies.store.orchestration.backings.current(backingLookup);
+  const movedBacking = currentBacking && currentBacking.workspaceKey !== checkout
+    && (mobility === "resume" || !localBacking || localBacking.status === "retired") ? currentBacking : null;
+  const candidateBacking = movedBacking ?? localBacking;
+  const usable = (backing: ProviderBacking | null) => backing?.status === "ready" && backing.coverageComplete
+    && backing.id !== exhaustedBacking?.id ? backing : null;
+  const relocation = movedBacking && mobility === "resume" && usable(movedBacking)
+    && !dependencies.store.orchestration.history.continuationFor({ threadId: conversation.id,
+      providerInstanceId: movedBacking.providerInstanceId, workspaceKey: movedBacking.workspaceKey,
+      nativeSessionId: movedBacking.nativeSessionId }) ? movedBacking : null;
+  const reusableBacking = movedBacking ? relocation : usable(localBacking);
+  const relocatedBackingId = relocation ? relocatedProviderBackingId(relocation, checkout) : null;
+  // A session without a backing (imported, recorded before backings, or a native fork before its first turn)
+  // is never resumed by a harness that cannot move when it is known to belong to another checkout. A session
+  // nothing records keeps resuming, as before backings existed.
+  const unbackedSessionRanHere = (sessionId: string): boolean => {
+    const known = importedSession(dependencies.store, conversation.id, sessionId)?.cwd
+      ?? dependencies.store.orchestration.backings.sessionWorkspaceKey(conversation.id, sessionId);
+    return known === null || sameCheckoutPath(known, checkout);
+  };
   const resumeSessionId = reusableBacking?.nativeSessionId ?? conversation.providerSessionId;
   const previousContinuationIdentity = reusableBacking?.continuationIdentity ?? (candidateBacking ? null : latestTurn
     ? latestTurnOwnsProviderSession
@@ -409,7 +434,11 @@ export function resolveTurnRequest(
     nextIdentity: route.continuationIdentity,
     previousModelId: previousContinuationModelId,
     nextModelId: routeSelection.modelId,
-    hasProviderSession: resumeSessionId !== null && (!candidateBacking || reusableBacking !== null),
+    hasProviderSession: resumeSessionId !== null && (candidateBacking
+      ? reusableBacking !== null
+      // A session whose backing was retired (uncertain delivery, a retired relocation) stays retired anywhere.
+      : !dependencies.store.orchestration.backings.sessionRetired({ ...backingLookup, nativeSessionId: resumeSessionId })
+        && (mobility === "resume" || unbackedSessionRanHere(resumeSessionId))),
     hasTurns: latestTurn !== null,
     allowsModelSwitchWithinSession:
       officiallyAllowsModelSwitchWithinSession(route.compatibility),
@@ -569,7 +598,8 @@ export function resolveTurnRequest(
       return offer(null, null);
     }
     return offer({ ...history, itemIds: history.selection.items.map(({ id }) => id),
-      omittedItemIds: history.selection.omittedItemIds }, target?.id ?? null);
+      omittedItemIds: history.selection.omittedItemIds },
+    target ? target.id === relocation?.id ? relocatedBackingId : target.id : null);
   };
   const assembleOnFreshSession = (excludedMessageId?: string) => {
     offeredHistory = null;
@@ -610,6 +640,11 @@ export function resolveTurnRequest(
     const contextHandoff = appendedContextHandoff(assembled, offeredHistory);
     return { ...assembled, ...(contextHandoff ? { contextHandoff } : {}) };
   };
+  // Never resume a native session that another live process may still be writing.
+  if (canResume && relocation
+    && providerBackgroundWork(dependencies.providers, exhaustedBackingSession(relocation)) === "pending") {
+    throw new CheckoutMoveBackgroundWorkError();
+  }
   let assembled: ReturnType<typeof assembleOnFreshSession>;
   try {
     assembled = startsFreshInEstablishedChat ? assembleOnFreshSession() : assembleOnResumedSession();
@@ -736,6 +771,8 @@ export function resolveTurnRequest(
     continuationReasonCode: continuation.reasonCode,
     sessionRecovery: assembled.sessionRecovery,
     ...(contextHandoff ? { contextHandoff } : {}),
+    ...(canResume && relocation ? { backingRelocation: { fromBackingId: relocation.id } } : {}),
+    preparedWorkspaceKey: checkout,
     ...(nativeContinuation ? { nativeContinuation } : {}),
     harnessId,
     backendProfileId: modelSelection.backendProfileId,

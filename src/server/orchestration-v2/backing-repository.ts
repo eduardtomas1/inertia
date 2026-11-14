@@ -10,9 +10,11 @@ import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { versionedContinuationIdentitySchema } from "../../shared/model-routing";
 import { nativeControlSchema } from "../../shared/orchestration-native-control";
 import { staleAttemptObservation, type AttemptObserver, type StaleAttemptObservation } from "./attempt-fence";
+import { relocatedBackingId } from "./backing-projector";
 import type { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint, durableJson } from "./json";
 import { providerInstanceId } from "./provider-instance";
+import { OrchestrationConflict } from "./types";
 
 const UNCLEAN_RECOVERY_REASONS = new Set(["runtime-restart", "runtime-crash"]);
 
@@ -40,6 +42,65 @@ export class ProviderBackingRepository {
     return null;
   }
 
+  /**
+   * The chat's current native conversation for a provider instance: the newest
+   * backing that is not retired, in any checkout. T3 keeps one current native
+   * conversation per provider thread and resumes it wherever the thread runs.
+   */
+  current(input: { threadId: string; providerId: string; identity: ContinuationIdentity }): ProviderBacking | null {
+    const row = this.database.prepare(`SELECT payload_json FROM orchestration_v2_entities
+      WHERE kind = 'provider-backing' AND thread_id = ?
+        AND json_extract(payload_json, '$.providerInstanceId') = ?
+        AND json_extract(payload_json, '$.status') <> 'retired'
+      ORDER BY revision DESC, id LIMIT 1`)
+      .get(input.threadId, providerInstanceId(input.providerId, input.identity)) as { payload_json: string } | undefined;
+    return row ? providerBackingSchema.parse(JSON.parse(row.payload_json)) : null;
+  }
+
+  /** Whether this native session's backing was retired in any checkout: it must not be resumed again. */
+  sessionRetired(input: { threadId: string; providerId: string; identity: ContinuationIdentity; nativeSessionId: string }): boolean {
+    return this.database.prepare(`SELECT 1 FROM orchestration_v2_entities
+      WHERE kind = 'provider-backing' AND thread_id = ?
+        AND json_extract(payload_json, '$.providerInstanceId') = ?
+        AND json_extract(payload_json, '$.nativeSessionId') = ?
+        AND json_extract(payload_json, '$.status') = 'retired' LIMIT 1`)
+      .get(input.threadId, providerInstanceId(input.providerId, input.identity), input.nativeSessionId) !== undefined;
+  }
+
+  /**
+   * The checkout a native session without a backing last ran in, as far as
+   * V2 recorded it: the newest run whose turn ended on the session, else the
+   * native fork that created it. Null when nothing records it, as for a
+   * session last used by a turn from before V2 runs.
+   */
+  sessionWorkspaceKey(threadId: string, nativeSessionId: string): string | null {
+    const run = this.database.prepare(`SELECT json_extract(run.payload_json, '$.workspaceKey') AS workspace_key
+      FROM agent_turns AS turn JOIN orchestration_v2_entities AS run ON run.kind = 'run' AND run.id = turn.run_id
+      WHERE turn.conversation_id = ? AND turn.provider_session_after = ?
+      ORDER BY turn.requested_at DESC, turn.rowid DESC LIMIT 1`).get(threadId, nativeSessionId) as
+      { workspace_key: string | null } | undefined;
+    if (run?.workspace_key) return run.workspace_key;
+    const row = this.events.projection("fork-native-backing", threadId);
+    const fork = row ? nativeControlSchema.parse(row.value) : null;
+    return fork?.state === "completed" && fork.backing?.nativeConversationId === nativeSessionId
+      ? fork.targetWorkspaceKey : null;
+  }
+
+  /**
+   * The relocation event for a run admitted to resume `source`'s native session
+   * in another checkout, checked against the run's own identity. It commits in
+   * the admission, before the run's handoff.
+   */
+  relocation(run: { id: string; attemptId: string; threadId: string; providerInstanceId: string; workspaceKey: string },
+    fromBackingId: string, nativeSessionId: string | null): OrchestrationBackingEvent {
+    const source = this.get(fromBackingId);
+    if (!source || source.threadId !== run.threadId || source.providerInstanceId !== run.providerInstanceId
+      || source.workspaceKey === run.workspaceKey || source.nativeSessionId !== nativeSessionId
+      || source.status !== "ready" || !source.coverageComplete) throw new OrchestrationConflict("revision-conflict");
+    return { type: "provider.backing-relocated", payload: { runId: run.id, attemptId: run.attemptId, fromBackingId,
+      backingId: relocatedBackingId(source, run.workspaceKey), workspaceKey: run.workspaceKey } };
+  }
+
   handoff(runId: string): ContextHandoff | null {
     const run = this.run(runId);
     if (!run) return null;
@@ -63,9 +124,10 @@ export class ProviderBackingRepository {
     return rows.find(({ delivery }) => delivery !== "not-delivered")?.id ?? rows[0]?.id ?? null;
   }
 
+  /** `relocatedFrom`: the run relocates this backing first, so its target is not projected yet. */
   preparation(runId: string, attemptId: string, threadId: string, requestedAt: string,
-    prepared: PreparedContextHandoff): OrchestrationBackingEvent {
-    const target = prepared.targetBackingId ? this.get(prepared.targetBackingId) : null;
+    prepared: PreparedContextHandoff, relocatedFrom?: ProviderBacking): OrchestrationBackingEvent {
+    const target = prepared.targetBackingId ? this.get(prepared.targetBackingId) ?? relocatedFrom ?? null : null;
     const selection = { runId, attemptId, targetBackingId: prepared.targetBackingId, itemIds: [...prepared.itemIds] };
     const omitted = prepared.omittedItemIds?.length ? { omittedItemIds: [...prepared.omittedItemIds] } : null;
     return { type: "context.handoff-prepared", payload: {
@@ -99,13 +161,14 @@ export class ProviderBackingRepository {
     if (!run) return null;
     const stale = staleAttemptObservation(this.events, run, observer);
     if (stale) return stale;
-    const id = commandFingerprint({ threadId: run.threadId, instanceId: run.providerInstanceId,
-      workspaceKey: run.workspaceKey, nativeSessionId });
-    const previous = this.get(id);
+    // A relocated backing has its own id, so look the session's row up rather than derive its id.
+    const previous = this.latest(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
     if (previous?.status === "retired") return null;
+    const id = previous?.id ?? commandFingerprint({ threadId: run.threadId, instanceId: run.providerInstanceId,
+      workspaceKey: run.workspaceKey, nativeSessionId });
     const timestamp = new Date().toISOString();
     const handoff = this.handoff(run.id);
-    const inherited = previous ? null : this.nativeForkCoverage(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
+    const inherited = previous ? null : this.nativeForkCoverage(run.threadId, run.providerInstanceId, nativeSessionId);
     const moved = previous || inherited ? [] : this.movedBackings(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
     const [carried] = moved;
     const status = previous?.lastRunId === run.id ? previous.status
@@ -123,6 +186,17 @@ export class ProviderBackingRepository {
     return null;
   }
 
+  private latest(threadId: string, instanceId: string, workspaceKey: string, nativeSessionId: string): ProviderBacking | null {
+    const row = this.database.prepare(`SELECT payload_json FROM orchestration_v2_entities
+      WHERE kind = 'provider-backing' AND thread_id = ?
+        AND json_extract(payload_json, '$.providerInstanceId') = ?
+        AND json_extract(payload_json, '$.workspaceKey') = ?
+        AND json_extract(payload_json, '$.nativeSessionId') = ?
+      ORDER BY revision DESC, json_extract(payload_json, '$.status') = 'retired', id LIMIT 1`)
+      .get(threadId, instanceId, workspaceKey, nativeSessionId) as { payload_json: string } | undefined;
+    return row ? providerBackingSchema.parse(JSON.parse(row.payload_json)) : null;
+  }
+
   private movedBackings(threadId: string, instanceId: string, workspaceKey: string, nativeSessionId: string): ProviderBacking[] {
     const rows = this.database.prepare(`SELECT payload_json FROM orchestration_v2_entities
       WHERE kind = 'provider-backing' AND thread_id = ?
@@ -134,12 +208,14 @@ export class ProviderBackingRepository {
     return rows.map((row) => providerBackingSchema.parse(JSON.parse(row.payload_json)));
   }
 
-  private nativeForkCoverage(threadId: string, instanceId: string, workspaceKey: string, nativeSessionId: string) {
+  private nativeForkCoverage(threadId: string, instanceId: string, nativeSessionId: string) {
     const row = this.events.projection("fork-native-backing", threadId);
     if (!row) return null;
     const fork = nativeControlSchema.parse(row.value);
+    // Inherited coverage belongs to the native conversation, not to a checkout (T3 keys coverage by native thread):
+    // a fork moved before its first send keeps it when its harness resumes there.
     if (fork.state !== "completed" || fork.request.source.identity.providerInstanceId !== instanceId
-      || fork.targetWorkspaceKey !== workspaceKey || fork.backing?.nativeConversationId !== nativeSessionId) return null;
+      || fork.backing?.nativeConversationId !== nativeSessionId) return null;
     const items = this.database.prepare(`SELECT id FROM orchestration_v2_entities WHERE kind = 'fork-history'
       AND thread_id = ? AND json_extract(payload_json, '$.part') = 0 ORDER BY revision LIMIT ?`)
       .all(threadId, MAX_BACKING_COVERAGE_ITEMS + 1) as { id: string }[];

@@ -102,7 +102,7 @@ describe("deferred native history rollback", () => {
       expect([first, second, third].map(({ id }) => runtime.store.orchestration.history.rolledBack(id))).toEqual([false, true, true]);
       const instance = request.source.identity.providerInstanceId;
       expect(runtime.store.orchestration.history.physicalHead({ threadId: runtime.conversationId, providerInstanceId: instance,
-        workspaceKey: runtime.workspace, nativeConversationId: "source-native" })).toBe("first");
+        nativeConversationId: "source-native" })).toBe("first");
       const parent = runtime.store.conversation(runtime.conversationId);
       const forkInput = { projectId: parent.projectId, sourceConversationId: parent.id, sourceTurnId: third.id };
       expect(() => runtime.store.orchestration.forks.create(forkInput, { actorId: "human", commandId: "fork-old", command: { ...forkInput } }))
@@ -132,7 +132,7 @@ describe("deferred native history rollback", () => {
       const state = runtime.store.orchestration.history.cursor(runtime.conversationId)!;
       expect(state).toMatchObject({ physicalHeadId: "third", effectiveHeadId: "first", continuation: cursor, continuationState: "pending" });
       expect(runtime.store.orchestration.history.physicalHead({ threadId: runtime.conversationId, providerInstanceId: state.providerInstanceId!,
-        workspaceKey: runtime.workspace, nativeConversationId: "source-native" })).toBe("third");
+        nativeConversationId: "source-native" })).toBe("third");
       await expect(rollback(runtime, deps, second.id)).rejects.toThrow("already rolled back");
       await expect(rollback(runtime, deps, first.id)).resolves.toMatchObject({ transfer: "unchanged", rolledBackTurns: 0 });
       expect(deps.providers.nativeConversation).toHaveBeenCalledOnce();

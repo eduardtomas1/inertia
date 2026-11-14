@@ -211,11 +211,73 @@ describe("T3-compatible portable item kinds and budget", () => {
   it("names the retrieval tool only when the route's host tool bridge is attested", () => {
     const items = [item("1", "user", "Question")];
     const attested = selectPortableHistory({ threadId: "thread-1", items, budget: 16_000, hostToolBridgeAttested: true });
-    expect(attested.context).toContain('Retrieve omitted turns with inertia_request_context({conversationId:"thread-1"})');
+    expect(attested.context).toContain('Recover an omitted item only when the request needs it, with '
+      + 'inertia_request_context({conversationId:"thread-1",itemId:"<omitted item ID>"}); continue long text with '
+      + "cursor=nextCursor until null. Items included below need no read.");
     const unattested = selectPortableHistory({ threadId: "thread-1", items, budget: 16_000, hostToolBridgeAttested: false });
     expect(unattested.context).not.toContain("inertia_request_context");
     expect(unattested.context).toContain("Omitted history cannot be retrieved in this session");
     expect(unattested.cost).toBe(portableHistoryCost(unattested.items, unattested.context));
+  });
+});
+
+describe("omitted item ids in the coverage text (T3 9f1e97de6)", () => {
+  const listedIds = (context: string) => /Omitted item IDs, newest last: ([^\n]*?)\.(?: \d+ older|\n)/u
+    .exec(context)?.[1]?.split(", ") ?? [];
+
+  it("points history recovery at the omitted items instead of a read from the chat's start", () => {
+    const omitted = message("item:omitted", "assistant", "o".repeat(4_000));
+    const selected = selectPortableHistory({ threadId: "thread-1", budget: 3_000, items: [t3Messages[0]!, omitted,
+      ...Array.from({ length: 3 }, (_, index) => message(`item:recent-${index}`, "assistant", "recent"))] });
+    expect(selected.omittedItemIds).toEqual([omitted.id]);
+    expect(selected.items.map(({ id }) => id)).not.toContain(omitted.id);
+    expect(selected.context).toContain("1 omitted. Omitted item IDs, newest last: item:omitted.\n");
+    expect(selected.context).not.toContain("older omitted items are not listed");
+    expect(selected.cost).toBeLessThanOrEqual(3_000);
+  });
+
+  it("lists at most the 20 newest omitted candidates, newest last, and counts the rest", () => {
+    const candidates = Array.from({ length: 60 }, (_, index) => message(`item:${index}`, index % 2 ? "assistant" : "user",
+      `entry ${index} ${"y".repeat(600)}`));
+    const selected = selectPortableHistory({ threadId: "thread-1", items: candidates, previouslyOmitted: 7, budget: 6_000 });
+    const listed = listedIds(selected.context);
+    expect(selected.omittedItemIds.length).toBeGreaterThan(20);
+    expect(listed).toEqual(selected.omittedItemIds.slice(-20));
+    expect(selected.context).toContain(`${selected.omittedCount - 20} older omitted items are not listed.`);
+    expect(selected.omittedCount).toBe(7 + selected.omittedItemIds.length);
+    for (const id of listed) expect(selected.items.some((entry) => entry.id === id)).toBe(false);
+  });
+
+  it("keeps the list within an eighth of the budget and the whole block within the budget", () => {
+    const long = (index: number) => `item:${String(index).padStart(3, "0")}:${"k".repeat(180)}`;
+    const candidates = Array.from({ length: 40 }, (_, index) => message(long(index), "assistant", "z".repeat(900)));
+    for (const budget of [2_000, 3_000, 4_000, 8_000, 16_000, 64_000]) {
+      const selected = selectPortableHistory({ threadId: "thread-1", items: candidates, previouslyOmitted: 3, budget });
+      const listed = listedIds(selected.context);
+      expect(listed.length).toBeLessThanOrEqual(20);
+      expect(listed).toEqual(listed.length ? selected.omittedItemIds.slice(-listed.length) : []);
+      const list = /( Omitted item IDs, newest last: [^\n]*)\n/u.exec(selected.context)?.[1] ?? "";
+      expect(Buffer.byteLength(JSON.stringify(list))).toBeLessThanOrEqual(list ? budget / 8 : 2);
+      expect(selected.cost).toBeLessThanOrEqual(budget);
+    }
+    expect(listedIds(selectPortableHistory({ threadId: "thread-1", items: candidates, budget: 4_000 }).context).length)
+      .toBeLessThan(20);
+  });
+
+  it("fits the final envelope at every budget while the list grows and shrinks", () => {
+    const candidates = Array.from({ length: 30 }, (_, index) => message(`boundary:${index}`, "assistant", "w".repeat(300)));
+    for (let budget = 1_024; budget <= 12_000; budget += 7) {
+      const selected = selectPortableHistory({ threadId: "thread-1", items: candidates, previouslyOmitted: 95, budget });
+      expect(portableHistoryCost(selected.items, selected.context) <= budget).toBe(true);
+    }
+  });
+
+  it("names no ids where omitted history cannot be retrieved", () => {
+    const candidates = Array.from({ length: 10 }, (_, index) => message(`item:${index}`, "assistant", "v".repeat(800)));
+    const selected = selectPortableHistory({ threadId: "thread-1", items: candidates, budget: 3_000,
+      hostToolBridgeAttested: false });
+    expect(selected.omittedItemIds.length).toBeGreaterThan(0);
+    expect(selected.context).not.toContain("Omitted item IDs");
   });
 });
 
@@ -292,6 +354,12 @@ describe("portable activity items from durable turns", () => {
         kind: "error", title: "ROLLED-BACK-ERROR", detail: null, status: "failed" });
       plan(runtime, removed, "ROLLED-BACK-PLAN");
       changedFile(runtime, removed.id, "src/rolled-back.ts");
+      const before = history(runtime)!.selection.items;
+      const idsOf = (turnId: string) => before.filter((entry) => entry.turnId === turnId).map(({ id }) => id);
+      const readItem = (itemId: string, threadId = runtime.conversationId) =>
+        runtime.store.orchestration.portableHistoryItem({ threadId, itemId, maxTextBytes: 1_048_576 });
+      expect(idsOf(removed.id).length).toBeGreaterThanOrEqual(5);
+      for (const id of [...idsOf(retained.id), ...idsOf(removed.id)]) expect(readItem(id).found).toBe(true);
       const nativeConversation = vi.fn(async (request: NativeConversationRequest) => ({ operationId: request.operationId,
         identity: request.source.identity, status: "unsupported" as const, reason: "native-history-control-unavailable" as const }));
       const deps = { store: runtime.store, turns: runtime.controller,
@@ -309,6 +377,15 @@ describe("portable activity items from durable turns", () => {
       for (const hidden of ["rolled-back-check", "ROLLED-BACK-OUTPUT", "ROLLED-BACK-ERROR", "ROLLED-BACK-PLAN", "src/rolled-back.ts"]) {
         expect(rendered).not.toContain(hidden);
       }
+      // An item read by id follows the same rule as the handoff: a rolled-back turn's items are gone.
+      for (const id of idsOf(removed.id)) expect(readItem(id)).toEqual({ found: false, reason: "not-found" });
+      const retainedCommand = readItem(idsOf(retained.id).find((id) => id.startsWith("activity:"))!);
+      expect(retainedCommand).toMatchObject({ found: true, item: { kind: "command", turnId: retained.id } });
+      expect(retainedCommand.found && retainedCommand.text).toContain("npm run retained-check");
+      // Ids are scoped to the chat that owns them.
+      const otherChat = runtime.store.createConversation(runtime.store.conversation(runtime.conversationId).projectId,
+        "Other chat", { activate: false });
+      for (const id of idsOf(retained.id)) expect(readItem(id, otherChat.id)).toEqual({ found: false, reason: "not-found" });
       const fresh = runtime.controller.queue({ conversationId: runtime.conversationId, content: "fresh request" });
       runtime.controller.start(fresh.turn.id);
       expect(runtime.provider.input?.sessionId).toBeUndefined();

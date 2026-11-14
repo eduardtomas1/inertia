@@ -63,16 +63,22 @@ export class HistoryRollbackRepository {
     return rows.length ? { retainedTurnId, rolledBackTurnIds: rows.map(({ id }) => id) } : null;
   }
 
-  physicalHead(input: { threadId: string; providerInstanceId: string; workspaceKey: string; nativeConversationId: string }): string | null {
+  /**
+   * The newest persisted head of a native conversation. A conversation can run
+   * in several checkouts when its backing follows it (G11 part 1b), so the head
+   * belongs to the provider instance and the native conversation, not to a
+   * checkout (T3 keys native state by provider thread and native thread).
+   */
+  physicalHead(input: { threadId: string; providerInstanceId: string; nativeConversationId: string }): string | null {
     const boundary = this.database.prepare(`SELECT revision, payload_json FROM orchestration_v2_entities
       WHERE kind = 'native-boundary' AND thread_id = ? AND json_extract(payload_json, '$.providerInstanceId') = ?
-        AND json_extract(payload_json, '$.workspaceKey') = ? AND json_extract(payload_json, '$.nativeConversationId') = ?
-      ORDER BY revision DESC LIMIT 1`).get(input.threadId, input.providerInstanceId, input.workspaceKey,
+        AND json_extract(payload_json, '$.nativeConversationId') = ?
+      ORDER BY revision DESC LIMIT 1`).get(input.threadId, input.providerInstanceId,
       input.nativeConversationId) as { revision: number; payload_json: string } | undefined;
     const cursorRow = this.events.projection("history-cursor", input.threadId);
     const cursor = cursorRow ? historyCursorSchema.parse(cursorRow.value) : null;
     if (cursor?.transfer === "native" && cursor.providerInstanceId === input.providerInstanceId
-      && cursor.workspaceKey === input.workspaceKey && cursor.nativeConversationId === input.nativeConversationId
+      && cursor.nativeConversationId === input.nativeConversationId
       && cursorRow!.revision > (boundary?.revision ?? 0)) return cursor.physicalHeadId;
     if (!boundary) return null;
     const settled = orchestrationNativeBoundarySchema.parse(JSON.parse(boundary.payload_json));

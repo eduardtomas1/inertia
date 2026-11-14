@@ -6,6 +6,7 @@ import {
   MESSAGE_ADMISSION_UNAVAILABLE,
   publicRuntimeError,
   RuntimeRequestError,
+  USER_CORRECTABLE_REQUEST,
 } from "../../runtime-errors";
 import type { TurnInteractionCommandDependencies } from "./turn-interaction-types";
 
@@ -50,6 +51,9 @@ export function classifiedMessageSendError(
 ): RuntimeRequestError {
   if (error instanceof OrchestrationConflict && error.code === "cleanup-pending") {
     return new RuntimeRequestError(publicRuntimeError(error), MESSAGE_ADMISSION_UNAVAILABLE);
+  }
+  if (error instanceof OrchestrationConflict && error.code === "checkout-changed") {
+    return new RuntimeRequestError(publicRuntimeError(error), USER_CORRECTABLE_REQUEST);
   }
   if (error instanceof RuntimeRequestError && error.delivery === "ambiguous") return error;
   const code = `message-send/${stage}/unexpected`;

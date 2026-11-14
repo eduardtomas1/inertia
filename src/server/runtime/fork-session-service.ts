@@ -72,8 +72,7 @@ async function prepareOrderedForkSession(dependencies: ForkSessionDependencies, 
       portable("native-route-changed"); return;
     }
     const expectedHeadId = store.orchestration.history.physicalHead({ threadId: source.id,
-      providerInstanceId: boundary.providerInstanceId, workspaceKey: fork.sourceWorkspaceKey,
-      nativeConversationId: boundary.nativeConversationId });
+      providerInstanceId: boundary.providerInstanceId, nativeConversationId: boundary.nativeConversationId });
     if (expectedHeadId === null) { portable("native-head-unavailable"); return; }
     const workspaceKey = store.conversationPath(conversationId);
     const operationId = randomUUID();

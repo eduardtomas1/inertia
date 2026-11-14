@@ -17,7 +17,8 @@ import {
   portableCommandText, portableErrorText, portableFileChangeText, portableInterruptText, portablePlanText,
   providerHandoffReason,
 } from "../persistence/turn-context-facts";
-import { boundedHistoryCandidates, portableForkHistory } from "./portable-fork-history";
+import { forkHistoryPartSchema } from "../../shared/orchestration-forks";
+import { MAX_FORK_ITEM_PARTS, boundedHistoryCandidates, forkItemText, portableForkHistory } from "./portable-fork-history";
 import { coveredHistoryOccupancy } from "./portable-history-occupancy";
 import {
   MAX_PORTABLE_HISTORY_BUDGET, MAX_PORTABLE_HISTORY_CANDIDATES,
@@ -71,35 +72,39 @@ function candidateIndex(input: {
   const plan = attached("agent_plans.turn_id");
   const files = attached("artifact.turn_id");
   const interrupt = attached("agent_turns.id");
-  const sources = [
-    { sql: `SELECT 'message' AS source, messages.id AS key, messages.id AS id, messages.turn_id AS turn_id,
+  const sources: { source: SourceKind; keyColumn: string; sql: string; parameters: (string | null)[] }[] = [
+    { source: "message", keyColumn: "messages.id", sql: `SELECT 'message' AS source, messages.id AS key, messages.id AS id, messages.turn_id AS turn_id,
         messages.created_at AS at, 0 AS source_order, messages.rowid AS position, messages.role AS kind
         FROM messages WHERE ${messageWhere} AND messages.id NOT IN ${COVERED}`,
     parameters: [...messageParameters, excluded] },
-    { sql: `SELECT 'activity', activities.id, 'activity:' || activities.id, activities.turn_id, activities.created_at,
-        1, activities.rowid, activities.kind FROM activities
+    { source: "activity", keyColumn: "activities.id", sql: `SELECT 'activity' AS source, activities.id AS key, 'activity:' || activities.id AS id,
+        activities.turn_id AS turn_id, activities.created_at AS at, 1 AS source_order, activities.rowid AS position,
+        activities.kind AS kind FROM activities
         WHERE activities.conversation_id = ? AND activities.kind IN ('command','error') AND activities.status <> 'running'
           AND ${activity.sql} AND ('activity:' || activities.id) NOT IN ${COVERED}`,
     parameters: [input.threadId, ...activity.parameters, excluded] },
-    { sql: `SELECT 'plan', agent_plans.run_id, 'plan:' || agent_plans.run_id, agent_plans.turn_id, agent_plans.updated_at,
-        2, agent_plans.rowid, 'plan' FROM agent_plans
+    { source: "plan", keyColumn: "agent_plans.run_id", sql: `SELECT 'plan' AS source, agent_plans.run_id AS key, 'plan:' || agent_plans.run_id AS id,
+        agent_plans.turn_id AS turn_id, agent_plans.updated_at AS at, 2 AS source_order, agent_plans.rowid AS position,
+        'plan' AS kind FROM agent_plans
         WHERE agent_plans.conversation_id = ? AND ${plan.sql} AND ('plan:' || agent_plans.run_id) NOT IN ${COVERED}`,
     parameters: [input.threadId, ...plan.parameters, excluded] },
-    { sql: `SELECT 'files', artifact.id, 'files:' || artifact.id, artifact.turn_id, artifact.updated_at,
-        3, artifact.rowid, 'file-change' FROM turn_git_artifacts AS artifact
+    { source: "files", keyColumn: "artifact.id", sql: `SELECT 'files' AS source, artifact.id AS key, 'files:' || artifact.id AS id,
+        artifact.turn_id AS turn_id, artifact.updated_at AS at, 3 AS source_order, artifact.rowid AS position,
+        'file-change' AS kind FROM turn_git_artifacts AS artifact
         WHERE artifact.conversation_id = ? AND artifact.status IN ('ready','partial')
           AND (CASE WHEN json_valid(artifact.files_json) THEN json_array_length(artifact.files_json) ELSE 0 END) > 0
           AND EXISTS (SELECT 1 FROM agent_turns AS owner WHERE owner.id = artifact.turn_id AND owner.association = 'authoritative')
           AND ${files.sql} AND ('files:' || artifact.id) NOT IN ${COVERED}`,
     parameters: [input.threadId, ...files.parameters, excluded] },
-    { sql: `SELECT 'interrupt', agent_turns.id, 'interrupt:' || agent_turns.id, agent_turns.id,
-        COALESCE(agent_turns.completed_at, agent_turns.updated_at), 4, agent_turns.rowid, agent_turns.status FROM agent_turns
+    { source: "interrupt", keyColumn: "agent_turns.id", sql: `SELECT 'interrupt' AS source, agent_turns.id AS key, 'interrupt:' || agent_turns.id AS id,
+        agent_turns.id AS turn_id, COALESCE(agent_turns.completed_at, agent_turns.updated_at) AS at, 4 AS source_order,
+        agent_turns.rowid AS position, agent_turns.status AS kind FROM agent_turns
         WHERE agent_turns.conversation_id = ? AND agent_turns.status IN ('cancelled','interrupted')
           AND agent_turns.started_at IS NOT NULL AND ${interrupt.sql} AND ('interrupt:' || agent_turns.id) NOT IN ${COVERED}`,
     parameters: [input.threadId, ...interrupt.parameters, excluded] },
   ];
   return { sql: sources.map(({ sql }) => sql).join(" UNION ALL "), parameters: sources.flatMap(({ parameters }) => parameters),
-    messageWhere, messageParameters, retained };
+    sources, messageWhere, messageParameters, retained };
 }
 
 type SourceContent = Pick<PortableHistoryItem, "kind" | "status" | "text">;
@@ -220,6 +225,84 @@ export function portableHistorySource(database: Database.Database, input: {
     activityOmittedCount: eligible - eligibleMessages - bounded.filter(isActivityItem).length,
     withheldCount: total - routedCount,
     turnOrdinals: turnOrdinals(database, input.threadId, [...new Set(items.flatMap(({ turnId }) => turnId ? [turnId] : []))]) };
+}
+
+export type PortableHistoryItemRead =
+  | { found: true; item: Omit<PortableHistoryItem, "text" | "references" | "origin">; text: string; truncated: boolean }
+  | { found: false; reason: "not-found" | "withheld" };
+
+/**
+ * One portable history item of this chat by its handoff id, for the
+ * item-scoped retrieval hint (T3 `9f1e97de6`). Eligibility is the handoff
+ * source's own: the chat's messages and terminal-turn activity outside
+ * rolled-back turns, on the reader's route, plus the chat's inherited fork
+ * snapshot. Any other id, including another chat's, reads as not found.
+ */
+export function portableHistoryItem(database: Database.Database, input: {
+  threadId: string;
+  itemId: string;
+  route?: ContinuationRouteFilter;
+  maxTextBytes: number;
+}): PortableHistoryItemRead {
+  const fork = database.prepare(`SELECT payload_json FROM orchestration_v2_entities WHERE kind = 'fork-history'
+      AND thread_id = ? AND id = ? AND json_extract(payload_json, '$.part') = 0
+      AND json_extract(payload_json, '$.kind') IN ('user-message','assistant-message','command','file','plan','error')`)
+    .get(input.threadId, input.itemId) as { payload_json: string } | undefined;
+  if (fork) {
+    const first = forkHistoryPartSchema.parse(JSON.parse(fork.payload_json));
+    // The same integrity rule as the handoff's inherited items: every part present, and a bounded count.
+    const stored = (database.prepare(`SELECT COUNT(*) AS parts FROM orchestration_v2_entities
+      WHERE kind = 'fork-history' AND thread_id = ? AND json_extract(payload_json, '$.ordinal') = ?`)
+      .get(input.threadId, first.ordinal) as { parts: number }).parts;
+    if (stored !== first.parts || first.parts > MAX_FORK_ITEM_PARTS) return { found: false, reason: "not-found" };
+    const parts = database.prepare(`SELECT CAST(json_extract(payload_json, '$.text') AS BLOB) AS content
+      FROM orchestration_v2_entities WHERE kind = 'fork-history' AND thread_id = ?
+        AND json_extract(payload_json, '$.ordinal') = ? ORDER BY json_extract(payload_json, '$.part') LIMIT ?`);
+    const read = readBoundedMessageText(Buffer.alloc(0),
+      () => parts.iterate(input.threadId, first.ordinal, first.parts) as Iterable<{ content: Buffer }>, input.maxTextBytes);
+    return { found: true, truncated: read.truncated, text: forkItemText(first.kind, read.content),
+      item: { id: first.id, threadId: input.threadId, sourceThreadId: first.sourceThreadId, runId: first.sourceRunId,
+        turnId: first.sourceTurnId, providerBackingId: null, role: first.kind === "user-message" ? "user" : "assistant",
+        kind: first.kind === "file" ? "file-change" : first.kind as PortableHistoryItem["kind"], status: first.status,
+        at: first.createdAt } };
+  }
+  // Look the item up by its own key in the one source its id names, never by scanning computed ids.
+  const separator = input.itemId.indexOf(":");
+  const prefix = separator < 0 ? "message" : input.itemId.slice(0, separator);
+  const source: SourceKind = prefix === "activity" || prefix === "plan" || prefix === "files" || prefix === "interrupt"
+    ? prefix : "message";
+  const key = source === "message" ? input.itemId : input.itemId.slice(separator + 1);
+  const find = (route?: ContinuationRouteFilter) => {
+    const arm = candidateIndex({ threadId: input.threadId, ...(route ? { route } : {}) }, "[]").sources
+      .find((candidate) => candidate.source === source)!;
+    return database.prepare(`${arm.sql} AND ${arm.keyColumn} = ? LIMIT 1`).get(...arm.parameters, key) as SourceRow | undefined;
+  };
+  const row = find(input.route);
+  if (!row || row.id !== input.itemId) {
+    return { found: false, reason: !row && input.route && find()?.id === input.itemId ? "withheld" : "not-found" };
+  }
+  const turn = row.turn_id === null ? undefined : database.prepare(
+    "SELECT run_id, status, provider_id, terminal_reason FROM agent_turns WHERE id = ?").get(row.turn_id) as TurnFacts | undefined;
+  let content: SourceContent | null;
+  let truncated = false;
+  if (row.source === "message") {
+    const value = database.prepare("SELECT substr(CAST(content AS BLOB), 1, ?) AS content FROM messages WHERE id = ?")
+      .get(input.maxTextBytes + 1, row.key) as { content: Buffer | null };
+    const chunks = database.prepare(`SELECT substr(CAST(content AS BLOB), 1, ?) AS content
+      FROM message_content_chunks WHERE message_id = ? ORDER BY sequence`);
+    const text = readBoundedMessageText(value.content ?? Buffer.alloc(0),
+      () => chunks.iterate(input.maxTextBytes + 1, row.key) as Iterable<{ content: Buffer }>, input.maxTextBytes);
+    truncated = text.truncated;
+    content = { kind: row.kind === "user" ? "user-message" : "assistant-message", status: turnItemStatus(turn?.status ?? null),
+      text: neutralizeUntrustedAgentText(boundedSubagentText(text.content, text.content.length) ?? "") };
+  } else {
+    content = activityContent(database, row, turn);
+  }
+  if (content === null) return { found: false, reason: "not-found" };
+  const { text, ...facts } = content;
+  return { found: true, text, truncated, item: { id: row.id, threadId: input.threadId, turnId: row.turn_id,
+    runId: turn?.run_id ?? null, providerBackingId: null, role: content.kind === "user-message" ? "user" : "assistant",
+    ...facts, at: row.at } };
 }
 
 function isActivityItem(item: PortableHistoryItem): boolean {

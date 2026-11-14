@@ -148,7 +148,8 @@ export interface CommitResult {
 }
 
 export class OrchestrationConflict extends Error {
-  constructor(readonly code: "command-conflict" | "revision-conflict" | "scope-conflict" | "cleanup-pending") {
+  constructor(readonly code: "command-conflict" | "revision-conflict" | "scope-conflict" | "cleanup-pending"
+    | "checkout-changed") {
     super(`Orchestration ${code}.`);
     this.name = "OrchestrationConflict";
   }

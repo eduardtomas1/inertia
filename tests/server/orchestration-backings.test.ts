@@ -399,7 +399,7 @@ describe("durable native provider backings and context delivery", () => {
       runtime.controller.start(returned.turn.id);
       const attested = runtime.provider.input?.prompt ?? "";
       expect(attested).toContain("Claude answer");
-      expect(attested).toContain("Retrieve omitted turns with inertia_request_context");
+      expect(attested).toContain("Recover an omitted item only when the request needs it, with inertia_request_context({conversationId:");
       expect(attested).not.toContain("Omitted history cannot be retrieved in this session");
       runtime.provider.resolve({ text: "Back on Codex", sessionId: "original-native" });
       await flushTurnControllerTestPromises();
@@ -604,7 +604,7 @@ describe("handoff coverage accounting", () => {
     } finally { runtime.store.close(); }
   });
 
-  it("carries a backing's coverage to the chat's moved checkout and retires the old backing", async () => {
+  it("relocates the native session's backing to the chat's moved checkout and retires the old backing", async () => {
     const runtime = await createTurnControllerTestRuntime();
     try {
       const first = await completeTurn(runtime, "Original Codex request", "codex-native", "Original Codex answer");
@@ -618,17 +618,24 @@ describe("handoff coverage accounting", () => {
         const resumed = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue after the move" });
         expect(resumed.turn.providerSessionBefore).toBe("codex-native");
         expect(runtime.store.orchestration.backings.handoff(resumed.turn.runId)).toBeNull();
+        // The relocation commits with the run, before it starts: coverage and status move with the session.
+        const relocated = runtime.store.orchestration.backings.find({ ...lookup, workspaceKey: moved })!;
+        expect(relocated).toMatchObject({ nativeSessionId: "codex-native", status: "ready",
+          coveredItemIds: original.coveredItemIds, coverageComplete: true });
+        expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("retired");
         runtime.controller.start(resumed.turn.id);
+        expect(runtime.provider.input).toMatchObject({ sessionId: "codex-native", cwd: moved });
         runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "codex-native" });
         runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Moved answer" });
         runtime.provider.resolve({ sessionId: "codex-native" });
         await flushTurnControllerTestPromises();
         const carried = runtime.store.orchestration.backings.find({ ...lookup, workspaceKey: moved })!;
         expect(carried).toMatchObject({ nativeSessionId: "codex-native", status: "ready", coverageComplete: true });
+        expect(carried.id).toBe(relocated.id);
         expect(carried.id).not.toBe(original.id);
         expect(carried.coveredItemIds).toEqual(expect.arrayContaining([...original.coveredItemIds, resumed.message.id]));
         expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("retired");
-        expect(invalidations(runtime)).toEqual([{ backingId: original.id, reason: "workspace-changed" }]);
+        expect(invalidations(runtime)).toEqual([]);
 
         runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
         const other = await completeTurn(runtime, "Claude follow-up", "claude-native", "Claude answer");
@@ -654,7 +661,7 @@ describe("handoff coverage accounting", () => {
     } finally { runtime.store.close(); }
   });
 
-  it("keeps an uncertain backing uncertain when its session continues in a moved checkout", async () => {
+  it("starts fresh in a moved checkout instead of resuming an uncertain session there", async () => {
     const runtime = await handoffRuntime();
     try {
       const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Request before the move" });
@@ -670,17 +677,19 @@ describe("handoff coverage accounting", () => {
       await mkdir(moved);
       const path = vi.spyOn(runtime.store, "conversationPath").mockReturnValue(moved);
       try {
-        const resumed = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue after the move" });
-        expect(resumed.turn.providerSessionBefore).toBe("uncertain-native");
-        runtime.controller.start(resumed.turn.id);
-        runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "uncertain-native" });
-        const carried = runtime.store.orchestration.backings.find({ ...lookup, workspaceKey: moved })!;
-        expect(carried.status).toBe("uncertain");
-        expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("retired");
-        runtime.provider.resolve({ status: "failed", sessionId: "uncertain-native", text: "" });
+        // The first turn after the move reads the session's status: an uncertain session is not resumed.
+        const afterMove = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue after the move" });
+        expect(afterMove.turn.providerSessionBefore).toBeNull();
+        expect(runtime.store.orchestration.backings.handoff(afterMove.turn.runId))
+          .toMatchObject({ targetBackingId: null, itemIds: expect.arrayContaining([first.message.id]) });
+        runtime.controller.start(afterMove.turn.id);
+        expect(runtime.provider.input?.sessionId).toBeUndefined();
+        expect(runtime.provider.input?.prompt).toContain("Original answer");
+        runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "fresh-native" });
+        runtime.provider.resolve({ sessionId: "fresh-native", text: "Fresh answer" });
         await flushTurnControllerTestPromises();
-        const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start over" });
-        expect(next.turn.providerSessionBefore).toBeNull();
+        expect(runtime.store.orchestration.backings.find({ ...lookup, workspaceKey: moved })?.nativeSessionId).toBe("fresh-native");
+        expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("uncertain");
       } finally { path.mockRestore(); }
     } finally { runtime.store.close(); }
   });

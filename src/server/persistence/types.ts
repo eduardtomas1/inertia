@@ -144,6 +144,9 @@ export interface AgentTurnLifecycleUpdate {
 export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
   contextHandoff?: import("../../shared/orchestration-backings").PreparedContextHandoff;
+  backingRelocation?: import("../../shared/orchestration-backings").PreparedBackingRelocation;
+  /** The checkout preparation resolved; admission refuses if the chat moved since. */
+  preparedWorkspaceKey?: string;
   nativeContinuation?: {
     rollbackId: string;
     continuation: import("../../shared/orchestration-history").HistoryCursor["continuation"] & object;

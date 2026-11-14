@@ -5,6 +5,7 @@ import type { RuntimeStore } from "../database";
 import type { ProviderHostToolDefinition, ProviderHostToolResult } from "../provider/contracts";
 import { boundedUntrustedAgentText } from "./untrusted-agent-text";
 import { boundedSubagentText } from "../provider/subagent-trace";
+import { scrubCommandSecrets } from "../provider/command-secrets";
 
 const schema = z.object({ conversationId: z.string().uuid(),
   afterRevision: z.number().int().nonnegative().optional(), offset: z.number().int().nonnegative().max(1_000_000).optional(),
@@ -29,7 +30,14 @@ export function readForkHistoryTool(store: RuntimeStore, caller: Conversation, i
   const page = store.orchestration.forks.history(target.id, afterRevision, 1);
   const part = page.parts[0];
   if (!part) return { success: true, text: JSON.stringify({ conversationId: target.id, item: null, cursor: null }) };
-  const sanitized = boundedUntrustedAgentText(boundedSubagentText(part.text, part.text.length) ?? "", 524_288);
+  // A command or error is redacted like the chat's own commands before the usual scrub, over the whole item so
+  // a secret split across parts is still recognized: the first part carries it all, later parts are empty.
+  const redact = part.kind === "command" || part.kind === "error";
+  const whole = redact && part.parts > 1
+    ? part.part === 0 ? store.orchestration.forks.itemText(target.id, part.ordinal, part.parts) ?? "" : ""
+    : part.text;
+  const raw = redact ? scrubCommandSecrets(whole.replace(/\0/gu, "")) : whole;
+  const sanitized = boundedUntrustedAgentText(boundedSubagentText(raw, raw.length) ?? "", 524_288);
   const characters = Array.from(sanitized.text);
   if (offset > characters.length) throw new Error("The fork history cursor is invalid.");
   const text = characters.slice(offset, offset + 2_000).join("");

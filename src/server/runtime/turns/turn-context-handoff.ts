@@ -23,6 +23,15 @@ export class ContextHandoffBackgroundWorkError extends RuntimeRequestError {
   }
 }
 
+export class CheckoutMoveBackgroundWorkError extends RuntimeRequestError {
+  constructor() {
+    super(
+      "This chat's provider session still has background work running in the checkout it used before. Wait for that work to finish or stop it, then send again.",
+      USER_CORRECTABLE_REQUEST,
+    );
+  }
+}
+
 export interface ModelContextLimits {
   modelWindow?: number | null;
   autoCompactThreshold?: number | null;

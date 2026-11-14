@@ -1,9 +1,23 @@
 import type Database from "better-sqlite3";
 
-import { forkHistoryPartSchema } from "../../shared/orchestration-forks";
+import { forkHistoryPartSchema, type ForkHistoryPart } from "../../shared/orchestration-forks";
+import { scrubCommandSecrets } from "../provider/command-secrets";
 import { boundedSubagentText } from "../provider/subagent-trace";
 import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
 import { MAX_PORTABLE_HISTORY_BUDGET, MAX_PORTABLE_HISTORY_CANDIDATES, type PortableHistoryItem } from "./portable-history";
+
+/** Parts of one inherited item; more means the snapshot is not one an intact fork writes. */
+export const MAX_FORK_ITEM_PARTS = 4_096;
+
+/**
+ * Inherited text as an agent may read it: a command or error line is redacted
+ * like the chat's own commands (`portableCommandText`), then every kind is
+ * scrubbed and neutralized like other historical agent text.
+ */
+export function forkItemText(kind: ForkHistoryPart["kind"], text: string): string {
+  const redacted = kind === "command" || kind === "error" ? scrubCommandSecrets(text.replace(/\0/gu, "")) : text;
+  return neutralizeUntrustedAgentText(boundedSubagentText(redacted, redacted.length) ?? "");
+}
 
 /** The fork itself authorizes access to its immutable inherited context. */
 export function portableForkHistory(database: Database.Database, threadId: string, excluded: readonly string[]) {
@@ -28,12 +42,11 @@ export function portableForkHistory(database: Database.Database, threadId: strin
     const size = database.prepare(`SELECT SUM(length(CAST(json_extract(payload_json, '$.text') AS BLOB))) AS bytes,
       COUNT(*) AS parts FROM orchestration_v2_entities WHERE kind = 'fork-history' AND thread_id = ?
       AND json_extract(payload_json, '$.ordinal') = ?`).get(threadId, first.ordinal) as { bytes: number; parts: number };
-    if (size.bytes > MAX_PORTABLE_HISTORY_BUDGET || size.parts > 4_096 || size.parts !== first.parts) continue;
+    if (size.bytes > MAX_PORTABLE_HISTORY_BUDGET || size.parts > MAX_FORK_ITEM_PARTS || size.parts !== first.parts) continue;
     const parts = database.prepare(`SELECT json_extract(payload_json, '$.text') AS text FROM orchestration_v2_entities
       WHERE kind = 'fork-history' AND thread_id = ? AND json_extract(payload_json, '$.ordinal') = ?
       ORDER BY json_extract(payload_json, '$.part')`).all(threadId, first.ordinal) as { text: string }[];
-    const original = parts.map(({ text }) => text).join("");
-    const text = neutralizeUntrustedAgentText(boundedSubagentText(original, original.length) ?? "");
+    const text = forkItemText(first.kind, parts.map(({ text: part }) => part).join(""));
     if (Buffer.byteLength(text) > MAX_PORTABLE_HISTORY_BUDGET) continue;
     items.push({ id: first.id, threadId, sourceThreadId: first.sourceThreadId,
       runId: first.sourceRunId, turnId: first.sourceTurnId, providerBackingId: null,

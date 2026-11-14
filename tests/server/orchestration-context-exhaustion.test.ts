@@ -1,6 +1,9 @@
 // @inertia-test-suite portable
 import { afterEach, describe, expect, it } from "vitest";
 
+import type Database from "better-sqlite3";
+
+import { coveredHistoryOccupancy } from "../../src/server/orchestration-v2/portable-history-occupancy";
 import type { ProviderBackgroundWorkSession } from "../../src/server/provider/contracts";
 import { ContextHandoffBackgroundWorkError } from "../../src/server/runtime/turns/turn-context-handoff";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
@@ -117,7 +120,8 @@ describe("context exhaustion on a resumed native session", () => {
   });
 
   it("estimates native occupancy from covered history when the session reported no usage", async () => {
-    const { runtime, original } = await exhaustedRuntime({ codexAnswer: "x".repeat(100_000) });
+    // 400,000 bytes is about 100,000 tokens at four bytes per token: past a 128k window's working room.
+    const { runtime, original } = await exhaustedRuntime({ codexAnswer: "x".repeat(400_000) });
     try {
       const returned = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex" });
       expect(returned.turn.providerSessionBefore).toBeNull();
@@ -125,6 +129,24 @@ describe("context exhaustion on a resumed native session", () => {
       runtime.controller.start(returned.turn.id);
       expect(runtime.provider.input?.prompt).toContain("Claude intervening answer");
       expect(runtime.provider.input?.prompt).not.toContain("x".repeat(1_000));
+    } finally { runtime.store.close(); }
+  });
+
+  it("keeps a native session whose stored prose is far below an unreported window", async () => {
+    // T3 b53cd6768: about 112 KB of ordinary English is about 28k tokens, a quarter of a 128k window.
+    // At one byte per token it would have counted as full and forced a fresh session.
+    const prose = "The quick brown fox jumps over the lazy dog. ".repeat(2_500);
+    const { runtime, original, other } = await exhaustedRuntime({ codexAnswer: prose });
+    try {
+      const database = (runtime.store as unknown as { database: Database.Database }).database;
+      const occupancy = coveredHistoryOccupancy(database, runtime.conversationId, original.coveredItemIds);
+      expect(occupancy).toBe(Math.ceil(Buffer.byteLength("Original Codex request") / 4)
+        + Math.ceil(Buffer.byteLength(prose) / 4));
+      const returned = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex" });
+      expect(returned.turn.providerSessionBefore).toBe("codex-native");
+      expect(runtime.store.orchestration.backings.handoff(returned.turn.runId))
+        .toMatchObject({ targetBackingId: original.id, itemIds: [other.message.id, expect.any(String)] });
+      expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("ready");
     } finally { runtime.store.close(); }
   });
 

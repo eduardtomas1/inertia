@@ -39,6 +39,7 @@ export function userCorrectableRuntimeError(error: unknown): boolean {
   return error instanceof PortableHistoryBudgetError || error instanceof TodoRepositoryError
     || error instanceof CustomAgentRepositoryError
     || error instanceof LibraryRepositoryError
+    || (error instanceof OrchestrationConflict && error.code === "checkout-changed")
     || (error instanceof RuntimeRequestError && error.code === USER_CORRECTABLE_REQUEST);
 }
 
@@ -47,6 +48,7 @@ export function publicRuntimeError(error: unknown): string {
   if (error instanceof OrchestrationConflict) {
     if (error.code === "cleanup-pending") return "The previous provider process has not been confirmed stopped. Wait for cleanup before starting another turn.";
     if (error.code === "command-conflict") return "This request identity was already used for different work. Refresh the chat before retrying.";
+    if (error.code === "checkout-changed") return "This chat moved to another checkout while the message was being prepared. Send it again.";
     return "The chat changed while this request was being prepared. Refresh it before retrying.";
   }
   if (error instanceof AttachmentResolutionError) {

@@ -117,10 +117,10 @@
       "opencode": 410
     },
     "inertia_request_context": {
-      "claude": 933,
-      "codex": 827,
-      "cursorKimi": 933,
-      "opencode": 933
+      "claude": 1021,
+      "codex": 915,
+      "cursorKimi": 1021,
+      "opencode": 1021
     },
     "inertia_create_conversation": {
       "claude": 1414,
@@ -246,20 +246,20 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 28508,
-      "withoutBrowser": 17087
+      "withBrowser": 28596,
+      "withoutBrowser": 17175
     },
     "codex": {
-      "withBrowser": 24424,
-      "withoutBrowser": 14680
+      "withBrowser": 24512,
+      "withoutBrowser": 14768
     },
     "cursorKimi": {
-      "withBrowser": 28518,
-      "withoutBrowser": 17088
+      "withBrowser": 28606,
+      "withoutBrowser": 17176
     },
     "opencode": {
-      "withBrowser": 28508,
-      "withoutBrowser": 17087
+      "withBrowser": 28596,
+      "withoutBrowser": 17175
     }
   }
 }

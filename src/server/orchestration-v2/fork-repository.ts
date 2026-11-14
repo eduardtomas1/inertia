@@ -56,6 +56,15 @@ export class ForkRepository {
       next: rows.length > limit ? page.at(-1)!.revision : null };
   }
 
+  /** All parts of one inherited item joined, or null when a part is missing or the item is oversized. */
+  itemText(threadId: string, ordinal: number, parts: number): string | null {
+    if (!Number.isSafeInteger(parts) || parts < 1 || parts > 4_096) return null;
+    const rows = this.database.prepare(`SELECT json_extract(payload_json, '$.text') AS text FROM orchestration_v2_entities
+      WHERE kind = 'fork-history' AND thread_id = ? AND json_extract(payload_json, '$.ordinal') = ?
+      ORDER BY json_extract(payload_json, '$.part') LIMIT ?`).all(threadId, ordinal, parts + 1) as { text: string }[];
+    return rows.length === parts ? rows.map(({ text }) => text).join("") : null;
+  }
+
   create(input: ForkInput, source: CommandSource): Conversation {
     const threadId = targetId(source);
     const identity = { actorId: source.actorId, commandId: source.commandId, projectId: input.projectId, threadId };

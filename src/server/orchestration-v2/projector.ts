@@ -47,6 +47,7 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   }
   if (event.type === "provider.backing-recorded" || event.type === "provider.backing-invalidated" || event.type === "provider.session-cleared"
     || event.type === "provider.backing-rewound" || event.type === "provider.backing-restored"
+    || event.type === "provider.backing-relocated"
     || event.type === "context.handoff-prepared" || event.type === "context.handoff-state-changed") {
     return projectBackingEvent(event, envelope, read);
   }

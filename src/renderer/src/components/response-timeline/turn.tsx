@@ -10,17 +10,19 @@ import {
 import clsx from "clsx";
 import type { SubagentTrace } from "@shared/contracts";
 import { activeWorkIdentityLabel } from "../../utils/finalAnswerIdentity";
-import { sameSubagentRevisions } from "../../utils/turnAgentStatus";
+import {
+  subagentGroupFoldable,
+  turnAgentStatus,
+} from "../../utils/turnAgentStatus";
 import {
   answerTailCommentary,
+  shouldFoldSettledTurn,
+  turnFoldLabel,
+  turnHasFoldableWork,
   type ResponseTurn,
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
-import {
-  liveSegmentContinuation,
-  trackLiveTextFollowUps,
-  type LiveTextFollowUps,
-} from "../../utils/response-timeline/execution";
+import { trackLiveTextFollowUps, type LiveTextFollowUps } from "../../utils/response-timeline/execution";
 import { layeredHtmlRenders } from "../../utils/response-timeline/model";
 import { CommentaryRow } from "./activity";
 import {
@@ -31,12 +33,23 @@ import {
   UserRequestLayer,
 } from "./layers";
 import { HtmlRenderTurnScopeProvider, TurnHtmlRenders } from "./html-render";
+import { SubagentCallContext } from "./subagentCallContext";
+import { transcriptSubagentCallMemory } from "./subagentCallMemory";
+import { SecretRequestContext } from "./secretRequestContext";
+import {
+  customAgentsById,
+  partitionSubagentCalls,
+  sameSubagentCallsForTurn,
+} from "../../utils/response-timeline/subagentCalls";
 import { turnCompletionAnnouncement } from "./metadata";
-import { useTurnRolledBack } from "../orchestration/fork-surface";
+import type { TurnFoldControl } from "./TurnFold";
+import { setTurnFoldOpen, useTurnFoldOpen } from "./turn-fold-store";
+import { UserRequestMeta } from "./UserRequestMeta";
 import type { ResponseTimelineProps } from "./types";
 
-const TURN_SETTLEMENT_TRANSITION_MS = 160;
+const TURN_SETTLEMENT_TRANSITION_MS = 200;
 const NO_HELD_FOLLOW_UPS: string[] = [];
+const NO_CUSTOM_AGENTS = customAgentsById(undefined);
 
 type CommentaryEntry = Extract<TurnExecutionStreamEntry, { kind: "commentary" }>;
 
@@ -82,34 +95,28 @@ function TurnTimelineComponent({
   onBeforeToggle?: (turnId: string) => void;
   onAfterToggle?: (turnId: string) => void;
 }): React.JSX.Element {
-  const liveText = turn.isActive && !turn.terminalAssistantMessage
+  const streamedText = turn.isActive && !turn.terminalAssistantMessage
     ? props.streamingText
     : "";
-  const continuedText = liveSegmentContinuation(turn, liveText);
-  const continuesSegment = continuedText !== null;
-  const liveTurn = useMemo(() => continuesSegment
-    ? { ...turn, commentaryMessages: turn.commentaryMessages.slice(0, -1) }
-    : turn, [continuesSegment, turn]);
-  const streamedText = continuedText ?? liveText;
   const streamedTextLive = props.streamingChannel === "text";
-  const tailCommentary = useMemo(() => answerTailCommentary(liveTurn), [liveTurn]);
+  const tailCommentary = useMemo(() => answerTailCommentary(turn), [turn]);
   const layeredRenders = useMemo(() => ({ htmlRenders: layeredHtmlRenders(turn) }), [turn]);
   const railTurn = useMemo(() => tailCommentary?.length
     ? {
-        ...liveTurn,
-        commentaryMessages: liveTurn.commentaryMessages.filter((message) =>
+        ...turn,
+        commentaryMessages: turn.commentaryMessages.filter((message) =>
           !tailCommentary.includes(message)),
       }
-    : liveTurn, [liveTurn, tailCommentary]);
+    : turn, [tailCommentary, turn]);
   const liveContent = tailCommentary ? "" : streamedText;
   const liveTextOpen = turn.isActive && Boolean(streamedText);
   const liveTextFollowUps = useRef<LiveTextFollowUps | null>(null);
   const heldFollowUpIds = useMemo(() => {
     liveTextFollowUps.current = liveTextOpen
-      ? trackLiveTextFollowUps(liveTextFollowUps.current, liveTurn)
+      ? trackLiveTextFollowUps(liveTextFollowUps.current, turn)
       : null;
     return liveTextFollowUps.current?.held ?? NO_HELD_FOLLOW_UPS;
-  }, [liveTextOpen, liveTurn]);
+  }, [liveTextOpen, turn]);
   const tailEntries = useMemo<CommentaryEntry[]>(() => {
     if (!tailCommentary) return [];
     const saved = tailCommentary.map((message): CommentaryEntry => ({
@@ -165,6 +172,66 @@ function TurnTimelineComponent({
     () => onAfterToggle?.(turn.id),
     [onAfterToggle, turn.id],
   );
+  const callContext = useMemo(() => ({
+    autoCollapse: props.autoCollapseWorkLog,
+    projectRoot: props.projectRoot,
+    projectId: props.projectId,
+    conversationId: props.conversationId,
+    defaultCodeWrap: props.defaultCodeWrap,
+    onOpenProjectFile: props.onOpenTurnFile,
+    onStopSubagent: props.onStopSubagent,
+    memory: transcriptSubagentCallMemory,
+  }), [
+    props.autoCollapseWorkLog,
+    props.conversationId,
+    props.defaultCodeWrap,
+    props.onOpenTurnFile,
+    props.onStopSubagent,
+    props.projectId,
+    props.projectRoot,
+  ]);
+  const foldOpen = useTurnFoldOpen(turn.id, !props.autoCollapseWorkLog);
+  const groupedSubagents = useMemo(
+    () => partitionSubagentCalls(subagents ?? NO_SUBAGENTS, NO_CUSTOM_AGENTS, undefined, props.turns).remaining,
+    [props.turns, subagents],
+  );
+  const agentStatus = turnAgentStatus(groupedSubagents);
+  const agentsLive = (agentStatus?.live ?? 0) > 0;
+  const [agentsHeldOutside, setAgentsHeldOutside] = useState(agentsLive);
+  if (agentsLive && !agentsHeldOutside) setAgentsHeldOutside(true);
+  const agentsFoldable = !agentsHeldOutside && subagentGroupFoldable(agentStatus);
+  const folds = shouldFoldSettledTurn(turn);
+  const foldVisible = folds && (
+    agentsFoldable || turnHasFoldableWork(turn, { showThinking: props.showThinking })
+  );
+  const fold = useMemo<TurnFoldControl | null>(() => folds
+    ? {
+        visible: foldVisible,
+        open: foldOpen,
+        status: turn.agentTurn.status,
+        label: turnFoldLabel(turn),
+        startedAt: turn.startedAt ?? turn.requestedAt,
+        showTimes: props.showTimestamps,
+        onToggle: () => {
+          handleBeforeToggle();
+          setTurnFoldOpen(turn.id, !foldOpen);
+          window.requestAnimationFrame(handleAfterToggle);
+        },
+      }
+    : null, [
+    foldOpen,
+    foldVisible,
+    folds,
+    handleAfterToggle,
+    handleBeforeToggle,
+    props.showTimestamps,
+    turn,
+  ]);
+
+  const secretContext = useMemo(() => ({
+    conversationId: props.conversationId,
+    onCommand: props.onSecretRequestCommand,
+  }), [props.conversationId, props.onSecretRequestCommand]);
 
   useLayoutEffect(() => {
     if (turn.isActive) answerTailWasVisible.current = answerTailVisible;
@@ -207,7 +274,6 @@ function TurnTimelineComponent({
     return () => window.clearTimeout(timer);
   }, [isSettling]);
 
-  const rolledBack = useTurnRolledBack(turn.agentTurn.id);
   return (
     <section
       className={clsx(
@@ -215,7 +281,6 @@ function TurnTimelineComponent({
         turn.isActive && "is-active",
         isSettling && "is-settling",
         isRevealingSettledAnswer && "is-revealing-settled-answer",
-        rolledBack && "is-rolled-back",
       )}
       aria-label={`Turn ${turn.index}`}
       data-completion-transition={isSettling ? "active-to-settled" : undefined}
@@ -231,6 +296,13 @@ function TurnTimelineComponent({
         onBeforeToggle={handleBeforeToggle}
         onAfterToggle={handleAfterToggle}
       />
+      {!turn.watcherWake && !turn.userMessage.duoComparison && (
+        <UserRequestMeta
+          content={turn.userMessage.content}
+          createdAt={turn.userMessage.createdAt}
+          showTime={props.showTimestamps}
+        />
+      )}
 
       {omitted ? (
         <p className="response-turn-omitted" role="note">
@@ -239,19 +311,25 @@ function TurnTimelineComponent({
       ) : (
         <HtmlRenderTurnScopeProvider>
           <TurnSubagentActivities subagents={subagents ?? NO_SUBAGENTS}>
-            <AgentExecutionLayer
-              turn={railTurn}
-              props={props}
-              subagents={subagents ?? NO_SUBAGENTS}
-              providerLabel={providerLabel}
-              reasoningContent={reasoningContent}
-              liveContent={liveContent}
-              heldFollowUpIds={heldFollowUpIds}
-              timerStart={timerStart}
-              completionAnnouncement={completionAnnouncement}
-              onBeforeToggle={handleBeforeToggle}
-              onAfterToggle={handleAfterToggle}
-            />
+            <SubagentCallContext.Provider value={callContext}>
+              <SecretRequestContext.Provider value={secretContext}>
+                <AgentExecutionLayer
+                  turn={railTurn}
+                  props={props}
+                  subagents={subagents ?? NO_SUBAGENTS}
+                  providerLabel={providerLabel}
+                  reasoningContent={reasoningContent}
+                  liveContent={liveContent}
+                  heldFollowUpIds={heldFollowUpIds}
+                  timerStart={timerStart}
+                  completionAnnouncement={completionAnnouncement}
+                  fold={fold}
+                  agentsInFold={foldVisible && agentsFoldable}
+                  onBeforeToggle={handleBeforeToggle}
+                  onAfterToggle={handleAfterToggle}
+                />
+              </SecretRequestContext.Provider>
+            </SubagentCallContext.Provider>
 
             <TurnHtmlRenders turn={layeredRenders} />
 
@@ -266,6 +344,7 @@ function TurnTimelineComponent({
               turn={turn}
               props={props}
               previousArtifactTurnId={previousArtifactTurnId}
+              durationShownAbove={foldVisible}
               onBeforeToggle={handleBeforeToggle}
               onAfterToggle={handleAfterToggle}
             />
@@ -298,7 +377,7 @@ export function sameTurnTimelineProps(
   const right = next.props;
   return previous.turn === next.turn
     && previous.previousArtifactTurnId === next.previousArtifactTurnId
-    && sameSubagentRevisions(previous.subagents, next.subagents)
+    && sameSubagentCallsForTurn(previous.subagents, next.subagents, left.customAgents, right.customAgents)
     && previous.onBeforeToggle === next.onBeforeToggle
     && previous.onAfterToggle === next.onAfterToggle
     && left.providerIdentityLabels === right.providerIdentityLabels
@@ -313,11 +392,13 @@ export function sameTurnTimelineProps(
     && left.checkpointRestoreDisabled === right.checkpointRestoreDisabled
     && left.onRespondToApproval === right.onRespondToApproval
     && left.onRespondToInput === right.onRespondToInput
+    && left.onSecretRequestCommand === right.onSecretRequestCommand
     && left.onRevertCheckpoint === right.onRevertCheckpoint
     && left.onOpenTurnDiff === right.onOpenTurnDiff
     && left.onCompareTurnArtifacts === right.onCompareTurnArtifacts
     && left.onOpenTurnFile === right.onOpenTurnFile
     && left.onStop === right.onStop
+    && left.onStopSubagent === right.onStopSubagent
     && left.onOpenSurface === right.onOpenSurface
     && left.onConversationContextCommand === right.onConversationContextCommand
     && left.turns === right.turns

@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Every coding agent, one calm desktop.</strong><br />
-  Run Codex, Claude, Cursor, Kimi Code, OpenCode, Antigravity and Pi side by side,<br />
+  Run Codex, Claude, Cursor, Grok, Kimi Code, OpenCode and Antigravity side by side,<br />
   next to your projects, Git review and terminals, in a workspace that stays on your computer.
 </p>
 
@@ -42,8 +42,9 @@ Inertia is a desktop app for working with coding agents. Each chat belongs to a 
 - **Decide how it works.** Choose the model, reasoning level, response speed, work mode and access from the composer. `/plan` and `/build` switch modes; in Plan mode the agent proposes steps before touching anything.
 - **Keep follow-ups moving.** While an agent works, Enter sends a follow-up and Tab queues it for the next turn.
 - **Switch providers without losing the chat.** Pick another provider and the next message continues with the earlier messages as context. The timeline marks the switch with a **Context handoff** divider.
+- **Call your own agents.** Save named agents with their own instructions, skills and character in **Settings → Custom agents**, start from nine presets, and type `/calling` to hand the next message to one. The transcript shows it working beside the answer.
 - **Get visual answers.** An agent can reply with a chart, table, diagram or mockup rendered in the chat, themed like the app and sandboxed from the network and your files. See [Visual replies](docs/user/chats-and-agents.md#visual-replies).
-- **Pay less for long API chats.** Return to a chat of 200K tokens or more on an Anthropic or OpenAI key after its prompt cache has expired and the send button reads **Compact and send**. See [Compact on return](docs/user/chats-and-agents.md#compact-on-return).
+- **Spend less on long chats.** Return to a chat of 200K tokens or more on a Claude subscription, an Anthropic key or an OpenAI key after its prompt cache has expired and the send button reads **Compact and send**. Claude chats compact on their own at 400K tokens instead of near 1M, and can compact while idle before their cache expires; Codex chats compact at 300K. See [Compact on return](docs/user/chats-and-agents.md#compact-on-return).
 - **Choose the access you are comfortable with.** **Supervised** keeps provider approvals, **Auto-accept edits** allows supported file edits, and **Full access** lets the agent act without asking.
 
 ## Find anything
@@ -89,7 +90,7 @@ The right panel opens **Changes**, **Files**, **Browser**, **Terminal**, **Attac
 
 ## Local by default
 
-History and preferences stay on your computer. Each provider keeps its own sign-in, and API keys and custom backend credentials live in your operating system's credential vault, never in Inertia's database. Desktop notifications leave out prompt and response text. Diagnostics are a local history you can search, export or clear, and **Report an issue** shows you the exact text before anything reaches GitHub.
+History and preferences stay on your computer. Each provider keeps its own sign-in, and API keys and custom backend credentials live in your operating system's credential vault, never in Inertia's database. When an agent needs a credential it asks in a private card, and what you type reaches only an owner-only file the agent can read, never the chat, its history or the logs. Desktop notifications leave out prompt and response text. Diagnostics are a local history you can search, export or clear, and **Report an issue** shows you the exact text before anything reaches GitHub.
 
 Optional [Private Connect](docs/PRIVATE_CONNECT.md) pairs a browser on another device over your Tailscale network while this computer stays online, with Monitor or Collaborate access per device. Its boundaries are in the [security model](docs/PRIVATE_CONNECT_SECURITY.md).
 
@@ -103,7 +104,7 @@ Choose System, Light or Dark and a colour theme from the theme library, or pick 
 <summary><strong>More</strong></summary>
 
 - **Resume at reset.** When a chat stops at a subscription limit, the composer offers **Resume at reset** and **Snooze until reset**; Inertia must be running to resume.
-- **Usage and limits.** **Usage** shows locally recorded usage across chats and providers, and each provider's remaining quota per window with a countdown to its reset. **Daily work** summarises tokens, runtime and conversations for a day.
+- **Usage and limits.** **Usage** opens one popup with Cost, Tokens and Limits: locally recorded usage across chats and providers, and each account's remaining quota per window with its pace and a countdown to its reset. **Daily work** summarises tokens, runtime and conversations for a day.
 - **Import CLI conversations.** Bring a project's Codex or Claude Code history into Inertia from **Settings → Projects**; the chat continues the original session.
 - **Chats without a project.** Choose **No project** in the composer to work in a chat folder of its own.
 - **Start from a terminal.** Run Inertia with `--new-chat` to open a chat for the current folder, or `--new-chat <path>` for another.

@@ -6,7 +6,6 @@ import { RuntimeRequestError, publicRuntimeError } from "../runtime-errors";
 import { publicLimitResetPlan, type StoredLimitResetPlan } from "../persistence/limit-reset-repository";
 import { queuedRouteIdentity } from "../persistence/queued-message-repository";
 import { isHeld } from "../runtime/update-hold";
-import { provideLimitResetCancel, scheduledPlanSettled } from "../runtime/scheduled-plan-settlements";
 import { MISSED_RESUME_AFTER_MS, matchesFailedNativeTurn, resetQuota, resumeAccountIdentity, sameReportedReset } from "./limit-reset-policy";
 
 const LIMIT_CHANGED = "The reported limit changed. Check the new reset time and try again.";
@@ -52,18 +51,9 @@ export class LimitResetScheduler {
   private admissionFailures = 0;
   private readonly planFailures = new Map<string, { count: number; retryAt: number }>();
   private readonly offers = new Map<string, Promise<Offer | null>>();
-  constructor(private readonly dependencies: LimitResetDependencies) {
-    provideLimitResetCancel(dependencies.store, (conversationId, id) => this.cancel(conversationId, id));
-  }
+  constructor(private readonly dependencies: LimitResetDependencies) {}
   private get store(): RuntimeStore {
     return this.dependencies.store;
-  }
-  private settle(plan: StoredLimitResetPlan, state: "blocked" | "cancelled" | "missed", error: string | null): void {
-    this.store.limitResets.settle(plan, state, error);
-    const saved = this.store.limitResets.get(plan.conversationId);
-    if (saved?.id !== plan.id || saved.state !== state) return;
-    scheduledPlanSettled(this.store, { kind: "limit-reset", conversationId: plan.conversationId, planId: plan.id,
-      turnId: plan.failedTurnId, state });
   }
   private current(plan: StoredLimitResetPlan): boolean {
     try {
@@ -109,7 +99,7 @@ export class LimitResetScheduler {
     const latest = this.store.latestAgentTurnForConversation(conversationId);
     if (!account || account.providerId !== conversation.providerId) return null;
     if (route !== queuedRouteIdentity(current) || latest?.id !== turn.id || !matchesFailedNativeTurn(current, latest)) return null;
-    const quota = resetQuota(account, turn.model);
+    const quota = resetQuota(account, turn.model, undefined, turn.modelSelection.alias);
     if (quota.kind !== "exhausted") return null;
     const accountIdentity = resumeAccountIdentity(account);
     return {
@@ -123,8 +113,8 @@ export class LimitResetScheduler {
   }
   /** A deliberate provider handoff retires the plan; other drift needs attention. */
   private settleChangedChat(plan: StoredLimitResetPlan): void {
-    if (this.handedOff(plan)) this.settle(plan, "cancelled", null);
-    else this.settle(plan, "blocked", CHAT_CHANGED);
+    if (this.handedOff(plan)) this.store.limitResets.settle(plan, "cancelled", null);
+    else this.store.limitResets.settle(plan, "blocked", CHAT_CHANGED);
   }
   private handedOff(plan: StoredLimitResetPlan): boolean {
     try {
@@ -138,7 +128,7 @@ export class LimitResetScheduler {
     let plan = this.store.limitResets.get(conversationId);
     const latestTurnId = this.store.latestAgentTurnForConversation(conversationId)?.id;
     if (plan && ["waiting", "dispatching", "blocked", "missed"].includes(plan.state) && latestTurnId !== plan.failedTurnId) {
-      this.settle(plan, "cancelled", null);
+      this.store.limitResets.settle(plan, "cancelled", null);
       this.dependencies.changed(conversationId);
       plan = this.store.limitResets.get(conversationId);
     }
@@ -232,7 +222,7 @@ export class LimitResetScheduler {
   cancel(conversationId: string, id: string): void {
     const plan = this.store.limitResets.get(conversationId);
     if (plan?.id === id) {
-      this.settle(plan, "cancelled", null);
+      this.store.limitResets.settle(plan, "cancelled", null);
       this.dependencies.changed(conversationId);
     }
     this.arm();
@@ -313,7 +303,7 @@ export class LimitResetScheduler {
     this.planFailures.set(plan.id, { count, retryAt: Date.now() + Math.min(MAX_BACKOFF_MS, 1_000 * 2 ** count) });
     if (count < STALLED_AFTER_FAILURES) return;
     try {
-      this.settle(plan, "blocked", STALLED);
+      this.store.limitResets.settle(plan, "blocked", STALLED);
       this.dependencies.changed(plan.conversationId);
     } catch {
       return;
@@ -327,7 +317,7 @@ export class LimitResetScheduler {
     }
     if (Date.parse(plan.nextAttemptAt) > Date.now()) return;
     if (Date.now() - Date.parse(plan.nextAttemptAt) > MISSED_RESUME_AFTER_MS) {
-      this.settle(plan, "missed", null);
+      this.store.limitResets.settle(plan, "missed", null);
       this.dependencies.changed(plan.conversationId);
       return;
     }
@@ -337,7 +327,7 @@ export class LimitResetScheduler {
       await this.attempt(plan);
     } catch (error) {
       if (this.dependencies.signal.aborted) this.store.limitResets.retry(plan, new Date().toISOString());
-      else this.settle(plan, "blocked", publicRuntimeError(error));
+      else this.store.limitResets.settle(plan, "blocked", publicRuntimeError(error));
     } finally {
       this.dependencies.changed(plan.conversationId);
     }
@@ -346,7 +336,7 @@ export class LimitResetScheduler {
     this.assertDispatch(plan);
     if (this.dependencies.busy(plan.conversationId)) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
     const conversation = this.store.conversation(plan.conversationId);
-    const model = this.store.latestAgentTurnForConversation(plan.conversationId)!.model;
+    const { model, modelSelection } = this.store.latestAgentTurnForConversation(plan.conversationId)!;
     const cwd = this.store.conversationPath(plan.conversationId);
     const account = await this.dependencies.readAccount(conversation.providerId, true, model, cwd, false).catch(() => null);
     this.assertDispatch(plan);
@@ -356,8 +346,8 @@ export class LimitResetScheduler {
       throw new RuntimeRequestError("The account changed. Resume this chat manually.");
     }
     if (!unread && identity === null) throw new RuntimeRequestError(ACCOUNT_UNCONFIRMED_AT_RESET);
-    if (unread || resetQuota(account, model).kind !== "available") {
-      if (quotaCheckedFor(plan.attempts) > MISSED_RESUME_AFTER_MS) this.settle(plan, "missed", QUOTA_NOT_CONFIRMED);
+    if (unread || resetQuota(account, model, undefined, modelSelection.alias).kind !== "available") {
+      if (quotaCheckedFor(plan.attempts) > MISSED_RESUME_AFTER_MS) this.store.limitResets.settle(plan, "missed", QUOTA_NOT_CONFIRMED);
       else this.store.limitResets.retry(plan, new Date(Date.now() + quotaCheckDelay(plan.attempts)).toISOString());
       return;
     }

@@ -57,7 +57,7 @@ const harnessLabels: Readonly<Record<ProviderId, string>> = {
   kimi: "Kimi Code",
   opencode: "OpenCode",
   antigravity: "Antigravity CLI",
-  pi: "Pi",
+  grok: "Grok",
 };
 
 const refreshModelsReason = "Refresh models to select this route.";
@@ -82,7 +82,6 @@ export function readyModelChooserRoutes<Route extends { providerReady: boolean }
 }
 
 export function modelChooserHarnessLabel(harnessId: string): string {
-  if (harnessId === "cursor-sdk") return "Cursor SDK";
   const providerId = providerIdForHarness(harnessId);
   if (providerId) return harnessLabels[providerId];
   return harnessId;

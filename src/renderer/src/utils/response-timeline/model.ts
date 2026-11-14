@@ -17,6 +17,7 @@ import type {
 import type { WatcherNoteAttribution, WatcherWakeSummary } from "@shared/watcher";
 import { activityNeedsAttention } from "./activity-attention";
 import { providerBackendName } from "../providerBackendName";
+import { isSecretRequestMessage, type SecretRequestMessage } from "./secretRequests";
 
 /** Current workspace status is intentionally not accepted by the timeline. */
 export type TurnGitArtifactSummary = TurnGitArtifact;
@@ -34,6 +35,7 @@ export interface ResponseTurn {
   systemMessages: ChatMessage[];
   /** Visual replies: turn-scoped system messages carrying a valid `htmlRender`, in message order. */
   htmlRenders: ChatMessage[];
+  secretRequests: SecretRequestMessage[];
   activities: AgentActivity[];
   reasonings: AgentReasoning[];
   reasoning: AgentReasoning | null;
@@ -41,7 +43,6 @@ export interface ResponseTurn {
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   checkpoint: CheckpointSummary | null;
-  extraCheckpoints: CheckpointSummary[];
   checkpointUnavailableReason: string | null;
   gitArtifact: TurnGitArtifactSummary | null;
   requestedAt: string;
@@ -54,34 +55,6 @@ export interface ResponseTurn {
   /** Set when the previous authoritative turn ran on another provider. */
   providerChanged?: true;
   watcherWake?: WatcherWakeSummary;
-}
-
-/**
- * Clean successful history does not need a second status row above the answer.
- * Its authoritative status and duration live in the answer footer, while the
- * execution transcript remains available from that footer's Run details.
- */
-export function shouldConsolidateSettledWorkIntoRunDetails(
-  turn: Pick<
-    ResponseTurn,
-    | "isActive"
-    | "agentTurn"
-    | "terminalAssistantMessage"
-    | "followUpMessages"
-    | "importantActivities"
-    | "approvals"
-    | "inputRequests"
-    | "systemMessages"
-  >,
-): boolean {
-  return !turn.isActive
-    && turn.agentTurn.status === "completed"
-    && turn.terminalAssistantMessage !== null
-    && turn.followUpMessages.length === 0
-    && turn.importantActivities.length === 0
-    && turn.approvals.length === 0
-    && turn.inputRequests.length === 0
-    && turn.systemMessages.length === 0;
 }
 
 export function layeredHtmlRenders(
@@ -266,8 +239,9 @@ function buildTurn(
   // or keep clean settled work from consolidating into Run details.
   const htmlRenders = scopedMessages.filter(({ role, htmlRender }) =>
     role === "system" && isHtmlRenderReference(htmlRender));
-  const systemMessages = scopedMessages.filter(({ role, htmlRender }) =>
-    role === "system" && !isHtmlRenderReference(htmlRender));
+  const secretRequests = scopedMessages.filter(isSecretRequestMessage);
+  const systemMessages = scopedMessages.filter((message) =>
+    message.role === "system" && !isHtmlRenderReference(message.htmlRender) && !isSecretRequestMessage(message));
   const turnActivities = (indexes.activitiesByTurn.get(agentTurn.id) ?? [])
     .filter((activity) =>
       activity.conversationId === agentTurn.conversationId)
@@ -287,12 +261,6 @@ function buildTurn(
       })()
     : (indexes.checkpointsByTurn.get(agentTurn.id) ?? [])
       .find((item) => item.conversationId === agentTurn.conversationId) ?? null;
-  const extraCheckpoints = (indexes.checkpointsByTurn.get(agentTurn.id) ?? [])
-    .filter((item) =>
-      item.conversationId === agentTurn.conversationId
-      && item.id !== agentTurn.checkpointId
-      && item.id !== checkpoint?.id)
-    .sort(compareTimestamped);
   const importantActivities: AgentActivity[] = [];
   const foldableActivities: AgentActivity[] = [];
   for (const activity of activities) {
@@ -312,6 +280,7 @@ function buildTurn(
     terminalAssistantMessage,
     systemMessages,
     htmlRenders,
+    secretRequests,
     activities,
     reasonings,
     reasoning: latestReasoning(reasonings),
@@ -321,7 +290,6 @@ function buildTurn(
     inputRequests: (indexes.inputRequestsByTurn.get(agentTurn.id) ?? [])
       .filter((request) => request.conversationId === agentTurn.conversationId),
     checkpoint,
-    extraCheckpoints,
     checkpointUnavailableReason: checkpointUnavailableReason(
       checkpoint,
       turnActivities,
@@ -396,8 +364,8 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
     turn.assistantMessages.forEach(({ id }) => claimedMessageIds.add(id));
     turn.systemMessages.forEach(({ id }) => claimedMessageIds.add(id));
     turn.htmlRenders.forEach(({ id }) => claimedMessageIds.add(id));
+    turn.secretRequests.forEach(({ id }) => claimedMessageIds.add(id));
     if (turn.checkpoint) claimedCheckpointIds.add(turn.checkpoint.id);
-    turn.extraCheckpoints.forEach(({ id }) => claimedCheckpointIds.add(id));
   }
 
   const compatibility: ResponseTimelineCompatibility = {
@@ -635,7 +603,7 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
     && sameReferences(left.commentaryMessages, right.commentaryMessages)
     && sameReferences(left.systemMessages, right.systemMessages)
     && sameReferences(left.htmlRenders, right.htmlRenders)
-    && sameReferences(left.extraCheckpoints, right.extraCheckpoints)
+    && sameReferences(left.secretRequests, right.secretRequests)
     && sameReferences(left.activities, right.activities)
     && sameReferences(left.reasonings, right.reasonings)
     && sameReferences(left.plans, right.plans)

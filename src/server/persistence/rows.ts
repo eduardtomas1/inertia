@@ -204,10 +204,11 @@ export interface TurnGitArtifactRow {
 export interface MessageRow {
   private_connect_device_id?: string | null;
   watcher_note_json?: string | null;
-  delegated_completion_json?: string | null;
   duo_comparison_json?: string | null;
+  custom_agent_call_json?: string | null;
   compaction_json?: string | null;
   html_render_json?: string | null;
+  secret_request_json?: string | null;
   id: string;
   conversation_id: string;
   turn_id: string | null;
@@ -243,6 +244,7 @@ export interface SubagentTraceRow {
   provider_tool_use_id: string | null;
   provider_role: string | null;
   provider_name: string | null;
+  custom_agent_id?: string | null;
   provider_status: string | null;
   status: SubagentTraceStatus;
   is_live: 0 | 1;
@@ -371,7 +373,9 @@ export interface StateRow {
   quota_warning_threshold?: number;
   notify_only_in_background?: number;
   compact_on_return?: string;
-  delegation_automatic_wakes?: number;
+  compact_before_cache_expires?: number;
+  claude_auto_compact_window?: number | null;
+  codex_auto_compact_token_limit?: number | null;
   attachment_storage_gib?: number;
   auto_remove_old_attachments?: number;
   active_project_id: string | null;

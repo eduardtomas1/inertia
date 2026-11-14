@@ -16,6 +16,7 @@ import type {
 import type { RuntimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
 import type { DiagnosticPage, DiagnosticQuery, RendererDiagnostic } from "./application-diagnostics";
 import type { CompletionSoundImport } from "./completion-sound";
+import type { CustomAgentDraft, CustomAgentExport } from "./custom-agents";
 import type { ContextMenuAction, ContextMenuRequest } from "./context-menu";
 import { isProjectRelativePath, UUID_PATTERN } from "./request-identifiers";
 import {
@@ -452,7 +453,7 @@ const MAIN_WINDOW_PROVIDER_IDS: Readonly<Record<ProviderId, true>> = {
   kimi: true,
   opencode: true,
   antigravity: true,
-  pi: true,
+  grok: true,
 };
 const BACKEND_PROFILE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 const MAX_TARGET_BRANCH_LENGTH = 255;
@@ -768,6 +769,16 @@ export interface LaunchProjectRequest {
   realPath: string | null;
 }
 
+export type CustomAgentExportResult =
+  | { status: "exported" }
+  | { status: "cancelled" }
+  | { status: "rejected"; message: string };
+
+export type CustomAgentImportResult =
+  | { status: "imported"; agents: CustomAgentDraft[] }
+  | { status: "cancelled" }
+  | { status: "rejected"; message: string };
+
 export interface DesktopBridge {
   /** Identifies the main workbench or one main-owned fixed-chat renderer. */
   getWindowContext: () => Promise<DesktopWindowContext>;
@@ -909,6 +920,8 @@ export interface DesktopBridge {
   importCompletionSound: (keep: readonly string[]) => Promise<CompletionSoundImport>;
   readCompletionSound: (file: string) => Promise<Uint8Array | null>;
   removeCompletionSound: (file: string) => Promise<void>;
+  exportCustomAgents: (payload: CustomAgentExport) => Promise<CustomAgentExportResult>;
+  importCustomAgents: () => Promise<CustomAgentImportResult>;
   onThreadNotificationActivated: (listener: (conversationId: string) => void) => () => void;
   /** Samples aggregate local app resource use and fixed Inertia-owned storage paths. */
   getAppHealth: () => Promise<AppHealthSnapshot>;
@@ -964,6 +977,7 @@ export interface DesktopBridge {
   setBackendCredential: (request: SetBackendCredentialRequest) => Promise<BackendCredentialState>;
   clearBackendCredential: (request: BackendCredentialProfileRequest) => Promise<BackendCredentialState>;
   getBackendCredentialState: (request: BackendCredentialProfileRequest) => Promise<BackendCredentialState>;
+  saveAgentSecret: (request: SaveAgentSecretRequest) => Promise<SaveAgentSecretResult>;
   getPrivateConnectState: () => Promise<PrivateConnectStateView>;
   onPrivateConnectState: (listener: (state: PrivateConnectStateView) => void) => () => void;
   setPrivateConnectEnabled: (request: PrivateConnectEnableRequest) => Promise<PrivateConnectStateView>;
@@ -985,3 +999,4 @@ import type {
   BackendCredentialState,
   SetBackendCredentialRequest,
 } from "./backend-credentials";
+import type { SaveAgentSecretRequest, SaveAgentSecretResult } from "./agent-secrets";

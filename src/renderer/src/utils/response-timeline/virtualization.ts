@@ -12,12 +12,18 @@ import {
   isTranscriptActivity,
   type TurnExecutionStreamEntry,
 } from "./execution";
+import { estimateSecretRequestHeight } from "./secretRequests";
 import { latestFailureIndex, resolveActivityGroupWindow } from "./activity-summary";
 import {
-  shouldConsolidateSettledWorkIntoRunDetails,
-  type ResponseTimelineItem,
-  type ResponseTurn,
-  type TurnGitArtifactSummary,
+  isQuietSettledTurn,
+  needsStaticFoldRow,
+  shouldFoldSettledTurn,
+  turnHasFoldableWork,
+} from "./fold";
+import type {
+  ResponseTimelineItem,
+  ResponseTurn,
+  TurnGitArtifactSummary,
 } from "./model";
 import {
   collapsedUserRequestPreview,
@@ -39,10 +45,11 @@ export const TIMELINE_MINIMAP_MIN_GUTTER = 48;
 // each marker. The rail remains bounded and scrollable in shorter viewports.
 export const TIMELINE_MINIMAP_MAX_MARKERS = 40;
 const WATCHER_NOTE_ROW_HEIGHT = 64;
+const USER_REQUEST_META_HEIGHT = 28;
+const SUBAGENT_GROUP_ROW_HEIGHT = 52;
 const WATCHER_WAKE_REQUEST_HEIGHT = 44;
 const DUO_COMPARISON_REQUEST_HEIGHT = 136;
 export const DUO_COMPARISON_REQUEST_LABEL = "Comparing A and B";
-export const DELEGATED_RESULTS_REQUEST_LABEL = "Delegated results";
 
 /**
  * Row count alone misses short-but-expensive histories. A turn containing
@@ -111,7 +118,7 @@ function estimatePlanTextChars(plans: ResponseTurn["plans"]): number {
 function estimateResponseTurnRenderWeight(turn: ResponseTurn): number {
   const messageChars = turn.assistantMessages.reduce(
     (total, message) => total + message.content.length,
-    (turn.watcherWake || turn.userMessage.duoComparison || turn.userMessage.delegatedCompletion ? 0 : turn.userMessage.content.length)
+    (turn.watcherWake || turn.userMessage.duoComparison ? 0 : turn.userMessage.content.length)
       + turn.followUpMessages.reduce(
         (total, message) => total + message.content.length,
         0,
@@ -133,6 +140,7 @@ function estimateResponseTurnRenderWeight(turn: ResponseTurn): number {
     + turn.assistantMessages.length / 8
     + turn.activities.length / 24
     + turn.htmlRenders.length / 4
+    + turn.secretRequests.length / 4
     + messageChars / 40_000
     + detailChars / 50_000;
 }
@@ -197,6 +205,8 @@ export interface TimelineRowEstimateOptions {
   changedFilesExpanded?: boolean;
   /** The turn's delegated tasks: their rows are taller than the tool rows they replace. */
   subagents?: readonly SubagentTrace[];
+  turnFoldExpanded?: boolean;
+  settledSubagentsFoldable?: boolean;
 }
 
 const SUBAGENT_ROW_HEIGHT = 30;
@@ -240,6 +250,7 @@ function estimateSubagentRowsHeight(
   turn: ResponseTurn,
   subagents: readonly SubagentTrace[] | undefined,
   visibleActivityIds: ReadonlySet<string>,
+  includeUnlinked: boolean,
 ): number {
   if (!subagents || subagents.length === 0) return 0;
   let height = 0;
@@ -250,7 +261,7 @@ function estimateSubagentRowsHeight(
     subagents,
     new Set([...turn.activities, ...turn.importantActivities].map(({ id }) => id)),
   );
-  if (compact.length > 0) {
+  if (includeUnlinked && compact.length > 0) {
     height += 6 + compact.reduce((total, trace) =>
       total + SUBAGENT_ROW_HEIGHT + estimateSubagentRowExtraHeight(trace), 0);
   }
@@ -592,11 +603,11 @@ function estimateTurnRowSize(
   const requestActionsHeight = turn.userMessage.privateConnectDeviceId
     || turn.userMessage.watcherNote
     || turn.checkpoint
-    || turn.extraCheckpoints.length > 0
     || turn.checkpointUnavailableReason !== null
     ? 28
     : 0;
-  const requestHeight = turn.watcherWake || turn.userMessage.delegatedCompletion ? WATCHER_WAKE_REQUEST_HEIGHT : turn.userMessage.duoComparison ? DUO_COMPARISON_REQUEST_HEIGHT : (24
+  const requestHeight = turn.watcherWake ? WATCHER_WAKE_REQUEST_HEIGHT : turn.userMessage.duoComparison ? DUO_COMPARISON_REQUEST_HEIGHT : (24
+    + USER_REQUEST_META_HEIGHT
     + requestActionsHeight
     + requestLines * 22
     + attachmentRows * 25
@@ -631,7 +642,12 @@ function estimateTurnRowSize(
       ? 28
       : 0
   );
-  const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
+  const foldsTurn = !turn.isActive && shouldFoldSettledTurn(turn);
+  const foldVisible = foldsTurn && (
+    options.settledSubagentsFoldable === true
+    || turnHasFoldableWork(turn, { showThinking: options.showThinking !== false })
+  );
+  const consolidatesSettledWork = isQuietSettledTurn(turn, foldVisible);
   const failureActivities = turn.importantActivities.filter((activity) =>
     activity.kind === "error" && activity.status === "failed");
   const settledFailureFolded = !turn.isActive
@@ -656,13 +672,18 @@ function estimateTurnRowSize(
       + (hasSupplementalWork ? 27 : 0)
     : consolidatesSettledWork
       ? 0
-      : 32
-        + (settledFailureFolded ? 0 : importantHeight + openFailureHeight)
-        + settledExchangeHeight;
-  const expandedWorkHeight = (
-    options.workDetailsExpanded
-      || (consolidatesSettledWork && options.runDetailsExpanded)
-  )
+      : foldsTurn
+        ? (foldVisible || needsStaticFoldRow(turn, foldVisible) ? 32 : 0)
+          + importantHeight
+          + (failureActivities.length > 0 ? 28 + (settledFailureFolded ? 0 : openFailureHeight) : 0)
+          + settledExchangeHeight
+        : 32
+          + (settledFailureFolded ? 0 : importantHeight + openFailureHeight)
+          + settledExchangeHeight;
+  const workExpanded = foldsTurn
+    ? foldVisible && options.turnFoldExpanded === true
+    : options.workDetailsExpanded === true;
+  const expandedWorkHeight = workExpanded
     && (transcriptActivities.length > 0
       || turn.commentaryMessages.length > 0
       || hasSupplementalWork)
@@ -673,6 +694,10 @@ function estimateTurnRowSize(
         options.activityGroupsExpanded === true,
       )
     : 0;
+  const delegatedInFold = !turn.isActive
+    && !consolidatesSettledWork
+    && foldVisible
+    && options.settledSubagentsFoldable === true;
   const visibleActivities = [
     ...(turn.isActive || expandedWorkHeight > 0 ? transcriptActivities : []),
     ...(settledFailureFolded ? [] : turn.importantActivities),
@@ -681,11 +706,17 @@ function estimateTurnRowSize(
     turn,
     options.subagents,
     new Set(visibleActivities.map(({ id }) => id)),
+    !delegatedInFold || workExpanded,
   );
+  const foldedSubagentsHeight = workExpanded && options.settledSubagentsFoldable === true
+    ? SUBAGENT_GROUP_ROW_HEIGHT
+    : 0;
   const exceptionalHeight = turn.approvals.reduce((total, approval) =>
     total + estimateApprovalHeight(approval, answerColumns), 0)
     + turn.inputRequests.reduce((total, request) =>
-      total + estimateInputRequestHeight(request, answerColumns), 0);
+      total + estimateInputRequestHeight(request, answerColumns), 0)
+    + turn.secretRequests.reduce((total, message) =>
+      total + estimateSecretRequestHeight(message.secretRequest, answerColumns), 0);
 
   const systemHeight = turn.systemMessages.reduce((total, message) =>
     total + 35 + estimatedWrappedLines(message.content, answerColumns) * 20, 0);
@@ -727,12 +758,10 @@ function estimateTurnRowSize(
           + 38
         : 0)
     : 0;
-  const consolidatedWorkHeight = consolidatesSettledWork
-    ? expandedWorkHeight
-    : 0;
   const executionSectionHeight = executionHeight
     + subagentRowsHeight
     + (consolidatesSettledWork ? 0 : expandedWorkHeight)
+    + foldedSubagentsHeight
     + exceptionalHeight
     + systemHeight;
   const orderedSections = [
@@ -740,10 +769,7 @@ function estimateTurnRowSize(
     { kind: "execution", height: executionSectionHeight },
     { kind: "html-renders", height: htmlRenderHeight },
     { kind: "answer", height: answerHeight },
-    {
-      kind: "metadata",
-      height: metadataHeight + consolidatedWorkHeight,
-    },
+    { kind: "metadata", height: metadataHeight },
     { kind: "artifact", height: changedFilesHeight },
   ].filter(({ height }) => height > 0);
   const settledSpacing = estimateCompletedTurnSpacing(options.responseDensity);
@@ -766,6 +792,7 @@ function estimateTurnRowSize(
     + executionHeight
     + subagentRowsHeight
     + expandedWorkHeight
+    + foldedSubagentsHeight
     + exceptionalHeight
     + systemHeight
     + answerHeight
@@ -783,7 +810,8 @@ export function estimateTimelineRowSize(
   options: TimelineRowEstimateOptions = {},
 ): number {
   if (item.kind === "compaction") {
-    return item.message.compaction?.trigger === "on-return"
+    const trigger = item.message.compaction?.trigger;
+    return trigger === "on-return" || trigger === "idle"
       ? 56
       : 120 + Math.ceil(item.message.content.length / 80) * 20;
   }
@@ -827,11 +855,9 @@ export function buildTimelineMinimapMarkers(
     const turn = turns[index]!;
     const request = turn.watcherWake
       ? watcherCheckTitle(turn.watcherWake)
-      : turn.userMessage.delegatedCompletion
-        ? DELEGATED_RESULTS_REQUEST_LABEL
-        : turn.userMessage.duoComparison
-          ? DUO_COMPARISON_REQUEST_LABEL
-          : turn.userMessage.content.replace(/\s+/gu, " ").trim();
+      : turn.userMessage.duoComparison
+        ? DUO_COMPARISON_REQUEST_LABEL
+        : turn.userMessage.content.replace(/\s+/gu, " ").trim();
     return {
       index,
       id: turn.id,
@@ -876,10 +902,8 @@ export function readerScrollReachesLatest(input: {
   scrollHeight: number;
   previousScrollTop: number | null;
   live: boolean;
-  aimedAtLatest?: boolean;
 }): boolean {
   const movedUp = input.previousScrollTop !== null && input.scrollTop < input.previousScrollTop;
-  if (input.aimedAtLatest && !movedUp) return true;
   return shouldFollowTimeline(
     input.scrollTop,
     input.clientHeight,
@@ -895,14 +919,10 @@ export function readerScrollFollow(input: {
   previousScrollTop: number | null;
   live: boolean;
   intentional: boolean;
-  aimedAtLatest: boolean;
-}): { follows: boolean; movedUp: boolean } {
-  return {
-    movedUp: input.previousScrollTop !== null && input.scrollTop < input.previousScrollTop,
-    follows: input.intentional
-      ? readerScrollReachesLatest(input)
-      : shouldFollowTimeline(input.scrollTop, input.clientHeight, input.scrollHeight),
-  };
+}): boolean {
+  return input.intentional
+    ? readerScrollReachesLatest(input)
+    : shouldFollowTimeline(input.scrollTop, input.clientHeight, input.scrollHeight);
 }
 
 export function shouldFollowTimeline(scrollTop: number, clientHeight: number, scrollHeight: number, threshold = 120): boolean {

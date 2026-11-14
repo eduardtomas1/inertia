@@ -15,7 +15,6 @@ import type {
   CheckpointSummary,
   Conversation,
   ConversationLatestTurnSummary,
-  GitStatusSnapshot,
   Project,
   ProviderId,
   ProviderMaintenanceProviderId,
@@ -153,12 +152,47 @@ function unsavedChatQueueRunner(run: QueueCommandRunner): QueueCommandRunner {
   return unsaved;
 }
 
-export function savedChatRunner<Runner>(
-  run: Runner | undefined,
-  draft: Pick<Conversation, "id"> | null,
-  conversations: readonly Pick<Conversation, "id">[] | undefined,
-): Runner | undefined {
-  return !draft || conversations?.some(({ id }) => id === draft.id) ? run : undefined;
+interface StableSceneCallbacks {
+  setActionError: Dispatch<SetStateAction<string | null>>;
+  stopSubagent: (trace: SubagentTrace) => Promise<void>;
+  backgroundSubagent: (trace: SubagentTrace) => Promise<void>;
+  openCustomAgentSettings: () => void;
+}
+
+const stableSceneCallbacks = new WeakMap<WorkspaceSceneActions, StableSceneCallbacks>();
+
+export function workspaceSceneCallbacks(
+  actions: WorkspaceSceneActions,
+  setActionError: Dispatch<SetStateAction<string | null>>,
+): StableSceneCallbacks {
+  const cached = stableSceneCallbacks.get(actions);
+  if (cached?.setActionError === setActionError) return cached;
+  const created: StableSceneCallbacks = {
+    setActionError,
+    stopSubagent: async (trace) => {
+      try {
+        await actions.stopSubagent(trace);
+      } catch (error) {
+        setActionError(error instanceof Error
+          ? error.message
+          : "The delegated task could not be stopped.");
+        throw error;
+      }
+    },
+    backgroundSubagent: async (trace) => {
+      try {
+        await actions.backgroundSubagent?.(trace);
+      } catch (error) {
+        setActionError(error instanceof Error
+          ? error.message
+          : "The agent could not be moved to the background.");
+        throw error;
+      }
+    },
+    openCustomAgentSettings: () => actions.openSettings({ section: "custom-agents" }),
+  };
+  stableSceneCallbacks.set(actions, created);
+  return created;
 }
 
 export function chatQueueRunner(
@@ -166,13 +200,8 @@ export function chatQueueRunner(
   draft: Conversation | null,
   conversations: readonly Pick<Conversation, "id">[] | undefined,
 ): QueueCommandRunner | undefined {
-  return savedChatRunner(run, draft, conversations) ?? (run && unsavedChatQueueRunner(run));
-}
-
-export function chatCheckoutBranch(
-  gitStatus: Pick<GitStatusSnapshot, "isRepository" | "branch"> | null,
-): string | null | undefined {
-  return gitStatus?.isRepository ? gitStatus.branch : undefined;
+  if (!run || !draft || conversations?.some(({ id }) => id === draft.id)) return run;
+  return unsavedChatQueueRunner(run);
 }
 
 export function visibleChatConversation(
@@ -212,9 +241,7 @@ export function visibleChatProjection(
       ? projection.usage
       : null,
     contextPackets: detailOwned ? projection.detail?.contextPackets ?? [] : [],
-    rolledBackTurnIds: detailOwned ? projection.detail?.rolledBackTurnIds : undefined,
     watcherWakes: detailOwned ? projection.detail?.watcherWakes : undefined,
-    delegation: detailOwned ? projection.detail?.delegation : undefined,
     history: projectionOwned ? projection.history : undefined,
   };
 }
@@ -286,8 +313,7 @@ export interface WorkspaceSceneActions {
   connectProvider: (providerId: ProviderId) => void;
   openProviderSetup: (providerId: ProviderId) => void;
   openBackendSetup: (profileId: string) => void;
-  openSettings: () => void;
-  openUsageView?: () => void;
+  openSettings: (target?: SettingsTarget) => void;
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
   ) => void;
@@ -558,26 +584,8 @@ export function createWorkspaceSceneModel({
     persistedConversation?.id ?? null,
     projection.turns,
   );
-  const stopSubagent = async (trace: SubagentTrace): Promise<void> => {
-    try {
-      await actions.stopSubagent(trace);
-    } catch (error) {
-      setActionError(error instanceof Error
-        ? error.message
-        : "The delegated task could not be stopped.");
-      throw error;
-    }
-  };
-  const backgroundSubagent = async (trace: SubagentTrace): Promise<void> => {
-    try {
-      await actions.backgroundSubagent?.(trace);
-    } catch (error) {
-      setActionError(error instanceof Error
-        ? error.message
-        : "The agent could not be moved to the background.");
-      throw error;
-    }
-  };
+  const sceneCallbacks = workspaceSceneCallbacks(actions, setActionError);
+  const { stopSubagent, backgroundSubagent } = sceneCallbacks;
   const setGoal = async (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -629,6 +637,8 @@ export function createWorkspaceSceneModel({
         ({ archivedAt }) => archivedAt !== null,
       ) ?? [],
       databaseBackup: connection.snapshot?.databaseBackup,
+      customAgents: connection.snapshot?.customAgents ?? EMPTY_LIST,
+      skills: currentWorkflow?.skills ?? EMPTY_LIST,
       lifecycleDiagnostics: connection.status === "online"
         ? connection.snapshot?.lifecycleDiagnostics
         : undefined,
@@ -705,7 +715,7 @@ export function createWorkspaceSceneModel({
           onChange: actions.selectGlobalChatProject,
         },
       } : {}),
-      checkoutBranch: chatCheckoutBranch(workspaceTools.gitStatus),
+      checkoutBranch: workspaceTools.gitStatus?.branch ?? null,
       latestTurnSummary: visibleConversationLatestTurnSummary(
         persistedConversation,
         conversation,
@@ -727,6 +737,9 @@ export function createWorkspaceSceneModel({
       skillsLoading: draftConversation && draftSkills ? draftSkills.loading : workflow.loading,
       skillsError: draftConversation && draftSkills ? draftSkills.error : workflow.error,
       promptPresets: connection.snapshot?.promptPresets ?? EMPTY_LIST,
+      customAgents: connection.snapshot ? connection.snapshot.customAgents ?? EMPTY_LIST : undefined,
+      onOpenCustomAgentSettings: sceneCallbacks.openCustomAgentSettings,
+      onStopSubagent: stopSubagent,
       goal: persistedConversation && !globalChatActive ? {
         workflow: currentWorkflow,
         executionStatus: currentGoalExecution,
@@ -756,15 +769,14 @@ export function createWorkspaceSceneModel({
       promptContext: workspaceTools.pendingDiffContext,
       contextSources: workspaceOptions.contextSources,
       contextPackets: chatProjection.contextPackets,
-      rolledBackTurnIds: chatProjection.rolledBackTurnIds,
       watcherWakes: chatProjection.watcherWakes,
-      delegation: chatProjection.delegation,
-      conversations: connection.snapshot?.conversations,
-      onDelegationCommand: actions.run,
-      onOpenConversation: actions.openConversation,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
-      onForkCommand: savedChatRunner(actions.run, draftConversation, snapshotConversations),
-      onQueueCommand: chatQueueRunner(actions.runQueueCommand, draftConversation, snapshotConversations),
+      onSecretRequestCommand: actions.run,
+      onQueueCommand: chatQueueRunner(
+        actions.runQueueCommand,
+        draftConversation,
+        connection.snapshot?.conversations,
+      ),
       onLimitResetCommand: actions.runLimitResetCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
@@ -903,7 +915,6 @@ export function createWorkspaceSceneModel({
         ...(usageProvider && usageQuotaSource === "selected-route"
           ? { onRefreshUsage: () => actions.refreshUsage(usageProvider.id) }
           : {}),
-        ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },
       attachments: { attachments: environmentSummary.attachments, conversationId: conversation?.id ?? null },
       agents: {
@@ -1115,7 +1126,6 @@ export function createWorkspaceSceneModel({
           Boolean(conversationIsRunning
             && canStopSubagentTrace(trace, projection.turns)),
         onStopSubagent: stopSubagent,
-        onObservedChildCommand: actions.run,
       },
       plan: {
         steps: panelPlanSteps,

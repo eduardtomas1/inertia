@@ -42,7 +42,7 @@ export const PROVIDER_IDS = [
   "kimi",
   "opencode",
   "antigravity",
-  "pi",
+  "grok",
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -88,6 +88,13 @@ export interface ProviderDetectionOptions {
   signal?: AbortSignal;
 }
 
+export interface ProviderCustomAgentInput {
+  nativeName: string;
+  description: string;
+  instructions: string;
+  skills: readonly string[];
+}
+
 interface ProviderRunRequest {
   /** Native discovery/event compatibility projection; never used for routing. */
   providerId: ProviderId;
@@ -108,7 +115,6 @@ interface ProviderRunRequest {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
-  nativeContinuation?: import("./native-conversation-operations").NativeConversationContinuation;
   /**
    * Exact native Fast value advertised for the selected model. Presence means
    * both Fast and Standard can be requested explicitly and must be attested by
@@ -120,6 +126,7 @@ interface ProviderRunRequest {
   imagePaths?: readonly string[];
   attachmentReadRoots?: readonly string[];
   skills?: readonly ProviderSkillInput[];
+  customAgent?: ProviderCustomAgentInput;
   /**
    * Privileged Codex-only launch mode for a user-authored native goal. The
    * App Server owns the automatic turns started by this mutation; `prompt`
@@ -140,6 +147,8 @@ interface ProviderRunRequest {
    * it. Every other harness or backend ignores it. Absent means no limit.
    */
   maxBudgetUsd?: number;
+  autoCompactWindow?: number;
+  autoCompactTokenLimit?: number;
   readOnlyProfile?: "watcher";
   systemInstruction?: string;
   sessionInstruction?: string;
@@ -214,50 +223,12 @@ export interface ProviderRunFailure {
   activityId?: string;
   sessionUnavailable?: true;
   resumeRejected?: true;
-  /**
-   * Definite: the provider refused before the request reached the native
-   * session, so no prompt, handoff or rollback cursor was delivered.
-   */
-  notDelivered?: true;
   usageLimited?: true;
   failureKind?: TurnFailureKind;
 }
 
-/**
- * What the provider layer asserts about the rejected attempt when it asks for
- * a fresh session: its process tree has ended (cleanup was confirmed).
- */
-export interface ProviderFreshSessionPrior {
-  readonly priorCleanup: "confirmed";
-}
-
 export interface ProviderFreshSessionFallback {
   prompt: string;
-  /**
-   * Receives the replacement attempt's events. Without it they go to the
-   * run's `onEvent`, as the rejected attempt's did.
-   */
-  onEvent?: (event: ProviderEvent) => void;
-}
-
-export type ProviderBackgroundWork = "none" | "pending";
-
-export interface ProviderBackgroundWorkSession {
-  conversationId: string;
-  providerId: ProviderId;
-  harnessId: string;
-  nativeSessionId: string;
-}
-
-export interface ProviderBackgroundWorkProbe {
-  pendingBackgroundWork?(session: ProviderBackgroundWorkSession): ProviderBackgroundWork;
-}
-
-export function providerBackgroundWork(
-  probe: ProviderBackgroundWorkProbe,
-  session: ProviderBackgroundWorkSession,
-): ProviderBackgroundWork {
-  return probe.pendingBackgroundWork?.(session) ?? "none";
 }
 
 export interface ProviderEventBase {
@@ -319,16 +290,6 @@ export interface ProviderStatusEvent extends ProviderEventBase {
 export interface ProviderSessionEvent extends ProviderEventBase {
   type: "session";
   sessionId: string;
-}
-
-/** Provider-authored inclusive history anchor; null means unproved, never an inferred application ID. */
-export interface ProviderNativeBoundaryEvent extends ProviderEventBase {
-  type: "native-boundary";
-  nativeConversationId: string;
-  nativeSessionId: string | null;
-  nativeTurnId: string | null;
-  persistedHeadId: string | null;
-  phase: "started" | "settled";
 }
 
 export interface ProviderSessionTitleEvent extends ProviderEventBase {
@@ -469,7 +430,6 @@ export type ProviderEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
-  | ProviderNativeBoundaryEvent
   | ProviderSessionTitleEvent
   | ProviderApprovalEvent
   | ProviderApprovalResolvedEvent
@@ -486,7 +446,7 @@ export type ProviderEvent =
 export interface ProviderRunCallbacks {
   /** Fires only after the selected harness has synchronously accepted the run. */
   onStarted?: () => void;
-  freshSessionFallback?: (prior: ProviderFreshSessionPrior) => ProviderFreshSessionFallback | null;
+  freshSessionFallback?: () => ProviderFreshSessionFallback | null;
   onEvent?: (event: ProviderEvent) => void;
   onText?: (event: ProviderTextEvent) => void;
   onTextSnapshot?: (event: ProviderTextSnapshotEvent) => void;
@@ -788,7 +748,6 @@ export function isProviderRunRefusal(
 }
 
 export interface ProviderManagerOptions {
-  cursorSdk?: import("./cursor-sdk-service").CursorSdkConfiguration;
   /** Durable maintenance recovery blocks every launch for this provider. */
   providerRecoveryPending?: (providerId: ProviderId) => boolean;
   commands?: Partial<Record<ProviderId, string>>;

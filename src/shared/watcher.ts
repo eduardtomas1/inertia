@@ -3,7 +3,7 @@ import { z } from "zod";
 import { providerIdSchema } from "./contracts/client-command/common";
 
 export const WATCHER_HARNESS_IDS = [
-  "claude-agent-sdk", "codex-app-server", "opencode-sdk", "cursor-acp", "kimi-acp", "antigravity-cli", "pi-rpc",
+  "claude-agent-sdk", "codex-app-server", "opencode-sdk", "cursor-acp", "kimi-acp", "antigravity-cli", "grok-acp",
 ] as const;
 export const WATCHER_PRESETS = ["reviewer", "scope-guard", "explainer"] as const;
 export const WATCHER_STATUSES = ["watching", "waking", "paused", "detached"] as const;
@@ -369,8 +369,8 @@ export const WATCHER_READ_ONLY_ENFORCEMENT: Readonly<Record<string, WatcherReadO
   "opencode-sdk": "inertia",
   "cursor-acp": "approvals",
   "kimi-acp": "approvals",
+  "grok-acp": "approvals",
   "antigravity-cli": "provider",
-  "pi-rpc": "inertia",
 });
 
 export function watcherReadOnlyEnforcement(harnessId: string): WatcherReadOnlyEnforcement | null {

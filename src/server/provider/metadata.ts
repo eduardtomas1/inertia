@@ -24,12 +24,13 @@ import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
 import { readClaudeAgentSdkMetadata } from "./claude-agent-sdk-harness";
 import type { ProviderAuthState, ProviderId } from "./contracts";
 import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
-import { readOpenCode2Models } from "./opencode2-metadata";
-import { readPiModels } from "./pi-models";
 import { readAntigravityModels } from "./antigravity-models";
+import { grokStaticModels } from "./grok-models";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 import { RATE_LIMIT_TTL_MS } from "../runtime/provider-usage-refresh";
 import { slowMachineProbeDeadline } from "./probe-deadline";
+import { canonicalClaudeRateLimits, withKnownClaudeModelWeeklyLabel } from "./claude-rate-limit-windows";
+import { mergeSparseRateLimits } from "./rate-limit-merge";
 
 export type ProviderMetadataField = "models" | "rateLimits";
 
@@ -132,7 +133,7 @@ const DEFAULT_MODEL_TTL_MS = 5 * 60 * 1_000;
 const DEFAULT_RATE_LIMIT_TTL_MS = RATE_LIMIT_TTL_MS;
 const MAX_MODELS = 128;
 const MAX_RATE_LIMITS = 16;
-const SESSION_REASONING_PROVIDERS: readonly ProviderId[] = ["cursor", "kimi"];
+const SESSION_REASONING_PROVIDERS: readonly ProviderId[] = ["cursor", "kimi", "grok"];
 const AUTH_STATES: readonly ProviderAuthState[] = ["checking", "authenticated", "unauthenticated", "configured", "unknown", "error"];
 
 // @ts-expect-error New providers are appended below without rewriting this migration-pinned declaration.
@@ -151,10 +152,11 @@ const PROBE_FIELDS: Record<ProviderId, readonly ProviderMetadataField[]> = {
   kimi: [],
   opencode: ["models"],
   antigravity: ["models"],
-  pi: ["models"],
+  grok: ["models"],
 };
 
-Object.assign(AVAILABLE_FIELDS, { antigravity: ["models"] as const, pi: ["models"] as const });
+Object.assign(AVAILABLE_FIELDS, { antigravity: ["models"] as const });
+Object.assign(AVAILABLE_FIELDS, { grok: ["models"] as const });
 
 function cleanString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -496,19 +498,17 @@ export async function readProviderMetadata(
   fields: readonly ProviderMetadataField[] = PROBE_FIELDS[providerId],
   signal?: AbortSignal,
   timeoutMs = PROVIDER_METADATA_TIMEOUT_MS,
-  installationVersion?: string | null,
 ): Promise<ProviderMetadataReadResult> {
   if (providerId === "codex") return await readCodexMetadata(executable, environment, cwd, timeoutMs, fields, { signal });
   if (providerId === "claude") return await readClaudeAgentSdkMetadata(executable, environment, cwd, timeoutMs, undefined, fields, {}, signal);
   if (providerId === "opencode" && fields.includes("models")) {
-    if ((installationVersion ?? "").startsWith("2.")) return { models: await readOpenCode2Models(executable, environment, cwd, signal, timeoutMs, installationVersion) };
     return { models: await readOpenCodeSdkModels(executable, environment, cwd, { signal }) };
-  }
-  if (providerId === "pi" && fields.includes("models")) {
-    return { models: await readPiModels(executable, environment, cwd, { signal }) };
   }
   if (providerId === "antigravity" && fields.includes("models")) {
     return { models: await readAntigravityModels(executable, environment, cwd, { signal }) };
+  }
+  if (providerId === "grok" && fields.includes("models")) {
+    return { models: grokStaticModels() };
   }
   return {};
 }
@@ -700,7 +700,13 @@ export class ProviderMetadataCache {
       rateLimits.length > 0
       && AVAILABLE_FIELDS[scope.providerId].includes("rateLimits")
     ) {
-      entry.rateLimits.values = options.merge ? mergeById(entry.rateLimits.values, rateLimits).slice(0, MAX_RATE_LIMITS) : rateLimits;
+      entry.rateLimits.values = options.merge
+        ? mergeSparseRateLimits(
+            this.isFresh("rateLimits", entry.rateLimits) ? entry.rateLimits.values : [],
+            withKnownClaudeModelWeeklyLabel(entry.rateLimits.values, rateLimits),
+            attemptedAt,
+          ).slice(0, MAX_RATE_LIMITS)
+        : rateLimits;
       entry.rateLimits.updatedAt = attemptedAt;
       entry.rateLimits.lastAttemptedAt = attemptedAt;
       entry.rateLimits.provenance = provenance;
@@ -825,7 +831,6 @@ export class ProviderMetadataCache {
         fields,
         signal,
         timeoutMs,
-        scope.version,
       );
     } catch (error) {
       if (isProcessTreeTerminationUnconfirmed(error)) {
@@ -879,7 +884,10 @@ export class ProviderMetadataCache {
     const scope = normalizeCurrentProviderMetadataScope(cached.scope);
     if (!scope) return;
     const models = validateProviderModels(cached.models, scope.providerId);
-    const rateLimits = validateProviderRateLimits(cached.rateLimits);
+    const validRateLimits = validateProviderRateLimits(cached.rateLimits);
+    const rateLimits = scope.providerId === "claude"
+      ? canonicalClaudeRateLimits(validRateLimits)
+      : validRateLimits;
     const entry = blankProvider(scope);
     entry.models = {
       values: models,

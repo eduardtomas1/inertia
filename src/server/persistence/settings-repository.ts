@@ -71,7 +71,9 @@ export class SettingsRepository {
         quota_warnings_enabled = ?, quota_warning_threshold = ?,
         notify_only_in_background = ?,
         compact_on_return = ?,
-        delegation_automatic_wakes = ?,
+        compact_before_cache_expires = ?,
+        claude_auto_compact_window = ?,
+        codex_auto_compact_token_limit = ?,
         muted_custom_colors = ?
       WHERE id = 1
     `).run(
@@ -116,7 +118,9 @@ export class SettingsRepository {
       Number(next.quotaWarnings.enabled), next.quotaWarnings.firstThreshold,
       Number(next.notifyOnlyInBackground),
       next.compactOnReturn,
-      Number(next.delegationAutomaticWakes),
+      Number(next.compactBeforeCacheExpires),
+      next.claudeAutoCompactWindow,
+      next.codexAutoCompactTokenLimit,
       Number(mutedCustomColors),
     );
   }

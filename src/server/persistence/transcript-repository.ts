@@ -4,10 +4,11 @@ import { contextBlockPromptBytes, providerHandoffBlockBytes, providerHandoffFile
 import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
+import { isSecretRequestReference } from "../../shared/agent-secrets";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
-import { delegatedCompletionAttributionSchema, type DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
 import { DUO_COMPARISON_BRIEF_MAX_BYTES, duoComparisonBriefSchema, type DuoComparisonBrief } from "../../shared/duo-comparison-brief";
+import { customAgentCallAttributionSchema, type CustomAgentCallAttribution } from "../../shared/custom-agents";
 import { AGENT_TURN_STATUSES, isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { randomUUID } from "node:crypto";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
@@ -25,6 +26,7 @@ import {
 } from "./codecs";
 import type { PersistenceContext } from "./context";
 import { RecordNotFoundError } from "./errors";
+import { AgentSecretRequestRepository } from "./agent-secret-request-repository";
 import type { MessageRow } from "./rows";
 import {
   appendMessageContentChunks,
@@ -56,15 +58,6 @@ function validWatcherNote(role: ChatMessage["role"], note: WatcherNoteAttributio
   return parsed.data;
 }
 
-function validDelegatedCompletion(role: ChatMessage["role"], attribution: DelegatedCompletionAttribution,
-  conversationId: string, watcherNote: WatcherNoteAttribution | undefined): DelegatedCompletionAttribution {
-  const parsed = delegatedCompletionAttributionSchema.safeParse(attribution);
-  if (role !== "user" || watcherNote !== undefined || !parsed.success || parsed.data.parentConversationId !== conversationId) {
-    throw new Error("Invalid delegated result attribution.");
-  }
-  return parsed.data;
-}
-
 function validDuoComparison(role: ChatMessage["role"], turnId: string | null, brief: DuoComparisonBrief): DuoComparisonBrief {
   const parsed = duoComparisonBriefSchema.safeParse(brief);
   if (role !== "user" || turnId !== null || !parsed.success
@@ -72,8 +65,23 @@ function validDuoComparison(role: ChatMessage["role"], turnId: string | null, br
   return parsed.data;
 }
 
+function validCustomAgentCall(role: ChatMessage["role"], call: CustomAgentCallAttribution): CustomAgentCallAttribution {
+  const parsed = customAgentCallAttributionSchema.safeParse(call);
+  if (role !== "user" || !parsed.success) throw new Error("Invalid custom agent attribution.");
+  return parsed.data;
+}
+
 export class TranscriptRepository {
-  constructor(private readonly context: TranscriptPersistenceContext) {}
+  readonly secretRequests: AgentSecretRequestRepository;
+
+  constructor(private readonly context: TranscriptPersistenceContext) {
+    this.secretRequests = new AgentSecretRequestRepository(context.database, {
+      assertAgentTurnIdentity: (conversationId, runId, turnId) =>
+        context.assertAgentTurnIdentity(conversationId, runId, turnId),
+      createMessage: (...input) => this.createMessage(...input),
+      message: (messageId) => this.message(messageId),
+    });
+  }
 
   continuationHistory(
     conversationId: string,
@@ -182,27 +190,29 @@ export class TranscriptRepository {
       : requireTimestamp(createdAt, "Message creation time");
     if (options.compaction && (role !== "system" || turnId !== null || !isContextCompaction(options.compaction))) throw new Error("Invalid compaction receipt.");
     if (options.htmlRender && (role !== "system" || turnId === null || !isHtmlRenderReference(options.htmlRender))) throw new Error("Invalid rendered page reference.");
+    if (options.secretRequest && (role !== "system" || turnId === null || !isSecretRequestReference(options.secretRequest))) throw new Error("Invalid secret request reference.");
     if (options.privateConnectDeviceId !== undefined
       && (role !== "user" || !isMessageOriginDeviceId(options.privateConnectDeviceId))) throw new Error("Invalid remote message origin.");
     const watcherNote = options.watcherNote === undefined ? undefined : validWatcherNote(role, options.watcherNote);
     const duoComparison = options.duoComparison === undefined ? undefined : validDuoComparison(role, turnId, options.duoComparison);
-    const delegatedCompletion = options.delegatedCompletion === undefined ? undefined
-      : validDelegatedCompletion(role, options.delegatedCompletion, conversationId, watcherNote);
-    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}), ...(options.htmlRender ? { htmlRender: { ...options.htmlRender } } : {}) };
+    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}), ...(options.htmlRender ? { htmlRender: { ...options.htmlRender } } : {}), ...(options.secretRequest ? { secretRequest: { ...options.secretRequest } } : {}) };
     if (options.privateConnectDeviceId !== undefined) message.privateConnectDeviceId = options.privateConnectDeviceId;
     if (watcherNote) message.watcherNote = watcherNote;
     if (duoComparison) message.duoComparison = duoComparison;
-    if (delegatedCompletion) message.delegatedCompletion = delegatedCompletion;
+    const customAgentCall = options.customAgentCall === undefined ? undefined : validCustomAgentCall(role, options.customAgentCall);
+    if (customAgentCall) message.customAgentCall = customAgentCall;
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, delegated_completion_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @delegatedCompletionJson)`).run({ ...message, delegatedCompletionJson: delegatedCompletion ? JSON.stringify(delegatedCompletion) : null,attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null });
-      this.context.database.prepare(`
-        UPDATE conversations
-        SET updated_at = ?, settled_at = NULL,
-            last_viewed_at = CASE WHEN ? = 'user' THEN ? ELSE last_viewed_at END
-        WHERE id = ?
-      `).run(now, role, now, conversationId);
-      this.context.touchProject(conversation.project_id, now);
+      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, custom_agent_call_json, secret_request_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @customAgentCallJson, @secretRequestJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null, customAgentCallJson: customAgentCall ? JSON.stringify(customAgentCall) : null, secretRequestJson: message.secretRequest ? JSON.stringify(message.secretRequest) : null });
+      if (options.touchConversation !== false) {
+        this.context.database.prepare(`
+          UPDATE conversations
+          SET updated_at = ?, settled_at = NULL,
+              last_viewed_at = CASE WHEN ? = 'user' THEN ? ELSE last_viewed_at END
+          WHERE id = ?
+        `).run(now, role, now, conversationId);
+        this.context.touchProject(conversation.project_id, now);
+      }
       if (role === "user" && options.activateConversation !== false) {
         this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1")
           .run(conversation.project_id, conversationId);
@@ -229,12 +239,10 @@ export class TranscriptRepository {
     acknowledgedAt?: string,
     attachments: readonly ChatAttachment[] = [],
     queuedMessageId?: string,
-    options: { watcherNote?: WatcherNoteAttribution; delegatedCompletion?: DelegatedCompletionAttribution } = {},
+    options: { watcherNote?: WatcherNoteAttribution } = {},
   ): ChatMessage {
     const conversation = this.context.requireConversation(conversationId);
     const watcherNote = options.watcherNote === undefined ? undefined : validWatcherNote("user", options.watcherNote);
-    const delegatedCompletion = options.delegatedCompletion === undefined ? undefined
-      : validDelegatedCompletion("user", options.delegatedCompletion, conversationId, watcherNote);
     const turn = agentTurnFromRow(this.context.requireAgentTurn(turnId));
     if (turn.conversationId !== conversationId) {
       throw new Error("The follow-up turn belongs to a different conversation.");
@@ -254,20 +262,17 @@ export class TranscriptRepository {
       attachments: rendererSafeAttachments(attachments),
       createdAt: submittedAt,
       ...(watcherNote ? { watcherNote } : {}),
-      ...(delegatedCompletion ? { delegatedCompletion } : {}),
     };
     this.context.database.transaction(() => {
       this.context.database.prepare(`
         INSERT INTO messages (
           id, conversation_id, turn_id, role, content,
-          attachments_json, created_at, watcher_note_json, delegated_completion_json
-        ) VALUES (@id, @conversationId, @turnId, 'user', @content, @attachmentsJson, @createdAt, @watcherNoteJson,
-          @delegatedCompletionJson)
+          attachments_json, created_at, watcher_note_json
+        ) VALUES (@id, @conversationId, @turnId, 'user', @content, @attachmentsJson, @createdAt, @watcherNoteJson)
       `).run({
         ...message,
         attachmentsJson: JSON.stringify(message.attachments),
         watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null,
-        delegatedCompletionJson: delegatedCompletion ? JSON.stringify(delegatedCompletion) : null,
       });
       this.context.database.prepare(`
         UPDATE conversations
@@ -286,31 +291,6 @@ export class TranscriptRepository {
       }
     })();
     return message;
-  }
-
-  associateMessageWithTurn(
-    messageId: string,
-    conversationId: string,
-    runId: string,
-    turnId: string,
-  ): ChatMessage {
-    const turn = this.context.assertAgentTurnIdentity(conversationId, runId, turnId);
-    const row = this.context.database.prepare(`
-      SELECT ${MESSAGE_PROJECTION_COLUMNS}
-      FROM messages
-      WHERE messages.id = ?
-    `).get(messageId) as MessageRow | undefined;
-    if (!row || row.conversation_id !== conversationId) throw new RecordNotFoundError("Message not found.");
-    if (row.role === "user" && turn.userMessageId !== messageId) {
-      throw new Error("The user message is owned by a different turn.");
-    }
-    if (row.turn_id !== null && row.turn_id !== turnId) {
-      throw new Error("The message is already owned by a different turn.");
-    }
-    if (row.turn_id === null) {
-      this.context.database.prepare("UPDATE messages SET turn_id = ? WHERE id = ?").run(turnId, messageId);
-    }
-    return { ...messageFromRow(row), turnId };
   }
 
   updateMessageContent(messageId: string, content: string): void {

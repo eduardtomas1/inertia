@@ -78,7 +78,7 @@ const PROVIDER_LABELS: Partial<Record<SubagentTrace["providerId"], string>> = {
   kimi: "Kimi Code",
   opencode: "OpenCode",
   antigravity: "Antigravity",
-  pi: "Pi",
+  grok: "Grok",
 };
 
 export function subagentProviderLabel(trace: SubagentTrace): string {
@@ -90,6 +90,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "claude-agent-sdk": "Agent SDK",
   "cursor-acp": "ACP",
   "kimi-acp": "ACP",
+  "grok-acp": "ACP",
   "opencode-sdk": "SDK",
   "antigravity-cli": "CLI",
 };
@@ -120,14 +121,6 @@ export function subagentTraceLabel(trace: SubagentTrace): string {
   const name = trace.providerName ?? trace.providerRole;
   if (name) return humanizeSubagentIdentifier(name);
   return `${subagentProviderLabel(trace)} delegated task`;
-}
-
-export function subagentMissionSummary(trace: SubagentTrace): string | null {
-  const mission = trace.description?.trim();
-  if (!mission) return null;
-  return mission.length <= MAX_SUBAGENT_SUMMARY_CHARS
-    ? mission
-    : `${mission.slice(0, MAX_SUBAGENT_SUMMARY_CHARS - 1).trimEnd()}…`;
 }
 
 const EQUIVALENT_PROVIDER_STATUSES: Readonly<
@@ -239,6 +232,15 @@ export function subagentElapsedMs(
     ? now
     : updatedAt;
   return Math.max(0, end - startedAt);
+}
+
+export function subagentReportedElapsedMs(
+  trace: SubagentTrace,
+  now: number,
+): number | null {
+  if (isLiveSubagentTrace(trace)) return subagentElapsedMs(trace, now);
+  if (trace.durationMs !== null) return trace.durationMs;
+  return trace.status === "lost" ? null : subagentElapsedMs(trace, now);
 }
 
 export function subagentDisclosureRows(

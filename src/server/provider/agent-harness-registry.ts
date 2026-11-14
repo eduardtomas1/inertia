@@ -1,9 +1,8 @@
-import { createCursorSdkHarness } from "./cursor-sdk-harness";
-import { createPiRpcHarness } from "./pi-rpc-harness";
 import { createAntigravityCliHarness } from "./antigravity-cli-harness";
 import { createClaudeAgentSdkHarness } from "./claude-agent-sdk-harness";
 import { createCodexAppServerHarness } from "./codex-app-server-harness";
 import { createCursorAcpHarness } from "./cursor-acp-harness";
+import { createGrokAcpHarness } from "./grok-acp-harness";
 import { createKimiAcpHarness } from "./kimi-acp-harness";
 import { createOpenCodeSdkHarness } from "./opencode-sdk-harness";
 import {
@@ -27,11 +26,10 @@ const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "opencode-cli": "opencode",
   "claude-agent-sdk": "claude",
   "cursor-acp": "cursor",
-  "cursor-sdk": "cursor",
   "kimi-acp": "kimi",
+  "grok-acp": "grok",
   "opencode-sdk": "opencode",
   "antigravity-cli": "antigravity",
-  "pi-rpc": "pi",
 };
 
 export class AgentHarnessRegistry {
@@ -80,22 +78,22 @@ export class AgentHarnessRegistry {
     }
     if (input.backendProfile.source === "custom") {
       if (
-        input.providerId === "pi"
-        || input.providerId === "cursor"
+        input.providerId === "cursor"
         || input.providerId === "kimi"
         || input.providerId === "antigravity"
         || input.providerId === "opencode"
+        || input.providerId === "grok"
       ) {
         throw new ProviderRuntimeError(
           "invalid_input",
-          input.providerId === "pi"
-            ? "Pi backends must come from Pi’s native model catalog."
-            : input.providerId === "cursor"
+          input.providerId === "cursor"
             ? "Cursor controls its backend; external backend profiles cannot be injected."
             : input.providerId === "kimi"
               ? "Kimi Code controls its backend; external backend profiles cannot be injected."
             : input.providerId === "antigravity"
               ? "Antigravity controls its backend; external backend profiles cannot be injected."
+            : input.providerId === "grok"
+              ? "Grok controls its backend; external backend profiles cannot be injected."
               : "OpenCode backends must come from OpenCode's native provider catalog.",
         );
       }
@@ -146,11 +144,10 @@ export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
     createCodexAppServerHarness(),
     createClaudeAgentSdkHarness(),
     createCursorAcpHarness(),
-    createCursorSdkHarness(),
     createKimiAcpHarness(),
     createOpenCodeSdkHarness(),
     createAntigravityCliHarness(),
-    createPiRpcHarness(),
+    createGrokAcpHarness(),
   ]);
   const registered = registry.list().map((harness) =>
     `${harness.providerId}\0${harness.id}`);

@@ -1,9 +1,13 @@
 import { LIBRARY_SCHEMA_VERSION } from "./migrations/library";
-import { ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION } from "./migrations/orchestration-v2-receipt-status";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
+import { CUSTOM_AGENTS_SCHEMA_VERSION } from "./migrations/custom-agents";
+import { CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS } from "./custom-agents-schema";
 import { TODO_SOURCE_CONVERSATION_SCHEMA_VERSION } from "./migrations/todo-source-conversation";
 import { CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION } from "./migrations/codex-thread-tool-packs";
 import { SUBAGENT_TASK_SHAPE_SCHEMA_VERSION } from "./migrations/subagent-task-shape";
+import { CONTEXT_COMPACTION_SETTINGS_SCHEMA_VERSION } from "./migrations/context-compaction-settings";
+import { CODEX_COMPACTION_LIMIT_SCHEMA_VERSION } from "./migrations/codex-compaction-limit";
+import { AGENT_SECRET_REQUESTS_SCHEMA_VERSION } from "./migrations/agent-secret-requests";
 
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
@@ -160,35 +164,45 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "model_source",
     "steps_json",
   ]],
-  [116, "agent_thread_operations", ["client_request_key"]],
-  [116, "queued_messages", ["delegated_completion_json"]],
-  [116, "messages", ["delegated_completion_json"]],
-  [116, "delegated_tasks", [
-    "task_id",
-    "parent_conversation_id",
-    "source_turn_id",
-    "source_run_id",
-    "child_conversation_id",
-    "operation_id",
-    "kind",
-    "original_task_id",
-    "status",
-    "completion_wake",
-    "wake_armed",
-    "delivery_state",
-    "delivery_generation",
-    "result_turn_id",
+  [CONTEXT_COMPACTION_SETTINGS_SCHEMA_VERSION, "app_state", [
+    "compact_before_cache_expires",
+    "claude_auto_compact_window",
+  ]],
+  [CODEX_COMPACTION_LIMIT_SCHEMA_VERSION, "app_state", ["codex_auto_compact_token_limit"]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents", [
+    "id",
+    "name",
+    "handle",
+    "description",
+    "icon_json",
+    "accent",
+    "blocks_json",
+    "skills_json",
+    "position",
+    "revision",
     "created_at",
     "updated_at",
   ]],
-  [116, "delegated_task_turns", ["child_turn_id", "task_id"]],
-  [117, "app_state", ["delegation_automatic_wakes"]],
-  [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, "orchestration_v2_receipts", ["status", "error", "command_type"]],
-  [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, "orchestration_v2_projection_metadata", [
-    "projection_name",
-    "schema_version",
-    "last_sequence",
-    "updated_at",
+  [CUSTOM_AGENTS_SCHEMA_VERSION, "messages", ["custom_agent_call_json"]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, "subagent_traces", ["custom_agent_id"]],
+  [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "messages", ["secret_request_json"]],
+  [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "agent_secret_requests", [
+    "id",
+    "conversation_id",
+    "turn_id",
+    "run_id",
+    "message_id",
+    "provider_id",
+    "title",
+    "description",
+    "file_name",
+    "file_token",
+    "ttl_hours",
+    "status",
+    "vaulted",
+    "created_at",
+    "answered_at",
+    "expires_at",
   ]],
 ];
 
@@ -238,8 +252,8 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [103, ["turn_failure_kinds"]],
   [LIBRARY_SCHEMA_VERSION, ["library_categories", "saved_answers"]],
   [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, ["codex_thread_tool_packs"]],
-  [116, ["delegated_tasks", "delegated_task_turns"]],
-  [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, ["orchestration_v2_projection_metadata"]],
+  [CUSTOM_AGENTS_SCHEMA_VERSION, ["custom_agents"]],
+  [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, ["agent_secret_requests"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -273,12 +287,9 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [LIBRARY_SCHEMA_VERSION, "html_renders_created_idx"],
     [TODO_SOURCE_CONVERSATION_SCHEMA_VERSION, "todos_source_conversation_idx"],
     [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, "codex_thread_tool_packs_registered_idx"],
-    [116, "agent_thread_operations_client_request_idx"],
-    [116, "queued_messages_delegated_delivery_idx"],
-    [116, "delegated_tasks_parent_delivery_idx"],
-    [116, "delegated_tasks_child_status_idx"],
-    [116, "delegated_tasks_source_turn_idx"],
-    [116, "delegated_task_turns_task_idx"],
+    [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_position_idx"],
+    [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "agent_secret_requests_status_expiry_idx"],
+    [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "agent_secret_requests_conversation_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [
@@ -315,5 +326,6 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
       "(select count(*) from saved_answers) >= 1000",
       "raise(abort,",
     ]],
+    [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_count_limit", CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS],
   ],
 };

@@ -100,7 +100,7 @@ const BACKEND_PROVIDER_IDS = [
   "kimi",
   "opencode",
   "antigravity",
-  "pi",
+  "grok",
 ] as const satisfies readonly ProviderId[];
 
 export const CLAUDE_BACKEND_TIER_IDS = [

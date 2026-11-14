@@ -24,11 +24,10 @@ const productionMappings = [
   ["codex", "codex-app-server"],
   ["claude", "claude-agent-sdk"],
   ["cursor", "cursor-acp"],
-  ["cursor", "cursor-sdk"],
   ["kimi", "kimi-acp"],
   ["opencode", "opencode-sdk"],
   ["antigravity", "antigravity-cli"],
-  ["pi", "pi-rpc"],
+  ["grok", "grok-acp"],
 ] as const;
 
 function manifest(harnessId: (typeof productionMappings)[number][1]) {
@@ -91,12 +90,12 @@ describe("provider capability manifests", () => {
     }
   });
 
-  it("publishes eight complete canonical harness mappings for seven providers", () => {
+  it("publishes exactly seven complete canonical provider-harness mappings", () => {
     const manifests = productionProviderCapabilityManifests();
     expect(manifests.map(({ providerId, harnessId }) =>
       [providerId, harnessId])).toEqual(productionMappings);
     expect(new Set(manifests.map(({ providerId }) => providerId)).size).toBe(7);
-    expect(new Set(manifests.map(({ harnessId }) => harnessId)).size).toBe(8);
+    expect(new Set(manifests.map(({ harnessId }) => harnessId)).size).toBe(7);
 
     for (const value of manifests) {
       expect(value.schemaVersion).toBe(1);
@@ -131,6 +130,8 @@ describe("provider capability manifests", () => {
     expect(manifest("cursor-acp").bundledSdkVersion)
       .toBe(packageJson.dependencies["@agentclientprotocol/sdk"]);
     expect(manifest("kimi-acp").bundledSdkVersion)
+      .toBe(packageJson.dependencies["@agentclientprotocol/sdk"]);
+    expect(manifest("grok-acp").bundledSdkVersion)
       .toBe(packageJson.dependencies["@agentclientprotocol/sdk"]);
     expect(manifest("opencode-sdk").bundledSdkVersion)
       .toBe(packageJson.dependencies["@opencode-ai/sdk"]);
@@ -193,6 +194,16 @@ describe("provider capability manifests", () => {
     expect(capability(kimi, "model-discovery").support).toBe("negotiated");
     expect(capability(kimi, "maintenance-update").support)
       .toBe("negotiated");
+
+    const grok = manifest("grok-acp");
+    expect(capability(grok, "structured-input").support).toBe("native");
+    expect(capability(grok, "images").support).toBe("negotiated");
+    expect(capability(grok, "compaction")).toMatchObject({
+      support: "unavailable",
+      fallback: "reject-unsupported-operation",
+      unavailableReasonCode: "unsupported-operation",
+    });
+    expect(capability(grok, "model-discovery").support).toBe("negotiated");
 
     const antigravity = manifest("antigravity-cli");
     expect(capability(antigravity, "model-discovery").support).toBe("native");

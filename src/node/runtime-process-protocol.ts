@@ -7,8 +7,7 @@ import { isMascotFocus } from "../shared/mascot.js";
 import { isMascotRequest, parseMascotFeed, type MascotFeed } from "../shared/mascot-feed.js";
 import { isAbsolute } from "node:path";
 import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
-import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
-import { parseRuntimeIssueEvidenceRequest, parseRuntimeIssueEvidenceResult, type RuntimeIssueEvidenceRequest, type RuntimeIssueEvidenceResult } from "./runtime-issue-evidence-protocol";
+import { parseRuntimeFeatureWorkerCommand, parseRuntimeFeatureWorkerEvent, type RuntimeFeatureWorkerCommand, type RuntimeFeatureWorkerEvent } from "./runtime-feature-protocol";
 import {
   parseRuntimeAttachmentConversationsEvent,
   parseRuntimeAttachmentConversationsQuery,
@@ -21,10 +20,11 @@ import {
   type RuntimeAttachmentRelinquishResult,
   type RuntimeAttachmentResult,
 } from "./runtime-attachment-protocol";
-import { parseRuntimeHtmlRenderEvent, parseRuntimeHtmlRenderReadCommand, type RuntimeHtmlRenderEvent, type RuntimeHtmlRenderReadCommand } from "./runtime-html-render-protocol";
-import { parseRuntimeCredentialRequest, parseRuntimeCredentialResult,
-  type RuntimeCredentialRequest, type RuntimeCredentialResult } from "./runtime-credential-protocol";
-export type { RuntimeCredentialOperation, RuntimeCredentialFailureCode, RuntimeCredentialResult } from "./runtime-credential-protocol";
+import {
+  isBackendCredentialGeneration,
+  isBackendCredentialSecret,
+  isBackendSecretReference,
+} from "../shared/backend-credentials";
 import {
   claudeCompatibleBackendProfileSchema,
   type ClaudeCompatibleBackendProfile,
@@ -112,7 +112,7 @@ export type RuntimeWorkerCommand =
   | RuntimeUpdateWorkerCommand
   | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
   | RuntimeAttachmentConversationsQuery
-  | RuntimeHtmlRenderReadCommand
+  | RuntimeFeatureWorkerCommand
   | {
       type: "runtime.private-connect-request";
       requestId: string;
@@ -154,7 +154,41 @@ export type RuntimeWorkerCommand =
   | RuntimeAttachmentRelinquishResult
   | RuntimeConversationAttachmentStoreResult
   | RuntimeDocumentPreparationResult
-  | RuntimeSecureFileResult | RuntimeAgentBrowserResult | RuntimeIssueEvidenceResult;
+  | RuntimeSecureFileResult;
+
+export type RuntimeCredentialOperation = "resolve" | "status" | "clear" | "forget";
+export type RuntimeCredentialFailureCode = "not-found" | "unavailable" | "invalid";
+export type RuntimeCredentialResult =
+  | {
+      type: "runtime.credential-result";
+      requestId: string;
+      operation: "resolve";
+      ok: true;
+      secret: string;
+    }
+  | {
+      type: "runtime.credential-result";
+      requestId: string;
+      operation: "status";
+      ok: true;
+      hasSecret: boolean;
+      credentialGeneration: string | null;
+    }
+  | {
+      type: "runtime.credential-result";
+      requestId: string;
+      operation: "clear" | "forget";
+      ok: true;
+      removed: boolean;
+    }
+  | {
+      type: "runtime.credential-result";
+      requestId: string;
+      operation: RuntimeCredentialOperation;
+      ok: false;
+      code: RuntimeCredentialFailureCode;
+      message: string;
+    };
 
 export interface RuntimeSecureFileResult {
   type: "runtime.secure-file-result";
@@ -239,12 +273,17 @@ export type RuntimeWorkerEvent =
     }
   | RuntimeConversationAttachmentStoreEvent
   | RuntimeDocumentPreparationEvent
-  | RuntimeCredentialRequest
+  | {
+      type: "runtime.credential-request";
+      requestId: string;
+      operation: RuntimeCredentialOperation;
+      secretReference: string;
+    }
   | ({
       type: "runtime.secure-file-request";
       requestId: string;
     } & SecureFileRequest)
-  | RuntimeAgentBrowserEvent | RuntimeIssueEvidenceRequest | RuntimeHtmlRenderEvent | RuntimeAttachmentConversationsEvent;
+  | RuntimeFeatureWorkerEvent | RuntimeAttachmentConversationsEvent;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -312,9 +351,8 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     return parseRuntimeConversationAttachmentStoreResult(value);
   }
   if (value.type === "runtime.document-preparation-result") return parseRuntimeDocumentPreparationResult(value);
-  const browserResult = parseRuntimeAgentBrowserResult(value); if (browserResult) return browserResult;
-  if (value.type === "runtime.issue-evidence-result") return parseRuntimeIssueEvidenceResult(value);
-  if (value.type === "runtime.read-html-render") return parseRuntimeHtmlRenderReadCommand(value);
+  const featureCommand = parseRuntimeFeatureWorkerCommand(value);
+  if (featureCommand) return featureCommand;
   if (value.type === "runtime.attachment-conversations") return parseRuntimeAttachmentConversationsQuery(value);
   if (
     value.type === "runtime.secure-file-result"
@@ -463,6 +501,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const hasKimiProfiles = Object.hasOwn(options, "kimiClaudeProfiles");
   const hasCodexBinaryPath = Object.hasOwn(options, "codexBinaryPath");
   const hasAttachmentRoot = Object.hasOwn(options, "attachmentRoot");
+  const hasAgentSecretDirectory = Object.hasOwn(options, "agentSecretDirectory");
   const hasPackageSmokePdf = Object.hasOwn(options, "packageSmokePdf");
   const hasPackageSmokeImage = Object.hasOwn(options, "packageSmokeImage");
   const hasRecoveryImportFault = Object.hasOwn(options, "recoveryImportFault");
@@ -490,6 +529,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       + Number(hasKimiProfiles)
       + Number(hasCodexBinaryPath)
       + Number(hasAttachmentRoot)
+      + Number(hasAgentSecretDirectory)
       + Number(hasPackageSmokePdf)
       + Number(hasPackageSmokeImage)
       + Number(hasRecoveryImportFault)
@@ -517,6 +557,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     )
     || (hasCodexBinaryPath && !runtimePath(options.codexBinaryPath))
     || (hasAttachmentRoot && !runtimePath(options.attachmentRoot))
+    || (hasAgentSecretDirectory && !runtimePath(options.agentSecretDirectory))
     || (
       hasPackageSmokePdf
       && (
@@ -582,6 +623,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       ...(windowsTerminalAuthority ? { windowsTerminalAuthority } : {}),
       ...(hasCodexBinaryPath ? { codexBinaryPath: options.codexBinaryPath as string } : {}),
       ...(hasAttachmentRoot ? { attachmentRoot: options.attachmentRoot as string } : {}),
+      ...(hasAgentSecretDirectory ? { agentSecretDirectory: options.agentSecretDirectory as string } : {}),
       ...(hasKimiProfiles ? { kimiClaudeProfiles } : {}),
       ...(hasPackageSmokePdf
         ? {
@@ -636,9 +678,8 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   }
   const updateEvent = parseRuntimeUpdateWorkerEvent(value);
   if (updateEvent) return updateEvent;
-  const browserEvent = parseRuntimeAgentBrowserEvent(value); if (browserEvent) return browserEvent;
-  if (value.type === "runtime.issue-evidence-request") return parseRuntimeIssueEvidenceRequest(value);
-  const htmlRenderEvent = parseRuntimeHtmlRenderEvent(value); if (htmlRenderEvent) return htmlRenderEvent;
+  const featureEvent = parseRuntimeFeatureWorkerEvent(value);
+  if (featureEvent) return featureEvent;
   const attachmentConversations = parseRuntimeAttachmentConversationsEvent(value); if (attachmentConversations) return attachmentConversations;
   const recoveryEvent = parseRuntimeRecoveryWorkerEvent(value);
   if (recoveryEvent) return recoveryEvent;
@@ -749,7 +790,26 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       attachmentId: value.attachmentId,
     };
   }
-  if (value.type === "runtime.credential-request") return parseRuntimeCredentialRequest(value);
+  if (
+    value.type === "runtime.credential-request"
+    && Object.keys(value).length === 4
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+    && (
+      value.operation === "resolve"
+      || value.operation === "status"
+      || value.operation === "clear"
+      || value.operation === "forget"
+    )
+    && isBackendSecretReference(value.secretReference)
+  ) {
+    return {
+      type: "runtime.credential-request",
+      requestId: value.requestId,
+      operation: value.operation,
+      secretReference: value.secretReference,
+    };
+  }
   if (
     value.type === "runtime.secure-file-request"
     && typeof value.requestId === "string"
@@ -899,6 +959,89 @@ function parseRuntimePrivateConnectForgetScope(
     && scope.conversationId.length <= 200
   ) {
     return { kind: "conversation", conversationId: scope.conversationId };
+  }
+  return null;
+}
+
+function parseRuntimeCredentialResult(
+  value: Record<string, unknown>,
+): RuntimeCredentialResult | null {
+  if (
+    typeof value.requestId !== "string"
+    || !UUID_PATTERN.test(value.requestId)
+    || (
+      value.operation !== "resolve"
+      && value.operation !== "status"
+      && value.operation !== "clear"
+      && value.operation !== "forget"
+    )
+    || typeof value.ok !== "boolean"
+  ) return null;
+  if (!value.ok) {
+    if (
+      Object.keys(value).length !== 6
+      || (
+        value.code !== "not-found"
+        && value.code !== "unavailable"
+        && value.code !== "invalid"
+      )
+      || typeof value.message !== "string"
+    ) return null;
+    const message = value.message.trim();
+    return message.length > 0 && message.length <= 300
+      ? {
+          type: "runtime.credential-result",
+          requestId: value.requestId,
+          operation: value.operation,
+          ok: false,
+          code: value.code,
+          message,
+        }
+      : null;
+  }
+  if (
+    value.operation === "resolve"
+    && Object.keys(value).length === 5
+    && isBackendCredentialSecret(value.secret)
+  ) {
+    return {
+      type: "runtime.credential-result",
+      requestId: value.requestId,
+      operation: "resolve",
+      ok: true,
+      secret: value.secret,
+    };
+  }
+  if (
+    value.operation === "status"
+    && Object.keys(value).length === 6
+    && typeof value.hasSecret === "boolean"
+    && (
+      value.credentialGeneration === null
+      || isBackendCredentialGeneration(value.credentialGeneration)
+    )
+  ) {
+    return {
+      type: "runtime.credential-result",
+      requestId: value.requestId,
+      operation: "status",
+      ok: true,
+      hasSecret: value.hasSecret,
+      credentialGeneration: value.credentialGeneration,
+    };
+  }
+  if (
+    (value.operation === "clear" || value.operation === "forget")
+    && Object.keys(value).length === 5
+    && typeof value.removed === "boolean"
+  ) {
+    return {
+      type: "runtime.credential-result",
+      requestId: value.requestId,
+      operation: value.operation,
+      ok: true,
+      removed: value.removed,
+    };
   }
   return null;
 }

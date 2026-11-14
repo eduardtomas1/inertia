@@ -104,7 +104,7 @@ const note = {
 describe("watcher shared contracts", () => {
   it("lets every current provider's harness watch and gives each a read-only tier", () => {
     expect(WATCHER_HARNESS_IDS).toEqual([
-      "claude-agent-sdk", "codex-app-server", "opencode-sdk", "cursor-acp", "kimi-acp", "antigravity-cli", "pi-rpc",
+      "claude-agent-sdk", "codex-app-server", "opencode-sdk", "cursor-acp", "kimi-acp", "antigravity-cli", "grok-acp",
     ]);
     for (const harnessId of WATCHER_HARNESS_IDS) {
       expect(watcherHarnessAllowed(harnessId)).toBe(true);
@@ -116,8 +116,8 @@ describe("watcher shared contracts", () => {
       "opencode-sdk": "inertia",
       "cursor-acp": "approvals",
       "kimi-acp": "approvals",
+      "grok-acp": "approvals",
       "antigravity-cli": "provider",
-      "pi-rpc": "inertia",
     });
     for (const harnessId of ["codex-cli", "kimi-cli", "claude-cli", "", "CODEX-APP-SERVER", "toString", "__proto__"]) {
       expect(watcherHarnessAllowed(harnessId)).toBe(false);

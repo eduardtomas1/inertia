@@ -1,11 +1,4 @@
-import { cursorSdkProviderMigration } from "./cursor-sdk-provider";
-import { conversationContextSupplementBoundMigration } from "./conversation-context-supplement-bound";
-import { delegatedTasksMigration } from "./delegated-tasks";
-import { delegationAutomaticWakesMigration } from "./delegation-automatic-wakes";
-import { orchestrationV2ReceiptStatusMigration } from "./orchestration-v2-receipt-status";
 import { limitResetMigration } from "./limit-reset";
-import { orchestrationV2Migration } from "./orchestration-v2";
-import { nativePiProviderMigration } from "./native-pi-provider";
 import type { DatabaseMigrationDefinition } from "./catalog";
 import { cliConversationImportsMigration } from "./cli-conversation-imports";
 import { agentThreadTargetOwnershipMigration } from "./agent-thread-target-ownership";
@@ -35,6 +28,8 @@ import { watcherAccessMigration } from "./watcher-access";
 import { extendBackendPresetsMigration } from "./extend-backend-presets";
 import { persistTurnFailureKindsMigration } from "./persist-turn-failure-kinds";
 import { persistCompactOnReturnMigration } from "./persist-compact-on-return";
+import { contextCompactionSettingsMigration } from "./context-compaction-settings";
+import { codexCompactionLimitMigration } from "./codex-compaction-limit";
 import { duoComparisonBriefsMigration } from "./duo-comparison-briefs";
 import { turnScopedIndexesMigration } from "./turn-scoped-indexes";
 import { libraryMigration } from "./library";
@@ -42,6 +37,9 @@ import { agentContextReadManagedAccessMigration } from "./agent-context-read-man
 import { todoSourceConversationMigration } from "./todo-source-conversation";
 import { codexThreadToolPacksMigration } from "./codex-thread-tool-packs";
 import { subagentTaskShapeMigration } from "./subagent-task-shape";
+import { nativeGrokProviderMigration } from "./native-grok-provider";
+import { customAgentsMigration } from "./custom-agents";
+import { agentSecretRequestsMigration } from "./agent-secret-requests";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -80,11 +78,9 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   todoSourceConversationMigration,
   codexThreadToolPacksMigration,
   subagentTaskShapeMigration,
-  orchestrationV2Migration,
-  nativePiProviderMigration,
-  cursorSdkProviderMigration,
-  conversationContextSupplementBoundMigration,
-  delegatedTasksMigration,
-  delegationAutomaticWakesMigration,
-  orchestrationV2ReceiptStatusMigration,
+  nativeGrokProviderMigration,
+  contextCompactionSettingsMigration,
+  codexCompactionLimitMigration,
+  customAgentsMigration,
+  agentSecretRequestsMigration,
 ];

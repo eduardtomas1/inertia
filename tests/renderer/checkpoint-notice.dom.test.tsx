@@ -1,10 +1,10 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
-import type { AgentActivity, AgentTurn, ChatAttachment, ChatMessage, CheckpointSummary } from "../../src/shared/contracts";
+import { TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "../../src/renderer/src/components/Tooltip";
+import type { AgentActivity, AgentTurn, ChatAttachment, ChatMessage } from "../../src/shared/contracts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const requestedAt = "2026-07-23T10:00:00.000Z";
@@ -84,111 +84,17 @@ const notice: AgentActivity = {
   createdAt: "2026-07-23T10:00:01.000Z",
 };
 
-function checkpoint(id: string, label: string, createdAt: string): CheckpointSummary {
-  return {
-    id,
-    conversationId,
-    turnId: "turn-1",
-    ref: `refs/inertia/checkpoints/${id}`,
-    label,
-    turnIndex: 1,
-    filesChanged: 1,
-    insertions: 1,
-    deletions: 0,
-    createdAt,
-  };
-}
-
-function timeline(props: {
-  checkpointId: string | null;
-  checkpoints: CheckpointSummary[];
-  activities?: AgentActivity[];
-  checkpointRestoreDisabled?: boolean;
-  onRevertCheckpoint?: (checkpoint: CheckpointSummary) => void;
-}): React.ReactElement {
-  return createElement(ResponseTimeline, {
-    turns: [turn(props.checkpointId)],
-    messages: [message("Change the build.")],
-    activities: props.activities ?? [],
-    reasonings: [],
-    plans: [],
-    checkpoints: props.checkpoints,
-    projectRoot: "/workspace",
-    projectId: "project-1",
-    conversationId,
-    streamingText: "",
-    streamingReasoning: "",
-    approvals: [],
-    inputRequests: [],
-    showTimestamps: true,
-    showThinking: false,
-    defaultCodeWrap: false,
-    autoCollapseWorkLog: true,
-    showChangedFileSummaries: false,
-    checkpointRestoreDisabled: props.checkpointRestoreDisabled ?? false,
-    onRespondToApproval: async () => undefined,
-    onRespondToInput: async () => undefined,
-    onRevertCheckpoint: props.onRevertCheckpoint ?? (() => undefined),
-    onOpenTurnDiff: () => undefined,
-    onCompareTurnArtifacts: () => undefined,
-    onOpenTurnFile: () => undefined,
-    onStop: () => undefined,
-  });
-}
-
-describe("attributed recovery checkpoints", () => {
-  afterEach(cleanup);
-
-  const own = checkpoint("own", "Turn 1", "2026-07-23T10:00:00.000Z");
-  const fileRestore = checkpoint("file-restore", "Before file restore", "2026-07-23T10:05:00.000Z");
-  const checkpointRestore = checkpoint("checkpoint-restore", "Before checkpoint restore", "2026-07-23T10:09:00.000Z");
-
-  it("offers each recovery checkpoint next to Revert, in order, from the keyboard", async () => {
-    const user = userEvent.setup();
-    const onRevertCheckpoint = vi.fn();
-    render(timeline({
-      checkpointId: own.id,
-      checkpoints: [checkpointRestore, own, fileRestore],
-      onRevertCheckpoint,
-    }));
-
-    const actions = screen.getAllByRole("button", { name: /^Revert$|^Restore checkpoint:/u });
-    expect(actions.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual([
-      "Revert",
-      "Restore checkpoint: Before file restore",
-      "Restore checkpoint: Before checkpoint restore",
-    ]);
-    expect(actions[1]).toHaveTextContent("Before file restore");
-    expect(actions[1]).toHaveAccessibleDescription("Restore the project to this checkpoint");
-    expect(screen.queryByText("Recovered legacy history")).toBeNull();
-
-    actions[0]!.focus();
-    await user.tab();
-    expect(actions[1]).toHaveFocus();
-    await user.keyboard("{Enter}");
-    expect(onRevertCheckpoint).toHaveBeenCalledWith(fileRestore);
-  });
-
-  it("shows a recovery checkpoint on a turn without its own checkpoint and disables it with Revert", () => {
-    const onRevertCheckpoint = vi.fn();
-    render(timeline({
-      checkpointId: null,
-      checkpoints: [fileRestore, checkpointRestore],
-      checkpointRestoreDisabled: true,
-      onRevertCheckpoint,
-    }));
-
-    expect(screen.getByRole("button", { name: /^Revert$/u })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Restore checkpoint: Before checkpoint restore" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Restore checkpoint: Before file restore" })).toBeNull();
-    expect(screen.queryByText("Recovered legacy history")).toBeNull();
-  });
-});
-
 describe("missing checkpoint notice", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_WARM_MS + 1);
+    });
+    vi.useRealTimers();
+    cleanup();
+  });
 
   it("gives keyboard and screen-reader users the reason, not only a hover title", () => {
+    vi.useFakeTimers();
     const { container } = render(createElement(ResponseTimeline, {
     turns: [turn()],
     messages: [message("Change the build.")],
@@ -222,5 +128,12 @@ describe("missing checkpoint notice", () => {
     expect(label?.textContent).toBe("No checkpoint for this turn: Checkpoint operation timed out.");
     expect(label?.getAttribute("title")).toBeNull();
     expect(screen.getByText(": Checkpoint operation timed out.").classList.contains("visually-hidden")).toBe(true);
+    fireEvent.pointerEnter(label!, { pointerType: "mouse" });
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("Checkpoint operation timed out.");
+    fireEvent.pointerLeave(label!, { pointerType: "mouse" });
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
   });
 });

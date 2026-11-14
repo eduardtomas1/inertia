@@ -64,6 +64,7 @@ import {
 import { ConversationHistoryTooLargeError } from "./errors";
 import { PromptPresetRepository } from "./prompt-preset-repository";
 import { TodoRepository } from "./todo-repository";
+import { CustomAgentRepository } from "./custom-agent-repository";
 import { LibraryRepository } from "./library-repository";
 import { cachedStatement } from "./statement-cache";
 import { withLatestPlanDocument } from "./latest-plan-document";
@@ -74,7 +75,6 @@ import {
 } from "./stream-text-storage";
 import { agentContextReadSummaries } from "./conversation-context-turn-reads";
 import { watcherLinkViews, watcherWakeSummaries } from "./watcher-link-codecs";
-import { DelegationReads, defaultLiveNativeChildren } from "../orchestration-v2/delegation-reads";
 
 type ConversationShellRow = ConversationRow & { has_history: number };
 type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number; failure_kind: string | null };
@@ -84,23 +84,7 @@ type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewS
 type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | "attachmentGallery" | keyof ConversationRecords>;
 const EMPTY_CONVERSATION_RECORDS: ConversationRecords = { usage: [], goals: [], reviewSummaries: [], reviewStates: [], reviewNotes: [] };
 const EMPTY_HISTORY_RECORDS: HistoryPageRecords = { agentTurns: [], turnGitArtifacts: [], messages: [], activities: [],
-  subagents: [], reasonings: [], plans: [], checkpoints: [], contextPackets: [], contextReads: [], rolledBackTurnIds: [] };
-
-function rollbackRevision(database: PersistenceContext["database"], conversationId: string): number {
-  return (database.prepare(`SELECT count(*) AS count FROM orchestration_v2_entities
-    WHERE kind = 'rolled-back-turn' AND thread_id = ?`).get(conversationId) as { count: number }).count;
-}
-
-function rolledBackTurnIds(database: PersistenceContext["database"], conversationId: string, turnIds: readonly string[]): string[] {
-  return (database.prepare(`SELECT id FROM orchestration_v2_entities WHERE kind = 'rolled-back-turn' AND thread_id = ?
-    AND id IN (SELECT value FROM json_each(?)) ORDER BY id`).all(conversationId, JSON.stringify(turnIds)) as { id: string }[])
-    .map(({ id }) => id);
-}
-
-function delegationField(database: PersistenceContext["database"], conversationId: string): Pick<ConversationDetail, "delegation"> {
-  const delegation = new DelegationReads(database, defaultLiveNativeChildren(database)).detail(conversationId);
-  return delegation ? { delegation } : {};
-}
+  subagents: [], reasonings: [], plans: [], checkpoints: [], contextPackets: [], contextReads: [] };
 
 function watcherWakeField(
   database: PersistenceContext["database"],
@@ -125,11 +109,13 @@ type SnapshotPersistenceContext = Pick<PersistenceContext, "database"> & {
 export class SnapshotRepository {
   readonly promptPresets: PromptPresetRepository;
   readonly todos: TodoRepository;
+  readonly customAgents: CustomAgentRepository;
   readonly library: LibraryRepository;
 
   constructor(private readonly context: SnapshotPersistenceContext) {
     this.promptPresets = new PromptPresetRepository(context.database);
     this.todos = new TodoRepository(context.database);
+    this.customAgents = new CustomAgentRepository(context.database);
     this.library = new LibraryRepository(context.database);
   }
 
@@ -177,6 +163,7 @@ export class SnapshotRepository {
       runs: (this.context.database.prepare("SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200").all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
       promptPresets: this.promptPresets.list(),
+      customAgents: this.customAgents.list(),
       todos: this.todos.list(),
       library: this.library.snapshot(),
       settings: settingsFromState(state),
@@ -219,6 +206,7 @@ export class SnapshotRepository {
       ).all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
       promptPresets: this.promptPresets.list(),
+      customAgents: this.customAgents.list(),
       todos: this.todos.list(),
       library: this.library.snapshot(),
       watchers: watcherLinkViews(this.context.database),
@@ -262,9 +250,7 @@ export class SnapshotRepository {
     const shared = {
       conversation: conversationDetailFromRow(conversationRow),
       attachmentGallery: conversationAttachmentGallery(this.context.database, conversationId),
-      rollbackRevision: rollbackRevision(this.context.database, conversationId),
       ...(latest ? this.conversationRecords(conversationId) : EMPTY_CONVERSATION_RECORDS),
-      ...(latest ? delegationField(this.context.database, conversationId) : {}),
     };
     const page = (records: HistoryPageRecords, omittedTurnIds: string[] = []): ConversationDetail | null => {
       const detail: ConversationDetail = { ...shared, ...records,
@@ -300,10 +286,8 @@ export class SnapshotRepository {
     if (!conversationRow) return null;
     return {
       conversation: conversationDetailFromRow(conversationRow),
-      rollbackRevision: rollbackRevision(this.context.database, conversationId),
       ...this.historyRecords(conversationId),
       ...this.conversationRecords(conversationId),
-      ...delegationField(this.context.database, conversationId),
     };
   }
 
@@ -317,10 +301,10 @@ export class SnapshotRepository {
       ...EMPTY_CONVERSATION_RECORDS,
       conversation: conversationDetailFromRow(conversationRow),
       messages: newest<MessageRow>(`SELECT id, conversation_id, turn_id, role, substr(content, 1, ?) AS content,
-          attachments_json, compaction_json, html_render_json, private_connect_device_id, watcher_note_json,
-          delegated_completion_json, created_at
+          attachments_json, compaction_json, html_render_json, secret_request_json, private_connect_device_id, watcher_note_json, created_at
         FROM (SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages
-          WHERE messages.conversation_id = ? AND ${CONVERSATION_CONTEXT_MESSAGE_SQL}
+          WHERE messages.conversation_id = ? AND (${CONVERSATION_CONTEXT_MESSAGE_SQL}
+            OR (messages.role = 'system' AND messages.secret_request_json IS NOT NULL AND messages.turn_id IS NOT NULL))
           ORDER BY messages.created_at DESC, messages.id DESC LIMIT ?)`,
       limits.contentCharacters, conversationId, limits.messages).map(messageFromRow),
       activities: newest<ActivityRow>(`SELECT id, conversation_id, run_id, turn_id, kind, title, NULL AS detail,
@@ -328,7 +312,7 @@ export class SnapshotRepository {
         ORDER BY created_at DESC, id DESC LIMIT ?`, conversationId, limits.activities).map(activityFromRow),
       subagents: newest<SubagentTraceRow>(`SELECT id, conversation_id, run_id, turn_id, provider_id, provider_task_id,
           provider_agent_id, parent_trace_id, parent_provider_agent_id, parent_provider_tool_use_id,
-          provider_tool_use_id, provider_role, provider_name, provider_status, status, is_live,
+          provider_tool_use_id, provider_role, provider_name, custom_agent_id, provider_status, status, is_live,
           NULL AS description, NULL AS progress, NULL AS result, NULL AS model, NULL AS activity,
           NULL AS usage_json, NULL AS tool_use_count, NULL AS duration_ms, sequence, created_at, updated_at
         FROM subagent_traces WHERE conversation_id = ?
@@ -360,7 +344,6 @@ export class SnapshotRepository {
       checkpoints: query<CheckpointRow>("checkpoints", "*", "created_at ASC, id ASC").map(checkpointFromRow),
       contextPackets: this.context.contextPackets(conversationId, scope ? messages.map(({ id }) => id) : undefined),
       contextReads: agentContextReadSummaries(this.context.database, conversationId, scope ? messages.map(({ id }) => id) : undefined),
-      rolledBackTurnIds: rolledBackTurnIds(this.context.database, conversationId, turns.map(({ id }) => id)),
       ...watcherWakeField(this.context.database, conversationId, scope ? turns.map(({ id }) => id) : undefined),
     };
   }
@@ -374,7 +357,6 @@ export class SnapshotRepository {
     return { ...EMPTY_HISTORY_RECORDS, agentTurns: [agentTurnFromRow(turn)], messages,
       contextPackets: this.context.contextPackets(conversationId, messages.map(({ id }) => id)),
       contextReads: agentContextReadSummaries(this.context.database, conversationId, messages.map(({ id }) => id)),
-      rolledBackTurnIds: rolledBackTurnIds(this.context.database, conversationId, [turnId]),
       ...watcherWakeField(this.context.database, conversationId, [turnId]) };
   }
 

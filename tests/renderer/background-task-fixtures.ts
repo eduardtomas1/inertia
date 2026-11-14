@@ -12,7 +12,7 @@ export const harnessByProvider = {
   cursor: "cursor-acp",
   kimi: "kimi-acp",
   antigravity: "antigravity-cli",
-    pi: "pi-rpc",
+  grok: "grok-acp",
 } as const;
 
 export function taskUsage(

@@ -6,11 +6,12 @@ import { RuntimeStore } from "../../src/server/database";
 import { RESTORED_CHAT_HISTORY_LABEL } from "../../src/server/persistence/conversation-context-transport";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { MAX_CONVERSATION_CONTEXT_BLOCK_BYTES, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
-import { resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
+import { NATIVE_RESTORED_HISTORY_BYTES, NATIVE_RESTORED_HISTORY_BYTES_WITHOUT_CONTEXT_TOOL, resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
 import type { QueueTurnRequest, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
+import type { ProviderInfo } from "../../src/shared/contracts";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
-const providers = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const;
+const providers = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"] as const;
 const capturedAt = "2030-01-01T00:01:00.000Z";
 const stores: RuntimeStore[] = [];
 const directories: string[] = [];
@@ -133,11 +134,7 @@ describe("provider session continuity", () => {
     expect(input.prompt).toContain("The export must preserve accented names.");
     expect(input.prompt).toContain("I will use UTF-8 and verify café.");
     expect(input.prompt).toContain("Continue the export.");
-    expect(input.prompt).toContain("3 intact historical items included; 0 omitted.");
-    expect(input.prompt).toContain("Omitted history cannot be retrieved in this session");
-    expect(input.prompt).not.toContain("inertia_request_context");
-    expect(input.prompt.indexOf("The export must preserve accented names.")).toBeLessThan(input.prompt.indexOf("I will use UTF-8 and verify café."));
-    expect(input.prompt.indexOf("I will use UTF-8 and verify café.")).toBeLessThan(input.prompt.indexOf("Continue the export."));
+    expect(input.prompt).toContain("restored because this provider session does not have them");
     expect(input.prompt).not.toContain("OTHER_CHAT_PRIVATE_SENTINEL");
     expect(queued.turn).toMatchObject({
       continuationReasonCode: "missing-continuation-identity",
@@ -181,18 +178,13 @@ describe("provider session continuity", () => {
     const input = resolved.adopt(queued).active.providerInput;
     expect(input.sessionId).toBeUndefined();
     expect(input.prompt).not.toContain("The export must preserve accented names.");
-    expect(input.prompt).not.toContain("I will use UTF-8 and verify café.");
-    expect(input.prompt).not.toContain("OTHER_CHAT_PRIVATE_SENTINEL");
-    expect(input.prompt).toContain("0 intact historical items included; 0 omitted.");
+    expect(input.prompt).not.toContain("restored because this provider session does not have them");
     expect(input.prompt).toContain("Continue the export.");
     expect(queued.turn).toMatchObject({
       continuationReasonCode: reason,
       sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: 2 },
     });
-    expect(f.restoredReferences(queued.turn.id)).toEqual([expect.objectContaining({
-      label: `${RESTORED_CHAT_HISTORY_LABEL} · 0 messages`,
-      truncated: false,
-    })]);
+    expect(f.restoredReferences(queued.turn.id)).toEqual([]);
     expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
   });
 
@@ -600,7 +592,12 @@ describe("restored history on a custom backend", () => {
       providerSessionId: "before-update",
       continuationIdentity: { ...f.previous, backendConfigurationRevision: f.previous.backendConfigurationRevision + 1 },
     });
-    const restoredBytes = (custom: boolean) => {
+    const bridged = [{
+      id: f.route.providerId,
+      models: [],
+      capabilityContract: { installationVerified: true, hostToolBridgeAvailable: true, harnessId: f.route.harnessId },
+    }] as unknown as ProviderInfo[];
+    const restoredBytes = (custom: boolean, providerInfo: ProviderInfo[] = bridged) => {
       const resolved = resolveTurnRequest({
         store: f.store,
         providers: {
@@ -609,7 +606,7 @@ describe("restored history on a custom backend", () => {
             : f.route,
           harnessIdFor: () => f.route.harnessId,
         } as unknown as TurnProviderRuntime,
-        hooks: { broadcast: () => undefined, broadcastSnapshot: () => undefined, providerInfo: () => [] },
+        hooks: { broadcast: () => undefined, broadcastSnapshot: () => undefined, providerInfo: () => providerInfo },
         id: () => `bounded-${custom}`,
         now: () => capturedAt,
         clock: () => new Date(capturedAt),
@@ -619,31 +616,23 @@ describe("restored history on a custom backend", () => {
           .filter(({ label }) => label.startsWith(RESTORED_CHAT_HISTORY_LABEL))
           .reduce((total, { byteSize }) => total + byteSize, 0),
         recovery: resolved.input.sessionRecovery,
-        prompt: resolved.input.executionContext!.blobs.map(({ content }) => content).join("\n"),
       };
     };
     const native = restoredBytes(false);
     const custom = restoredBytes(true);
-    for (const result of [native, custom]) {
-      expect(result.bytes).toBeGreaterThan(0);
-      expect(result.bytes).toBeLessThanOrEqual(16_000);
-      expect(result.recovery!.restoredMessageCount).toBeGreaterThan(0);
-      expect(result.recovery!.omittedMessageCount).toBeGreaterThan(0);
-      expect(result.recovery!.restoredMessageCount + result.recovery!.omittedMessageCount).toBe(42);
-      expect(result.prompt).toContain("Omitted history cannot be retrieved in this session");
-      expect(result.prompt).not.toContain("inertia_request_context");
-      expect(result.prompt).toContain("The export must preserve accented names.");
-      expect(result.prompt).toContain(`message-38: ${"x".repeat(4_000)}`);
-      expect(result.prompt).toContain(`message-39: ${"x".repeat(4_000)}`);
-      let previousPosition = -1;
-      for (let i = 0; i < 40; i += 1) {
-        const position = result.prompt.indexOf(`message-${i}: `);
-        if (position < 0) continue;
-        expect(result.prompt).toContain(`message-${i}: ${"x".repeat(4_000)}`);
-        expect(position).toBeGreaterThan(previousPosition);
-        previousPosition = position;
-      }
-    }
+    expect(native.bytes).toBeGreaterThan(48 * 1_024);
+    expect(native.bytes).toBeLessThanOrEqual(NATIVE_RESTORED_HISTORY_BYTES);
+    expect(native.recovery!.restoredMessageCount).toBeGreaterThan(custom.recovery!.restoredMessageCount);
+    expect(native.recovery!.restoredMessageCount + native.recovery!.omittedMessageCount).toBe(42);
+    expect(native.recovery!.omittedMessageCount).toBeGreaterThan(0);
+    expect(custom.bytes).toBeGreaterThan(0);
+    expect(custom.bytes).toBeLessThanOrEqual(48 * 1_024);
+    expect(custom.recovery!.restoredMessageCount).toBeGreaterThan(0);
+    expect(custom.recovery!.restoredMessageCount + custom.recovery!.omittedMessageCount).toBe(42);
+    const toolless = restoredBytes(false, []);
+    expect(toolless.bytes).toBeGreaterThan(NATIVE_RESTORED_HISTORY_BYTES);
+    expect(toolless.bytes).toBeLessThanOrEqual(NATIVE_RESTORED_HISTORY_BYTES_WITHOUT_CONTEXT_TOOL);
+    expect(toolless.recovery!.restoredMessageCount).toBeGreaterThan(native.recovery!.restoredMessageCount);
   });
 });
 

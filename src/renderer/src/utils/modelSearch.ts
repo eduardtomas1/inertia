@@ -131,7 +131,7 @@ const SEARCH_PROVIDER_IDS: readonly ProviderId[] = [
   "kimi",
   "opencode",
   "antigravity",
-  "pi",
+  "grok",
 ];
 
 function queryProviderId(queryTokens: readonly string[]): ProviderId | null {

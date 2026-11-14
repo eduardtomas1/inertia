@@ -4,10 +4,11 @@ import { snapshotSourceSchema } from "../../shared/snapshots";
 import { parseProjectPreferences } from "../../shared/project-preferences";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
+import { isSecretRequestReference } from "../../shared/agent-secrets";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
-import { delegatedCompletionAttributionSchema, type DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
 import { duoComparisonBriefFromJson } from "../../shared/duo-comparison-brief";
+import { customAgentCallAttributionSchema, type CustomAgentCallAttribution } from "../../shared/custom-agents";
 import {
   AGENT_RUN_STATES,
   type AgentActivity,
@@ -65,7 +66,14 @@ import {
   versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
 import { providerTimestamp, validatePromptCacheFacts, validateProviderUsage, validateSubagentTaskUsage } from "../provider/usage-values";
-import { COMPACT_ON_RETURN_SETTINGS, DEFAULT_COMPACT_ON_RETURN, type CompactOnReturnSetting } from "../../shared/compact-on-return";
+import {
+  COMPACT_ON_RETURN_SETTINGS,
+  DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW,
+  DEFAULT_CODEX_AUTO_COMPACT_LIMIT,
+  DEFAULT_COMPACT_ON_RETURN,
+  validAutoCompactTokenCount,
+  type CompactOnReturnSetting,
+} from "../../shared/compact-on-return";
 import {
   boundedSubagentCount,
   boundedSubagentLabel,
@@ -475,7 +483,9 @@ export function settingsFromState(state: StateRow): AppSettings {
     desktopNotifications: state.desktop_notifications === 1,
     notifyOnlyInBackground: state.notify_only_in_background === 1,
     compactOnReturn: compactOnReturnFromState(state.compact_on_return),
-    delegationAutomaticWakes: state.delegation_automatic_wakes !== 0,
+    compactBeforeCacheExpires: state.compact_before_cache_expires === 1,
+    claudeAutoCompactWindow: autoCompactTokensFromState(state.claude_auto_compact_window, DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW),
+    codexAutoCompactTokenLimit: autoCompactTokensFromState(state.codex_auto_compact_token_limit, DEFAULT_CODEX_AUTO_COMPACT_LIMIT),
     quotaWarnings: {
       enabled: state.quota_warnings_enabled !== 0,
       firstThreshold: isQuotaWarningThreshold(state.quota_warning_threshold)
@@ -789,10 +799,10 @@ export function watcherNoteFromJson(value: string | null | undefined): WatcherNo
   }
 }
 
-export function delegatedCompletionFromJson(value: string | null | undefined): DelegatedCompletionAttribution | undefined {
+export function customAgentCallFromJson(value: string | null | undefined): CustomAgentCallAttribution | undefined {
   if (!value) return undefined;
   try {
-    const parsed = delegatedCompletionAttributionSchema.safeParse(JSON.parse(value));
+    const parsed = customAgentCallAttributionSchema.safeParse(JSON.parse(value));
     return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
@@ -800,21 +810,24 @@ export function delegatedCompletionFromJson(value: string | null | undefined): D
 }
 
 export function messageFromRow(row: MessageRow): ChatMessage {
+  const customAgentCall = row.role === "user" ? customAgentCallFromJson(row.custom_agent_call_json) : undefined;
   const watcherNote = row.role === "user" ? watcherNoteFromJson(row.watcher_note_json) : undefined;
-  const delegatedCompletion = row.role === "user" && !watcherNote ? delegatedCompletionFromJson(row.delegated_completion_json) : undefined;
   const duoComparison = row.role === "user" ? duoComparisonBriefFromJson(row.duo_comparison_json) : undefined;
   let compaction: unknown;
   try { compaction = row.compaction_json ? JSON.parse(row.compaction_json) : undefined; } catch { /* Older or malformed optional metadata stays unprojected. */ }
   let htmlRender: unknown;
   try { htmlRender = row.role === "system" && row.html_render_json ? JSON.parse(row.html_render_json) : undefined; } catch { /* Malformed optional metadata stays unprojected. */ }
+  let secretRequest: unknown;
+  try { secretRequest = row.role === "system" && row.secret_request_json ? JSON.parse(row.secret_request_json) : undefined; } catch { secretRequest = undefined; }
   return {
     ...(row.role === "user" && isMessageOriginDeviceId(row.private_connect_device_id)
       ? { privateConnectDeviceId: row.private_connect_device_id } : {}),
     ...(watcherNote ? { watcherNote } : {}),
-    ...(delegatedCompletion ? { delegatedCompletion } : {}),
     ...(duoComparison ? { duoComparison } : {}),
+    ...(customAgentCall ? { customAgentCall } : {}),
     ...(row.role === "system" && row.turn_id === null && isContextCompaction(compaction) ? { compaction } : {}),
     ...(row.role === "system" && row.turn_id !== null && isHtmlRenderReference(htmlRender) ? { htmlRender } : {}),
+    ...(row.role === "system" && row.turn_id !== null && isSecretRequestReference(secretRequest) ? { secretRequest } : {}),
     id: row.id,
     conversationId: row.conversation_id,
     turnId: row.turn_id,
@@ -856,6 +869,7 @@ export function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
     providerToolUseId: row.provider_tool_use_id,
     providerRole: row.provider_role,
     providerName: row.provider_name,
+    ...(row.custom_agent_id && customAgentCallAttributionSchema.shape.agentId.safeParse(row.custom_agent_id).success ? { customAgentId: row.custom_agent_id } : {}),
     providerStatus: row.provider_status,
     status: row.status,
     isLive: row.is_live === 1,
@@ -996,6 +1010,11 @@ function promptCacheFromRow(row: ThreadUsageRow): Pick<ThreadUsageSnapshot, "pro
     source: row.prompt_cache_source,
   });
   return promptCache ? { promptCache } : {};
+}
+
+function autoCompactTokensFromState(value: number | null | undefined, fallback: number): number | null {
+  if (value === undefined) return fallback;
+  return validAutoCompactTokenCount(value) ? value : fallback;
 }
 
 function compactOnReturnFromState(value: string | undefined): CompactOnReturnSetting {

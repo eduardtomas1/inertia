@@ -3,14 +3,10 @@ import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
-import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
-import { useForkActionsAvailable, useTurnRolledBack } from "../orchestration/fork-surface";
-import { revertsRolledBackTurn } from "../workspace-scene/createWorkspaceTurnActions";
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { WatcherWakeRequest } from "./WatcherWakeRequest";
-import { DelegatedCompletionCard } from "../orchestration/delegated-completion-card";
 import { DuoComparisonRequest } from "./DuoComparisonRequest";
 import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
@@ -25,7 +21,7 @@ import {
 import {
   activeAgentPresentation,
   buildTurnExecutionStream,
-  shouldConsolidateSettledWorkIntoRunDetails,
+  isQuietSettledTurn,
   type ActiveAgentPhase,
   type ResponseTurn,
 } from "../../utils/responseTimeline";
@@ -45,7 +41,11 @@ import {
   workingOrbSyncKey,
 } from "../working-indicator/orbMotion";
 import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
-import { TurnAgentsLine } from "./TurnAgentsLine";
+import { MessageAgentCall } from "./MessageAgentCall";
+import { SubagentCallList } from "./SubagentCallBlock";
+import { SecretRequestList } from "./SecretRequestCard";
+import { customAgentsById, partitionSubagentCalls } from "../../utils/response-timeline/subagentCalls";
+import { SubagentGroup } from "./SubagentGroup";
 import { UnlinkedSubagentRows } from "./SubagentActivityRow";
 import {
   createSubagentActivityStore,
@@ -56,7 +56,6 @@ import { useFreshRequest } from "./useFreshRequest";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
   LiveElapsed,
-  SettledWorkDetails,
   WorkLog,
 } from "./activity";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
@@ -67,6 +66,7 @@ import {
 } from "./changedFiles";
 import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
+import type { TurnFoldControl } from "./TurnFold";
 import "./ConversationContextProvenance.css";
 import { TooltipText } from "../TooltipText";
 
@@ -129,10 +129,6 @@ export function UserRequestLayer({
   const [expanded, setExpanded] = useState(false);
   const [openPacketId, setOpenPacketId] = useState<string | null>(null);
   const fresh = useFreshRequest(turn.userMessage.conversationId, turn.userMessage.content);
-  const rolledBack = useTurnRolledBack(turn.agentTurn.id);
-  const turnCheckpoint = turn.checkpoint && !revertsRolledBackTurn(turn.checkpoint, turn.agentTurn, rolledBack)
-    ? turn.checkpoint
-    : null;
   const content = collapsible && !expanded
     ? collapsedUserRequestPreview(turn.userMessage.content)
     : turn.userMessage.content;
@@ -152,15 +148,11 @@ export function UserRequestLayer({
   ) ?? [];
   const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
   if (turn.watcherWake) return <WatcherWakeRequest turn={turn} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
-  if (turn.userMessage.delegatedCompletion) {
-    return <DelegatedCompletionCard message={turn.userMessage} turnId={turn.id} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
-  }
   const watcherNote = turn.userMessage.role === "user" ? turn.userMessage.watcherNote : undefined;
-  const requestMeta = (turn.userMessage.privateConnectDeviceId || watcherNote || turnCheckpoint || turn.extraCheckpoints.length > 0 || turn.checkpointUnavailableReason !== null) && (
+  const requestMeta = (turn.userMessage.privateConnectDeviceId || watcherNote || turn.checkpoint || turn.checkpointUnavailableReason !== null) && (
     <div className="message-meta">
       <MessageOrigin message={turn.userMessage} />
-      {turnCheckpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turnCheckpoint)}><RotateCcw size={14} />Revert</TooltipButton>}
-      {turn.extraCheckpoints.map((checkpoint) => <TooltipButton key={checkpoint.id} className="message-revert" aria-label={`Restore checkpoint: ${checkpoint.label}`} tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to this checkpoint"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(checkpoint)}><RotateCcw size={14} aria-hidden="true" />{checkpoint.label}</TooltipButton>)}
+      {turn.checkpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</TooltipButton>}
       {turn.checkpointUnavailableReason !== null && <TooltipText className="message-checkpoint-missing" tooltip={turn.checkpointUnavailableReason || TURN_CHECKPOINT_UNAVAILABLE_TITLE}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</TooltipText>}
     </div>
   );
@@ -190,6 +182,7 @@ export function UserRequestLayer({
       {...messageContextMenu(turn.userMessage, turn.userMessage.content, taskCreator)}
     >
       {requestMeta}
+      {turn.userMessage.customAgentCall && <MessageAgentCall attribution={turn.userMessage.customAgentCall} />}
       <div
         className={clsx("message-body", collapsible && !expanded && "is-collapsed")}
         data-request-content={collapsible ? "collapsible" : "complete"}
@@ -276,6 +269,8 @@ export function AgentExecutionLayer({
   heldFollowUpIds,
   timerStart,
   completionAnnouncement,
+  fold,
+  agentsInFold,
   onBeforeToggle,
   onAfterToggle,
 }: {
@@ -288,6 +283,8 @@ export function AgentExecutionLayer({
   heldFollowUpIds: string[];
   timerStart: string;
   completionAnnouncement: string;
+  fold: TurnFoldControl | null;
+  agentsInFold: boolean;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
@@ -308,7 +305,7 @@ export function AgentExecutionLayer({
     stopPressedAtRef.current = pressedAt;
     props.onStop();
   };
-  const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
+  const consolidatesSettledWork = isQuietSettledTurn(turn, fold?.visible ?? false);
   const settledCompactions = useMemo(
     () => turn.isActive
       ? []
@@ -316,10 +313,6 @@ export function AgentExecutionLayer({
         .flatMap((entry) => entry.kind === "compaction" ? [entry] : []),
     [turn],
   );
-  const unlinkedSubagents = useMemo(() => unlinkedSubagentTraces(
-    subagents,
-    new Set([...turn.activities, ...turn.importantActivities].map(({ id }) => id)),
-  ), [subagents, turn.activities, turn.importantActivities]);
   const activePresentation = activeAgentPresentation({
     turn,
     providerLabel,
@@ -328,6 +321,37 @@ export function AgentExecutionLayer({
   usePublishLiveAgentPhase(turn.isActive
     ? { conversationId: props.conversationId, turnId: turn.id, phase: activePresentation.phase }
     : null);
+  const agentsById = useMemo(() => customAgentsById(props.customAgents), [props.customAgents]);
+  const callAttribution = turn.userMessage.customAgentCall;
+  const subagentCalls = useMemo(
+    () => partitionSubagentCalls(subagents, agentsById, callAttribution, props.turns),
+    [agentsById, callAttribution, props.turns, subagents],
+  );
+  const unlinkedSubagents = useMemo(() => unlinkedSubagentTraces(
+    subagentCalls.remaining,
+    new Set([...turn.activities, ...turn.importantActivities].map(({ id }) => id)),
+  ), [subagentCalls.remaining, turn.activities, turn.importantActivities]);
+  const subagentGroup = (
+    <SubagentGroup
+      conversationId={props.conversationId}
+      turnId={turn.id}
+      subagents={subagentCalls.remaining}
+      onOpenSurface={props.onOpenSurface}
+      onBeforeToggle={onBeforeToggle}
+      onAfterToggle={onAfterToggle}
+    />
+  );
+  const groupInFold = agentsInFold && !turn.isActive && !consolidatesSettledWork;
+  const delegatedWork = (
+    <>
+      <UnlinkedSubagentRows
+        traces={unlinkedSubagents}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
+      {subagentGroup}
+    </>
+  );
   return (
     <section
       className={clsx(
@@ -390,6 +414,7 @@ export function AgentExecutionLayer({
             liveContent={liveContent}
             liveContentStreaming={props.streamingChannel === "text"}
             heldFollowUpIds={heldFollowUpIds}
+            subagentCalls={subagentCalls.entries}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}
@@ -401,7 +426,10 @@ export function AgentExecutionLayer({
           />
         </div>
       ) : !consolidatesSettledWork ? (
-        <div className="turn-execution-rail is-settled">
+        <div
+          className="turn-execution-rail is-settled"
+          data-turn-fold={fold?.visible ? fold.open ? "open" : "closed" : undefined}
+        >
           <WorkLog
             key="work-log"
             turn={turn}
@@ -410,6 +438,7 @@ export function AgentExecutionLayer({
             reasoningStreaming={false}
             liveContent=""
             liveContentStreaming={false}
+            subagentCalls={subagentCalls.entries}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}
@@ -418,24 +447,19 @@ export function AgentExecutionLayer({
             onOpenProjectFile={props.onOpenTurnFile}
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
+            fold={fold}
+            foldedWork={groupInFold ? delegatedWork : null}
           />
         </div>
       ) : null}
       {settledCompactions.map((entry) => (
         <ContextCompactionActivityMarker key={entry.id} activities={entry.activities} />
       ))}
-      <UnlinkedSubagentRows
-        traces={unlinkedSubagents}
-        onBeforeToggle={onBeforeToggle}
-        onAfterToggle={onAfterToggle}
-      />
-      <TurnAgentsLine
-        conversationId={props.conversationId}
-        turnId={turn.id}
-        turnIndex={turn.index}
-        subagents={subagents}
-        onOpenSurface={props.onOpenSurface}
-      />
+      {!turn.isActive && consolidatesSettledWork && (
+        <SubagentCallList entries={subagentCalls.entries} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />
+      )}
+      {!turn.isActive && consolidatesSettledWork && <SecretRequestList messages={turn.secretRequests} />}
+      {!groupInFold && delegatedWork}
       <span
         className="visually-hidden"
         role="status"
@@ -542,22 +566,17 @@ export function SupportingLedgerLayer({
   turn,
   props,
   previousArtifactTurnId,
+  durationShownAbove = false,
   onBeforeToggle,
   onAfterToggle,
 }: {
   turn: ResponseTurn;
   props: ResponseTimelineProps;
   previousArtifactTurnId: string | null;
+  durationShownAbove?: boolean;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
-  const canFork = useForkActionsAvailable();
-  const consolidatesSettledWork = !turn.isActive
-    && shouldConsolidateSettledWorkIntoRunDetails(turn);
-  const settledWorkStream = useMemo(
-    () => consolidatesSettledWork ? buildTurnExecutionStream(turn) : [],
-    [consolidatesSettledWork, turn],
-  );
   if (turn.isActive) {
     return props.showTimestamps
       ? (
@@ -571,17 +590,11 @@ export function SupportingLedgerLayer({
         )
       : null;
   }
-  const includesReasoning = consolidatesSettledWork
-    && props.showThinking
-    && Boolean(turn.reasoning?.content);
-  const hasSettledWorkDetails = settledWorkStream.length > 0
-    || includesReasoning
-    || turn.plans.length > 0;
   const showChangedFiles = props.showChangedFileSummaries
     && turn.gitArtifact !== null
     && shouldShowChangedFilesSummary(turn.gitArtifact);
-  const showsFooter = turn.terminalAssistantMessage !== null || turn.agentTurn.status !== "completed"
-    || canFork && isAgentTurnTerminalStatus(turn.agentTurn.status);
+  const showsFooter = turn.terminalAssistantMessage !== null
+    || turn.agentTurn.status !== "completed";
   if (!showsFooter && !showChangedFiles) return null;
 
   return (
@@ -595,25 +608,7 @@ export function SupportingLedgerLayer({
           turn={turn}
           terminalAnswer={turn.terminalAssistantMessage}
           showTimestamp={props.showTimestamps}
-          settledWorkDetails={hasSettledWorkDetails
-            ? (
-                <SettledWorkDetails
-                  entries={settledWorkStream}
-                  turn={turn}
-                  reasoningContent={turn.reasoning?.content ?? ""}
-                  includesReasoning={includesReasoning}
-                  projectRoot={props.projectRoot}
-                  projectId={props.projectId}
-                  conversationId={props.conversationId}
-                  defaultCodeWrap={props.defaultCodeWrap}
-                  onOpenProjectFile={props.onOpenTurnFile}
-                  onBeforeToggle={onBeforeToggle}
-                  onAfterToggle={onAfterToggle}
-                />
-              )
-            : null}
-          workDetailsExpandedByDefault={hasSettledWorkDetails
-            && !props.autoCollapseWorkLog}
+          durationShownAbove={durationShownAbove}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />

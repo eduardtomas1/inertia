@@ -8,7 +8,7 @@ export type SelectedModelChipGlyph =
   | "kimi"
   | "opencode"
   | "antigravity"
-  | "pi"
+  | "grok"
   | "custom"
   | "unknown";
 

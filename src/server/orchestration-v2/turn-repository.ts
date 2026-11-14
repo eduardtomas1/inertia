@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type Database from "better-sqlite3";
+import { z } from "zod";
 
 import type { AgentTurn, ChatMessage, Conversation } from "../../shared/contracts";
 import { modelSelectionSchema } from "../../shared/model-routing";
@@ -39,6 +40,7 @@ import { providerInstanceId } from "./provider-instance";
 import {
   OrchestrationConflict,
   OrchestrationProjectionVerificationError,
+  OrchestrationStateUnreadable,
   type CommandSource,
   type JsonValue,
   type OrchestrationEffect,
@@ -235,6 +237,12 @@ export class OrchestratedTurnRepository {
     const result = this.backings.restart(input.turn, input.expectedSessionId, input.prepared, restart, (run) => {
       // A caller that does not know which attempt it ran cannot replace one.
       if (input.expectedAttemptId === null) throw new OrchestrationConflict("revision-conflict");
+      // A Stop recorded its interrupt and claimed its effect on this attempt; recovery would strand them. Refused
+      // here, not in the projector, so logs written before this check still rebuild.
+      const expected = this.events.projection("attempt", input.expectedAttemptId);
+      if (expected && orchestrationAttemptSchema.parse(expected.value).interruptRequestedAt !== null) {
+        throw new OrchestrationConflict("revision-conflict");
+      }
       attemptId = this.replaceAttempt({ runId: run.id, turnId: run.turnId, expectedAttemptId: input.expectedAttemptId,
         reason: "provider_recovery", priorCleanup: input.priorCleanup }).id;
       return attemptId;
@@ -475,9 +483,14 @@ export class OrchestratedTurnRepository {
     if (intent && !claim) return false;
     try {
       if (intent) {
-        this.backings.dispatch(runId);
-        this.history.dispatched(runId);
-        this.mergeBacks.dispatched(runId);
+        try {
+          this.backings.dispatch(runId);
+          this.history.dispatched(runId);
+          this.mergeBacks.dispatched(runId);
+        } catch (error) {
+          // These read the backing, rollback-cursor and merge-back projections before anything is dispatched.
+          throw error instanceof z.ZodError ? new OrchestrationStateUnreadable({ cause: error }) : error;
+        }
       }
       const accepted = dispatch();
       if (claim) this.effects.settle(claim, accepted

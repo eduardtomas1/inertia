@@ -71,7 +71,7 @@ import { HtmlRenderHostTool } from "./html-render-host-tool";
 import { WORKSPACE_TOOL_NAMES, WorkspaceHostTools, type WorkspaceHostToolDependencies } from "./workspace-host-tools";
 import { SECRET_REQUEST_TOOL_NAME, SECRET_VALUE_EXPOSURE_MESSAGE } from "../../node/agent-secrets";
 import type { AgentSecretHostToolSource } from "./agent-secrets/agent-secret-service";
-import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
+import { recordManagedTurn, recordQueuedManagedTurn, stopManagedTurnForAgent } from "./managed-turn-ownership";
 import {
   AGENT_THREAD_WAIT_TOOL_NAME,
   managedConversationStatus,
@@ -87,7 +87,7 @@ import {
   ModeEscalationError, TASK_STATUS_TOOL, TASK_WAIT_TOOL, taskCancelSchema, taskReadSchema, taskWaitSchema,
   type DelegateTaskInput,
 } from "./delegation/task-tools";
-import { DelegatedWaitAbortedError } from "./delegation/task-wait";
+import { DelegatedWaitAbortedError, delegatedWaitTimeout } from "./delegation/task-wait";
 import type { TurnCapabilityOffer } from "./turns/turn-controller-types";
 import {
   boundedUntrustedAgentText,
@@ -96,6 +96,7 @@ import {
 import { CHECKOUT_RESTORE_IN_PROGRESS } from "./conversation-work-authority";
 
 const MAX_ACTIVE_CHILDREN = 3;
+const MAX_CANCELLED_DELEGATE_WAITS = 64;
 const STORED_CONTENT_TOOLS = new Set([HTML_RENDER_TOOL_NAME, SECRET_REQUEST_TOOL_NAME, "inertia_create_conversation",
   "inertia_send_message", DELEGATE_TASK_TOOL, CANCEL_TASK_TOOL]);
 const LATEST_RESULT_RUNNING_NEXT = "Still running; wait for it with inertia_wait_for_conversation, then call inertia_get_latest_result again.";
@@ -201,6 +202,12 @@ function safeConversation(conversation: Conversation, managed: boolean): unknown
 export class AgentThreadManager {
   private readonly now: () => string;
   private readonly mutations = new ManagedMutationQueue();
+  /**
+   * Delegations whose wait was cancelled after the child chat was created, by source turn and request. An entry
+   * lives only while the agent has never seen that task's handle: a status, wait or cancel call names it and
+   * removes it.
+   */
+  private readonly cancelledDelegateWaits = new Map<string, { taskId: string; created: string }>();
   private readonly agentBrowser: AgentBrowserHostTools | undefined;
   private readonly capabilities: HarnessCapabilityRegistry;
   private readonly htmlRenders: HtmlRenderHostTool;
@@ -274,6 +281,9 @@ export class AgentThreadManager {
 
   async onSourceTurnSettled(turn: AgentTurn): Promise<void> {
     this.dependencies.contextRequests.cancelForTurn(turn.conversationId, turn.id);
+    for (const key of this.cancelledDelegateWaits.keys()) {
+      if (key.startsWith(`${turn.id}:`)) this.cancelledDelegateWaits.delete(key);
+    }
     if (turn.status === "completed" || this.limitHeld(turn)) return;
     const targets = this.dependencies.store.agentThreadManagement
       .runsDispatchedByTurn(turn.conversationId, turn.id);
@@ -315,6 +325,7 @@ export class AgentThreadManager {
     source: AgentThreadSource,
     call: ProviderHostToolCall,
   ): Promise<ProviderHostToolResult> {
+    const startedAt = performance.now();
     try {
       const current = this.assertSource(source);
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
@@ -368,8 +379,8 @@ export class AgentThreadManager {
           const target = this.managedTarget(current, input.conversationId);
           const identity = this.dependencies.turns.activeIdentity(target.id);
           if (!identity) throw new Error("The managed chat does not have an exact active turn to stop.");
-          return await this.mutate(source, call, call.tool, (_operationId, signal) =>
-            this.stop(source, call.arguments, signal, identity), {
+          return await this.mutate(source, call, call.tool, (operationId, signal) =>
+            this.stop(source, call.arguments, signal, identity, operationId), {
               childConversationId: target.id,
               targetTurnId: identity.turnId,
               targetRunId: identity.runId,
@@ -379,15 +390,21 @@ export class AgentThreadManager {
           return await this.mutate(source, call, call.tool, (_operationId, signal) =>
             this.archive(source, call.arguments, signal));
         case DELEGATE_TASK_TOOL:
-          return await this.delegate(source, call);
-        case TASK_STATUS_TOOL:
-          return json(await this.tasks().status(caller(source), taskReadSchema.parse(call.arguments).taskId));
+          return await this.delegate(source, call, startedAt);
+        case TASK_STATUS_TOOL: {
+          const { taskId } = taskReadSchema.parse(call.arguments);
+          this.forgetCancelledDelegateWait(taskId);
+          return json(await this.tasks().status(caller(source), taskId));
+        }
         case TASK_WAIT_TOOL: {
           const input = taskWaitSchema.parse(call.arguments);
-          return json(await this.tasks().wait(caller(source), input.taskId, input.timeoutMs, call.signal));
+          this.forgetCancelledDelegateWait(input.taskId);
+          return json(await this.tasks().wait(caller(source), input.taskId,
+            delegatedWaitTimeout(input.timeoutMs, source.turn.providerId, performance.now() - startedAt), call.signal));
         }
         case CANCEL_TASK_TOOL: {
           const { taskId } = taskCancelSchema.parse(call.arguments);
+          this.forgetCancelledDelegateWait(taskId);
           const replay = this.keyedReplay(source, call, call.tool);
           if (replay) return replay;
           const { identity, task } = this.tasks().prepareCancel(current.id, taskId);
@@ -748,7 +765,7 @@ export class AgentThreadManager {
     if (toolName === DELEGATE_TASK_TOOL) {
       const input = delegateTaskSchema.parse(args);
       const created = this.approvalDetail(source, "inertia_create_conversation", delegateCreateInput(input, current));
-      return { ...created, title: `Delegate “${delegatedTaskTitle(input)}”`, detail: `${created.detail}${delegateApprovalSuffix(input, this.automaticWakes())}` };
+      return { ...created, title: `Delegate “${delegatedTaskTitle(input)}”`, detail: `${created.detail}${delegateApprovalSuffix(input, this.automaticWakes(), source.turn.providerId)}` };
     }
     if (toolName === CANCEL_TASK_TOOL) {
       const input = taskCancelSchema.parse(args);
@@ -853,16 +870,43 @@ export class AgentThreadManager {
     }
   }
 
-  private async delegate(source: AgentThreadSource, call: ProviderHostToolCall): Promise<ProviderHostToolResult> {
+  private async delegate(source: AgentThreadSource, call: ProviderHostToolCall, startedAt: number):
+    Promise<ProviderHostToolResult> {
     const input = delegateTaskSchema.parse(call.arguments);
     this.tasks();
-    const created = await this.mutate(source, call, DELEGATE_TASK_TOOL, (operationId, signal) =>
-      this.create(source, delegateCreateInput(input, this.assertSource(source)), operationId, signal, input));
+    // A client that cancels a wait (OpenCode at its MCP timeout) never delivers the task handle, so the agent sees a
+    // failure and may send the same request again. Without its own `clientRequestId`, an identical retry in the same
+    // turn reuses the chat the cancelled call created instead of creating a second one.
+    const retryKey = input.mode === "wait" && input.clientRequestId === undefined
+      ? `${source.turn.id}:${digest({ toolName: DELEGATE_TASK_TOOL, arguments: call.arguments })}` : null;
+    const reused = retryKey === null ? undefined : this.cancelledDelegateWaits.get(retryKey)?.created;
+    const created = reused !== undefined ? { success: true, text: reused } : await this.mutate(source, call,
+      DELEGATE_TASK_TOOL, (operationId, signal) =>
+        this.create(source, delegateCreateInput(input, this.assertSource(source)), operationId, signal, input));
     if (!created.success) return created;
     const { taskId } = JSON.parse(created.text) as { taskId: string };
-    return json(input.mode === "wait"
-      ? await this.tasks().wait(caller(source), taskId, input.timeoutMs, call.signal)
-      : this.tasks().view(taskId));
+    if (input.mode !== "wait") return json(this.tasks().view(taskId));
+    try {
+      // The approval and the chat's creation count against the call's own budget.
+      const view = await this.tasks().wait(caller(source), taskId,
+        delegatedWaitTimeout(input.timeoutMs, source.turn.providerId, performance.now() - startedAt), call.signal);
+      if (retryKey !== null) this.cancelledDelegateWaits.delete(retryKey);
+      return json(view);
+    } catch (error) {
+      if (retryKey !== null && error instanceof DelegatedWaitAbortedError) {
+        if (this.cancelledDelegateWaits.size >= MAX_CANCELLED_DELEGATE_WAITS) {
+          this.cancelledDelegateWaits.delete(this.cancelledDelegateWaits.keys().next().value!);
+        }
+        this.cancelledDelegateWaits.set(retryKey, { taskId, created: created.text });
+      }
+      throw error;
+    }
+  }
+
+  private forgetCancelledDelegateWait(taskId: string): void {
+    for (const [key, entry] of this.cancelledDelegateWaits) {
+      if (entry.taskId === taskId) this.cancelledDelegateWaits.delete(key);
+    }
   }
 
   private tasks(): DelegationTaskService {
@@ -1106,14 +1150,16 @@ export class AgentThreadManager {
     args: unknown,
     signal: AbortSignal,
     identity: { turnId: string; runId: string },
+    operationId: string,
   ): Promise<ProviderHostToolResult> {
     const input = inspectSchema.parse(args);
     const current = this.assertSource(source);
     const target = this.managedTarget(current, input.conversationId);
     if (signal.aborted) throw new Error("The parent turn ended before stop.");
-    await stopOwnedManagedTurn(this.dependencies.store, this.dependencies.turns, target.id, identity);
+    const outcome = await stopManagedTurnForAgent(this.dependencies.store, this.dependencies.turns, target.id, identity, operationId);
     this.dependencies.broadcastSnapshot();
-    return json({ conversationId: target.id, stopped: true });
+    return json(outcome === "stopped" ? { conversationId: target.id, stopped: true }
+      : { conversationId: target.id, stopped: false, next: "The approved turn had already ended, so nothing was stopped." });
   }
 
   private async archive(

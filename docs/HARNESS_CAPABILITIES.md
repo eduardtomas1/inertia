@@ -105,6 +105,23 @@ does not use the allowance. Arguments that fail validation return
 tools. A Codex thread registers it from its next new provider
 thread.
 
+OpenCode cancels a host tool call at its MCP server's `timeout` with
+`notifications/cancelled`, and the host call is then cancelled too. The chat
+tools that wait for the user's approval or for another chat
+(`inertia_create_conversation`, `inertia_send_message`,
+`inertia_stop_conversation`, `inertia_archive_conversation`,
+`inertia_delegate_task`, `inertia_wait_for_task`, `inertia_cancel_task` and
+`inertia_request_context`) are therefore served to OpenCode from a second
+server, `inertia-chat-waits`. Its timeout covers a five-minute approval plus
+the 30-minute maximum delegated wait, plus one minute. Every other tool keeps
+the 30-second server, and the secret request keeps its own server.
+`inertia_delegate_task` in wait mode that is cancelled after it created the
+child chat leaves no handle with the agent. If the agent then sends the same
+request again in the same turn, Inertia reuses that chat instead of creating a
+second one. A request with a `clientRequestId` replays through its key, as it
+does on every provider. The wait-for-chat tool above stays on the 30-second
+server and keeps its 20-second cap.
+
 ### Reading chat context
 
 `inertia.orchestration` also carries `inertia_request_context`, which lets an

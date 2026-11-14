@@ -34,7 +34,7 @@ describe("inertia_delegate_task", () => {
       expect(f.starts).toHaveLength(1);
       const view = parsed<DelegatedTaskView>(results.find(({ success }) => success)!);
       expect(view).toMatchObject({ kind: "original", status: "running", workState: "working", completionWake: "always",
-        wakeArmed: true, title: TASK.title, delivery: { state: null, generation: null }, next: expect.stringContaining("End your turn") });
+        wakeArmed: true, title: TASK.title, delivery: { state: null, generation: null }, next: expect.stringContaining("do not wait on it or poll it") });
 
       const replayApproval = vi.fn(async (): Promise<AgentApprovalDecision> => "approve");
       const replay = await f.invoke("inertia_delegate_task", TASK, { toolCallId: "dispatch-1", approval: replayApproval });

@@ -2201,3 +2201,433 @@ the active-writer rule. Native revert reports only a reason code, so there is
 no raw text to replace. Compaction goes through the Codex control client,
 which drops the JSON-RPC error code, so T3's rule would need a control-client
 change. Neither path counts strikes or retires a session.
+
+## Core safety fixes — 2026-11-14
+
+Package D.1 of [t3code-delta-2026-11-14.md](t3code-delta-2026-11-14.md):
+the core and agent-facing safety fixes. Uncommitted on top of `26e42678`
+(PR #686), macOS, Node 22. T3 anchors are at `b05c505b`.
+
+**Effect settlement on a locked database** (T3 `5ba3a84db`). Before, a
+`settle` or `requeue` that threw inside `OrchestrationEffectDispatcher.execute`
+was swallowed by the dispatcher's `.catch(() => undefined)`. A write that
+outlasted the 5 s busy timeout therefore left the row `running` until the next
+boot, and that row held every later effect in its thread. The dispatcher now
+follows T3's `EffectWorker` (`EffectWorker.ts:672-680` `retryWhileLocked`;
+`:729` `requeueClaim`, `:763` `terminalizeClaim`, `:802`
+`recoverPostSuccessSettlement`). The outcome is written once. If that write
+throws, a recovery write runs: it requeues the claim when the effect is
+replay-safe or the failure was going to retry, and it settles the claim
+`failed` otherwise. A process-bound effect whose success could not be written
+is settled `failed` with `effect-settle-failed` and is never requeued, so it
+never runs twice. A rejected or final failure keeps its own code
+(`settleOrRecover`, `src/server/orchestration-v2/effect-outbox.ts:426`). The
+recovery write is retried only while it fails with a lock timeout
+(`isDatabaseLockTimeout`, `:309`: `SQLITE_BUSY`, `SQLITE_LOCKED` and their
+extended codes).
+
+The retry schedule differs from T3's on purpose. T3 runs SQLite in a worker,
+so its 100 ms spacing costs nothing. In Inertia, better-sqlite3 waits for a
+lock on the runtime thread, up to the connection's 5 s `busy_timeout`
+(`runtime-connection-pragmas.ts`). With 100 ms spacing, a lock held by another
+process would block IPC, provider events and stop-ladder timers almost all the
+time. `EFFECT_SETTLE_RETRY_POLICY` (`:285`) therefore sets four limits:
+
+- Each recovery attempt runs with the busy timeout lowered to 250 ms
+  (`OrchestrationEffectOutbox.withBusyTimeout`, `:236`). The statement is
+  synchronous, and the previous value is restored in `finally`.
+- Attempts back off from 100 ms, doubling up to 5 s.
+- After 60 s in total, the claim is left `running`.
+- The loop also stops when the write lands or is fenced off (a cancel or a
+  lost lease returns `false`), the write fails for any other reason, the
+  effect's own signal is aborted (cancel), or the dispatcher closes
+  (`whileLocked`, `:443`). Cancel and close also interrupt the pause between
+  attempts.
+
+What the next startup does with a claim left `running`
+(`OrchestrationEffectOutbox.recover`): a replay-safe row (today only
+`checkpoint.capture-requested`) returns to `pending` under the new runtime and
+runs again. A process-bound row (`provider.start`, `native.fork`,
+`native.rollback`, `provider.interrupt`, `provider.steer`) is retired as
+`runtime-lost` and never runs again. Until that startup, the row holds later
+effects in its thread, as it did before this package for every settle failure.
+A requeue after a failed pre-execution read, and the requeue for a kind with
+no handler, use the same loop. The fenced `settle` and `requeue` statements
+are unchanged. A requeued claim counts toward `MAX_EFFECT_ATTEMPTS` when it is
+claimed again, as T3's retry does.
+
+**Restart-continuation prompt** (T3 `5bb50dca8`, `RestartContinuation.ts:33`).
+`RESTART_CONTINUATION_PROMPT`
+(`src/server/runtime/restart-continuation-runtime.ts:15`) now reads:
+"Continue from where you stopped. Inertia restarted while your last turn was
+running, so a command or other action it started may have finished or may
+still be running. Before you repeat an action that changes state, check that
+it did not already take effect and is not still running. If you cannot tell,
+say so instead of repeating it." The usage-limit resume
+(`limit-reset-runtime.ts`) keeps "Continue from where you stopped.", as T3's
+`UsageLimitRecoveryWorker.ts:73` keeps its short prompt. A limit stop does not
+cut an action short. `inertia-current-state.md` and the update scenario
+(`tests/e2e/update-everything.spec.ts`) quote the new text. No user guide
+quotes it. The CHANGELOG lines that quote the old text describe released
+versions and are left as they are.
+
+**Delegated task wait** (T3 `ac781dcb7`, `41e69ffa0`).
+`DELEGATION_WAIT_DEFAULT_MS` is 240 s (`src/shared/orchestration-delegation.ts:16`;
+T3 `M:141`), and the tool descriptions say "4 min default, 30 max". The
+maximum stays 30 min (T3: 60). Review of how the host answers a call:
+
+- `createProviderHostToolMcpSession` (`src/server/provider/host-tool-mcp-http.ts`)
+  answers a `tools/call` with one `application/json` body when the call
+  completes. It writes neither early headers nor a stream.
+- Claude's host tools are an in-process SDK MCP server, and Codex's are
+  dynamic tools over the App Server's stdio JSON-RPC. Neither goes through
+  HTTP, so a long wait has no fetch timeout there.
+- Cursor and Kimi Code without HTTP MCP support reach the server through
+  Inertia's stdio bridge (`STDIO_PROXY_SOURCE`, `host-tool-mcp-config.ts`).
+  The bridge calls Node `fetch` with undici's defaults: 300 s for headers and
+  300 s between body chunks. Pi's bridge aborts `tools/call` at 300 s
+  (`pi-bridge-source.ts:35`). When the stdio bridge's fetch fails, the bridge
+  sets `exitCode = 1` and closes stdin. That ends every Inertia tool for the
+  rest of the turn, not just the call. The same 300 s limit is why secret
+  waits stop at 270 s on these providers (`SECRET_REQUEST_WAIT_MS_BY_PROVIDER`).
+- Sending headers early would not help. The body timeout also fires after
+  300 s of silence, so only periodic bytes (SSE comments or JSON whitespace)
+  would keep the call open. That is a protocol change for every MCP client and
+  is not made here.
+- T3 sends neither early headers nor keepalives. It lowered only the default
+  and kept a 60 min maximum.
+
+Inertia therefore keeps T3's default and its maximum on the other routes, and
+bounds the call where Inertia's own bridge would drop it.
+`DELEGATED_WAIT_CALL_BUDGET_MS` (Cursor, Kimi Code and Pi, 270 s,
+`src/server/runtime/delegation/task-wait.ts:32`) caps
+`delegatedWaitTimeout` (`:43`). The budget is measured from the start of the
+host-tool call (`agent-thread-manager.ts:318`), so the user's approval and the
+child chat's creation count against it for `inertia_delegate_task` in wait
+mode. The call then returns its task handle with `waitTimedOut` before the
+bridge gives up. The approval text uses the same bound and rounds down
+("waits up to 4 min"). The running-task hint (`TASK_RUNNING_WAKE_NEXT`,
+`src/server/runtime/delegation/task-view.ts:18`) now reads "Still running. Its
+result will continue this chat automatically, so do not wait on it or poll it.
+Continue other work, and end your turn when none is left." It no longer
+suggests `inertia_wait_for_task` (T3 `orchestratorMcp.ts:202`). The agent
+surface budget is unchanged in bytes ("5 min" and "4 min" are the same
+length), and `agent-surface-budget.test.ts` passes without a rebaseline.
+
+**Regression tests for races Inertia should already handle.**
+
+- *One command id on two threads at once* (T3 `a530cab2b`, `Orchestrator.ts:15207`,
+  `:15452`). T3's semantics are that exactly one use succeeds and the other
+  fails with a command-id conflict; the two uses are not two independent
+  commands. Inertia already behaves this way, because receipts are keyed by
+  `(actor, command id)` and not by thread (G6). The authority's in-flight
+  entry refuses a second thread with `command-conflict` while the first use
+  runs. `OrchestrationEventStore.receipt` refuses it after the first use
+  committed. `commit` re-reads the receipt inside its transaction, so a
+  receipt that another thread's commit wrote first is refused rather than
+  returned as this command's result. That is the check T3 added at `:15452`.
+  The tests pass on the unchanged code.
+- *A follow-up started during the stop ladder* (T3 `2e0bd97e8`). The ladder's
+  grace escalation is bound to the stopped run's own `ActiveRun`. A second
+  Stop escalates through `TurnController.cancel` while the stopped turn is
+  still active. A stopped turn's release drains its in-flight steers
+  (`TurnFollowUpCoordinator.drain`) before another turn can start. One gap
+  remained. After its in-lane intake, `requestAgentStop` awaited earlier steers
+  and then called `turns.cancel(conversationId)`, which cancels whatever is
+  active at that moment. Only microtask ordering kept a follow-up from being
+  that turn. The intake now records the owner it stopped, and the handler calls
+  `TurnController.cancelExact` (`turn-controller.ts:948`,
+  `agent-stop-command.ts:84`). That method cancels only the recorded run,
+  including one whose terminal write is being retried. The new tests hold the
+  Stop's steer wait open past the release, for the first Stop and for an
+  escalating second Stop. Both cancelled the follow-up before the change.
+- *Unreadable state at turn start* (T3 `37e0fd378`,
+  `ProviderTurnStartService.ts:608-619`). This was a real bug. A projection
+  read that threw inside `dispatchStart` settled the start intent `failed`
+  but threw out of `TurnController.start`. The turn stayed `queued`, and its
+  chat stayed active. On a start deferred behind the previous turn's capture,
+  the throw was swallowed by the tracked promise. `dispatchTurnStart`
+  (`turn-controller-support.ts:66`) now settles the turn `failed` with
+  `turn-start-failed` when the start path throws before it hands the turn to
+  the provider path.
+  When a saved-state read fails, the error activity reads "Inertia couldn't
+  read this chat's saved state, so the turn didn't start."
+  (`TURN_START_STATE_UNREADABLE_MESSAGE`, `:51`), the counterpart of T3's
+  "Couldn't read thread state" error item. The message is used only for
+  `OrchestrationStateUnreadable` (`orchestration-v2/types.ts:165`).
+  `dispatchStart` raises that error when a schema error comes from its
+  pre-dispatch reads of the backing, rollback-cursor and merge-back
+  projections (`turn-repository.ts:486`). Any other error, including a schema
+  error raised elsewhere, keeps its existing message (`publicTurnError`). A
+  failure after hand-off still propagates, as before. One limit remains, checked with
+  a probe. When the run, attempt or thread projection row itself no longer
+  decodes, the terminal write fails for the same reason, so the turn still
+  cannot settle. T3's failing read is a separate recovery projection, so its
+  run write is unaffected. In Inertia, the start path reads only projections
+  that settlement also writes. Repairing a row at runtime would need G6's
+  rebuild to run while the runtime is live, which this package does not do.
+
+**A rejected resume racing a Stop** (review item, G9 interplay). A Stop
+commits its interrupt for attempt A1 in the lane, then cancels outside it,
+possibly after waiting for earlier steers. If a rejected native resume fell
+back to a fresh session in between, the fallback's `deferredSettlement ===
+null` guard still passed and A1 became A2. `settleInterrupt(runId)` then found
+no interrupt on A2, so A1's claimed `provider.interrupt` effect stayed
+`running` until restart, holding later checkpoint captures. T3 recovers in a
+fresh native thread only while the run is still `starting`
+(`isCurrentAttemptInStatus`, `ProviderTurnStartService.ts:1332`), so a landed
+Stop declines recovery. Inertia now does the same.
+`applyFreshSessionFallback` declines once the run's current attempt has
+`interruptRequested` (`turn-fresh-session-fallback.ts:73`). As a backstop,
+`restartOnFreshSession` reads the expected attempt and refuses with
+`revision-conflict` when it has `interruptRequestedAt`, before
+`replaceAttempt` (`turn-repository.ts:243`). The whole restart then rolls
+back. The refusal is at write time, not in the projector. Logs written before
+it can contain an interrupt followed by a `provider_recovery` replacement, and
+a projector refusal would make their rebuild, and so startup, fail. The
+projector stays as permissive as before. Other replacement reasons are
+unchanged.
+
+**Stop attribution** (T3 `009c9e6bd`, `M:268`). `run-control.interrupt-recorded`
+carries an optional `cause` (`user`, `agent` or `runtime`;
+`RUN_INTERRUPT_CAUSES`, `src/shared/orchestration-run-control.ts:8`), and the
+`run-interrupt` projection keeps it. Events and rows written before this have
+none and read as `null`. No projector version bump is needed, because a
+rebuild reproduces the same values. `requestAgentStop` requires the cause.
+The user's Stop and stop-and-send record `user`. An escalating Stop records
+its requester's cause too. `RUN_INTERRUPT_ESCALATION_CAUSES` gains `agent` and
+`runtime` (`orchestration-run-control.ts:7`); older events keep their values,
+and `escalateByRequester` (`run-control-repository.ts:111`) passes the cause
+through. `inertia_stop_conversation`
+no longer cancels through `stopOwnedManagedTurn`.
+`stopManagedTurnForAgent` (`src/server/runtime/managed-turn-ownership.ts:34`)
+sends it through the G5 Stop command under the new actor `agent`, with the
+command id `agent-stop:<operation id>` and the approved turn as
+`expectedTurnId`. The Stop is therefore receipted, ordered in the chat's lane
+against sends, recorded with a `provider.interrupt` effect and settled by the
+ladder like the user's. The approval names one exact run. Intake compares
+`expectedRunId` as well as the turn (`agent-stop-command.ts:58`). A turn or
+run replaced after approval is refused as superseded and reported with the old
+"approved turn is no longer active" message. The cancel uses the approved
+identity. If that run ended on its own before the cancel reached it,
+`cancelExact` returns `false`, and the Stop answers the new disposition
+`ended` (`:94`). The user's Stop treats `ended` like `releasing` and waits for
+cleanup. `stopManagedTurnForAgent` (`managed-turn-ownership.ts:35`) answers
+`ended` for that case and for `idle` and `releasing`. The tool then returns
+`stopped: false` and says the approved turn had already ended, instead of
+`stopped: true`. The exact-cleanup check after the stop is unchanged.
+
+**OpenCode host-tool calls that wait** (review item). Verified from the
+repository, not from OpenCode's source, which is not vendored here:
+
+- `openCodeHostMcpConfig` registers the host server with `timeout: 30_000`.
+  Commit `8cd25059e` raised it from 10 s so that browser actions would not
+  time out.
+- #687 moved the secret request to a second OpenCode MCP server with a 10 min
+  + 60 s timeout, so that its wait would not be cut.
+- `HARNESS_CAPABILITIES.md` states that OpenCode's MCP client gives a host
+  call 30 seconds.
+- On timeout OpenCode sends `notifications/cancelled`, and
+  `handleProviderMcpBody` calls `runtime.cancelCall`
+  (`host-tool-mcp-protocol.ts:221-226`). The call's signal aborts, and the
+  approval and the delegated wait end with it.
+- One contrary hint: the bundled v1 SDK documents the per-server `timeout` as
+  a timeout "for fetching tools", and the v2 config also has
+  `experimental.mcp_timeout`. If OpenCode applied neither to tool calls, the
+  MCP SDK's own 60 s request default would apply instead. Either way, an
+  approval (up to 5 min) or a delegated wait (240 s by default) outlasts it.
+- T3 registers its OpenCode server without a timeout. Its behaviour was not
+  compared.
+
+The fix follows the secrets precedent. `OPENCODE_WAIT_HOST_TOOLS`
+(`host-tool-mcp-config.ts:36`) lists the chat tools that ask for approval or
+wait on another chat: create, send, stop, archive, delegate, wait for task,
+cancel task and `inertia_request_context`. They are served from a third
+server, `inertia-chat-waits`, with `OPENCODE_WAIT_MCP_TIMEOUT_MS` (`:34`): the
+5 min approval timeout plus the 30 min maximum wait plus 60 s. The rest of the
+OpenCode wiring follows from that:
+
+- The main server excludes those tools.
+- The supervised and watcher rulesets allow `inertia-chat-waits_*`.
+- The activity-title pattern accepts the new prefix.
+- No wait server is added when the turn has none of those tools.
+
+Delegate in wait mode is now safe against a cancelled call. With a
+`clientRequestId`, the existing per-source key (`client_request_key`,
+`agent_thread_operations`) replays the completed creation and waits again. A
+test now pins this. Without one, an identical request in the same source turn,
+after a wait that was cancelled once the child existed, reuses that chat
+instead of creating another (`cancelledDelegateWaits`,
+`agent-thread-manager.ts:210`). Reuse lasts only while the agent has never
+seen that task's handle. `inertia_get_task_status`, `inertia_wait_for_task`
+and `inertia_cancel_task` remove the entry for the task they name
+(`forgetCancelledDelegateWait`). Inertia has no task-listing tool, so these
+are all the calls that take a task handle. After any of them, an identical
+request is a new task with its own approval. Entries are held in memory, at
+most 64, and cleared when the source turn settles. `HARNESS_CAPABILITIES.md` describes the
+split. Delegated
+cancels still stop through `stopOwnedManagedTurn` (G5's deliberate
+difference).
+
+Deliberate differences from T3 Code:
+
+- The effect retry backs off, waits at most 250 ms per attempt and gives up
+  after 60 s, leaving the claim to startup recovery. T3 retries every 100 ms
+  without a cap, because its SQLite does not block its main thread. It retries
+  only lock timeouts and tries any other failure once. In production the
+  dispatcher runs only replay-safe kinds, so the process-bound branch is
+  covered by tests only.
+  Process-bound effects that callers claim and settle inline (`dispatchStart`,
+  `RunControlRepository.settleClaim`, native controls) are outside the
+  dispatcher and unchanged. A lock timeout there still reaches the caller.
+  `SQLITE_LOCKED` counts as a lock timeout. Whether Effect's
+  `LockTimeoutError` also covers it was not checked.
+- The continuation prompt names the restart and keeps Inertia's opening
+  sentence. Only restart continuations use it; usage-limit resumes keep the
+  short prompt, as in T3.
+- Delegated waits are capped at 270 s per call on Cursor, Kimi Code and Pi,
+  measured from the call's start. T3 has no per-route cap, and its maximum is
+  60 min against Inertia's 30.
+- Stop cancels the exact run its intake recorded. T3's counterpart releases a
+  shared provider session only when no later run is active on it; Inertia has
+  one harness process per turn.
+- A start-path failure before hand-off settles the turn; one that comes from
+  the run's own projection still cannot settle (see above).
+- OpenCode's waiting chat tools are served from their own long-timeout
+  server; T3 sets no OpenCode MCP timeout.
+- Attribution is durable (event, projection and receipt actor), but the turn
+  still reads "Stopped". T3 shows "Stopped by an agent[: reason]" as the run's
+  stop reason. A visible agent label is a renderer follow-up.
+
+Tests:
+
+- `tests/server/orchestration-v2-outbox.test.ts` gains 9 cases (24 in the
+  file). Most cover real lock contention through a second connection with
+  `busy_timeout = 0`:
+  - lock classification;
+  - a replay-safe success requeued on a backoff of 0, 100, 300 and 700 ms,
+    then run again, with the next effect in the thread following;
+  - a process-bound success settled `failed` and run once, with the thread
+    released;
+  - a retryable failure requeued and a rejected failure settled with its own
+    code;
+  - another error tried once and left to startup recovery;
+  - close stopping the retries;
+  - another writer fencing the claim off, and a cancel, each stopping the
+    loop;
+  - a runtime connection with a real 300 ms busy timeout, where the first
+    write waits about 300 ms and each recovery attempt under 200 ms. The
+    timeout is restored, the loop gives up at its budget, and the next
+    startup requeues the replay-safe claim and retires the process-bound one
+    as `runtime-lost`;
+  - the default policy and the timeout helper.
+- `tests/server/orchestration-command-authority.test.ts` gains 7 cases (22):
+  - cross-thread id reuse through `conversation.update`;
+  - cross-thread id reuse through the authority, with the in-flight, receipt
+    and commit-time checks;
+  - the two follow-up stop races;
+  - user and agent attribution with the real controller, including an agent
+    replay that never stops the next run;
+  - a projection rebuild over events without `cause`;
+  - an agent's escalating Stop recorded as `agent`, and an approval for
+    another run of the turn refused as superseded.
+- `tests/server/turn-start-read-failure.test.ts` (new, 4 cases):
+  - a direct start and a deferred start whose saved-state read fails, each
+    settled failed with no provider run, after which the chat takes the next
+    turn;
+  - a plain error and a schema error outside the saved-state reads, which
+    keep their own message;
+  - a failure after hand-off, which still throws and leaves the started turn
+    running to completion.
+- `tests/server/orchestration-v2-attempts.test.ts` gains 2 cases (14):
+  - A Stop records its interrupt. The fallback is then declined, and
+    `restartOnFreshSession` refuses at write time and leaves every entity, the
+    revision and the saved session unchanged. The interrupt and its effect
+    settle on the original attempt.
+  - A log in which a `provider_recovery` replacement follows an interrupt, the
+    sequence the race used to commit, rebuilds to identical entities and
+    verifies as readable.
+- `tests/server/opencode-secret-mcp-scope.test.ts` gains 2 cases. They check
+  the wait server's timeout and tool split, the refusal of a misrouted call,
+  both rulesets, that every listed tool exists, and that no wait server is
+  added without such tools. `watcher-read-only-harnesses.test.ts` expects the
+  new allow rule.
+- `tests/server/delegation-wait.test.ts` gains 6 cases (11): the budget
+  function, and a manager case where approval time on Cursor shortens the wait
+  to 170 s, approval text included, while Codex keeps 30 min; and the
+  cancelled-wait retry. An identical unkeyed retry reuses the chat without a
+  second approval, a later identical request creates a new one, and a keyed
+  retry replays. Three more cases cover status, wait and cancel naming the
+  handle, after which an identical request creates a new chat with its own
+  approval.
+- `tests/server/agent-thread-manager.test.ts` gains 2 cases (49), the second
+  for the `stopped: false` answer when the approved turn ended on its own. It checks
+  that `inertia_stop_conversation` commits an `agent.stop` receipt under
+  `agent` and cancels the exact identity. The delayed-approval case now also
+  checks that no interrupt is recorded on the replacement.
+- Updated: `turn-interaction-commands.test.ts` (`cancelExact` mocks),
+  `agent-thread-delegation.test.ts` (hint wording) and the restart
+  continuation suites (`RESTART_CONTINUATION_PROMPT`).
+
+Against the unchanged sources, these fail: the five lock cases (the sixth,
+classification, needs the new export), both stop-race cases (the follow-up
+ends `cancelled`) and both start-read cases (`start` throws a ZodError, and
+the deferred turn stays `queued`). The cross-thread cases pass on both, as
+expected. Review round, each checked against the code before its fix:
+
+- Five outbox cases fail against the first round's 100 ms loop (the fence and
+  cancel case, the real busy timeout case, the default-policy case and the two
+  re-timed cases).
+- The fallback case fails without the fallback decline and the write-time
+  refusal: the fallback runs and the restart is accepted.
+- The rebuild case fails against the earlier projector refusal.
+- The three handle cases fail while reuse ignores a seen handle.
+- The agent escalation case fails while escalations record `user`, and the
+  `expectedRunId` refusal fails while intake compares turns only.
+- The ended-turn case fails while the tool always answers `stopped: true`.
+- The OpenCode split and retry-reuse cases fail without the wait server and
+  without `cancelledDelegateWaits`. The keyed retry passes on both.
+- The hand-off and narrowing cases pin behaviour rather than fix a bug.
+
+Verification (2026-11-14, macOS, Node 22, after the review round):
+
+- The changed suites passed.
+- A wider run passed 1,863 of 1,863 tests in 131 files (second review round). It covered every
+  `tests/server` file matching `orchestration-*`, `turn-*`, `delegation-*`,
+  `restart-*`, `agent-*`, `queued-message-*`, `update-everything*`,
+  `limit-reset*`, `observed-child-*`, `opencode-*` and `provider-host-tool-*`,
+  plus `detached-chat-runtime-authority`, `watcher-read-only-harnesses`,
+  `secret-request-routes`, `provider-session-fallback`, `mascot-status` and
+  `tests/renderer/activity-summary`.
+- `npm run check:quality` passed: workflow concurrency, migration lineage,
+  architecture, colour themes, `lint` and `typecheck`. `turn-controller.ts`
+  is at 1,248 lines, under the 1,250 ceiling.
+- `npm run test:portable` passed 4,319 tests with 31 skipped, in 260 files
+  (2 skipped).
+- The Electron scenarios (`update-everything.spec.ts`, whose quoted prompt
+  changed, and the stop ladder), a real OpenCode run and the full
+  `npm run check` were not run. The branch base is one commit behind the PR
+  head (`e6cdf6b3`, CI timeouts only).
+
+Open risks:
+
+- *Browser approvals on OpenCode.* Browser tools stay on the 30 s server, so a
+  Browser approval slower than 30 s is still cancelled there. Moving the
+  browser family would remove its 30 s bound and rename its OpenCode tools;
+  it is left to the browser surface.
+- *OpenCode 2.* The OpenCode 2 harness (`opencode2-harness.ts`) registers its
+  host server without a timeout, and OpenCode 2's default was not checked.
+- *OpenCode's timeout semantics.* Whether OpenCode's per-server `timeout`
+  covers tool calls remains unverified without a live run. It is inferred
+  from the repository's history, as above, not read in OpenCode's code. If it
+  does not, the MCP SDK's 60 s request default applies, which still cuts
+  approvals and delegated waits. A live 31 s call would settle it.
+- *Inline process-bound settles.* A stuck `running` steer or interrupt row
+  (an inline `settleClaim` that hit a lock timeout) still holds later
+  checkpoint captures in its thread until the next boot. Only the dispatcher's
+  settles were in scope.
+- *A claim the retry gave up on.* After the 60 s budget, the claim holds its
+  thread's later effects until the next startup, as every settle failure did
+  before this package.
+- *Approval time on Cursor, Kimi Code and Pi.* An approval longer than the
+  bridge's 300 s can still lose the call. That predates this package.

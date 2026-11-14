@@ -20,7 +20,8 @@ import {
   WORKSPACE_JSON_SCHEMA,
   workspaceSchema,
 } from "../agent-thread-schemas";
-import { clampDelegatedWaitTimeout } from "./task-wait";
+import type { ProviderId } from "../../../shared/provider";
+import { delegatedWaitLimit } from "./task-wait";
 import { DelegationTaskError } from "./task-service";
 
 export const DELEGATE_TASK_TOOL = "inertia_delegate_task";
@@ -79,7 +80,7 @@ const timeoutProperty = { type: "integer", minimum: 1, maximum: DELEGATION_WAIT_
 export const DELEGATION_TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
   {
     name: DELEGATE_TASK_TOOL,
-    description: "Give `task` to a new chat this chat owns and track its result; Inertia asks the user first. `mode: wait` blocks up to `timeoutMs` (5 min default, 30 max). `wake` (always for async, settled_only for wait, or never) continues this chat with the result.",
+    description: "Give `task` to a new chat this chat owns and track its result; Inertia asks the user first. `mode: wait` blocks up to `timeoutMs` (4 min default, 30 max). `wake` (always for async, settled_only for wait, or never) continues this chat with the result.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -115,7 +116,7 @@ export const DELEGATION_TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] 
   },
   {
     name: TASK_WAIT_TOOL,
-    description: "Wait until a delegated task finishes or needs the user, or `timeoutMs` passes (5 min default, 30 max). The task keeps running after a timeout.",
+    description: "Wait until a delegated task finishes or needs the user, or `timeoutMs` passes (4 min default, 30 max). The task keeps running after a timeout.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -187,9 +188,10 @@ export function assertInteractionWithinParent(requested: "build" | "plan", paren
 
 const WAKES_OFF = "result stays in the inbox; automatic continues are off";
 
-export function delegateApprovalSuffix(input: DelegateTaskInput, automaticWakes: boolean): string {
+export function delegateApprovalSuffix(input: DelegateTaskInput, automaticWakes: boolean, providerId: ProviderId): string {
   const wake = delegateWake(input);
-  const minutes = Math.max(1, Math.round(clampDelegatedWaitTimeout(input.timeoutMs) / 60_000));
+  // Rounded down: "up to" never promises a longer wait than the call can have.
+  const minutes = Math.max(1, Math.floor(delegatedWaitLimit(input.timeoutMs, providerId) / 60_000));
   const held = wake !== "never" && !automaticWakes;
   const behaviour = input.mode === "wait"
     ? `waits up to ${minutes} min${wake === "never" ? " · no automatic wake" : held ? ` · ${WAKES_OFF}` : ""}`

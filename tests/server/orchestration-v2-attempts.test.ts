@@ -477,6 +477,74 @@ describe("Orchestrator V2 rejected-resume fallback (G9)", () => {
     } finally { await closeRuntime(before.runtime); }
   });
 
+  it("declines the fallback once a Stop has recorded its interrupt, so the interrupt settles on its own attempt", async () => {
+    const { runtime, turn } = await resumingChat();
+    try {
+      const { orchestration } = runtime.store;
+      const [initial] = orchestration.attempts(turn.runId);
+      // Stop commits its interrupt in the lane and cancels only after earlier steers settle.
+      const start = await orchestration.authority.begin({
+        source: { actorId: "human", commandId: "stop-before-cancel", command: { type: "agent.stop" } },
+        threadId: runtime.conversationId, projectId: runtime.store.conversation(runtime.conversationId).projectId,
+        commandType: "agent.stop", rejection: null,
+      }, (ticket) => orchestration.runControl.recordInterrupt(ticket, orchestration.runControl.target(turn.runId)!, null, "user"));
+      if (start.kind !== "lead") throw new Error("expected the Stop to lead");
+      start.ticket.finish(null);
+      const effectId = start.intake;
+
+      expect(runtime.provider.freshSession()).toBeNull();
+      expect(orchestration.attempts(turn.runId)).toEqual([expect.objectContaining({ id: initial!.id, status: "running" })]);
+      const db = storeDatabase(runtime.store);
+      const before = { entities: entities(db), revision: orchestration.events.revision(runtime.conversationId) };
+      expect(() => orchestration.restartOnFreshSession({ turn: runtime.store.agentTurn(turn.id),
+        expectedSessionId: "saved-session", expectedAttemptId: initial!.id, prepared: undefined,
+        priorCleanup: "confirmed" }, () => runtime.store.updateConversation(runtime.conversationId,
+        { providerSessionId: null, continuationIdentity: null }))).toThrow("revision-conflict");
+      expect(entities(db)).toEqual(before.entities);
+      expect(orchestration.events.revision(runtime.conversationId)).toBe(before.revision);
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("saved-session");
+      expect(orchestration.attempts(turn.runId)).toHaveLength(1);
+
+      runtime.controller.cancel(runtime.conversationId);
+      runtime.provider.resolve({ status: "cancelled" });
+      await flushTurnControllerTestPromises();
+      await runtime.controller.drainSettlementTasks();
+      expect(runtime.store.agentTurn(turn.id).status).toBe("cancelled");
+      expect(orchestration.runControl.attemptInterrupt(initial!.id)).toMatchObject({ effectId, outcome: "settled" });
+      expect(orchestration.effects.get(effectId)).toMatchObject({ state: "succeeded" });
+    } finally { await closeRuntime(runtime); }
+  });
+
+  it("still rebuilds a log written before the write-time refusal, with a recovery replacement after an interrupt", async () => {
+    const { runtime, turn } = await resumingChat();
+    try {
+      const { orchestration } = runtime.store;
+      const [initial] = orchestration.attempts(turn.runId);
+      const start = await orchestration.authority.begin({
+        source: { actorId: "human", commandId: "stop-before-recovery", command: { type: "agent.stop" } },
+        threadId: runtime.conversationId, projectId: runtime.store.conversation(runtime.conversationId).projectId,
+        commandType: "agent.stop", rejection: null,
+      }, (ticket) => orchestration.runControl.recordInterrupt(ticket, orchestration.runControl.target(turn.runId)!, null, "user"));
+      if (start.kind !== "lead") throw new Error("expected the Stop to lead");
+      start.ticket.finish(null);
+      // The sequence the race used to commit: the projector accepts it, as it always did.
+      const replacement = orchestration.replaceAttempt({ runId: turn.runId, turnId: turn.id, expectedAttemptId: initial!.id,
+        reason: "provider_recovery", priorCleanup: "confirmed" });
+      const db = storeDatabase(runtime.store);
+      const types = (db.prepare(`SELECT type FROM orchestration_v2_events WHERE thread_id = ? ORDER BY sequence`)
+        .all(runtime.conversationId) as Array<{ type: string }>).map(({ type }) => type);
+      expect(types.indexOf("run.attempt-replaced")).toBeGreaterThan(types.indexOf("attempt.interrupt-requested"));
+      const before = entities(db);
+      orchestration.delegation.rebuildProjections();
+      expect(entities(db)).toEqual(before);
+      expect(orchestration.events.verify({ readable: true })).toMatchObject({ valid: true });
+      expect(orchestration.attempts(turn.runId)).toMatchObject([
+        { id: initial!.id, status: "superseded", interruptRequestedAt: expect.any(String) },
+        { id: replacement.id, interruptRequestedAt: null },
+      ]);
+    } finally { await closeRuntime(runtime); }
+  });
+
   it("reproduces the replaced attempts when projections are rebuilt or the store reopens", async () => {
     const { runtime, turn } = await resumingChat();
     runtime.provider.freshSession();

@@ -3,12 +3,16 @@ import { z } from "zod";
 import { orchestrationIdSchema as id } from "./orchestration-identities";
 
 export const RUN_INTERRUPT_OUTCOMES = ["settled", "force-detached", "expired", "failed", "missing", "identity-mismatch"] as const;
-export const RUN_INTERRUPT_ESCALATION_CAUSES = ["grace-expired", "user"] as const;
+/** `agent` and `runtime` are later additions: an escalating Stop records who asked, as its interrupt does. */
+export const RUN_INTERRUPT_ESCALATION_CAUSES = ["grace-expired", "user", "agent", "runtime"] as const;
+/** Who asked for a Stop. Events recorded before attribution have none. */
+export const RUN_INTERRUPT_CAUSES = ["user", "agent", "runtime"] as const;
 export const RUN_STEER_OUTCOMES = ["accepted", "refused", "turn-ended", "unconfirmed", "unavailable"] as const;
 export const RUN_STEER_STATES = ["dispatching", "settled"] as const;
 
 export type RunInterruptOutcome = (typeof RUN_INTERRUPT_OUTCOMES)[number];
 export type RunInterruptEscalationCause = (typeof RUN_INTERRUPT_ESCALATION_CAUSES)[number];
+export type RunInterruptCause = (typeof RUN_INTERRUPT_CAUSES)[number];
 export type RunSteerOutcome = (typeof RUN_STEER_OUTCOMES)[number];
 
 const timestamp = z.iso.datetime();
@@ -19,6 +23,7 @@ export const runInterruptSchema = z.strictObject({
   effectId: id.nullable(),
   requestedAt: timestamp.nullable(),
   expectedTurnId: id.nullable(),
+  cause: z.enum(RUN_INTERRUPT_CAUSES).nullable().optional(),
   unresponsiveAt: timestamp.nullable(),
   escalations: z.number().int().nonnegative(),
   outcome: z.enum(RUN_INTERRUPT_OUTCOMES).nullable(),
@@ -40,6 +45,7 @@ export const runSteerSchema = z.strictObject({
 export const runControlEventSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("run-control.interrupt-recorded"), payload: z.strictObject({
     runId: id, attemptId: id, effectId: id, requestedAt: timestamp, expectedTurnId: id.nullable(),
+    cause: z.enum(RUN_INTERRUPT_CAUSES).optional(),
   }) }),
   z.strictObject({ type: z.literal("run-control.interrupt-escalated"), payload: z.strictObject({
     runId: id, attemptId: id, cause: z.enum(RUN_INTERRUPT_ESCALATION_CAUSES), at: timestamp,

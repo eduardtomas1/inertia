@@ -16,7 +16,7 @@ export interface DelegationInteractions {
 }
 
 export const TASK_RUNNING_WAKE_NEXT =
-  "Still running. End your turn and its result will continue this chat automatically, or call inertia_wait_for_task.";
+  "Still running. Its result will continue this chat automatically, so do not wait on it or poll it. Continue other work, and end your turn when none is left.";
 export const TASK_NEEDS_USER_NEXT =
   "The delegated chat is waiting for the user. Ask the user to answer in that chat; you cannot answer it.";
 

@@ -359,7 +359,7 @@ export function createQueuedMessageRuntime(
     const stopId = `${handoffId}:stop`;
     const stopCommand = { type: "agent.stop", requestId: stopId, payload: { conversationId, expectedTurnId: turnId } };
     try {
-      await requestAgentStop(dependencies, { conversationId, expectedTurnId: turnId, rejection: commandRejection,
+      await requestAgentStop(dependencies, { conversationId, expectedTurnId: turnId, cause: "user", rejection: commandRejection,
         source: { actorId: "human", commandId: stopId, command: stopCommand } });
     } catch (error) {
       if (!(error instanceof RuntimeRequestError)) throw error;

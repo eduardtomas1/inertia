@@ -14,7 +14,7 @@ const evidenceDirectory = process.env.INERTIA_UPDATE_EVIDENCE_DIR
 const installedVersion = "0.124.0";
 const latestVersion = "0.125.0";
 const request = "Refactor the parser module and keep the public API.";
-const continuation = "Continue from where you stopped.";
+const continuation = "Continue from where you stopped. Inertia restarted while your last turn was running, so a command or other action it started may have finished or may still be running. Before you repeat an action that changes state, check that it did not already take effect and is not still running. If you cannot tell, say so instead of repeating it.";
 const continuedAnswer = "Picked up the parser refactor where it stopped.";
 const restartNote = "Inertia stopped while your previous turn was running";
 

@@ -3,6 +3,7 @@ import {
   DELEGATION_WAIT_MAX_MS,
   type DelegatedTaskView,
 } from "../../../shared/orchestration-delegation";
+import type { ProviderId } from "../../../shared/provider";
 
 export type DelegatedWaitOutcome = "terminal" | "needs_action" | "timeout";
 
@@ -18,6 +19,37 @@ export class DelegatedWaitAbortedError extends Error {
 export function clampDelegatedWaitTimeout(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return DELEGATION_WAIT_DEFAULT_MS;
   return Math.min(DELEGATION_WAIT_MAX_MS, Math.max(1, Math.trunc(value)));
+}
+
+/**
+ * How long one host-tool call may stay silent on providers whose MCP client
+ * drops it at 300 s: Inertia's stdio bridge (Cursor, Kimi Code) and Pi's
+ * bridge both use Node fetch, whose headers timeout is 300 s, and the host MCP
+ * server answers only when the call completes. A dropped call loses the task
+ * handle and, on the stdio bridge, ends the bridge for the rest of the turn.
+ * The same providers and value bound secret waits.
+ */
+export const DELEGATED_WAIT_CALL_BUDGET_MS: Readonly<Partial<Record<ProviderId, number>>> = Object.freeze({
+  cursor: 270_000,
+  kimi: 270_000,
+  pi: 270_000,
+});
+
+/**
+ * The wait a delegated task call may use: the requested or default timeout,
+ * and on a provider with a call budget, no more than what is left of it since
+ * the call began, so the call returns its task handle before the client gives up.
+ */
+export function delegatedWaitTimeout(requested: number | undefined, providerId: ProviderId, elapsedMs: number): number {
+  const timeout = clampDelegatedWaitTimeout(requested);
+  const budget = DELEGATED_WAIT_CALL_BUDGET_MS[providerId];
+  if (budget === undefined) return timeout;
+  return Math.max(1, Math.min(timeout, Math.trunc(budget - Math.max(0, elapsedMs))));
+}
+
+/** The longest a wait can last on this provider, for the approval text. */
+export function delegatedWaitLimit(requested: number | undefined, providerId: ProviderId): number {
+  return delegatedWaitTimeout(requested, providerId, 0);
 }
 
 export function delegatedWaitOutcome(view: DelegatedTaskView): Exclude<DelegatedWaitOutcome, "timeout"> | null {

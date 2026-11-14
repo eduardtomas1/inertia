@@ -226,6 +226,25 @@ export class OrchestrationEffectOutbox {
     }).immediate();
   }
 
+  /**
+   * Runs one write with the connection's busy timeout lowered to at most `ms`.
+   * better-sqlite3 waits for a lock on the calling thread, so a recovery write
+   * that retries must not wait the connection's full timeout on every attempt.
+   * The statement is synchronous, so no other statement on this connection can
+   * observe the lowered value.
+   */
+  withBusyTimeout<T>(ms: number, write: () => T): T {
+    if (!Number.isSafeInteger(ms) || ms < 0) throw new Error("Invalid busy timeout.");
+    const previous = this.database.pragma("busy_timeout", { simple: true }) as number;
+    if (previous <= ms) return write();
+    this.database.pragma(`busy_timeout = ${ms}`);
+    try {
+      return write();
+    } finally {
+      this.database.pragma(`busy_timeout = ${previous}`);
+    }
+  }
+
   notifyAvailable(): void {
     for (const listener of this.listeners) {
       try { listener(); } catch { continue; }
@@ -253,17 +272,51 @@ export interface EffectFailure {
   readonly willRetry: boolean;
 }
 
+/** How a recovery write is retried while the database stays locked. */
+export interface EffectSettleRetryPolicy {
+  /** Longest a single attempt waits for the lock, on the runtime thread. */
+  readonly busyTimeoutMs: number;
+  readonly initialDelayMs: number;
+  readonly maxDelayMs: number;
+  /** After this, the claim stays `running` and startup recovery owns it. */
+  readonly budgetMs: number;
+}
+
+export const EFFECT_SETTLE_RETRY_POLICY: EffectSettleRetryPolicy = Object.freeze({
+  busyTimeoutMs: 250,
+  initialDelayMs: 100,
+  maxDelayMs: 5_000,
+  budgetMs: 60_000,
+});
+
 export interface OrchestrationEffectDispatcherOptions {
   readonly concurrency?: number;
   readonly onFailure?: (failure: EffectFailure) => void;
   readonly afterTask?: () => void;
+  readonly settleRetry?: EffectSettleRetryPolicy;
 }
 
 const SHUTDOWN = Symbol("orchestration-effect-shutdown");
 
+/** Recorded when a process-bound effect ran but its success could not be written. */
+export const EFFECT_SETTLE_FAILED_CODE = "effect-settle-failed";
+
+/**
+ * SQLite reports a write that outlasted the connection's busy timeout as
+ * SQLITE_BUSY (or an extended SQLITE_BUSY_* code), and shared-cache lock
+ * contention as SQLITE_LOCKED. Both clear once the other writer commits.
+ */
+export function isDatabaseLockTimeout(error: unknown): boolean {
+  if (error === null || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && /^SQLITE_(?:BUSY|LOCKED)(?:_|$)/u.test(code);
+}
+
 export class OrchestrationEffectDispatcher {
   private readonly active = new Map<string, { controller: AbortController; task: Promise<void> }>();
   private readonly concurrency: number;
+  private readonly shutdown = new AbortController();
+  private readonly settleRetry: EffectSettleRetryPolicy;
   private closed = false;
 
   constructor(
@@ -275,6 +328,7 @@ export class OrchestrationEffectDispatcher {
     if (!Number.isSafeInteger(this.concurrency) || this.concurrency < 1 || this.concurrency > 32) {
       throw new Error("Invalid orchestration effect concurrency.");
     }
+    this.settleRetry = options.settleRetry ?? EFFECT_SETTLE_RETRY_POLICY;
   }
 
   get inFlight(): number {
@@ -310,6 +364,7 @@ export class OrchestrationEffectDispatcher {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.shutdown.abort(SHUTDOWN);
     for (const { controller } of this.active.values()) controller.abort(SHUTDOWN);
     await Promise.allSettled([...this.active.values()].map(({ task }) => task));
   }
@@ -319,13 +374,13 @@ export class OrchestrationEffectDispatcher {
     try {
       current = this.outbox.get(effect.id);
     } catch {
-      this.outbox.requeue(effect);
+      await this.whileLocked(() => this.outbox.requeue(effect), signal);
       return;
     }
     if (signal.aborted || current?.state !== "running" || current.claimId !== effect.claimId) return;
     const handler = this.handlers.get(effect.kind);
     if (!handler) {
-      this.outbox.requeue(effect);
+      await this.whileLocked(() => this.outbox.requeue(effect), signal);
       return;
     }
     const willRetry = effect.replayPolicy === "replay-safe" && effect.attempts < MAX_EFFECT_ATTEMPTS;
@@ -335,9 +390,17 @@ export class OrchestrationEffectDispatcher {
       if (signal.aborted) return;
       const rejected = error instanceof OrchestrationEffectRejected;
       const code = rejected ? error.code : "effect-execution-failed";
-      if (this.outbox.settle(effect, { kind: "failed", code, retryable: !rejected })) {
+      const retries = !rejected && willRetry;
+      const settled = await this.settleOrRecover(
+        () => this.outbox.settle(effect, { kind: "failed", code, retryable: !rejected }),
+        retries
+          ? () => this.outbox.requeue(effect)
+          : () => this.outbox.settle(effect, { kind: "failed", code }),
+        signal,
+      );
+      if (settled) {
         try {
-          this.options.onFailure?.({ effect, code, willRetry: !rejected && willRetry });
+          this.options.onFailure?.({ effect, code, willRetry: retries });
         } catch {
           return;
         }
@@ -345,6 +408,67 @@ export class OrchestrationEffectDispatcher {
       return;
     }
     if (signal.aborted && signal.reason !== SHUTDOWN) return;
-    this.outbox.settle(effect, { kind: "succeeded" });
+    await this.settleOrRecover(
+      () => this.outbox.settle(effect, { kind: "succeeded" }),
+      // A replay-safe effect may run again; a process-bound one never does.
+      effect.replayPolicy === "replay-safe"
+        ? () => this.outbox.requeue(effect)
+        : () => this.outbox.settle(effect, { kind: "failed", code: EFFECT_SETTLE_FAILED_CODE }),
+      signal,
+    );
+  }
+
+  /**
+   * Only the claiming dispatcher settles its row, and a running row holds every
+   * later effect in its thread. The outcome is written once; if that write
+   * throws, a recovery write is retried while the database stays locked.
+   */
+  private async settleOrRecover(settle: () => boolean, recover: () => boolean, signal: AbortSignal): Promise<boolean> {
+    try {
+      return settle();
+    } catch {
+      return await this.whileLocked(recover, signal);
+    }
+  }
+
+  /**
+   * Unlike T3, whose SQLite runs off the main thread, a locked write here
+   * blocks the runtime thread for its busy timeout. Each attempt therefore
+   * waits at most `busyTimeoutMs`, attempts back off exponentially, and after
+   * `budgetMs` the claim is left `running`: the next startup requeues a
+   * replay-safe row and retires a process-bound one as `runtime-lost`. The loop
+   * also ends when the write lands or is fenced off (`false`), fails for
+   * another reason, the effect is cancelled, or the dispatcher closes.
+   */
+  private async whileLocked(write: () => boolean, signal?: AbortSignal): Promise<boolean> {
+    const policy = this.settleRetry;
+    const deadline = Date.now() + policy.budgetMs;
+    let delay = policy.initialDelayMs;
+    for (;;) {
+      try {
+        return this.outbox.withBusyTimeout(policy.busyTimeoutMs, write);
+      } catch (error) {
+        if (!isDatabaseLockTimeout(error) || this.closed || !this.outbox.open || signal?.aborted) return false;
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || !await this.pause(Math.min(delay, remaining), signal)) return false;
+      delay = Math.min(delay * 2, policy.maxDelayMs);
+    }
+  }
+
+  private pause(ms: number, cancelled?: AbortSignal): Promise<boolean> {
+    const signals = [this.shutdown.signal, ...(cancelled ? [cancelled] : [])];
+    if (signals.some(({ aborted }) => aborted)) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const done = (resumed: boolean): void => {
+        clearTimeout(timer);
+        for (const signal of signals) signal.removeEventListener("abort", onAbort);
+        resolve(resumed);
+      };
+      const onAbort = (): void => { done(false); };
+      const timer = setTimeout(() => { done(true); }, ms);
+      timer.unref?.();
+      for (const signal of signals) signal.addEventListener("abort", onAbort, { once: true });
+    });
   }
 }

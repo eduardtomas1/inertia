@@ -161,6 +161,14 @@ export class OrchestrationCommandRejected extends Error {
   }
 }
 
+/** A stored projection the caller needed no longer matches its schema. */
+export class OrchestrationStateUnreadable extends Error {
+  constructor(options: ErrorOptions) {
+    super("Saved orchestration state could not be read.", options);
+    this.name = "OrchestrationStateUnreadable";
+  }
+}
+
 export class OrchestrationProjectionVerificationError extends RuntimeStartupBlockerError {
   constructor(readonly verification: ProjectionVerification) {
     super("orchestration-projection-invalid", "Orchestration projections could not be verified after a rebuild.");

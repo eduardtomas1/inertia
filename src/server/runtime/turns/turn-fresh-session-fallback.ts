@@ -68,6 +68,9 @@ export function applyFreshSessionFallback(
     || !active.freshSessionRequest
     || active.runState.isTerminal()
     || active.deferredSettlement !== null
+    // A Stop records its interrupt before it cancels; that run is being stopped, not recovered (T3 recovers only a
+    // run still `starting`).
+    || store.orchestration.runControl.target(active.turn.runId)?.interruptRequested === true
     || active.assistantText !== ""
     || active.latestAssistantMessageId !== null
     || active.reasoningText !== ""

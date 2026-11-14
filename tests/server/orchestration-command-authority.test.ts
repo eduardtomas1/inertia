@@ -7,11 +7,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import { RuntimeStore } from "../../src/server/database";
 import { OrchestrationLaneReentry, OrchestrationCommandLanes } from "../../src/server/orchestration-v2/command-lanes";
+import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
 import {
   createConversationCommandHandler,
   type ConversationCommandDependencies,
 } from "../../src/server/runtime/commands/conversation-commands";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
+import { requestAgentStop } from "../../src/server/runtime/commands/agent-stop-command";
+import { stopManagedTurnForAgent } from "../../src/server/runtime/managed-turn-ownership";
 import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
 import type { ChatAttachment, ClientCommand, ModelSelection, ServerEvent } from "../../src/shared/contracts";
 import { orchestrationAttemptSchema, orchestrationRunSchema } from "../../src/shared/orchestration-v2";
@@ -262,6 +265,198 @@ describe("Stop authority", () => {
     } finally { await f.close(); }
   });
 
+  // The release of a stopped turn drains its in-flight steers before another turn can start, so the
+  // Stop's own wait for those steers normally ends first. These cases hold that wait open past the
+  // release to show the Stop acts only on the run its intake recorded, not on whatever runs later.
+  it("never stops a follow-up that started while the first Stop waited for an earlier steer", async () => {
+    const f = await fixture();
+    try {
+      const first = f.startRunning();
+      const steerStarted = deferred();
+      const steerGate = deferred();
+      vi.spyOn(f.provider, "steer").mockImplementation(async () => {
+        steerStarted.resolve();
+        await steerGate.promise;
+        return true;
+      });
+      const stopWaiting = deferred();
+      const stopResumes = deferred();
+      vi.spyOn(f.store.orchestration.runControl, "awaitSettled").mockImplementation(async () => {
+        stopWaiting.resolve();
+        await stopResumes.promise;
+        return true;
+      });
+      const sending = f.send(randomUUID(), "Before the stop.");
+      await steerStarted.promise;
+      const stopping = f.stop(randomUUID(), first.id);
+      await stopWaiting.promise;
+
+      f.provider.resolve({ status: "completed" });
+      steerGate.resolve();
+      await expect(sending).resolves.toBe("handled");
+      await vi.waitFor(() => { expect(f.controller.isReleasing(f.conversationId)).toBe(false); });
+      expect(f.store.agentTurn(first.id).status).toBe("completed");
+      const next = f.controller.queue({ conversationId: f.conversationId, content: "Next task" });
+      expect(f.controller.start(next.turn.id)).toBe(true);
+      f.provider.emit({ ...turnControllerTestIdentity(f), turnId: next.turn.id, runId: next.turn.runId,
+        type: "status", status: "running" });
+      await vi.waitFor(() => { expect(f.store.agentTurn(next.turn.id).status).toBe("running"); });
+      const cancels = f.provider.cancelCount;
+
+      stopResumes.resolve();
+      await expect(stopping).resolves.toBe("mutation");
+      await flushTurnControllerTestPromises();
+      expect(f.store.agentTurn(next.turn.id).status).toBe("running");
+      expect(f.provider.cancelCount).toBe(cancels);
+      expect(f.provider.stopOwnedCalls.map(({ identity }) => identity.turnId)).not.toContain(next.turn.id);
+      expect(f.attempt(next.turn.runId).interruptRequestedAt).toBeNull();
+      expect(f.store.orchestration.runControl.attemptInterrupt(f.attempt(first.runId).id)).toMatchObject({ outcome: "settled" });
+      f.provider.resolve({ status: "completed" });
+      await f.drain();
+      expect(f.store.agentTurn(next.turn.id).status).toBe("completed");
+    } finally { await f.close(); }
+  });
+
+  it("never force-stops a follow-up that started during the ladder when a second Stop escalates", async () => {
+    const f = await fixture();
+    try {
+      const first = f.startRunning();
+      const steerStarted = deferred();
+      const steerGate = deferred();
+      vi.spyOn(f.provider, "steer").mockImplementation(async () => {
+        steerStarted.resolve();
+        await steerGate.promise;
+        return true;
+      });
+      const escalationWaiting = deferred();
+      const escalationResumes = deferred();
+      let waits = 0;
+      vi.spyOn(f.store.orchestration.runControl, "awaitSettled").mockImplementation(async () => {
+        waits += 1;
+        // The first Stop's wait for the hung steer runs out at once; the escalation's is held open.
+        if (waits === 1) return false;
+        escalationWaiting.resolve();
+        await escalationResumes.promise;
+        return true;
+      });
+      f.provider.deferOwnedStop("force-detached");
+      const sending = f.send(randomUUID(), "Before the stop.");
+      await steerStarted.promise;
+      const stopping = f.stop(randomUUID(), first.id);
+      await vi.waitFor(() => { expect(f.provider.stopOwnedCalls).toHaveLength(1); });
+      const escalating = f.stop(randomUUID(), first.id);
+      await escalationWaiting.promise;
+      expect(f.threadEvents().filter(({ type }) => type === "run-control.interrupt-escalated")
+        .map(({ payload }) => (payload as { cause: string }).cause)).toEqual(["user"]);
+
+      steerGate.resolve();
+      await sending;
+      f.provider.resolve({ status: "cancelled" });
+      f.provider.resolveOwnedStop();
+      await expect(stopping).resolves.toBe("mutation");
+      await vi.waitFor(() => { expect(f.controller.isReleasing(f.conversationId)).toBe(false); });
+      expect(f.store.agentTurn(first.id).status).toBe("cancelled");
+      const next = f.controller.queue({ conversationId: f.conversationId, content: "Follow-up" });
+      expect(f.controller.start(next.turn.id)).toBe(true);
+      f.provider.emit({ ...turnControllerTestIdentity(f), turnId: next.turn.id, runId: next.turn.runId,
+        type: "status", status: "running" });
+      await vi.waitFor(() => { expect(f.store.agentTurn(next.turn.id).status).toBe("running"); });
+      const cancels = f.provider.cancelCount;
+
+      escalationResumes.resolve();
+      await expect(escalating).resolves.toBe("mutation");
+      await flushTurnControllerTestPromises();
+      expect(f.store.agentTurn(next.turn.id).status).toBe("running");
+      expect(f.provider.cancelCount).toBe(cancels);
+      expect(f.provider.stopOwnedCalls.map(({ identity }) => identity.turnId)).toEqual([first.id]);
+      expect(f.attempt(next.turn.runId).interruptRequestedAt).toBeNull();
+      f.provider.resolve({ status: "completed" });
+      await f.drain();
+      expect(f.store.agentTurn(next.turn.id).status).toBe("completed");
+    } finally { f.provider.resolveOwnedStop(); await f.close(); }
+  });
+
+  it("records who asked for each Stop: the user's Stop as user, an agent's as agent under its own receipt", async () => {
+    const f = await fixture();
+    try {
+      const first = f.startRunning();
+      await expect(f.stop(randomUUID(), first.id)).resolves.toBe("mutation");
+      await f.drain();
+      const second = f.startRunning();
+      await expect(stopManagedTurnForAgent(f.store, f.controller, f.conversationId,
+        { turnId: second.id, runId: second.runId }, "operation-1")).resolves.toBe("stopped");
+      await f.drain();
+      expect(f.store.agentTurn(second.id).status).toBe("cancelled");
+      const recorded = f.threadEvents().filter(({ type }) => type === "run-control.interrupt-recorded");
+      expect(recorded.map(({ payload }) => payload)).toEqual([
+        expect.objectContaining({ runId: first.runId, cause: "user" }),
+        expect.objectContaining({ runId: second.runId, expectedTurnId: second.id, cause: "agent" }),
+      ]);
+      expect(recorded[1]!.commandId).toBe("agent-stop:operation-1");
+      expect(f.store.orchestration.runControl.attemptInterrupt(f.attempt(first.runId).id)).toMatchObject({ cause: "user" });
+      expect(f.store.orchestration.runControl.attemptInterrupt(f.attempt(second.runId).id))
+        .toMatchObject({ cause: "agent", outcome: "settled" });
+      expect(f.controlEffects("provider.interrupt").map(({ state }) => state)).toEqual(["succeeded", "succeeded"]);
+
+      // The same approved operation replays its receipt; it never stops the chat's next run.
+      const third = f.startRunning();
+      await expect(stopManagedTurnForAgent(f.store, f.controller, f.conversationId,
+        { turnId: second.id, runId: second.runId }, "operation-1")).resolves.toBe("stopped");
+      await expect(stopManagedTurnForAgent(f.store, f.controller, f.conversationId,
+        { turnId: second.id, runId: second.runId }, "operation-2")).rejects.toThrow("approved turn is no longer active");
+      expect(f.store.agentTurn(third.id).status).toBe("running");
+      expect(f.threadEvents().filter(({ type }) => type === "run-control.interrupt-recorded")).toHaveLength(2);
+      f.provider.resolve({ status: "completed" });
+      await f.drain();
+    } finally { await f.close(); }
+  });
+
+  it("records an agent's escalating Stop as the agent's and refuses an approval for another run of the turn", async () => {
+    const f = await fixture();
+    try {
+      const turn = f.startRunning();
+      f.provider.deferOwnedStop("settled");
+      const agentStop = (operationId: string, expectedRunId = turn.runId) => requestAgentStop(f.dependencies, {
+        conversationId: f.conversationId, expectedTurnId: turn.id, expectedRunId, cause: "agent", rejection: null,
+        source: { actorId: "agent", commandId: `agent-stop:${operationId}`, command: { type: "agent.stop", operationId } },
+      });
+      await expect(agentStop("other-run", "another-run-id")).rejects.toMatchObject({ code: "superseded" });
+      expect(f.attempt(turn.runId).interruptRequestedAt).toBeNull();
+      expect(f.provider.stopOwnedCalls).toEqual([]);
+
+      await expect(agentStop("first")).resolves.toBe("turn");
+      await vi.waitFor(() => { expect(f.provider.stopOwnedCalls).toHaveLength(1); });
+      await expect(agentStop("second")).resolves.toBe("turn");
+      expect(f.threadEvents().filter(({ type }) => type.startsWith("run-control.interrupt-"))
+        .map(({ type, payload }) => [type, (payload as { cause?: string }).cause])).toEqual([
+        ["run-control.interrupt-recorded", "agent"],
+        ["run-control.interrupt-escalated", "agent"],
+      ]);
+      expect(f.store.orchestration.runControl.attemptInterrupt(f.attempt(turn.runId).id))
+        .toMatchObject({ cause: "agent", escalations: 1, unresponsiveAt: null });
+      f.provider.resolve({ status: "cancelled" });
+      f.provider.resolveOwnedStop();
+      await f.drain();
+      expect(f.store.agentTurn(turn.id).status).toBe("cancelled");
+    } finally { f.provider.resolveOwnedStop(); await f.close(); }
+  });
+
+  it("reads an interrupt recorded before attribution, without a cause, after a projection rebuild", async () => {
+    const f = await fixture();
+    try {
+      const turn = f.startRunning();
+      await expect(f.stop(randomUUID(), turn.id)).resolves.toBe("mutation");
+      await f.drain();
+      const database = (f.store as unknown as { database: import("better-sqlite3").Database }).database;
+      database.prepare(`UPDATE orchestration_v2_events SET payload_json = json_remove(payload_json, '$.cause')
+        WHERE type = 'run-control.interrupt-recorded'`).run();
+      f.store.orchestration.delegation.rebuildProjections();
+      expect(f.store.orchestration.events.verify({ readable: true })).toMatchObject({ valid: true });
+      const interrupt = f.store.orchestration.runControl.attemptInterrupt(f.attempt(turn.runId).id);
+      expect(interrupt).toMatchObject({ runId: turn.runId, cause: null, outcome: "settled" });
+    } finally { await f.close(); }
+  });
+
   it("refuses a Stop whose expected turn is stale as superseded before stopping anything", async () => {
     const f = await fixture();
     try {
@@ -437,6 +632,65 @@ describe("Stop authority", () => {
       reopened?.close();
       await f.abandon();
     }
+  });
+});
+
+describe("command id reuse across threads", () => {
+  const conflict = { name: "OrchestrationConflict", code: "command-conflict" };
+
+  it("lets one of two chats win a command id used on both at once and refuses it on the other", async () => {
+    const f = await fixture();
+    try {
+      const projectId = f.store.conversation(f.conversationId).projectId;
+      const other = f.store.createConversation(projectId, "Other chat", { providerId: "codex", model: "gpt-test",
+        reasoningEffort: "high", interactionMode: "build", accessMode: "supervised" });
+      const handler = createConversationCommandHandler({
+        store: f.store,
+        providers: { resolveModelRoute: (value: ModelSelection) => resolveNativeModelRoute(value) },
+        backendProfileController: { isExternalSelection: () => false, validateSelection: (value: ModelSelection) => value,
+          supportsNativeFastModeControl: () => false },
+      } as unknown as ConversationCommandDependencies);
+      const requestId = randomUUID();
+      const rename = (conversationId: string, title: string) => handler(null as never, {
+        type: "conversation.update", requestId, payload: { conversationId, title },
+      } as ClientCommand);
+      const results = await Promise.allSettled([rename(f.conversationId, "First wins"), rename(other.id, "Second loses")]);
+      expect(results.map(({ status }) => status)).toEqual(["fulfilled", "rejected"]);
+      expect((results[1] as PromiseRejectedResult).reason).toMatchObject(conflict);
+      expect(f.store.conversation(f.conversationId).title).toBe("First wins");
+      expect(f.store.conversation(other.id).title).toBe("Other chat");
+      await expect(rename(f.conversationId, "First wins")).resolves.toBe("mutation");
+      await expect(rename(other.id, "Second loses")).rejects.toMatchObject(conflict);
+      expect(f.store.orchestration.events.readEvents({ projectId, threadId: other.id, limit: 50 })).toEqual([]);
+      expect(f.store.orchestration.authority.inFlightCount()).toBe(0);
+    } finally { await f.close(); }
+  });
+
+  it("refuses the id on another thread while its first use is in flight and after it committed", async () => {
+    const f = await fixture();
+    try {
+      const authority = f.store.orchestration.authority;
+      const events = f.store.orchestration.events;
+      const projectId = f.store.conversation(f.conversationId).projectId;
+      const other = f.store.createConversation(projectId, "Other chat", { providerId: "codex", model: "gpt-test",
+        reasoningEffort: "high", interactionMode: "build", accessMode: "supervised" });
+      const source = { actorId: "human", commandId: randomUUID(), command: { type: "test.command" } };
+      const request = (threadId: string) => ({ source, threadId, projectId, commandType: "test.command", rejection: null });
+      const lead = await authority.begin(request(f.conversationId));
+      if (lead.kind !== "lead") throw new Error("expected the first use to lead");
+      await expect(authority.begin(request(other.id))).rejects.toMatchObject(conflict);
+
+      // A writer that skipped the authority commits the same identity on the other thread first.
+      events.commit({ ...source, projectId, threadId: other.id, commandType: "test.command",
+        expectedRevision: events.revision(other.id), events: [], result: { thread: "other" } });
+      expect(() => lead.ticket.commit({ events: [], result: { thread: "first" } })).toThrow(OrchestrationConflict);
+      lead.ticket.fail(new OrchestrationConflict("command-conflict"));
+      await expect(authority.begin(request(f.conversationId))).rejects.toMatchObject(conflict);
+      expect(events.receipt({ ...source, projectId, threadId: other.id }, source.command))
+        .toMatchObject({ threadId: other.id, result: { thread: "other" } });
+      await expect(authority.begin(request(other.id))).resolves.toMatchObject({ kind: "replay" });
+      expect(authority.inFlightCount()).toBe(0);
+    } finally { await f.close(); }
   });
 });
 

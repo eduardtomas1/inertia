@@ -4,6 +4,8 @@ import type { McpRemoteConfig } from "@opencode-ai/sdk/v2";
 import { chatInstruction, withoutInternalProviderInstructions } from "../runtime/turns/request-context";
 import type { ProviderHostToolBridge } from "./contracts";
 import { SECRET_REQUEST_WAIT_MS_BY_PROVIDER } from "../../node/agent-secrets";
+import { DELEGATION_WAIT_MAX_MS } from "../../shared/orchestration-delegation";
+import { HOST_TOOL_APPROVAL_TIMEOUT_MS } from "./host-tool-runtime";
 import {
   MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES,
   PROVIDER_HOST_TOOL_MCP_BODY_LIMIT_MESSAGE,
@@ -17,11 +19,30 @@ import {
 
 export const INERTIA_HOST_MCP_NAME = "inertia-chat-manager";
 export const INERTIA_SECRET_MCP_NAME = "inertia-chat-secrets";
+export const INERTIA_WAIT_MCP_NAME = "inertia-chat-waits";
 export const INERTIA_HOST_MCP_URL_ENV = "INERTIA_HOST_MCP_URL";
 export const INERTIA_HOST_MCP_TOKEN_ENV = "INERTIA_HOST_MCP_TOKEN";
 const MAX_STDIO_PROXY_RESPONSE_BYTES = 6 * 1024 * 1024;
 const OPENCODE_HOST_MCP_TIMEOUT_MS = 30_000;
 export const OPENCODE_SECRET_MCP_TIMEOUT_MS = SECRET_REQUEST_WAIT_MS_BY_PROVIDER.opencode + 60_000;
+/**
+ * OpenCode cuts a call to an MCP server at that server's `timeout` and sends
+ * `notifications/cancelled`, which cancels the host call. Tools that wait for
+ * the user's approval or for a delegated task are served from their own server:
+ * the longest such call is an approval followed by the longest delegated wait.
+ */
+export const OPENCODE_WAIT_MCP_TIMEOUT_MS = HOST_TOOL_APPROVAL_TIMEOUT_MS + DELEGATION_WAIT_MAX_MS + 60_000;
+/** Host tools that ask the user or wait on another chat; they need more than the main server's timeout. */
+export const OPENCODE_WAIT_HOST_TOOLS: ReadonlySet<string> = new Set([
+  "inertia_create_conversation",
+  "inertia_send_message",
+  "inertia_stop_conversation",
+  "inertia_archive_conversation",
+  "inertia_delegate_task",
+  "inertia_wait_for_task",
+  "inertia_cancel_task",
+  "inertia_request_context",
+]);
 
 const STDIO_PROXY_SOURCE = String.raw`
 const url=process.env.INERTIA_HOST_MCP_URL;

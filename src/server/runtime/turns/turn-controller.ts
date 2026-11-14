@@ -45,7 +45,7 @@ import type {
 import {
   defaultTurnScheduler,
   broadcastTurnConversationShell,
-  DEFAULT_TURN_MAX_LIFETIME_MS, DEFAULT_TURN_TIMEOUT_MS, deferredTurnStart,
+  DEFAULT_TURN_MAX_LIFETIME_MS, DEFAULT_TURN_TIMEOUT_MS, dispatchTurnStart,
   normalizedProviderRunFailure,
   providerEventResumesRun,
   providerPromiseFailure,
@@ -744,20 +744,18 @@ export class TurnController {
   start(turnId: string): boolean {
     const active = this.activeByTurn.get(turnId);
     if (!active || active.runState.isTerminal() || this.closing) return false;
-    return this.store.orchestration.dispatchStart(active.turn.runId, () => {
-      this.beginStart(active);
-      const priorProviderCleanup = this.providerRunOwnershipBarriers.get(active.conversation.id);
-      if (priorProviderCleanup) {
-        this.track(priorProviderCleanup
-          .catch(() => undefined)
-          .then(() => {
-            this.captureBeforeAndStartProvider(active);
-          }));
+    return dispatchTurnStart({ track: (value) => this.track(value), startable: () => !active.runState.isTerminal() && !this.closing,
+      dispatchStart: (dispatch, defer) => this.store.orchestration.dispatchStart(active.turn.runId, dispatch, defer),
+      dispatch: () => {
+        this.beginStart(active);
+        const priorCleanup = this.providerRunOwnershipBarriers.get(active.conversation.id);
+        if (!priorCleanup) return this.captureBeforeAndStartProvider(active);
+        this.track(priorCleanup.catch(() => undefined).then(() => { this.captureBeforeAndStartProvider(active); }));
         return true;
-      }
-      return this.captureBeforeAndStartProvider(active);
-    }, deferredTurnStart((value) => this.track(value), () => !active.runState.isTerminal() && !this.closing,
-      () => { this.failBeforeStart(active.conversation.id, "The turn could not start."); }));
+      },
+      refused: () => { this.failBeforeStart(active.conversation.id, "The turn could not start."); },
+      failed: (message) => { if (!active.runState.isTerminal()) this.settle(active, "failed", "turn-start-failed", message); },
+    });
   }
 
   private beginStart(active: ActiveTurn): void {
@@ -806,10 +804,7 @@ export class TurnController {
     const preCapture = this.artifacts.captureBefore(active);
     if (preCapture) {
       active.gitBeforeCapture = preCapture;
-      this.track(active.gitBeforeCapture
-        .then(() => {
-          this.startProvider(active);
-        }));
+      this.track(active.gitBeforeCapture.then(() => { this.startProvider(active); }));
       return true;
     }
     return this.startProvider(active).accepted;
@@ -947,6 +942,12 @@ export class TurnController {
 
   cancelOwned(conversationId: string, owner: TurnOwnerIdentity): boolean {
     return sameTurnOwner(this.activeIdentity(conversationId), owner) && this.cancel(conversationId);
+  }
+
+  /** Cancels only the run the caller recorded (even mid terminal-write retry), never a later one. */
+  cancelExact(conversationId: string, owner: TurnOwnerIdentity): boolean {
+    const turn = this.activeByConversation.get(conversationId)?.turn;
+    return turn?.id === owner.turnId && turn.runId === owner.runId && this.cancel(conversationId);
   }
 
   failBeforeStart(conversationId: string, message: string): boolean {

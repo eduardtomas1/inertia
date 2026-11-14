@@ -326,9 +326,9 @@ describe("turn stop cleanup", () => {
       queue: vi.fn(),
       relinquishAll: vi.fn(async () => undefined),
     });
-    const cancel = vi.fn(() => true);
+    const cancelExact = vi.fn(() => true);
     const waitForProviderCleanup = vi.fn(async () => await cleanup);
-    Object.assign(runtime.turns, { cancel, waitForProviderCleanup });
+    Object.assign(runtime.turns, { cancelExact, waitForProviderCleanup });
     vi.mocked(runtime.turns.isActive).mockReturnValue(false);
     Object.assign(runtime.isolatedRuns, {
       stopConversation: vi.fn(() => false),
@@ -351,7 +351,7 @@ describe("turn stop cleanup", () => {
 
     release();
     await expect(result).resolves.toBe("mutation");
-    expect(cancel).toHaveBeenCalledWith(conversationId);
+    expect(cancelExact).toHaveBeenCalledWith(conversationId, runtime.turns.activeIdentity(conversationId));
   });
 
   it("acknowledges Stop at its deadline when the turn never leaves the active set", async () => {
@@ -362,9 +362,9 @@ describe("turn stop cleanup", () => {
         relinquishAll: vi.fn(async () => undefined),
       });
       const barriers = new Map([[conversationId, new Promise<void>(() => undefined)]]);
-      const cancel = vi.fn(() => true);
+      const cancelExact = vi.fn(() => true);
       Object.assign(runtime.turns, {
-        cancel,
+        cancelExact,
         waitForProviderCleanup: (ids: readonly string[], deadlineAt: number) =>
           waitForProviderCleanupBarriers(barriers, ids, deadlineAt),
       });
@@ -389,7 +389,7 @@ describe("turn stop cleanup", () => {
       const second = stop();
       await vi.advanceTimersByTimeAsync(ownedProviderStopBudgetMs() + 2_100);
       await expect(second).resolves.toBe("mutation");
-      expect(cancel).toHaveBeenCalledTimes(2);
+      expect(cancelExact).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
@@ -404,7 +404,7 @@ describe("stop racing settlement", () => {
     });
     const waitForProviderCleanup = vi.fn(async () => undefined);
     Object.assign(runtime.turns, {
-      cancel: vi.fn(() => false),
+      cancelExact: vi.fn(() => false),
       activeIdentity: vi.fn(() => null),
       isReleasing: vi.fn(() => releasing),
       waitForProviderCleanup,

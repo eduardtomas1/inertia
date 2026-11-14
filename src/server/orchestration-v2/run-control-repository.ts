@@ -8,6 +8,8 @@ import {
   runInterruptSchema,
   runSteerSchema,
   type RunInterrupt,
+  type RunInterruptCause,
+  type RunInterruptEscalationCause,
   type RunInterruptOutcome,
   type RunSteer,
   type RunSteerOutcome,
@@ -88,13 +90,14 @@ export class RunControlRepository {
     return this.effects.get(effectId);
   }
 
-  recordInterrupt(ticket: CommandTicket, target: RunControlTarget, expectedTurnId: string | null): string {
+  recordInterrupt(ticket: CommandTicket, target: RunControlTarget, expectedTurnId: string | null,
+    cause: RunInterruptCause): string {
     const effectId = `interrupt:${commandFingerprint({ actorId: ticket.identity.actorId,
       commandId: ticket.identity.commandId, attemptId: target.attemptId })}`;
     const events: OrchestrationDomainEvent[] = [
       { type: "attempt.interrupt-requested", payload: { runId: target.runId, attemptId: target.attemptId } },
       { type: "run-control.interrupt-recorded", payload: { runId: target.runId, attemptId: target.attemptId,
-        effectId, requestedAt: this.clock(), expectedTurnId } },
+        effectId, requestedAt: this.clock(), expectedTurnId, cause } },
     ];
     const start = this.startIntent(target.runId);
     ticket.commit({ events, effects: [this.controlEffect(effectId, 1, "provider.interrupt", target)],
@@ -105,8 +108,8 @@ export class RunControlRepository {
     return effectId;
   }
 
-  escalateByUser(ticket: CommandTicket, target: RunControlTarget): void {
-    ticket.commit({ events: [this.escalation(target, "user")],
+  escalateByRequester(ticket: CommandTicket, target: RunControlTarget, cause: RunInterruptCause): void {
+    ticket.commit({ events: [this.escalation(target, cause)],
       result: { stop: "escalated", runId: target.runId, attemptId: target.attemptId } });
   }
 
@@ -194,7 +197,7 @@ export class RunControlRepository {
     }
   }
 
-  private escalation(target: RunControlTarget, cause: "grace-expired" | "user"): OrchestrationDomainEvent {
+  private escalation(target: RunControlTarget, cause: RunInterruptEscalationCause): OrchestrationDomainEvent {
     return { type: "run-control.interrupt-escalated",
       payload: { runId: target.runId, attemptId: target.attemptId, cause, at: this.clock() } };
   }

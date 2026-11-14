@@ -40,11 +40,12 @@ function interrupt(read: ProjectionReader, attemptId: string): RunInterrupt | nu
 export function projectRunControlEvent(event: RunControlEvent, envelope: OrchestrationEvent, read: ProjectionReader): ProjectionWrite[] {
   switch (event.type) {
     case "run-control.interrupt-recorded": {
-      const { runId, attemptId, effectId, requestedAt, expectedTurnId } = event.payload;
+      const { runId, attemptId, effectId, requestedAt, expectedTurnId, cause } = event.payload;
       requireCurrent(read, envelope, runId, attemptId);
       if (read(RUN_INTERRUPT_PROJECTION, attemptId)) throw new OrchestrationConflict("revision-conflict");
       return [{ kind: RUN_INTERRUPT_PROJECTION, id: attemptId, value: runInterruptSchema.parse({ runId, attemptId,
-        effectId, requestedAt, expectedTurnId, unresponsiveAt: null, escalations: 0, outcome: null, settledAt: null }) }];
+        effectId, requestedAt, expectedTurnId, cause: cause ?? null, unresponsiveAt: null, escalations: 0, outcome: null,
+        settledAt: null }) }];
     }
     case "run-control.interrupt-escalated": {
       const { runId, attemptId, cause, at } = event.payload;

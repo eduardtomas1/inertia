@@ -1685,3 +1685,433 @@ escalation hook on `stopOwned`, and two gave two different commands one
 request id or omitted the command authority from their mocks. The Electron
 scenarios for Send and Stop, Stop and send, grace escalation, immediate force
 and natural completion passed; `stop-ladder.spec.ts` is POSIX-only.
+
+## G9: rejected-resume fallback as a replacement attempt — 2026-11-09
+
+**The restart is an attempt.** When a provider reports that the saved native
+session is unavailable and the in-run fresh-session fallback restarts the turn,
+V2 now records a `provider_recovery` replacement attempt.
+`OrchestratedTurnRepository.restartOnFreshSession`
+(`src/server/orchestration-v2/turn-repository.ts:231`) runs the whole restart
+in one transaction through `ProviderBackingRepository.restart`
+(`src/server/orchestration-v2/backing-repository.ts:188`). In order, it
+abandons the pending handoff, retires the rejected session's backing, applies
+the compatibility restart (`turnLedgerRepository.restartOnFreshSession`),
+calls G8's `replaceAttempt` with `reason: "provider_recovery"` and
+`priorCleanup: "confirmed"`, and prepares the restored-history handoff for the
+replacement attempt. The prior attempt becomes `superseded` with its cleanup
+`confirmed`. The replacement is ordinal + 1, has null native refs and cleanup
+`pending`. The run-level ownership row, recorded once when the provider
+started, covers the new harness until the run ends. The superseded attempt
+keeps the native refs it observed. The restart no longer commits
+`provider.session-cleared`; the event type stays in the schema so older events
+replay. The caller must name the attempt it ran under; a restart without one,
+or with an attempt that is no longer current, fails with `revision-conflict`.
+The transaction then rolls back the backing retirement and the compatibility
+restart, and the wrapper keeps the rejected resume's failure. A repeated
+`replaceAttempt` request returns the same attempt through G8's receipt and
+writes nothing. `restartOnFreshSession` as a whole is not idempotent: run again,
+its compatibility restart finds the session already cleared and throws, so the
+transaction rolls back and nothing changes. A second fallback in the same run
+is refused earlier anyway, by `applyFreshSessionFallback`, because the turn no
+longer has a saved session. Once the transaction has committed,
+`applyFreshSessionFallback` no longer throws: a failed broadcast is ignored and
+clients reconcile from the next snapshot.
+
+**The cleanup assertion comes from the provider layer.** The wrapper asks for a
+fallback only when the rejected attempt's result has `cleanupConfirmed`. It now
+passes that fact as `{ priorCleanup: "confirmed" }`
+(`ProviderFreshSessionPrior`, `src/server/provider/contracts.ts`;
+`src/server/provider/fresh-session-fallback.ts:91`), and the turn forwards it to
+`replaceAttempt`. The turn does not assert the cleanup itself.
+
+**Observations are bound to the attempt that started the harness.**
+`ActiveTurn.attemptId` (`src/server/runtime/turns/turn-controller-types.ts`)
+is read from the run projection when the provider starts, after ownership is
+recorded (`src/server/runtime/turns/turn-controller.ts`). The fallback replaces
+it. The run's `onEvent` is bound to the starting attempt. The fallback returns
+its own `onEvent`, bound to the replacement attempt
+(`src/server/runtime/turns/turn-fresh-session-fallback.ts`). The run
+coordinator gives the replacement harness its own route through
+`ProviderEmitter.rebind` (`src/server/provider/emitter.ts`): an emitter for the
+same run that delivers to the new `onEvent`. Both emitters share the
+open/closed state, so quarantine, protocol violations and run settlement close
+both. `routedFreshSessionFallback` (`src/server/provider/fresh-session-fallback.ts`)
+adapts the turn's fallback for the harness wrapper. Once the fallback has
+committed, the wrapper drops every later event from the rejected harness.
+That keeps its capability observations, the unattested-event policy (which
+could close the shared emitter state and cancel the replacement) and
+metadata-cache learning out of the run. On rebind the run's
+`negotiatedCapabilities` are cleared too: capability evidence belongs to one
+harness process, and the replacement re-observes its own capabilities when it
+starts. The run's required capabilities are recomputed at the same point for
+the replacement's input, which has no session id, so `session-resume` is no
+longer required. Without that recomputation the clear broke the fallback for
+Cursor ACP and Kimi ACP. For those harnesses `session-resume` is a negotiated
+capability, observed only on the resume path. The replacement opens with
+`session/new`, so its completion failed with "'session-resume' completed
+without exact-run capability evidence". The test manager's capability check
+ignores negotiated capabilities, which is why the existing ACP fallback tests
+missed it. `markPendingCancellation` emits on the
+current route. It runs only while no harness run exists yet, so in practice
+that route is the first one.
+
+`TurnController.handleProviderEvent(event, attemptId)` compares the event's
+attempt with `active.attemptId` in memory. If they differ, it returns `false`
+before any write: no transcript turn change, message, activity, usage, session,
+goal or V2 event. This costs one comparison per event and no database read.
+The comparison is sound because every path that replaces an active run's
+attempt updates `active.attemptId`. There are two such paths:
+`restartOnFreshSession` (the fallback), and `cleanup("pending")` after
+`confirmed`, which only `providerRunOwnership.record` triggers. `record` runs
+in `startProvider`, before the attempt id is read, and in the Duo quarantine
+path, which now re-reads the attempt id right after it. As a backstop in the
+same transaction, the rare state-changing writes re-check the attempt against
+the projection: `nativeBoundaries.observe`, `backings.observeSession`, and
+provider-reported status transitions through `lifecycleIfCurrent`
+(`RuntimeStore.updateAgentTurnLifecycleIfCurrent`,
+`TurnRunStateCoordinator.persist`). The per-output `acknowledge` is not
+re-checked, so text deltas stay cheap. The controller's own transitions (Stop,
+settlement, the start acknowledgement, interaction waits, Duo quarantine,
+timeouts) carry no observer and always commit. Runs that V2 never admitted
+have no attempt id and are not fenced. `orchestration.observation(runId,
+observer)` still reports the typed reason for a stale attempt. A
+micro-measurement of 5,000 text events through the controller on a V2 run,
+four runs each, took 335 to 490 ms on the unchanged branch and 352 to 439 ms
+with this change, so no difference was measurable. The platform benchmark's
+streaming case drives the stream coalescer directly and does not reach this
+path.
+
+A side effect is fixed. Native-boundary rows are keyed by attempt. Before G9,
+when the rejected resume had already reported a boundary, the run's boundary
+stayed on the old conversation and the fresh session's boundary was not
+recorded. Checked against the unchanged branch with a probe test. The
+replacement attempt now has its own row.
+
+**Stop and cleanup across the replacement.** Stop, the ladder's escalation,
+`cleanup(...)` and `releaseCleanup(...)` all act on the run's current attempt,
+which after the fallback is the replacement. The wrapper still forwards cancel
+to the running harness. A Stop before the fallback leaves the wrapper's
+`cancelled` flag and the turn's deferred settlement set, so the fallback is
+declined, as before. Cleanup proof does not change: the ownership row is cleared
+when the run's process tree ends, which confirms the replacement attempt.
+
+**The two-strike rule stays.** `savedSessionKeepsFailing`
+(`src/server/persistence/turn-ledger-repository.ts:389`, used at
+`turn-request-preparation.ts:372`) retires a saved session across turns after
+two consecutive failed turns whose resume was rejected (`resumeRejected`)
+without progress. The in-run fallback runs only for `sessionUnavailable` with
+confirmed cleanup. These are separate cases and both stay. T3 has no
+equivalent count. There, any resume failure except a thread held by another
+client (and also uncertain history delivery or an exhausted budget) moves the
+run to a fresh native thread at start.
+
+**A thread held by another Codex client is refused, not replaced.** This
+follows T3 commit `a445272c7` ("Codex threads open in another client are no
+longer silently replaced"). Codex keeps a per-thread writer lock while the
+thread is loaded in any App Server that shares the same `CODEX_HOME`, such as
+the Codex app, the CLI or an IDE extension. It refuses `thread/resume` with
+JSON-RPC `-32600` and a message containing "already has an active writer".
+Before this entry, Inertia classified that error as `resume-rejected`, so two
+such refusals counted as two strikes, retired the saved session and started a
+fresh one. That splits the conversation from the client that still owns it.
+`isCodexActiveWriterError` (`src/server/codex/app-server-run.ts`) matches the
+same code and text as T3. `CodexErrorResponse` now keeps the JSON-RPC code.
+The result's `continuationError` is the new `thread-in-use`
+(`src/server/codex/types.ts`). The harness reports T3's copy as the failure
+message (`CODEX_THREAD_IN_USE_MESSAGE`, `src/server/codex/app-server-config.ts`;
+`src/server/provider/codex-app-server-harness.ts`). The failure carries neither
+`resumeRejected` nor `sessionUnavailable`. As a result, the turn fails with that
+message as its error, nothing is counted toward the two-strike rule, no
+fresh-session fallback or replacement attempt runs, and the conversation's
+saved session and its backing are kept. The same text under another error code
+is still a rejected resume, as in T3.
+
+**A refusal that delivered nothing settles as not delivered.** The Codex
+harness marks the active-writer refusal `failure.notDelivered`. The refusal
+comes at `thread/resume`, and `turn/start`, which carries the prompt and any
+handoff, is never sent. Before this, the turn still split the conversation
+whenever it carried a delta handoff or a rollback cursor. `dispatchStart` had
+already moved the handoff to `dispatching`, the backing to `uncertain`, and the
+cursor and merge-backs to `dispatched`. Settlement then left them `uncertain`
+and invalidated the backing, so the next turn started fresh. Now the
+controller passes the flag through normalisation and settlement as
+`providerDelivery: "not-delivered"` (`AgentTurnSettlementUpdate`). The terminal
+`run.status-changed` event records `delivery: "not-delivered"` on the run, and
+`synchronize` settles the run without assuming delivery:
+
+- The handoff is `abandoned`.
+- The backing returns to its state before dispatch. Dispatch now carries the
+  backing it took over in its own record (`beforeDispatch` on
+  `provider.backing-recorded`). Settlement restores that value with a new
+  `provider.backing-restored` event, which rewrites only the backing, never an
+  attempt. The projector refuses it unless the backing still belongs to the
+  refused run and keeps the same session, workspace, instance and creation
+  time. A retired backing is left alone, so the terminal commit never fails
+  on it. This also covers a backing that a native rewind created on a new
+  session, which has no earlier record to search for.
+- The turn adds nothing to the backing's coverage.
+- A `dispatched` rollback cursor returns to `pending`, and `dispatched`
+  merge-backs become `undelivered`, as if the run had settled before dispatch.
+  The history and merge-back projectors accept these new transitions.
+- The ledger drops the turn's restored-history record. A record that holds a
+  withheld count stays, with its restored and omitted counts set to zero: the
+  withheld count records an endpoint crossing for `historyStayedOnEndpoint`,
+  not a delivery, and no "N earlier messages restored" notice shows. The ledger
+  also skips `harness-changed` turns, a guard that is never reached today. Such
+  a turn starts a session, while both not-delivered cases (an active-writer
+  refusal at resume, a fresh-session restart whose start throws) are resumes or
+  fallback restarts. The guard protects that record's other role as the route
+  handoff marker (`latestProviderHandoffOnRoute`).
+
+Preparation's provider-handoff decision uses the latest turn that was not
+settled as not delivered (`deliveredRouteTurnId`, which reads the run's
+`delivery`). Without that, the retried switch-back left out the other
+provider's messages. An earlier version inferred non-delivery from an
+abandoned handoff. That was wrong for Duo starts, which skip dispatch and so
+abandon a handoff the turn did deliver, and for the referenced-history
+fresh-session fallback. A switch-back turn that was cancelled before it
+started still counts as the latest turn on its route. That gap predates G9 and
+is unchanged.
+
+A Stop that lands before a thread-in-use refusal settles the turn `cancelled`,
+not as not delivered, so its handoff goes `uncertain` and the next turn
+starts fresh. This is left as is. It is consistent with T3, which also treats
+an interrupted run as missed and re-delivers it.
+
+What the next turn sends follows T3. A refused request is not dropped from
+history. Current T3 re-delivers every earlier run on the same provider thread
+that failed or was interrupted without an accepted provider turn (`missedRuns`,
+`ProviderTurnStartService.ts:935-943`). It sends that run's user, assistant and
+error items into the same native thread as a `delta_since_target_last_seen`
+handoff (`prepareRetryHandoff`, `:969-1007`), which is what a thread-in-use run
+is. Inertia does the same. The restored backing does not cover the refused
+turn's items, so the next delta into that session carries them as history: in
+a switch-back retry, alongside the other provider's messages; in a
+same-provider resend, as earlier history before the new prompt, so the text
+appears twice, as it would in T3. Once that turn completes, the items are
+covered. A later switch to a different provider carries the refused request
+like any other turn of the chat, because the new provider has seen none of it.
+The second review asked for the opposite (never replay a refused turn's items
+into that session). That would be a deliberate difference from T3, so it is
+not done; it can be made by covering the refused turn's items in the restored
+backing.
+
+Two related fixes. The event projector now returns early when
+`backings.observeSession` reports a stale attempt, so a late session never
+becomes the turn's or the chat's. `backings.find()` broke ties on entity
+revision arbitrarily. A native rewind writes the retired and the new backing
+in one event, so the next turn sometimes started fresh instead of resuming
+the new session. The live backing now wins the tie. That nondeterminism
+predates G9.
+
+**The replacement's own start failure.** If the replacement harness's
+`start()` throws after the fallback has committed, the wrapper no longer
+returns the rejected attempt's "session unavailable" result. It returns the
+replacement's own failure ("The fresh provider session could not start.",
+`FRESH_SESSION_START_FAILED_MESSAGE`), marked `notDelivered`. `start()`
+returned no run, and every harness sends its prompt only after `start()`
+returns. Settlement therefore abandons the replacement's handoff and drops the
+"N earlier messages restored" notice of the restore that never ran. The result does not claim cleanup (`cleanupConfirmed: false`), the same
+way the run coordinator treats any throw after a harness start was invoked.
+`releaseUnavailableProviderSession` no longer looks up a backing when the turn
+has no session id; that lookup could have retired an unrelated backing.
+
+T3 anchors compared, current T3 `b05c505b` (2026-11-14):
+`apps/server/src/orchestration-v2/ProviderTurnStartService.ts:1261-1365`
+covers the resume attempt, the refusal of a fresh session when the native
+thread is in use by another client (`:1334-1341`) and `ensureThread` with
+`forceNewNativeThread` inside the same attempt after
+`isCurrentAttemptInStatus("starting")` (`:1333`). `:1370-1413` records the
+"Recovered context" handoff turn item. `:170-190` is `makeRunControls`, which
+binds the attempt id per attempt. `RunExecutionService.ts:1043-1046` and
+`:1538-1542` call provider ingestion with `writeIfRunCurrent`
+(`activeAttemptId`, `expectedStatus: "running"`). `:1169-1173` makes the final
+run write also refuse while a Stop request has no result yet
+(`unlessInterruptRequested`). See also `ProviderEventIngestor.ts:213, 759` and
+`EventSink.ts:125-136, 523-575`. `packages/contracts/src/orchestrationV2.ts:780`
+declares `provider_recovery`; T3 still never emits it.
+
+Changes in T3 since the pin `15fe2832`, and how Inertia stands:
+
+- A resume refused because another client is using the native thread no
+  longer falls back to a fresh session (`a445272c7`). Inertia's in-run
+  fallback never ran for it, because it runs only for a session the provider
+  reports as missing or unsupported (`src/server/provider/session-unavailable.ts`,
+  `isStaleResumeError`). The across-turn two-strike rule did count it; that is
+  aligned above.
+- The fallback now records a visible "Recovered context" item. Inertia shows
+  the same fact on the turn: `continuationReasonCode: "stale-provider-session"`
+  with its `sessionRecovery` counts renders as "Saved session no longer
+  available · N earlier messages restored"
+  (`src/renderer/src/utils/sessionRecovery.ts`). It is a turn notice, not a
+  portable handoff item. Handoff item kinds belong to G10.
+- `writeIfRunCurrent` gained `unlessInterruptRequested` for the final run
+  write. This concerns Stop ordering, not attempt replacement. Inertia's
+  settlement keeps the first requested outcome (`deferredSettlement ??=`), so
+  a Stop that is already recorded is not overwritten by a later natural
+  completion (G5). This entry does not change that.
+- The guard itself (active attempt plus expected status) and same-attempt
+  recovery did not change. The pin's anchors for the same code were
+  `ProviderTurnStartService.ts:1227-1366` and `EventSink.ts:464-500`.
+
+Deliberate differences from T3 Code:
+
+- T3 (pin and `b05c505b`) recovers a rejected resume inside the same
+  attempt, before the provider turn starts. Inertia's fallback runs after the
+  first harness process has ended with a session-unavailable failure and starts
+  a second harness process. It records that as a `provider_recovery` replacement, so each
+  process has its own attempt, native refs and cleanup. T3 declares
+  `provider_recovery` but never emits it.
+- Inertia keeps the two-strike `resumeRejected` rule across turns. T3 falls
+  back on the first resume failure of any kind except a thread held by another
+  client. A rejected resume request can
+  be transient, unlike a session the provider reports as gone.
+- Provider observations pass only the attempt id, not an expected run status.
+  T3 passes `expectedStatus: "running"`. Inertia's provider events also move
+  the run through `starting`, `retrying`, `delegated` and `cancelling`, so one
+  expected status would drop legitimate transitions.
+- The per-event check is in memory, not a guarded write. The rare
+  state-changing writes keep a database re-check; the output acknowledgement
+  does not. T3 guards every provider ingest write. If a provider-reported
+  transition were refused by that re-check, the in-memory run state would
+  already have changed. That is reachable only through a replacement path that
+  does not update `active.attemptId`, and there is none today. The next
+  controller-owned write persists the full run state again.
+- Inertia drops the whole event before the compatibility writes. T3 runs
+  provider ingestion through the guarded event sink, so both commit nothing.
+
+Tests: `tests/server/orchestration-v2-attempts.test.ts` gains five G9 cases
+(12 in the file). (1) A rejected resume restarted in-run records a
+`provider_recovery` replacement with `priorCleanup: "confirmed"`. The prior
+attempt is superseded and keeps its native refs, and the restored-history
+handoff belongs to the replacement. The fresh session's session, boundary and
+output commit under the replacement, and settlement completes it with
+confirmed cleanup. (2) Late status, text, session and boundary events from the
+rejected attempt change no entity, V2 revision, transcript turn, message or
+conversation session. The stale observation reports `attempt-superseded`, and
+the replacement's route still writes. (3) A restart with a stale expected
+attempt fails with `revision-conflict` and rolls back the backing retirement
+and the compatibility write. The replacement replays idempotently, a second
+fallback is refused, and a conflicting reason fails. (4) Stop after the
+fallback interrupts and confirms the replacement attempt, and the superseded
+one is untouched. Stop before the fallback declines it and keeps one attempt.
+(5) A projection rebuild and a reopened store reproduce both attempts. The G8
+case that replaced an attempt by hand while a harness ran now expects that
+harness's later boundary to be dropped, while the controller's settlement
+still completes the replacement. `tests/server/provider-session-fallback.test.ts`
+adds two wrapper cases. In the first, the replacement's events go to its own
+callbacks, late events from the first attempt are dropped once the restart
+committed, and the fallback receives `{ priorCleanup: "confirmed" }`. In the
+second, a replacement whose `start()` throws fails with its own not-delivered
+failure, without `sessionUnavailable` and without claiming cleanup. It also adds a Codex App Server
+fixture case through the real `ProviderManager` (the fresh thread's events
+reach the route the fallback returns). It adds two more
+Codex fixture cases. In the first, an active-writer refusal fails with T3's copy,
+has neither flag, never calls the fallback and sends no `thread/start` or
+`turn/start`. The failure is `notDelivered`. The same text under another code, without a
+code, or with the code as a string stays a rejected resume. A Stop that lands
+before a delayed active-writer refusal yields a cancelled run, with no
+fallback and no `thread/start`. The fixture (`tests/helpers/codex-app-server-fixture.ts`) gains
+the five scenarios. `tests/server/agent-harness.test.ts` covers `rebind` routing and
+the shared close. In
+`tests/server/turn-session-fallback-policy.test.ts`, the real-wrapper
+controller case now checks the replacement attempt and that late events from
+the rejected harness change nothing. A new case gives two turns the failure
+shape the Codex harness now reports for an active writer. Both fail with the
+message, and afterwards the conversation keeps the saved session, its backing
+stays `ready` and the next turn resumes it. Two more cases run through the
+real wrapper, in production timing (the fallback runs between the rejected
+attempt's end and its result). In one, an attempt replaced outside the turn
+makes the restart fail with `revision-conflict`: there is no fresh harness, and
+the turn row, attempts and handoff are unchanged. In the other, a replacement
+whose start throws fails the turn with "The fresh provider session could not
+start.", without a restored-history notice, with the replacement attempt
+`failed` and its handoff `abandoned`. `tests/server/orchestration-backings.test.ts`
+adds the switch-back case (Codex, then Claude, then Codex with a delta
+handoff) refused before delivery. The handoff is abandoned, the backing is
+`ready` with unchanged coverage and nothing is invalidated, the refused turn
+loses its restored-history notice, and the retry resumes `codex-native` with a
+delta that carries the Claude turn and the refused request. Second-review
+cases in the same file:
+- a same-provider refusal followed by a resend of the same text: the delta
+  carries the refused request, the prompt shows the text twice, the request is
+  covered once the resend completes, and a later switch to Claude restores the
+  first, refused and resent requests;
+- a refused turn whose backing was retired while it ran still settles, and the
+  backing stays retired;
+- a completed turn whose handoff was abandoned (as a Duo start leaves it)
+  still counts as the latest turn on its route, while a later not-delivered
+  turn does not.
+`tests/server/orchestration-history-rollback.test.ts` adds the rollback-cursor
+case: the dispatched cursor returns to `pending` with no invalidation, and the
+next turn resumes at the cursor. It also adds a refusal on a backing that a
+native rewind created on a new session: the backing returns to the rewind's
+`lastRunId`, `lastTurnId` and coverage, and the next turn resumes that session.
+`tests/server/turn-provider-event-projector.test.ts` checks that a stale
+session observation changes neither the chat's session nor the turn's. Final
+review cases:
+- `provider-session-fallback` runs the Cursor ACP and Kimi ACP fallback on a
+  production manager, which attests capabilities from evidence. The
+  replacement completes without `session-resume` evidence. Without the
+  recomputation it fails with the protocol violation above.
+- `orchestration-backings` pins the `find()` tie-break: a retired row with the
+  lower id and a live row at the same revision, where the live one wins (the
+  old query returned the retired one). It also covers a not-delivered
+  settlement that drops a plain restored-history record and zeroes the counts
+  of a withheld one, and a projection rebuild after `provider.backing-restored`
+  that reproduces every entity.
+- The rewound-backing rollback case also checks that rebuild. `FakeTurnProvider.freshSession()`
+(`tests/support/fake-turn-provider.ts:98`) acts as the provider layer after a
+rejected resume, and the callers that called the fallback directly use it.
+Against the unchanged sources, these fail: the five G9 cases, the wrapper
+routing, `rebind`, Codex routing and active-writer classification cases, the
+changed G8 case, the extended real-wrapper case, the two not-delivered
+settlement cases, the wrapper and controller start-failure cases, and the
+stale-expected-attempt case. The second-review cases each fail against the
+code before their fix: the rewound-backing and retired-backing cases against
+the earlier event-log restore, the notice assertion before item 3, the
+abandoned-handoff route case against the handoff-based route lookup, and the
+stale-session projector case before item 5. The same-provider resend case
+fails on the unchanged branch, where the refusal leaves the backing
+`uncertain` and the resend starts fresh. Five guards pass on both sources, because they
+pin a boundary or record an outcome rather than new behaviour: the three
+error-code variants, the cancel race and the controller active-writer case. For the real-wrapper case, the old test was
+given the old fallback wiring so the comparison runs; it then fails at the new
+attempt assertion.
+
+Verification (2026-11-14, macOS, Node 22, after the final review's fixes):
+nine focused suites (`orchestration-v2-attempts`, `provider-session-fallback`,
+`turn-session-fallback-policy`, `turn-fresh-session-fallback`,
+`cli-conversation-import`, `agent-harness`, `orchestration-backings`,
+`orchestration-history-rollback`, `turn-provider-event-projector`) passed 176
+of 176. `cursor-acp-harness` and `kimi-acp-harness` passed 53 of 53. A wider
+run of all `orchestration-*`, `turn-*`, `duo-*`, `delegation-*`, `native-*`,
+`provider-*`, `agent-*`, `codex-*` and `database-*` server files, plus
+`cli-conversation-import` and `runtime-query-plans`, passed 3,024 of 3,025 in
+202 files, with 1 skipped. `typecheck`, `lint` and `check:architecture`
+passed. `npm run test:portable` passed 4,184 tests with 31 skipped in 249
+files (2 skipped). The full `tests/server` batch passed 9,110 tests with 54
+skipped in 641 files (7 skipped). After the first review's fixes, that batch had failed once in
+`orchestration-native-forks`. The file passed alone three times, and the
+cause was not established. The `find()` tie-break above is a plausible cause,
+but that is not shown. Earlier in this entry's work, the other batches passed:
+renderer, shared, node, scripts and the other top-level files with 6,892
+passed and 6 skipped, and `tests/main` with 3,203 passed and 97 skipped. Those
+runs excluded three files whose failures also occur on the unchanged branch on
+this machine. `tests/main/runtime-process-guardian-darwin.test.ts` and
+`runtime-process-guardian-darwin-escapees.test.ts` kill their own test runner,
+which is why the suite was run in batches, each in its own process session.
+`runtime-owned-process-recovery` fails 7 macOS guardian tests when run alone.
+In one batch before the active-writer change, 12 macOS runtime-guardian and
+process-tree tests failed in `antigravity-cli-harness`, `antigravity-models`,
+`claude-metadata-natural-close`, `kimi-acp-harness` and `kimi-auth-probe`.
+They failed identically on the unchanged branch when run alone, and they
+passed in the later server batches. The full `npm run check` was not run.
+
+Not done: compaction (`codex-app-server-harness.ts`) and native revert
+(`codex-native-conversation.ts`) also call `thread/resume`, but do not apply
+the active-writer rule. Native revert reports only a reason code, so there is
+no raw text to replace. Compaction goes through the Codex control client,
+which drops the JSON-RPC error code, so T3's rule would need a control-client
+change. Neither path counts strikes or retires a session.

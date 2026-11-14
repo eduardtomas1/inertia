@@ -214,12 +214,30 @@ export interface ProviderRunFailure {
   activityId?: string;
   sessionUnavailable?: true;
   resumeRejected?: true;
+  /**
+   * Definite: the provider refused before the request reached the native
+   * session, so no prompt, handoff or rollback cursor was delivered.
+   */
+  notDelivered?: true;
   usageLimited?: true;
   failureKind?: TurnFailureKind;
 }
 
+/**
+ * What the provider layer asserts about the rejected attempt when it asks for
+ * a fresh session: its process tree has ended (cleanup was confirmed).
+ */
+export interface ProviderFreshSessionPrior {
+  readonly priorCleanup: "confirmed";
+}
+
 export interface ProviderFreshSessionFallback {
   prompt: string;
+  /**
+   * Receives the replacement attempt's events. Without it they go to the
+   * run's `onEvent`, as the rejected attempt's did.
+   */
+  onEvent?: (event: ProviderEvent) => void;
 }
 
 export type ProviderBackgroundWork = "none" | "pending";
@@ -468,7 +486,7 @@ export type ProviderEvent =
 export interface ProviderRunCallbacks {
   /** Fires only after the selected harness has synchronously accepted the run. */
   onStarted?: () => void;
-  freshSessionFallback?: () => ProviderFreshSessionFallback | null;
+  freshSessionFallback?: (prior: ProviderFreshSessionPrior) => ProviderFreshSessionFallback | null;
   onEvent?: (event: ProviderEvent) => void;
   onText?: (event: ProviderTextEvent) => void;
   onTextSnapshot?: (event: ProviderTextSnapshotEvent) => void;

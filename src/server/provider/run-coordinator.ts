@@ -29,8 +29,8 @@ import {
   ProviderSteerDeliveryUnknownError,
   type ProviderSteerInput,
 } from "./contracts";
-import { createProviderEmitter, providerCallbacksFromHarness } from "./emitter";
-import { startHarnessWithFreshSessionFallback } from "./fresh-session-fallback";
+import { createProviderEmitter, providerCallbacksFromHarness, type ProviderEmitter } from "./emitter";
+import { routedFreshSessionFallback, startHarnessWithFreshSessionFallback } from "./fresh-session-fallback";
 import type { ProviderMetadataCache } from "./metadata";
 import { ProviderInstallationAdmissionError } from "./installation-lease";
 import {
@@ -288,30 +288,21 @@ export class ProviderRunCoordinator {
     const providerId = input.providerId;
     const runId = input.runId;
     const turnId = input.turnId;
-    const requiredCapabilities: ProviderCapabilityId[] = [
-      ...(
-        input.backendProfile.source === "custom"
-        && input.harnessId === "codex-app-server"
-          ? ["provider-native-tools" as const]
-          : []
-      ),
-      ...(providerCapabilityManifest(input.harnessId)
-        ? ["text-streaming" as const]
-        : []),
-      ...(input.interactionMode === "plan" ? ["plans" as const] : []),
-      ...(input.reasoningEffort || input.modelSelection.reasoningEffort
-        ? ["reasoning" as const]
-        : []),
-      ...(input.sessionId ? ["session-resume" as const] : []),
-      ...(input.imagePaths?.length ? ["images" as const] : []),
-      ...(input.goalStart ? ["goals" as const] : []),
-      ...(input.supportedFastMode !== undefined
-        ? ["performance-modes" as const]
-        : []),
-      ...(input.operation?.kind === "compact" ? ["compaction" as const] : []),
-      ...(input.skills?.length ? ["provider-native-tools" as const] : []),
+    const requiredCapabilitiesFor = (runInput: ProviderRunInput): ProviderCapabilityId[] => [
+      ...(runInput.backendProfile.source === "custom" && runInput.harnessId === "codex-app-server"
+        ? ["provider-native-tools" as const] : []),
+      ...(providerCapabilityManifest(runInput.harnessId) ? ["text-streaming" as const] : []),
+      ...(runInput.interactionMode === "plan" ? ["plans" as const] : []),
+      ...(runInput.reasoningEffort || runInput.modelSelection.reasoningEffort ? ["reasoning" as const] : []),
+      ...(runInput.sessionId ? ["session-resume" as const] : []),
+      ...(runInput.imagePaths?.length ? ["images" as const] : []),
+      ...(runInput.goalStart ? ["goals" as const] : []),
+      ...(runInput.supportedFastMode !== undefined ? ["performance-modes" as const] : []),
+      ...(runInput.operation?.kind === "compact" ? ["compaction" as const] : []),
+      ...(runInput.skills?.length ? ["provider-native-tools" as const] : []),
       ...(callbacks.hostTools ? ["host-tool-bridge" as const] : []),
     ];
+    let requiredCapabilities = requiredCapabilitiesFor(input);
     const unavailable = requiredCapabilities.find((capabilityId) =>
       !this.options.capabilityAdmissible(
         input,
@@ -436,6 +427,7 @@ export class ProviderRunCoordinator {
         },
       },
     );
+    let currentEmitter: ProviderEmitter = compatibilityEmitter;
     const harness = this.options.harnessRegistry.resolve(input);
     const baseEnvironment = providerChildEnvironment(
       providerId,
@@ -562,6 +554,29 @@ export class ProviderRunCoordinator {
         disposeLaunch();
         return Promise.resolve(cancelledBeforeStart());
       }
+      const observeCapability: NonNullable<Parameters<typeof providerCallbacksFromHarness>[1]> = (observation) => {
+        if (active.settled || active.cancelRequested) return;
+        if (!observation.available) {
+          active.negotiatedCapabilities.delete(observation.capabilityId);
+          return;
+        }
+        const candidate = new Set(active.negotiatedCapabilities);
+        candidate.add(observation.capabilityId);
+        if (!runCapabilityAvailable(
+          observation.capabilityId,
+          [...candidate],
+        )) {
+          protocolViolation ??= new ProviderRuntimeError(
+            "invalid_input",
+            `Provider protocol violation: '${observation.capabilityId}' cannot be negotiated for this installation.`,
+          );
+          active.cancelRequested = true;
+          compatibilityEmitter.close();
+          this.cancelStartedHarness(active);
+          return;
+        }
+        active.negotiatedCapabilities.add(observation.capabilityId);
+      };
       let harnessRun: AgentHarnessRun;
       try {
         if (input.backendProfile.source === "custom") {
@@ -620,36 +635,17 @@ export class ProviderRunCoordinator {
           ...(launchOptions.harnessConfiguration
             ? { harnessConfiguration: launchOptions.harnessConfiguration }
             : {}),
-          callbacks: providerCallbacksFromHarness(
-            compatibilityEmitter,
-            (observation) => {
-              if (active.settled || active.cancelRequested) return;
-              if (!observation.available) {
-                active.negotiatedCapabilities.delete(
-                  observation.capabilityId,
-                );
-                return;
-              }
-              const candidate = new Set(active.negotiatedCapabilities);
-              candidate.add(observation.capabilityId);
-              if (!runCapabilityAvailable(
-                observation.capabilityId,
-                [...candidate],
-              )) {
-                protocolViolation ??= new ProviderRuntimeError(
-                  "invalid_input",
-                  `Provider protocol violation: '${observation.capabilityId}' cannot be negotiated for this installation.`,
-                );
-                active.cancelRequested = true;
-                compatibilityEmitter.close();
-                this.cancelStartedHarness(active);
-                return;
-              }
-              active.negotiatedCapabilities.add(observation.capabilityId);
-            },
-          ),
+          callbacks: providerCallbacksFromHarness(compatibilityEmitter, observeCapability),
           ...(callbacks.hostTools ? { hostTools: callbacks.hostTools } : {}),
-        }, callbacks.freshSessionFallback);
+        }, routedFreshSessionFallback(callbacks.freshSessionFallback, (onEvent) => {
+          // Capability evidence belongs to one harness process; the replacement observes its own and,
+          // opening a fresh session, owes no session-resume evidence.
+          active.negotiatedCapabilities.clear();
+          const { sessionId: _resumedSession, ...replacementInput } = input;
+          requiredCapabilities = requiredCapabilitiesFor(replacementInput);
+          currentEmitter = compatibilityEmitter.rebind(onEvent);
+          return providerCallbacksFromHarness(currentEmitter, observeCapability);
+        }));
       } finally {
         releaseLaunch();
       }
@@ -688,7 +684,7 @@ export class ProviderRunCoordinator {
       harnessRun: null,
       harnessStartInvoked: false,
       launchAbort,
-      markPendingCancellation: () => compatibilityEmitter.status("cancelling"),
+      markPendingCancellation: () => currentEmitter.status("cancelling"),
       runId,
       turnId,
       input,

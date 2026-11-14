@@ -57,6 +57,8 @@ export const orchestrationRunSchema = z.object({
   startedAt: timestamp.nullable(),
   completedAt: timestamp.nullable(),
   terminalMessageId: orchestrationIdSchema.nullable(),
+  /** Set on a terminal run the provider definitely received nothing for. */
+  delivery: z.literal("not-delivered").optional(),
 }).strict();
 
 export const orchestrationCleanupReleaseSchema = z.object({
@@ -117,6 +119,7 @@ export const orchestrationDomainEventSchema = z.discriminatedUnion("type", [
     completedAt: timestamp.nullable(),
     terminalMessageId: orchestrationIdSchema.nullable(),
     nativeSessionId: nativeId.nullable(),
+    delivery: z.literal("not-delivered").optional(),
   }).strict() }).strict(),
   z.object({ type: z.literal("run.attempt-replaced"), payload: z.object({
     runId: orchestrationIdSchema,

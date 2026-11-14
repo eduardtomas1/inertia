@@ -13,7 +13,12 @@ import {
   type ProviderRunInput,
   type ProviderRunResult,
 } from "../../src/server/provider/contracts";
-import { startHarnessWithFreshSessionFallback } from "../../src/server/provider/fresh-session-fallback";
+import { CODEX_THREAD_IN_USE_MESSAGE } from "../../src/server/codex/app-server-config";
+import {
+  FRESH_SESSION_START_FAILED_MESSAGE,
+  routedFreshSessionFallback,
+  startHarnessWithFreshSessionFallback,
+} from "../../src/server/provider/fresh-session-fallback";
 import { staleProviderSessionDecision } from "../../src/shared/continuation-policy";
 import { providerNativeModelSelection, type ModelSelection } from "../../src/shared/model-routing";
 import { FakeTurnProvider } from "../support/fake-turn-provider";
@@ -43,6 +48,8 @@ interface Attempt {
 class WrappedProvider extends FakeTurnProvider {
   attempts: Attempt[] = [];
   wrapped: AgentHarnessRun | null = null;
+  /** The next harness start after the first throws, as a refused spawn would. */
+  failNextStart = false;
 
   override run(input: ProviderRunInput, callbacks: ProviderRunCallbacks): Promise<ProviderRunResult> {
     this.runCount += 1;
@@ -55,6 +62,7 @@ class WrappedProvider extends FakeTurnProvider {
       capabilities: {} as AgentHarness["capabilities"],
       supports: () => true,
       start: (options: AgentHarnessStartOptions): AgentHarnessRun => {
+        if (this.failNextStart && attempts.length > 0) throw new Error("spawn refused");
         let resolve!: (result: ProviderRunResult) => void;
         const cancelled: boolean[] = [];
         attempts.push({
@@ -92,7 +100,8 @@ class WrappedProvider extends FakeTurnProvider {
       environment: {},
       providerNativeToolsAvailable: true,
       callbacks: { onEvent: (event) => callbacks.onEvent?.(event as never) },
-    }, callbacks.freshSessionFallback);
+    }, routedFreshSessionFallback(callbacks.freshSessionFallback,
+      (onEvent) => ({ onEvent: (event) => onEvent(event as never) })));
     callbacks.onStarted?.();
     return this.wrapped.result;
   }
@@ -149,7 +158,18 @@ describe("fresh-session fallback through the real wrapper and turn controller", 
       await flushTurnControllerTestPromises();
       expect(provider.attempts).toHaveLength(2);
       expect(runtime.store.agentTurn(queued.turn.id).status).not.toBe("failed");
+      expect(runtime.store.orchestration.attempts(queued.turn.runId)).toMatchObject([
+        { ordinal: 1, status: "superseded", cleanup: "confirmed" },
+        { ordinal: 2, reason: "provider_recovery", cleanup: "pending" },
+      ]);
       provider.attempts[1]!.emit({ type: "status", status: "running" });
+      const revision = runtime.store.orchestration.events.revision(runtime.conversationId);
+      provider.attempts[0]!.emit({ type: "text", text: "Late text from the rejected session" });
+      provider.attempts[0]!.emit({ type: "status", status: "retrying" });
+      expect(runtime.store.orchestration.events.revision(runtime.conversationId)).toBe(revision);
+      expect(runtime.store.agentTurn(queued.turn.id).runState?.state).toBe("running");
+      expect(JSON.stringify(runtime.store.conversationDetail(runtime.conversationId)?.messages))
+        .not.toContain("Late text");
       expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
       expect(provider.attempts[0]!.cancelled).toEqual([]);
       expect(provider.attempts[1]!.cancelled).toEqual([false]);
@@ -164,6 +184,61 @@ describe("fresh-session fallback through the real wrapper and turn controller", 
         userMessageId: queued.turn.userMessageId,
         continuationReasonCode: "stale-provider-session",
       });
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("keeps the rejected resume when the attempt it ran under was replaced before the restart", async () => {
+    const { runtime } = await establishedChat();
+    const provider = swapProvider(runtime);
+    try {
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." });
+      runtime.controller.start(queued.turn.id);
+      const { orchestration } = runtime.store;
+      const [initial] = orchestration.attempts(queued.turn.runId);
+      // Replaced outside this turn (the implicit retry replacement), so the
+      // fallback's expected attempt is stale.
+      const identity = { turnId: queued.turn.id, runId: queued.turn.runId };
+      orchestration.cleanup(identity, "confirmed");
+      orchestration.cleanup(identity, "pending");
+      const outside = orchestration.attempts(queued.turn.runId)[1]!;
+      expect(outside).toMatchObject({ reason: "retry" });
+      const handoffsBefore = orchestration.backings.handoff(queued.turn.runId);
+      provider.attempts[0]!.finish({ status: "failed", error: unavailable.message, failure: unavailable });
+      await flushTurnControllerTestPromises();
+      expect(provider.attempts).toHaveLength(1);
+      expect(orchestration.attempts(queued.turn.runId).map(({ id }) => id)).toEqual([initial!.id, outside.id]);
+      expect(orchestration.backings.handoff(queued.turn.runId)?.id).toBe(handoffsBefore?.id);
+      expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: "failed",
+        providerSessionBefore: "saved-session", continuationReasonCode: "same-continuation" });
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("fails as the replacement, without a restored-history notice, when the fresh harness cannot start", async () => {
+    const { runtime } = await establishedChat();
+    const provider = swapProvider(runtime);
+    try {
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." });
+      runtime.controller.start(queued.turn.id);
+      provider.failNextStart = true;
+      provider.attempts[0]!.finish({ status: "failed", error: unavailable.message, failure: unavailable });
+      await flushTurnControllerTestPromises();
+      expect(provider.attempts).toHaveLength(1);
+      const turn = runtime.store.agentTurn(queued.turn.id);
+      expect(turn).toMatchObject({ status: "failed", continuationReasonCode: "stale-provider-session",
+        sessionRecovery: null });
+      const errors = (runtime.store.conversationDetail(runtime.conversationId)?.activities ?? [])
+        .filter(({ kind, turnId }) => kind === "error" && turnId === queued.turn.id).map(({ title }) => title);
+      expect(errors).toEqual([FRESH_SESSION_START_FAILED_MESSAGE]);
+      const attempts = runtime.store.orchestration.attempts(queued.turn.runId);
+      expect(attempts).toMatchObject([{ status: "superseded" }, { reason: "provider_recovery", status: "failed" }]);
+      expect(runtime.store.orchestration.backings.handoff(queued.turn.runId)).toMatchObject({
+        attemptId: attempts[1]!.id, state: "abandoned" });
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();
@@ -267,7 +342,7 @@ describe("follow-ups and the in-turn restart", () => {
     try {
       runtime.provider.steerSupported = false;
       expect(await sendFollowUp(runtime)).toEqual({ kind: "refused" });
-      expect(runtime.provider.callbacks!.freshSessionFallback!()).not.toBeNull();
+      expect(runtime.provider.freshSession()).not.toBeNull();
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();
@@ -278,7 +353,7 @@ describe("follow-ups and the in-turn restart", () => {
     const runtime = await runningResume();
     try {
       expect(await sendFollowUp(runtime)).toMatchObject({ kind: "accepted" });
-      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();
@@ -292,7 +367,7 @@ describe("follow-ups and the in-turn restart", () => {
         throw new ProviderSteerDeliveryUnknownError();
       };
       await expect(sendFollowUp(runtime)).rejects.toThrow("did not confirm whether it received this follow-up");
-      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();
@@ -309,10 +384,10 @@ describe("follow-ups and the in-turn restart", () => {
       };
       const pending = sendFollowUp(runtime);
       await vi.waitFor(() => expect(runtime.provider.steerCalls).toHaveLength(1));
-      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
       answer(false);
       expect(await pending).toEqual({ kind: "refused" });
-      expect(runtime.provider.callbacks!.freshSessionFallback!()).not.toBeNull();
+      expect(runtime.provider.freshSession()).not.toBeNull();
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();
@@ -360,6 +435,32 @@ describe("retiring a saved session after repeated rejected resumes", () => {
     resumeRejected: true,
   } as const;
   const outage = { reason: "provider-error", message: "Network unreachable." } as const;
+
+  it("keeps the saved session and its backing while another Codex client holds the thread", async () => {
+    const { runtime } = await establishedChat();
+    try {
+      // The failure shape the Codex harness reports for an active-writer refusal.
+      const inUse = { reason: "codex-error", message: CODEX_THREAD_IN_USE_MESSAGE } as const;
+      for (const content of ["1", "2"]) {
+        expect(await failTurn(runtime, content, inUse)).toMatchObject({ status: "failed",
+          providerSessionBefore: "saved-session", sessionRecovery: null });
+      }
+      const errors = (runtime.store.conversationDetail(runtime.conversationId)?.activities ?? [])
+        .filter(({ kind }) => kind === "error").map(({ title }) => title);
+      expect(errors).toEqual([CODEX_THREAD_IN_USE_MESSAGE, CODEX_THREAD_IN_USE_MESSAGE]);
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("saved-session");
+      const backing = runtime.store.orchestration.backings.find({ threadId: runtime.conversationId,
+        providerId: "codex", workspaceKey: runtime.store.conversationPath(runtime.conversationId),
+        identity: runtime.store.agentTurnsForConversation(runtime.conversationId)[0]!.continuationIdentity,
+        nativeSessionId: "saved-session" });
+      expect(backing?.status).toBe("ready");
+      const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "3" });
+      expect(next.turn).toMatchObject({ providerSessionBefore: "saved-session", continuationReasonCode: "same-continuation" });
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
 
   it("starts fresh after two rejected resumes of the same session", async () => {
     const { runtime } = await establishedChat();

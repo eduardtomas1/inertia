@@ -5,10 +5,11 @@ import {
   MAX_BACKING_COVERAGE_ITEMS, contextHandoffSchema, providerBackingSchema,
   type ContextHandoff, type OrchestrationBackingEvent, type PreparedContextHandoff, type ProviderBacking,
 } from "../../shared/orchestration-backings";
-import { orchestrationAttemptSchema, orchestrationRunSchema } from "../../shared/orchestration-v2";
+import { orchestrationAttemptSchema, orchestrationRunSchema, type OrchestrationRun } from "../../shared/orchestration-v2";
 import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { versionedContinuationIdentitySchema } from "../../shared/model-routing";
 import { nativeControlSchema } from "../../shared/orchestration-native-control";
+import { staleAttemptObservation, type AttemptObserver, type StaleAttemptObservation } from "./attempt-fence";
 import type { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint, durableJson } from "./json";
 import { providerInstanceId } from "./provider-instance";
@@ -23,13 +24,15 @@ export class ProviderBackingRepository {
     return row ? providerBackingSchema.parse(row.value) : null;
   }
 
+  /** Newest first. A native rewind writes the retired and the new backing in one event; the live one wins the tie. */
   find(input: { threadId: string; providerId: string; workspaceKey: string; identity: ContinuationIdentity;
     nativeSessionId?: string }): ProviderBacking | null {
     const rows = this.database.prepare(`SELECT payload_json FROM orchestration_v2_entities
       WHERE kind = 'provider-backing' AND thread_id = ?
         AND json_extract(payload_json, '$.providerInstanceId') = ?
         AND json_extract(payload_json, '$.workspaceKey') = ?
-      ORDER BY revision DESC LIMIT 64`).all(input.threadId, providerInstanceId(input.providerId, input.identity), input.workspaceKey) as { payload_json: string }[];
+      ORDER BY revision DESC, json_extract(payload_json, '$.status') = 'retired', id LIMIT 64`)
+      .all(input.threadId, providerInstanceId(input.providerId, input.identity), input.workspaceKey) as { payload_json: string }[];
     for (const row of rows) {
       const backing = providerBackingSchema.parse(JSON.parse(row.payload_json));
       if (input.nativeSessionId === undefined || backing.nativeSessionId === input.nativeSessionId) return backing;
@@ -44,6 +47,20 @@ export class ProviderBackingRepository {
       WHERE thread_id = ? AND kind = 'context-handoff' AND json_extract(payload_json, '$.runId') = ?
       ORDER BY revision DESC LIMIT 1`).get(run.threadId, run.id) as { payload_json: string } | undefined;
     return row ? contextHandoffSchema.parse(JSON.parse(row.payload_json)) : null;
+  }
+
+  /**
+   * The latest turn that was not settled as not delivered. The provider
+   * received nothing for such a turn, so it did not move the conversation
+   * onto its route. Looks back over at most 16 turns.
+   */
+  deliveredRouteTurnId(threadId: string): string | null {
+    const rows = this.database.prepare(`SELECT turn.id,
+        json_extract(run.payload_json, '$.delivery') AS delivery FROM agent_turns AS turn
+      LEFT JOIN orchestration_v2_entities AS run ON run.kind = 'run' AND run.id = turn.run_id
+      WHERE turn.conversation_id = ? ORDER BY turn.requested_at DESC, turn.id DESC LIMIT 16`)
+      .all(threadId) as { id: string; delivery: string | null }[];
+    return rows.find(({ delivery }) => delivery !== "not-delivered")?.id ?? rows[0]?.id ?? null;
   }
 
   preparation(runId: string, attemptId: string, threadId: string, requestedAt: string,
@@ -72,18 +89,20 @@ export class ProviderBackingRepository {
           identity: this.turnIdentity(run.turnId), nativeSessionId: attempt.nativeSessionId });
         if (row && row.status !== "retired") this.record({ ...row, lastRunId: run.id,
           lastTurnId: run.turnId, selection: run.selection,
-          status: handoff?.state === "prepared" ? "uncertain" : row.status }, run.id, run.attemptId);
+          status: handoff?.state === "prepared" ? "uncertain" : row.status }, run.id, run.attemptId, row);
       }
     }).immediate();
   }
 
-  observeSession(turn: AgentTurn, nativeSessionId: string): void {
+  observeSession(turn: AgentTurn, nativeSessionId: string, observer?: AttemptObserver): StaleAttemptObservation | null {
     const run = this.run(turn.runId);
-    if (!run) return;
+    if (!run) return null;
+    const stale = staleAttemptObservation(this.events, run, observer);
+    if (stale) return stale;
     const id = commandFingerprint({ threadId: run.threadId, instanceId: run.providerInstanceId,
       workspaceKey: run.workspaceKey, nativeSessionId });
     const previous = this.get(id);
-    if (previous?.status === "retired") return;
+    if (previous?.status === "retired") return null;
     const timestamp = new Date().toISOString();
     const handoff = this.handoff(run.id);
     const inherited = previous ? null : this.nativeForkCoverage(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
@@ -101,6 +120,7 @@ export class ProviderBackingRepository {
         coverageComplete: previous?.coverageComplete ?? inherited?.complete ?? carried?.coverageComplete ?? true,
         createdAt: previous?.createdAt ?? timestamp, updatedAt: timestamp }, run.id, run.attemptId);
     }).immediate();
+    return null;
   }
 
   private movedBackings(threadId: string, instanceId: string, workspaceKey: string, nativeSessionId: string): ProviderBacking[] {
@@ -141,7 +161,12 @@ export class ProviderBackingRepository {
     }).immediate();
   }
 
-  settle(turn: AgentTurn): void {
+  /**
+   * `undelivered`: the provider refused before anything reached the session.
+   * The handoff is abandoned rather than uncertain, the backing returns to its
+   * state before this run's dispatch, and the turn adds nothing to its coverage.
+   */
+  settle(turn: AgentTurn, undelivered = false): void {
     if (!isAgentTurnTerminalStatus(turn.status)) return;
     const run = this.run(turn.runId);
     if (!run) return;
@@ -151,10 +176,15 @@ export class ProviderBackingRepository {
     const backing = attempt.nativeSessionId ? this.find({ threadId: run.threadId, providerId: run.providerId,
       workspaceKey: run.workspaceKey, identity: turn.continuationIdentity, nativeSessionId: attempt.nativeSessionId }) : null;
     const handoff = this.handoff(run.id);
-    if (handoff?.state === "prepared") this.changeHandoff(handoff, "abandoned");
-    else if (handoff?.state === "dispatching") this.changeHandoff(handoff, "uncertain", backing);
+    if (handoff?.state === "prepared" || (undelivered && handoff?.state === "dispatching")) {
+      this.changeHandoff(handoff, "abandoned");
+    } else if (handoff?.state === "dispatching") this.changeHandoff(handoff, "uncertain", backing);
     if (backing?.lastRunId === run.id && UNCLEAN_RECOVERY_REASONS.has(turn.terminalReason ?? "")) {
       this.invalidate(backing, "uncertain-delivery");
+      return;
+    }
+    if (undelivered) {
+      if (backing?.lastRunId === run.id && backing.status !== "retired") this.restoreBeforeRun(backing, run.id);
       return;
     }
     if (!backing || backing.lastRunId !== run.id || backing.status !== "ready") return;
@@ -168,27 +198,52 @@ export class ProviderBackingRepository {
       coverageComplete: backing.coverageComplete && coverage.length <= MAX_BACKING_COVERAGE_ITEMS }, run.id, run.attemptId);
   }
 
+  /**
+   * Dispatch moved the backing to this run (and to `uncertain` for a prepared
+   * handoff) and kept its earlier value in that record. Restore that value, so
+   * the next turn sees the backing it would have seen without this run. Unlike
+   * a record, a restore touches no attempt.
+   */
+  private restoreBeforeRun(backing: ProviderBacking, runId: string): void {
+    const row = this.database.prepare(`SELECT payload_json FROM orchestration_v2_events
+      WHERE thread_id = ? AND type = 'provider.backing-recorded' AND json_extract(payload_json, '$.runId') = ?
+        AND json_extract(payload_json, '$.backing.id') = ? AND json_extract(payload_json, '$.beforeDispatch') IS NOT NULL
+      ORDER BY revision DESC LIMIT 1`).get(backing.threadId, runId, backing.id) as { payload_json: string } | undefined;
+    if (!row) return;
+    const before = providerBackingSchema.parse((JSON.parse(row.payload_json) as { beforeDispatch: unknown }).beforeDispatch);
+    if (before.status === "retired" || before.lastRunId === runId) return;
+    this.commit(backing.threadId, backing.projectId, { type: "provider.backing-restored", payload: { runId,
+      backing: providerBackingSchema.parse({ ...before, coveredItemIds: backing.coveredItemIds,
+        coverageComplete: backing.coverageComplete, updatedAt: new Date().toISOString() }) } });
+  }
+
   invalidate(backing: ProviderBacking, reason: Extract<OrchestrationBackingEvent,
     { type: "provider.backing-invalidated" }>["payload"]["reason"]): void {
     if (backing.status === "retired") return;
     this.commit(backing.threadId, backing.projectId, { type: "provider.backing-invalidated", payload: { backingId: backing.id, reason } });
   }
 
-  restart<T>(turn: AgentTurn, expectedSessionId: string, prepared: PreparedContextHandoff | undefined, restart: () => T): T {
+  /**
+   * Moves a run off a rejected native session inside one transaction: the
+   * pending handoff is abandoned, the session's backing retired, the
+   * compatibility restart applied and the attempt replaced, and the restored
+   * history is prepared for the replacement attempt. The replaced attempt
+   * keeps the native refs it observed.
+   */
+  restart<T>(turn: AgentTurn, expectedSessionId: string, prepared: PreparedContextHandoff | undefined, restart: () => T,
+    replaceAttempt: (run: OrchestrationRun) => string): T {
     return this.database.transaction(() => {
       const run = this.run(turn.runId);
       if (!run) return restart();
-      const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", run.attemptId)?.value);
       const backing = this.find({ threadId: run.threadId, providerId: run.providerId, workspaceKey: run.workspaceKey,
         identity: turn.continuationIdentity, nativeSessionId: expectedSessionId });
       const handoff = this.handoff(run.id);
       if (handoff?.state === "prepared" || handoff?.state === "dispatching") this.changeHandoff(handoff, "abandoned");
       if (backing) this.invalidate(backing, "native-resume-failed");
-      if (attempt.nativeSessionId === expectedSessionId) this.commit(run.threadId, run.projectId,
-        { type: "provider.session-cleared", payload: { runId: run.id, attemptId: attempt.id, expectedNativeSessionId: expectedSessionId } });
       const result = restart();
+      const attemptId = replaceAttempt(run);
       if (prepared) {
-        this.commit(run.threadId, run.projectId, this.preparation(run.id, run.attemptId,
+        this.commit(run.threadId, run.projectId, this.preparation(run.id, attemptId,
           run.threadId, new Date().toISOString(), { ...prepared, targetBackingId: null }));
         this.changeHandoff(this.handoff(run.id)!, "dispatching");
       }
@@ -206,11 +261,12 @@ export class ProviderBackingRepository {
     return row ? orchestrationRunSchema.parse(row.value) : null;
   }
 
-  private record(backing: ProviderBacking, runId: string, attemptId: string): void {
+  private record(backing: ProviderBacking, runId: string, attemptId: string, beforeDispatch?: ProviderBacking): void {
     const previous = this.get(backing.id);
     if (previous && durableJson({ ...backing, updatedAt: previous.updatedAt }) === durableJson(previous)) return;
     const value = providerBackingSchema.parse({ ...backing, updatedAt: new Date().toISOString() });
-    this.commit(backing.threadId, backing.projectId, { type: "provider.backing-recorded", payload: { backing: value, runId, attemptId } });
+    this.commit(backing.threadId, backing.projectId, { type: "provider.backing-recorded",
+      payload: { backing: value, runId, attemptId, ...(beforeDispatch ? { beforeDispatch } : {}) } });
   }
 
   private changeHandoff(handoff: ContextHandoff, state: "dispatching" | "delivered" | "uncertain" | "abandoned",

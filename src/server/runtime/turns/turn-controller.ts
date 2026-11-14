@@ -274,11 +274,7 @@ export class TurnController {
       interactions: this.interactions,
       scheduler: this.scheduler,
       now: () => this.now(),
-      transition: (active, status, providerState) => this.transition(
-        active,
-        status,
-        providerState,
-      ),
+      transition: (active, status, providerState, observer) => this.transition(active, status, providerState, observer),
       observeSubagent: (active, event) => this.observeSubagent(active, event),
     });
     this.nativeGoals = new TurnNativeGoalCoordinator({
@@ -403,14 +399,10 @@ export class TurnController {
         runId: turn.runId,
         turnId,
       })) return false;
-      this.store.providerRunOwnership.record(
-        turn.id,
-        turn.conversationId,
-        turn.runId,
-        this.runtimeGenerationId,
-        this.systemBootId,
-        this.now(),
-      );
+      this.store.providerRunOwnership.record(turn.id, turn.conversationId, turn.runId,
+        this.runtimeGenerationId, this.systemBootId, this.now());
+      // Recording ownership again after confirmed cleanup replaces the attempt.
+      if (exactActive) exactActive.attemptId = this.store.orchestration.currentAttemptId(turn.runId);
     }
     if (exactActive && !exactActive.providerRunStarted) {
       this.settle(exactActive, "cancelled", "user-cancelled", "Stopped");
@@ -843,6 +835,8 @@ export class TurnController {
         this.now(),
       );
       active.providerRunStarted = true;
+      // Read after recording ownership, which can itself replace the attempt.
+      const startedAttemptId = active.attemptId = this.store.orchestration.currentAttemptId(active.turn.runId);
       const result = this.providers.run(active.providerInput, {
         hostTools,
         onStarted: () => {
@@ -863,8 +857,9 @@ export class TurnController {
             }
           }
         },
-        onEvent: (event) => { this.handleProviderEvent(event); },
-        freshSessionFallback: () => applyFreshSessionFallback(this.store, this.hooks, active, this.now()),
+        onEvent: (event) => { this.handleProviderEvent(event, startedAttemptId); },
+        freshSessionFallback: (prior) => applyFreshSessionFallback(this.store, this.hooks, active, this.now(), prior,
+          (attemptId) => (event) => { this.handleProviderEvent(event, attemptId); }),
       });
       void result.then(
         (providerResult) => {
@@ -1080,11 +1075,16 @@ export class TurnController {
     }
   }
 
-  handleProviderEvent(event: ProviderEvent): boolean {
+  /**
+   * `attemptId` names the reporting attempt; once it is no longer current, the
+   * event writes nothing. Every path that replaces an active run's attempt
+   * updates `active.attemptId`, so this is an in-memory check per event.
+   */
+  handleProviderEvent(event: ProviderEvent, attemptId?: string | null): boolean {
     const active = this.activeByConversation.get(event.conversationId);
-    if (!active || !providerEventMatchesActiveTurn(this.store, active, event)) {
-      return false;
-    }
+    if (!active || !providerEventMatchesActiveTurn(this.store, active, event)
+      || (attemptId && attemptId !== active.attemptId)) return false;
+    const observer = attemptId ? { attemptId } : undefined;
     try {
       this.timeouts.activity(active);
       const currentRunState = active.runState.snapshot().state;
@@ -1098,14 +1098,14 @@ export class TurnController {
           || event.type === "plan"
         )
       ) {
-        if (this.transition(active, "running")) {
+        if (this.transition(active, "running", undefined, observer)) {
           broadcastTurnConversationShell(this.hooks, active);
         }
       }
       if (event.type === "text") {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
       }
-      this.providerEvents.project(active, event);
+      this.providerEvents.project(active, event, observer);
       this.nativeGoals.handleEvent(active, event);
       return true;
     } catch (error) {
@@ -1167,8 +1167,9 @@ export class TurnController {
     active: ActiveTurn,
     state: Exclude<AgentRunState, AgentTurnTerminalStatus>,
     providerState?: string | null,
+    observer?: Parameters<TurnRunStateCoordinator["transition"]>[3],
   ): boolean {
-    return this.runStates.transition(active, state, providerState);
+    return this.runStates.transition(active, state, providerState, observer);
   }
 
   private observeSubagent(

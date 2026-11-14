@@ -99,10 +99,11 @@ export class HistoryRollbackRepository {
     this.advance(runId, ["attached", "dispatched"], "consumed");
   }
 
-  settleRun(turn: AgentTurn, invalidate: (backing: ProviderBacking) => void): void {
+  settleRun(turn: AgentTurn, invalidate: (backing: ProviderBacking) => void, undelivered = false): void {
     if (!isAgentTurnTerminalStatus(turn.status)) return;
     if (turn.status === "completed") this.acknowledge(turn.runId);
-    const cursor = this.advance(turn.runId, ["attached"], "pending")
+    // A dispatched cursor the provider never received is pending again.
+    const cursor = this.advance(turn.runId, undelivered ? ["attached", "dispatched"] : ["attached"], "pending")
       ?? this.advance(turn.runId, ["dispatched"], "uncertain");
     if (cursor?.continuationState !== "uncertain") return;
     for (const backing of this.backings(cursor.threadId)) {

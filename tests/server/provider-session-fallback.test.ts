@@ -9,7 +9,7 @@ import type {
   AgentHarnessRun,
   AgentHarnessStartOptions,
 } from "../../src/server/provider/agent-harness";
-import { isStaleResumeError } from "../../src/server/codex/app-server-config";
+import { CODEX_THREAD_IN_USE_MESSAGE, isStaleResumeError } from "../../src/server/codex/app-server-config";
 import {
   providerRunTerminal,
   type ProviderEvent,
@@ -17,7 +17,10 @@ import {
   type ProviderRunResult,
 } from "../../src/server/provider/contracts";
 import { cursorRuntimeFailure } from "../../src/server/provider/cursor-acp-failures";
-import { startHarnessWithFreshSessionFallback } from "../../src/server/provider/fresh-session-fallback";
+import {
+  FRESH_SESSION_START_FAILED_MESSAGE,
+  startHarnessWithFreshSessionFallback,
+} from "../../src/server/provider/fresh-session-fallback";
 import { kimiRuntimeFailure } from "../../src/server/provider/kimi-acp-support";
 import {
   acpSessionUnavailable,
@@ -26,6 +29,7 @@ import {
 import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
 import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
+import { ProviderInstallationLeaseCoordinator } from "../../src/server/provider/installation-lease";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {
   captured,
@@ -113,7 +117,7 @@ function scriptedHarness(): { harness: AgentHarness; attempts: Attempt[] } {
 }
 
 function start(
-  fallback: (() => { prompt: string } | null) | undefined,
+  fallback: Parameters<typeof startHarnessWithFreshSessionFallback>[2],
   runInput = input(),
   environment: NodeJS.ProcessEnv = { PROVIDER_SECRET: "opaque" },
 ) {
@@ -162,6 +166,25 @@ describe("fresh provider session fallback", () => {
 
     await expect(run.result).resolves.toMatchObject({ status: "completed", sessionId: "fresh-session" });
     expect(statuses()).toEqual(["starting", "running", "running", "completed"]);
+  });
+
+  it("routes the replacement's events to its own callbacks, drops the rejected attempt's late events and asserts its cleanup", async () => {
+    const replacementEvents: AgentHarnessEvent[] = [];
+    const fallback = vi.fn((_prior: { priorCleanup: "confirmed" }) => ({ prompt: "Replacement",
+      callbacks: { onEvent: (event: AgentHarnessEvent) => { replacementEvents.push(event); } } }));
+    const { run, attempts, events } = start(fallback);
+    attempts[0]!.emit({ type: "status", status: "running" });
+    attempts[0]!.finish({ status: "failed", failure: unavailable });
+    await vi.waitFor(() => expect(attempts).toHaveLength(2));
+    expect(fallback).toHaveBeenCalledWith({ priorCleanup: "confirmed" });
+    attempts[1]!.emit({ type: "status", status: "starting" });
+    attempts[1]!.emit({ type: "text", text: "Fresh answer" });
+    attempts[0]!.emit({ type: "text", text: "Late answer" });
+    expect(replacementEvents.map((event) => event.type === "text" ? event.text : event.type)).toEqual(["Fresh answer"]);
+    // Once the restart committed, the rejected attempt's late events go nowhere.
+    expect(events.map((event) => event.type === "text" ? event.text : event.type)).toEqual(["status"]);
+    attempts[1]!.finish({ status: "completed", text: "Fresh answer" });
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
   });
 
   it("never carries a deferred native rollback cursor into the fresh replacement session", async () => {
@@ -216,6 +239,24 @@ describe("fresh provider session fallback", () => {
     cancelled.attempts[0]!.finish({ status: "failed", failure: unavailable });
     await expect(cancelled.run.result).resolves.toMatchObject({ status: "failed" });
     expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it("fails as the replacement, not as the rejected resume, when the fresh harness cannot start", async () => {
+    const { harness, attempts } = scriptedHarness();
+    const original = harness.start;
+    harness.start = (options) => {
+      if (attempts.length === 1) throw new Error("spawn refused");
+      return original(options);
+    };
+    const fallback = vi.fn(() => ({ prompt: "Replacement" }));
+    const run = startHarnessWithFreshSessionFallback(harness, { input: input(), executable: "provider",
+      environment: {}, providerNativeToolsAvailable: true }, fallback);
+    attempts[0]!.finish({ status: "failed", failure: unavailable, error: unavailable.message });
+    const result = await run.result;
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ status: "failed", cleanupConfirmed: false, error: FRESH_SESSION_START_FAILED_MESSAGE,
+      failure: { reason: "provider-error", message: FRESH_SESSION_START_FAILED_MESSAGE, notDelivered: true } });
+    expect(result.failure).not.toHaveProperty("sessionUnavailable");
   });
 
   it("stops a fresh attempt that was cancelled while it was starting", async () => {
@@ -471,6 +512,59 @@ describe("Codex App Server session fallback", { concurrent: false }, () => {
     expect(manager.isRunning(runInput.conversationId)).toBe(false);
   });
 
+  it("delivers the fresh thread's events to the route the fallback returns", async () => {
+    const { manager, runInput } = fixture("stale-resume");
+    const rejected: ProviderEvent[] = [];
+    const fresh: ProviderEvent[] = [];
+    const fallback = vi.fn(() => ({ prompt: "Continue with the restored history.",
+      onEvent: (event: ProviderEvent) => { fresh.push(event); } }));
+    const result = await manager.run(runInput, {
+      onEvent: (event) => { rejected.push(event); },
+      freshSessionFallback: fallback,
+    });
+    expect(result).toMatchObject({ status: "completed", sessionId: "thread-new" });
+    expect(fallback).toHaveBeenCalledWith({ priorCleanup: "confirmed" });
+    expect(fresh.flatMap((event) => event.type === "session" ? [event.sessionId] : [])).toEqual(["thread-new"]);
+    expect(rejected.some((event) => event.type === "session")).toBe(false);
+    expect(fresh.every((event) => event.runId === runInput.runId && event.turnId === runInput.turnId)).toBe(true);
+  });
+
+  it("refuses a thread another Codex client is writing to without a fallback or a rejected-resume strike", async () => {
+    const { fake, manager, runInput } = fixture("active-writer-resume");
+    const fallback = vi.fn(() => ({ prompt: "unused" }));
+    const result = await manager.run(runInput, { freshSessionFallback: fallback });
+    expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true, error: CODEX_THREAD_IN_USE_MESSAGE,
+      failure: { message: CODEX_THREAD_IN_USE_MESSAGE, notDelivered: true } });
+    expect(result.failure).not.toHaveProperty("resumeRejected");
+    expect(result.failure).not.toHaveProperty("sessionUnavailable");
+    expect(fallback).not.toHaveBeenCalled();
+    const messages = captured(fake.capturePath);
+    expect(messages.filter(({ method }) => method === "thread/resume")).toHaveLength(1);
+    expect(messages.some(({ method }) => method === "thread/start" || method === "turn/start")).toBe(false);
+  });
+
+  it.each(["active-writer-other-code", "active-writer-no-code", "active-writer-string-code"])(
+    "keeps the active-writer text a rejected resume when the error code is not the integer -32600 (%s)", async (scenario) => {
+      const { manager, runInput } = fixture(scenario);
+      const result = await manager.run(runInput, { freshSessionFallback: () => ({ prompt: "unused" }) });
+      expect(result).toMatchObject({ status: "failed", failure: { resumeRejected: true } });
+      expect(result.failure).not.toHaveProperty("notDelivered");
+      expect(result.error).not.toBe(CODEX_THREAD_IN_USE_MESSAGE);
+    });
+
+  it("lets a Stop that lands before the active-writer refusal win", async () => {
+    const { fake, manager, runInput } = fixture("active-writer-delayed");
+    const fallback = vi.fn(() => ({ prompt: "unused" }));
+    const running = manager.run(runInput, { freshSessionFallback: fallback });
+    await vi.waitFor(() => expect(captured(fake.capturePath).some(({ method }) => method === "thread/resume")).toBe(true));
+    expect(manager.cancel(runInput.conversationId)).toBe(true);
+    const result = await running;
+    expect(result.status).toBe("cancelled");
+    expect(result.failure?.notDelivered).toBeUndefined();
+    expect(fallback).not.toHaveBeenCalled();
+    expect(captured(fake.capturePath).some(({ method }) => method === "thread/start" || method === "turn/start")).toBe(false);
+  });
+
   it("reports any other refused resume as rejected but not as an unavailable session", async () => {
     const { fake, manager, runInput } = fixture("rejected-resume");
     const result = await manager.run(runInput, { freshSessionFallback: () => ({ prompt: "unused" }) });
@@ -634,11 +728,26 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = ProviderManager.createForTests(
-      { commands: { [providerId]: command } },
-      new AgentHarnessRegistry([providerId === "cursor" ? createCursorAcpHarness() : createKimiAcpHarness()]),
-    );
+    const harnesses = () => new AgentHarnessRegistry([providerId === "cursor" ? createCursorAcpHarness() : createKimiAcpHarness()]);
+    const manager = ProviderManager.createForTests({ commands: { [providerId]: command } }, harnesses());
     managers.push(manager);
+    // The production manager attests capabilities from evidence: a negotiated
+    // capability is available only when this run observed it.
+    const attestedManager = async () => {
+      const attested = ProviderManager.createProduction({
+        commands: { [providerId]: command },
+        installationLeases: new ProviderInstallationLeaseCoordinator(),
+        conversationProviderGate: () => undefined,
+        detectProvider: async () => ({
+          provider: { id: providerId, name: agentName, command: executable },
+          available: true, version: "1.0.0", executable: command, installState: "installed" as const,
+          authState: "authenticated" as const, canRun: true, cleanupConfirmed: true,
+        }),
+      }, harnesses());
+      managers.push(attested);
+      await attested.detect(providerId);
+      return attested;
+    };
     const runInput = nativeProviderRunInput({
       providerId,
       conversationId: label.replaceAll(" ", "-"),
@@ -650,7 +759,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
     const requests = () => readFileSync(capturePath, "utf8").trim().split("\n")
       .map((line) => JSON.parse(line) as { method?: string; params?: Record<string, unknown> });
-    return { manager, runInput, requests };
+    return { manager, attestedManager, runInput, requests };
   }
 
   it("reports a rejected session as unavailable", async () => {
@@ -695,5 +804,19 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(prompts).toHaveLength(1);
     expect(JSON.stringify(prompts[0]!.params)).toContain("Continue with the restored history.");
     expect(JSON.stringify(prompts[0]!.params)).not.toContain("Continue from the saved session.");
+  });
+
+  it("completes the fresh session on a production manager without session-resume evidence", async () => {
+    const { attestedManager, runInput, requests } = fixture(`${providerId} ACP attested fallback`);
+    const manager = await attestedManager();
+    const fresh: ProviderEvent[] = [];
+    const result = await manager.run(runInput, {
+      freshSessionFallback: () => ({ prompt: "Continue with the restored history.",
+        onEvent: (event: ProviderEvent) => { fresh.push(event); } }),
+    });
+    expect(result).toMatchObject({ status: "completed", sessionId: "fresh-acp-session",
+      text: "Answered from a fresh session", cleanupConfirmed: true });
+    expect(fresh.some((event) => event.type === "text")).toBe(true);
+    expect(requests().filter(({ method }) => method === "session/new")).toHaveLength(1);
   });
 });

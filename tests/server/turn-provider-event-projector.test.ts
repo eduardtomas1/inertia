@@ -119,6 +119,28 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
     });
   });
 
+  it("records nothing for a session reported by an attempt that is no longer current", () => {
+    const stale = { reason: "attempt-superseded", runId: "run-1", observedAttemptId: "old", currentAttemptId: "new" };
+    const observeSession = vi.fn((_turn: unknown, sessionId: string) => sessionId === "late-session" ? stale : null);
+    const updateConversation = vi.fn();
+    const projector = new TurnProviderEventProjector({
+      store: { orchestration: { backings: { observeSession } }, updateConversation } as unknown as RuntimeStore,
+      hooks: { broadcast: vi.fn(), broadcastSnapshot: vi.fn() } as unknown as TurnControllerHooks,
+      agentPlans: new Map(), streams: {} as never, activities: {} as never, interactions: {} as never,
+      scheduler: defaultTurnScheduler(), now: () => "2030-01-01T00:00:01.000Z",
+      transition: () => false, observeSubagent: () => false,
+    });
+    const active = { conversation: { id: "conversation-1" }, sessionAfter: null, lastUsage: null,
+      turn: { id: "turn-1", runId: "run-1", providerId: "codex", continuationIdentity: {} } } as unknown as ActiveTurn;
+    const identity = { providerId: "codex", conversationId: "conversation-1", runId: "run-1", turnId: "turn-1" } as const;
+    projector.project(active, { ...identity, type: "session", sessionId: "late-session" }, { attemptId: "old" });
+    expect(updateConversation).not.toHaveBeenCalled();
+    expect(active.sessionAfter).toBeNull();
+    projector.project(active, { ...identity, type: "session", sessionId: "current-session" }, { attemptId: "new" });
+    expect(updateConversation).toHaveBeenCalledWith("conversation-1", expect.objectContaining({ providerSessionId: "current-session" }));
+    expect(active.sessionAfter).toBe("current-session");
+  });
+
   it("does not feed a rejected late descendant revival into run state", () => {
     const terminalTrace = {
       ...event(2, "interrupted", "interrupted", false),

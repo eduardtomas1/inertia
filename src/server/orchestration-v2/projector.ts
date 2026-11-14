@@ -46,7 +46,7 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
     return projectForkEvent(event, envelope, read);
   }
   if (event.type === "provider.backing-recorded" || event.type === "provider.backing-invalidated" || event.type === "provider.session-cleared"
-    || event.type === "provider.backing-rewound"
+    || event.type === "provider.backing-rewound" || event.type === "provider.backing-restored"
     || event.type === "context.handoff-prepared" || event.type === "context.handoff-state-changed") {
     return projectBackingEvent(event, envelope, read);
   }
@@ -129,7 +129,8 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
           && payload.stateRevision <= run.stateRevision)
         || (run.startedAt !== null && payload.startedAt !== run.startedAt)
         || (run.completedAt !== null && payload.completedAt !== run.completedAt)
-        || (isAgentTurnTerminalStatus(payload.status) !== (payload.completedAt !== null))) {
+        || (isAgentTurnTerminalStatus(payload.status) !== (payload.completedAt !== null))
+        || (payload.delivery !== undefined && payload.status !== "failed")) {
         throw new OrchestrationConflict("revision-conflict");
       }
       const terminal = isAgentTurnTerminalStatus(payload.status);
@@ -137,7 +138,8 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
         { kind: "run", id: run.id, value: { ...run,
           status: payload.status, executionState: payload.executionState, providerState: payload.providerState,
           stateRevision: payload.stateRevision, startedAt: payload.startedAt,
-          completedAt: payload.completedAt, terminalMessageId: payload.terminalMessageId } },
+          completedAt: payload.completedAt, terminalMessageId: payload.terminalMessageId,
+          ...(payload.delivery ? { delivery: payload.delivery } : {}) } },
         { kind: "attempt", id: attempt.id, value: { ...attempt, status: payload.status,
           nativeSessionId: payload.nativeSessionId ?? attempt.nativeSessionId } },
       ];

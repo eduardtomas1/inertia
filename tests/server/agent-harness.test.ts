@@ -172,6 +172,23 @@ describe("agent harness architecture", () => {
     ]);
   });
 
+  it("routes a rebound emitter elsewhere and closes both together", () => {
+    const first: ProviderEvent[] = [];
+    const second: ProviderEvent[] = [];
+    const emitter = createProviderEmitter("codex", "conversation-1", {
+      onEvent: (event) => first.push(event),
+    }, "run-1", "turn-1");
+    const rebound = emitter.rebind((event) => second.push(event));
+    emitter.text("first");
+    rebound.text("second");
+    expect(first.map((event) => event.type === "text" && event.text)).toEqual(["first"]);
+    expect(second.map((event) => event.type === "text" && event.text)).toEqual(["second"]);
+    emitter.close();
+    rebound.text("after close");
+    emitter.text("after close");
+    expect([first.length, second.length]).toEqual([1, 1]);
+  });
+
   it("forwards delegated task telemetry from the harness to the provider event", () => {
     const events: ProviderEvent[] = [];
     const providerEmitter = createProviderEmitter("codex", "conversation-1", {

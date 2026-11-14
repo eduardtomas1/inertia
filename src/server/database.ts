@@ -1,4 +1,5 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
+import type { AttemptObserver } from "./orchestration-v2/attempt-fence";
 import { OrchestratedTurnRepository } from "./orchestration-v2/turn-repository";
 import type { CommandSource } from "./orchestration-v2/types";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository"; import { WorkspaceToolReads } from "./persistence/workspace-tool-reads";
@@ -834,12 +835,16 @@ export class RuntimeStore {
     return this.orchestration.lifecycle(turnId, () => this.turnLedgerRepository.updateLifecycle(turnId, update));
   }
 
+  updateAgentTurnLifecycleIfCurrent(turnId: string, observer: AttemptObserver, update: AgentTurnLifecycleUpdate) {
+    return this.orchestration.lifecycleIfCurrent(turnId, observer, () => this.turnLedgerRepository.updateLifecycle(turnId, update));
+  }
+
   settleAgentTurn(
     turnId: string,
     update: AgentTurnSettlementUpdate,
   ): AgentTurnSettlementResult {
-    return this.orchestration.lifecycle(turnId, () =>
-      settleProjectedAgentTurn(this.database, this, update.projection, () => this.turnLedgerRepository.settle(turnId, update)));
+    return this.orchestration.lifecycle(turnId, () => settleProjectedAgentTurn(this.database, this, update.projection,
+      () => this.turnLedgerRepository.settle(turnId, update)), update.providerDelivery);
   }
 
   settleConversation(conversationId: string, settled: boolean): Conversation {

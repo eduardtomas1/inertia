@@ -196,6 +196,7 @@ export class TurnSettlementCoordinator {
         stopUnconfirmed ? withProviderStopNote(message) : message,
         status === "failed" && failure?.usageLimited === true,
         status === "failed" ? turnFailureKind(failure) : undefined,
+        status === "failed" && failure?.notDelivered === true,
       );
     } catch {
       try {
@@ -239,6 +240,7 @@ export class TurnSettlementCoordinator {
     message?: string,
     usageLimited = false,
     failureKind?: TurnFailureKind,
+    notDelivered = false,
   ): CommittedSettlement {
     const completedAt = this.options.now();
     try {
@@ -255,6 +257,7 @@ export class TurnSettlementCoordinator {
         startedAt: active.turn.startedAt ?? completedAt,
         completedAt,
         updatedAt: completedAt,
+        ...(notDelivered ? { providerDelivery: "not-delivered" as const } : {}),
         projection: {
           workspaceRunCreated: active.workspaceRunCreated,
           detail: message ?? active.conversation.title,

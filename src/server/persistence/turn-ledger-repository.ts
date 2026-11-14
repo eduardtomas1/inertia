@@ -1020,6 +1020,21 @@ export class TurnLedgerRepository {
     const current = this.get(turnId);
     if (isAgentTurnTerminalStatus(current.status)) return { settled: false, turn: current };
     try {
+      // Nothing reached the provider, so no history was restored: drop the
+      // restored-history record. A withheld count stays, with nothing restored,
+      // because it records an endpoint crossing (historyStayedOnEndpoint), not a
+      // delivery. The harness-changed guard is never reached today (such a turn
+      // starts a session, and neither not-delivered case does); it protects the
+      // route-handoff marker that record also is (latestProviderHandoffOnRoute).
+      if (update.providerDelivery === "not-delivered") {
+        this.context.database.prepare(`UPDATE agent_turns SET session_recovery_json = CASE
+            WHEN (CASE WHEN json_valid(session_recovery_json)
+              THEN json_extract(session_recovery_json, '$.withheldMessageCount') END) IS NOT NULL
+            THEN json_set(session_recovery_json, '$.restoredMessageCount', 0, '$.omittedMessageCount', 0)
+            ELSE NULL END
+          WHERE id = ? AND session_recovery_json IS NOT NULL
+            AND continuation_reason_code IS NOT 'harness-changed'`).run(turnId);
+      }
       return {
         settled: true,
         turn: this.updateLifecycle(turnId, update),

@@ -136,7 +136,11 @@ export interface CodexAppServerResult {
   diagnostic?: string;
   failure?: ProviderRunFailure;
   compatibilityError?: "full-access-unsupported" | "fast-mode-unsupported";
-  continuationError?: "stale-provider-session" | "resume-rejected";
+  /**
+   * `thread-in-use`: another Codex client holds the thread's writer lock. The
+   * turn is refused; the session is neither rejected nor unavailable.
+   */
+  continuationError?: "stale-provider-session" | "resume-rejected" | "thread-in-use";
   sessionInstructionApplied?: false;
   cleanupConfirmed: boolean;
   cleanupConfirmation?: Promise<boolean>;

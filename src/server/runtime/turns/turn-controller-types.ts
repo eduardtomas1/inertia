@@ -360,6 +360,13 @@ export interface NativeGoalStartAcknowledgement {
 export interface ActiveTurn {
   diagnosticFailureCode?: "turn.inactivity-timeout" | "turn.lifetime-timeout";
   turn: AgentTurn;
+  /**
+   * The run's current V2 attempt, read when the provider starts and replaced
+   * by the in-run fresh-session fallback. Provider observations carry the
+   * attempt they were started under and write nothing once it is replaced.
+   * Null or absent for a run V2 never admitted.
+   */
+  attemptId?: string | null;
   conversation: Conversation;
   providerInput: ProviderRunInput;
   /**

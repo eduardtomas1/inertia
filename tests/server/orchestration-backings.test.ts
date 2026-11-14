@@ -98,6 +98,170 @@ describe("durable native provider backings and context delivery", () => {
     } finally { runtime.store.close(); }
   });
 
+  it("keeps the earlier session reusable when the provider refused the switch-back before delivery", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await completeTurn(runtime, "Original Codex request", "codex-native", "Original Codex answer");
+      const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
+        identity: first.turn.continuationIdentity };
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
+      const other = await completeTurn(runtime, "Claude follow-up", "claude-native", "Claude new answer");
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "codex", modelSelection: codexSelection });
+      const refused = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex" });
+      expect(refused.turn.providerSessionBefore).toBe("codex-native");
+      runtime.controller.start(refused.turn.id);
+      expect(runtime.store.orchestration.backings.handoff(refused.turn.runId)?.state).toBe("dispatching");
+      expect(runtime.store.orchestration.backings.find(lookup)?.status).toBe("uncertain");
+      const message = "This conversation is open in another Codex client.";
+      runtime.provider.resolve({ status: "failed", sessionId: "codex-native", error: message,
+        failure: { reason: "codex-error", message, notDelivered: true } });
+      await flushTurnControllerTestPromises();
+      expect(refused.turn.sessionRecovery).not.toBeNull();
+      expect(runtime.store.agentTurn(refused.turn.id)).toMatchObject({ status: "failed", sessionRecovery: null });
+      expect(runtime.store.orchestration.backings.handoff(refused.turn.runId)?.state).toBe("abandoned");
+      const kept = runtime.store.orchestration.backings.find(lookup)!;
+      expect(kept.status).toBe("ready");
+      expect(kept.coveredItemIds).not.toContain(refused.message.id);
+      expect(invalidations(runtime)).toEqual([]);
+      // The restore replays exactly: a rebuild reproduces every projection.
+      const projectionRows = () => (runtime.store as unknown as { database: import("better-sqlite3").Database }).database
+        .prepare("SELECT kind, id, project_id, thread_id, revision, payload_json FROM orchestration_v2_entities ORDER BY kind, id").all();
+      const beforeRebuild = projectionRows();
+      expect(runtime.store.orchestration.events.readEvents({ projectId: runtime.store.conversation(runtime.conversationId).projectId,
+        threadId: runtime.conversationId, limit: 500 }).some(({ type }) => type === "provider.backing-restored")).toBe(true);
+      runtime.store.orchestration.events.rebuildProjections();
+      expect(projectionRows()).toEqual(beforeRebuild);
+
+      const retry = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex again" });
+      expect(retry.turn).toMatchObject({ providerSessionBefore: "codex-native" });
+      const handoff = runtime.store.orchestration.backings.handoff(retry.turn.runId)!;
+      expect(handoff.targetBackingId).toBe(kept.id);
+      expect(handoff.itemIds).toContain(other.message.id);
+      // As T3's missed-run retry handoff: the refused request never reached
+      // this session, so the next delta carries it as history.
+      expect(handoff.itemIds).toContain(refused.message.id);
+      runtime.controller.start(retry.turn.id);
+      expect(runtime.provider.input?.prompt).toContain("Claude new answer");
+      runtime.provider.resolve({ sessionId: "codex-native", text: "Returned" });
+      await flushTurnControllerTestPromises();
+    } finally { runtime.store.close(); }
+  });
+
+  it("counts a delivered turn on its route even when its handoff was abandoned, as Duo starts leave it", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      await completeTurn(runtime, "Original Codex request", "codex-native", "Original Codex answer");
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
+      const claude = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Claude request" });
+      const { backings } = runtime.store.orchestration;
+      // Duo starts skip dispatch, so settlement abandons a handoff the turn delivered.
+      (backings as unknown as { changeHandoff(handoff: unknown, state: string): void })
+        .changeHandoff(backings.handoff(claude.turn.runId)!, "abandoned");
+      runtime.controller.start(claude.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "claude-native" });
+      runtime.provider.resolve({ sessionId: "claude-native", text: "Claude answer" });
+      await flushTurnControllerTestPromises();
+      expect(backings.handoff(claude.turn.runId)?.state).toBe("abandoned");
+      expect(backings.deliveredRouteTurnId(runtime.conversationId)).toBe(claude.turn.id);
+
+      const refused = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Refused" });
+      runtime.controller.start(refused.turn.id);
+      runtime.provider.resolve({ status: "failed", sessionId: "claude-native", error: "Refused.",
+        failure: { reason: "codex-error", message: "Refused.", notDelivered: true } });
+      await flushTurnControllerTestPromises();
+      expect(backings.deliveredRouteTurnId(runtime.conversationId)).toBe(claude.turn.id);
+    } finally { runtime.store.close(); }
+  });
+
+  it("carries a refused same-provider request as history into the resend and into a later provider switch", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await completeTurn(runtime, "Original Codex request", "codex-native", "Original Codex answer");
+      const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
+        identity: first.turn.continuationIdentity };
+      const refused = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Rename the module" });
+      runtime.controller.start(refused.turn.id);
+      runtime.provider.resolve({ status: "failed", sessionId: "codex-native", error: "Open in another client.",
+        failure: { reason: "codex-error", message: "Open in another client.", notDelivered: true } });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.orchestration.backings.find(lookup)).toMatchObject({ status: "ready", lastTurnId: first.turn.id });
+
+      const resend = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Rename the module" });
+      expect(resend.turn.providerSessionBefore).toBe("codex-native");
+      const delta = runtime.store.orchestration.backings.handoff(resend.turn.runId)!;
+      expect(delta.itemIds).toContain(refused.message.id);
+      expect(delta.itemIds).not.toContain(first.message.id);
+      runtime.controller.start(resend.turn.id);
+      expect(runtime.provider.input?.prompt.split("Rename the module").length).toBe(3);
+      runtime.provider.resolve({ sessionId: "codex-native", text: "Renamed" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.orchestration.backings.find(lookup)?.coveredItemIds).toContain(refused.message.id);
+
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
+      const switched = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Claude, review it" });
+      const restore = runtime.store.orchestration.backings.handoff(switched.turn.runId)!;
+      expect(restore.itemIds).toEqual(expect.arrayContaining([first.message.id, refused.message.id, resend.message.id]));
+      runtime.controller.start(switched.turn.id);
+      runtime.provider.resolve({ sessionId: "claude-native", text: "Reviewed" });
+      await flushTurnControllerTestPromises();
+    } finally { runtime.store.close(); }
+  });
+
+  it.each([
+    ["drops a plain restored-history record", { restoredMessageCount: 3, omittedMessageCount: 1 }, null],
+    ["keeps an endpoint-crossing record with nothing restored",
+      { restoredMessageCount: 3, omittedMessageCount: 1, withheldMessageCount: 2 },
+      { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: 2 }],
+  ] as const)("%s when the turn delivered nothing", async (_label, recorded, expected) => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const turn = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Refused" }).turn;
+      const db = (runtime.store as unknown as { database: import("better-sqlite3").Database }).database;
+      db.prepare("UPDATE agent_turns SET session_recovery_json = ? WHERE id = ?").run(JSON.stringify(recorded), turn.id);
+      runtime.store.settleAgentTurn(turn.id, { status: "failed", terminalReason: "provider-error",
+        providerDelivery: "not-delivered", startedAt: "2030-01-01T00:00:00.000Z",
+        completedAt: "2030-01-01T00:00:01.000Z", updatedAt: "2030-01-01T00:00:01.000Z" });
+      expect(runtime.store.agentTurn(turn.id).sessionRecovery).toEqual(expected);
+    } finally { runtime.store.close(); }
+  });
+
+  it("prefers the live backing when a retired one shares its revision", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await completeTurn(runtime, "Original Codex request", "codex-native", "Original Codex answer");
+      const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
+        identity: first.turn.continuationIdentity };
+      const original = runtime.store.orchestration.backings.find(lookup)!;
+      const db = (runtime.store as unknown as { database: import("better-sqlite3").Database }).database;
+      const insert = db.prepare(`INSERT INTO orchestration_v2_entities (kind, id, project_id, thread_id, revision, payload_json)
+        VALUES ('provider-backing', ?, ?, ?, 999999, ?)`);
+      // The same shape a native rewind leaves: both rows written by one event.
+      const retired = { ...original, id: "0".repeat(64), nativeSessionId: "retired-native", status: "retired" };
+      const live = { ...original, id: "f".repeat(64), nativeSessionId: "live-native", status: "ready" };
+      for (const backing of [retired, live]) {
+        insert.run(backing.id, original.projectId, original.threadId, JSON.stringify(backing));
+      }
+      expect(runtime.store.orchestration.backings.find(lookup)?.id).toBe(live.id);
+    } finally { runtime.store.close(); }
+  });
+
+  it("settles a refused turn whose backing was retired while it ran", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await completeTurn(runtime, "Original Codex request", "codex-native", "Original Codex answer");
+      const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
+        identity: first.turn.continuationIdentity };
+      const refused = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue" });
+      runtime.controller.start(refused.turn.id);
+      runtime.store.orchestration.backings.invalidate(runtime.store.orchestration.backings.find(lookup)!, "rolled-back");
+      runtime.provider.resolve({ status: "failed", sessionId: "codex-native", error: "Open in another client.",
+        failure: { reason: "codex-error", message: "Open in another client.", notDelivered: true } });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(refused.turn.id)).toMatchObject({ status: "failed", terminalReason: "provider-error" });
+      expect(runtime.store.orchestration.backings.find(lookup)?.status).toBe("retired");
+    } finally { runtime.store.close(); }
+  });
+
   it("retains uncertain delivery across a runtime restart and refuses native reuse", async () => {
     const runtime = await handoffRuntime();
     const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Request before crash" });

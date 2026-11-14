@@ -16,6 +16,7 @@ import {
   CODEX_CHILD_INTERRUPT_TIMEOUT_MS,
   CODEX_APP_SERVER_MAX_QUEUED_STDIN_BYTES,
   CODEX_ROOT_INTERRUPT_TIMEOUT_MS,
+  CODEX_THREAD_IN_USE_MESSAGE,
   CODEX_TRANSPORT_CLOSE_GRACE_MS,
   MAX_CODEX_PENDING_CANCELLATION_REQUESTS,
   MAX_CODEX_PENDING_CLIENT_REQUESTS,
@@ -86,7 +87,21 @@ import {
 import { createOwnedProcessTreeTermination } from "../process-lifecycle";
 
 class CodexRequestRefusedError extends Error {}
-class CodexErrorResponse extends CodexRequestRefusedError {}
+class CodexErrorResponse extends CodexRequestRefusedError {
+  constructor(message: string, readonly code: number | null = null) {
+    super(message);
+  }
+}
+
+// Codex holds a per-thread writer lock while the thread is loaded in any App
+// Server sharing the same CODEX_HOME (the Codex app, CLI or an IDE extension),
+// and refuses a second writer this way. A fresh session would split the
+// conversation from that client, so this is neither a rejected nor a missing
+// session (T3 Code a445272c7).
+function isCodexActiveWriterError(error: unknown): boolean {
+  return error instanceof CodexErrorResponse && error.code === -32600
+    && error.message.includes("already has an active writer");
+}
 
 interface PendingClientRequest {
   method: string;
@@ -625,7 +640,8 @@ export function startCodexAppServerRun(
             errorMessage,
           );
         }
-        pending.reject(new CodexErrorResponse(errorMessage));
+        pending.reject(new CodexErrorResponse(errorMessage,
+          typeof error.code === "number" && Number.isSafeInteger(error.code) ? error.code : null));
       } else {
         pending.resolve(objectValue(message.result) ?? {});
       }
@@ -1039,6 +1055,10 @@ export async function openCodexTurn({
         ...threadConfig,
       });
     } catch (error) {
+      if (isCodexActiveWriterError(error)) {
+        setContinuationError("thread-in-use");
+        throw new Error(CODEX_THREAD_IN_USE_MESSAGE);
+      }
       if (isStaleResumeError(error)) {
         setContinuationError("stale-provider-session");
         throw new Error(staleProviderSessionDecision().reason);

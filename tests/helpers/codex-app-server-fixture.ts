@@ -155,6 +155,24 @@ if (message.method === "thread/start" || message.method === "thread/resume") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "missing-rollout-resume" && message.method === "thread/resume") {
     return send({ id: message.id, error: { code: -32600, message: "no rollout found for thread id " + message.params.threadId } });
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "active-writer-resume" && message.method === "thread/resume") {
+    return send({ id: message.id, error: { code: -32600, message: "thread " + message.params.threadId + " already has an active writer" } });
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "active-writer-other-code" && message.method === "thread/resume") {
+    return send({ id: message.id, error: { code: -32603, message: "thread " + message.params.threadId + " already has an active writer" } });
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "active-writer-no-code" && message.method === "thread/resume") {
+    return send({ id: message.id, error: { message: "thread " + message.params.threadId + " already has an active writer" } });
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "active-writer-string-code" && message.method === "thread/resume") {
+    return send({ id: message.id, error: { code: "-32600", message: "thread " + message.params.threadId + " already has an active writer" } });
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "active-writer-delayed" && message.method === "thread/resume") {
+    const id = message.id;
+    const threadIdentifier = message.params.threadId;
+    setTimeout(() => send({ id, error: { code: -32600, message: "thread " + threadIdentifier + " already has an active writer" } }), 400);
+    return;
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "rejected-resume" && message.method === "thread/resume") {
     return send({ id: message.id, error: { code: -32603, message: "rollout file is corrupt" } });
   }

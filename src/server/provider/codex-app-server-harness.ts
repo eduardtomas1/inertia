@@ -13,6 +13,7 @@ import {
 } from "../codex/developer-instructions";
 import { createCodexPromptCacheClock } from "../codex/usage";
 import {
+  CODEX_THREAD_IN_USE_MESSAGE,
   codexAccessPolicy,
   codexServiceTierMatches,
   validateCodexModelProvider,
@@ -281,6 +282,10 @@ function startCodexRun(
       );
       const message = continuationError === "stale-provider-session"
         ? staleProviderSessionDecision().reason
+        : continuationError === "thread-in-use"
+          // Not a rejected or missing session: the turn is refused and the
+          // saved session stays, so no fresh session splits the conversation.
+          ? CODEX_THREAD_IN_USE_MESSAGE
         : compatibilityError === "full-access-unsupported"
           ? "This Codex App Server version does not support Full Access. Update Codex CLI and try again."
           : compatibilityError === "fast-mode-unsupported"
@@ -310,6 +315,9 @@ function startCodexRun(
         ...(continuationError === "resume-rejected" && !compatibilityError
           ? { resumeRejected: true as const }
           : {}),
+        // Refused at thread/resume: turn/start, which carries the prompt and
+        // any handoff, was never sent.
+        ...(continuationError === "thread-in-use" ? { notDelivered: true as const } : {}),
       };
       emitter.status("failed", message);
       return {

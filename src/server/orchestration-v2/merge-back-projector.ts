@@ -5,7 +5,7 @@ import { OrchestrationConflict, type OrchestrationEvent, type ProjectionReader, 
 const transitions: Record<MergeBack["state"], readonly MergeBack["state"][]> = {
   prepared: ["attached", "withdrawn", "superseded"],
   attached: ["dispatched", "delivered", "undelivered"],
-  dispatched: ["delivered", "uncertain"],
+  dispatched: ["delivered", "uncertain", "undelivered"],
   delivered: [], undelivered: [], uncertain: [], withdrawn: [], superseded: [],
 };
 

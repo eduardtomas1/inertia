@@ -12,6 +12,10 @@ export const CODEX_APP_SERVER_MAX_QUEUED_STDIN_BYTES = 32 * 1024 * 1024;
 export const MAX_CODEX_TEXT_CHARS = 4 * 1024 * 1024;
 export const MAX_CODEX_DIAGNOSTIC_CHARS = 32 * 1024;
 export const CODEX_RPC_TIMEOUT_MS = 30_000;
+/** Shown when another Codex client holds the thread's writer lock (T3 Code a445272c7). */
+export const CODEX_THREAD_IN_USE_MESSAGE =
+  "This conversation is open in another Codex client, such as the Codex app, the Codex CLI, or an IDE extension. "
+  + "Codex lets one client write to a conversation at a time. Quit that client, then send your message again.";
 export const CODEX_TRANSPORT_CLOSE_GRACE_MS = 100;
 export const CODEX_CHILD_INTERRUPT_TIMEOUT_MS = 400;
 export const CODEX_CHILD_INTERRUPT_OVERALL_TIMEOUT_MS = 900;

@@ -196,11 +196,11 @@ export class MergeBackRepository {
     for (const merge of this.forRun(runId, ["attached", "dispatched"])) this.change(merge, "delivered");
   }
 
-  settleRun(turn: AgentTurn): void {
+  settleRun(turn: AgentTurn, undelivered = false): void {
     if (!isAgentTurnTerminalStatus(turn.status)) return;
     if (turn.status === "completed") this.acknowledge(turn.runId);
     for (const merge of this.forRun(turn.runId, ["attached", "dispatched"])) {
-      this.change(merge, merge.state === "attached" ? "undelivered" : "uncertain");
+      this.change(merge, merge.state === "attached" || undelivered ? "undelivered" : "uncertain");
     }
   }
 

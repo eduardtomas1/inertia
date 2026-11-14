@@ -13,7 +13,7 @@ export function rollbackWrites(envelope: OrchestrationEvent, read: ProjectionRea
 
 const continuationTransitions: Record<HistoryCursor["continuationState"], readonly HistoryCursor["continuationState"][]> = {
   none: [], pending: ["attached"], attached: ["pending", "dispatched", "consumed"],
-  dispatched: ["consumed", "uncertain"], consumed: [], uncertain: [],
+  dispatched: ["consumed", "uncertain", "pending"], consumed: [], uncertain: [],
 };
 
 function filesWrites(payload: Extract<HistoryEvent, { type: "history.files-changed" }>["payload"], cursor: HistoryCursor,

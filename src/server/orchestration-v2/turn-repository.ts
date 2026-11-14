@@ -16,6 +16,7 @@ import {
   type OrchestrationCleanupRelease,
   type OrchestrationDomainEvent,
 } from "../../shared/orchestration-v2";
+import type { PreparedContextHandoff } from "../../shared/orchestration-backings";
 import type { BeginAgentTurnInput, NewConversationOptions } from "../persistence/types";
 import { staleAttemptObservation, type AttemptObserver, type StaleAttemptObservation } from "./attempt-fence";
 import { OrchestrationEffectOutbox } from "./effect-outbox";
@@ -208,6 +209,39 @@ export class OrchestratedTurnRepository {
     return { turn, message: this.access.message(result.messageId) };
   }
 
+  /** The run's current attempt, or null for a run V2 never admitted. */
+  currentAttemptId(runId: string): string | null {
+    const row = this.events.projection("run", runId);
+    return row ? orchestrationRunSchema.parse(row.value).attemptId : null;
+  }
+
+  /** Whether an observation from `observer`'s attempt may still write; writes nothing itself. */
+  observation(runId: string, observer: AttemptObserver): StaleAttemptObservation | null {
+    const row = this.events.projection("run", runId);
+    return row ? staleAttemptObservation(this.events, orchestrationRunSchema.parse(row.value), observer) : null;
+  }
+
+  /**
+   * In-run fresh-session fallback after the provider rejected a native resume:
+   * the compatibility restart and a `provider_recovery` replacement of the
+   * expected attempt commit together, so the rejected attempt is superseded
+   * and its late observations write nothing. Returns the replacement attempt,
+   * or null for a run V2 never admitted.
+   */
+  restartOnFreshSession<T>(input: { turn: AgentTurn; expectedSessionId: string; expectedAttemptId: string | null;
+    prepared: PreparedContextHandoff | undefined; priorCleanup: "confirmed" }, restart: () => T):
+    { result: T; attemptId: string | null } {
+    let attemptId: string | null = null;
+    const result = this.backings.restart(input.turn, input.expectedSessionId, input.prepared, restart, (run) => {
+      // A caller that does not know which attempt it ran cannot replace one.
+      if (input.expectedAttemptId === null) throw new OrchestrationConflict("revision-conflict");
+      attemptId = this.replaceAttempt({ runId: run.id, turnId: run.turnId, expectedAttemptId: input.expectedAttemptId,
+        reason: "provider_recovery", priorCleanup: input.priorCleanup }).id;
+      return attemptId;
+    });
+    return { result, attemptId };
+  }
+
   acknowledge(runId: string, observer?: AttemptObserver): StaleAttemptObservation | null {
     const row = observer ? this.events.projection("run", runId) : null;
     const stale = row ? staleAttemptObservation(this.events, orchestrationRunSchema.parse(row.value), observer) : null;
@@ -248,10 +282,10 @@ export class OrchestratedTurnRepository {
     return readPortableContinuationHistory(this.database, input);
   }
 
-  lifecycle<T>(turnId: string, updateCompatibilityProjection: () => T): T {
+  lifecycle<T>(turnId: string, updateCompatibilityProjection: () => T, delivery?: "not-delivered"): T {
     return this.database.transaction(() => {
       const result = updateCompatibilityProjection();
-      this.synchronize(this.access.agentTurn(turnId));
+      this.synchronize(this.access.agentTurn(turnId), undefined, delivery);
       return result;
     }).immediate();
   }
@@ -276,7 +310,12 @@ export class OrchestratedTurnRepository {
     })();
   }
 
-  synchronize(turn: AgentTurn, observer?: AttemptObserver): StaleAttemptObservation | null {
+  /**
+   * `delivery: "not-delivered"` settles a run the provider refused before
+   * anything reached it: its handoff is abandoned and its backing and
+   * continuation cursors return to their state before dispatch.
+   */
+  synchronize(turn: AgentTurn, observer?: AttemptObserver, delivery?: "not-delivered"): StaleAttemptObservation | null {
     const previous = this.events.projection("run", turn.runId);
     if (!previous) return null; // Imported/pre-V2 history has no invented execution authority.
     const run = orchestrationRunSchema.parse(previous.value);
@@ -291,6 +330,7 @@ export class OrchestratedTurnRepository {
       startedAt: turn.startedAt, completedAt: turn.completedAt,
       terminalMessageId: turn.terminalAssistantMessageId,
       nativeSessionId: turn.providerSessionAfter ?? turn.providerSessionBefore,
+      ...(delivery === "not-delivered" && turn.status === "failed" ? { delivery } : {}),
     } };
     const before = { ...event.payload, status: run.status, stateRevision: run.stateRevision,
       executionState: run.executionState, providerState: run.providerState,
@@ -306,9 +346,10 @@ export class OrchestratedTurnRepository {
       expectedRevision: this.events.revision(run.threadId), events: [event],
       ...(capture && !this.effects.get(capture.id) ? { effects: [capture] } : {}), result: null });
     if (isAgentTurnTerminalStatus(turn.status)) this.effects.retirePending(this.startEffectId(turn.runId), "run-settled");
-    this.backings.settle(turn);
-    this.history.settleRun(turn, (backing) => this.backings.invalidate(backing, "uncertain-delivery"));
-    this.mergeBacks.settleRun(turn);
+    const undelivered = delivery === "not-delivered";
+    this.backings.settle(turn, undelivered);
+    this.history.settleRun(turn, (backing) => this.backings.invalidate(backing, "uncertain-delivery"), undelivered);
+    this.mergeBacks.settleRun(turn, undelivered);
     if (turn.runState?.state === "cancelling" && attempt.interruptRequestedAt === null) {
       const interrupted: OrchestrationDomainEvent = { type: "attempt.interrupt-requested",
         payload: { runId: run.id, attemptId: attempt.id } };

@@ -450,8 +450,13 @@ export function resolveTurnRequest(
   // A provider handoff carries the chat's earlier messages to the new
   // provider. Later fresh sessions on that route keep what the handoff carried,
   // but messages produced afterwards on other routes stay withheld.
-  const providerHandoff = latestTurn !== null
-    && latestTurn.providerId !== route.providerId;
+  // A turn whose context handoff never reached its provider did not move the
+  // conversation onto that route; the switch it attempted is still due.
+  const routeTurnId = latestTurn ? dependencies.store.orchestration.backings.deliveredRouteTurnId(conversation.id) : null;
+  const routeTurn = routeTurnId === null || routeTurnId === latestTurn?.id ? latestTurn
+    : dependencies.store.agentTurn(routeTurnId);
+  const providerHandoff = routeTurn !== null
+    && routeTurn.providerId !== route.providerId;
   const restoredHistoryRoute = () => {
     const { backendProfileId, endpointIdentity } = route.continuationIdentity;
     const handoffBefore = providerHandoff
@@ -686,7 +691,7 @@ export function resolveTurnRequest(
   return {
     input,
     importNote,
-    handoffFromTurnId: providerHandoff ? latestTurn.id : null,
+    handoffFromTurnId: latestTurn !== null && latestTurn.providerId !== route.providerId ? latestTurn.id : null,
     adopt: (queued) => {
       const exhausted = exhaustedBacking ? dependencies.store.orchestration.backings.get(exhaustedBacking.id) : null;
       if (exhausted) dependencies.store.orchestration.backings.invalidate(exhausted, "context-exhausted");

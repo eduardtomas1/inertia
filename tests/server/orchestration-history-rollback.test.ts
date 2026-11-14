@@ -54,6 +54,12 @@ function rollback(runtime: TurnControllerTestRuntime, deps: ReturnType<typeof de
   return rollbackConversationHistory(deps, { conversationId, turnId, source }, new AbortController().signal);
 }
 
+function invalidations(runtime: TurnControllerTestRuntime) {
+  const { projectId } = runtime.store.conversation(runtime.conversationId);
+  return runtime.store.orchestration.events.readEvents({ projectId, threadId: runtime.conversationId, limit: 500 })
+    .filter(({ type }) => type === "provider.backing-invalidated").map(({ payload }) => payload);
+}
+
 function send(runtime: TurnControllerTestRuntime, content: string, conversationId = runtime.conversationId) {
   const queued = runtime.controller.queue({ conversationId, content });
   runtime.controller.start(queued.turn.id);
@@ -164,6 +170,69 @@ describe("deferred native history rollback", () => {
       expect(runtime.provider.input?.prompt).toContain("first answer");
       expect(runtime.provider.input?.prompt).not.toContain("second answer");
       runtime.provider.resolve({ text: "Fresh", sessionId: "replacement-native" });
+      await flushTurnControllerTestPromises();
+    } finally { runtime.store.close(); }
+  });
+
+  it("returns a dispatched cursor to pending when the provider refused before anything was delivered", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await finish(runtime, "first");
+      await finish(runtime, "second");
+      const deps = dependencies(runtime, async (request) => completed(request, "resume-cursor",
+        { nativeConversationId: "source-native", headId: "first", persistedHeadId: "second", continuation: cursor }));
+      await rollback(runtime, deps, first.id);
+      send(runtime, "Refused while another client holds the thread");
+      expect(runtime.store.orchestration.history.cursor(runtime.conversationId)?.continuationState).toBe("dispatched");
+      runtime.provider.resolve({ status: "failed", sessionId: "source-native", error: "Open in another client.",
+        failure: { reason: "codex-error", message: "Open in another client.", notDelivered: true } });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.orchestration.history.cursor(runtime.conversationId)).toMatchObject({
+        continuationState: "pending", runId: null, continuation: cursor });
+      expect(invalidations(runtime)).toEqual([]);
+      send(runtime, "Resume at cursor after the refusal");
+      expect(runtime.provider.input).toMatchObject({ sessionId: "source-native", nativeContinuation: cursor });
+      runtime.provider.resolve({ text: "Resumed", sessionId: "source-native" });
+      await flushTurnControllerTestPromises();
+    } finally { runtime.store.close(); }
+  });
+
+  it("restores a backing the rollback created on a new native session when the next turn was refused", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await finish(runtime, "first");
+      await finish(runtime, "second");
+      const deps = dependencies(runtime, async (request) => completed(request, "native-revert",
+        { nativeConversationId: "rewound-native", headId: "first", persistedHeadId: "first" }));
+      await rollback(runtime, deps, first.id);
+      await flushTurnControllerTestPromises();
+      const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
+        identity: first.continuationIdentity, nativeSessionId: "rewound-native" };
+      const rewound = runtime.store.orchestration.backings.find(lookup)!;
+      expect(rewound.status).toBe("ready");
+      const refused = send(runtime, "Refused on the rewound session");
+      expect(refused.providerSessionBefore).toBe("rewound-native");
+      await flushTurnControllerTestPromises();
+      expect(runtime.provider.input?.sessionId).toBe("rewound-native");
+      expect(runtime.store.orchestration.backings.find(lookup)?.lastRunId).toBe(refused.runId);
+      runtime.provider.resolve({ status: "failed", sessionId: "rewound-native", error: "Open in another client.",
+        failure: { reason: "codex-error", message: "Open in another client.", notDelivered: true } });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(refused.id).status).toBe("failed");
+      expect(runtime.store.orchestration.backings.find(lookup)).toMatchObject({ status: "ready",
+        lastRunId: rewound.lastRunId, lastTurnId: rewound.lastTurnId, coveredItemIds: rewound.coveredItemIds });
+      // The restore replays exactly: a rebuild reproduces every projection.
+      const projectionRows = () => (runtime.store as unknown as { database: import("better-sqlite3").Database }).database
+        .prepare("SELECT kind, id, project_id, thread_id, revision, payload_json FROM orchestration_v2_entities ORDER BY kind, id").all();
+      const beforeRebuild = projectionRows();
+      expect(runtime.store.orchestration.events.readEvents({ projectId: runtime.store.conversation(runtime.conversationId).projectId,
+        threadId: runtime.conversationId, limit: 500 }).some(({ type }) => type === "provider.backing-restored")).toBe(true);
+      runtime.store.orchestration.events.rebuildProjections();
+      expect(projectionRows()).toEqual(beforeRebuild);
+      send(runtime, "Retry on the rewound session");
+      await flushTurnControllerTestPromises();
+      expect(runtime.provider.input?.sessionId).toBe("rewound-native");
+      runtime.provider.resolve({ text: "Resumed", sessionId: "rewound-native" });
       await flushTurnControllerTestPromises();
     } finally { runtime.store.close(); }
   });

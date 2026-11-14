@@ -187,6 +187,14 @@ export interface CreateMessageOptions {
 export interface AgentTurnSettlementUpdate
   extends Omit<AgentTurnLifecycleUpdate, "status"> {
   status: AgentTurnTerminalStatus;
+  /**
+   * The provider definitely received nothing for this turn. Settlement then
+   * returns the handoff, backing and continuation cursors to their state
+   * before dispatch instead of treating the delivery as uncertain, and the
+   * turn's restored-history notice is dropped (except for a provider-switch
+   * restore, which also marks the route handoff).
+   */
+  providerDelivery?: "not-delivered";
   /** Controller-owned stored projections belong to the same terminal commit. */
   projection?: {
     workspaceRunCreated: boolean;

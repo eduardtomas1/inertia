@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { ORCHESTRATION_V2_PROJECTION_VERSION } from "../../src/server/orchestration-v2/projector";
 import type { AgentTurn } from "../../src/shared/contracts";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { orchestrationRunSchema, orchestrationThreadSchema } from "../../src/shared/orchestration-v2";
+import { resolveNativeModelRoute } from "./model-route-fixture";
 import {
   cleanupTurnControllerTestDirectories,
   createTurnControllerTestRuntime,
@@ -122,12 +124,15 @@ describe("Orchestrator V2 attempt replacement", () => {
       expect(events(storeDatabase(runtime.store), runtime.conversationId, "run.attempt-replaced")).toMatchObject([
         { payload: { attemptId: initial!.id, reason: "provider_recovery", priorCleanup: "confirmed" } }]);
 
+      // The running harness was started under the replaced attempt, so its
+      // observations write nothing; the controller's own settlement still does.
       runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "native-boundary", ...boundary("native-turn-2") });
+      expect(orchestration.events.revision(runtime.conversationId)).toBe(revision);
       runtime.provider.resolve({ text: "Recovered answer" });
       await flushTurnControllerTestPromises();
       expect(orchestration.attempts(turn.runId)).toMatchObject([
         { id: initial!.id, status: "superseded", nativeTurnId: "native-turn-1" },
-        { id: replacement.id, status: "completed", nativeThreadId: "native-thread", nativeTurnId: "native-turn-2" },
+        { id: replacement.id, status: "completed", nativeThreadId: null, nativeTurnId: null },
       ]);
     } finally { runtime.store.close(); }
   });
@@ -294,6 +299,208 @@ describe("Orchestrator V2 attempt projection rebuild", () => {
         .toEqual({ schema_version: ORCHESTRATION_V2_PROJECTION_VERSION });
       expectReplacedRuns(reopened, first, second);
       expect(reopened.orchestration.maintainProjections()).toMatchObject({ valid: true, rebuilt: false });
+    } finally { reopened.close(); }
+  });
+});
+
+describe("Orchestrator V2 rejected-resume fallback (G9)", () => {
+  async function resumingChat() {
+    const runtime = await createTurnControllerTestRuntime({}, {
+      modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "provider-default" }),
+      resolveModelRoute: resolveNativeModelRoute,
+    });
+    const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Keep the API." });
+    runtime.controller.start(first.turn.id);
+    runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "saved-session" });
+    runtime.provider.resolve({ status: "completed", sessionId: "saved-session", text: "Understood." });
+    await flushTurnControllerTestPromises();
+    const turn = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." }).turn;
+    runtime.controller.start(turn.id);
+    expect(runtime.provider.input?.sessionId).toBe("saved-session");
+    const rejectedRoute = runtime.provider.callbacks!.onEvent!;
+    runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+    return { runtime, turn, rejectedRoute };
+  }
+
+  async function closeRuntime(runtime: TurnControllerTestRuntime) {
+    await runtime.controller.dispose();
+    runtime.store.close();
+  }
+
+  it("records the in-run restart as a provider_recovery replacement and commits the fresh session under it", async () => {
+    const { runtime, turn } = await resumingChat();
+    try {
+      const { orchestration } = runtime.store;
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "native-boundary",
+        nativeConversationId: "saved-session", nativeSessionId: null, nativeTurnId: null, persistedHeadId: null,
+        phase: "started" });
+      const [initial] = orchestration.attempts(turn.runId);
+      expect(initial).toMatchObject({ ordinal: 1, cleanup: "pending", nativeSessionId: "saved-session",
+        nativeThreadId: "saved-session" });
+
+      expect(runtime.provider.freshSession()).not.toBeNull();
+      const [superseded, replacement] = orchestration.attempts(turn.runId);
+      expect(superseded).toMatchObject({ id: initial!.id, status: "superseded", supersededAt: expect.any(String),
+        cleanup: "confirmed", nativeSessionId: "saved-session", nativeThreadId: "saved-session" });
+      expect(orchestration.nativeBoundaries.forRun(turn.runId)).toBeNull();
+      expect(replacement).toMatchObject({ ordinal: 2, reason: "provider_recovery", status: "running",
+        cleanup: "pending", nativeSessionId: null, nativeThreadId: null, nativeTurnId: null });
+      expect(run(runtime.store, turn.runId).attemptId).toBe(replacement!.id);
+      expect(events(storeDatabase(runtime.store), runtime.conversationId, "run.attempt-replaced")).toMatchObject([
+        { payload: { attemptId: initial!.id, reason: "provider_recovery", priorCleanup: "confirmed" } }]);
+      expect(orchestration.backings.handoff(turn.runId)).toMatchObject({ attemptId: replacement!.id, state: "dispatching" });
+      expect(runtime.store.agentTurn(turn.id)).toMatchObject({ providerSessionBefore: null,
+        continuationReasonCode: "stale-provider-session" });
+
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "session", sessionId: "fresh-session" });
+      runtime.provider.emit({ ...identity, type: "native-boundary", nativeConversationId: "fresh-session",
+        nativeSessionId: null, nativeTurnId: "fresh-turn", persistedHeadId: null, phase: "started" });
+      runtime.provider.emit({ ...identity, type: "text", text: "Continuing." });
+      expect(orchestration.attempts(turn.runId)[1]).toMatchObject({ nativeSessionId: "fresh-session",
+        nativeThreadId: "fresh-session", nativeTurnId: "fresh-turn" });
+      expect(orchestration.nativeBoundaries.forRun(turn.runId)).toMatchObject({ attemptId: replacement!.id,
+        nativeConversationId: "fresh-session" });
+      expect(orchestration.backings.handoff(turn.runId)).toMatchObject({ attemptId: replacement!.id, state: "delivered" });
+      runtime.provider.resolve({ status: "completed", sessionId: "fresh-session", text: "Continuing." });
+      await flushTurnControllerTestPromises();
+      expect(orchestration.attempts(turn.runId)).toMatchObject([
+        { id: initial!.id, status: "superseded", cleanup: "confirmed" },
+        { id: replacement!.id, status: "completed", cleanup: "confirmed" },
+      ]);
+      expect(runtime.store.agentTurn(turn.id)).toMatchObject({ status: "completed", providerSessionAfter: "fresh-session" });
+      expect(orchestration.hasPendingCleanup(runtime.conversationId)).toBe(false);
+    } finally { await closeRuntime(runtime); }
+  });
+
+  it("writes nothing for a late observation from the rejected attempt", async () => {
+    const { runtime, turn, rejectedRoute } = await resumingChat();
+    try {
+      const { orchestration } = runtime.store;
+      const [initial] = orchestration.attempts(turn.runId);
+      runtime.provider.freshSession();
+      const replacement = orchestration.attempts(turn.runId)[1]!;
+      const db = storeDatabase(runtime.store);
+      const before = { entities: entities(db), turn: runtime.store.agentTurn(turn.id),
+        revision: orchestration.events.revision(runtime.conversationId),
+        messages: runtime.store.conversationDetail(runtime.conversationId)?.messages.length };
+      const identity = turnControllerTestIdentity(runtime);
+      const late = [
+        { ...identity, type: "status", status: "retrying" },
+        { ...identity, type: "text", text: "Late answer from the rejected session" },
+        { ...identity, type: "session", sessionId: "saved-session" },
+        { ...identity, type: "native-boundary", nativeConversationId: "saved-session", nativeSessionId: null,
+          nativeTurnId: "late-turn", persistedHeadId: null, phase: "settled" },
+        { ...identity, type: "status", status: "cancelling" },
+      ] as const;
+      for (const event of late) rejectedRoute(event);
+      expect(runtime.controller.handleProviderEvent({ ...identity, type: "text", text: "Late" }, initial!.id)).toBe(false);
+      expect(orchestration.observation(turn.runId, { attemptId: initial!.id })).toEqual({ reason: "attempt-superseded",
+        runId: turn.runId, observedAttemptId: initial!.id, currentAttemptId: replacement.id });
+      expect(orchestration.lifecycleIfCurrent(turn.id, { attemptId: initial!.id }, () => {
+        throw new Error("A stale observation must not reach the transcript turn.");
+      })).toMatchObject({ committed: false, stale: { reason: "attempt-superseded" } });
+      expect(runtime.store.agentTurn(turn.id)).toEqual(before.turn);
+      expect(orchestration.events.revision(runtime.conversationId)).toBe(before.revision);
+      expect(entities(db)).toEqual(before.entities);
+      expect(runtime.store.conversationDetail(runtime.conversationId)?.messages).toHaveLength(before.messages!);
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBeNull();
+
+      runtime.provider.emit({ ...identity, type: "status", status: "retrying" });
+      expect(runtime.store.agentTurn(turn.id).runState?.state).toBe("retrying");
+    } finally { await closeRuntime(runtime); }
+  });
+
+  it("replays the replacement idempotently and refuses the whole restart for a stale expected attempt", async () => {
+    const { runtime, turn } = await resumingChat();
+    try {
+      const { orchestration } = runtime.store;
+      const [initial] = orchestration.attempts(turn.runId);
+      const backing = orchestration.backings.find({ threadId: runtime.conversationId, providerId: "codex",
+        workspaceKey: runtime.store.conversationPath(runtime.conversationId), identity: turn.continuationIdentity,
+        nativeSessionId: "saved-session" })!;
+      expect(backing.status).toBe("ready");
+      const db = storeDatabase(runtime.store);
+      const before = { entities: entities(db), revision: orchestration.events.revision(runtime.conversationId) };
+      expect(() => orchestration.restartOnFreshSession({ turn: runtime.store.agentTurn(turn.id),
+        expectedSessionId: "saved-session", expectedAttemptId: "another-attempt", prepared: undefined,
+        priorCleanup: "confirmed" }, () => runtime.store.updateConversation(runtime.conversationId,
+        { providerSessionId: null, continuationIdentity: null }))).toThrow("revision-conflict");
+      expect(entities(db)).toEqual(before.entities);
+      expect(orchestration.events.revision(runtime.conversationId)).toBe(before.revision);
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("saved-session");
+
+      expect(runtime.provider.freshSession()).not.toBeNull();
+      const replacement = orchestration.attempts(turn.runId)[1]!;
+      const revision = orchestration.events.revision(runtime.conversationId);
+      const request = { runId: turn.runId, turnId: turn.id, expectedAttemptId: initial!.id,
+        reason: "provider_recovery" as const, priorCleanup: "confirmed" as const };
+      expect(orchestration.replaceAttempt(request)).toEqual(replacement);
+      expect(runtime.provider.freshSession()).toBeNull();
+      expect(orchestration.events.revision(runtime.conversationId)).toBe(revision);
+      expect(() => orchestration.replaceAttempt({ ...request, reason: "retry", priorCleanup: undefined }))
+        .toThrow("revision-conflict");
+      expect(orchestration.attempts(turn.runId)).toHaveLength(2);
+      expect(orchestration.backings.get(backing.id)).toMatchObject({ status: "retired" });
+    } finally { await closeRuntime(runtime); }
+  });
+
+  it("stops the replacement attempt after the fallback and declines the fallback after a Stop", async () => {
+    const after = await resumingChat();
+    try {
+      const { orchestration } = after.runtime.store;
+      after.runtime.provider.freshSession();
+      const replacement = orchestration.attempts(after.turn.runId)[1]!;
+      expect(after.runtime.controller.cancel(after.runtime.conversationId)).toBe(true);
+      expect(orchestration.attempts(after.turn.runId)[1]).toMatchObject({ id: replacement.id,
+        interruptRequestedAt: expect.any(String) });
+      expect(orchestration.attempts(after.turn.runId)[0]).toMatchObject({ status: "superseded", interruptRequestedAt: null });
+      after.rejectedRoute({ ...turnControllerTestIdentity(after.runtime), type: "status", status: "cancelled" });
+      after.runtime.provider.resolve({ status: "cancelled" });
+      await flushTurnControllerTestPromises();
+      expect(after.runtime.store.agentTurn(after.turn.id).status).toBe("cancelled");
+      expect(orchestration.attempts(after.turn.runId)).toMatchObject([
+        { status: "superseded", cleanup: "confirmed" }, { id: replacement.id, status: "cancelled", cleanup: "confirmed" }]);
+      expect(orchestration.awaitsCleanupProof(after.runtime.conversationId)).toBe(false);
+    } finally { await closeRuntime(after.runtime); }
+
+    const before = await resumingChat();
+    try {
+      const { orchestration } = before.runtime.store;
+      expect(before.runtime.controller.cancel(before.runtime.conversationId)).toBe(true);
+      expect(before.runtime.provider.freshSession()).toBeNull();
+      expect(orchestration.attempts(before.turn.runId)).toMatchObject([{ ordinal: 1, reason: "initial" }]);
+      before.runtime.provider.resolve({ status: "cancelled" });
+      await flushTurnControllerTestPromises();
+      expect(orchestration.attempts(before.turn.runId)).toMatchObject([{ status: "cancelled", cleanup: "confirmed" }]);
+      expect(before.runtime.store.conversation(before.runtime.conversationId).providerSessionId).toBe("saved-session");
+    } finally { await closeRuntime(before.runtime); }
+  });
+
+  it("reproduces the replaced attempts when projections are rebuilt or the store reopens", async () => {
+    const { runtime, turn } = await resumingChat();
+    runtime.provider.freshSession();
+    runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "fresh-session" });
+    runtime.provider.resolve({ status: "completed", sessionId: "fresh-session", text: "Done." });
+    await flushTurnControllerTestPromises();
+    await runtime.controller.dispose();
+    const db = storeDatabase(runtime.store);
+    const before = entities(db);
+    db.prepare("DELETE FROM orchestration_v2_entities WHERE kind IN ('run', 'attempt', 'context-handoff', 'provider-backing')").run();
+    db.prepare("UPDATE orchestration_v2_projection_metadata SET last_sequence = last_sequence - 1").run();
+    expect(runtime.store.orchestration.maintainProjections()).toMatchObject({ valid: true, rebuilt: true });
+    expect(entities(db)).toEqual(before);
+    runtime.store.close();
+
+    const reopened = new RuntimeStore(join(runtime.directory, "inertia.sqlite"), runtime.workspace,
+      { recoverInterruptedRuns: false });
+    try {
+      expect(entities(storeDatabase(reopened))).toEqual(before);
+      expect(reopened.orchestration.attempts(turn.runId).map(({ ordinal, reason, status, cleanup }) =>
+        ({ ordinal, reason, status, cleanup }))).toEqual([
+        { ordinal: 1, reason: "initial", status: "superseded", cleanup: "confirmed" },
+        { ordinal: 2, reason: "provider_recovery", status: "completed", cleanup: "confirmed" },
+      ]);
     } finally { reopened.close(); }
   });
 });

@@ -16,6 +16,19 @@ export function projectBackingEvent(event: OrchestrationBackingEvent, envelope: 
       value: { ...backing, status: "retired", updatedAt: envelope.createdAt } }];
   }
   if (event.type === "provider.backing-rewound") return rewound(event.payload, envelope, read);
+  if (event.type === "provider.backing-restored") {
+    const { backing: restored, runId } = event.payload;
+    const row = read("provider-backing", restored.id);
+    if (!row || row.threadId !== envelope.threadId) throw new OrchestrationConflict("scope-conflict");
+    const current = providerBackingSchema.parse(row.value);
+    if (current.status === "retired" || restored.status === "retired" || current.lastRunId !== runId
+      || restored.lastRunId === runId || restored.threadId !== current.threadId || restored.projectId !== current.projectId
+      || restored.providerInstanceId !== current.providerInstanceId || restored.workspaceKey !== current.workspaceKey
+      || restored.nativeSessionId !== current.nativeSessionId || restored.createdAt !== current.createdAt) {
+      throw new OrchestrationConflict("revision-conflict");
+    }
+    return [{ kind: "provider-backing", id: restored.id, value: { ...restored, updatedAt: envelope.createdAt } }];
+  }
   const run = orchestrationRunSchema.parse(read("run", event.payload.runId)?.value);
   const attempt = orchestrationAttemptSchema.parse(read("attempt", event.payload.attemptId)?.value);
   if (run.threadId !== envelope.threadId || run.projectId !== envelope.projectId

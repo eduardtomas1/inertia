@@ -67,6 +67,8 @@ import {
   type ProviderMetadata,
 } from "./provider/metadata";
 import { readClaudeAgentSdkSkills } from "./provider/claude-agent-sdk-harness";
+import type { ProviderSlashCommand } from "../shared/contracts";
+import { ProviderCommandCatalog } from "./provider/provider-command-catalog";
 import {
   canonicalProviderExecutable,
   ProviderInstallationAdmissionError,
@@ -134,6 +136,7 @@ export type ProductionProviderManagerOptions =
 export class ProviderManager {
   private readonly commands: Partial<Record<ProviderId, string>>;
   private readonly resolvedCommands = new Map<ProviderId, string>();
+  private readonly commandCatalog: ProviderCommandCatalog;
   private readonly updateRequirements = new Map<ProviderId, string>();
   private readonly cancelGraceMs: number;
   private readonly harnessRegistry: AgentHarnessRegistry;
@@ -268,6 +271,20 @@ export class ProviderManager {
       ?? this.ownedLifetimeAbort!.signal;
     this.resolveBackendLaunchOptions = options.resolveBackendLaunchOptions;
     this.conversationProviderGate = options.conversationProviderGate;
+    this.commandCatalog = new ProviderCommandCatalog({
+      installationAuthority: this.installationAuthority,
+      resolvedCommand: (providerId) => this.resolvedCommands.get(providerId),
+      claudeExecutable: async (cwd) => {
+        this.installationAuthority.assertRecoveryComplete("claude");
+        const executable = this.resolvedCommands.get("claude") ?? (await this.detect("claude", { cwd })).executable;
+        if (!executable) throw new ProviderRuntimeError("invalid_input", "Claude CLI is not installed.");
+        this.assertVersionSupported("claude");
+        return executable;
+      },
+      trackAuxiliary: (operation) => this.trackAuxiliary(operation),
+      rememberEnvironment: (environment) => { this.processEnvironment = environment; },
+      signal: this.lifetimeSignal,
+    });
     this.runCoordinator = new ProviderRunCoordinator({
       cancelGraceMs: this.cancelGraceMs,
       forceStopBudgetMs: options.forceStopBudgetMs,
@@ -280,6 +297,7 @@ export class ProviderManager {
       rememberResolvedCommand: (providerId, executable) => {
         this.resolvedCommands.set(providerId, executable);
       },
+      learnSessionCommands: (providerId, commands) => this.commandCatalog.learn(providerId, commands),
       processEnvironment: () => this.processEnvironment,
       evidenceUncertain: (providerId) => Boolean(this.installationLeases)
         && !this.providerEvidenceTrusted(providerId),
@@ -1079,6 +1097,11 @@ export class ProviderManager {
       );
     }
     return skills;
+  }
+
+  /** Slash commands the provider runs from a `/name` prompt; see ProviderCommandCatalog. */
+  providerCommands(providerId: ProviderId, cwd: string): Promise<ProviderSlashCommand[]> {
+    return this.commandCatalog.list(providerId, cwd);
   }
 
   run(

@@ -86,6 +86,9 @@ export function detachedChatCommandRejection(
         : REJECTION;
     case "conversation.detail.load":
       return owns(command.payload.conversationId) ? null : REJECTION;
+    case "agent.commands.list":
+      // Read-only and project-scoped: the detached chat's own project only.
+      return shell()?.projectId === command.payload.projectId ? null : REJECTION;
     case "agent.workflow.load":
     case "agent.workflow.saved.load":
     case "agent.skills.list":

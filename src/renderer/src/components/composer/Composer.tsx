@@ -118,7 +118,7 @@ export const Composer = memo(function Composer({
   compaction: shellCompaction = null,
   compactOnReturnSetting = DEFAULT_COMPACT_ON_RETURN,
   onCompactAndSend,
-  onListSkills, promptPresets = [], promptPresetsEnabled = true, customAgents, onOpenCustomAgentSettings,
+  onListSkills, onListProviderCommands, promptPresets = [], promptPresetsEnabled = true, customAgents, onOpenCustomAgentSettings,
   promptStashEnabled = true,
   onPromptPresetCommand = ignorePromptPresetMutation,
   onUpdateConversation,
@@ -206,7 +206,7 @@ export const Composer = memo(function Composer({
     setMenuTrigger("skills", textareaRef.current);
     return () => setMenuTrigger("skills", null);
   }, [setMenuTrigger]);
-  const slashMatch = /^\/(\w*)$/u.exec(message.trim());
+  const slashMatch = /^\/([\w.:-]*)$/u.exec(message.trim());
   const dismissCommandSurface = useCallback((
     reason: "action" | "escape" | "outside" | "owner-change",
   ) => {
@@ -1131,7 +1131,7 @@ export const Composer = memo(function Composer({
           {...skillCompletion}
           acceptSkill={insertSkill}
           dismissSkills={() => dismissMenu("context-change")}
-          slashMatch={slashMatch} agentCall={agentCall}
+          slashMatch={slashMatch} agentCall={agentCall} providerCommandSource={{ load: onListProviderCommands, projectId: conversation.projectId, providerId: conversation.providerId }}
           onCompactCommand={() => void compact({ kind: "compact" })}
           compactUnavailableReason={compactUnavailableReason}
           compactNotice={compactOnReturn.notice(compactNotice)}

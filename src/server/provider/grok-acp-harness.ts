@@ -80,6 +80,7 @@ import {
 import { selectGrokAcpAuthMethod } from "./grok-acp-auth";
 import { AcpCompactionProjection } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
+import { acpSlashCommands } from "./provider-slash-commands";
 import {
   endProviderInput,
   providerNaturalCloseFirst,
@@ -1077,6 +1078,12 @@ function handleGrokUpdate(
       emitter.rich({ type: "plan", explanation: "", steps: [] });
       return;
     case "available_commands_update":
+      emitter.rich({
+        type: "metadata",
+        metadata: { commands: acpSlashCommands("grok", update.availableCommands) },
+        source: "session",
+        complete: true,
+      });
       return;
     case "current_mode_update":
       emitter.activity(

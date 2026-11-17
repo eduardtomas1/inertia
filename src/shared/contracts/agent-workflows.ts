@@ -54,6 +54,17 @@ export interface AgentSkillSummary {
   source: "codex-native" | "claude-native";
 }
 
+/**
+ * A slash command the provider itself reports and runs when a prompt starts
+ * with `/name`. The name has no leading slash; Inertia's own composer commands
+ * are never in this list.
+ */
+export interface ProviderSlashCommand {
+  name: string;
+  description: string;
+  argumentHint: string | null;
+}
+
 export type AgentWorkflowGoalCapability =
   | {
       kind: "codex-native";

@@ -278,6 +278,7 @@ export interface WorkspaceSceneActions {
     context?: TurnRequestContext,
   ) => Promise<ConversationCompactAndSendResult>;
   listSkills: (forceReload?: boolean) => Promise<void>;
+  listProviderCommands?: import("../../hooks/useAgentWorkflows").ProviderCommandsLoader;
   setGoal: (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -796,6 +797,7 @@ export function createWorkspaceSceneModel({
         ? { onCompactAndSendMessage: actions.compactAndSendMessage }
         : {}),
       onListSkills: draftConversation && draftSkills ? draftSkills.list : actions.listSkills,
+      ...(actions.listProviderCommands ? { onListProviderCommands: actions.listProviderCommands } : {}),
       onPromptPresetCommand: actions.run,
       onRespondToApproval: actions.respondToApproval,
       onRespondToInput: actions.respondToInput,

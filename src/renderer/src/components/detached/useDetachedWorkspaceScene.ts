@@ -212,6 +212,7 @@ export function useDetachedWorkspaceScene({
       false,
     ),
     listSkills: workflow.listSkills,
+    listProviderCommands: workflow.listProviderCommands,
     setGoal: workflow.setGoal,
     clearGoal: workflow.clearGoal,
     respondToApproval: async (

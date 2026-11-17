@@ -12,6 +12,8 @@ import type {
   AgentWorkflowState,
   Conversation,
   Project,
+  ProviderId,
+  ProviderSlashCommand,
   ServerEvent,
 } from "@shared/contracts";
 import { resultEvent, type CommandWithoutId } from "../lib/runtimeCommands";
@@ -31,7 +33,14 @@ export interface AgentWorkflowProjection {
   }) => Promise<void>;
   clearGoal: (source: AgentGoalSource) => Promise<void>;
   listSkills: (forceReload?: boolean) => Promise<void>;
+  /** Advisory: resolves to an empty list when the provider has none. */
+  listProviderCommands: ProviderCommandsLoader;
 }
+
+export type ProviderCommandsLoader = (
+  projectId: string,
+  providerId: ProviderId,
+) => Promise<readonly ProviderSlashCommand[]>;
 
 export interface UseAgentWorkflowsOptions {
   conversationId: string | null;
@@ -317,6 +326,24 @@ export function useAgentWorkflows({
     }
   }, [activeConversationId, request]);
 
+  const listProviderCommands = useCallback<ProviderCommandsLoader>(async (
+    projectId,
+    providerId,
+  ) => {
+    const event = resultEvent(await request({
+      type: "agent.commands.list",
+      payload: { projectId, providerId },
+    }));
+    if (
+      event.result.kind !== "agent.commands"
+      || event.result.projectId !== projectId
+      || event.result.providerId !== providerId
+    ) {
+      throw new Error("The local service returned an unexpected commands response.");
+    }
+    return event.result.commands;
+  }, [request]);
+
   return useMemo(() => ({
     state: activeConversationId ? state : null,
     loading: activeConversationId
@@ -328,10 +355,12 @@ export function useAgentWorkflows({
     setGoal,
     clearGoal,
     listSkills,
+    listProviderCommands,
   }), [
     activeConversationId,
     clearGoal,
     error,
+    listProviderCommands,
     listSkills,
     load,
     skillsLoading,

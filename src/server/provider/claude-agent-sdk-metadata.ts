@@ -4,7 +4,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
-import type { ProviderModel, ProviderRateLimit } from "../../shared/contracts";
+import type { ProviderModel, ProviderRateLimit, ProviderSlashCommand } from "../../shared/contracts";
 import type { createAgentHarnessEmitter } from "./agent-harness";
 import {
   createClaudeOwnedQueryProcess,
@@ -13,6 +13,7 @@ import {
 import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { CLAUDE_ISOLATED_SKILL_SETTINGS } from "./claude-skill-plugin";
 import { claudeModelScopedWindows, claudeRateLimitWindow } from "./claude-rate-limit-windows";
+import { providerSlashCommands } from "./provider-slash-commands";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
@@ -127,7 +128,7 @@ export async function readClaudeAgentSdkMetadata(
   cwd: string,
   timeoutMs = 6_000,
   createQuery: ClaudeQueryFactory = claudeQuery,
-  fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
+  fields: readonly ("models" | "rateLimits" | "commands")[] = ["models", "rateLimits"],
   lifecycleDependencies: ClaudeOwnedQueryDependencies = {},
   signal?: AbortSignal,
   includeAccount = false,
@@ -136,6 +137,7 @@ export async function readClaudeAgentSdkMetadata(
   models?: ProviderModel[];
   rateLimits?: ProviderRateLimit[];
   rateLimitsUnavailable?: boolean;
+  commands?: ProviderSlashCommand[];
 }> {
   if (signal?.aborted) {
     throw new Error("Claude metadata discovery was cancelled.");
@@ -186,6 +188,7 @@ export async function readClaudeAgentSdkMetadata(
         ? usageReader.call(query, { skipBehaviors: true })
         : Promise.resolve(undefined),
       includeAccount && typeof query.accountInfo === "function" ? query.accountInfo() : Promise.resolve(undefined),
+      fields.includes("commands") ? query.supportedCommands() : Promise.resolve(undefined),
     ] as const;
     const answered: PromiseSettledResult<unknown>[] = reads.map(() => ({
       status: "rejected",
@@ -211,17 +214,19 @@ export async function readClaudeAgentSdkMetadata(
     ) {
       throw new Error("Claude metadata discovery timed out.");
     }
-    const [modelsResult, limitsResult, accountResult] = (settled === "timed-out"
+    const [modelsResult, limitsResult, accountResult, commandsResult] = (settled === "timed-out"
       ? answered
       : settled) as [
       PromiseSettledResult<Awaited<typeof reads[0]>>,
       PromiseSettledResult<Awaited<typeof reads[1]>>,
       PromiseSettledResult<Awaited<typeof reads[2]>>,
+      PromiseSettledResult<Awaited<typeof reads[3]>>,
     ];
     metadata = {
       ...(accountResult.status === "fulfilled" && accountResult.value ? { account: { email: accountResult.value.email, organization: accountResult.value.organization, subscriptionType: accountResult.value.subscriptionType, apiProvider: accountResult.value.apiProvider } } : {}),
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
       ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? claudeRateLimitReadResult(limitsResult.value) : {}),
+      ...(commandsResult.status === "fulfilled" && commandsResult.value !== undefined ? { commands: providerSlashCommands("claude", commandsResult.value) } : {}),
     };
     // Ordinary SDK control errors may yield partial metadata. Every request
     // has settled here, so these also finish through EOF instead of a stop.

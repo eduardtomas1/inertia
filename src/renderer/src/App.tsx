@@ -852,6 +852,7 @@ export default function App(): React.JSX.Element {
       },
       compactAndSendMessage: activeChatCompactAndSend(conversation?.id ?? null, compactAndSendToConversation),
       listSkills: agentWorkflows.listSkills,
+      listProviderCommands: agentWorkflows.listProviderCommands,
       setGoal: agentWorkflows.setGoal,
       clearGoal: agentWorkflows.clearGoal,
       respondToApproval,

@@ -6,6 +6,7 @@ import {
   turnRequestContextSchema,
 } from "./common";
 import { AGENT_GOAL_STATUSES } from "../agent-workflows";
+import type { ProviderId } from "../../provider";
 
 export const MAX_AGENT_INPUT_QUESTIONS = 4;
 
@@ -118,6 +119,16 @@ export const agentCommandSchemas = [
         projectId: z.string().uuid(),
         harnessId: z.enum(["codex-app-server", "claude-agent-sdk"]),
         forceReload: z.boolean().optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("agent.commands.list"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        providerId: z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"] as const satisfies readonly ProviderId[]),
       }).strict(),
     })
     .strict(),

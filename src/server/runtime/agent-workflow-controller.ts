@@ -7,6 +7,7 @@ import type {
   AgentGoalStatus,
   AgentSkillScope,
   AgentSkillSummary,
+  ProviderSlashCommand,
   AgentWorkflowState,
   Conversation,
   ProviderSkillInput,
@@ -860,6 +861,28 @@ export class AgentWorkflowController {
       (raw) => this.codexSkillCandidate(conversationId, routeKey, raw),
       routeKey,
     );
+  }
+
+  /**
+   * Slash commands the provider runs from a `/name` prompt, for the composer
+   * menu. Advisory only: a provider without a command list, or a failed read,
+   * yields an empty list so the menu falls back to Inertia's own commands.
+   */
+  async listProviderCommands(
+    projectId: string,
+    providerId: Parameters<ConversationProviderContact["providerCommandsAt"]>[0],
+  ): Promise<ProviderSlashCommand[]> {
+    let cwd: string;
+    try {
+      cwd = this.store.projectPath(projectId);
+    } catch {
+      return [];
+    }
+    try {
+      return await this.contact.providerCommandsAt(providerId, cwd);
+    } catch {
+      return [];
+    }
   }
 
   async previewSkills(input: {

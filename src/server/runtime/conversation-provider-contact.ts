@@ -4,7 +4,8 @@ import type { ProviderManager } from "../providers";
 export class ConversationProviderContact {
   constructor(
     private readonly store: Pick<RuntimeStore, "assertConversationProvider" | "conversationPath">,
-    private readonly providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">,
+    private readonly providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">
+      & Partial<Pick<ProviderManager, "providerCommands">>,
   ) {}
 
   async codexControl(conversationId: string): ReturnType<ProviderManager["codexControlContext"]> {
@@ -22,6 +23,13 @@ export class ConversationProviderContact {
 
   async codexControlAt(cwd: string): ReturnType<ProviderManager["codexControlContext"]> {
     return await this.providers.codexControlContext(cwd);
+  }
+
+  async providerCommandsAt(
+    providerId: Parameters<ProviderManager["providerCommands"]>[0],
+    cwd: string,
+  ): ReturnType<ProviderManager["providerCommands"]> {
+    return await this.providers.providerCommands?.(providerId, cwd) ?? [];
   }
 
   async claudeSkillsAt(

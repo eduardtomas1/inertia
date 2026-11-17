@@ -103,6 +103,7 @@ export interface ProviderRunCoordinatorOptions {
   commandFor(providerId: ProviderId): string;
   resolvedCommandFor(providerId: ProviderId): string | undefined;
   rememberResolvedCommand(providerId: ProviderId, executable: string): void;
+  learnSessionCommands?(providerId: ProviderId, commands: readonly import("../../shared/contracts").ProviderSlashCommand[]): void;
   processEnvironment(): NodeJS.ProcessEnv | undefined;
   /** True while this provider's capability evidence is untrusted (#336). */
   evidenceUncertain?(providerId: ProviderId): boolean;
@@ -387,6 +388,8 @@ export class ProviderRunCoordinator {
     const managerCallbacks: ProviderRunCallbacks = {
       ...callbacks,
       onMetadata: (event) => {
+        if (event.metadata.commands) this.options.learnSessionCommands?.(providerId, event.metadata.commands);
+        if (!event.metadata.models && !event.metadata.rateLimits) return void callbacks.onMetadata?.(event);
         this.options.metadataCache.learnScoped(
           runMetadataScope,
           event.metadata,

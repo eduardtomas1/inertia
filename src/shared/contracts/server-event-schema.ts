@@ -496,6 +496,12 @@ function agentSkill(value: unknown): boolean {
     && oneOf(value, "source", ["codex-native", "claude-native"]);
 }
 
+function providerSlashCommand(value: unknown): boolean {
+  return recordWithStrings(value, "name", "description")
+    && nullableStringField(value, "argumentHint")
+    && /^[A-Za-z0-9][\w.:-]{0,63}$/u.test((value as { name: string }).name);
+}
+
 function workflowGoalCapability(value: unknown): boolean {
   if (!recordWithStrings(value, "kind", "label")) return false;
   if (value.kind === "unavailable") {
@@ -1031,6 +1037,11 @@ const REQUEST_RESULT_VALIDATORS = {
       && entry.conversationId === value.conversationId)
     && uniqueRecordField(value.skills as unknown[], "id")
     && skillDiscovery(value.skillDiscovery),
+  "agent.commands": (value) => stringField(value, "projectId")
+    && stringField(value, "providerId")
+    && arrayOf(value.commands, providerSlashCommand)
+    && (value.commands as unknown[]).length <= 128
+    && uniqueRecordField(value.commands as unknown[], "name"),
   "conversation.detail": (value) => stringField(value, "conversationId")
     && oneOf(value, "state", ["ready", "missing", "deleted", "failed"])
     && (value.sync === undefined || syncCursor(value.sync))

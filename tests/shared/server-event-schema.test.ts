@@ -1701,6 +1701,24 @@ describe("server event remaining discriminant and identity boundary", () => {
       skills: workflow.skills,
       skillDiscovery: workflow.skillDiscovery,
     }))).toBeTruthy();
+    const commandsResult = (commands: unknown): unknown => event({
+      kind: "agent.commands",
+      projectId: "11111111-1111-4111-8111-111111111111",
+      providerId: "claude",
+      commands,
+    });
+    const advisor = { name: "advisor", description: "Set the advisor model", argumentHint: "<fable|opus|off>" };
+    expect(parseServerEvent(commandsResult([advisor, { name: "code-review", description: "", argumentHint: null }]))).toBeTruthy();
+    expect(parseServerEvent(commandsResult([]))).toBeTruthy();
+    for (const malformed of [
+      [advisor, { ...advisor }],
+      [{ ...advisor, name: "/advisor" }],
+      [{ ...advisor, name: "two words" }],
+      [{ ...advisor, argumentHint: 3 }],
+      [{ name: "advisor", argumentHint: null }],
+    ]) {
+      expect(() => parseServerEvent(commandsResult(malformed))).toThrow("Malformed server event");
+    }
   });
   it.each([
     ["maintenance provider", { providers: [{ ...provider, maintenance: {

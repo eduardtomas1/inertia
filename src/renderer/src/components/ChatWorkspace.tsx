@@ -236,6 +236,7 @@ type ChatWorkspaceProps = {
     context?: TurnRequestContext,
   ) => Promise<ConversationCompactAndSendResult>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
+  onListProviderCommands?: import("../hooks/useAgentWorkflows").ProviderCommandsLoader;
   onPromptPresetCommand?: PromptPresetCommandRunner;
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
@@ -344,6 +345,7 @@ export function ChatWorkspace({
   compactOnReturnSetting,
   onCompactAndSendMessage,
   onListSkills,
+  onListProviderCommands,
   onPromptPresetCommand,
   onRespondToApproval,
   onRespondToInput,
@@ -1202,6 +1204,7 @@ export function ChatWorkspace({
           compaction={compaction}
           compactOnReturnSetting={compactOnReturnSetting}
           onListSkills={onListSkills}
+          {...(onListProviderCommands ? { onListProviderCommands } : {})}
           promptPresets={promptPresets}
           promptPresetsEnabled={promptPresetsEnabled} customAgents={customAgents} onOpenCustomAgentSettings={onOpenCustomAgentSettings}
           promptStashEnabled={promptStashEnabled}

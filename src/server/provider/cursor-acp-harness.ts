@@ -70,6 +70,7 @@ import {
 import { selectAcpAgentAuthMethod } from "./acp-auth";
 import { AcpCompactionProjection, unconfirmedAcpCompactionFailure } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
+import { acpSlashCommands } from "./provider-slash-commands";
 import { AcpPromptFrames } from "./acp-prompt-frames";
 import {
   cursorQuestions,
@@ -994,7 +995,13 @@ function handleCursorUpdate(
       emitter.rich({ type: "plan", explanation: "", steps: [] });
       return;
     case "available_commands_update":
-      // The enclosing notification handler retains the bounded command set.
+      // The enclosing notification handler also retains the bounded names.
+      emitter.rich({
+        type: "metadata",
+        metadata: { commands: acpSlashCommands("cursor", update.availableCommands) },
+        source: "session",
+        complete: true,
+      });
       return;
     case "current_mode_update":
       emitter.activity(

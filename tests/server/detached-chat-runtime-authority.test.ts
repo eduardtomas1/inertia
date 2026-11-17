@@ -385,6 +385,17 @@ describe("detached chat runtime authority", () => {
     expect(project("55555555-5555-4555-8555-555555555555")).toEqual({ type: "runtime.cursor", sync });
   });
 
+  it("lets a detached chat list provider commands for its own project only", () => {
+    const list = (projectId: string): ClientCommand => ({
+      type: "agent.commands.list",
+      requestId: REQUEST,
+      payload: { projectId, providerId: "claude" },
+    } as ClientCommand);
+    expect(rejection(list(PROJECT))).toBeNull();
+    expect(rejection(list(OTHER_PROJECT))).not.toBeNull();
+    expect(mainRejection(list(OTHER_PROJECT))).toBeNull();
+  });
+
   it("keeps draft skill previews in the main window", () => {
     const command = {
       type: "agent.skills.preview",

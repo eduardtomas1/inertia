@@ -1,9 +1,18 @@
 name: Install dependencies
 description: >-
   Set up Node.js and provide the locked dependency graph, restoring the
-  resolved node_modules tree from cache when the lockfile is unchanged.
+  resolved node_modules tree from cache when the lockfile is unchanged and
+  caching is enabled.
 
 inputs:
+  cache:
+    description: >-
+      Restore and save the resolved node_modules tree and any requested
+      Electron download caches. Release jobs set this to false so they always
+      run a clean npm ci and never consume a cache entry another workflow
+      could write.
+    required: false
+    default: "true"
   node-version:
     description: Node.js version to set up.
     required: false
@@ -44,6 +53,7 @@ runs:
     # explicit end-to-end preparation step outside Playwright's hook deadline.
     - name: Restore resolved dependency tree
       id: dependencies
+      if: inputs.cache == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
@@ -81,7 +91,7 @@ runs:
         echo "versions=$versions" >> "$GITHUB_OUTPUT"
 
     - name: Restore Electron download caches
-      if: inputs.electron-downloads == 'true'
+      if: inputs.electron-downloads == 'true' && inputs.cache == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/electron-downloads

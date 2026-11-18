@@ -42,6 +42,24 @@ describe("restricted CLI runner", () => {
     });
   });
 
+  it("forbids Windows workspace name resolution in every restricted CLI child", () => {
+    expect(restrictedCliEnvironment({
+      Path: "C:\\tools",
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      nodefaultcurrentdirectoryinexepath: "",
+      GH_TOKEN: "secret",
+    }, "win32")).toEqual({
+      NO_COLOR: "1",
+      COMSPEC: "C:\\Windows\\System32\\cmd.exe",
+      PATH: "C:\\tools",
+      NoDefaultCurrentDirectoryInExePath: "1",
+    });
+    expect(restrictedCliEnvironment({
+      PATH: "/usr/bin",
+      NoDefaultCurrentDirectoryInExePath: "1",
+    }, "linux")).toEqual({ NO_COLOR: "1", PATH: "/usr/bin" });
+  });
+
   it("passes bounded stdin without a shell and never restores stripped variables", async () => {
     const result = await runRestrictedCli(
       process.execPath,
@@ -102,7 +120,7 @@ describe("restricted CLI runner", () => {
         "/s",
         "/v:off",
         "/c",
-        "\"C:\\Users\\Test^ User\\gh.cmd ^\"pr^\" ^\"create^\" ^\"--title^\" ^\"Test^ PR^\"\"",
+        "\"set NoDefaultCurrentDirectoryInExePath=1&C:\\Users\\Test^ User\\gh.cmd ^\"pr^\" ^\"create^\" ^\"--title^\" ^\"Test^ PR^\"\"",
       ],
       expect.objectContaining({
         cwd: "C:\\workspace",
@@ -110,6 +128,7 @@ describe("restricted CLI runner", () => {
         env: {
           COMSPEC: "C:\\Windows\\System32\\cmd.exe",
           NO_COLOR: "1",
+          NoDefaultCurrentDirectoryInExePath: "1",
           PATH: "C:\\tools",
           SYSTEMROOT: "C:\\Windows",
         },

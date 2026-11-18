@@ -107,10 +107,10 @@ describe.runIf(process.platform === "win32")("native managed Windows terminal Jo
     expect(action.owned.confirmStopped()).toBe(true);
   });
 
-  it("preserves the ComSpec-unset basename shell fallback", async () => {
+  it("launches the ComSpec-unset shell fallback from System32", async () => {
     vi.stubEnv("ComSpec", undefined);
     const command = userShell("win32").executable;
-    expect(command).toBe("powershell.exe");
+    expect(command).toBe(join(process.env.SystemRoot!, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"));
     const action = launched("", undefined, command, ["-NoProfile", "-NonInteractive", "-Command", "[Console]::WriteLine('FALLBACK_READY'); exit 7"]);
     // Cold ARM64 helper-path startup took 8.212s in run 34727886221; see the
     // open observation in docs/ISSUE_356_TRIAGE.md. This new fixture allowance

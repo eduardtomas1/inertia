@@ -4,7 +4,7 @@ import {
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
 
-import { environmentValue } from "./environment";
+import { environmentValue, withoutWindowsCurrentDirectorySearch } from "./environment";
 import {
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
@@ -80,7 +80,7 @@ export function restrictedCliEnvironment(
       environment[key] = value;
     }
   }
-  return environment;
+  return withoutWindowsCurrentDirectorySearch(environment, platform);
 }
 
 export async function runRestrictedCli(

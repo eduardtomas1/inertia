@@ -10,6 +10,7 @@ import { PROVIDER_INFO } from "../provider/catalog";
 import { executableCandidates, providerEnvironment } from "../environment";
 import { gitProcessEnvironment } from "../git/environment";
 import { providerProcessInvocation, providerPtyArguments } from "../provider/process";
+import { withUserWindowsCurrentDirectorySearch } from "../../node/windows-current-directory-search";
 import type { TerminalManager } from "../terminal";
 import { recoverReviewedCommitTransaction } from "../git";
 import { GitError, isGitProcessTreeTerminationFailure } from "../git/types";
@@ -287,10 +288,12 @@ export class WorkspaceRunController<Owner> {
         if (custom) {
           if (!this.terminals.replaceProcess) throw new RuntimeRequestError("Direct project actions are unavailable.");
           const discoveredEnvironment = await providerEnvironment();
-          const environment = gitProcessEnvironment(discoveredEnvironment.env);
+          const environment = withUserWindowsCurrentDirectorySearch(gitProcessEnvironment(discoveredEnvironment.env));
           const [executable] = await executableCandidates(custom.executable, discoveredEnvironment, input.cwd);
           if (!executable) throw new RuntimeRequestError("The project action executable was not found. Check its path in Project settings.");
-          const invocation = providerProcessInvocation(executable, custom.args, environment);
+          const invocation = providerProcessInvocation(executable, custom.args, environment, process.platform, {
+            guardCurrentDirectorySearch: false,
+          });
           terminalId = await this.terminals.replaceProcess(
             input.owner, input.terminalId, input.cwd, invocation.command, providerPtyArguments(invocation),
             environment, input.cols, input.rows, onExit, onOutput,

@@ -126,6 +126,81 @@ describe("provider activity detail boundary", () => {
     ].join("\n"));
   });
 
+  it("redacts xAI, Gemini and Groq key formats and credential query parameters", () => {
+    const detail = sanitizeProviderActivityDetail([
+      "grok failed with xai-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
+      "gemini echoed AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI back",
+      "groq rejected gsk_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
+      "GET https://maps.example.test/geocode?address=x&key=plainvalue123&page=2",
+      "GET https://api.example.test/v1?client_secret=opaque-client-value&page=2",
+      "GET https://api.example.test/v1?token=opaque-token-value&page=2",
+      "GET https://api.example.test/v1?access_token=opaque-access-value#frag",
+      "GET https://api.example.test/v1?api_key=opaque-api-value&token=opaque-token-value",
+    ].join("\n"), { homeDirectory: "/nonexistent-home" });
+    expect(detail?.split("\n").slice(0, 5)).toEqual([
+      "grok failed with [redacted]",
+      "gemini echoed [redacted] back",
+      "groq rejected [redacted]",
+      "GET https://maps.example.test/geocode?address=x&key=[redacted]&page=2",
+      "GET https://api.example.test/v1?client_secret=[redacted]&page=2",
+    ]);
+    for (const secret of ["opaque-access-value", "opaque-api-value", "opaque-token-value"]) {
+      expect(detail).not.toContain(secret);
+    }
+    expect(sanitizeProviderActivityDetail(
+      "GET https://example.test/?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI",
+    )).toBe("GET https://example.test/?key=[redacted]");
+  });
+
+  it("keeps ordinary query parameters and look-alike words", () => {
+    const text = "GET https://example.test/search?q=xai-sdk&page=2&monkeys=3 then install gsk_tools and AIzawa";
+    expect(sanitizeProviderActivityDetail(text, { homeDirectory: "/nonexistent-home" })).toBe(text);
+  });
+
+  it("redacts auth, code, jwt and session query parameters, including percent-encoded ones", () => {
+    const options = { homeDirectory: "/nonexistent-home" };
+    expect(sanitizeProviderActivityDetail([
+      "GET https://idp.example.test/cb?code=4%2F0AXauth-code-value&state=opaque-state",
+      "GET https://idp.example.test/cb?device_code=device-code-value&scope=read",
+      "GET https://api.example.test/v1?auth=auth-value&jwt=jwt-value&page=2",
+      "GET https://api.example.test/v1?session=session-value&session_id=session-id-value&sessionid=sid-value",
+      "GET https://app.example.test/login?next=https%3A%2F%2Fapp.example.test%2Fcb%3Ftoken%3Dencoded-token-value%26page%3D2",
+      "GET https://app.example.test/login?next=%2Fcb%3Bsession%3Dencoded-session-value%23frag",
+      "GET https://app.example.test/v1?zipcode=94110&unicode=1&page=2",
+    ].join("\n"), options)?.split("\n")).toEqual([
+      "GET https://idp.example.test/cb?code=[redacted]&state=opaque-state",
+      "GET https://idp.example.test/cb?device_code=[redacted]&scope=read",
+      "GET https://api.example.test/v1?auth=[redacted]&jwt=[redacted]&page=2",
+      "GET https://api.example.test/v1?session=[redacted]&session_id=[redacted]&sessionid=[redacted]",
+      "GET https://app.example.test/login?next=https%3A%2F%2Fapp.example.test%2Fcb%3Ftoken%3D[redacted]%26page%3D2",
+      "GET https://app.example.test/login?next=%2Fcb%3Bsession%3D[redacted]%23frag",
+      "GET https://app.example.test/v1?zipcode=94110&unicode=1&page=2",
+    ]);
+  });
+
+  it("scrubs long adversarial percent-encoded and keyword runs in linear time", () => {
+    const inputs = [
+      `?${"a".repeat(200_000)}`,
+      `%3F${"%41".repeat(70_000)}`,
+      "&session".repeat(25_000),
+      "%26code".repeat(30_000),
+      `?code%3D${"%2".repeat(100_000)}`,
+      `?${"_".repeat(63)}token%3`.repeat(3_000),
+      "?a%3Dauth%3D".repeat(20_000),
+    ];
+    const startedAt = performance.now();
+    for (const input of inputs) sanitizeProviderActivityDetail(input, { maxChars: Number.MAX_SAFE_INTEGER });
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  it("scrubs adversarial query-parameter runs in linear time", () => {
+    const startedAt = performance.now();
+    sanitizeProviderActivityDetail("?a".repeat(50_000), { maxChars: Number.MAX_SAFE_INTEGER });
+    sanitizeProviderActivityDetail(`?${"%41".repeat(30_000)}`, { maxChars: Number.MAX_SAFE_INTEGER });
+    sanitizeProviderActivityDetail("&key=".repeat(20_000), { maxChars: Number.MAX_SAFE_INTEGER });
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+  });
+
   it("cuts only to the caller's bound after scrubbing, even when scrubbing lengthens the text", () => {
     const detail = "psql postgres://admin:pw@db.internal/app --tail-marker";
     expect(sanitizeProviderActivityDetail(detail)).toBe("psql postgres://admin:[redacted]@db.internal/app --tail-marker");

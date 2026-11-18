@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { win32 } from "node:path";
 
 import {
   runtimeOwnedPtyInvocation,
@@ -11,7 +12,17 @@ export function userShell(
   platform: NodeJS.Platform,
 ): { executable: string; args: string[] } {
   if (platform === "win32") {
-    return { executable: process.env.ComSpec || "powershell.exe", args: [] };
+    const comSpec = process.env.ComSpec;
+    if (comSpec && win32.isAbsolute(comSpec)) return { executable: comSpec, args: [] };
+    const configuredSystemRoot = process.env.SystemRoot;
+    const systemRoot = configuredSystemRoot && win32.isAbsolute(configuredSystemRoot) ? configuredSystemRoot : undefined;
+    if (comSpec && systemRoot) return { executable: win32.join(systemRoot, "System32", "cmd.exe"), args: [] };
+    return {
+      executable: systemRoot
+        ? win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+        : "powershell.exe",
+      args: [],
+    };
   }
 
   const configuredShell = process.env.SHELL;

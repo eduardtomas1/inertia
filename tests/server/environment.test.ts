@@ -484,7 +484,7 @@ describe("provider environment discovery", { concurrent: false }, () => {
     expect(redactor.assistantChunk("Saved the file with cursor-session-token") + redactor.finishAssistant())
       .toBe("Saved the file with [redacted]");
     for (const providerId of ["codex", "claude", "kimi", "antigravity", "opencode"] as const) {
-      expect(Object.keys(providerChildEnvironment(providerId, source))).toEqual(["PATH"]);
+      expect(Object.keys(providerChildEnvironment(providerId, source, "linux"))).toEqual(["PATH"]);
     }
   });
 
@@ -529,7 +529,7 @@ describe("provider environment discovery", { concurrent: false }, () => {
       Anthropic_Aws_Auth: "Bearer sentinel-windows-secret",
     };
 
-    expect(providerChildEnvironment("claude", source)).toEqual({
+    expect(providerChildEnvironment("claude", source, "linux")).toEqual({
       Claude_Code_Use_Anthropic_Aws: source.Claude_Code_Use_Anthropic_Aws,
       Anthropic_Aws_Base_Url: source.Anthropic_Aws_Base_Url,
       Anthropic_Aws_Workspace_Id: source.Anthropic_Aws_Workspace_Id,
@@ -572,7 +572,7 @@ describe("provider environment discovery", { concurrent: false }, () => {
         CLOUD_ML_REGION: "must-not-pass",
         GOOGLE_APPLICATION_CREDENTIALS: "/must/not/pass.json",
         GCLOUD_PROJECT: "must-not-pass",
-      });
+      }, "linux");
 
       expect(environment).toEqual({
         CLAUDE_CODE_USE_ANTHROPIC_AWS: falsey,
@@ -590,7 +590,7 @@ describe("provider environment discovery", { concurrent: false }, () => {
       CLOUD_ML_REGION: "must-not-pass",
       GOOGLE_APPLICATION_CREDENTIALS: "/must/not/pass.json",
       GCLOUD_PROJECT: "must-not-pass",
-    })).toEqual({
+    }, "linux")).toEqual({
       CLAUDE_CODE_USE_ANTHROPIC_AWS: "on",
       CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "off",
       AWS_ACCESS_KEY_ID: "aws-access-id",
@@ -607,7 +607,7 @@ describe("provider environment discovery", { concurrent: false }, () => {
       CLOUD_ML_REGION: "europe-west4",
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google.json",
       GCLOUD_PROJECT: "example-project",
-    })).toEqual({
+    }, "linux")).toEqual({
       CLAUDE_CODE_USE_ANTHROPIC_AWS: "off",
       CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "on",
       CLOUD_ML_REGION: "europe-west4",
@@ -627,7 +627,7 @@ describe("provider environment discovery", { concurrent: false }, () => {
         "https://cloud.example.test/v1?token=sentinel-secret",
         `https://cloud.example.test/${"x".repeat(2_048)}`,
       ]) {
-        expect(providerChildEnvironment("claude", { [key]: value })).toEqual({});
+        expect(providerChildEnvironment("claude", { [key]: value }, "linux")).toEqual({});
       }
     }
     for (const key of [
@@ -636,23 +636,23 @@ describe("provider environment discovery", { concurrent: false }, () => {
     ]) {
       expect(providerChildEnvironment("claude", {
         [key]: "sometimes",
-      })).toEqual({});
+      }, "linux")).toEqual({});
       expect(providerChildEnvironment("claude", {
         [key]: `true${" ".repeat(16)}`,
-      })).toEqual({});
+      }, "linux")).toEqual({});
       expect(providerChildEnvironment("claude", {
         [key]: multiMegabyteValue,
-      })).toEqual({});
+      }, "linux")).toEqual({});
     }
     expect(providerChildEnvironment("claude", {
       ANTHROPIC_BEDROCK_REGION_PREFIX: "north-america",
-    })).toEqual({});
+    }, "linux")).toEqual({});
     expect(providerChildEnvironment("claude", {
       ANTHROPIC_BEDROCK_REGION_PREFIX: "u".repeat(257),
-    })).toEqual({});
+    }, "linux")).toEqual({});
     expect(providerChildEnvironment("claude", {
       ANTHROPIC_BEDROCK_REGION_PREFIX: multiMegabyteValue,
-    })).toEqual({});
+    }, "linux")).toEqual({});
     for (const key of [
       "ANTHROPIC_AWS_WORKSPACE_ID",
       "ANTHROPIC_GOOGLE_CLOUD_LOCATION",
@@ -660,14 +660,14 @@ describe("provider environment discovery", { concurrent: false }, () => {
       "ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID",
       "ANTHROPIC_BEDROCK_SERVICE_TIER",
     ]) {
-      expect(providerChildEnvironment("claude", { [key]: " \n " })).toEqual({});
+      expect(providerChildEnvironment("claude", { [key]: " \n " }, "linux")).toEqual({});
       expect(providerChildEnvironment("claude", {
         [key]: "x".repeat(257),
-      })).toEqual({});
+      }, "linux")).toEqual({});
     }
     expect(providerChildEnvironment("claude", {
       ANTHROPIC_AWS_WORKSPACE_ID: multiMegabyteValue,
-    })).toEqual({});
+    }, "linux")).toEqual({});
   });
 
   it("recognizes every outer-boundary provider routing control", () => {
@@ -745,6 +745,49 @@ describe("provider environment discovery", { concurrent: false }, () => {
     expect(environment).not.toHaveProperty("OPENAI_API_KEY");
     expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(environment).not.toHaveProperty("GEMINI_API_KEY");
+  });
+
+  it("forbids Windows command shims from resolving bare names in the workspace", () => {
+    const source = {
+      PATH: "C:\\Windows\\System32",
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      nodefaultcurrentdirectoryinexepath: "",
+    };
+    const providers = ["codex", "claude", "cursor", "kimi", "antigravity", "grok", "opencode"] as const;
+    const environments = [
+      ...providers.map((providerId) => providerChildEnvironment(providerId, source, "win32")),
+      credentialFreeProviderEnvironment(source, "win32"),
+      providerChildEnvironment("codex", { PATH: "C:\\Windows\\System32" }, "win32"),
+      credentialFreeProviderEnvironment({}, "win32"),
+    ];
+    for (const environment of environments) {
+      expect(environment.NoDefaultCurrentDirectoryInExePath).toBe("1");
+      expect(Object.keys(environment).filter((key) =>
+        key.toUpperCase() === "NODEFAULTCURRENTDIRECTORYINEXEPATH")).toEqual(["NoDefaultCurrentDirectoryInExePath"]);
+    }
+  });
+
+  it("adds no Windows search control to POSIX provider children", () => {
+    const source = { PATH: "/usr/bin", NoDefaultCurrentDirectoryInExePath: "1" };
+    for (const platform of ["linux", "darwin"] as const) {
+      for (const providerId of ["codex", "claude", "cursor", "kimi", "antigravity", "grok", "opencode"] as const) {
+        expect(providerChildEnvironment(providerId, source, platform)).not.toHaveProperty("NoDefaultCurrentDirectoryInExePath");
+      }
+      expect(credentialFreeProviderEnvironment(source, platform)).toEqual({ NO_COLOR: "1", PATH: "/usr/bin" });
+    }
+  });
+
+  it.skipIf(process.platform !== "win32")("discovers the Windows provider environment with workspace name resolution disabled", async () => {
+    const previous = process.env.NoDefaultCurrentDirectoryInExePath;
+    delete process.env.NoDefaultCurrentDirectoryInExePath;
+    try {
+      const { env } = await providerEnvironment(true);
+      expect(env.NoDefaultCurrentDirectoryInExePath).toBe("1");
+    } finally {
+      if (previous === undefined) delete process.env.NoDefaultCurrentDirectoryInExePath;
+      else process.env.NoDefaultCurrentDirectoryInExePath = previous;
+      await providerEnvironment(true);
+    }
   });
 
   it("expands Codex's leading home shorthand before a shell-free launch", () => {

@@ -38,7 +38,7 @@ import { sendTerminalSocketEvent as send } from "./terminal-socket";
 import { terminalCleanupFailureOptions } from "./terminal-cleanup-failure";
 import { applyPendingPtyResize, resizePty } from "./terminal-pty-resize";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "./runtime/update-hold";
-
+import { withUserWindowsCurrentDirectorySearch } from "../node/windows-current-directory-search";
 import { spawnWindowsManagedTerminal } from "./windows-managed-terminal";
 import type { WindowsTerminalAuthority } from "../node/windows-terminal-authority";
 const MAX_TERMINALS = 8;
@@ -239,7 +239,7 @@ export class TerminalManager {
       cwd,
       shell.executable,
       shell.args,
-      process.env,
+      withUserWindowsCurrentDirectorySearch(process.env, this.platform),
       cols,
       rows,
       onExit,
@@ -269,7 +269,7 @@ export class TerminalManager {
       cwd,
       shell.executable,
       shell.args,
-      process.env,
+      withUserWindowsCurrentDirectorySearch(process.env, this.platform),
       cols,
       rows,
       onExit,

@@ -194,10 +194,10 @@ jobs:
         run: npm run test:coverage
 
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=moderate
 
       - name: Audit all dependencies, including the shipped Electron runtime
-        run: npm audit --audit-level=high
+        run: npm run check:dependency-audit
 
       - name: Keep core failure diagnostics
         if: failure()
@@ -563,11 +563,11 @@ jobs:
 
       - name: Audit production dependencies
         if: runner.os == 'Linux' && matrix.arch == 'x64'
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=moderate
 
       - name: Audit all dependencies, including the shipped Electron runtime
         if: runner.os == 'Linux' && matrix.arch == 'x64'
-        run: npm audit --audit-level=high
+        run: npm run check:dependency-audit
 
       # The one build in the job. It carries the generated third-party notices
       # and the runtime guardian that packaging requires, but not the typecheck

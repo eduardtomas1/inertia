@@ -190,6 +190,8 @@ describe("provider maintenance runner", () => {
     expect(calls[0]?.options.env?.PATH).toBe(
       "C:\\Users\\Ada\\AppData\\Roaming\\npm;C:\\Tools",
     );
+    expect(calls[0]?.options.env?.NoDefaultCurrentDirectoryInExePath).toBe("1");
+    expect(calls[0]?.args[4]?.startsWith("\"set NoDefaultCurrentDirectoryInExePath=1&")).toBe(true);
   });
 
   it("cancels the owned process and reports cancellation", async () => {
@@ -475,7 +477,7 @@ describe("provider maintenance runner", () => {
       CURSOR_API_KEY: "secret",
       ANTHROPIC_AUTH_TOKEN: "secret",
       HTTPS_PROXY: "https://proxy.example",
-    })).toEqual({
+    }, "linux")).toEqual({
       CI: "1",
       NO_COLOR: "1",
       HOME: "/home/ada",
@@ -483,5 +485,21 @@ describe("provider maintenance runner", () => {
       HOMEBREW_PREFIX: "/opt/homebrew",
       PATH: "/tools",
     });
+  });
+
+  it("forbids Windows workspace name resolution in updater children", () => {
+    expect(providerMaintenanceEnvironment({
+      PATH: "C:\\Tools",
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      NODEFAULTCURRENTDIRECTORYINEXEPATH: "",
+    }, "win32")).toEqual({
+      CI: "1",
+      NO_COLOR: "1",
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      PATH: "C:\\Tools",
+      NoDefaultCurrentDirectoryInExePath: "1",
+    });
+    expect(providerMaintenanceEnvironment({ PATH: "/tools" }, "darwin"))
+      .not.toHaveProperty("NoDefaultCurrentDirectoryInExePath");
   });
 });

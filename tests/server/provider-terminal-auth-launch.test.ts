@@ -40,7 +40,11 @@ it("keeps the selected installation leased through negotiation and exact termina
   vi.mocked(probeKimiAuthentication).mockImplementationOnce(async (executable, cwd, environment, signal) => {
     expect(f.leases.hasProviderAuthority("kimi")).toBe(true);
     expect({ executable, cwd, signal }).toEqual({ executable: f.executable, cwd: f.cwd, signal: f.controller.signal });
-    expect(environment).toEqual({ PATH: "/synthetic/bin", KIMI_CODE_HOME: f.cwd });
+    expect(environment).toEqual({
+      PATH: "/synthetic/bin",
+      KIMI_CODE_HOME: f.cwd,
+      ...(process.platform === "win32" ? { NoDefaultCurrentDirectoryInExePath: "1" } : {}),
+    });
     return { type: "terminal", id: "login", name: "Sign in", args: ["--login"], env: { KIMI_CODE_HOME: f.cwd } };
   });
   const launch = await prepareProviderAuthLaunch(f.options);

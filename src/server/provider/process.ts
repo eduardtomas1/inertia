@@ -1,5 +1,7 @@
 import { extname, win32 } from "node:path";
 
+import { WINDOWS_NO_CURRENT_DIRECTORY_SEARCH_KEY } from "../../node/windows-current-directory-search";
+
 export interface ProviderProcessInvocation {
   command: string;
   args: string[];
@@ -14,6 +16,16 @@ function windowsEnvironmentValue(environment: NodeJS.ProcessEnv, key: string): s
   const normalized = key.toUpperCase();
   const match = Object.keys(environment).find((candidate) => candidate.toUpperCase() === normalized);
   return match ? environment[match] : undefined;
+}
+
+const WINDOWS_CURRENT_DIRECTORY_SEARCH_GUARD = `set ${WINDOWS_NO_CURRENT_DIRECTORY_SEARCH_KEY}=1&`;
+
+function windowsCommandProcessor(environment: NodeJS.ProcessEnv): string {
+  const configured = windowsEnvironmentValue(environment, "ComSpec");
+  if (configured && win32.isAbsolute(configured)) return configured;
+  const systemRoot = windowsEnvironmentValue(environment, "SystemRoot");
+  if (systemRoot && win32.isAbsolute(systemRoot)) return win32.join(systemRoot, "System32", "cmd.exe");
+  return "C:\\Windows\\System32\\cmd.exe";
 }
 
 const CMD_META_CHARACTERS = /([()\][%!^"`<>&|;, *?])/gu;
@@ -48,6 +60,7 @@ export function providerProcessInvocation(
   args: readonly string[],
   environment: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
+  { guardCurrentDirectorySearch = true }: { guardCurrentDirectorySearch?: boolean } = {},
 ): ProviderProcessInvocation {
   if (platform !== "win32" || ![".cmd", ".bat"].includes(extname(executable).toLowerCase())) {
     return { command: executable, args: [...args] };
@@ -56,12 +69,10 @@ export function providerProcessInvocation(
     escapeCmdCommand(executable),
     ...args.map(escapeCmdArgument),
   ].join(" ");
-  const systemRoot = windowsEnvironmentValue(environment, "SystemRoot");
-  const command = windowsEnvironmentValue(environment, "ComSpec")
-    || (systemRoot ? win32.join(systemRoot, "System32", "cmd.exe") : "cmd.exe");
+  const guard = guardCurrentDirectorySearch ? WINDOWS_CURRENT_DIRECTORY_SEARCH_GUARD : "";
   return {
-    command,
-    args: ["/d", "/s", "/v:off", "/c", `"${commandLine}"`],
+    command: windowsCommandProcessor(environment),
+    args: ["/d", "/s", "/v:off", "/c", `"${guard}${commandLine}"`],
     windowsVerbatimArguments: true,
   };
 }

@@ -18,6 +18,7 @@ import {
   antigravityUserLine,
   parseAntigravityLine,
 } from "../../src/server/provider/antigravity-stream";
+import type { AgentHarnessEvent } from "../../src/server/provider/agent-harness";
 import type {
   ProviderActivityEvent,
   ProviderSessionEvent,
@@ -1071,5 +1072,147 @@ hang();
       cleanupConfirmed: true,
     });
     expect(existsSync(command)).toBe(false);
+  });
+});
+
+describe("Antigravity launch credential redaction", { concurrent: false }, () => {
+  const SECRET = "Zq7xW-gemini-canary-9mT4pL-2k8R";
+  const SPLIT = 9;
+
+  function secretWindowLeaked(value: string): string | undefined {
+    for (const form of [SECRET, Buffer.from(SECRET).toString("base64")]) {
+      for (let index = 0; index + 6 <= form.length; index += 1) {
+        const window = form.slice(index, index + 6);
+        if (value.includes(window)) return window;
+      }
+    }
+    return undefined;
+  }
+
+  async function keyedRun(label: string, body: string) {
+    const root = fixtureRoot(`antigravity keyed ${label}`);
+    const { command } = fakeAgy(root, `
+const secret = ${JSON.stringify(SECRET)};
+const head = secret.slice(0, ${SPLIT});
+const tail = secret.slice(${SPLIT});
+${body}
+`);
+    const events: AgentHarnessEvent[] = [];
+    const run = createAntigravityCliHarness().start({
+      input: antigravityInput(root, { conversationId: `antigravity-keyed-${label}` }),
+      executable: command,
+      environment: { ...process.env, GEMINI_API_KEY: SECRET },
+      providerNativeToolsAvailable: false,
+      callbacks: { onEvent: (event) => events.push(event) },
+    });
+    const result = await run.result;
+    const text = events.flatMap((event) => event.type === "text" ? [event.text] : []).join("");
+    const snapshots = events.flatMap((event) => event.type === "text-snapshot" ? [event.text] : []);
+    const tools = events.flatMap((event) => event.type === "activity" && event.kind === "tool" ? [event] : []);
+    return { result, events, text, snapshots, tools };
+  }
+
+  it("masks the Gemini key in streamed text split across deltas and in tool error detail", async () => {
+    const { result, events, text, tools } = await keyedRun("complete", `
+emit({ event: "step_update", step_update: { conversation_id: ${JSON.stringify(CONVERSATION)}, step_index: 0, state: "ACTIVE", text_delta: "Key: " + head } });
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: tail + " end" } });
+emit({ event: "step_update", step_update: { step_index: 1, state: "DONE", tool_name: "run_command", tool_info: { error: { type: "CommandFailed", message: "curl -H x-goog-api-key:" + secret + " failed; encoded " + Buffer.from(secret).toString("base64") } } } });
+emit({ event: "result", result: { conversation_id: ${JSON.stringify(CONVERSATION)}, status: "SUCCESS", response: "Key: " + secret + " end", error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    expect(result).toMatchObject({ status: "completed", text: "Key: [redacted] end", cleanupConfirmed: true });
+    expect(text).toBe("Key: [redacted] end");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ phase: "failed", detail: expect.stringContaining("[redacted]") });
+    expect(secretWindowLeaked(JSON.stringify({ result, events }))).toBeUndefined();
+  });
+
+  it("masks a significant key prefix that ends a completed stream", async () => {
+    const { result, events, text } = await keyedRun("short", `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Key: " + head } });
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: tail.slice(0, -1) } });
+emit({ event: "result", result: { status: "SUCCESS", response: "Key: " + secret.slice(0, -1), error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    expect(result).toMatchObject({ status: "completed", text: "Key: [redacted]" });
+    expect(text).toBe("Key: [redacted]");
+    expect(secretWindowLeaked(JSON.stringify({ result, events }))).toBeUndefined();
+  });
+
+  it("emits ordinary trailing text completely", async () => {
+    const { result, text } = await keyedRun("ordinary", `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "All " } });
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "done." } });
+emit({ event: "result", result: { status: "SUCCESS", response: "All done.", error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    expect(result).toMatchObject({ status: "completed", text: "All done." });
+    expect(text).toBe("All done.");
+  });
+
+  it("masks the key in a final response that arrives without streamed text", async () => {
+    const { result, events, text } = await keyedRun("response", `
+emit({ event: "result", result: { status: "SUCCESS", response: "Your key is " + secret, error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    expect(result).toMatchObject({ status: "completed", text: "Your key is [redacted]" });
+    expect(text).toBe("Your key is [redacted]");
+    expect(secretWindowLeaked(JSON.stringify({ result, events }))).toBeUndefined();
+  });
+
+  it("masks the key in the response snapshot that replaces skipped output", async () => {
+    const { result, events, snapshots } = await keyedRun("snapshot", `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "First " + head } });
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "x".repeat(1100000) } });
+emit({ event: "result", result: { status: "SUCCESS", response: "First " + secret + " second", error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    expect(result).toMatchObject({ status: "completed", text: "First [redacted] second" });
+    expect(snapshots).toEqual(["First [redacted] second"]);
+    expect(secretWindowLeaked(JSON.stringify({ result, events }))).toBeUndefined();
+  });
+
+  it("masks the key in a failed result and drops a buffered prefix", async () => {
+    const { result, events } = await keyedRun("failed result", `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Key: " + head } });
+emit({ event: "result", result: { status: "ERROR", response: "", error: "API key " + secret + " is not valid for this project." } });
+process.stdout.write("", () => process.exit(0));
+`);
+    expect(result).toMatchObject({ status: "failed", failure: { terminalEvent: "result:error" } });
+    expect(result.failure?.message).toContain("[redacted]");
+    expect(secretWindowLeaked(JSON.stringify({ result, events }))).toBeUndefined();
+  });
+
+  it("masks the key in stderr split across writes when the process exits without a result", async () => {
+    const { result, events } = await keyedRun("stderr", `
+process.stderr.write("request with key " + head);
+process.stderr.write(tail + " was rejected" + String.fromCharCode(10));
+process.stderr.write("retrying with " + head, () => process.exit(3));
+`);
+    expect(result).toMatchObject({ status: "failed", failure: { reason: "process-exit" } });
+    expect(result.failure?.technicalDetail).toContain("request with key [redacted] was rejected");
+    expect(secretWindowLeaked(JSON.stringify({ result, events }))).toBeUndefined();
+  });
+
+  it("masks the key in a malformed line", async () => {
+    const { result, events } = await keyedRun("malformed", `
+process.stdout.write("not json " + secret + String.fromCharCode(10));
+hang();
+`);
+    expect(result).toMatchObject({ status: "failed", failure: { reason: "malformed-protocol" } });
+    expect(result.failure?.technicalDetail).toContain("not json [redacted]");
+    expect(secretWindowLeaked(JSON.stringify({ result, events }))).toBeUndefined();
+  });
+
+  it("masks every launch credential encoding in result failure detail", () => {
+    const failure = antigravityResultFailure({
+      status: "ERROR",
+      conversationId: null,
+      response: "",
+      error: `bad key ${SECRET} (${encodeURIComponent(SECRET)}) \u001b[31m${SECRET.slice(0, SPLIT)}\u001b[0m${SECRET.slice(SPLIT)}`,
+      usage: null,
+    }, "/workspace", [SECRET]);
+    expect(failure?.message).toContain("[redacted]");
+    expect(secretWindowLeaked(JSON.stringify(failure))).toBeUndefined();
   });
 });

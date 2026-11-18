@@ -72,7 +72,7 @@ describe("Private Connect startup failure ownership", () => {
     await expect(f.service.setEnabled(true)).rejects.toBe(error);
     const port = f.ensure.mock.calls[0]?.[0];
     expect(port).toBeGreaterThan(0);
-    expect(f.disable).toHaveBeenCalledExactlyOnceWith(port);
+    expect(f.disable).toHaveBeenCalledExactlyOnceWith(port, { port: 8443, target: `http://127.0.0.1:${port as number}` });
     expect(stop).toHaveBeenCalledOnce();
     const gateway = stop.mock.contexts[0];
     if (!(gateway instanceof PrivateConnectGatewayServer)) throw new Error("The failed gateway was not stopped");

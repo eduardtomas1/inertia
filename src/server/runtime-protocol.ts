@@ -96,8 +96,24 @@ export function isAllowedRuntimeOrigin(origin: string | undefined): boolean {
   }
 }
 
+const REJECTED_RUNTIME_UPGRADE_DESTROY_MS = 1_000;
+
 export function rejectRuntimeUpgrade(socket: Duplex, status: 403 | 404 | 503): void {
+  socket.on("error", () => {
+    socket.destroy();
+  });
+  if (socket.destroyed) return;
   const label = status === 403 ? "Forbidden" : status === 404 ? "Not Found" : "Service Unavailable";
+  const fallback = setTimeout(() => {
+    socket.destroy();
+  }, REJECTED_RUNTIME_UPGRADE_DESTROY_MS);
+  fallback.unref();
+  socket.once("close", () => {
+    clearTimeout(fallback);
+  });
+  socket.once("finish", () => {
+    socket.destroy();
+  });
   socket.end(`HTTP/1.1 ${status} ${label}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
 }
 

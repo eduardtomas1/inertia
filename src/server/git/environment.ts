@@ -1,4 +1,5 @@
 import { GIT_LAUNCH_ENVIRONMENT_KEYS } from "../../node/git-environment";
+import { withoutWindowsCurrentDirectorySearch } from "../environment";
 
 const PASSTHROUGH_ENVIRONMENT_KEYS = new Set([
   "ALL_PROXY",
@@ -58,6 +59,7 @@ const TRUSTED_GIT_OVERRIDE_KEYS = new Set([
 export function gitProcessEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
   overrides: NodeJS.ProcessEnv = {},
+  platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const sanitized: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(environment)) {
@@ -77,11 +79,11 @@ export function gitProcessEnvironment(
       )
     ) sanitized[key] = value;
   }
-  return {
+  return withoutWindowsCurrentDirectorySearch({
     ...sanitized,
     GIT_TERMINAL_PROMPT: "0",
     GIT_ASKPASS: "",
     LANG: "C",
     LC_ALL: "C",
-  };
+  }, platform);
 }

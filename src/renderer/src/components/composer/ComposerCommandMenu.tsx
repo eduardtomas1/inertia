@@ -6,7 +6,6 @@ import "./ComposerCommandMenu.css";
 export interface ComposerCommandMenuItem {
   id: string;
   description: string;
-  /** Argument syntax the command expects, such as `<model>`. */
   argumentHint?: string | null;
   section: "built-in" | "provider";
   disabled: boolean;

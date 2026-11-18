@@ -226,7 +226,7 @@ export async function readClaudeAgentSdkMetadata(
       ...(accountResult.status === "fulfilled" && accountResult.value ? { account: { email: accountResult.value.email, organization: accountResult.value.organization, subscriptionType: accountResult.value.subscriptionType, apiProvider: accountResult.value.apiProvider } } : {}),
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
       ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? claudeRateLimitReadResult(limitsResult.value) : {}),
-      ...(commandsResult.status === "fulfilled" && commandsResult.value !== undefined ? { commands: providerSlashCommands("claude", commandsResult.value) } : {}),
+      ...(commandsResult.status === "fulfilled" && Array.isArray(commandsResult.value) ? { commands: providerSlashCommands("claude", commandsResult.value) } : {}),
     };
     // Ordinary SDK control errors may yield partial metadata. Every request
     // has settled here, so these also finish through EOF instead of a stop.

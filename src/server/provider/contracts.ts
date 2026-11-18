@@ -371,7 +371,6 @@ export interface ProviderMetadataEvent extends ProviderEventBase {
   metadata: {
     models?: ProviderModel[];
     rateLimits?: ProviderRateLimit[];
-    /** Slash commands the provider advertised for this session. */
     commands?: ProviderSlashCommand[];
   };
   source: "provider" | "session";

@@ -1,4 +1,5 @@
 import type { RuntimeStore } from "../database";
+import { providerCommandIntegrityFailure } from "../provider/provider-command-catalog";
 import type { ProviderManager } from "../providers";
 
 export class ConversationProviderContact {
@@ -25,11 +26,15 @@ export class ConversationProviderContact {
     return await this.providers.codexControlContext(cwd);
   }
 
-  async providerCommandsAt(
-    providerId: Parameters<ProviderManager["providerCommands"]>[0],
-    cwd: string,
+  async providerCommands(
+    scope: Parameters<ProviderManager["providerCommands"]>[0],
   ): ReturnType<ProviderManager["providerCommands"]> {
-    return await this.providers.providerCommands?.(providerId, cwd) ?? [];
+    try {
+      return await this.providers.providerCommands?.(scope) ?? [];
+    } catch (error) {
+      if (providerCommandIntegrityFailure(error)) throw error;
+      return [];
+    }
   }
 
   async claudeSkillsAt(

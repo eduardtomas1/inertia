@@ -1,44 +1,48 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { ProviderId, ProviderSlashCommand } from "@shared/contracts";
+import type { Conversation, ProviderSlashCommand } from "@shared/contracts";
 import type { ProviderCommandsLoader } from "../../hooks/useAgentWorkflows";
 
 const NO_COMMANDS: readonly ProviderSlashCommand[] = [];
 
-/**
- * The slash commands this chat's provider reports, fetched each time the
- * composer's slash menu opens. The last answer per project and provider stays
- * visible while a refresh is in flight. A provider that learns its commands
- * during a session (ACP) is picked up on the next open. Failures keep the
- * menu to Inertia's own commands.
- */
+export type ProviderCommandsConversation = Pick<Conversation, "id" | "projectId" | "providerId" | "modelSelection">;
+
 export function useProviderSlashCommands({
   load,
-  projectId,
-  providerId,
+  conversation,
   menuOpen,
 }: {
   load: ProviderCommandsLoader | undefined;
-  projectId: string;
-  providerId: ProviderId;
+  conversation: ProviderCommandsConversation | null;
   menuOpen: boolean;
 }): readonly ProviderSlashCommand[] {
-  const key = `${projectId}\0${providerId}`;
+  const id = conversation?.id ?? null;
+  const projectId = conversation?.projectId ?? null;
+  const providerId = conversation?.providerId ?? null;
+  const harnessId = conversation?.modelSelection.harnessId ?? null;
+  const key = id && projectId && providerId ? `${id}\0${projectId}\0${providerId}\0${harnessId ?? ""}` : null;
   const [loaded, setLoaded] = useState<ReadonlyMap<string, readonly ProviderSlashCommand[]>>(
     () => new Map(),
   );
   const inFlight = useRef(new Set<string>());
   useEffect(() => {
-    if (!menuOpen || !load || inFlight.current.has(key)) return;
+    if (!menuOpen || !load || !key || !id || !projectId || !providerId || inFlight.current.has(key)) return;
     inFlight.current.add(key);
-    void load(projectId, providerId).then(
+    void load({ id, projectId, providerId }).then(
       (commands) => {
         setLoaded((current) => new Map(current).set(key, commands));
       },
-      () => undefined,
+      () => {
+        setLoaded((current) => {
+          if (!current.has(key)) return current;
+          const next = new Map(current);
+          next.delete(key);
+          return next;
+        });
+      },
     ).finally(() => {
       inFlight.current.delete(key);
     });
-  }, [key, load, menuOpen, projectId, providerId]);
-  return loaded.get(key) ?? NO_COMMANDS;
+  }, [id, key, load, menuOpen, projectId, providerId]);
+  return key && load ? loaded.get(key) ?? NO_COMMANDS : NO_COMMANDS;
 }

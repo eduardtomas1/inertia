@@ -90,7 +90,6 @@ export interface ComposerProps {
     context?: TurnRequestContext,
   ) => Promise<ConversationCompactAndSendResult>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
-  /** Loads the slash commands this chat's provider runs itself. */
   onListProviderCommands?: import("../../hooks/useAgentWorkflows").ProviderCommandsLoader;
   promptPresets?: readonly PromptPreset[];
   onPromptPresetCommand?: PromptPresetCommandRunner;

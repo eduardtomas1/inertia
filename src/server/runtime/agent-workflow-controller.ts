@@ -10,8 +10,10 @@ import type {
   ProviderSlashCommand,
   AgentWorkflowState,
   Conversation,
+  ProviderId,
   ProviderSkillInput,
 } from "../../shared/contracts";
+import { providerNativeHarnessId } from "../../shared/model-routing";
 import { agentSkillsCapability } from "../../shared/agent-skills-capability";
 import { withCodexControlClient } from "../codex/control-client";
 import { objectValue, type JsonObject } from "../codex/protocol";
@@ -863,26 +865,20 @@ export class AgentWorkflowController {
     );
   }
 
-  /**
-   * Slash commands the provider runs from a `/name` prompt, for the composer
-   * menu. Advisory only: a provider without a command list, or a failed read,
-   * yields an empty list so the menu falls back to Inertia's own commands.
-   */
   async listProviderCommands(
-    projectId: string,
-    providerId: Parameters<ConversationProviderContact["providerCommandsAt"]>[0],
-  ): Promise<ProviderSlashCommand[]> {
-    let cwd: string;
-    try {
-      cwd = this.store.projectPath(projectId);
-    } catch {
-      return [];
+    target: { conversationId: string } | { draftConversationId: string; projectId: string; providerId: ProviderId },
+  ): Promise<{ conversationId: string; providerId: ProviderId; commands: ProviderSlashCommand[] }> {
+    if (!("conversationId" in target)) {
+      const cwd = this.store.projectPath(target.projectId);
+      const commands = await this.contact.providerCommands({ providerId: target.providerId, cwd, conversationId: null });
+      return { conversationId: target.draftConversationId, providerId: target.providerId, commands };
     }
-    try {
-      return await this.contact.providerCommandsAt(providerId, cwd);
-    } catch {
-      return [];
-    }
+    const conversation = this.store.conversation(target.conversationId);
+    const cwd = this.store.conversationPath(conversation.id);
+    const commands = conversation.modelSelection.harnessId === providerNativeHarnessId(conversation.providerId)
+      ? await this.contact.providerCommands({ providerId: conversation.providerId, cwd, conversationId: conversation.id })
+      : [];
+    return { conversationId: conversation.id, providerId: conversation.providerId, commands };
   }
 
   async previewSkills(input: {

@@ -481,6 +481,131 @@ describe("hidden instruction delivery", () => {
     expect(deliveries.sentTurnId("chat-new", "digest")).toBe("turn-new");
   });
 
+  it.each(["claude", "cursor", "grok", "kimi"] as const)(
+    "sends a %s slash command exactly as typed in Build mode and delivers the withheld instructions on the next message",
+    async (providerId) => {
+      const { runtime } = await chatRuntime(providerId);
+
+      const command = await runTurn(runtime, "/advisor fable");
+      const next = await runTurn(runtime, "now build");
+      const settled = await runTurn(runtime, "keep going");
+
+      expect(command.prompt).toBe("/advisor fable");
+      expect(runtime.store.turnExecutionManifest(runtime.store.agentTurnsForConversation(runtime.conversationId)[0]!.id))
+        .toMatchObject({ internalInstructionCount: 0, internalInstructionBytes: 0, executionSegmentCount: 1, promptWithheld: true });
+      expect(next.sessionId).toBe("session-1");
+      expect(next.prompt).toContain(`now build\n\n${INSTRUCTIONS_HEADER}\n[build-mode]\n${BUILD_MODE_INSTRUCTION}`);
+      if (providerId === "claude") {
+        expect(command.sessionInstruction).toBe(sessionText(runtime.conversationId));
+        expect(next.sessionInstruction).toBe(sessionText(runtime.conversationId));
+        expect(next.prompt).toBe(`now build\n\n${INSTRUCTIONS_HEADER}\n[build-mode]\n${BUILD_MODE_INSTRUCTION}`);
+      } else {
+        expect(command.sessionInstruction).toBeUndefined();
+        expect(next.prompt).toContain("[inertia-orchestration]\nORCHESTRATION_PACK_TEXT");
+        expect(next.prompt).toContain(`[inertia-chat]\nThis chat's id is ${runtime.conversationId}.`);
+      }
+      expect(settled.prompt).toBe("keep going");
+      runtime.store.close();
+    },
+  );
+
+  it("sends a slash command bare and leaves later messages bare when nothing was due", async () => {
+    const { runtime } = await chatRuntime("cursor");
+
+    await runTurn(runtime, "one");
+    const command = await runTurn(runtime, "/advisor fable");
+    const after = await runTurn(runtime, "two");
+
+    expect(command.prompt).toBe("/advisor fable");
+    expect(runtime.store.turnExecutionManifest(runtime.store.agentTurnsForConversation(runtime.conversationId)[1]!.id))
+      .not.toHaveProperty("promptWithheld");
+    expect(after.prompt).toBe("two");
+    runtime.store.close();
+  });
+
+  it.each([
+    "/advisor",
+    "/review   the parser",
+    "/plugin:command arg",
+    "/advisor\nfable",
+    "  /advisor fable  ",
+  ])("treats %j as a Claude slash command", async (content) => {
+    const { runtime } = await chatRuntime("claude");
+
+    const command = await runTurn(runtime, content);
+
+    expect(command.prompt).toBe(content.trim());
+    runtime.store.close();
+  });
+
+  it.each([
+    "/ path",
+    "//comment",
+    "/usr/bin",
+    "/usr/bin/env node",
+    "/",
+    "/-flag",
+    "run /advisor fable",
+    `/${"a".repeat(65)} arg`,
+  ])("sends %j as an ordinary message with the Build-mode instruction", async (content) => {
+    const { runtime } = await chatRuntime("claude");
+
+    const input = await runTurn(runtime, content);
+
+    expect(input.prompt).toBe(`${content}\n\n${INSTRUCTIONS_HEADER}\n[build-mode]\n${BUILD_MODE_INSTRUCTION}`);
+    runtime.store.close();
+  });
+
+  it.each(["claude", "cursor", "grok", "kimi"] as const)(
+    "still sends an ordinary %s message in Build mode with the instruction block",
+    async (providerId) => {
+      const { runtime } = await chatRuntime(providerId);
+
+      const input = await runTurn(runtime, "one");
+
+      expect(input.prompt).toContain(`one\n\n${INSTRUCTIONS_HEADER}\n[build-mode]\n${BUILD_MODE_INSTRUCTION}`);
+      runtime.store.close();
+    },
+  );
+
+  it.each(["codex", "opencode"] as const)("keeps the instruction block on a slash-led %s message", async (providerId) => {
+    const { runtime } = await chatRuntime(providerId);
+
+    const input = await runTurn(runtime, "/advisor fable");
+
+    expect(input.prompt).toContain(`/advisor fable\n\n${INSTRUCTIONS_HEADER}\n[build-mode]\n`);
+    runtime.store.close();
+  });
+
+  it("refuses a slash command that carries context, before any turn starts", async () => {
+    const { runtime } = await chatRuntime("cursor");
+
+    expect(() => runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "/advisor fable",
+      context: { conversationContextPacketIds: ["packet-1"] },
+    })).toThrow("Cursor runs /advisor on its own. Remove the attached files and context, then send it again.");
+    expect(runtime.store.latestAgentTurnForConversation(runtime.conversationId)).toBeNull();
+    runtime.store.close();
+  });
+
+  it("refuses a slash command that would start a fresh session in an established chat, then sends the next message with history", async () => {
+    const { runtime } = await chatRuntime("cursor");
+
+    await runTurn(runtime, "one");
+    runtime.store.updateConversation(runtime.conversationId, { providerSessionId: null });
+
+    expect(() => runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "/advisor fable",
+    })).toThrow("Send a message first so Cursor receives this chat's earlier messages.");
+    expect(runtime.store.agentTurnsForConversation(runtime.conversationId)).toHaveLength(1);
+    const next = await runTurn(runtime, "two", "session-2");
+    expect(next.sessionId).toBeUndefined();
+    expect(next.prompt).toContain("[build-mode]");
+    runtime.store.close();
+  });
+
   it("adds no instruction header when nothing is due", async () => {
     const { runtime } = await chatRuntime("cursor", () => [], "plan");
 

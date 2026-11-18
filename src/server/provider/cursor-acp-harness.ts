@@ -69,8 +69,10 @@ import {
 } from "./cursor-acp-framing";
 import { selectAcpAgentAuthMethod } from "./acp-auth";
 import { AcpCompactionProjection, unconfirmedAcpCompactionFailure } from "./acp-compaction-projection";
-import { parseAcpSessionNotification } from "./acp-json-rpc";
-import { acpSlashCommands } from "./provider-slash-commands";
+import {
+  AcpCommandAdvertisements,
+  parseAcpSessionNotificationOrIgnoredCommands,
+} from "./acp-command-advertisement";
 import { AcpPromptFrames } from "./acp-prompt-frames";
 import {
   cursorQuestions,
@@ -232,6 +234,7 @@ function startCursorRun(
   });
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
   const compactions = new AcpCompactionProjection("Cursor", "cursor", emitter);
+  const commandAdvertisements = new AcpCommandAdvertisements("cursor", emitter, options.input.sessionId);
   const inbandErrors = new CursorInbandErrors();
   let subagentSequence = 0;
   const toolActivities = new Map<
@@ -332,10 +335,14 @@ function startCursorRun(
     })
     .onNotification(acp.methods.client.session.update, (value) =>
       handleCursorProviderEvent(
-        () => parseAcpSessionNotification(value) as SessionNotification,
+        () => parseAcpSessionNotificationOrIgnoredCommands(value) as SessionNotification | null,
         "Cursor ACP sent an invalid session update.",
       ), ({ params }) => {
+      if (params === null) return;
       const safeParams = secretRedactor.streamNotification(params);
+      if (!cancelRequested && safeParams.update.sessionUpdate === "available_commands_update") {
+        commandAdvertisements.observe(safeParams.sessionId, safeParams.update.availableCommands);
+      }
       if (!sessionId || safeParams.sessionId !== sessionId || cancelRequested) return;
       if (
         acceptsCommandAdvertisement
@@ -603,6 +610,7 @@ function startCursorRun(
       sessionId = created.sessionId;
       todoSessions.reset(sessionId);
       emitter.session(sessionId);
+      commandAdvertisements.establish(sessionId);
       modes = created.modes;
       configOptions = created.configOptions;
     }
@@ -995,13 +1003,7 @@ function handleCursorUpdate(
       emitter.rich({ type: "plan", explanation: "", steps: [] });
       return;
     case "available_commands_update":
-      // The enclosing notification handler also retains the bounded names.
-      emitter.rich({
-        type: "metadata",
-        metadata: { commands: acpSlashCommands("cursor", update.availableCommands) },
-        source: "session",
-        complete: true,
-      });
+      // The enclosing notification handler retains the bounded command set.
       return;
     case "current_mode_update":
       emitter.activity(

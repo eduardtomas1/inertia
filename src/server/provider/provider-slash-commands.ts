@@ -1,25 +1,15 @@
 import type { ProviderId } from "../../shared/provider";
-import type { ProviderSlashCommand } from "../../shared/contracts";
+import {
+  PROVIDER_SLASH_COMMAND_LIMITS,
+  PROVIDER_SLASH_COMMAND_NAME,
+  type ProviderSlashCommand,
+} from "../../shared/contracts";
 import { CLAUDE_ISOLATED_SKILL_PLUGIN_NAME } from "./claude-skill-plugin";
 
-export const MAX_PROVIDER_SLASH_COMMANDS = 128;
-const MAX_DESCRIPTION_LENGTH = 300;
-const MAX_ARGUMENT_HINT_LENGTH = 120;
-const COMMAND_NAME = /^[A-Za-z0-9][\w.:-]{0,63}$/u;
+export const MAX_PROVIDER_SLASH_COMMANDS = PROVIDER_SLASH_COMMAND_LIMITS.commands;
 
-/**
- * Providers whose agent runs a prompt that starts with `/name` as that
- * command, and that report which commands exist. Codex app-server reports
- * none; OpenCode runs commands through a separate API rather than prompt
- * text, so advertising its list would send ordinary text.
- */
 export const SLASH_COMMAND_PROVIDERS: readonly ProviderId[] = ["claude", "cursor", "kimi", "grok"];
 
-/**
- * Commands no provider may advertise in Inertia: Inertia owns these itself
- * (compaction, resume, goals, plan/build modes) or they end the session that
- * Inertia manages.
- */
 const HIDDEN_FOR_EVERY_PROVIDER: readonly string[] = [
   "build",
   "clear",
@@ -33,11 +23,6 @@ const HIDDEN_FOR_EVERY_PROVIDER: readonly string[] = [
   "resume",
 ];
 
-/**
- * Provider-specific commands that only work in the provider's own terminal UI,
- * or change settings Inertia sets on every turn (model, effort, fast mode),
- * so they would appear to work and then silently revert.
- */
 const HIDDEN_BY_PROVIDER: Partial<Record<ProviderId, readonly string[]>> = {
   claude: [
     "add-dir",
@@ -53,6 +38,7 @@ const HIDDEN_BY_PROVIDER: Partial<Record<ProviderId, readonly string[]>> = {
     "heapdump",
     "hooks",
     "ide",
+    "init",
     "mcp",
     "memory",
     "model",
@@ -67,7 +53,6 @@ const HIDDEN_BY_PROVIDER: Partial<Record<ProviderId, readonly string[]>> = {
     "theme",
     "vim",
   ],
-  // Inertia's /compact already drives Cursor's summarize command.
   cursor: ["summarize"],
 };
 
@@ -77,50 +62,74 @@ export interface RawProviderSlashCommand {
   argumentHint?: unknown;
 }
 
-function cleanText(value: unknown, maxLength: number): string {
-  if (typeof value !== "string") return "";
-  const printable = [...value]
-    .map((character) => {
-      const code = character.codePointAt(0) ?? 0;
-      return code < 0x20 || code === 0x7f ? " " : character;
-    })
-    .join("");
-  return printable.replace(/\s+/gu, " ").trim().slice(0, maxLength);
+function invisibleFormatCharacter(code: number): boolean {
+  return code === 0x00ad
+    || code === 0x034f
+    || code === 0x061c
+    || code === 0x115f
+    || code === 0x1160
+    || code === 0x180e
+    || (code >= 0x200b && code <= 0x200f)
+    || (code >= 0x202a && code <= 0x202e)
+    || (code >= 0x2060 && code <= 0x2069)
+    || code === 0x3164
+    || code === 0xfeff
+    || code === 0xffa0
+    || (code >= 0xfff9 && code <= 0xfffb)
+    || (code >= 0xd800 && code <= 0xdfff)
+    || (code >= 0xe0000 && code <= 0xe007f);
 }
 
-/** Bounded, renderer-safe projection of the commands a provider reports. */
+function controlCharacter(code: number): boolean {
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f);
+}
+
+function cleanProviderCommandText(value: unknown, maxCodePoints: number): string {
+  if (typeof value !== "string") return "";
+  const printable = Array.from(value.slice(0, maxCodePoints * 8), (character) => {
+    const code = character.codePointAt(0) ?? 0;
+    if (invisibleFormatCharacter(code)) return "";
+    return controlCharacter(code) ? " " : character;
+  }).join("");
+  const collapsed = printable.replace(/\s+/gu, " ").trim();
+  return [...collapsed].slice(0, maxCodePoints).join("").trimEnd();
+}
+
 export function providerSlashCommands(
   providerId: ProviderId,
-  commands: readonly RawProviderSlashCommand[],
+  commands: readonly unknown[],
 ): ProviderSlashCommand[] {
   if (!SLASH_COMMAND_PROVIDERS.includes(providerId)) return [];
   const hidden = new Set([...HIDDEN_FOR_EVERY_PROVIDER, ...(HIDDEN_BY_PROVIDER[providerId] ?? [])]);
   const skillPluginPrefix = `${CLAUDE_ISOLATED_SKILL_PLUGIN_NAME.toLowerCase()}:`;
   const seen = new Set<string>();
   const projected: ProviderSlashCommand[] = [];
-  for (const command of commands) {
+  for (const entry of commands) {
     if (projected.length >= MAX_PROVIDER_SLASH_COMMANDS) break;
-    const name = typeof command?.name === "string" ? command.name.trim().replace(/^\//u, "") : "";
+    if (entry === null || typeof entry !== "object") continue;
+    const command = entry as RawProviderSlashCommand;
+    const name = typeof command.name === "string" ? command.name.trim().replace(/^\//u, "") : "";
     const key = name.toLowerCase();
     if (
-      !COMMAND_NAME.test(name)
+      !PROVIDER_SLASH_COMMAND_NAME.test(name)
       || hidden.has(key)
       || seen.has(key)
-      // Inertia's own skill plugin is offered through the $ skills menu.
       || (providerId === "claude" && key.startsWith(skillPluginPrefix))
     ) continue;
     seen.add(key);
-    const argumentHint = cleanText(command.argumentHint, MAX_ARGUMENT_HINT_LENGTH);
+    const argumentHint = cleanProviderCommandText(
+      command.argumentHint,
+      PROVIDER_SLASH_COMMAND_LIMITS.argumentHint,
+    );
     projected.push({
       name,
-      description: cleanText(command.description, MAX_DESCRIPTION_LENGTH),
+      description: cleanProviderCommandText(command.description, PROVIDER_SLASH_COMMAND_LIMITS.description),
       argumentHint: argumentHint || null,
     });
   }
   return projected.sort((left, right) => left.name.localeCompare(right.name, "en-US"));
 }
 
-/** Maps an ACP `available_commands_update` list (already shape-validated). */
 export function acpSlashCommands(
   providerId: ProviderId,
   availableCommands: readonly unknown[],

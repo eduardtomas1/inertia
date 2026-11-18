@@ -2,11 +2,11 @@ import { z } from "zod";
 
 import {
   attachmentsSchema,
+  providerIdSchema,
   requestBase,
   turnRequestContextSchema,
 } from "./common";
 import { AGENT_GOAL_STATUSES } from "../agent-workflows";
-import type { ProviderId } from "../../provider";
 
 export const MAX_AGENT_INPUT_QUESTIONS = 4;
 
@@ -126,10 +126,14 @@ export const agentCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("agent.commands.list"),
-      payload: z.object({
-        projectId: z.string().uuid(),
-        providerId: z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"] as const satisfies readonly ProviderId[]),
-      }).strict(),
+      payload: z.union([
+        z.strictObject({ conversationId: z.uuid() }),
+        z.strictObject({
+          draftConversationId: z.uuid(),
+          projectId: z.uuid(),
+          providerId: providerIdSchema,
+        }),
+      ]),
     })
     .strict(),
   z

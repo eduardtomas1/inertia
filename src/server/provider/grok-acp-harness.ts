@@ -79,8 +79,10 @@ import {
 } from "./grok-acp-projection";
 import { selectGrokAcpAuthMethod } from "./grok-acp-auth";
 import { AcpCompactionProjection } from "./acp-compaction-projection";
-import { parseAcpSessionNotification } from "./acp-json-rpc";
-import { acpSlashCommands } from "./provider-slash-commands";
+import {
+  AcpCommandAdvertisements,
+  parseAcpSessionNotificationOrIgnoredCommands,
+} from "./acp-command-advertisement";
 import {
   endProviderInput,
   providerNaturalCloseFirst,
@@ -236,6 +238,7 @@ function startGrokRun(
     "grok",
     emitter,
   );
+  const commandAdvertisements = new AcpCommandAdvertisements("grok", emitter, options.input.sessionId);
   const hostToolRuntime = options.hostTools && options.input.turnId
     ? new ProviderHostToolRuntime({
         bridge: options.hostTools,
@@ -325,7 +328,7 @@ function startGrokRun(
     )
     .onNotification(acp.methods.client.session.update, (value) => {
       try {
-        return parseAcpSessionNotification(value) as SessionNotification;
+        return parseAcpSessionNotificationOrIgnoredCommands(value) as SessionNotification | null;
       } catch (error) {
         wireError = error instanceof Error
           ? error
@@ -335,7 +338,11 @@ function startGrokRun(
       }
     }, ({ params: rawParams }) => {
       try {
+        if (rawParams === null) return;
         const params = secretRedactor.streamNotification(rawParams);
+        if (!cancelRequested && params.update.sessionUpdate === "available_commands_update") {
+          commandAdvertisements.observe(params.sessionId, params.update.availableCommands);
+        }
         if (
           cancelRequested
           || !sessionId
@@ -574,6 +581,7 @@ function startGrokRun(
         );
         sessionId = created.sessionId;
         emitter.session(sessionId);
+        commandAdvertisements.establish(sessionId);
         session = created;
       }
       if (!sessionId) throw new Error("Grok ACP did not return a session ID.");
@@ -1078,12 +1086,6 @@ function handleGrokUpdate(
       emitter.rich({ type: "plan", explanation: "", steps: [] });
       return;
     case "available_commands_update":
-      emitter.rich({
-        type: "metadata",
-        metadata: { commands: acpSlashCommands("grok", update.availableCommands) },
-        source: "session",
-        complete: true,
-      });
       return;
     case "current_mode_update":
       emitter.activity(

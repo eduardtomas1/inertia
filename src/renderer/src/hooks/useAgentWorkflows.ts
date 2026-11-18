@@ -12,7 +12,6 @@ import type {
   AgentWorkflowState,
   Conversation,
   Project,
-  ProviderId,
   ProviderSlashCommand,
   ServerEvent,
 } from "@shared/contracts";
@@ -33,13 +32,14 @@ export interface AgentWorkflowProjection {
   }) => Promise<void>;
   clearGoal: (source: AgentGoalSource) => Promise<void>;
   listSkills: (forceReload?: boolean) => Promise<void>;
-  /** Advisory: resolves to an empty list when the provider has none. */
   listProviderCommands: ProviderCommandsLoader;
+  previewProviderCommands: ProviderCommandsLoader;
 }
 
+export type ProviderCommandsTarget = Pick<Conversation, "id" | "projectId" | "providerId">;
+
 export type ProviderCommandsLoader = (
-  projectId: string,
-  providerId: ProviderId,
+  target: ProviderCommandsTarget,
 ) => Promise<readonly ProviderSlashCommand[]>;
 
 export interface UseAgentWorkflowsOptions {
@@ -326,23 +326,33 @@ export function useAgentWorkflows({
     }
   }, [activeConversationId, request]);
 
-  const listProviderCommands = useCallback<ProviderCommandsLoader>(async (
-    projectId,
-    providerId,
-  ) => {
+  const requestProviderCommands = useCallback(async (
+    target: ProviderCommandsTarget,
+    draft: boolean,
+  ): Promise<readonly ProviderSlashCommand[]> => {
     const event = resultEvent(await request({
       type: "agent.commands.list",
-      payload: { projectId, providerId },
+      payload: draft
+        ? { draftConversationId: target.id, projectId: target.projectId, providerId: target.providerId }
+        : { conversationId: target.id },
     }));
     if (
       event.result.kind !== "agent.commands"
-      || event.result.projectId !== projectId
-      || event.result.providerId !== providerId
+      || event.result.conversationId !== target.id
+      || event.result.providerId !== target.providerId
     ) {
       throw new Error("The local service returned an unexpected commands response.");
     }
     return event.result.commands;
   }, [request]);
+  const listProviderCommands = useCallback<ProviderCommandsLoader>(
+    async (target) => await requestProviderCommands(target, false),
+    [requestProviderCommands],
+  );
+  const previewProviderCommands = useCallback<ProviderCommandsLoader>(
+    async (target) => await requestProviderCommands(target, true),
+    [requestProviderCommands],
+  );
 
   return useMemo(() => ({
     state: activeConversationId ? state : null,
@@ -356,6 +366,7 @@ export function useAgentWorkflows({
     clearGoal,
     listSkills,
     listProviderCommands,
+    previewProviderCommands,
   }), [
     activeConversationId,
     clearGoal,
@@ -363,6 +374,7 @@ export function useAgentWorkflows({
     listProviderCommands,
     listSkills,
     load,
+    previewProviderCommands,
     skillsLoading,
     mutating,
     setGoal,

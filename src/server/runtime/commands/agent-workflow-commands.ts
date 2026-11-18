@@ -147,19 +147,11 @@ export function createAgentWorkflowCommandHandler(
         return "handled";
       }
       case "agent.commands.list": {
-        const commands = await dependencies.workflows.listProviderCommands(
-          command.payload.projectId,
-          command.payload.providerId,
-        );
+        const listing = await dependencies.workflows.listProviderCommands(command.payload);
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
-          result: {
-            kind: "agent.commands",
-            projectId: command.payload.projectId,
-            providerId: command.payload.providerId,
-            commands,
-          },
+          result: { kind: "agent.commands", ...listing },
         });
         return "handled";
       }

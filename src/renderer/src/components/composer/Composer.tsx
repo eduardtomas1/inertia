@@ -1131,7 +1131,7 @@ export const Composer = memo(function Composer({
           {...skillCompletion}
           acceptSkill={insertSkill}
           dismissSkills={() => dismissMenu("context-change")}
-          slashMatch={slashMatch} agentCall={agentCall} providerCommandSource={{ load: onListProviderCommands, projectId: conversation.projectId, providerId: conversation.providerId }}
+          slashMatch={slashMatch} agentCall={agentCall} providerCommandSource={{ load: onListProviderCommands, conversation }}
           onCompactCommand={() => void compact({ kind: "compact" })}
           compactUnavailableReason={compactUnavailableReason}
           compactNotice={compactOnReturn.notice(compactNotice)}

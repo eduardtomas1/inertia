@@ -295,7 +295,7 @@ export type ServerEvent =
           }
         | {
             kind: "agent.commands";
-            projectId: string;
+            conversationId: string;
             providerId: import("../provider").ProviderId;
             commands: ProviderSlashCommand[];
           }

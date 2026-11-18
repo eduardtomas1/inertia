@@ -68,7 +68,7 @@ import {
 } from "./provider/metadata";
 import { readClaudeAgentSdkSkills } from "./provider/claude-agent-sdk-harness";
 import type { ProviderSlashCommand } from "../shared/contracts";
-import { ProviderCommandCatalog } from "./provider/provider-command-catalog";
+import { ProviderCommandCatalog, type ProviderCommandScope } from "./provider/provider-command-catalog";
 import {
   canonicalProviderExecutable,
   ProviderInstallationAdmissionError,
@@ -297,7 +297,7 @@ export class ProviderManager {
       rememberResolvedCommand: (providerId, executable) => {
         this.resolvedCommands.set(providerId, executable);
       },
-      learnSessionCommands: (providerId, commands) => this.commandCatalog.learn(providerId, commands),
+      learnSessionCommands: (identity, commands) => this.commandCatalog.learn(identity, commands),
       processEnvironment: () => this.processEnvironment,
       evidenceUncertain: (providerId) => Boolean(this.installationLeases)
         && !this.providerEvidenceTrusted(providerId),
@@ -572,6 +572,7 @@ export class ProviderManager {
   invalidateInstallationEvidence(providerId: ProviderId): void {
     this.capabilityAuthority.invalidate(providerId);
     this.resolvedCommands.delete(providerId);
+    this.commandCatalog.forgetFailures(providerId);
     this.metadataCache.correlate(providerId, {
       executable: null,
       version: null,
@@ -686,6 +687,7 @@ export class ProviderManager {
       detection.cleanupConfirmed,
       detection.cleanupDiagnostic ?? null,
     );
+    this.commandCatalog.forgetFailures(providerId);
     if (detection.executable && detection.cleanupConfirmed) {
       this.resolvedCommands.set(providerId, detection.executable);
     } else {
@@ -805,6 +807,7 @@ export class ProviderManager {
     if (value) this.commands[providerId] = value;
     else delete this.commands[providerId];
     this.resolvedCommands.delete(providerId);
+    this.commandCatalog.forgetFailures(providerId);
     this.capabilityAuthority.invalidate(providerId);
     this.metadataCache.invalidate(providerId);
   }
@@ -1099,9 +1102,8 @@ export class ProviderManager {
     return skills;
   }
 
-  /** Slash commands the provider runs from a `/name` prompt; see ProviderCommandCatalog. */
-  providerCommands(providerId: ProviderId, cwd: string): Promise<ProviderSlashCommand[]> {
-    return this.commandCatalog.list(providerId, cwd);
+  providerCommands(scope: ProviderCommandScope): Promise<ProviderSlashCommand[]> {
+    return this.commandCatalog.list(scope);
   }
 
   run(

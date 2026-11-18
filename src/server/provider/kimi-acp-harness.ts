@@ -83,8 +83,10 @@ import {
 } from "./kimi-acp-projection";
 import { selectKimiAcpAuthMethod } from "./acp-terminal-auth";
 import { AcpCompactionProjection } from "./acp-compaction-projection";
-import { parseAcpSessionNotification } from "./acp-json-rpc";
-import { acpSlashCommands } from "./provider-slash-commands";
+import {
+  AcpCommandAdvertisements,
+  parseAcpSessionNotificationOrIgnoredCommands,
+} from "./acp-command-advertisement";
 import {
   endProviderInput,
   providerNaturalCloseFirst,
@@ -225,6 +227,7 @@ function startKimiRun(
     "kimi",
     emitter,
   );
+  const commandAdvertisements = new AcpCommandAdvertisements("kimi", emitter, options.input.sessionId);
   const hostToolRuntime = options.hostTools && options.input.turnId
     ? new ProviderHostToolRuntime({
         bridge: options.hostTools,
@@ -315,7 +318,7 @@ function startKimiRun(
     )
     .onNotification(acp.methods.client.session.update, (value) => {
       try {
-        return parseAcpSessionNotification(value) as SessionNotification;
+        return parseAcpSessionNotificationOrIgnoredCommands(value) as SessionNotification | null;
       } catch (error) {
         wireError = error instanceof Error
           ? error
@@ -325,7 +328,11 @@ function startKimiRun(
       }
     }, ({ params: rawParams }) => {
       try {
+        if (rawParams === null) return;
         const params = secretRedactor.streamNotification(rawParams);
+        if (!cancelRequested && params.update.sessionUpdate === "available_commands_update") {
+          commandAdvertisements.observe(params.sessionId, params.update.availableCommands);
+        }
         if (
           cancelRequested
           || !sessionId
@@ -534,6 +541,7 @@ function startKimiRun(
         );
         sessionId = created.sessionId;
         emitter.session(sessionId);
+        commandAdvertisements.establish(sessionId);
         modes = created.modes;
         configOptions = created.configOptions;
       }
@@ -1078,12 +1086,6 @@ function handleKimiUpdate(
       emitter.rich({ type: "plan", explanation: "", steps: [] });
       return;
     case "available_commands_update":
-      emitter.rich({
-        type: "metadata",
-        metadata: { commands: acpSlashCommands("kimi", update.availableCommands) },
-        source: "session",
-        complete: true,
-      });
       return;
     case "current_mode_update":
       emitter.activity(

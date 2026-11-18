@@ -14,7 +14,6 @@ import clsx from "clsx";
 import { usePhaseLockedAnimations } from "../../hooks/usePhaseLockedAnimations";
 import type {
   AgentSkillSummary,
-  ProviderSlashCommand,
   ChatAttachment,
   Conversation,
   InteractionMode,
@@ -45,7 +44,8 @@ import {
 } from "./config";
 import type { ComposerCommandMenuItem } from "./ComposerCommandMenu";
 import type { ComposerAgentCall } from "./useComposerAgentCall";
-import { useProviderSlashCommands } from "./useProviderSlashCommands";
+import { useProviderSlashCommands, type ProviderCommandsConversation } from "./useProviderSlashCommands";
+import type { ProviderCommandsLoader } from "../../hooks/useAgentWorkflows";
 
 type RouteReadiness = ReturnType<typeof composerRouteReadiness>;
 
@@ -62,11 +62,8 @@ const ComposerCalledAgentChip = lazy(async () => ({
 interface ComposerSlashCommand extends ComposerCommandMenuItem {
   action?: () => void;
   mode?: InteractionMode;
-  /** A provider-run command: selecting it writes `/name ` into the draft. */
   providerCommand?: true;
 }
-
-const NO_PROVIDER_COMMANDS: readonly ProviderSlashCommand[] = [];
 
 export interface ComposerInputZoneProps {
   contextCards?: ReactNode;
@@ -116,8 +113,10 @@ export interface ComposerInputZoneProps {
   acceptSkill: (skill: AgentSkillSummary) => void;
   dismissSkills: () => void;
   slashMatch: RegExpExecArray | null;
-  /** Where the commands the chat's provider runs itself come from. */
-  providerCommandSource?: Omit<Parameters<typeof useProviderSlashCommands>[0], "menuOpen">;
+  providerCommandSource?: {
+    load: ProviderCommandsLoader | undefined;
+    conversation: ProviderCommandsConversation;
+  };
   agentCall?: ComposerAgentCall;
   onCompactCommand: () => void;
   compactUnavailableReason: string | null;
@@ -203,13 +202,11 @@ export function ComposerInputZone({
   const runLocked = useWatcherRunLock(conversationId);
   const modeChangesDisabled = disabled || running || runLocked;
   const slashQuery = slashMatch?.[1].toLowerCase();
-  const loadedProviderCommands = useProviderSlashCommands({
+  const providerCommands = useProviderSlashCommands({
     load: providerCommandSource?.load,
-    projectId: providerCommandSource?.projectId ?? "",
-    providerId: providerCommandSource?.providerId ?? "codex",
-    menuOpen: slashMatch !== null && providerCommandSource?.load !== undefined,
+    conversation: providerCommandSource?.conversation ?? null,
+    menuOpen: slashMatch !== null,
   });
-  const providerCommands = providerCommandSource ? loadedProviderCommands : NO_PROVIDER_COMMANDS;
   const slashCommands: ComposerSlashCommand[] = slashMatch ? [
     { id: "goal", description: "View or set this chat's goal", section: "built-in", action: onOpenGoal, disabled: disabled || !goalAvailable },
     { id: "plan", description: "Switch this chat into plan mode", section: "built-in", mode: "plan", disabled: modeChangesDisabled },
@@ -352,8 +349,6 @@ export function ComposerInputZone({
   const activateSlashCommand = (item: ComposerSlashCommand): void => {
     if (item.disabled) return;
     if (item.providerCommand) {
-      // The provider runs the command from the prompt text; leave room for
-      // arguments and keep the menu closed on the completed draft.
       const completed = `/${item.id} `;
       setDismissedSuggestionValue(completed);
       onMessageChange(completed);
@@ -650,7 +645,6 @@ export function ComposerInputZone({
                 activeSlashCommand?.providerCommand
                 && activeSlashCommand.id.toLowerCase() === slashQuery
               ) {
-                // An exactly typed provider command sends as typed.
                 dismissSuggestions();
                 void onSubmit();
               } else if (activeSlashCommand) {

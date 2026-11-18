@@ -54,11 +54,14 @@ export interface AgentSkillSummary {
   source: "codex-native" | "claude-native";
 }
 
-/**
- * A slash command the provider itself reports and runs when a prompt starts
- * with `/name`. The name has no leading slash; Inertia's own composer commands
- * are never in this list.
- */
+export const PROVIDER_SLASH_COMMAND_LIMITS = {
+  commands: 128,
+  description: 300,
+  argumentHint: 120,
+} as const;
+
+export const PROVIDER_SLASH_COMMAND_NAME = /^[A-Za-z0-9][\w.:-]{0,63}$/u;
+
 export interface ProviderSlashCommand {
   name: string;
   description: string;

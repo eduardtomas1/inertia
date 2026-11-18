@@ -54,6 +54,19 @@ export function liveNativeChildren(
   })();
 }
 
+/** Counts provider-managed agents still live in any of the given turns of one conversation, in one query. */
+export function liveNativeChildCount(
+  database: Database.Database,
+  conversationId: string,
+  turnIds: readonly string[],
+): number {
+  if (turnIds.length === 0) return 0;
+  return (database.prepare(`
+    SELECT COUNT(*) AS count FROM subagent_traces
+    WHERE conversation_id = ? AND turn_id IN (SELECT value FROM json_each(?)) AND ${LIVE_TRACE}
+  `).get(conversationId, JSON.stringify(turnIds)) as { count: number }).count;
+}
+
 /**
  * Reads the bounded trace set an observed-child view is derived from: every
  * trace of one turn, or the newest traces of the conversation, oldest first.

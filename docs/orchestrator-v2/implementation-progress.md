@@ -3494,3 +3494,521 @@ passed 20,488 tests with 174 skipped in 1,621 files (1,607 passed, 14
 skipped); `npm run test:portable` passed 4,414 tests with 31 skipped in 269
 files (267 passed, 2 skipped). The full `npm run check`, the Electron scenarios
 and a packaged build were not run.
+
+## D.1 delegation follow-up — 2026-11-17
+
+Package D.1 of [t3code-delta-2026-11-17.md](t3code-delta-2026-11-17.md),
+section F: delegated waits and the delegated-result polish. Written on top of
+`5543eaa86` and rebased onto `3756b1b7` (G11 part 2) for the combined
+verification below (PR #686), macOS arm64, Node 22. T3 anchors are at
+`b387e3a17`.
+
+The same commit records the T3 re-check from `b05c505b` to `b387e3a17` in
+[t3code-delta-2026-11-17.md](t3code-delta-2026-11-17.md) and updates the
+Phase 5 decisions it changed in place
+([phase5-queue-design.md](phase5-queue-design.md), marked "updated
+2026-11-17"): delegated deliveries merge with queued items by request time,
+the Phase 4 "manual Send delivers results first" rule is dropped, a provider
+switch on Claude or Pi queues behind the turn, "never reached the provider"
+is decided from provider-turn observations, live configuration apply is per
+adapter, and Resume is refused while workspace setup is pending or failed.
+None of these is implemented yet; they belong to Phase 5.
+
+**Delegated waits: 30 s default, 45 s maximum** (T3 `5393882fb`). This
+reverses the 2026-11-14 "Delegated task wait" entry above, which kept 240 s
+and a 30 min maximum on purpose. T3 now returns task and thread waits before
+common MCP client timeouts expire (`DEFAULT_WAIT_TIMEOUT_MS = 30_000`,
+`MAX_WAIT_TIMEOUT_MS = 45_000`, `M:143-144`), and no invariant keeps the
+longer wait.
+
+- `DELEGATION_WAIT_DEFAULT_MS` is 30 s and `DELEGATION_WAIT_MAX_MS` 45 s
+  (`src/shared/orchestration-delegation.ts`). Both `inertia_delegate_task` in
+  wait mode and `inertia_wait_for_task` use them through
+  `clampDelegatedWaitTimeout` (`task-wait.ts`).
+- A longer `timeoutMs` is now clamped, as T3 clamps (`Math.min(MAX, …)`), and
+  no longer refused with `invalid_arguments`. Agents in older chats saw "30
+  max" and may still ask for minutes. The validator keeps `int` and `min(1)`,
+  and the JSON schema drops its `maximum`.
+- The descriptions use T3's wording: "(default 30 s). At most 45 s. A timeout
+  does not cancel the child." The approval reads "waits up to 45 s" (seconds,
+  still rounded down), no longer "waits up to N min".
+- The bridge call budget stays 270 s on Cursor, Kimi Code and Pi
+  (`DELEGATED_WAIT_CALL_BUDGET_MS`). It bounds the whole call, approval
+  included, against Node fetch's 300 s cut, and equals the secret-wait
+  budget. With a 45 s wait it only shortens the wait when the approval and
+  the chat's creation used more than 225 s.
+- OpenCode's `inertia-chat-waits` server is kept. Its timeout is still
+  derived as approval + longest wait + 60 s, now 5 min + 45 s + 60 s = 405 s
+  (`OPENCODE_WAIT_MCP_TIMEOUT_MS`). A 45 s wait alone outlasts the main
+  server's 30 s, so `inertia_wait_for_task` stays on the wait server.
+  `HARNESS_CAPABILITIES.md` says so.
+- Agent surface: the delegate tool grows 24 bytes and the wait tool shrinks
+  16, +8 bytes per provider in total. `tests/fixtures/agent-surface-budget.json`
+  is re-baselined.
+- Nothing else depended on long waits. `inertia_wait_for_conversation` was
+  already 15 s and 20 s. The Electron delegation scenario never passes a
+  timeout. No user guide quotes the delegated wait.
+
+**Delegated result: look back for the report** (T3 `0df1967cf`). Before, a
+result turn that completed without assistant text gave a null result even
+when the task had reported in an earlier turn. Examples are a silent
+acknowledgement queued behind the report, or the child's wake turn after its
+own task finished. Now `DelegationReads.outcome` falls back to `earlierReport`
+(`src/server/orchestration-v2/delegation-reads.ts`) when the result turn is
+`completed` with no `terminal_assistant_message_id`. The rules follow T3's
+`delegatedTaskReportRuns`:
+
+- It walks the chat's turns that ended before the result turn, newest end
+  first, at most 64.
+- It skips watcher wakes (T3 skips Monitor updates), rolled-back turns and
+  turns that never started.
+- It stops at a turn that did not complete, or at a turn of another task.
+  For a follow-up, a turn it does not own (a user's own message in the chat)
+  counts as another task's, as an untagged run does in T3. For an original
+  task, unowned turns are its own, as everywhere else in Inertia's
+  original-task reads.
+- The finalized result keeps the silent turn's `turnId` and `runId` and
+  records the earlier turn's `messageId`, so the frozen result, the wake text
+  and the preview read the report.
+
+T3 also requires that no provider stop notice exists. Inertia has no such
+notice; see the deferral below.
+
+**Multi-report wake summary groups outcomes** (T3 `f0495f741`). Before,
+`delegatedWakeSummary` applied the worst verb to the whole batch, so one
+failure read "2 of 3 delegated tasks failed: Beta, Gamma". The batch line now
+keeps one verb when all tasks share an outcome ("2 delegated tasks finished:
+…"). Otherwise it groups them, worst first, in the precedence order T3's
+groups use: "2 of 3 delegated tasks (1 failed, 1 finished): Beta, Gamma",
+or "(2 were interrupted, 1 finished)" (`delegatedOutcomeGroups`,
+`delegation-text.ts`). Inertia keeps its own frame: the cohort count and every
+label. T3 drops labels past three reports or names each report with its verb.
+The renderer's card (`delegation-model.ts`) parses the grouped line and builds
+the same grouping when it falls back to task statuses. It groups only when
+every task's status is known. Wake texts recorded with one verb still render
+as recorded.
+
+**`waiting_for_children` counts the task's own work** (T3 `b79d277cd`). The
+unresolved-task check now requires `source_turn_id` among the task's turns:
+every turn of the chat for an original task, and the owned turns for a
+follow-up. Live native children are read for the task's latest turn, not the
+chat's. For an original task both are unchanged. A follow-up no longer waits
+on a task the user started from the child chat, and no longer misses native
+children of its own turn when a later unowned turn exists. T3 stamps the run
+on each pending background task. Inertia's delegated tasks and native traces
+already carry the turn.
+
+**Deferred: a Codex hook's stop reason in a textless result** (T3
+`c02b98bb3`). Inertia's Codex path shows a hook as a timeline activity
+(`handleCodexHook`, `app-server-item-events.ts`). It flattens every entry's
+text and drops `entries[].kind`. A `stopped` run maps to the same failed phase
+as `blocked` and `failed`, and the turn settles `completed` with no reason
+attached. Carrying T3's "Stopped by the provider" into a delegated result
+would need four changes:
+
+- the Codex projection keeps the `stop` entries of a `stopped` hook run;
+- a provider-result field carries the reason through settlement;
+- a durable per-turn place holds it. `agent_turns.terminal_reason` holds codes
+  only, so this needs an append-only migration or a reserved activity;
+- a Codex portable fixture.
+
+That is more than the small change this row allows, so it is left for the
+D.4 provider polish. Until then, a hook-stopped silent delegated turn still
+reads "(No result text.)" in the wake, unless the look-back finds an earlier
+report.
+
+Deliberate differences from T3 Code:
+
+- Approval time still counts against the 270 s call budget on bridged
+  providers (unchanged from 2026-11-14).
+- The wake summary keeps the cohort count and all labels, with the grouped
+  outcomes in parentheses.
+- No provider stop notice exists, so the look-back runs for every textless
+  completed result (the Codex hook item is deferred).
+
+Tests (each fails against the unchanged sources unless marked as a guard):
+
+- `tests/server/orchestration-delegation-report.test.ts` (new, 6 cases):
+  - a follow-up's silent second turn reads the first turn's report, and
+    finalization records that message id;
+  - an original task whose silent wake turn, after its grandchild finished,
+    reads the earlier report;
+  - the walk skips a watcher wake (with text) and a rolled-back turn;
+  - guard: the walk stops at the original's turn for a follow-up, at a failed
+    turn, and at a user's unowned turn;
+  - a follow-up is not held by a task the user started from the child chat,
+    and is held by its own;
+  - live native children of a later unowned turn do not hold a follow-up, and
+    those of its own turn do.
+- `tests/server/orchestration-delegation-delivery.test.ts`: the summary case
+  now covers the grouped forms, and the delivered-cohort case expects
+  "(1 failed, 1 finished)".
+- `tests/renderer/delegated-completion-card.dom.test.tsx`: the fallback
+  headline groups a mixed batch, and a new case parses a grouped wake line.
+  The single-verb line of an earlier wake is kept as a case.
+- `tests/server/delegation-wait.test.ts`: the clamp (30 s, 1, 45 s), a 1 h
+  request accepted and clamped, `0` still refused, the budget function
+  (30 s and 45 s everywhere, 20 s after a 250 s approval on bridged
+  providers), and the approval text "waits up to 45 s".
+- `tests/server/agent-thread-delegation.test.ts` (approval text in seconds),
+  `tests/server/opencode-secret-mcp-scope.test.ts` (405 s wait server) and
+  `tests/server/agent-surface-budget.test.ts` (re-baselined).
+
+Against the unchanged sources, 5 of the 6 new report and child-scope cases
+fail. Both summary cases, both card cases and the 6 wait, approval and
+OpenCode cases fail too.
+
+Verification (2026-11-17, macOS arm64, Node 22.23.2): the focused suites
+passed. `npm test` (the full Vitest suite, after building the runtime process
+guardian) passed 20,437 tests with 174 skipped in 1,620 files (1,606 passed,
+14 skipped). `npm run test:portable` passed 4,364 tests with 31 skipped in 268
+files (2 skipped). `typecheck`, `lint` and `check:architecture` passed. A
+plain `npx vitest run` in a fresh worktree fails the process-recovery and
+harness cleanup suites, because the guardian binary is not built; `npm test`
+builds it first. The full `npm run check`, the Electron scenarios and a
+packaged build were not run.
+
+
+### Review fixes (independent review, 2026-11-17)
+
+1. **Wake turns belong to the follow-up whose tasks they deliver**
+   (MEDIUM–HIGH, a regression in item d). Item d scoped a follow-up's
+   children to its attached turns. A delegated-completion wake in the child
+   chat is never attached, so a follow-up whose turn started G1 could be
+   finalized with stale text. That happened when G1's wake started G2 and
+   ended. HEAD kept the follow-up `waiting_for_children` there. T3 tags a wake
+   run to the open follow-up (`Orchestrator.ts` near `:9773-9815`).
+   `delegatedTaskRuns` (`RestartBackgroundNote.ts:196`) also counts an
+   untagged wake run whose `delegatedCompletion.parentRunId` is one of the
+   task's runs, closed recursively. This round followed only the second rule,
+   at read time, which the second review round below replaced. It was not
+   T3's rule: T3 tags every notification run admitted while a follow-up is
+   open, whichever tasks it delivers.
+   - `FOLLOW_UP_TURNS` (`delegation-reads.ts`) is a recursive CTE, bounded at
+     1,024 rows. It covers the follow-up's attached turns, plus every unowned
+     turn in the chat whose user message carries a `delegated_completion_json`
+     that delivers a task with `source_turn_id` already in the set.
+   - `ownTurn(task)` uses that set for a follow-up. For an original task it
+     uses every turn of the chat that no other task owns.
+   - Every evaluation query uses `ownTurn`: latest turn, pending, result,
+     waited-on tasks and native children. So does the look-back's ownership
+     check, and so do `ownsTurn` and `activeTaskTurn` (`task-view.ts`) for
+     `needsAction` and cancel.
+   - The wake's own report could now be the follow-up's result, which closed
+     the earlier gap where it never could be. A wake that delivered a task the
+     follow-up did not start stayed outside it. That differed from T3, and the
+     second round reverses it.
+2. **OpenCode wait budget** (LOW). `DELEGATED_WAIT_CALL_BUDGET_MS.opencode`
+   is `OPENCODE_WAIT_MCP_TIMEOUT_MS − 30 s` = 375 s (`task-wait.ts`). Approval
+   time and chat-creation time, which can pass 60 s for an isolated worktree,
+   now shorten the wait before the wait server's 405 s cut. Before, the call
+   would have been lost. OpenCode 2 uses the same provider id, so it gets
+   the same bound.
+3. **Native children on every own turn** (LOW). `evaluate` checks live native
+   children on the task's own turns, the newest 64, not only the latest, as
+   T3 checks every task run's pending work.
+4. **The renderer no longer parses grouped verbs** (LOW, design). The verb
+   tables, the precedence order, `delegatedWorstOutcome` and
+   `delegatedOutcomeGroups` moved to `src/shared/delegated-outcome.ts`. The
+   server's `delegation-text.ts` and the renderer's `delegation-model.ts` both
+   use them.
+   - The card still renders a one-verb line as recorded. That covers earlier
+     wakes and uniform batches.
+   - For a grouped line it reads only the "N of M" counts. It groups the
+     outcomes again from the per-task `[status]` headers it already parses
+     (`deliveredStatuses`), or from the task summaries when the text does not
+     name every task.
+   - No structured count was added to the attribution.
+5. **Approval rounding** (nit). Under one second the approval states
+   milliseconds ("waits up to 1 ms"). Otherwise it rounds whole seconds down,
+   so "up to" never overstates.
+6. **Look-back bound.** Watcher wakes and rolled-back turns are now filtered
+   in SQL before the 64-row limit, so they cannot crowd the report out. Only
+   never-started turns, skipped in code because `startCrossed` needs the
+   effect fingerprint, still count toward the bound.
+
+Review tests. Each fails against the code before its fix, except the guards
+marked:
+
+- `orchestration-delegation-report.test.ts`:
+  - The follow-up plus wake scenario. G1's wake is the follow-up's active
+    turn, the follow-up stays `waiting_for_children` while G2 runs, and the
+    next wake's "FINAL-REPORT" becomes its result.
+  - Guard, reversed in the second round: a wake delivering a task the user
+    started is not the follow-up's.
+  - Live native children on an earlier own turn hold the follow-up.
+  - 70 watcher wakes between the report and the silent turn no longer hide
+    the report.
+  - Guard: a turn cancelled before it started is skipped.
+- `delegation-wait.test.ts`:
+  - the OpenCode budget (375 s; 15 s left after 360 s; 1 ms after 400 s);
+  - a new approval-text case (1 ms, 999 ms, 1 s for 1,999 ms, 30 s, 45 s).
+- `agent-thread-delegation.test.ts`: approval text "waits up to 1 ms".
+- `delegated-completion-card.dom.test.tsx`: a grouped line whose verbs
+  disagree with its task headers renders the headers' grouping. It fails
+  against the earlier regex parser.
+
+Verification after the review fixes (2026-11-18, macOS arm64, Node 22.23.2):
+
+- The focused suites passed.
+- The full Vitest suite passed 20,444 tests with 174 skipped in 1,620 files
+  (1,606 passed, 14 skipped). The runtime process guardian was built and the
+  run was held awake with `caffeinate -i`.
+- Two earlier full runs failed only tests that were in flight while the Mac
+  slept. `pmset` logs a "Dark Wake Thermal Emergency" sleep of about 1,000 s,
+  and every failed test hung for 830–920 s across it.
+- `npm run test:portable` passed 4,370 tests with 31 skipped in 268 files
+  (2 skipped).
+- `typecheck`, `lint` and `check:architecture` passed.
+
+
+### Review fixes, second round (independent review, 2026-11-18)
+
+**Wakes are attached to the open follow-up when they are admitted** (follows
+T3; it replaces the read-time recursion of the first round). T3 tags every
+notification run admitted while a follow-up is open with that follow-up,
+whichever tasks it delivers (`Orchestrator.ts:9773-9800` at `b387e3a17`).
+`delegatedTaskRuns` adds only untagged wakes, keyed on
+`delegatedCompletion.parentRunId`.
+
+- `OrchestrationRepository.admit` (`turn-repository.ts`) calls
+  `DelegationRepository.attachWake` when the admitted turn carries a
+  `delegatedCompletion`. The call runs in the transaction that commits
+  `run.accepted`. It attaches the turn to the chat's open follow-up, at most
+  one, through the existing `delegation.task-turn-attached` event with
+  `via: "continuation"`. That value was already in `DELEGATED_ATTACH_VIAS`, so
+  no schema changed.
+- The recursive CTE and its 1,024-row cap are gone. A follow-up's own turns
+  are its attached turns again (`ownTurn`, `delegation-reads.ts`).
+- The untagged-wake fallback was added, because it is cheap and bounded. An
+  unattached wake counts for a follow-up when every task it delivers started
+  from a turn attached to that follow-up. It is one level deep and has no
+  recursion. Per turn it costs a primary-key lookup of the message and, for a
+  wake, at most 16 `json_each` rows joined on primary keys.
+- So that no turn has two owners, an original task no longer owns a turn
+  attached to another task, nor an unattached wake of another task's tasks.
+- A probe put 5,000 turns in a child chat, 200 of them attached to the
+  follow-up. A whole `evaluate` took 8.4 ms for the follow-up and 10.7 ms for
+  the original. The reviewer measured about 240 ms per query for the CTE, run
+  7–8 times per evaluate.
+- **Upgrade.** Older databases have wakes that were never attached, and no
+  migration rewrites them. For a follow-up open at upgrade time:
+  - A wake that delivers tasks its attached turns started belongs to it
+    through the fallback, so it waits on what that wake started. Its
+    approvals, limit plans and continuations also count as the follow-up's.
+  - A deeper pre-upgrade chain, a wake delivering a task that an unattached
+    wake started, does not belong to the follow-up. The follow-up still waits
+    until that task is delivered, because its source wake is its own. Its
+    result is then the newest turn it owns, so the deeper wake's report can
+    be missed.
+  - Every wake admitted after the upgrade is attached.
+
+**Other fixes:**
+
+1. **Cancel uses the reads' ownership rule** (MEDIUM). `ownsChildTurn`
+   (`task-service.ts`) now calls `DelegationReads.ownsTurn`, so
+   `armedLimitPlan` and `pendingContinuation` see the follow-up's wakes. A
+   wake that hit a usage limit or was cut by an update no longer leaves the
+   follow-up working but refused with `task_not_cancellable`, and its plan is
+   cancelled with the follow-up.
+2. **Cancel and hold scope** (LOW, `b79d277cd`). `nestedUnresolved` keeps only
+   tasks whose source turn the task owns, so cancelling a follow-up leaves
+   tasks the user started in the child chat running. The continuation hold
+   in `evaluate` now requires the interrupted turn to be the task's own, so a
+   continuation of the user's own turn no longer holds a follow-up. Stopping
+   the follow-up's turn still disarms the chat's wakes, as any Stop in that
+   chat does. That is the Stop rule, not the cancel cascade, and it is
+   unchanged.
+3. **One owner per turn** (LOW). `read()` of a finalized original no longer
+   counts the follow-up's running wake as its pending turn. That comes from
+   the ownership rule above, so `read()` still evaluates finalized tasks for
+   `latest`.
+4. **Forged headers** (LOW). `neutralizeUntrustedAgentText` now also escapes a
+   line shaped like a wake's per-task header (`Delegated task <id> (…)
+   [status]:` becomes `…]\:`). Every result body passes through it, so a
+   body can no longer set the card's statuses. The real headers are written
+   after neutralization, and no new channel was added.
+5. **Unknown outcomes are counted, not guessed** (renderer). When the wake
+   text lacks a task's header and no summary gives its status, the card says
+   "(1 finished, 1 unknown)". Before, it applied the worst known verb to the
+   whole batch. The server cannot cut a header (see the guard test), so this
+   only covers damaged text.
+
+Second-round tests. Each fails against the code before its fix, except the
+guards marked:
+
+- `orchestration-delegation-report.test.ts`:
+  - A wake admitted while F is open, delivering only a user-started task,
+    belongs to F and its report is F's result (the flipped guard).
+  - A mixed wake (F's G1 plus a user-started Gu) is attached to F, holds F
+    while it runs, and its report is F's result.
+  - `read()` of the finalized original while F's wake runs shows no pending
+    turn and no later turn.
+  - The chain scenario now relies on attachment.
+  - Without the admit hook it fails at the second wake: the fallback is one
+    level deep.
+  - Guard: an unattached legacy wake is placed by the fallback, for F and not
+    for the original.
+  - Guard: a silent wake looks back to F's earlier report.
+- `delegation-follow-up-wake.test.ts` (new, manager fixture). None of these
+  went through admission. The manager fixture persists turns with
+  `store.beginAgentTurn`, which skips `admit`, so the wake in the first two
+  cases was an unattached legacy wake placed by the fallback. The needsAction
+  guard attached its wake by hand. The third round adds admitted variants.
+  - cancel of F cancels its wake's armed usage-limit plan;
+  - cancel of F dismisses its wake's restart continuation;
+  - cancel of F does not stop a task the user started from the child chat;
+  - a continuation of the user's own turn does not hold F;
+  - guard: needsAction and `prepareCancel` for an approval inside F's running
+    wake.
+- `orchestration-delegation-delivery.test.ts`:
+  - a forged header in a body is escaped, and the card's headline comes from
+    the real headers;
+  - guard: 16 tasks with 2,000-character titles and 20 kB results keep every
+    header inside the 16 kB wake.
+- `delegated-completion-card.dom.test.tsx`: a header the wake text lost is
+  counted as unknown, or filled from the task summary when there is one.
+- The delegation fixture's `wake` now admits the wake through the real path
+  (`controller.queue` with `delegatedCompletion` and `queuedMessageId`)
+  instead of patching rows afterwards. The manager fixture's `beginStoreTurn`
+  takes a `delegatedCompletion` and does not admit, so it stands in for a
+  legacy, unattached wake.
+
+Verification after the second round (2026-11-18, macOS arm64, Node 22.23.2,
+run alone, with no other Vitest process and the machine held awake by
+`caffeinate -i`): the focused suites passed (21 files, 243 tests). `npm test`
+passed 20,456 tests with 174 skipped in 1,621 files (1,607 passed, 14
+skipped). `npm run test:portable`, run after it, passed 4,381 tests with 31
+skipped in 269 files (2 skipped). `typecheck`, `lint` and
+`check:architecture` passed.
+
+### Review fixes, third round (final review, 2026-11-18)
+
+1. **Resume and continuation turns continue the follow-up** (MEDIUM, older
+   than this package).
+   - Before: a follow-up's wake W hit a usage limit or was cut by an update.
+     The resume turn R was admitted (the plan completed) but attached to no
+     task. F's newest own turn was still the failed W, so `onChildChanged`
+     finalized F as `failed`, and R's result never reached the parent.
+   - Now `admit` (`turn-repository.ts`) reads the plan's turn:
+     `usage_limit_resume_plans.failed_turn_id` for `limitResetPlanId`, or
+     `restart_continuation_plans.interrupted_turn_id` for
+     `restartContinuationPlanId`. `DelegationRepository.attachContinuation`
+     then attaches R, with `via: "continuation"` and in the same transaction,
+     to the chat's open follow-up that owns that turn (`ownsTurn`, so a
+     legacy wake placed by the fallback counts).
+   - An original task needs no attachment: it owns unattached turns.
+   - T3, restart continuation: the run takes the continued run's task
+     (`continuedTaskId` from `restartContinuationOfRunId`, `Orchestrator.ts`
+     near `:7039`). Inertia's attachment is the equivalent.
+   - T3, usage-limit continuation: the run is not tagged with the continued
+     task. `mayStartSubagentFollowup` (`:849-862`) admits it, and because only
+     notifications take the open follow-up's tag (`:9776-9783`),
+     `recordSubagentFollowup` records a new follow-up task for the parent's
+     owner run (`:9819`). The first follow-up then ends on its failed run.
+   - Deliberate difference: Inertia attaches the usage-limit resume to the
+     follow-up whose turn it resumes. That keeps one task, and one delivery,
+     for one piece of work, instead of a failed result followed by a second
+     task. No AGENTS.md invariant forces it. It follows from a recorded
+     Phase 4 choice: T3's second task comes from its generic rule that any
+     message dispatched into a child thread after the original finished
+     becomes a new follow-up task, while Inertia creates follow-ups only from
+     an agent's send or steer (a user's own message in a child chat is
+     another task's turn). Without that rule, continuing the existing
+     follow-up is the closest equivalent, and the resumed report still
+     reaches the parent once.
+2. **No attachment to a cancelled follow-up** (LOW). `attachWake` and
+   `attachContinuation` consider only follow-ups with no result and a delivery
+   state that is not terminal (`openFollowUps`). `dispose(F, "cancelled")`
+   leaves F running until it finalizes, and T3 skips a task with
+   `cancelledRunId`.
+3. **One query for native children** (LOW). `LiveNativeChildren` now takes the
+   list of turn ids, and the default counts live traces for all of them in one
+   query (`liveNativeChildCount`, `observed-child-repository.ts`, through
+   `json_each`). Before, it ran one transaction per turn, up to 64.
+   Finished turns stay in the list, because a provider agent can outlive its
+   turn (the existing finished-turn trace case).
+4. **No guessed outcome** (LOW, renderer). When the card can read no status,
+   for one task or for all of them, it says "returned"
+   (`DELEGATED_UNKNOWN_OUTCOME_VERB`). Before, it said "finished". A partly
+   known batch still reads "(1 finished, 1 unknown)".
+5. **OpenCode wait-server timeout decoupled from the wait** (LOW). The
+   `inertia-chat-waits` server also carries create, send, stop, archive,
+   `inertia_request_context` and async delegate. Its timeout had fallen from
+   about 36 min to 6 min 45 s with the 45 s wait.
+   - It is now the 5 min approval plus `OPENCODE_WAIT_TOOL_WORK_MS` (10 min)
+     plus 60 s, which is 16 min. The 10 min covers the longest work after an
+     approval: creating an isolated worktree (a few Git commands, each
+     bounded at 30 s), the 5 min context chooser, or the 45 s wait.
+   - It no longer follows `DELEGATION_WAIT_MAX_MS`. I chose a fixed work
+     allowance because the waits server's tools are bounded by their own
+     limits, not by the delegated wait.
+   - The delegated wait call on OpenCode keeps its own bound,
+     `DELEGATED_WAIT_CALL_BUDGET_MS.opencode` = 5 min + 45 s + 30 s = 375 s,
+     now written from those parts rather than from the server timeout. It
+     stays well inside 16 min.
+6. **Tests and claims.** The second round's notes now say that its manager
+   fixture tests did not go through admission. The needsAction guard and the
+   cancel cases now also run with a wake admitted through
+   `beginOrchestratedAgentTurn`: `beginStoreTurn(..., { admit: true })` claims
+   the queued delivery row and passes its `queuedMessageId`, as the queue
+   runtime does.
+
+**Known gap, recorded only: cancelling a follow-up disarms every wake in the
+child chat.** Cancel stops F's running turn through `stopOwnedManagedTurn`.
+Like any Stop in that chat, that disarms the chat's armed delegated wakes
+(`delegation.wakes-disarmed`, `reason: "stop"`, `scope: "conversation"`), so
+a task the user started from the child chat keeps running but its delivery
+is disposed. Proposed fix: when the Stop comes from a delegated cancel,
+disarm with the existing `scope: "source-turn"` for each of the task's own
+turns, or add a task scope, instead of the conversation scope. A user's own
+Stop keeps the conversation scope. Not implemented.
+
+Third-round tests. Each fails against the code before its fix, except the
+guards marked:
+
+- `orchestration-delegation-report.test.ts`:
+  - For a usage-limit resume and for a restart continuation, the resumed
+    turn of F's wake is attached to F, F does not finalize at its admission,
+    and R's "RESUMED-REPORT" is F's result.
+  - A wake admitted after `dispose(F, "cancelled")` is not attached.
+  - F's own turns are read for live native children in one call.
+  - Guard: a delivery steered into F's running turn attaches nothing, and
+    the task is delivered.
+  - Guard: `rebuildIndex` restores a `continuation` attachment, and a
+    replayed admission (the same command source) attaches once.
+- `delegation-follow-up-wake.test.ts`: the limit and continuation cancel
+  cases run for an admitted and a legacy wake, and the needsAction guard uses
+  an admitted wake. The admitted variants are guards, because round 2's
+  ownership change only mattered for unattached wakes.
+- `delegated-completion-card.dom.test.tsx`: with no readable status, one task
+  and a grouped line read "returned". The steered-wake row, rendered without
+  task summaries, now reads "returned".
+- `opencode-secret-mcp-scope.test.ts`: the waits server's timeout is 16 min,
+  built from the approval and the work allowance. `delegation-wait.test.ts`:
+  the OpenCode wait budget is 375 s and below the server timeout.
+
+Verification after the third round (2026-11-18, macOS arm64, Node 22.23.2,
+run alone after `pgrep` showed no other Vitest process, under `caffeinate -i`):
+
+- The focused suites passed (45 files, 491 tests).
+- `npm test` passed 20,463 tests with 174 skipped in 1,621 files (1,607
+  passed, 14 skipped).
+- `npm run test:portable`, run after it, passed 4,388 tests with 31 skipped
+  in 269 files (2 skipped).
+- `typecheck`, `lint` and `check:architecture` passed.
+Not exercised: real Codex, Claude, Cursor, Kimi Code, Pi or OpenCode
+accounts. Whether a client cuts a 45 s call was not checked; T3 chose 45 s
+for that reason. A Codex hook that stops a turn was not exercised (deferred
+above). Windows and Linux were not run, and neither were the Electron
+scenarios, including `delegation-wake.spec.ts`, whose wake-line pattern still
+matches the grouped form.
+
+### Combined verification with G11 part 2 (2026-11-18)
+
+After rebasing onto `3756b1b7`, on macOS arm64 with Node 22.23.2, run alone
+under `caffeinate -i`: `typecheck`, `lint` and `check:architecture` passed;
+`npm test` passed 20,521 tests with 174 skipped in 1,623 files (1,609 passed,
+14 skipped); `npm run test:portable` passed 4,444 tests with 31 skipped in
+271 files (269 passed, 2 skipped). The full `npm run check`, the Electron
+scenarios and a packaged build were not run.

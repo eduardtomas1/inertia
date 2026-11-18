@@ -112,8 +112,14 @@ tools that wait for the user's approval or for another chat
 `inertia_stop_conversation`, `inertia_archive_conversation`,
 `inertia_delegate_task`, `inertia_wait_for_task`, `inertia_cancel_task` and
 `inertia_request_context`) are therefore served to OpenCode from a second
-server, `inertia-chat-waits`. Its timeout covers a five-minute approval plus
-the 30-minute maximum delegated wait, plus one minute. Every other tool keeps
+server, `inertia-chat-waits`. Its timeout, 16 minutes, covers a five-minute
+approval followed by up to ten minutes of work (creating an isolated
+worktree, the five-minute context chooser, or a delegated wait), plus one
+minute. A 45-second delegated wait alone already outlasts the 30-second
+server. A delegated wait on OpenCode returns within 375 seconds of the call's
+start (the approval's five minutes, the 45-second wait and 30 seconds), so a
+slow approval or chat creation shortens the wait instead of losing the call.
+Every other tool keeps
 the 30-second server, and the secret request keeps its own server.
 `inertia_delegate_task` in wait mode that is cancelled after it created the
 child chat leaves no handle with the agent. If the agent then sends the same

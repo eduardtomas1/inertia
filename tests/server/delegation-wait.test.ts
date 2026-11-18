@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { DelegatedTaskView } from "../../src/shared/orchestration-delegation";
 import type { AgentApprovalDecision } from "../../src/server/provider/interactions";
 import { SECRET_REQUEST_WAIT_MS_BY_PROVIDER } from "../../src/node/agent-secrets";
+import { OPENCODE_WAIT_MCP_TIMEOUT_MS } from "../../src/server/provider/host-tool-mcp-config";
+import { delegateApprovalSuffix } from "../../src/server/runtime/delegation/task-tools";
 import { TASK_RUNNING_WAKE_NEXT } from "../../src/server/runtime/delegation/task-view";
 import {
   clampDelegatedWaitTimeout,
@@ -44,7 +46,7 @@ describe("inertia_wait_for_task", () => {
     try {
       const view = parsed<DelegatedTaskView>(await f.invoke("inertia_delegate_task", { ...TASK, wake: "settled_only" }));
       const started = Date.now();
-      const waiting = f.invoke("inertia_wait_for_task", { taskId: view.taskId, timeoutMs: 1_800_000 });
+      const waiting = f.invoke("inertia_wait_for_task", { taskId: view.taskId, timeoutMs: 45_000 });
       await new Promise((resolve) => setImmediate(resolve));
       const requestId = randomUUID();
       f.inputs.set(requestId, { id: requestId, providerId: "codex", conversationId: view.conversationId, runId: "run",
@@ -117,30 +119,53 @@ describe("inertia_wait_for_task", () => {
       expect(result).toMatchObject({ status: "failed", waitTimedOut: false, delivery: { state: "acknowledged" },
         result: { status: "failed", text: expect.stringContaining("The delegated turn failed") } });
       expect(f.store.queuedMessages.activeDelegatedDelivery(f.source.id)).toBeNull();
-      expect(errorCode(await f.invoke("inertia_wait_for_task", { taskId: view.taskId, timeoutMs: 1_800_001 })))
-        .toBe("invalid_arguments");
+      // A longer request is clamped, as T3 does, instead of refused; a non-positive one is still invalid.
+      expect(parsed<DelegatedTaskView>(await f.invoke("inertia_wait_for_task", { taskId: view.taskId, timeoutMs: 3_600_000 })))
+        .toMatchObject({ status: "failed", waitTimedOut: false });
+      expect(errorCode(await f.invoke("inertia_wait_for_task", { taskId: view.taskId, timeoutMs: 0 }))).toBe("invalid_arguments");
       expect([clampDelegatedWaitTimeout(undefined), clampDelegatedWaitTimeout(0), clampDelegatedWaitTimeout(9e9)])
-        .toEqual([240_000, 1, 1_800_000]);
+        .toEqual([30_000, 1, 45_000]);
     } finally { await f.close(); }
   });
 
-  it("returns before a Node fetch client's 300 s cut by default, and within the call budget on bridged providers", () => {
-    expect(delegatedWaitTimeout(undefined, "codex", 0)).toBe(240_000);
-    expect(delegatedWaitTimeout(undefined, "claude", 200_000)).toBe(240_000);
-    expect(delegatedWaitTimeout(1_800_000, "codex", 0)).toBe(1_800_000);
-    expect(delegatedWaitTimeout(1_800_000, "opencode", 0)).toBe(1_800_000);
+  it("returns within 30 s by default and 45 s at most, and within the call budget on bridged providers", () => {
+    expect(delegatedWaitTimeout(undefined, "codex", 0)).toBe(30_000);
+    expect(delegatedWaitTimeout(undefined, "claude", 200_000)).toBe(30_000);
+    expect(delegatedWaitTimeout(1_800_000, "codex", 0)).toBe(45_000);
+    expect(delegatedWaitTimeout(1_800_000, "opencode", 0)).toBe(45_000);
+    // OpenCode's wait server cuts the call at its timeout; approval and creation time count against it too.
+    expect(DELEGATED_WAIT_CALL_BUDGET_MS.opencode).toBe(375_000);
+    expect(DELEGATED_WAIT_CALL_BUDGET_MS.opencode).toBeLessThan(OPENCODE_WAIT_MCP_TIMEOUT_MS);
+    expect(delegatedWaitTimeout(undefined, "opencode", 330_000)).toBe(30_000);
+    expect(delegatedWaitTimeout(1_800_000, "opencode", 360_000)).toBe(15_000);
+    expect(delegatedWaitTimeout(undefined, "opencode", 400_000)).toBe(1);
+    expect(DELEGATED_WAIT_CALL_BUDGET_MS.codex).toBeUndefined();
+    expect(DELEGATED_WAIT_CALL_BUDGET_MS.claude).toBeUndefined();
+    expect(delegatedWaitTimeout(500, "claude", 0)).toBe(500);
     for (const providerId of ["cursor", "kimi", "pi"] as const) {
       expect(DELEGATED_WAIT_CALL_BUDGET_MS[providerId]).toBe(SECRET_REQUEST_WAIT_MS_BY_PROVIDER[providerId]);
       expect(DELEGATED_WAIT_CALL_BUDGET_MS[providerId]).toBeLessThan(300_000);
-      expect(delegatedWaitTimeout(undefined, providerId, 0)).toBe(240_000);
-      expect(delegatedWaitTimeout(1_800_000, providerId, 0)).toBe(270_000);
-      expect(delegatedWaitTimeout(undefined, providerId, 60_000)).toBe(210_000);
+      expect(delegatedWaitTimeout(undefined, providerId, 0)).toBe(30_000);
+      expect(delegatedWaitTimeout(1_800_000, providerId, 0)).toBe(45_000);
+      // Only an approval that used more than 225 s of the call shortens the wait.
+      expect(delegatedWaitTimeout(1_800_000, providerId, 225_000)).toBe(45_000);
+      expect(delegatedWaitTimeout(undefined, providerId, 250_000)).toBe(20_000);
       expect(delegatedWaitTimeout(1_000, providerId, 60_000)).toBe(1_000);
       expect(delegatedWaitTimeout(undefined, providerId, 400_000)).toBe(1);
     }
   });
 
-  it("counts the approval against the call budget on a bridged provider and keeps the long wait elsewhere", async () => {
+  it("never states a longer wait in the approval than the call can have", () => {
+    const suffix = (timeoutMs: number | undefined, elapsedProvider: "codex" | "cursor" = "codex") =>
+      delegateApprovalSuffix({ ...TASK, mode: "wait", ...(timeoutMs === undefined ? {} : { timeoutMs }) }, true, elapsedProvider);
+    expect(suffix(1)).toContain("waits up to 1 ms");
+    expect(suffix(999)).toContain("waits up to 999 ms");
+    expect(suffix(1_999)).toContain("waits up to 1 s");
+    expect(suffix(undefined)).toContain("waits up to 30 s");
+    expect(suffix(3_600_000, "cursor")).toContain("waits up to 45 s");
+  });
+
+  it("counts the approval against the call budget on a bridged provider and keeps the full wait elsewhere", async () => {
     const f = await createDelegationManagerFixture();
     try {
       const wait = vi.spyOn(f.service, "wait").mockImplementation(async (_caller, taskId) => f.service.view(taskId));
@@ -152,24 +177,26 @@ describe("inertia_wait_for_task", () => {
         { ...TASK, mode: "wait", timeoutMs: 1_800_000 },
         { approval: vi.fn(async (request): Promise<AgentApprovalDecision> => {
           approvals.push(request.detail);
-          now += 100_000;
+          now += 250_000;
           return "approve";
         }) });
       const view = parsed<DelegatedTaskView>(delegated);
-      expect(wait.mock.calls.at(-1)?.[2]).toBe(170_000);
-      expect(approvals[0]).toContain("waits up to 4 min");
+      expect(wait.mock.calls.at(-1)?.[2]).toBe(20_000);
+      expect(approvals[0]).toContain("waits up to 45 s");
       expect(view).toMatchObject({ status: "running", taskId: expect.any(String) });
 
       parsed(await f.invokeAs({ conversation: f.source, turn: cursorTurn }, "inertia_wait_for_task",
         { taskId: view.taskId, timeoutMs: 1_800_000 }));
-      expect(wait.mock.calls.at(-1)?.[2]).toBe(270_000);
+      expect(wait.mock.calls.at(-1)?.[2]).toBe(45_000);
       clock.mockRestore();
       parsed(await f.invoke("inertia_wait_for_task", { taskId: view.taskId, timeoutMs: 1_800_000 }));
-      expect(wait.mock.calls.at(-1)?.[2]).toBe(1_800_000);
+      expect(wait.mock.calls.at(-1)?.[2]).toBe(45_000);
+      parsed(await f.invoke("inertia_wait_for_task", { taskId: view.taskId }));
+      expect(wait.mock.calls.at(-1)?.[2]).toBe(30_000);
       await f.invoke("inertia_delegate_task", { ...TASK, title: "Long wait", mode: "wait", timeoutMs: 1_800_000 },
         { approval: vi.fn(async (request): Promise<AgentApprovalDecision> => { approvals.push(request.detail); return "approve"; }) });
-      expect(approvals[1]).toContain("waits up to 30 min");
-      expect(wait.mock.calls.at(-1)?.[2]).toBe(1_800_000);
+      expect(approvals[1]).toContain("waits up to 45 s");
+      expect(wait.mock.calls.at(-1)?.[2]).toBe(45_000);
     } finally { await f.close(); }
   });
 

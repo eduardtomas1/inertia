@@ -76,7 +76,7 @@ describe("delegated completion card", () => {
       ...messages(wake, wakeText, { delegatedCompletion: attribution }),
     ]);
     const card = screen.getByRole("article",
-      { name: "Delegated results: 2 of 3 delegated tasks failed: Audit the parser, Write the tests" });
+      { name: "Delegated results: 2 of 3 delegated tasks (1 failed, 1 finished): Audit the parser, Write the tests" });
     expect(card).toHaveClass("delegated-completion-card");
     expect(card).not.toHaveClass("message");
     expect(card).toHaveAttribute("data-turn-jump-target", "request");
@@ -110,7 +110,49 @@ describe("delegated completion card", () => {
     expect(region).toHaveAttribute("hidden");
   });
 
-  it("shows the delivered outcome verb, labels and per-task status from the wake text", async () => {
+  it("shows the delivered outcome groups, labels and per-task status from the wake text", async () => {
+    const content = [
+      "3 delegated tasks (1 failed, 2 finished): Audit the parser, Write the tests, Benchmark the change",
+      `Delegated task ${taskId(1)} (Audit the parser) [completed]:\nTwo call sites still use the old name.`,
+      `Delegated task ${taskId(2)} (Write the tests) [failed]:\nThe fixture could not be built.`,
+      `Delegated task ${taskId(3)} (Benchmark the change) [completed]:\nNo regression.`,
+    ].join("\n\n");
+    timeline([wake], messages(wake, content, { delegatedCompletion: { ...attribution, taskIds: [taskId(1), taskId(2), taskId(3)] } }),
+      { asParent: null, asChild: null });
+    const card = screen.getByRole("article", { name:
+      "Delegated results: 3 delegated tasks (1 failed, 2 finished): Audit the parser, Write the tests, Benchmark the change" });
+    expect(within(card).getByText("3 delegated tasks (1 failed, 2 finished)", { selector: "strong" })).toBeTruthy();
+    expect(within(card).getByText("Audit the parser, Write the tests, Benchmark the change"))
+      .toHaveClass("delegated-completion-labels");
+  });
+
+  it("groups outcomes from the delivered task headers, reading only the counts from a grouped line", () => {
+    const content = [
+      "2 of 4 delegated tasks (1 failed, 1 finished): Audit the parser, Write the tests",
+      `Delegated task ${taskId(1)} (Audit the parser) [completed]:\nDone.`,
+      `Delegated task ${taskId(2)} (Write the tests) [cancelled]:\n(No result text.)`,
+    ].join("\n\n");
+    timeline([wake], messages(wake, content, { delegatedCompletion: attribution }), { asParent: null, asChild: null });
+    const card = screen.getByRole("article",
+      { name: "Delegated results: 2 of 4 delegated tasks (1 stopped, 1 finished): Audit the parser, Write the tests" });
+    expect(within(card).getByText("2 of 4 delegated tasks (1 stopped, 1 finished)", { selector: "strong" })).toBeTruthy();
+  });
+
+  it("counts an outcome whose header the wake text lost instead of guessing it", () => {
+    const content = [
+      "2 delegated tasks (1 failed, 1 finished): Audit the parser, Write the tests",
+      `Delegated task ${taskId(1)} (Audit the parser) [completed]:\nDone.`,
+      `Delegated task ${taskId(2)} (Write the te`,
+    ].join("\n\n");
+    const view = timeline([wake], messages(wake, content, { delegatedCompletion: attribution }), { asParent: null, asChild: null });
+    expect(screen.getByText("2 delegated tasks (1 finished, 1 unknown)", { selector: "strong" })).toBeTruthy();
+    view.unmount();
+    // With the task's own summary, its recorded status fills the gap.
+    timeline([wake], messages(wake, content, { delegatedCompletion: attribution }));
+    expect(screen.getByText("2 delegated tasks (1 failed, 1 finished)", { selector: "strong" })).toBeTruthy();
+  });
+
+  it("keeps the single outcome verb an earlier wake recorded", async () => {
     const content = [
       "2 of 3 delegated tasks failed: Audit the parser, Write the tests",
       `Delegated task ${taskId(1)} (Audit the parser) [completed]:\nTwo call sites still use the old name.`,
@@ -152,9 +194,14 @@ describe("delegated completion card", () => {
     expect(within(card).getAllByRole("listitem").map((item) => item.dataset.taskStatus)).toEqual(["cancelled", "cancelled"]);
   });
 
-  it("counts only the delivered tasks when the cohort is unknown", () => {
-    timeline([wake], messages(wake, wakeText, { delegatedCompletion: { ...attribution, taskIds: [taskId(1)] } }), { asParent: null, asChild: null });
-    expect(screen.getByRole("article", { name: "Delegated results: 1 delegated task finished" })).toBeTruthy();
+  it("counts only the delivered tasks when the cohort is unknown, and claims no outcome it cannot read", () => {
+    const view = timeline([wake], messages(wake, wakeText, { delegatedCompletion: { ...attribution, taskIds: [taskId(1)] } }),
+      { asParent: null, asChild: null });
+    expect(screen.getByRole("article", { name: "Delegated results: 1 delegated task returned" })).toBeTruthy();
+    view.unmount();
+    timeline([wake], messages(wake, "2 delegated tasks (1 failed, 1 finished): Audit the parser, Write the tests",
+      { delegatedCompletion: attribution }), { asParent: null, asChild: null });
+    expect(screen.getByText("2 delegated tasks returned", { selector: "strong" })).toBeTruthy();
   });
 
   it("labels the timeline row and renders a steered wake as a card, not a follow-up bubble", () => {
@@ -162,7 +209,7 @@ describe("delegated completion card", () => {
     expect(responseTimelineArticleLabel({ kind: "turn", id: wake.id, turn: { index: 4, userMessage: request } } as never))
       .toBe("Turn 4: Delegated results");
     render(<FollowUpRow entry={{ kind: "follow-up", id: "follow-up", message: request! } as never} />);
-    const card = screen.getByRole("article", { name: "Delegated results: 2 delegated tasks finished" });
+    const card = screen.getByRole("article", { name: "Delegated results: 2 delegated tasks returned" });
     expect(card).toHaveAttribute("data-follow-up-message-id", request!.id);
     expect(screen.queryByRole("article", { name: "Your follow-up" })).toBeNull();
   });

@@ -9,6 +9,10 @@ claims that were read in the upstream code. It supplements
 follows, and it is the source for the decisions in
 [phase5-queue-design.md](phase5-queue-design.md) section 4.
 
+Updated by [t3code-delta-2026-11-17.md](t3code-delta-2026-11-17.md), which
+covers T3 `b05c505b` → `b387e3a17` and supersedes rows of sections D and E
+where it says so (for example the delegated-wait times).
+
 **Rule.** T3 Code's current orchestrator is the reference for every decision.
 Inertia keeps a deliberate difference only where an invariant in `AGENTS.md`
 forces it, or where it is an explicitly recorded architecture choice. Section

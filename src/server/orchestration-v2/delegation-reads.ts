@@ -15,14 +15,15 @@ import {
   type DelegationMailbox,
 } from "../../shared/orchestration-delegation";
 import { isAgentTurnTerminalStatus, type AgentTurnStatus } from "../../shared/turn-lifecycle";
-import { liveNativeChildren as observedLiveNativeChildren } from "../persistence/observed-child-repository";
+import { liveNativeChildCount } from "../persistence/observed-child-repository";
 import { MESSAGE_PROJECTION_COLUMNS } from "../persistence/stream-text-storage";
 import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
 import { DELEGATED_TASK_PROJECTION, DELEGATION_MAILBOX_PROJECTION } from "./delegation-projector";
 import { delegatedResultPreview, delegatedResultText } from "./delegation-text";
 import { commandFingerprint } from "./json";
 
-export type LiveNativeChildren = (conversationId: string, turnId: string) => number;
+/** Live provider-managed agents in any of the given turns of a conversation. */
+export type LiveNativeChildren = (conversationId: string, turnIds: readonly string[]) => number;
 
 export interface DelegationTurnRow {
   id: string;
@@ -65,11 +66,24 @@ const NOT_ROLLED_BACK = `NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS 
 const NOT_WATCHER_WAKE = "NOT EXISTS (SELECT 1 FROM watcher_wakes AS wake WHERE wake.watcher_turn_id = turn.id)";
 const BY_END = "ORDER BY turn.completed_at DESC, turn.requested_at DESC, turn.id DESC";
 const TURN_COLUMNS = "turn.id, turn.run_id, turn.conversation_id, turn.status, turn.terminal_reason, turn.terminal_assistant_message_id, turn.started_at";
+const NATIVE_CHILD_TURNS = 64;
+const UNATTACHED = "NOT EXISTS (SELECT 1 FROM delegated_task_turns AS attached WHERE attached.child_turn_id = turn.id)";
+/**
+ * A delegated-completion wake whose delivered tasks all started from turns attached to a task matching `owner`
+ * (`= ?` or `<> ?`). Wakes admitted while a follow-up is open are attached to it; this places wakes an older
+ * version left unattached, one level deep, as T3's `delegatedTaskRuns` places untagged wake runs.
+ */
+const wakeOfTasks = (owner: "= ?" | "<> ?") => `EXISTS (SELECT 1 FROM messages AS wake
+    WHERE wake.id = turn.user_message_id AND wake.delegated_completion_json IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM json_each(wake.delegated_completion_json, '$.taskIds') AS item
+        WHERE NOT EXISTS (SELECT 1 FROM delegated_tasks AS delivered
+          JOIN delegated_task_turns AS source ON source.child_turn_id = delivered.source_turn_id
+          WHERE delivered.task_id = item.value AND source.task_id ${owner})))`;
 export const UNRESOLVED_TASK_SQL = `(status = 'running' OR delivery_state IN ('pending','claimed')
   OR (delivery_state IS NULL AND wake_armed = 1 AND completion_wake <> 'never'))`;
 
 export function defaultLiveNativeChildren(database: Database.Database): LiveNativeChildren {
-  return (conversationId, turnId) => observedLiveNativeChildren(database, conversationId, turnId).count;
+  return (conversationId, turnIds) => liveNativeChildCount(database, conversationId, turnIds);
 }
 
 export class DelegationReads {
@@ -133,13 +147,34 @@ export class DelegationReads {
     return row ? row.archived_at !== null : null;
   }
 
+  /**
+   * Whether `turn` is one of the task's own turns, as SQL over the alias `turn`. A follow-up owns the turns attached
+   * to it (its sends and steers, and the wakes admitted while it is open) and an unattached wake of its own tasks. An
+   * original task owns every other turn of its chat: not attached to another task, and not an unattached wake of
+   * another task's tasks. So no turn has two owners.
+   */
+  private ownTurn(task: DelegatedTask): { sql: string; parameters: string[] } {
+    return task.kind === "original"
+      ? { sql: `(NOT EXISTS (SELECT 1 FROM delegated_task_turns AS other WHERE other.child_turn_id = turn.id
+          AND other.task_id <> ?) AND NOT (${UNATTACHED} AND ${wakeOfTasks("<> ?")}))`,
+        parameters: [task.taskId, task.taskId] }
+      : { sql: `(EXISTS (SELECT 1 FROM delegated_task_turns AS attached WHERE attached.child_turn_id = turn.id
+          AND attached.task_id = ?) OR (${UNATTACHED} AND ${wakeOfTasks("= ?")}))`,
+        parameters: [task.taskId, task.taskId] };
+  }
+
+  /** Whether the turn is one of the task's own turns (`ownTurn`). */
+  ownsTurn(task: DelegatedTask, turnId: string): boolean {
+    const own = this.ownTurn(task);
+    return this.database.prepare(`SELECT 1 FROM agent_turns AS turn WHERE turn.id = ? AND turn.conversation_id = ?
+      AND ${own.sql}`).get(turnId, task.childConversationId, ...own.parameters) !== undefined;
+  }
+
   evaluate(task: DelegatedTask): DelegatedWorkEvaluation {
     const child = task.childConversationId;
-    const taskTurns = task.kind === "original"
-      ? `FROM agent_turns AS turn WHERE turn.conversation_id = ?`
-      : `FROM agent_turns AS turn JOIN delegated_task_turns AS owned ON owned.child_turn_id = turn.id
-        WHERE turn.conversation_id = ? AND owned.task_id = ?`;
-    const parameters = task.kind === "original" ? [child] : [child, task.taskId];
+    const own = this.ownTurn(task);
+    const taskTurns = `FROM agent_turns AS turn WHERE turn.conversation_id = ? AND ${own.sql}`;
+    const parameters = [child, ...own.parameters];
     const latestTurn = this.database.prepare(`SELECT ${TURN_COLUMNS} ${taskTurns}
       ORDER BY turn.requested_at DESC, turn.id DESC LIMIT 1`).get(...parameters) as DelegationTurnRow | undefined ?? null;
     const latestTerminalTurn = this.database.prepare(`SELECT ${TURN_COLUMNS} ${taskTurns} AND turn.status IN ${TERMINAL}
@@ -151,13 +186,22 @@ export class DelegationReads {
       .find((turn) => turn.id === task.firstChildTurnId || this.startCrossed(turn)) ?? null;
     const evaluation = (workState: DelegatedWorkState): DelegatedWorkEvaluation =>
       ({ workState, hasPendingChildTurns: pending, resultTurn, latestTurn, latestTerminalTurn });
-    if (pending || !resultTurn || this.continuationPending(child) || this.limitResetHeld(child, latestTurn)) {
+    const continuation = this.database.prepare(`SELECT 1 FROM restart_continuation_plans AS plan
+      JOIN agent_turns AS turn ON turn.id = plan.interrupted_turn_id
+      WHERE plan.conversation_id = ? AND plan.state IN ('waiting','dispatching') AND turn.conversation_id = ? AND ${own.sql}
+      LIMIT 1`).get(child, child, ...own.parameters) !== undefined;
+    if (pending || !resultTurn || continuation || this.limitResetHeld(child, latestTurn)) {
       return evaluation("working");
     }
-    const childLatest = this.latestTurn(child);
-    if ((childLatest && this.liveNativeChildren(child, childLatest.id) > 0)
-      || this.database.prepare(`SELECT 1 FROM delegated_tasks WHERE parent_conversation_id = ? AND ${UNRESOLVED_TASK_SQL} LIMIT 1`)
-        .get(child) !== undefined) return evaluation("waiting_for_children");
+    // Only work the task's own turns started holds it (T3 b79d277cd): native children of its turns (the newest 64)
+    // and tasks delegated from its turns. A follow-up does not wait on what the original or the user started.
+    const ownTurnIds = (this.database.prepare(`SELECT turn.id ${taskTurns} ORDER BY turn.requested_at DESC, turn.id DESC
+      LIMIT ${NATIVE_CHILD_TURNS}`).all(...parameters) as { id: string }[]).map(({ id }) => id);
+    if (this.liveNativeChildren(child, ownTurnIds) > 0
+      || this.database.prepare(`SELECT 1 FROM delegated_tasks WHERE parent_conversation_id = ? AND ${UNRESOLVED_TASK_SQL}
+        AND source_turn_id IN (SELECT turn.id ${taskTurns}) LIMIT 1`).get(child, ...parameters) !== undefined) {
+      return evaluation("waiting_for_children");
+    }
     return evaluation("result_available");
   }
 
@@ -179,7 +223,32 @@ export class DelegationReads {
       return { turnId, runId, status, messageId, failureSummary: summary };
     }
     const evaluated = evaluation ?? this.evaluate(task);
-    return evaluated.workState === "result_available" && evaluated.resultTurn ? this.outcomeFromTurn(evaluated.resultTurn) : null;
+    if (evaluated.workState !== "result_available" || !evaluated.resultTurn) return null;
+    const outcome = this.outcomeFromTurn(evaluated.resultTurn);
+    if (outcome?.status !== "completed" || outcome.messageId !== null) return outcome;
+    return { ...outcome, messageId: this.earlierReport(task, evaluated.resultTurn) };
+  }
+
+  /**
+   * The report of a result turn that completed without assistant text (T3 `delegatedTaskReportRuns`): the newest
+   * assistant message among the task's earlier completed turns, by end time. Watcher wakes and rolled-back turns are
+   * left out of the 64 candidates, and turns that never started are skipped. The search ends at a turn that did not
+   * complete or is not the task's own (`ownTurn`); for a follow-up, a user's own message in the chat is not.
+   */
+  private earlierReport(task: DelegatedTask, result: DelegationTurnRow): string | null {
+    const own = this.ownTurn(task);
+    const rows = this.database.prepare(`SELECT ${TURN_COLUMNS}, ${own.sql} AS own_turn
+      FROM agent_turns AS turn
+      WHERE turn.conversation_id = ? AND ${NOT_WATCHER_WAKE} AND ${NOT_ROLLED_BACK}
+        AND (turn.completed_at, turn.requested_at, turn.id) < (SELECT completed_at, requested_at, id FROM agent_turns WHERE id = ?)
+      ${BY_END} LIMIT ${RESULT_CANDIDATES}`).all(...own.parameters, result.conversation_id, result.id) as
+      (DelegationTurnRow & { own_turn: number })[];
+    for (const turn of rows) {
+      if (!this.startCrossed(turn)) continue;
+      if (!turn.own_turn || turn.status !== "completed") return null;
+      if (turn.terminal_assistant_message_id !== null) return turn.terminal_assistant_message_id;
+    }
+    return null;
   }
 
   resultView(task: DelegatedTask): DelegatedTaskResultView | null {
@@ -285,11 +354,6 @@ export class DelegationReads {
   private messageContent(messageId: string): string | null {
     return (this.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages WHERE messages.id = ?`)
       .get(messageId) as { content: string } | undefined)?.content ?? null;
-  }
-
-  private continuationPending(conversationId: string): boolean {
-    return this.database.prepare(`SELECT 1 FROM restart_continuation_plans WHERE conversation_id = ?
-      AND state IN ('waiting','dispatching')`).get(conversationId) !== undefined;
   }
 
   private limitResetHeld(conversationId: string, latest: DelegationTurnRow | null): boolean {

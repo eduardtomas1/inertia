@@ -4,6 +4,7 @@ import {
   type DelegatedTaskView,
 } from "../../../shared/orchestration-delegation";
 import type { ProviderId } from "../../../shared/provider";
+import { HOST_TOOL_APPROVAL_TIMEOUT_MS } from "../../provider/host-tool-runtime";
 
 export type DelegatedWaitOutcome = "terminal" | "needs_action" | "timeout";
 
@@ -27,11 +28,20 @@ export function clampDelegatedWaitTimeout(value: number | undefined): number {
  * bridge both use Node fetch, whose headers timeout is 300 s, and the host MCP
  * server answers only when the call completes. A dropped call loses the task
  * handle and, on the stdio bridge, ends the bridge for the rest of the turn.
- * The same providers and value bound secret waits.
+ * The same providers and value bound secret waits. The wait itself is at most
+ * 45 s, so the budget only shortens it when the user's approval and the
+ * chat's creation took more than 225 s of the call.
+ *
+ * On OpenCode a delegated wait call keeps the bound it had when the wait
+ * server's timeout followed the wait: the approval's 5 min, the 45 s wait and
+ * 30 s, 375 s from the call's start. An approval near its limit followed by a
+ * slow isolated-worktree creation shortens the wait, and the call stays well
+ * inside the 16 min `inertia-chat-waits` timeout.
  */
 export const DELEGATED_WAIT_CALL_BUDGET_MS: Readonly<Partial<Record<ProviderId, number>>> = Object.freeze({
   cursor: 270_000,
   kimi: 270_000,
+  opencode: HOST_TOOL_APPROVAL_TIMEOUT_MS + DELEGATION_WAIT_MAX_MS + 30_000,
   pi: 270_000,
 });
 

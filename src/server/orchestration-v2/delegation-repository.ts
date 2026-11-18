@@ -211,6 +211,30 @@ export class DelegationRepository {
     });
   }
 
+  /**
+   * A delegated-completion wake admitted in a child chat continues the follow-up that is open there, whichever tasks
+   * it delivers (T3 tags a notification run with the open follow-up). Runs in the transaction that admits the turn.
+   */
+  attachWake(childConversationId: string, wakeTurnId: string): DelegatedTask | null {
+    const open = this.openFollowUps(childConversationId).at(-1);
+    return open ? this.attach(open.taskId, wakeTurnId, "continuation") : null;
+  }
+
+  /**
+   * A usage-limit resume or restart continuation continues the task whose turn it resumes (T3: a continuation run
+   * keeps the continued run's task). Only an open follow-up needs the attachment; an original owns unattached turns.
+   */
+  attachContinuation(childConversationId: string, interruptedTurnId: string, turnId: string): DelegatedTask | null {
+    const owner = this.openFollowUps(childConversationId).find((task) => this.reads.ownsTurn(task, interruptedTurnId));
+    return owner ? this.attach(owner.taskId, turnId, "continuation") : null;
+  }
+
+  /** Follow-ups of the chat with no result that were not cancelled (T3 skips a task with `cancelledRunId`). */
+  private openFollowUps(childConversationId: string): DelegatedTask[] {
+    return this.reads.tasks("child_conversation_id = ? AND kind = 'follow-up' AND result_turn_id IS NULL", childConversationId)
+      .filter(({ result, delivery }) => result === null && !isTerminalDelegatedDeliveryState(delivery.state));
+  }
+
   finalizeIfReady(taskId: string): DelegationChange {
     return this.transaction(() => {
       const task = this.requireTask(taskId);

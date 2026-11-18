@@ -165,10 +165,10 @@
       "opencode": 484
     },
     "inertia_delegate_task": {
-      "claude": 1800,
-      "codex": 1694,
-      "cursorKimi": 1800,
-      "opencode": 1800
+      "claude": 1824,
+      "codex": 1718,
+      "cursorKimi": 1824,
+      "opencode": 1824
     },
     "inertia_get_task_status": {
       "claude": 421,
@@ -177,10 +177,10 @@
       "opencode": 421
     },
     "inertia_wait_for_task": {
-      "claude": 508,
-      "codex": 404,
-      "cursorKimi": 508,
-      "opencode": 508
+      "claude": 492,
+      "codex": 388,
+      "cursorKimi": 492,
+      "opencode": 492
     },
     "inertia_cancel_task": {
       "claude": 599,
@@ -246,20 +246,20 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 28596,
-      "withoutBrowser": 17175
+      "withBrowser": 28604,
+      "withoutBrowser": 17183
     },
     "codex": {
-      "withBrowser": 24512,
-      "withoutBrowser": 14768
+      "withBrowser": 24520,
+      "withoutBrowser": 14776
     },
     "cursorKimi": {
-      "withBrowser": 28606,
-      "withoutBrowser": 17176
+      "withBrowser": 28614,
+      "withoutBrowser": 17184
     },
     "opencode": {
-      "withBrowser": 28596,
-      "withoutBrowser": 17175
+      "withBrowser": 28604,
+      "withoutBrowser": 17183
     }
   }
 }

@@ -8,6 +8,7 @@ import { vi } from "vitest";
 
 import type { AgentApprovalRequest, AgentInputRequest, AgentTurn, Conversation } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
+import type { BeginAgentTurnInput } from "../../src/server/persistence/types";
 import type { ProviderHostToolCall, ProviderHostToolResult } from "../../src/server/provider/contracts";
 import type { AgentApprovalDecision } from "../../src/server/provider/interactions";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
@@ -68,9 +69,9 @@ export function settleTurnRow(store: RuntimeStore, database: Database.Database, 
     WHERE id = ?`).run(status, status, reason, message?.id ?? null, turnId);
 }
 
-export function beginStoreTurn(store: RuntimeStore, conversationId: string, content: string) {
+export function storeTurnInput(store: RuntimeStore, conversationId: string, content: string): BeginAgentTurnInput {
   const conversation = store.conversation(conversationId);
-  return store.beginAgentTurn({
+  return {
     id: randomUUID(), conversationId, runId: randomUUID(), content, activateConversation: false,
     providerId: conversation.providerId, harnessId: conversation.modelSelection.harnessId,
     backendProfileId: conversation.modelSelection.backendProfileId, model: conversation.modelSelection.modelId,
@@ -78,7 +79,17 @@ export function beginStoreTurn(store: RuntimeStore, conversationId: string, cont
     interactionMode: conversation.interactionMode, accessMode: conversation.accessMode, providerSessionBefore: null,
     usageAtStart: null, configurationRevision: conversation.modelSelection.backendConfigurationRevision,
     association: "authoritative",
-  });
+  };
+}
+
+/**
+ * Persists a turn without orchestration admission (`beginAgentTurn`), so nothing is attached to a delegated task;
+ * with `admit`, through `beginOrchestratedAgentTurn` as the runtime admits it.
+ */
+export function beginStoreTurn(store: RuntimeStore, conversationId: string, content: string,
+  extra: Pick<BeginAgentTurnInput, "delegatedCompletion" | "queuedMessageId"> = {}, options: { admit?: boolean } = {}) {
+  const input = { ...storeTurnInput(store, conversationId, content), ...extra };
+  return options.admit ? store.beginOrchestratedAgentTurn(input) : store.beginAgentTurn(input);
 }
 
 function fakeTurns(store: RuntimeStore, database: Database.Database, onSettled: (turn: AgentTurn) => void) {
@@ -147,7 +158,8 @@ export async function createDelegationManagerFixture(options: { pollMs?: number 
     pending.add(tracked);
   };
   const turns = fakeTurns(store, database, (turn) => track(service.onTurnSettled(turn)));
-  store.orchestration.delegation.useLiveNativeChildren((conversationId, turnId) => live.get(`${conversationId}:${turnId}`) ?? 0);
+  store.orchestration.delegation.useLiveNativeChildren((conversationId, turnIds) =>
+    turnIds.reduce((count, turnId) => count + (live.get(`${conversationId}:${turnId}`) ?? 0), 0));
   service = new DelegationTaskService({
     store, turns: turns as never, interactions: { approvals, inputs }, pollMs: options.pollMs ?? 5,
     queue: () => ({

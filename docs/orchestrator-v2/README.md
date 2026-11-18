@@ -16,6 +16,9 @@ Research date: **2026-10-29**. The research phase is complete. The user subseque
 | [T3 orchestration study](t3code-orchestration.md) | Domain model, transaction/outbox boundary, provider transitions, handoff/fork/delegation, recovery, MCP and migration. |
 | [T3 evolution](t3code-evolution.md) | Original merge versus stable releases/current source, later corrections and stale-documentation findings. |
 | [T3 delta to 2026-10-31](t3code-delta-2026-10-31.md) | Upstream changes from `32ecd717` to `15fe2832` against Inertia, with anchors, Inertia status and phase-3 polish decisions. |
+| [T3 delta to 2026-11-14](t3code-delta-2026-11-14.md) | Re-baseline from `15fe2832` to `b05c505b`: per-area status against Inertia, the consolidated adopt list and the deliberate differences. |
+| [T3 delta to 2026-11-17](t3code-delta-2026-11-17.md) | Addendum from `b05c505b` to `b387e3a17`: changed decisions (queue delivery order, delegated waits) and additions to the adopt list. |
+| [Phase 5 queue design](phase5-queue-design.md) | Durable queue design and its decisions, checked against T3's current orchestrator. |
 | [Announcement coverage](announcement-coverage.md) | Where each visible feature category from the supplied posts/screenshots was investigated, with evidence levels. |
 | [T3 source map](t3code-source-map.md) | 28 source groups and concrete implementation landmarks, pinned to the audited commit. |
 | [Verification](verification.md) | Executed checks, results and behavior not exercised. |

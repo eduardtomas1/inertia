@@ -210,6 +210,15 @@ export class OrchestratedTurnRepository {
         this.history.attach(conversation.id, conversation.projectId, pending.rollbackId, turn.runId);
       }
       this.mergeBacks.attach(conversation.id, input.conversationContextPacketIds ?? [], turn.runId, queued.message.id);
+      if (input.delegatedCompletion) this.delegation.attachWake(conversation.id, turn.id);
+      const resumedTurnId = input.limitResetPlanId
+        ? (this.database.prepare("SELECT failed_turn_id AS id FROM usage_limit_resume_plans WHERE id = ?")
+          .get(input.limitResetPlanId) as { id: string } | undefined)?.id
+        : input.restartContinuationPlanId
+          ? (this.database.prepare("SELECT interrupted_turn_id AS id FROM restart_continuation_plans WHERE id = ?")
+            .get(input.restartContinuationPlanId) as { id: string } | undefined)?.id
+          : undefined;
+      if (resumedTurnId) this.delegation.attachContinuation(conversation.id, resumedTurnId, turn.id);
       return queued;
     }).immediate();
   }

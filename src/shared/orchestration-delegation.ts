@@ -12,9 +12,12 @@ export const MAX_DELEGATED_TASK_SUMMARIES = 50;
 export const MAX_DELEGATED_RESULT_PREVIEW_CHARS = 1_000;
 export const MAX_DELEGATED_TASK_TITLE_CHARS = 120;
 export const MAX_DELEGATED_FAILURE_SUMMARY_CHARS = 1_000;
-/** Nothing is written while a wait blocks, and MCP clients built on Node fetch drop a call silent for 300 s. */
-export const DELEGATION_WAIT_DEFAULT_MS = 240_000;
-export const DELEGATION_WAIT_MAX_MS = 1_800_000;
+/**
+ * A delegated wait returns its task handle before common MCP client timeouts expire (T3 5393882fb): 30 s by default
+ * and at most 45 s. A longer request is clamped, not refused. A timeout does not cancel the task.
+ */
+export const DELEGATION_WAIT_DEFAULT_MS = 30_000;
+export const DELEGATION_WAIT_MAX_MS = 45_000;
 
 export const DELEGATED_TASK_KINDS = ["original", "follow-up"] as const;
 export const DELEGATED_TASK_STATUSES = ["running", "completed", "failed", "cancelled", "interrupted"] as const;

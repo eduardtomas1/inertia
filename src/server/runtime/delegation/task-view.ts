@@ -24,8 +24,7 @@ export function activeTaskTurn(delegation: DelegationRepository, task: Delegated
   if (task.result) return null;
   const latest = delegation.reads.latestTurn(task.childConversationId);
   if (!latest || isAgentTurnTerminalStatus(latest.status)) return null;
-  const owner = delegation.reads.taskForChildTurn(latest.id);
-  return owner === task.taskId || (task.kind === "original" && owner === null) ? { id: latest.id, runId: latest.run_id } : null;
+  return delegation.reads.ownsTurn(task, latest.id) ? { id: latest.id, runId: latest.run_id } : null;
 }
 
 export function taskNeedsAction(delegation: DelegationRepository, interactions: DelegationInteractions,

@@ -1,11 +1,16 @@
 # Phase 5 design: durable queues
 
-Status: design for review, 2026-11-09; decisions re-answered 2026-11-14.
+Status: design for review, 2026-11-09; decisions re-answered 2026-11-14 and
+re-checked on 2026-11-17.
 Nothing in this document is implemented. It reconstructs the Phase 5 design
 from the code on `orchestrator-v2` at `652ba6c18`. Section 1.2 describes T3
 Code at the audited pin `15fe2832`; sections 2 to 5 follow T3 Code's current
 orchestrator at `b05c505b` (2026-11-14), compared commit by commit in
-[t3code-delta-2026-11-14.md](t3code-delta-2026-11-14.md).
+[t3code-delta-2026-11-14.md](t3code-delta-2026-11-14.md). The decisions that
+T3 changed between `b05c505b` and `b387e3a17` (2026-11-17) are updated in
+place and marked "(updated 2026-11-17)"; the commits are in
+[t3code-delta-2026-11-17.md](t3code-delta-2026-11-17.md). Anchors marked `O:`
+and `CP:` in those updates are against `b387e3a17`.
 
 Rule for every decision: T3 Code's current orchestrator is the reference.
 Inertia keeps a deliberate difference only where an invariant in `AGENTS.md`
@@ -417,6 +422,15 @@ stop-and-send in place of T3's same-run `interrupt_restart`:
    Send now uses the stop-and-send mechanism (decision 4.6): the run is
    stopped and the item runs next. The renderer labels the action **Stop and
    send** in that case, so the user sees what will happen before choosing it.
+   Exception (updated 2026-11-17, T3 `0597532f1`): when the only reason for
+   the restart is that the item's selection is on another provider instance,
+   and the target harness cannot interrupt-restart (T3
+   `providerSwitchWaitsForTurn` = `supportsQueuedMessages &&
+   !(supportsInterrupt && supportsSteeringByInterruptRestart)`, `CP:136-145`;
+   today Claude and Pi), the item queues behind the turn instead. The run is
+   not stopped and the action is labelled as queueing. Codex, OpenCode and
+   Cursor SDK keep stop-and-send. The explicit **Stop and send** action (4.6)
+   is unchanged.
 3. When the harness can neither steer nor interrupt, Send now is refused, as
    T3 refuses (`CP:278-288`).
 
@@ -434,13 +448,29 @@ compaction follows decision N4.
 
 At a turn boundary the order is: a waiting limit-reset resume (it runs before
 the queue because the queue stays held after a failed turn, matching T3
-`cbb0417df`), then delegated results, then every other item by position.
-Watcher notes no longer form a class after user items (decision 4.2). A
-restart continuation keeps today's rule: it is not planned while items wait
-and an app-update interrupt releases the queue instead. Any manual Send of a
-user item still dispatches a waiting delegated delivery first (Phase 4 rule,
-`queued-message-runtime.ts:105-108`; T3 keeps an unheld delegated result ahead
-of a stop-and-send item, `O:7525-7540`).
+`cbb0417df`), then the queue in delivery order. Updated 2026-11-17 (T3
+`4c8cb0445`, `QueuedRunOrder.ts:13-50`): delegated deliveries and the other
+items each keep their own order (position, then sequence), and the two lists
+merge by request time, with a delivery winning a tie. The request time of
+Inertia's coalesced per-conversation delivery is that of its earliest
+undelivered completion. A stop-and-send item is stamped with the time of the
+Send, so results that arrived before it still go first, which is T3's
+`O:7525-7540` behaviour, now produced by the order function alone. Watcher
+notes no longer form a class after user items (decision 4.2). A restart
+continuation keeps today's rule: it is not planned while items wait and an
+app-update interrupt releases the queue instead.
+
+The Phase 4 rule "any manual Send of a user item dispatches a waiting
+delegated delivery first" (`queued-message-runtime.ts:105-108`) is dropped
+(updated 2026-11-17). It was never T3's: T3's `queued-run.start` starts the
+selected item and refuses automatic items as targets (`O:15295-15318`,
+unchanged since `b05c505b`), and no AGENTS.md invariant requires the rule.
+Send now on a chosen item starts that item. A Send to an idle chat while
+unheld items wait starts the next queued item first, and the new message
+waits behind it; restart continuations are exempt (T3 `7a72fe301`,
+`O:15529`). Today the drain after settlement is asynchronous
+(`queued-message-runtime.ts:632`), so package 2 needs a race test for that
+gap.
 
 Holds follow T3: Stop holds every queued item and cancels buffered provider
 wakes (`O:12560-12588`); a provider failure on the same instance, a disabled
@@ -498,10 +528,22 @@ lane section, and follows T3 `737afe24b`
 (`ProviderRuntimeRecoveryService.ts:331-443`):
 
 - `dispatching` with no accepted run: `queue.item-released (runtime-lost)`.
-- Delivered to a run that never reached the provider (no provider start, no
-  native turn, no pending request), user items only: `queue.item-requeued`
-  at the **front**, positions 1..n in their original order ahead of the items
-  already waiting.
+- Delivered to a run that never reached the provider, user items only:
+  `queue.item-requeued` at the **front**, positions 1..n in their original
+  order ahead of the items already waiting. Updated 2026-11-17 (T3
+  `34204a39e`, `rewindUnacceptedRuns`, `ProviderRuntimeRecoveryService.ts:220-260`):
+  "never reached the provider" means that no attempt of the run has a
+  provider-turn observation and none has a pending request. It is never
+  decided from the turn status, because a run is marked running before its
+  provider accepts the prompt.
+- Unattended prompts that never reached the provider (agent-sent through
+  `inertia_send_message`, and scheduled prompts once they exist) are sent
+  again after boot, as T3 does when restart continuation is on
+  (`:440-500`). Each resend is a new attempt, admitted only after boot
+  confirms cleanup, so no same-run restart is written. A run is resent at
+  most three times (`MAX_RESENDS`, `:62`), and never after a Stop recorded on
+  it or on the run that delegated it. This lands in the recovery phase;
+  package 2 only records how such items are marked.
 - The whole queue is held with reason `restart`. Buffered provider
   notifications are exempt, as in T3.
 - Automatic items are not requeued; their owners (delegation recovery,
@@ -532,9 +574,10 @@ migration first, every number below moves up again.
   ('run','steer','after-stop'))`, `hold_reason TEXT`, `origin TEXT`,
   `skips_hold INTEGER NOT NULL DEFAULT 0`, `steer_when_ready_run_id TEXT` and
   `steer_fallback_json TEXT` (JSON-valid, bounded). It backfills `position`
-  for active rows in one FIFO sequence from today's order (delegated rows
-  first, then the rest by `sequence`) and adds an index on
-  `(conversation_id, state, position)`. The `state` CHECK is unchanged;
+  for active rows other than delegated deliveries by `sequence`, and adds an
+  index on `(conversation_id, state, position)`. A delegated delivery is
+  ordered by its request time (updated 2026-11-17, section 2.6), so it needs
+  no position. The `state` CHECK is unchanged;
   "held" is a thread property and "delivered" stays `accepted` in the table.
 - **125 `PersistQueueItemSelection`** (package 3). Adds `selection_json`
   (JSON-valid, bounded). There is no `access_ceiling` column (decision 4.3).
@@ -582,9 +625,11 @@ Tests (unit and integration, `*.test.ts`): new
 `orchestration-command-authority.test.ts`.
 
 Acceptance:
-- Delivery order: delegated results first, then every item by position,
-  watcher notes included; blocked watcher skipped (port of T3
-  `QueuedRunOrder.test.ts:6`).
+- Delivery order: delegated deliveries and the other items, each in their own
+  order, merged by request time with a delivery winning a tie; watcher notes
+  are ordinary items; blocked watcher skipped (port of T3
+  `QueuedRunOrder.test.ts` at `b387e3a17`, "delivers completions and queued
+  messages in request order").
 - Reorder refuses automatic items and positions ahead of delegated results
   (T3 `O:11394-11440`); reorder of a dispatched item is refused.
 - Edit with a stale `expectedRevision` is refused; edit of a dispatching
@@ -850,8 +895,12 @@ Monitor notes follow the current selection (`O:976-994`), never steer
 (`0af2d2164`, `O:1116-1126`, `:2383-2391`). User-first order was an Inertia
 product promise (`docs/user/watcher.md:84`), not an invariant.
 
+Updated 2026-11-17: T3 `4c8cb0445` replaced "completions first" with a merge
+by request time (section 2.6), so `QueuedRunOrder.ts` is no longer
+byte-unchanged.
+
 Inertia follows T3: watcher notes take positions with user items, delegated
-results stay first, and a watcher note whose source review is stale (a newer
+deliveries merge with them by request time, and a watcher note whose source review is stale (a newer
 note from the same watcher exists, or the turn it reviewed was rolled back)
 is cancelled at queued start with reason `stale`. This removes a priority
 class from the order function and from migration 124's index. A note can
@@ -990,8 +1039,12 @@ promoted item steers with its own selection; a mode change restarts the queue.
 The current refusal (`conversation-commands.ts:60`, `:585`, `:623`) is
 Inertia's own choice, not an invariant.
 
-Inertia follows T3 as described in section 2.7. Live effort apply is a
-separate Claude-only provider item with portable fixtures. No
+Inertia follows T3 as described in section 2.7. Live apply is a separate
+provider item per adapter, each with portable fixtures (updated 2026-11-17):
+Claude effort and flags, and Codex `serviceTier` through
+`thread/settings/update`, which must survive a retried attempt (T3
+`8009cd8c3`, `ea6d3fc30`). A Claude `setModel` echo is not a wake
+(`3eadb214e`). No
 configuration-only rows. Which composer submissions name a selection must
 match T3's web composer; check it when Package 3 starts (not verified here).
 
@@ -1029,6 +1082,13 @@ Inertia requeues user items whose run never reached the provider, at the
 front in their original order, holds the whole queue, and never requeues
 automatic items or anything with evidence of delivery (section 2.9).
 
+Updated 2026-11-17 (T3 `34204a39e`): "never reached the provider" is decided
+from provider-turn observations on every attempt, not from the turn status.
+Unattended prompts (agent-sent, later scheduled) are resent after boot at
+most three times, and never after a recorded Stop on the run or on the run
+that delegated it (section 2.9; recovery phase). Delegated deliveries and
+notifications are still never requeued.
+
 ### 4.11 Decisions added from current T3
 
 | # | Decision | T3 at `b05c505b` | Inertia | Package |
@@ -1039,7 +1099,7 @@ automatic items or anything with evidence of delivery (section 2.9).
 | N4 | Steering during compaction | Only where `activeSteeringDuringCompaction` (Codex) and only during automatic compaction; `/compact` always blocks (`b3f5d5270`) | **Decided (follows T3 b05c505b).** Behind `steerDuringCompaction` with a Codex portable fixture; until it lands the queue keeps skipping compaction (`queued-message-runtime.ts:128`) | 4, S–M |
 | N5 | Model for an item that names none | The last queued run's selection (`4168c14c7`) | **Decided (follows T3 b05c505b).** Section 2.7 | 3, S |
 | N6 | Fresh-context items | Never steer; reserve a fresh provider thread (`e139768a7`, `C:760`, `C:3356`) | **Decided (follows T3 b05c505b), dormant.** `freshContext` is an item field that never steers; it gets a trigger only when fresh-context sends are adopted | — |
-| N7 | What Resume does | Resume continues the stopped or usage-limited run natively first (`manualContinuationOfRunId`, empty prompt; `9e19b7f7e`, `cbb0417df`), then releases the queue; hidden while a request is pending; Enter on an empty composer resumes (`5f4368165`, `packages/client-runtime/src/state/threadExecution.ts:309-336`) | **Decided (follows T3 b05c505b).** `message.queue.resume` continues the interrupted run when its provider can continue it natively, else releases the hold and starts the next item. Hidden while a question or approval is pending. Native continuation per provider is a provider item (adapter `resumeTurn`); until a harness has it, Resume releases and starts | 2 and 5, M |
+| N7 | What Resume does | Resume continues the stopped or usage-limited run natively first (`manualContinuationOfRunId`, empty prompt; `9e19b7f7e`, `cbb0417df`), then releases the queue; hidden while a request is pending; Enter on an empty composer resumes (`5f4368165`, `packages/client-runtime/src/state/threadExecution.ts:309-336`) | **Decided (follows T3 b05c505b).** `message.queue.resume` continues the interrupted run when its provider can continue it natively, else releases the hold and starts the next item. Hidden while a question or approval is pending. Native continuation per provider is a provider item (adapter `resumeTurn`); until a harness has it, Resume releases and starts. Updated 2026-11-17: Resume is refused while workspace setup is pending or failed ("Retry worktree setup or choose a workspace before resuming the queue.", T3 `3209fa953`); images from a missed run force a prompted start, so the empty-prompt continue is skipped (`c2eb8f336`); Cursor SDK native resume needs the SDK upgrade from 1.0.38 (`0b308312d`) | 2 and 5, M |
 | N8 | Usage-limit hold scope | Per provider; automatic starts respect a future reset, an unknown reset lifts, a user start lifts (`8d236998d`, `O:1026-1045`) | **Decided (follows T3 b05c505b).** Section 2.6 | 3, S |
 | N9 | Messages after failed or stopped workspace setup | Held, never run in the project checkout, including `start_immediately` (`4225c9dfa`, `O:7317-7330`) | **Decided (follows T3 b05c505b).** Applies to isolated-workspace preparation; Inertia's failure path is not yet checked | 2, S |
 | N10 | Agent sends to a stopping chat | Queue (`c192c6786`) | **Decided (follows T3 b05c505b).** Check and align `inertia_send_message` | 4, S |
@@ -1072,7 +1132,10 @@ Kept, each with the reason that forces it:
 
 Closed on 2026-11-14 (Inertia now follows T3):
 
-- Watcher notes after user items: now FIFO with delegated results first (4.2).
+- Watcher notes after user items: now FIFO, with delegated deliveries merged
+  by request time (4.2, updated 2026-11-17).
+- Manual Send dispatching a waiting delegated delivery first (Phase 4 rule):
+  dropped on 2026-11-17; Send now starts the chosen item (2.6).
 - Per-item access ceiling with widening confirmation: removed (4.3).
 - Send now never restarting: it now resolves like T3's steering decision,
   with stop-and-send in place of interrupt-restart (2.5).

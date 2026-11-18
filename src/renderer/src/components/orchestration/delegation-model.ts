@@ -1,4 +1,11 @@
 import type { Conversation, ServerEvent } from "@shared/contracts";
+import {
+  DELEGATED_SINGLE_VERBS,
+  DELEGATED_UNKNOWN_OUTCOME_VERB,
+  delegatedOutcomeCounts,
+  delegatedOutcomeGroups,
+  delegatedWorstOutcome,
+} from "@shared/delegated-outcome";
 import type { ConversationDelegation, DelegatedTaskStatus, DelegatedTaskSummary } from "@shared/orchestration-delegation";
 import type { ObservedChildThread, ObservedChildUsage } from "@shared/observed-child-thread";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
@@ -86,16 +93,12 @@ export function childStatusLabel(asChild: NonNullable<ConversationDelegation["as
   return taskOutcomeLabel(asChild.status);
 }
 
-const SINGLE_VERBS: Record<DelegatedTaskStatus, string> = {
-  running: "is still running", completed: "finished", failed: "failed", cancelled: "stopped", interrupted: "was interrupted",
-};
-const BATCH_VERBS: Record<DelegatedTaskStatus, string> = {
-  running: "are still running", completed: "finished", failed: "failed", cancelled: "stopped", interrupted: "were interrupted",
-};
-const OUTCOME_PRECEDENCE: readonly DelegatedTaskStatus[] = ["failed", "cancelled", "interrupted", "running", "completed"];
 const NOTICE_LABEL_MAX_CHARS = 80;
 const SINGLE_LINE = /^Delegated task "(.+)" (finished|failed|stopped|was interrupted|is still running)$/u;
+// A wake line with one outcome verb, as every wake before grouped outcomes and every uniform batch writes it.
 const BATCH_LINE = /^(\d+)(?: of (\d+))? delegated tasks (finished|failed|stopped|were interrupted|are still running)(?:: (.+))?$/u;
+// A wake line with grouped outcomes. Only its counts are read; the outcomes come from the per-task headers.
+const GROUPED_LINE = /^(\d+)(?: of (\d+))? delegated tasks \(/u;
 const TASK_HEADER = /^Delegated task ([0-9a-f]{64}) \((.*)\) \[(running|completed|failed|cancelled|interrupted)\]:$/u;
 
 export interface CompletionTask {
@@ -150,20 +153,32 @@ export function completionSummary(taskIds: readonly string[], delegation: Conver
     const settled = summary && summary.status !== "running" ? summary.status : null;
     return { taskId, summary, label: summary?.title ?? payload?.label ?? null, status: settled ?? payload?.status ?? summary?.status ?? null };
   });
-  const parsed = parsedHeadline(content.split("\n", 1)[0]?.trim() ?? "", unique.length);
+  const line = content.split("\n", 1)[0]?.trim() ?? "";
+  const parsed = parsedHeadline(line, unique.length);
   if (parsed) return { ...parsed, title: parsed.labels ? `${parsed.headline}: ${parsed.labels}` : parsed.headline, tasks };
-  const statuses = tasks.flatMap(({ status }) => status ? [status] : []);
-  const outcome = OUTCOME_PRECEDENCE.find((status) => statuses.includes(status)) ?? "completed";
+  // The outcomes the wake delivered when its text names every task's, otherwise each task's own.
+  const statuses = delivered.size === unique.length ? unique.map((taskId) => delivered.get(taskId)!.status)
+    : tasks.flatMap(({ status }) => status ? [status] : []);
+  const outcome = delegatedWorstOutcome(statuses);
   const [only] = tasks;
   if (tasks.length === 1 && only?.label) {
-    const headline = `Delegated task "${noticeLabel(only.label)}" ${SINGLE_VERBS[only.status ?? outcome]}`;
+    const verb = only.status ? DELEGATED_SINGLE_VERBS[only.status] : DELEGATED_UNKNOWN_OUTCOME_VERB;
+    const headline = `Delegated task "${noticeLabel(only.label)}" ${verb}`;
     return { title: headline, headline, labels: null, tasks };
   }
+  const grouped = GROUPED_LINE.exec(line);
   const sources = new Set(tasks.flatMap(({ summary }) => summary ? [summary.sourceTurnId] : []));
   const cohort = rows.filter((row) => sources.has(row.sourceTurnId) || unique.includes(row.taskId)).length;
-  const total = Math.max(unique.length, cohort);
+  const total = grouped && Number(grouped[1]) === unique.length ? Math.max(unique.length, Number(grouped[2] ?? 0))
+    : Math.max(unique.length, cohort);
   const count = total > unique.length ? `${unique.length} of ${total}` : `${unique.length}`;
-  const headline = `${count} delegated ${unique.length === 1 ? "task" : "tasks"} ${(unique.length === 1 ? SINGLE_VERBS : BATCH_VERBS)[outcome]}`;
+  // Outcomes that are not known (a header the text does not carry, and no summary) are counted, never guessed.
+  const unknown = unique.length - statuses.length;
+  const verb = statuses.length === 0 ? DELEGATED_UNKNOWN_OUTCOME_VERB
+    : unique.length === 1 ? DELEGATED_SINGLE_VERBS[outcome]
+      : unknown === 0 ? delegatedOutcomeGroups(statuses)
+        : `(${[...delegatedOutcomeCounts(statuses), `${unknown} unknown`].join(", ")})`;
+  const headline = `${count} delegated ${unique.length === 1 ? "task" : "tasks"} ${verb}`;
   const known = tasks.flatMap(({ label }) => label ? [noticeLabel(label)] : []);
   const labels = known.length === tasks.length && known.length > 0 ? known.join(", ") : null;
   return { title: labels ? `${headline}: ${labels}` : headline, headline, labels, tasks };

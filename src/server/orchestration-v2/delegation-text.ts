@@ -4,6 +4,7 @@ import {
   MAX_DELEGATED_WAKE_BYTES,
   type DelegatedTaskStatus,
 } from "../../shared/orchestration-delegation";
+import { DELEGATED_SINGLE_VERBS, delegatedOutcomeGroups } from "../../shared/delegated-outcome";
 import { byteLength } from "../persistence/bounded-message-text";
 import { boundedUntrustedAgentText, neutralizeUntrustedAgentText, truncateUtf8 } from "../runtime/untrusted-agent-text";
 
@@ -18,23 +19,6 @@ export interface DelegatedWakeCohort {
   total: number;
 }
 
-const SINGLE_VERBS: Record<DelegatedTaskStatus, string> = {
-  running: "is still running",
-  completed: "finished",
-  failed: "failed",
-  cancelled: "stopped",
-  interrupted: "was interrupted",
-};
-
-const BATCH_VERBS: Record<DelegatedTaskStatus, string> = {
-  running: "are still running",
-  completed: "finished",
-  failed: "failed",
-  cancelled: "stopped",
-  interrupted: "were interrupted",
-};
-
-const OUTCOME_PRECEDENCE: readonly DelegatedTaskStatus[] = ["failed", "cancelled", "interrupted", "running", "completed"];
 const NOTICE_LABEL_MAX_CHARS = 80;
 
 export function delegatedTaskLabel(title: string): string {
@@ -63,17 +47,13 @@ export function delegatedNoticeLabel(title: string): string {
     ? `${characters.slice(0, NOTICE_LABEL_MAX_CHARS - 1).join("")}…` : characters.join("");
 }
 
-export function delegatedDeliveryOutcome(statuses: readonly DelegatedTaskStatus[]): DelegatedTaskStatus {
-  return OUTCOME_PRECEDENCE.find((status) => statuses.includes(status)) ?? "completed";
-}
-
 export function delegatedWakeSummary(entries: readonly Pick<DelegatedWakeEntry, "title" | "status">[], cohort: DelegatedWakeCohort): string {
   const [only] = entries;
-  if (entries.length === 1 && only) return `Delegated task "${delegatedNoticeLabel(only.title)}" ${SINGLE_VERBS[only.status]}`;
+  if (entries.length === 1 && only) return `Delegated task "${delegatedNoticeLabel(only.title)}" ${DELEGATED_SINGLE_VERBS[only.status]}`;
   const count = cohort.total > entries.length ? `${entries.length} of ${cohort.total}` : `${entries.length}`;
-  const verb = BATCH_VERBS[delegatedDeliveryOutcome(entries.map(({ status }) => status))];
   const labels = entries.map(({ title }) => delegatedNoticeLabel(title));
-  return `${count} delegated tasks ${verb}${labels.length ? `: ${labels.join(", ")}` : ""}`;
+  return `${count} delegated tasks ${delegatedOutcomeGroups(entries.map(({ status }) => status))}${labels.length
+    ? `: ${labels.join(", ")}` : ""}`;
 }
 
 export function delegatedWakeText(entries: readonly DelegatedWakeEntry[], cohort: DelegatedWakeCohort): string {

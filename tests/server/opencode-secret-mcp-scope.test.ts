@@ -10,11 +10,13 @@ import {
   OPENCODE_SECRET_MCP_TIMEOUT_MS,
   OPENCODE_WAIT_HOST_TOOLS,
   OPENCODE_WAIT_MCP_TIMEOUT_MS,
+  OPENCODE_WAIT_TOOL_WORK_MS,
 } from "../../src/server/provider/host-tool-mcp-config";
 import { HOST_TOOL_APPROVAL_TIMEOUT_MS } from "../../src/server/provider/host-tool-runtime";
 import { AGENT_CONTEXT_TOOL_DEFINITION } from "../../src/server/runtime/agent-context-tool";
 import { AGENT_THREAD_TOOL_DEFINITIONS } from "../../src/server/runtime/agent-thread-tool-definitions";
 import { DELEGATION_WAIT_MAX_MS } from "../../src/shared/orchestration-delegation";
+import { DELEGATED_WAIT_CALL_BUDGET_MS } from "../../src/server/runtime/delegation/task-wait";
 import { createOpenCodeHostTools, openCodePermissions, type OpenCodeHostTools } from "../../src/server/provider/opencode-host-tools";
 import { hostToolActivityTitle } from "../../src/shared/activity-display";
 import { SECRET_REQUEST_TOOL_NAME, SECRET_REQUEST_WAIT_MS_BY_PROVIDER } from "../../src/node/agent-secrets";
@@ -149,6 +151,14 @@ describe("OpenCode secret request MCP scope", () => {
       [INERTIA_WAIT_MCP_NAME, OPENCODE_WAIT_MCP_TIMEOUT_MS],
     ]);
     expect(OPENCODE_WAIT_MCP_TIMEOUT_MS).toBeGreaterThan(HOST_TOOL_APPROVAL_TIMEOUT_MS + DELEGATION_WAIT_MAX_MS);
+    // A 45 s wait alone outlasts the main server's 30 s, so the wait tools stay on their own server.
+    expect(DELEGATION_WAIT_MAX_MS).toBeGreaterThan(30_000);
+    // The server also carries creation (an isolated worktree) and the 5 min context chooser after an approval, so its
+    // timeout does not follow the delegated wait's maximum; the wait call keeps its own 375 s budget.
+    expect(OPENCODE_WAIT_MCP_TIMEOUT_MS).toBe(HOST_TOOL_APPROVAL_TIMEOUT_MS + OPENCODE_WAIT_TOOL_WORK_MS + 60_000);
+    expect(OPENCODE_WAIT_MCP_TIMEOUT_MS).toBe(960_000);
+    expect(OPENCODE_WAIT_TOOL_WORK_MS).toBeGreaterThan(5 * 60_000 + DELEGATION_WAIT_MAX_MS);
+    expect(DELEGATED_WAIT_CALL_BUDGET_MS.opencode).toBeLessThan(OPENCODE_WAIT_MCP_TIMEOUT_MS);
     const [main, waits] = added as [AddedServer, AddedServer];
     const names = async (server: AddedServer) => ((await rpc(server, { jsonrpc: "2.0", id: 1, method: "tools/list" }))
       .result as { tools: Array<{ name: string }> }).tools.map(({ name }) => name).sort();

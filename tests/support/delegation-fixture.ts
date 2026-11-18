@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 
 import type { AgentTurn } from "../../src/shared/contracts";
-import type { DelegatedCompletionWake, DelegatedTask } from "../../src/shared/orchestration-delegation";
+import type { DelegatedCompletionAttribution, DelegatedCompletionWake, DelegatedTask }
+  from "../../src/shared/orchestration-delegation";
 import type { DelegationRepository } from "../../src/server/orchestration-v2/delegation-repository";
 import {
   createTurnControllerTestRuntime,
@@ -37,7 +38,8 @@ export async function createDelegationFixture(): Promise<DelegationFixture> {
   const database = (runtime.store as unknown as { database: Database.Database }).database;
   const delegation = runtime.store.orchestration.delegation;
   const live = new Map<string, number>();
-  delegation.useLiveNativeChildren((conversationId, turnId) => live.get(`${conversationId}:${turnId}`) ?? 0);
+  delegation.useLiveNativeChildren((conversationId, turnIds) =>
+    turnIds.reduce((count, turnId) => count + (live.get(`${conversationId}:${turnId}`) ?? 0), 0));
   const parent = runtime.store.conversation(runtime.conversationId);
   const fixture: DelegationFixture = {
     runtime, database, delegation, parentId: parent.id, live,
@@ -102,11 +104,10 @@ export async function createDelegationFixture(): Promise<DelegationFixture> {
       const row = database.prepare(`SELECT id, content, delegated_completion_json FROM queued_messages WHERE conversation_id = ?
         AND json_extract(delegated_completion_json, '$.generation') = ? AND state IN ('waiting','blocked')`)
         .get(parentId, generation) as { id: string; content: string; delegated_completion_json: string };
-      const turn = fixture.queue(parentId, row.content);
-      database.prepare("UPDATE messages SET delegated_completion_json = ? WHERE id = ?").run(row.delegated_completion_json, turn.userMessageId);
-      database.prepare(`UPDATE queued_messages SET state = 'accepted', turn_id = ?, user_message_id = ? WHERE id = ?`)
-        .run(turn.id, turn.userMessageId, row.id);
-      return turn;
+      // Admitted as the queue runtime admits a delivery: the queued row is claimed, then accepted with the turn.
+      database.prepare("UPDATE queued_messages SET state = 'dispatching' WHERE id = ?").run(row.id);
+      return runtime.controller.queue({ conversationId: parentId, content: row.content, queuedMessageId: row.id,
+        delegatedCompletion: JSON.parse(row.delegated_completion_json) as DelegatedCompletionAttribution }).turn;
     },
     close() {
       runtime.store.close();

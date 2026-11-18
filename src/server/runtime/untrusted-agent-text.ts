@@ -78,6 +78,10 @@ const INERTIA_SECTION_HEADER = /^([ \t]*(?:Internal provider instructions|Struct
 // isolated review, watcher notes).
 const INERTIA_SECTION_LABEL = /^([ \t]*)\[(?=(?:build-mode|inertia-orchestration|inertia-frontend-workbench|inertia-workspace|read-only-diff-review|selected-diff-revision-scope|inertia-watcher|inertia-watcher-note)\])/gimu;
 
+// Per-task headers of a delegated-result wake (`delegation-text.ts`). The card reads each task's delivered status
+// from them, so a result body must not carry one.
+const DELEGATED_TASK_HEADER = /^([ \t]*Delegated task [0-9a-f]{64} \([^\n\r]*\) \[[a-z]+\]):/gimu;
+
 function neutralizeControlTag(
   match: string,
   directSlash: string | undefined,
@@ -101,7 +105,8 @@ export function neutralizeUntrustedAgentText(value: string): string {
     .replace(CONTROL_TAG, neutralizeControlTag)
     .replace(TURN_MARKER, "$1\\:")
     .replace(INERTIA_SECTION_HEADER, "$1\\:")
-    .replace(INERTIA_SECTION_LABEL, "$1\\[");
+    .replace(INERTIA_SECTION_LABEL, "$1\\[")
+    .replace(DELEGATED_TASK_HEADER, "$1\\:");
 }
 
 export function truncateUtf8(value: string, maximumBytes: number): {

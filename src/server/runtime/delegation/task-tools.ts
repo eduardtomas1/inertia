@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
   DELEGATED_COMPLETION_WAKES,
   DELEGATED_TASK_ROLES,
-  DELEGATION_WAIT_MAX_MS,
   delegatedTaskIdSchema,
   type DelegatedCompletionWake,
 } from "../../../shared/orchestration-delegation";
@@ -57,14 +56,15 @@ export const delegateTaskSchema = z.object({
   accessMode: z.enum(["inherit", "supervised", "auto-edit", "full"]).optional(),
   workspace: workspaceSchema.optional(),
   mode: z.enum(["async", "wait"]).optional(),
-  timeoutMs: z.number().int().min(1).max(DELEGATION_WAIT_MAX_MS).optional(),
+  // A longer wait is clamped to the maximum, as T3 does, so an agent that asks for one still gets its task handle.
+  timeoutMs: z.number().int().min(1).optional(),
   wake: z.enum(DELEGATED_COMPLETION_WAKES).optional(),
   clientRequestId: clientRequestIdSchema.optional(),
 }).strict();
 export const taskReadSchema = z.object({ taskId: delegatedTaskIdSchema }).strict();
 export const taskWaitSchema = z.object({
   taskId: delegatedTaskIdSchema,
-  timeoutMs: z.number().int().min(1).max(DELEGATION_WAIT_MAX_MS).optional(),
+  timeoutMs: z.number().int().min(1).optional(),
 }).strict();
 export const taskCancelSchema = z.object({
   taskId: delegatedTaskIdSchema,
@@ -75,12 +75,12 @@ export const taskCancelSchema = z.object({
 export type DelegateTaskInput = z.infer<typeof delegateTaskSchema>;
 
 const taskIdProperty = { type: "string", pattern: TASK_ID_PATTERN } as const;
-const timeoutProperty = { type: "integer", minimum: 1, maximum: DELEGATION_WAIT_MAX_MS } as const;
+const timeoutProperty = { type: "integer", minimum: 1 } as const;
 
 export const DELEGATION_TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
   {
     name: DELEGATE_TASK_TOOL,
-    description: "Give `task` to a new chat this chat owns and track its result; Inertia asks the user first. `mode: wait` blocks up to `timeoutMs` (4 min default, 30 max). `wake` (always for async, settled_only for wait, or never) continues this chat with the result.",
+    description: "Give `task` to a new chat this chat owns and track its result; Inertia asks the user first. `mode: wait` blocks up to `timeoutMs` (default 30 s). At most 45 s. A timeout does not cancel the child. `wake` (always for async, settled_only for wait, or never) continues this chat with the result.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -116,7 +116,7 @@ export const DELEGATION_TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] 
   },
   {
     name: TASK_WAIT_TOOL,
-    description: "Wait until a delegated task finishes or needs the user, or `timeoutMs` passes (4 min default, 30 max). The task keeps running after a timeout.",
+    description: "Wait until a delegated task finishes or needs the user, or `timeoutMs` passes (default 30 s). At most 45 s. A timeout does not cancel the child.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -190,11 +190,12 @@ const WAKES_OFF = "result stays in the inbox; automatic continues are off";
 
 export function delegateApprovalSuffix(input: DelegateTaskInput, automaticWakes: boolean, providerId: ProviderId): string {
   const wake = delegateWake(input);
-  // Rounded down: "up to" never promises a longer wait than the call can have.
-  const minutes = Math.max(1, Math.floor(delegatedWaitLimit(input.timeoutMs, providerId) / 60_000));
+  // Rounded down, in milliseconds below a second: "up to" never promises a longer wait than the call can have.
+  const limit = delegatedWaitLimit(input.timeoutMs, providerId);
+  const duration = limit < 1_000 ? `${limit} ms` : `${Math.floor(limit / 1_000)} s`;
   const held = wake !== "never" && !automaticWakes;
   const behaviour = input.mode === "wait"
-    ? `waits up to ${minutes} min${wake === "never" ? " · no automatic wake" : held ? ` · ${WAKES_OFF}` : ""}`
+    ? `waits up to ${duration}${wake === "never" ? " · no automatic wake" : held ? ` · ${WAKES_OFF}` : ""}`
     : held ? WAKES_OFF
       : wake === "always" ? "wakes this chat on result"
         : wake === "settled_only" ? "wakes this chat on result after this turn" : "no automatic wake";

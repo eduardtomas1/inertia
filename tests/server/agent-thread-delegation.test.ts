@@ -124,7 +124,7 @@ describe("inertia_delegate_task", () => {
         "Delegate “Waiting”"]);
       expect(approvals[0]!.detail).toMatch(/ · delegated task · wakes this chat on result$/u);
       expect(approvals[1]!.detail).toMatch(/ · delegated task · no automatic wake$/u);
-      expect(approvals[2]!.detail).toMatch(/ · delegated task · waits up to 1 min$/u);
+      expect(approvals[2]!.detail).toMatch(/ · delegated task · waits up to 1 ms$/u);
       const firstTurn = f.store.agentTurn(asyncView.firstTurnId);
       expect(f.store.message(firstTurn.userMessageId!).content).toBe(`Act as the review sub-agent for this task.\n\n${TASK.task}`);
     } finally { await f.close(); }
@@ -145,7 +145,7 @@ describe("inertia_delegate_task", () => {
       await f.settle(view.firstTurnId, "completed", "Done.");
       await f.invoke("inertia_send_message", { conversationId: view.conversationId, content: "Now write the fix." }, { approval });
       expect(details[0]).toMatch(/ · delegated task · result stays in the inbox; automatic continues are off$/u);
-      expect(details[1]).toMatch(/ · delegated task · waits up to 1 min · result stays in the inbox; automatic continues are off$/u);
+      expect(details[1]).toMatch(/ · delegated task · waits up to 1 ms · result stays in the inbox; automatic continues are off$/u);
       expect(details[2]).toMatch(/ · delegated task · no automatic wake$/u);
       expect(details[3]).toBe(`Target ${view.conversationId} · Now write the fix. · starts a follow-up task · `
         + "result stays in the inbox; automatic continues are off");

@@ -426,9 +426,11 @@ export class DelegationTaskService {
       ? { turnId: active.turnId, runId: active.runId } : null };
   }
 
+  /** Unresolved tasks the task's own turns started; a follow-up's cancel leaves tasks the user started alone. */
   private nestedUnresolved(task: DelegatedTask): DelegatedTask[] {
-    return this.delegation.tasksForParent(task.childConversationId).filter((nested) => nested.status === "running"
-      || (nested.result !== null && !isTerminalDelegatedDeliveryState(nested.delivery.state)));
+    return this.delegation.tasksForParent(task.childConversationId).filter((nested) => (nested.status === "running"
+      || (nested.result !== null && !isTerminalDelegatedDeliveryState(nested.delivery.state)))
+      && this.delegation.reads.ownsTurn(task, nested.sourceTurnId));
   }
 
   private holdWakesWhileOff(parentConversationId: string, taskId: string): void {
@@ -461,8 +463,7 @@ export class DelegationTaskService {
   }
 
   private ownsChildTurn(task: DelegatedTask, childTurnId: string): boolean {
-    const owner = this.delegation.reads.taskForChildTurn(childTurnId);
-    return owner === task.taskId || (task.kind === "original" && owner === null);
+    return this.delegation.reads.ownsTurn(task, childTurnId);
   }
 
   private armedLimitPlan(task: DelegatedTask): StoredLimitResetPlan | null {

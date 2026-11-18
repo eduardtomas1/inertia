@@ -17,6 +17,10 @@
       "ocean",
       "ember",
       "iris",
+      "graphite",
+      "blossom",
+      "lagoon",
+      "saffron",
     ];
     const half = window.localStorage.getItem(`inertia:color-theme:v1:${resolved}`);
     document.documentElement.dataset.colorTheme = themes.includes(half) ? half

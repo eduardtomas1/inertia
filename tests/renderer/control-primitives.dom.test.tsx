@@ -76,7 +76,7 @@ describe("button primitives", () => {
     expect(css).toMatch(/:is\(\.secondary-button, \.subtle-button, \.text-button, \.icon-button\):hover:not\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*background: var\(--fill\);/u);
     expect(css).toMatch(/:is\(\.secondary-button, \.subtle-button, \.text-button, \.icon-button\):active:not\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*background: var\(--fill-strong\);/u);
     expect(css).toMatch(/:is\(\.primary-button, \.secondary-button, \.subtle-button, \.text-button, \.icon-button\):active:not\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*transform: scale\(0\.97\);/u);
-    expect(css).toMatch(/\.primary-button:is\(:hover, :active\):not\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*background: var\(--accent-hover\);/u);
+    expect(css).toMatch(/\.primary-button:is\(:hover, :active\):not\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*background: var\(--accent-fill-hover\);/u);
     expect(css).not.toMatch(/translateY\(-1px\)/u);
   });
 });

@@ -582,7 +582,7 @@
   min-width: 0;
   flex: 1;
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--accent-fill);
 }
 
 .setting-range input:disabled {

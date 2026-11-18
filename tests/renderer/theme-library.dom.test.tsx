@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ThemeLibrary } from "../../src/renderer/src/components/ThemeLibrary";
 import { COLOR_THEME_OPTIONS } from "../../src/renderer/src/utils/colorThemes";
+import { COLOR_THEME_IDS } from "../../src/shared/contracts";
 
 describe("Theme library", () => {
   it("keeps appearance and color family as independent accessible choices", () => {
@@ -19,6 +20,10 @@ describe("Theme library", () => {
     expect(screen.getByRole("radio", { name: "System" })).toBeChecked();
     expect(screen.getByRole("group", { name: "Colour theme" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Inertia theme" })).toHaveAttribute("aria-pressed", "true");
+    expect(COLOR_THEME_OPTIONS.map(({ id }) => id)).toEqual([...COLOR_THEME_IDS]);
+    expect(COLOR_THEME_OPTIONS.map(({ label }) => label)).toEqual([
+      "Inertia", "Grove", "Ocean", "Ember", "Iris", "Graphite", "Blossom", "Lagoon", "Saffron",
+    ]);
     for (const option of COLOR_THEME_OPTIONS) {
       expect(screen.getByRole("button", { name: `${option.label} theme` }))
         .toHaveAttribute("aria-pressed", String(option.id === "inertia"));
@@ -60,6 +65,21 @@ describe("Theme library", () => {
     onUpdate.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Use Ember for dark" }));
     expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ darkColorTheme: "ember" });
+    onUpdate.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Use Blossom for light" }));
+    expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ lightColorTheme: "blossom" });
+    onUpdate.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Saffron theme" }));
+    expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ colorTheme: "saffron" });
+  });
+
+  it("marks a new family active for each appearance it owns", () => {
+    render(<ThemeLibrary settings={{ theme: "system", colorTheme: "inertia", lightColorTheme: "graphite", darkColorTheme: "lagoon" }} disabled={false} onUpdate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Use Graphite for light" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Use Lagoon for dark" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Graphite theme" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Lagoon theme" })).toHaveAttribute("aria-pressed", "false");
+    expect(document.querySelectorAll(".color-theme-options .color-theme-swatch[data-color-theme]")).toHaveLength(COLOR_THEME_IDS.length * 2);
   });
   it("validates keyboard hex input and changes only the requested appearance", () => {
     const onUpdate = vi.fn();
@@ -74,7 +94,7 @@ describe("Theme library", () => {
     expect(hex).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex colour");
     fireEvent.keyDown(hex, { key: "Escape" });
-    expect(hex).toHaveValue("#a3a3fa");
+    expect(hex).toHaveValue("#9693fa");
     fireEvent.change(hex, { target: { value: "F80" } });
     fireEvent.keyDown(hex, { key: "Enter" });
     expect(onUpdate).toHaveBeenLastCalledWith({ darkCustomColor: "#ff8800" });

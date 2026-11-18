@@ -13,7 +13,7 @@ import {
   expectGlassLayer,
   expectHoverBackground,
   expectLongestChipsFoldAtLarge,
-  expectRoundSendScalesOnHover,
+  expectRoundSendLiftsOnHover,
   expectSettingChips,
   expectRestingComposerAnatomy,
   expectSolidComposerSurface,
@@ -466,7 +466,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     )).toHaveCount(0);
     await textbox.fill("Summarize the attached document.");
     await expect(dock.getByRole("button", { name: "Send message" })).toBeEnabled();
-    await expectRoundSendScalesOnHover(page, dock.getByRole("button", { name: "Send message" }));
+    await expectRoundSendLiftsOnHover(page, dock.getByRole("button", { name: "Send message" }));
     await textbox.fill("");
     await expectComposerEndsAtDock(dock);
     const attachmentGeometry = await attachmentList.evaluate((list) => {

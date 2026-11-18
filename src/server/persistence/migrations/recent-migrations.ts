@@ -40,6 +40,7 @@ import { subagentTaskShapeMigration } from "./subagent-task-shape";
 import { nativeGrokProviderMigration } from "./native-grok-provider";
 import { customAgentsMigration } from "./custom-agents";
 import { agentSecretRequestsMigration } from "./agent-secret-requests";
+import { extendColorThemesMigration } from "./extend-color-themes";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -83,4 +84,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   codexCompactionLimitMigration,
   customAgentsMigration,
   agentSecretRequestsMigration,
+  extendColorThemesMigration,
 ];

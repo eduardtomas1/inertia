@@ -116,8 +116,8 @@
 }
 
 .add-provider-step.is-complete .add-provider-step-index {
-  color: var(--accent-text);
-  background: var(--accent);
+  color: var(--accent-fill-text);
+  background: var(--accent-fill);
   box-shadow: none;
 }
 
@@ -210,8 +210,8 @@
   flex: 0 0 auto;
   place-items: center;
   border-radius: 999px;
-  color: var(--accent-text);
-  background: var(--accent);
+  color: var(--accent-fill-text);
+  background: var(--accent-fill);
 }
 
 .add-provider-card.is-selected .add-provider-card-check {

@@ -540,7 +540,7 @@
 
 .multi-spawn-preset-toggle input {
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--accent-fill);
 }
 
 .multi-spawn-preset-toggle > span {

@@ -75,6 +75,29 @@ export type KimiPromptTerminalSurface = Pick<
   "stopReason" | "usage"
 >;
 
+export const grokClient: acp.ClientApp = acp.client({
+  name: "Inertia Grok provider drift",
+});
+export const grokPermissionMethod: "session/request_permission" =
+  acp.methods.client.session.requestPermission;
+export const grokCriticalMethods = {
+  initialize: acp.methods.agent.initialize,
+  authenticate: acp.methods.agent.authenticate,
+  sessionNew: acp.methods.agent.session.new,
+  sessionLoad: acp.methods.agent.session.load,
+  sessionResume: acp.methods.agent.session.resume,
+  sessionPrompt: acp.methods.agent.session.prompt,
+  sessionCancel: acp.methods.agent.session.cancel,
+  sessionSetMode: acp.methods.agent.session.setMode,
+  sessionSetConfigOption: acp.methods.agent.session.setConfigOption,
+  sessionUpdate: acp.methods.client.session.update,
+} as const;
+export type GrokSessionUpdateSurface = acp.SessionNotification["update"];
+export type GrokPromptTerminalSurface = Pick<
+  acp.PromptResponse,
+  "stopReason" | "usage"
+>;
+
 export type ClaudeQueryFactory = (params: {
   prompt: string | AsyncIterable<SDKUserMessage>;
   options?: ClaudeOptions;

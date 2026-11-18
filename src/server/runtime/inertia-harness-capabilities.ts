@@ -105,6 +105,7 @@ export function createInertiaHarnessCapabilities(
         "delegation-bounds",
         "exact-turn-authority",
         "terminal-result-observation",
+        "delegated-result-wake",
       ],
     },
   }];

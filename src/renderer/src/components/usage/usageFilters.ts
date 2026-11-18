@@ -16,6 +16,7 @@ const KNOWN_PROVIDERS: readonly UsageProviderOption[] = [
   { id: "opencode", label: "OpenCode" },
   { id: "antigravity", label: "Antigravity" },
   { id: "grok", label: "Grok" },
+  { id: "pi", label: "Pi" },
 ];
 
 export function accountMatchesSource(

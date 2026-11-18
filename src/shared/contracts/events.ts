@@ -191,6 +191,7 @@ export type RuntimeSequencedFrame =
     };
 
 export type ServerEvent =
+  | import("../cursor-sdk-auth").CursorSdkLoginEvent
   | { type: "conversation.message.focus"; target: MessageSearchTarget }
   | {
       type: "server.welcome";
@@ -211,6 +212,8 @@ export type ServerEvent =
       type: "request.result";
       requestId: string;
       result:
+        | import("../cursor-sdk-auth").CursorSdkStatusResult
+        | import("../cursor-sdk-auth").CursorSdkModelsResult
         | { kind: "attachment.storage"; storage: import("../attachment-storage").AttachmentStorageStatus; removed?: { records: number; bytes: number } }
         | { kind: "support.report"; report: import("../issue-report").IssueReport | null; github?: import("../issue-report").IssueGitHubState }
         | { kind: "git.status"; status: GitStatusSnapshot }
@@ -237,6 +240,13 @@ export type ServerEvent =
         | { kind: "project.actions"; actions: ProjectAction[] }
         | { kind: "project.created"; projectId: string }
         | { kind: "conversation.created"; conversationId: string }
+        | import("../orchestration-forks").ForkHistoryResult
+        | import("../orchestration-history").ConversationRollbackResult
+        | import("../orchestration-merge-back").MergeBackResult
+        | import("./client-command/delegation").DelegationTaskResult
+        | import("./client-command/delegation").DelegationCancelResult
+        | import("./client-command/delegation").DelegationDeliveryResult
+        | import("../observed-child-thread").ObservedChildReadResult
         | { kind: "todo.started"; conversationId: string }
         | { kind: "library.category"; category: LibraryCategory }
         | { kind: "library.answer"; savedAnswer: SavedAnswer }

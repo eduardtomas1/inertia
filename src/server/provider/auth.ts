@@ -29,6 +29,7 @@ const PROVIDER_AUTH: Readonly<Record<ProviderId, ProviderAuthCommands>> =
       loginArgs: ["login"],
       environment: { GROK_DISABLE_AUTOUPDATER: "1" },
     },
+    pi: { statusArgs: null, loginArgs: [] },
   });
 
 export function providerAuthStatusArgs(

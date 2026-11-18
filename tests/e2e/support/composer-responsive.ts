@@ -627,6 +627,9 @@ export async function expectLongestChipsFoldAtLarge(
   expect(await dock.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(900);
   const longest = ["Extra high", "Standard", "Auto-accept edits", "Build"];
   const screenshotControl = await dock.locator(".composer-attach-actions button").count() > 1;
+  // After the reload the branch chip joins the row only once Git status is
+  // known, so judge folding against the complete row, not the one before it.
+  await expect(dock.locator(".composer-checkout-context .composer-branch-control")).toBeAttached();
   await expect.poll(async () => JSON.stringify((await inspectComposerChipRow(dock)).folded))
     .toMatch(screenshotControl ? /^\[(?:"branch")?\]$/u : /^\[\]$/u);
   const fullWidth = await inspectComposerChipRow(dock);

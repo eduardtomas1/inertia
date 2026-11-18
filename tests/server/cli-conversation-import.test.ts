@@ -264,7 +264,7 @@ describe("CLI conversation import authority and persistence", () => {
         expect(queued.turn).toMatchObject({ providerSessionBefore: sessionId, continuationReasonCode: "same-continuation" });
         runtime.controller.start(queued.turn.id);
         expect(runtime.provider.input?.sessionId).toBe(sessionId);
-        expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+        expect(runtime.provider.freshSession()).toBeNull();
         runtime.provider.resolve({ status: "failed", sessionId, error: unavailable.message, failure: unavailable });
         await flushTurnControllerTestPromises();
         expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: "failed", providerSessionBefore: sessionId, providerSessionAfter: sessionId });

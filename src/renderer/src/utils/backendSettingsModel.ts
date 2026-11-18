@@ -23,6 +23,7 @@ export const BACKEND_SETTINGS_PROVIDER_ORDER = [
   "kimi",
   "antigravity",
   "grok",
+  "pi",
 ] as const satisfies readonly ProviderId[];
 
 export const BACKEND_SETTINGS_PROVIDER_NAMES: Readonly<Record<ProviderId, string>> = {
@@ -33,6 +34,7 @@ export const BACKEND_SETTINGS_PROVIDER_NAMES: Readonly<Record<ProviderId, string
   kimi: "Kimi Code",
   antigravity: "Antigravity",
   grok: "Grok",
+  pi: "Pi",
 };
 
 const GEMINI_API_KEY_PRESET = "gemini-api-key";

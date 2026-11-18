@@ -17,6 +17,7 @@ import {
 } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
 import { RuntimeRequestError } from "../../runtime-errors";
+import { assertNoCheckoutRestore } from "./turn-checkout-restore-fence";
 import { clearPendingInteractionsForTurn } from "../pending-interaction-registry";
 import {
   isProviderRunRefusal,
@@ -44,19 +45,14 @@ import type {
 import {
   defaultTurnScheduler,
   broadcastTurnConversationShell,
-  DEFAULT_TURN_MAX_LIFETIME_MS,
-  DEFAULT_TURN_TIMEOUT_MS,
+  DEFAULT_TURN_MAX_LIFETIME_MS, DEFAULT_TURN_TIMEOUT_MS, dispatchTurnStart,
   normalizedProviderRunFailure,
   providerEventResumesRun,
   providerPromiseFailure,
   publicTurnError,
   updateActiveTurnProviderSession,
 } from "./turn-controller-support";
-import {
-  compactionSessionInstruction,
-  prepareTurnRequest,
-  type PreparedTurnRequest,
-} from "./turn-request-preparation";
+import { compactionSessionInstruction, prepareTurnRequest, type PreparedTurnRequest } from "./turn-request-preparation";
 import { TurnStreamProjection } from "./turn-stream-projection";
 import { TurnActivityProjection } from "./turn-activity-projection";
 import { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
@@ -68,7 +64,7 @@ import { backgroundActiveSubagent, stopActiveSubagent, type TurnSubagentStopOpti
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
 import { quarantineActiveDuoTurn } from "../duo/duo-active-turn-quarantine";
-import { exitedProviderTurns, hasActiveTurnCheckout, hasLiveProviderRun, liveProviderRunConversationIds, providerConversationIds, turnOwnedProviderRuns } from "./turn-checkout-activity";
+import { checkoutActivityConversationIds, exitedProviderTurns, hasActiveTurnCheckout, hasLiveProviderRun, liveProviderRunConversationIds, providerConversationIds, turnOwnedProviderRuns } from "./turn-checkout-activity";
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
@@ -98,6 +94,7 @@ import { resolveTurnHostTools } from "./turn-provider-host-tools";
 import { TurnSecretRequests } from "./turn-secret-output";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
+import { turnHistoryInjection } from "./turn-history-injection";
 
 export type {
   QueuedTurn,
@@ -281,11 +278,7 @@ export class TurnController {
       interactions: this.interactions,
       scheduler: this.scheduler,
       now: () => this.now(),
-      transition: (active, status, providerState) => this.transition(
-        active,
-        status,
-        providerState,
-      ),
+      transition: (active, status, providerState, observer) => this.transition(active, status, providerState, observer),
       observeSubagent: (active, event) => this.observeSubagent(active, event),
     });
     this.secretRequests = new TurnSecretRequests({
@@ -326,6 +319,7 @@ export class TurnController {
   async clearNativeGoal(conversationId: string): Promise<boolean | "superseded" | null> { return await this.nativeGoals.clear(conversationId); }
 
   isClosing(): boolean { return this.closing; }
+  checkoutActivityConversationIds(): string[] { return checkoutActivityConversationIds(this.store, this.providers, [...this.activeByConversation.keys(), ...this.providerRunOwnershipBarriers.keys(), ...this.admissions.conversationIds()]); }
 
   hasActiveCheckout(checkoutPath: string): boolean {
     const tracked = [
@@ -415,14 +409,10 @@ export class TurnController {
         runId: turn.runId,
         turnId,
       })) return false;
-      this.store.providerRunOwnership.record(
-        turn.id,
-        turn.conversationId,
-        turn.runId,
-        this.runtimeGenerationId,
-        this.systemBootId,
-        this.now(),
-      );
+      this.store.providerRunOwnership.record(turn.id, turn.conversationId, turn.runId,
+        this.runtimeGenerationId, this.systemBootId, this.now());
+      // Recording ownership again after confirmed cleanup replaces the attempt.
+      if (exactActive) exactActive.attemptId = this.store.orchestration.currentAttemptId(turn.runId);
     }
     if (exactActive && !exactActive.providerRunStarted) {
       this.settle(exactActive, "cancelled", "user-cancelled", "Stopped");
@@ -569,6 +559,7 @@ export class TurnController {
       throw new RuntimeRequestError("The local runtime is shutting down.");
     }
     if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+    assertNoCheckoutRestore(this.store, request.conversationId);
     this.admissions.assertQueueAuthority(request.conversationId, admission);
     if (
       !request.goalStart
@@ -623,6 +614,7 @@ export class TurnController {
     requests: readonly [QueueTurnRequest, QueueTurnRequest],
   ): [QueuedTurn, QueuedTurn] {
     if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+    for (const request of requests) assertNoCheckoutRestore(this.store, request.conversationId);
     return queuePairedTurns({
       store: this.store,
       providers: this.providers,
@@ -753,20 +745,18 @@ export class TurnController {
   start(turnId: string): boolean {
     const active = this.activeByTurn.get(turnId);
     if (!active || active.runState.isTerminal() || this.closing) return false;
-    this.beginStart(active);
-
-    const priorProviderCleanup = this.providerRunOwnershipBarriers.get(
-      active.conversation.id,
-    );
-    if (priorProviderCleanup) {
-      this.track(priorProviderCleanup
-        .catch(() => undefined)
-        .then(() => {
-          this.captureBeforeAndStartProvider(active);
-        }));
-      return true;
-    }
-    return this.captureBeforeAndStartProvider(active);
+    return dispatchTurnStart({ track: (value) => this.track(value), startable: () => !active.runState.isTerminal() && !this.closing,
+      dispatchStart: (dispatch, defer) => this.store.orchestration.dispatchStart(active.turn.runId, dispatch, defer),
+      dispatch: () => {
+        this.beginStart(active);
+        const priorCleanup = this.providerRunOwnershipBarriers.get(active.conversation.id);
+        if (!priorCleanup) return this.captureBeforeAndStartProvider(active);
+        this.track(priorCleanup.catch(() => undefined).then(() => { this.captureBeforeAndStartProvider(active); }));
+        return true;
+      },
+      refused: () => { this.failBeforeStart(active.conversation.id, "The turn could not start."); },
+      failed: (message) => { if (!active.runState.isTerminal()) this.settle(active, "failed", "turn-start-failed", message); },
+    });
   }
 
   private beginStart(active: ActiveTurn): void {
@@ -815,10 +805,7 @@ export class TurnController {
     const preCapture = this.artifacts.captureBefore(active);
     if (preCapture) {
       active.gitBeforeCapture = preCapture;
-      this.track(active.gitBeforeCapture
-        .then(() => {
-          this.startProvider(active);
-        }));
+      this.track(active.gitBeforeCapture.then(() => { this.startProvider(active); }));
       return true;
     }
     return this.startProvider(active).accepted;
@@ -853,8 +840,10 @@ export class TurnController {
         this.now(),
       );
       active.providerRunStarted = true;
+      // Read after recording ownership, which can itself replace the attempt.
+      const startedAttemptId = active.attemptId = this.store.orchestration.currentAttemptId(active.turn.runId);
       const result = this.providers.run(active.providerInput, {
-        hostTools,
+        hostTools, historyInjection: turnHistoryInjection(this.store, active, startedAttemptId),
         onStarted: () => {
           if (active.runState.isTerminal() || this.closing) {
             requestProviderCancellation(this.providers, active.conversation.id);
@@ -873,8 +862,9 @@ export class TurnController {
             }
           }
         },
-        onEvent: (event) => { this.handleProviderEvent(event); },
-        freshSessionFallback: () => applyFreshSessionFallback(this.store, this.hooks, active, this.now()),
+        onEvent: (event) => { this.handleProviderEvent(event, startedAttemptId); },
+        freshSessionFallback: (prior) => applyFreshSessionFallback(this.store, this.hooks, active, this.now(), prior,
+          (attemptId) => (event) => { this.handleProviderEvent(event, attemptId); }),
       });
       void result.then(
         (providerResult) => {
@@ -953,6 +943,12 @@ export class TurnController {
 
   cancelOwned(conversationId: string, owner: TurnOwnerIdentity): boolean {
     return sameTurnOwner(this.activeIdentity(conversationId), owner) && this.cancel(conversationId);
+  }
+
+  /** Cancels only the run the caller recorded (even mid terminal-write retry), never a later one. */
+  cancelExact(conversationId: string, owner: TurnOwnerIdentity): boolean {
+    const turn = this.activeByConversation.get(conversationId)?.turn;
+    return turn?.id === owner.turnId && turn.runId === owner.runId && this.cancel(conversationId);
   }
 
   failBeforeStart(conversationId: string, message: string): boolean {
@@ -1090,20 +1086,25 @@ export class TurnController {
     }
   }
 
-  handleProviderEvent(event: ProviderEvent): boolean {
+  /**
+   * `attemptId` names the reporting attempt; once it is no longer current, the
+   * event writes nothing. Every path that replaces an active run's attempt
+   * updates `active.attemptId`, so this is an in-memory check per event.
+   */
+  handleProviderEvent(event: ProviderEvent, attemptId?: string | null): boolean {
     const active = this.activeByConversation.get(event.conversationId);
-    if (!active || !providerEventMatchesActiveTurn(this.store, active, event)) {
-      return false;
-    }
+    if (!active || !providerEventMatchesActiveTurn(this.store, active, event)
+      || (attemptId && attemptId !== active.attemptId)) return false;
+    const observer = attemptId ? { attemptId } : undefined;
     try {
       this.timeouts.activity(active);
-      if (providerEventResumesRun(active, event) && this.transition(active, "running")) {
+      if (providerEventResumesRun(active, event) && this.transition(active, "running", undefined, observer)) {
         broadcastTurnConversationShell(this.hooks, active);
       }
       if (event.type === "text") {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
       }
-      for (const projected of this.secretRequests.events(event)) this.providerEvents.project(active, projected);
+      for (const projected of this.secretRequests.events(event)) this.providerEvents.project(active, projected, observer);
       this.nativeGoals.handleEvent(active, event);
       return true;
     } catch (error) {
@@ -1165,8 +1166,9 @@ export class TurnController {
     active: ActiveTurn,
     state: Exclude<AgentRunState, AgentTurnTerminalStatus>,
     providerState?: string | null,
+    observer?: Parameters<TurnRunStateCoordinator["transition"]>[3],
   ): boolean {
-    return this.runStates.transition(active, state, providerState);
+    return this.runStates.transition(active, state, providerState, observer);
   }
 
   private observeSubagent(

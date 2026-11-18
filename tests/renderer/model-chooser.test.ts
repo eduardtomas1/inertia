@@ -1,14 +1,14 @@
+import { ModelChooser } from "../../src/renderer/src/components/ModelChooser";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
-  ModelChooser,
   modelShortcutPlatform,
   nextModelChooserIndex,
   preferredModelChooserSource,
   searchableModelChooserRoutes,
-} from "../../src/renderer/src/components/ModelChooser";
+} from "../../src/renderer/src/components/ModelChooserLoaded";
 import type { ComposerModelRoute } from "../../src/renderer/src/utils/modelChooserRoutes";
 import {
   continuationIdentityForSelection,

@@ -23,6 +23,13 @@ function selection(update: Partial<ModelSelection> = {}): ModelSelection {
 }
 
 describe("final answer identity", () => {
+  it("names the Pi and Cursor SDK harnesses instead of their ids", () => {
+    expect(finalAnswerIdentityLabel(selection({ harnessId: "pi-rpc", backendProfileId: "builtin:pi",
+      backendProfileDisplayName: "Pi", modelId: "anthropic/claude-test", alias: null }))).toMatch(/^Pi · /u);
+    expect(activeWorkIdentityLabel(selection({ harnessId: "cursor-sdk", backendProfileId: "builtin:cursor",
+      backendProfileDisplayName: "Cursor" }))).toBe("Cursor · Cursor");
+  });
+
   it("uses only the persisted harness and backend for active work identity", () => {
     expect(activeWorkIdentityLabel(selection({
       harnessId: "claude-agent-sdk",

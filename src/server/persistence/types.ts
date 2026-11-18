@@ -143,12 +143,21 @@ export interface AgentTurnLifecycleUpdate {
 
 export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
+  contextHandoff?: import("../../shared/orchestration-backings").PreparedContextHandoff;
+  backingRelocation?: import("../../shared/orchestration-backings").PreparedBackingRelocation;
+  /** The checkout preparation resolved; admission refuses if the chat moved since. */
+  preparedWorkspaceKey?: string;
+  nativeContinuation?: {
+    rollbackId: string;
+    continuation: import("../../shared/orchestration-history").HistoryCursor["continuation"] & object;
+  };
   queuedMessageId?: string;
   limitResetPlanId?: string;
   restartContinuationPlanId?: string;
   content: string;
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   duoComparison?: DuoComparisonBrief;
   customAgentCall?: import("../../shared/custom-agents").CustomAgentCallAttribution;
   attachments?: ChatAttachment[];
@@ -171,6 +180,7 @@ export interface BeginAgentTurnInput
 export interface CreateMessageOptions {
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   duoComparison?: DuoComparisonBrief;
   customAgentCall?: import("../../shared/custom-agents").CustomAgentCallAttribution;
   compaction?: import("../../shared/context-compaction").ContextCompaction;
@@ -184,6 +194,14 @@ export interface CreateMessageOptions {
 export interface AgentTurnSettlementUpdate
   extends Omit<AgentTurnLifecycleUpdate, "status"> {
   status: AgentTurnTerminalStatus;
+  /**
+   * The provider definitely received nothing for this turn. Settlement then
+   * returns the handoff, backing and continuation cursors to their state
+   * before dispatch instead of treating the delivery as uncertain, and the
+   * turn's restored-history notice is dropped (except for a provider-switch
+   * restore, which also marks the route handoff).
+   */
+  providerDelivery?: "not-delivered";
   /** Controller-owned stored projections belong to the same terminal commit. */
   projection?: {
     workspaceRunCreated: boolean;

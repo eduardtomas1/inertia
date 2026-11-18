@@ -66,6 +66,9 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["claude-auto-compact", "Auto-compact Claude chats after", ["auto-compact", "autocompact", "compaction", "compact", "context window", "claude", "tokens", "usage", "cost", "context"]],
       ["codex-auto-compact", "Auto-compact Codex chats after", ["auto-compact", "autocompact", "compaction", "compact", "context window", "codex", "openai", "chatgpt", "tokens", "usage", "cost", "context"]],
     ],
+    "Delegated tasks": [
+      ["delegation-automatic-wakes", "Continue chats automatically when delegated tasks finish", ["delegation", "delegated tasks", "delegate", "subagents", "agents", "wake", "automatic", "continue", "results", "orchestration"]],
+    ],
     "Review and terminal": [
       ["wrap-diffs", "Wrap long diff lines", ["diff", "wrap", "review", "source control"]],
       ["ignore-whitespace", "Ignore whitespace", ["diff", "whitespace", "review", "source control"]],
@@ -148,7 +151,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
   section("agents", "Agents", {
     Providers: [
       ["provider-accounts", "Providers", ["agents", "accounts", "connect", "sign in", "refresh", "codex", "claude", "model", "connections"]],
-      ["add-provider", "Add provider", ["add account", "provider menu", "chatgpt", "sign in", "api key", "codex", "claude", "cursor", "grok", "opencode", "antigravity", "kimi"]],
+      ["add-provider", "Add provider", ["add account", "provider menu", "chatgpt", "sign in", "api key", "codex", "claude", "cursor", "grok", "opencode", "antigravity", "kimi", "pi"]],
       ["provider-display-name", "Account name", ["alias", "display name", "provider"]],
       ["provider-binary-path", "Executable", ["binary path", "codex path", "use automatic", "cli"]],
       ["provider-updates", "Provider updates", ["maintenance", "upgrade", "update", "version"]],

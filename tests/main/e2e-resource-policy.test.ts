@@ -20,6 +20,14 @@ afterEach(() => {
 });
 
 describe("Electron scenario resource ownership", () => {
+  it("assigns explicit scenario declarations and rejects duplicate or ambiguous declarations", () => {
+    expect(scenarioResource("launchHelper();", "history-rollback-merge-back.spec.ts")).toBe("isolated");
+    expect(() => scenarioResource("// @inertia-e2e-resource primary-display", "history-rollback-merge-back.spec.ts"))
+      .toThrow("exactly one resource declaration");
+    expect(() => scenarioResource("launchHelper();", "nested/history-rollback-merge-back.spec.ts"))
+      .toThrow("exactly one first-line");
+  });
+
   it.each([
     "launchHelper();",
     "// @inertia-e2e-resource isolated\n// @inertia-e2e-resource primary-display\n",

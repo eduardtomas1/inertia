@@ -67,6 +67,22 @@ function unavailableRuntimeConnectionReason(
       message: "Runtime startup is blocked because provider installation recovery requires manual attention. Review Runtime diagnostics in Settings → Help.",
     };
   }
+  if (state.startupBlockerCode === "orchestration-projection-invalid") {
+    return {
+      unavailable: true,
+      code: state.startupBlockerCode,
+      retryable: false,
+      message: "Runtime startup is blocked because the orchestration projection could not be rebuilt from saved chat history. Your saved data was not changed and the automatic database backups are kept. Review Runtime diagnostics in Settings → Help and copy the support summary.",
+    };
+  }
+  if (state.startupBlockerCode === "orchestrator-v2-development-database") {
+    return {
+      unavailable: true,
+      code: state.startupBlockerCode,
+      retryable: false,
+      message: "Runtime startup is blocked because this database was created by an earlier orchestrator-v2 development build, whose migration numbers changed. Move the data folder's inertia.sqlite and its backups aside, or start with a fresh data folder; Inertia left both unchanged.",
+    };
+  }
   if (state.phase === "restarting") {
     return {
       unavailable: true,

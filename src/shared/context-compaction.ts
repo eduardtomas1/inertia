@@ -1,5 +1,5 @@
 import type { ProviderId } from "./provider";
-const PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"];
+const PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok", "pi"];
 export const CONTEXT_COMPACTION_TRIGGERS = ["manual", "on-return", "idle"] as const;
 export type ContextCompactionTrigger = (typeof CONTEXT_COMPACTION_TRIGGERS)[number];
 

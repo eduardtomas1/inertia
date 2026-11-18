@@ -22,6 +22,7 @@ import {
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { ConversationCompactionStates } from "../../src/server/runtime/conversation-compaction-states";
 import { resolveNativeModelRoute } from "./model-route-fixture";
+import { mockCommandOrchestration } from "../support/orchestration-command-mocks";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const requestId = "22222222-2222-4222-8222-222222222222";
@@ -68,6 +69,7 @@ function fixture(options: FixtureOptions = {}) {
   const timeline: string[] = [];
   const conversation = {
     id: conversationId,
+    projectId: "77777777-7777-4777-8777-777777777777",
     title: "Long chat",
     providerId,
     providerSessionId: options.sessionId === undefined ? "provider-session" : options.sessionId,
@@ -126,6 +128,8 @@ function fixture(options: FixtureOptions = {}) {
     ...(options.accountKind ? { accountKind: options.accountKind } : {}),
   } as unknown as ProviderInfo;
   const store = {
+    orchestration: mockCommandOrchestration(),
+    conversationWork: { restoreBlocksConversation: vi.fn(() => false) },
     conversation: vi.fn(() => conversation),
     conversationPath: vi.fn(() => tmpdir()),
     cliConversationImport: vi.fn(() => null),

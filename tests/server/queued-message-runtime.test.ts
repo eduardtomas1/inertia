@@ -399,7 +399,7 @@ describe("durable runtime message queue", () => {
     } finally { await f.close(); }
   });
 
-  it("waits for the provider stop, then starts queued work once unconfirmed cleanup releases the chat", async () => {
+  it("waits for the provider stop, then starts queued work once the unconfirmed stop releases the chat", async () => {
     const f = await fixture();
     try {
       const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
@@ -410,8 +410,10 @@ describe("durable runtime message queue", () => {
       expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
       f.provider.resolveOwnedStop(); await f.drain();
       expect(f.store.agentTurn(initial.turn.id).status).toBe("completed");
-      expect(f.provider.runCount).toBe(2);
+      await vi.waitFor(() => expect(f.provider.runCount).toBe(2), { timeout: 3_000 });
       expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
+      expect(f.store.providerRunOwnership.forTurn(initial.turn.id)).toMatchObject({ runId: initial.turn.runId });
+      expect(f.store.orchestration.awaitsCleanupProof(f.conversationId)).toBe(true);
     } finally { await f.close(); }
   });
 

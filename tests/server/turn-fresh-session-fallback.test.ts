@@ -73,7 +73,7 @@ describe.each(providers)("%s session continuity across the turn controller", (pr
       expect(runtime.provider.input?.prompt).not.toContain("Keep the public API unchanged.");
       expect(runtime.provider.callbacks?.freshSessionFallback).toBeTypeOf("function");
 
-      const replacement = runtime.provider.callbacks!.freshSessionFallback!();
+      const replacement = runtime.provider.freshSession();
       expect(replacement?.prompt).toContain("Keep the public API unchanged.");
       expect(replacement?.prompt).toContain("Understood, the API stays as it is.");
       expect(replacement?.prompt.split("Continue.").length).toBe(2);
@@ -90,7 +90,7 @@ describe.each(providers)("%s session continuity across the turn controller", (pr
         type: "conversation.detail.invalidated",
         conversationId: runtime.conversationId,
       });
-      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
 
       const identity = turnControllerTestIdentity(runtime);
       runtime.provider.emit({ ...identity, type: "session", sessionId: "fresh-session" });
@@ -153,7 +153,7 @@ describe.each(providers)("%s session continuity across the turn controller", (pr
       runtime.controller.start(retry.turn.id);
       expect(runtime.provider.input?.sessionId).toBeUndefined();
       expect(runtime.provider.input?.prompt).toContain("Keep the public API unchanged.");
-      expect(runtime.provider.callbacks?.freshSessionFallback?.()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();
@@ -175,7 +175,7 @@ describe("fresh session fallback guards", () => {
         .filter(({ turnId }) => turnId === queued.turn.id)
         .map(({ title }) => title)).toEqual(["No checkpoint for this turn"]);
 
-      const replacement = runtime.provider.callbacks!.freshSessionFallback!();
+      const replacement = runtime.provider.freshSession();
 
       expect(replacement?.prompt).toContain("Keep the public API unchanged.");
       expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
@@ -195,14 +195,14 @@ describe("fresh session fallback guards", () => {
       runtime.controller.start(queued.turn.id);
       const fallback = runtime.provider.callbacks!.freshSessionFallback!;
       runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Partial answer" });
-      expect(fallback()).toBeNull();
+      expect(fallback({ priorCleanup: "confirmed" })).toBeNull();
       expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
         providerSessionBefore: "saved-session",
         continuationReasonCode: "same-continuation",
       });
       runtime.provider.resolve({ status: "completed", sessionId: "saved-session", text: "Partial answer" });
       await flushTurnControllerTestPromises();
-      expect(fallback()).toBeNull();
+      expect(fallback({ priorCleanup: "confirmed" })).toBeNull();
       expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("saved-session");
     } finally {
       await runtime.controller.dispose();
@@ -223,7 +223,7 @@ describe("fresh session fallback guards", () => {
       });
       admission.release();
       expect(followUp).toMatchObject({ kind: "accepted", message: { role: "user", turnId: queued.turn.id } });
-      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
       expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
         providerSessionBefore: "saved-session",
         continuationReasonCode: "same-continuation",
@@ -253,7 +253,7 @@ describe("fresh session fallback guards", () => {
       const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start." });
       expect(queued.turn.continuationReasonCode).toBe("first-turn");
       runtime.controller.start(queued.turn.id);
-      expect(runtime.provider.callbacks?.freshSessionFallback?.()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
       expect(runtime.store.agentTurn(queued.turn.id).continuationReasonCode).toBe("first-turn");
     } finally {
       await runtime.controller.dispose();

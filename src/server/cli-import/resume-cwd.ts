@@ -19,12 +19,19 @@ export function importedFollowUpNote(imported: CliConversationImportRecord | nul
     : "Continues the original Claude Code session";
 }
 
+/** Whether two folders are the same checkout, comparing canonical paths; a missing folder matches nothing. */
+export function sameCheckoutPath(left: string, right: string): boolean {
+  if (left === right) return true;
+  try {
+    // The native form returns the folder's on-disk spelling, so case differences on macOS compare equal.
+    return relative(realpathSync.native(right), realpathSync.native(left)) === "";
+  } catch {
+    return false;
+  }
+}
+
 export function importedResumeCwd(store: ImportStore, conversationId: string, sessionId: string | null | undefined, checkout: string): string {
   const imported = importedSession(store, conversationId, sessionId);
   if (imported?.providerId !== "claude" || imported.cwd === checkout) return checkout;
-  try {
-    return relative(realpathSync(checkout), realpathSync(imported.cwd)) === "" ? imported.cwd : checkout;
-  } catch {
-    return checkout;
-  }
+  return sameCheckoutPath(imported.cwd, checkout) ? imported.cwd : checkout;
 }

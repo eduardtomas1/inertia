@@ -19,6 +19,7 @@ import {
 import {
   pinnedManualCommand,
   pinnedProviderUpdateAction,
+  providerInstallPackageRange,
 } from "../../src/server/provider/maintenance-install-source";
 import type { ProviderMaintenanceProviderId } from "../../src/shared/provider-maintenance";
 
@@ -94,6 +95,29 @@ async function npmPackage(
   await link(entry, join(prefix, "bin", command));
   return entry;
 }
+
+posixIt("keeps OpenCode 2 npm updates in its reviewed package and major", async () => {
+  const { root, home } = await layout(); const prefix = join(root, "npm");
+  await npmPrefix(prefix); const executable = await npmPackage(prefix, "@opencode/cli", "opencode");
+  const capabilities = await resolveProviderMaintenanceCapabilities({ providerId: "opencode", executable, installedVersion: "2.0.28", installed: true }, {
+    home, platform: "linux", environment: async () => environment([join(prefix, "bin")]),
+  });
+  expect(capabilities.packageName).toBe("@opencode/cli");
+  expect(capabilities.update).toMatchObject({ registryPackage: { name: "@opencode/cli", range: "2" }, versionPin: { major: 2 } });
+  expect(capabilities.update?.args).toContain("@opencode/cli@2");
+  expect(providerInstallPackageRange("opencode", "2.0.28")).toBe("2");
+  expect(pinnedProviderUpdateAction(capabilities.update!, "1.19.4")).toBeNull();
+});
+
+posixIt("pins the OpenCode 2 native installer without downgrading it to version 1", async () => {
+  const { home } = await layout(); const executable = await file(join(home, ".opencode/bin/opencode"));
+  const capabilities = await resolveProviderMaintenanceCapabilities({ providerId: "opencode", executable, installedVersion: "2.0.28", installed: true }, {
+    home, platform: "linux", environment: async () => environment([join(home, ".opencode/bin")]),
+  });
+  expect(capabilities.update).toMatchObject({ versionPin: { major: 2, argumentIndex: 1 }, args: ["upgrade", "--method", "curl"] });
+  expect(pinnedProviderUpdateAction(capabilities.update!, "2.0.29")?.args).toEqual(["upgrade", "2.0.29", "--method", "curl"]);
+  expect(pinnedProviderUpdateAction(capabilities.update!, "1.19.4")).toBeNull();
+});
 
 const NPM_PACKAGES = [
   ["codex", "@openai/codex", "codex", ["@openai/codex@latest"]],

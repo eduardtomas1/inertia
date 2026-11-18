@@ -167,7 +167,7 @@ jobs:
     if: needs.classify.outputs.pr_linux_core == 'true'
     runs-on: ubuntu-24.04
     needs: [classify, gate]
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       CI: "true"
 
@@ -215,7 +215,7 @@ jobs:
     if: needs.classify.outputs.pr_linux_lifecycle == 'true'
     runs-on: ubuntu-24.04
     needs: [classify, gate]
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       CI: "true"
       INERTIA_CI_TIMINGS: "true"
@@ -305,7 +305,7 @@ jobs:
     if: needs.classify.outputs.pr_windows_lifecycle == 'true'
     runs-on: windows-2025
     needs: [classify, gate]
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       CI: "true"
       INERTIA_CI_TIMINGS: "true"

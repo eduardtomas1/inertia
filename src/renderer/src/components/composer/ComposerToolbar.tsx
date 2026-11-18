@@ -104,10 +104,11 @@ export function composerCheckoutStrip({
 export function composerCheckoutBranch(
   conversation: Pick<Conversation, "branch" | "worktreePath">,
   checkoutBranch: string | null | undefined,
-): string {
+): string | null {
+  const liveBranch = checkoutBranch === null ? "Detached HEAD" : checkoutBranch;
   return (conversation.worktreePath
-    ? conversation.branch ?? checkoutBranch
-    : checkoutBranch ?? conversation.branch) ?? "Detached HEAD";
+    ? conversation.branch ?? liveBranch
+    : liveBranch ?? conversation.branch) ?? null;
 }
 
 export interface ComposerToolbarProps {
@@ -299,7 +300,7 @@ export function ComposerToolbar({
   });
   const railRef = useRef<HTMLDivElement>(null);
   const branchMenuRef = useRef<CheckoutBranchMenuOpener | null>(null);
-  const showBranch = checkoutStrip !== "hidden" && !scratchWorkspace;
+  const showBranch = checkoutStrip !== "hidden" && !scratchWorkspace && visibleCheckoutBranch !== null;
   const worktree = Boolean(conversation.worktreePath);
   const branchChip = showBranch
     ? checkoutBranchChip(

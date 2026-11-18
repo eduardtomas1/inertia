@@ -28,6 +28,8 @@ import type {
   ProviderHostToolResult,
 } from "../provider/contracts";
 import {
+  AGENT_CONTEXT_MESSAGE_BYTES,
+  agentContextItemPage,
   agentContextTurnList,
   agentContextTurnPage,
   DEFAULT_AGENT_CONTEXT_TURNS,
@@ -52,6 +54,7 @@ const singleLine = (maximum: number) => z.string()
 const inputSchema = z.object({
   conversationId: z.string().uuid().optional(),
   turnId: singleLine(200).optional(),
+  itemId: singleLine(240).optional(),
   cursor: singleLine(200).optional(),
   limit: z.number().int().min(1).max(MAX_AGENT_CONTEXT_TURNS).optional(),
 }).strict();
@@ -60,7 +63,7 @@ export const AGENT_CONTEXT_TOOL_DEFINITION: ProviderHostToolDefinition = {
   name: AGENT_CONTEXT_TOOL_NAME,
   description: [
     "List and read turns of Inertia chats.",
-    "`conversationId` alone: its turns, newest first; add `turnId`: that turn in full.",
+    "`conversationId` alone: its turns, newest first; add `turnId`: that turn in full, or `itemId`: one history item.",
     "Pass `nextCursor` back as `cursor`.",
     "This chat's id is in the `[inertia-chat]` instruction.",
     "Read directly: this chat, chats this turn's message names, and chats this chat created (not their children).",
@@ -73,6 +76,7 @@ export const AGENT_CONTEXT_TOOL_DEFINITION: ProviderHostToolDefinition = {
     properties: {
       conversationId: { type: "string", format: "uuid" },
       turnId: { type: "string", minLength: 1, maxLength: 200 },
+      itemId: { type: "string", minLength: 1, maxLength: 240 },
       cursor: { type: "string", minLength: 1, maxLength: 200 },
       limit: { type: "integer", minimum: 1, maximum: MAX_AGENT_CONTEXT_TURNS },
     },
@@ -150,11 +154,20 @@ export class AgentContextTool {
       });
     }
     const input = parsed;
-    if (!input.conversationId && (input.turnId || input.cursor || input.limit)) {
-      return failure("invalid_arguments", "conversationId: required with turnId, cursor or limit; this chat's id is in the [inertia-chat] instruction.");
+    if (!input.conversationId && (input.turnId || input.itemId || input.cursor || input.limit)) {
+      return failure("invalid_arguments", "conversationId: required with turnId, itemId, cursor or limit; this chat's id is in the [inertia-chat] instruction.");
     }
     if (input.turnId && input.limit) {
       return failure("invalid_arguments", "limit: applies only to the turn list; drop it when passing turnId.");
+    }
+    if (input.itemId !== undefined) {
+      if (input.turnId || input.limit) {
+        return failure("invalid_arguments", "itemId: pass it with conversationId and, to continue, cursor; drop turnId and limit.");
+      }
+      if (input.conversationId !== current.id) {
+        return failure("item_not_in_this_chat", "itemId reads only this chat's own history; pass this chat's id from the [inertia-chat] instruction.");
+      }
+      return this.readItem(source, call, current, { itemId: input.itemId, cursor: input.cursor });
     }
     const reads = this.dependencies.store.contextPackets.turnReads;
     if (
@@ -185,6 +198,9 @@ export class AgentContextTool {
     if (input.turnId && input.limit) {
       return failure("invalid_arguments", "limit: applies only to the turn list; drop it when passing turnId.");
     }
+    if (input.itemId !== undefined && (input.turnId || input.limit || input.conversationId !== current.id)) {
+      return failure("not_available_to_watchers", "A watcher reads history items only of its own chat, with conversationId and cursor alone.");
+    }
     const access = this.dependencies.store.contextPackets.turnReads.access({
       targetConversationId: current.id,
       targetTurnId: source.turn.id,
@@ -202,6 +218,7 @@ export class AgentContextTool {
     if (!this.dependencies.watcherPolicy!.consumeRead(source.turn.id, budget)) {
       return failure("budget_exceeded", budget === 0 ? "This watcher can't read more of the chat." : `This check already read context ${budget} times.`);
     }
+    if (input.itemId !== undefined) return this.readItem(source, call, current, { itemId: input.itemId, cursor: input.cursor });
     const share: AgentContextShare | undefined = access === "watched" && link
       ? {
           requests: link.sharing.brief,
@@ -279,6 +296,52 @@ export class AgentContextTool {
       });
     }
     return json(result, images);
+  }
+
+  /**
+   * One item of this chat's own portable history, by the id a context handoff
+   * listed as omitted. The item comes from the same source as the handoff:
+   * this chat only, on this turn's route, without rolled-back turns.
+   */
+  private readItem(
+    source: AgentContextToolSource,
+    call: ProviderHostToolCall,
+    current: Conversation,
+    input: { itemId: string; cursor?: string },
+  ): ProviderHostToolResult {
+    const read = this.dependencies.store.orchestration.portableHistoryItem({
+      threadId: current.id,
+      itemId: input.itemId,
+      route: this.ownChatRoute(current, source.turn),
+      maxTextBytes: AGENT_CONTEXT_MESSAGE_BYTES,
+    });
+    if (!read.found) {
+      return read.reason === "withheld"
+        ? failure("item_withheld", "That item ran on another model endpoint, so it is withheld from this chat's history.")
+        : failure("item_not_found", "That item is not part of this chat's history; pass an id from an omitted item list.");
+    }
+    const result = agentContextItemPage(this.dependencies.store.contextPackets.turnReads, {
+      conversationId: current.id,
+      item: read.item,
+      text: read.text,
+      truncated: read.truncated,
+      ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+    });
+    this.dependencies.assertSource(source);
+    if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
+    const recorded = this.dependencies.store.contextPackets.turnReads.recordRead({
+      targetConversationId: current.id,
+      targetTurnId: source.turn.id,
+      targetUserMessageId: source.turn.userMessageId,
+      sourceConversationId: current.id,
+      sourceTurnId: read.item.sourceThreadId === undefined ? read.item.turnId : null,
+      access: "own",
+      now: this.dependencies.now(),
+    });
+    if (recorded) {
+      this.dependencies.broadcast({ type: "conversation.detail.invalidated", conversationId: current.id });
+    }
+    return json(result);
   }
 
   private ownChatRoute(conversation: Conversation, turn: AgentTurn): ContinuationRouteFilter {

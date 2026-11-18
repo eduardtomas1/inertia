@@ -151,6 +151,7 @@ export const MESSAGE_PROJECTION_COLUMNS = `
   messages.secret_request_json,
   messages.private_connect_device_id,
   messages.watcher_note_json,
+  messages.delegated_completion_json,
   messages.duo_comparison_json,
   messages.custom_agent_call_json,
   messages.created_at

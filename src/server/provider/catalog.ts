@@ -1,6 +1,7 @@
 import { PROVIDER_IDS, type ProviderId, type ProviderInfo } from "./contracts";
 
 export const PROVIDER_INFO: Readonly<Record<ProviderId, ProviderInfo>> = Object.freeze({
+  pi: { id: "pi", name: "Pi", command: "pi" },
   codex: {
     id: "codex",
     name: "Codex",

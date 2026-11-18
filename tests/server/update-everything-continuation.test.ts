@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
-import { createRestartContinuationRuntime } from "../../src/server/runtime/restart-continuation-runtime";
+import { createRestartContinuationRuntime, RESTART_CONTINUATION_PROMPT } from "../../src/server/runtime/restart-continuation-runtime";
 import { finishUpdateEverything, runUpdateEverything, type UpdateEverythingDependencies } from "../../src/server/runtime/update-everything";
 import { isHeld, release } from "../../src/server/runtime/update-hold";
 import type { ProviderMaintenanceOperation } from "../../src/shared/provider-maintenance";
@@ -88,7 +88,7 @@ describe("update everything with restart continuation", () => {
       expect(runtime.provider.runCount).toBe(2);
       expect(runtime.provider.input?.sessionId).toBe("native-session");
       expect(runtime.store.conversationDetail(runtime.conversationId)!.messages.at(-1))
-        .toMatchObject({ role: "user", content: "Continue from where you stopped." });
+        .toMatchObject({ role: "user", content: RESTART_CONTINUATION_PROMPT });
       await continuation.scheduler.tick();
       expect(runtime.provider.runCount).toBe(2);
     } finally { await close(); }

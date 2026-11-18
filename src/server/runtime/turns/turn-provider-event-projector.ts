@@ -6,6 +6,7 @@ import type {
   SubagentTrace,
 } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
+import type { AttemptObserver } from "../../orchestration-v2/attempt-fence";
 import type {
   ProviderEvent,
   ProviderSubagentEvent,
@@ -47,6 +48,7 @@ export interface TurnProviderEventProjectorOptions {
     active: ActiveTurn,
     status: Exclude<AgentRunState, AgentTurnTerminalStatus>,
     providerState?: string | null,
+    observer?: AttemptObserver,
   ): boolean;
   observeSubagent(
     active: ActiveTurn,
@@ -82,8 +84,24 @@ export class TurnProviderEventProjector {
     broadcastTurnSnapshot(this.options.hooks);
   }
 
-  project(active: ActiveTurn, event: ProviderEvent): void {
+  /**
+   * `observer` names the attempt the event came from, already checked against
+   * the turn's current attempt. The rare state-changing V2 writes (native
+   * boundary, session, provider status) re-check it in their transaction; the
+   * per-output acknowledgement does not, to keep streaming cheap.
+   */
+  project(active: ActiveTurn, event: ProviderEvent, observer?: AttemptObserver): void {
+    if (event.type === "text" || event.type === "text-snapshot" || event.type === "approval"
+      || event.type === "input" || event.type === "plan") {
+      this.options.store.orchestration.acknowledge(active.turn.runId);
+    }
     switch (event.type) {
+      case "native-boundary":
+        this.options.store.orchestration.nativeBoundaries.observe(active.turn, {
+          nativeConversationId: event.nativeConversationId, nativeSessionId: event.nativeSessionId,
+          nativeTurnId: event.nativeTurnId, persistedHeadId: event.persistedHeadId, phase: event.phase,
+        }, observer);
+        break;
       case "text":
         this.options.streams.appendAssistant(active, event.text);
         break;
@@ -128,6 +146,8 @@ export class TurnProviderEventProjector {
         break;
       }
       case "session":
+        // A stale attempt's session must not become the turn's or the chat's.
+        if (this.options.store.orchestration.backings.observeSession(active.turn, event.sessionId, observer)) break;
         updateActiveTurnProviderSession(active, event.sessionId);
         this.options.store.updateConversation(active.conversation.id, {
           providerSessionId: event.sessionId,
@@ -163,7 +183,7 @@ export class TurnProviderEventProjector {
       case "status":
         if (
           (event.status === "starting"
-            && this.options.transition(active, "starting", event.providerState))
+            && this.options.transition(active, "starting", event.providerState, observer))
           || ((event.status === "running"
             || event.status === "delegated"
             || event.status === "retrying"
@@ -172,6 +192,7 @@ export class TurnProviderEventProjector {
               active,
               event.status,
               event.providerState,
+              observer,
             ))
         ) {
           this.broadcastConversationShell(active);

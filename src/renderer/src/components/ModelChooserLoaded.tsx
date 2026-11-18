@@ -1,0 +1,692 @@
+import { Search } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  lazy,
+  Suspense,
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
+
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import { loadModelSourceRail } from "./chatSurfaceLoaders";
+import {
+  modelChooserRowFromRoute,
+  ModelChooserRow,
+  type ModelChooserRowData,
+} from "./ModelChooserRow";
+import {
+  modelFavoriteKey,
+  readModelFavorites,
+  resolveModelFavorites,
+  toggleModelFavorite,
+  writeModelFavorites,
+  type ModelFavoriteReference,
+  type ModelFavoriteConfiguration,
+} from "../utils/modelFavorites";
+import {
+  readyModelChooserRoutes,
+  type ComposerModelRoute,
+} from "../utils/modelChooserRoutes";
+import { searchModelRoutes } from "../utils/modelSearch";
+import {
+  deriveModelSourceRailItems,
+  filterModelRoutesBySource,
+  modelSourceFilterId,
+  type ModelSourceFilter,
+} from "../utils/modelSourceRail";
+import {
+  matchesModelShortcut,
+  resolveModelShortcutBindings,
+  type ModelShortcutPlatform,
+} from "../utils/modelShortcuts";
+import { outsidePointerShouldRestoreFocus } from "../utils/dismissibleMenu";
+import type { SelectedModelChipRoute } from "../utils/selectedModelChip";
+import {
+  isSidebarNavigationKey,
+  nextSelectableNavigationIndex,
+} from "../utils/sidebarModel";
+
+const CursorSdkModels = lazy(async () => ({
+  default: (await import("./cursor-sdk/CursorSdkModels")).CursorSdkModels,
+}));
+
+export type ModelChooserNavigationKey =
+  | "ArrowDown"
+  | "ArrowUp"
+  | "Home"
+  | "End";
+
+export interface ModelChooserProps {
+  routes: readonly ComposerModelRoute[];
+  selectedRoute: SelectedModelChipRoute;
+  configuration?: ModelFavoriteConfiguration;
+  disabled?: boolean;
+  closeSignal?: string | null;
+  onSelect: (route: ComposerModelRoute) => void | Promise<void>;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export const MODEL_CHOOSER_VIRTUALIZATION_MIN_RESULTS = 100;
+const MODEL_CHOOSER_INITIAL_VIRTUAL_RECT = {
+  width: 640,
+  height: 400,
+};
+const MODEL_CHOOSER_ESTIMATED_ROW_SIZE = 54;
+const MODEL_CHOOSER_FALLBACK_RENDER_COUNT = 16;
+
+export function nextModelChooserIndex(
+  routes: readonly ComposerModelRoute[],
+  currentIndex: number,
+  key: ModelChooserNavigationKey,
+): number {
+  const indices = routes.flatMap((route, index) => route.selectable ? [index] : []);
+  return nextSelectableNavigationIndex(indices, currentIndex, key);
+}
+
+export function modelShortcutPlatform(
+  platform: string,
+): ModelShortcutPlatform {
+  const normalized = platform.toLowerCase();
+  if (normalized.includes("mac")) return "darwin";
+  if (normalized.includes("win")) return "win32";
+  if (normalized.includes("linux")) return "linux";
+  return "unknown";
+}
+
+function initialFavorites(): ModelFavoriteReference[] {
+  return typeof window === "undefined"
+    ? []
+    : readModelFavorites(window.localStorage);
+}
+
+function favoriteKeyForRoute(
+  route: Pick<
+    ComposerModelRoute,
+    "harnessId" | "backendProfileId" | "modelId" | "reasoningEffort" | "configuration"
+  >,
+): string {
+  return modelFavoriteKey(route);
+}
+
+function activeKeyForRoute(
+  route: {
+    harnessId: string;
+    backendProfileId: string;
+    backendConfigurationRevision?: number;
+    modelId: string;
+    reasoningEffort?: string | null;
+  },
+): string {
+  return JSON.stringify([
+    modelFavoriteKey({
+      harnessId: route.harnessId,
+      backendProfileId: route.backendProfileId,
+      modelId: route.modelId,
+      reasoningEffort: route.reasoningEffort ?? null,
+    }),
+    route.backendConfigurationRevision ?? null,
+  ]);
+}
+
+
+export function searchableModelChooserRoutes(
+  routes: readonly ComposerModelRoute[],
+  favoriteRoutes: readonly ComposerModelRoute[],
+): ComposerModelRoute[] {
+  const seen = new Set<string>();
+  return [...favoriteRoutes, ...routes].filter((route) => {
+    const key = favoriteKeyForRoute(route);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function preferredModelChooserSource(
+  items: readonly { filter: ModelSourceFilter }[],
+): ModelSourceFilter {
+  return items.find(({ filter }) => filter.kind === "favorites")?.filter
+    ?? items[0]?.filter
+    ?? { kind: "all" };
+}
+
+interface ModelChooserResultProps {
+  route: ComposerModelRoute;
+  row: ModelChooserRowData;
+  index: number;
+  optionId: string;
+  navigated: boolean;
+  onNavigate: (index: number) => void;
+  onSelect: (route: ComposerModelRoute) => void;
+  onFavoriteToggle: (route: ComposerModelRoute) => void;
+  virtualStart?: number;
+  onMeasure?: (element: Element | null) => void;
+}
+
+const ModelChooserResult = memo(function ModelChooserResult({
+  route,
+  row,
+  index,
+  optionId,
+  navigated,
+  onNavigate,
+  onSelect,
+  onFavoriteToggle,
+  virtualStart,
+  onMeasure,
+}: ModelChooserResultProps): JSX.Element {
+  const selectRow = useCallback(() => onSelect(route), [onSelect, route]);
+  const toggleFavorite = useCallback(
+    () => onFavoriteToggle(route),
+    [onFavoriteToggle, route],
+  );
+  return (
+    <li
+      role="row"
+      className={navigated
+        ? "model-chooser-result is-navigated"
+        : "model-chooser-result"}
+      data-index={virtualStart === undefined ? undefined : index}
+      ref={virtualStart === undefined ? undefined : onMeasure}
+      style={virtualStart === undefined ? undefined : {
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        transform: `translateY(${virtualStart}px)`,
+      }}
+      aria-rowindex={index + 1}
+      onPointerMove={() => {
+        if (route.selectable) onNavigate(index);
+      }}
+    >
+      <ModelChooserRow
+        row={row}
+        highlighted={navigated}
+        optionId={optionId}
+        onSelect={selectRow}
+        onFavoriteToggle={toggleFavorite}
+      />
+    </li>
+  );
+});
+
+export function ModelChooser({
+  routes,
+  selectedRoute,
+  configuration,
+  disabled = false,
+  closeSignal = null,
+  onSelect,
+  onOpenChange,
+  open,
+  setOpen,
+  anchorRef,
+  triggerRef,
+  dialogId,
+}: ModelChooserProps & {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  anchorRef: React.RefObject<HTMLDivElement | null>;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  dialogId: string;
+}): JSX.Element {
+  const reactId = useId().replaceAll(":", "");
+  const resultsId = `${reactId}-model-results`;
+  const searchId = `${reactId}-model-search`;
+  const searchRef = useRef<HTMLInputElement>(null);
+  const resultsScrollRef = useRef<HTMLDivElement>(null);
+  const restoreFocusWhenEnabledRef = useRef(false);
+  const activeRouteKeyRef = useRef<string | null>(null);
+  const activeSelectionContextRef = useRef<string | null>(null);
+  const ModelSourceRail = useLoadedSurface(loadModelSourceRail, open);
+  const [query, setQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<ModelSourceFilter>({
+    kind: "all",
+  });
+  const [favorites, setFavorites] = useState<ModelFavoriteReference[]>(
+    initialFavorites,
+  );
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const favoriteKeys = useMemo(
+    () => new Set(favorites.map(modelFavoriteKey)),
+    [favorites],
+  );
+  const selectedKey = activeKeyForRoute(selectedRoute);
+  const offeredRoutes = useMemo(
+    () => readyModelChooserRoutes(
+      routes,
+      (route) => activeKeyForRoute(route) === selectedKey,
+    ),
+    [routes, selectedKey],
+  );
+  const favoriteReference = useCallback((route: ComposerModelRoute): ModelFavoriteReference => ({
+    ...route,
+    ...(favoriteKeys.has(route.key) || !configuration ? {} : {
+      configuration: {
+        accessMode: configuration.accessMode,
+        interactionMode: configuration.interactionMode,
+        ...(route.supportsNativeFastModeControl
+          ? { fastMode: route.responseSpeed === "Fast" } : {}),
+      },
+    }),
+  }), [configuration, favoriteKeys]);
+  const resolvedFavorites = useMemo(
+    () => resolveModelFavorites(favorites, offeredRoutes),
+    [favorites, offeredRoutes],
+  );
+  const resolvedFavoriteRoutes = useMemo(
+    () => resolvedFavorites.flatMap(({ route }) => route ? [route] : []),
+    [resolvedFavorites],
+  );
+  const railItems = useMemo(
+    () => deriveModelSourceRailItems(offeredRoutes, {
+      favoriteRoutes: resolvedFavoriteRoutes,
+    }).filter((item) => item.routes.some((route) =>
+      route.providerReady && route.selectable)),
+    [offeredRoutes, resolvedFavoriteRoutes],
+  );
+  const wasOpen = useRef(false);
+  useLayoutEffect(() => {
+    if (open && !wasOpen.current) setSourceFilter(preferredModelChooserSource(railItems));
+    wasOpen.current = open;
+  }, [open, railItems]);
+  const selectedSourceId = modelSourceFilterId(sourceFilter);
+  const searchableRoutes = useMemo(
+    () => searchableModelChooserRoutes(offeredRoutes, resolvedFavoriteRoutes),
+    [offeredRoutes, resolvedFavoriteRoutes],
+  );
+  const sourceRoutes = useMemo(
+    () => query.trim()
+      ? searchableRoutes
+      : sourceFilter.kind === "favorites"
+        ? resolvedFavoriteRoutes
+        : filterModelRoutesBySource(offeredRoutes, sourceFilter),
+    [
+      offeredRoutes,
+      query,
+      resolvedFavoriteRoutes,
+      searchableRoutes,
+      sourceFilter,
+    ],
+  );
+  const results = useMemo(() => {
+    const pinnedKeys = new Set(resolvedFavoriteRoutes.map(({ key }) => key));
+    return searchModelRoutes(sourceRoutes, query, {
+      pinned: (route) => pinnedKeys.has(route.key),
+    });
+  }, [query, resolvedFavoriteRoutes, sourceRoutes]);
+  const resultItems = results.items;
+  const virtualized = resultItems.length
+    >= MODEL_CHOOSER_VIRTUALIZATION_MIN_RESULTS;
+  const resultKey = useCallback(
+    (index: number) => resultItems[index]?.key ?? index,
+    [resultItems],
+  );
+  const resultVirtualizer = useVirtualizer({
+    count: virtualized ? resultItems.length : 0,
+    getScrollElement: () => resultsScrollRef.current,
+    estimateSize: () => MODEL_CHOOSER_ESTIMATED_ROW_SIZE,
+    initialRect: MODEL_CHOOSER_INITIAL_VIRTUAL_RECT,
+    overscan: 6,
+    getItemKey: resultKey,
+  });
+  const virtualItems = virtualized
+    ? resultVirtualizer.getVirtualItems()
+    : [];
+  const renderedResultItems: readonly {
+    index: number;
+    virtualStart?: number;
+  }[] = !virtualized
+    ? resultItems.map((_, index) => ({ index }))
+    : virtualItems.length > 0
+      ? virtualItems.map(({ index, start }) => ({ index, virtualStart: start }))
+      : Array.from(
+          {
+            length: Math.min(
+              MODEL_CHOOSER_FALLBACK_RENDER_COUNT,
+              resultItems.length,
+            ),
+          },
+          (_, offset) => {
+            const startIndex = Math.min(
+              Math.max(activeIndex - 6, 0),
+              Math.max(
+                resultItems.length - MODEL_CHOOSER_FALLBACK_RENDER_COUNT,
+                0,
+              ),
+            );
+            const index = startIndex + offset;
+            return {
+              index,
+              virtualStart: index * MODEL_CHOOSER_ESTIMATED_ROW_SIZE,
+            };
+          },
+        );
+  const platform = typeof navigator === "undefined"
+    ? "unknown"
+    : modelShortcutPlatform(navigator.platform);
+  const shortcuts = useMemo(
+    () => resolveModelShortcutBindings(
+      resolvedFavorites,
+      resultItems,
+      { platform },
+    ),
+    [platform, resolvedFavorites, resultItems],
+  );
+  const shortcutsByRoute = useMemo(
+    () => new Map(shortcuts.map((binding) => [binding.routeKey, binding])),
+    [shortcuts],
+  );
+  const selectedConfigurationKey = JSON.stringify(configuration ?? null);
+  const matchesSelection = useCallback((route: ComposerModelRoute): boolean =>
+    activeKeyForRoute(route) === selectedKey && (!route.configuration || (
+      route.configuration.accessMode === configuration?.accessMode
+      && route.configuration.interactionMode === configuration?.interactionMode
+      && (route.configuration.fastMode === undefined
+        || route.configuration.fastMode === configuration?.fastMode)
+    )), [configuration, selectedKey]);
+
+  const restoreTriggerFocus = useCallback((): void => {
+    const trigger = triggerRef.current;
+    if (!trigger || trigger.disabled) return;
+    restoreFocusWhenEnabledRef.current = false;
+    trigger.focus();
+  }, [triggerRef]);
+
+  const close = useCallback((restoreFocus = true): void => {
+    setOpen(false);
+    setQuery("");
+    onOpenChange?.(false);
+    restoreFocusWhenEnabledRef.current = restoreFocus;
+    if (restoreFocus) window.requestAnimationFrame(restoreTriggerFocus);
+  }, [onOpenChange, restoreTriggerFocus, setOpen]);
+
+  useEffect(() => {
+    if (open || disabled || !restoreFocusWhenEnabledRef.current) return;
+    const frame = window.requestAnimationFrame(restoreTriggerFocus);
+    return () => window.cancelAnimationFrame(frame);
+  }, [disabled, open, restoreTriggerFocus]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      activeRouteKeyRef.current = null;
+      activeSelectionContextRef.current = null;
+      return;
+    }
+    const selectionContext = JSON.stringify([
+      query,
+      selectedSourceId,
+      selectedKey,
+      selectedConfigurationKey,
+    ]);
+    const preserveNavigation =
+      activeSelectionContextRef.current === selectionContext;
+    const preservedIndex = preserveNavigation && activeRouteKeyRef.current
+      ? resultItems.findIndex((route) =>
+        route.key === activeRouteKeyRef.current && route.selectable)
+      : -1;
+    const selectedIndex = resultItems.findIndex((route) =>
+      matchesSelection(route) && route.selectable);
+    const nextIndex = preservedIndex >= 0
+      ? preservedIndex
+      : selectedIndex >= 0
+        ? selectedIndex
+        : nextModelChooserIndex(resultItems, -1, "Home");
+    activeSelectionContextRef.current = selectionContext;
+    activeRouteKeyRef.current = resultItems[nextIndex]?.key ?? null;
+    setActiveIndex((current) => current === nextIndex ? current : nextIndex);
+  }, [matchesSelection, open, query, resultItems, selectedConfigurationKey, selectedKey, selectedSourceId]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (railItems.some(({ id }) => id === selectedSourceId)) return;
+    setSourceFilter(preferredModelChooserSource(railItems));
+  }, [open, railItems, selectedSourceId]);
+
+  useEffect(() => {
+    if (!open) return;
+    const anchor = anchorRef.current;
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (
+        event.target instanceof Node
+        && anchor?.contains(event.target)
+      ) {
+        return;
+      }
+      close(outsidePointerShouldRestoreFocus(event.target));
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [anchorRef, close, open]);
+
+  useEffect(() => {
+    if (!open || (!disabled && closeSignal === null)) return;
+    close(false);
+  }, [close, closeSignal, disabled, open]);
+
+  const select = useCallback((route: ComposerModelRoute): void => {
+    if (!route.selectable) return;
+    const completion = onSelect(route);
+    if (!completion) {
+      close(true);
+      return;
+    }
+    void completion.then(
+      () => close(true),
+      () => undefined,
+    );
+  }, [close, onSelect]);
+
+  const toggleFavorite = useCallback((route: ComposerModelRoute): void => {
+    setFavorites((current) => {
+      const next = toggleModelFavorite(current, favoriteReference(route));
+      if (typeof window !== "undefined") {
+        writeModelFavorites(window.localStorage, next);
+      }
+      return next;
+    });
+  }, [favoriteReference]);
+
+  const navigateTo = useCallback((index: number): void => {
+    activeRouteKeyRef.current = resultItems[index]?.key ?? null;
+    setActiveIndex(index);
+  }, [resultItems]);
+
+  const handleNavigation = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void => {
+    const shortcut = shortcuts.find((binding) =>
+      matchesModelShortcut(event.nativeEvent, binding));
+    if (shortcut) {
+      event.preventDefault();
+      select(shortcut.route);
+      return;
+    }
+    const target = event.target as HTMLElement;
+    if (
+      target.closest(".model-source-rail")
+      || target.closest(".model-chooser-row-option")
+      || target.closest(".model-chooser-row-favorite")
+    ) {
+      return;
+    }
+    if (isSidebarNavigationKey(event.key)) {
+      event.preventDefault();
+      setActiveIndex((current) => {
+        const nextIndex = nextModelChooserIndex(
+          resultItems,
+          current,
+          event.key as ModelChooserNavigationKey,
+        );
+        activeRouteKeyRef.current = resultItems[nextIndex]?.key ?? null;
+        return nextIndex;
+      });
+      return;
+    }
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    const route = resultItems[activeIndex];
+    if (!route?.selectable) return;
+    event.preventDefault();
+    select(route);
+  };
+
+  const activeRoute = resultItems[activeIndex] ?? null;
+  const activeResultMounted = !virtualized
+    || renderedResultItems.some(({ index }) => index === activeIndex);
+  const activeDescendant = activeRoute && activeResultMounted
+    ? `${reactId}-model-option-${activeIndex}`
+    : undefined;
+  const chooserRows = useMemo(() => resultItems.map((route) =>
+    modelChooserRowFromRoute(route, {
+      active: matchesSelection(route),
+      favorite: favoriteKeys.has(modelFavoriteKey(favoriteReference(route))),
+      shortcut: shortcutsByRoute.get(route.key) ?? null,
+      compatibility: route.rowCompatibility,
+    })), [favoriteKeys, favoriteReference, matchesSelection, resultItems, shortcutsByRoute]);
+
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    const popover = document.getElementById(dialogId);
+    if (!open || !trigger || !popover) return;
+    let active = true;
+    let stop: (() => void) | undefined;
+    void import("../utils/composerPopoverPlacement").then(({ observeComposerPopover }) => {
+      if (!active) return;
+      stop = observeComposerPopover(trigger, popover, () => undefined, "below");
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    });
+    return () => { active = false; stop?.(); };
+  }, [dialogId, open, triggerRef]);
+
+  useLayoutEffect(() => {
+    if (!open || !virtualized || activeIndex < 0) return;
+    resultVirtualizer.scrollToIndex(activeIndex, { align: "auto" });
+  }, [activeIndex, open, resultVirtualizer, virtualized]);
+
+  return (
+    <>
+      {open && (
+        <div
+          id={dialogId}
+          className="model-chooser-palette"
+          role="dialog"
+          aria-modal="false"
+          aria-label="Choose model"
+          onKeyDown={handleNavigation}
+        >
+          <div className="model-chooser-header">
+            <label htmlFor={searchId}>
+              <Search size={14} aria-hidden="true" />
+              <span className="visually-hidden">Search models</span>
+            </label>
+            <input
+              ref={searchRef}
+              id={searchId}
+              type="search"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-haspopup="grid"
+              aria-expanded={true}
+              value={query}
+              autoComplete="off"
+              spellCheck="false"
+              placeholder="Search models…"
+              aria-label="Search models"
+              aria-controls={resultsId}
+              aria-activedescendant={activeDescendant}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+          <Suspense fallback={null}>
+            <CursorSdkModels onSelect={select} query={query} />
+          </Suspense>
+          <div className="model-chooser-body">
+            {ModelSourceRail ? (
+              <ModelSourceRail
+                items={railItems}
+                selectedId={selectedSourceId}
+                resultsId={resultsId}
+                onFilterChange={(filter) => {
+                  setSourceFilter(filter);
+                  window.requestAnimationFrame(() => searchRef.current?.focus());
+                }}
+              />
+            ) : (
+              <nav className="model-source-rail" aria-label="Model sources" aria-busy="true">
+                <span className="model-source-rail-item" aria-hidden="true" />
+              </nav>
+            )}
+            <div className="model-chooser-results-wrap">
+              <div
+                ref={resultsScrollRef}
+                className="model-chooser-results"
+              >
+                <ul
+                  role="grid"
+                  aria-colcount={2}
+                  aria-rowcount={resultItems.length}
+                  id={resultsId}
+                  className="model-chooser-list"
+                  aria-label="Model results"
+                  style={virtualized ? {
+                    position: "relative",
+                    height: `${resultVirtualizer.getTotalSize()}px`,
+                  } : undefined}
+                >
+                  {renderedResultItems.map((item) => {
+                    const route = resultItems[item.index]!;
+                    return (
+                      <ModelChooserResult
+                        key={route.key}
+                        route={route}
+                        row={chooserRows[item.index]!}
+                        index={item.index}
+                        optionId={`${reactId}-model-option-${item.index}`}
+                        navigated={activeIndex === item.index}
+                        onNavigate={navigateTo}
+                        onSelect={select}
+                        onFavoriteToggle={toggleFavorite}
+                        {...(item.virtualStart === undefined ? {} : {
+                          virtualStart: item.virtualStart,
+                          onMeasure: resultVirtualizer.measureElement,
+                        })}
+                      />
+                    );
+                  })}
+                </ul>
+                {results.emptyState && (
+                  <div className="model-chooser-empty" role="status">
+                    <Search size={16} aria-hidden="true" />
+                    <span>{results.emptyState.kind === "no-models"
+                      ? "No models yet"
+                      : "No matching models"}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

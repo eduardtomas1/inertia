@@ -35,6 +35,15 @@ function fixture(executableName = "selected-kimi") {
   return { cwd, executable, leases, authority, invalidateEvidence, controller, options };
 }
 
+it("uses a standalone OpenCode 2 login so the terminal does not attach to a shared background service", async () => {
+  const f = fixture("selected-opencode");
+  const launch = await prepareProviderAuthLaunch({ ...f.options, providerId: "opencode", installationVersion: "2.0.28" });
+  expect(launch.args).toEqual(["--standalone", "auth", "login"]);
+  expect(f.leases.hasProviderAuthority("opencode")).toBe(true);
+  expect(launch.installationUse.abandonBeforeSpawn()).toBe(true);
+  expect(f.leases.hasProviderAuthority("opencode")).toBe(false);
+});
+
 it("keeps the selected installation leased through negotiation and exact terminal handoff", async () => {
   const f = fixture();
   vi.mocked(probeKimiAuthentication).mockImplementationOnce(async (executable, cwd, environment, signal) => {

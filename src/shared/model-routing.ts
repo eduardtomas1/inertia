@@ -16,8 +16,10 @@ export const KNOWN_HARNESS_IDS = [
 
 export const CURRENT_KNOWN_HARNESS_IDS = [
   ...KNOWN_HARNESS_IDS,
+  "cursor-sdk",
   "antigravity-cli",
   "grok-acp",
+  "pi-rpc",
 ] as const;
 
 export type KnownHarnessId = (typeof CURRENT_KNOWN_HARNESS_IDS)[number];
@@ -32,6 +34,7 @@ export const MODEL_BACKEND_PROTOCOLS = [
   "opencode-native",
   "antigravity-managed",
   "grok-managed",
+  "pi-native",
 ] as const;
 
 export type ModelBackendProtocol = (typeof MODEL_BACKEND_PROTOCOLS)[number];
@@ -479,10 +482,16 @@ const CURRENT_NATIVE_HARNESS: Readonly<Record<ProviderId, KnownHarnessId>> = {
   ...NATIVE_HARNESS,
   antigravity: "antigravity-cli",
   grok: "grok-acp",
+  pi: "pi-rpc",
 };
 
 const CURRENT_NATIVE_BACKENDS: Readonly<Record<ProviderId, ModelBackendProfile>> = {
   ...NATIVE_BACKENDS,
+  pi: {
+    id: "builtin:pi", displayName: "Pi", protocol: "pi-native",
+    authenticationMode: "harness-managed", source: "built-in", enabled: true,
+    configurationRevision: 0, endpointIdentity: null,
+  },
   antigravity: {
     id: "builtin:antigravity",
     displayName: "Google Antigravity",
@@ -517,6 +526,8 @@ const EXPECTED_PROTOCOL: Readonly<Partial<Record<KnownHarnessId, ModelBackendPro
   "opencode-cli": "opencode-native",
   "antigravity-cli": "antigravity-managed",
   "grok-acp": "grok-managed",
+  "pi-rpc": "pi-native",
+  "cursor-sdk": "cursor-managed",
 };
 
 export function nativeHarnessId(providerId: ProviderId): KnownHarnessId {
@@ -591,6 +602,8 @@ export function providerNativeBackendProfile(
 }
 
 export function providerIdForHarness(harnessId: HarnessId): ProviderId | null {
+  if (harnessId === "cursor-sdk") return "cursor";
+  if (harnessId === "pi-rpc") return "pi";
   if (harnessId === "antigravity-cli") return "antigravity";
   if (harnessId === "grok-acp") return "grok";
   return legacyProviderIdForHarness(harnessId);
@@ -657,7 +670,7 @@ export function resolveHarnessBackendCompatibility(
     };
   }
   if (native && profile.id === native.id && profile.protocol === native.protocol) {
-    const cursorManaged = harnessId === "cursor-acp" || harnessId === "cursor-cli";
+    const cursorManaged = harnessId === "cursor-sdk" || harnessId === "cursor-acp" || harnessId === "cursor-cli";
     const kimiManaged = harnessId === "kimi-acp";
     const grokManaged = harnessId === "grok-acp";
     const antigravityManaged = harnessId === "antigravity-cli";
@@ -674,6 +687,7 @@ export function resolveHarnessBackendCompatibility(
         || harnessId === "kimi-acp"
         || harnessId === "grok-acp"
         || harnessId === "opencode-sdk"
+        || harnessId === "pi-rpc"
       ),
       reasonCode: cursorManaged
         ? "cursor-managed"
@@ -713,7 +727,9 @@ export function resolveHarnessBackendCompatibility(
   }
 
   if (
-    harnessId === "cursor-acp"
+    harnessId === "pi-rpc"
+    || harnessId === "cursor-sdk"
+    || harnessId === "cursor-acp"
     || harnessId === "cursor-cli"
     || harnessId === "kimi-acp"
     || harnessId === "grok-acp"
@@ -728,7 +744,7 @@ export function resolveHarnessBackendCompatibility(
       state: "unavailable",
       provenance: "built-in",
       allowsModelSwitchWithinSession: false,
-      reasonCode: harnessId.startsWith("cursor-")
+      reasonCode: harnessId === "pi-rpc" ? "native-backend" : harnessId.startsWith("cursor-")
         ? "cursor-managed"
         : harnessId.startsWith("kimi-")
           ? "kimi-managed"
@@ -737,7 +753,7 @@ export function resolveHarnessBackendCompatibility(
         : harnessId.startsWith("antigravity-")
           ? "antigravity-managed"
           : "opencode-native-catalog",
-      reason: harnessId.startsWith("cursor-")
+      reason: harnessId === "pi-rpc" ? "Pi models come from its native configuration." : harnessId.startsWith("cursor-")
         ? "Cursor controls its backend; Inertia does not inject external backend profiles."
         : harnessId.startsWith("kimi-")
           ? "Kimi Code controls its backend; Inertia does not inject external backend profiles."

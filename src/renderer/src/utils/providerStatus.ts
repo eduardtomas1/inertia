@@ -7,7 +7,7 @@ export function providerVersionLabel(version: string): string {
 }
 
 function verifiesSignInOnRun(provider: ProviderInfo): boolean {
-  return provider.id === "antigravity";
+  return provider.id === "antigravity" || provider.id === "pi";
 }
 
 function grokNeedsSignIn(provider: ProviderInfo): boolean {

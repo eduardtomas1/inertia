@@ -43,6 +43,7 @@ export const PROVIDER_IDS = [
   "opencode",
   "antigravity",
   "grok",
+  "pi",
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -115,6 +116,7 @@ interface ProviderRunRequest {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
+  nativeContinuation?: import("./native-conversation-operations").NativeConversationContinuation;
   /**
    * Exact native Fast value advertised for the selected model. Presence means
    * both Fast and Standard can be requested explicitly and must be attested by
@@ -223,12 +225,83 @@ export interface ProviderRunFailure {
   activityId?: string;
   sessionUnavailable?: true;
   resumeRejected?: true;
+  /**
+   * Definite: the provider refused before the request reached the native
+   * session, so no prompt, handoff or rollback cursor was delivered.
+   */
+  notDelivered?: true;
   usageLimited?: true;
   failureKind?: TurnFailureKind;
 }
 
+/**
+ * What the provider layer asserts about the rejected attempt when it asks for
+ * a fresh session: its process tree has ended (cleanup was confirmed).
+ */
+export interface ProviderFreshSessionPrior {
+  readonly priorCleanup: "confirmed";
+}
+
 export interface ProviderFreshSessionFallback {
   prompt: string;
+  /**
+   * Receives the replacement attempt's events. Without it they go to the
+   * run's `onEvent`, as the rejected attempt's did.
+   */
+  onEvent?: (event: ProviderEvent) => void;
+  /** Native delivery of the replacement's restored history, bound to the replacement attempt. */
+  historyInjection?: ProviderHistoryInjection;
+}
+
+/** The largest restored history a harness may inject, as JSON bytes: the portable history budget's cap. */
+export const MAX_HISTORY_INJECTION_BYTES = 64_000;
+
+/** One raw Responses API message item of restored history (T3 `historyResponseItems`). */
+export interface ProviderHistoryResponseItem {
+  type: "message";
+  role: "user" | "assistant";
+  content: [{ type: "input_text" | "output_text"; text: string }];
+}
+
+/**
+ * Process-local, exact-attempt authority to deliver a turn's restored history
+ * natively (capability `history-injection`; T3 `injectHistory`). The prompt the
+ * run carries keeps the history inline; a harness that injects sends `prompt`
+ * instead. Each step commits durably before it returns and returns false when
+ * nothing was recorded, so a harness never injects or starts a turn the record
+ * does not describe.
+ */
+export interface ProviderHistoryInjection {
+  /** The coverage context as a user item, then one labelled item per historical item; at most 64,000 JSON bytes. */
+  readonly items: readonly ProviderHistoryResponseItem[];
+  /** The turn's prompt without its restored-history block. */
+  readonly prompt: string;
+  /** Before the request. False: send nothing and keep the history inline. */
+  begin(): boolean;
+  /** The provider accepted the items; before the turn starts. False: start no turn. */
+  delivered(): boolean;
+  /** The provider does not know the method and changed nothing: the history goes inline in this turn. */
+  unsupported(): boolean;
+}
+
+export type ProviderBackgroundWork = "none" | "pending";
+
+export interface ProviderBackgroundWorkSession {
+  conversationId: string;
+  providerId: ProviderId;
+  harnessId: string;
+  nativeSessionId: string;
+}
+
+export interface ProviderBackgroundWorkProbe {
+  pendingBackgroundWork?(session: ProviderBackgroundWorkSession): ProviderBackgroundWork;
+}
+
+export function providerBackgroundWork(
+  probe: ProviderBackgroundWorkProbe,
+  session: ProviderBackgroundWorkSession,
+): ProviderBackgroundWork {
+  return probe.pendingBackgroundWork?.(session) ?? "none";
 }
 
 export interface ProviderEventBase {
@@ -290,6 +363,16 @@ export interface ProviderStatusEvent extends ProviderEventBase {
 export interface ProviderSessionEvent extends ProviderEventBase {
   type: "session";
   sessionId: string;
+}
+
+/** Provider-authored inclusive history anchor; null means unproved, never an inferred application ID. */
+export interface ProviderNativeBoundaryEvent extends ProviderEventBase {
+  type: "native-boundary";
+  nativeConversationId: string;
+  nativeSessionId: string | null;
+  nativeTurnId: string | null;
+  persistedHeadId: string | null;
+  phase: "started" | "settled";
 }
 
 export interface ProviderSessionTitleEvent extends ProviderEventBase {
@@ -430,6 +513,7 @@ export type ProviderEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
+  | ProviderNativeBoundaryEvent
   | ProviderSessionTitleEvent
   | ProviderApprovalEvent
   | ProviderApprovalResolvedEvent
@@ -446,7 +530,7 @@ export type ProviderEvent =
 export interface ProviderRunCallbacks {
   /** Fires only after the selected harness has synchronously accepted the run. */
   onStarted?: () => void;
-  freshSessionFallback?: () => ProviderFreshSessionFallback | null;
+  freshSessionFallback?: (prior: ProviderFreshSessionPrior) => ProviderFreshSessionFallback | null;
   onEvent?: (event: ProviderEvent) => void;
   onText?: (event: ProviderTextEvent) => void;
   onTextSnapshot?: (event: ProviderTextSnapshotEvent) => void;
@@ -466,6 +550,8 @@ export interface ProviderRunCallbacks {
   onSubagent?: (event: ProviderSubagentEvent) => void;
   /** Process-local, exact-turn authority for audited Inertia host tools. */
   hostTools?: ProviderHostToolBridge;
+  /** Offered to the harness only where `history-injection` can be negotiated for the run. */
+  historyInjection?: ProviderHistoryInjection;
 }
 
 export interface ProviderHostToolDefinition {
@@ -748,6 +834,7 @@ export function isProviderRunRefusal(
 }
 
 export interface ProviderManagerOptions {
+  cursorSdk?: import("./cursor-sdk-service").CursorSdkConfiguration;
   /** Durable maintenance recovery blocks every launch for this provider. */
   providerRecoveryPending?: (providerId: ProviderId) => boolean;
   commands?: Partial<Record<ProviderId, string>>;

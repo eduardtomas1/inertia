@@ -6,7 +6,9 @@ import type {
   Conversation,
 } from "../../src/shared/contracts";
 import type { RuntimeStore } from "../../src/server/database";
+import { OrchestrationCommandLanes } from "../../src/server/orchestration-v2/command-lanes";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
+import { ConversationWorkAuthority } from "../../src/server/runtime/conversation-work-authority";
 import {
   createConversationCommandHandler,
   type ConversationCommandDependencies,
@@ -142,6 +144,7 @@ function projectDependencies(
     dataDirectory: "/data",
     store: {
       hasRecordedActiveWorkspaceRunForProject: vi.fn(() => false),
+      orchestration: { lanes: new OrchestrationCommandLanes() },
       project: vi.fn(() => ({ id: projectId, path: "/workspace" }) as never),
       providerRunOwnership: { forConversation: vi.fn(() => []) },
       conversationWork,
@@ -364,9 +367,13 @@ describe("Duo deletion command preflights", () => {
       }) as never),
       conversationPath: vi.fn(() => worktreePath),
       hasActiveWorkspaceRunForConversation: vi.fn(() => false),
+      conversationWork: new ConversationWorkAuthority(() => ({ projectId, checkoutPath: worktreePath })),
+      orchestration: { lanes: new OrchestrationCommandLanes(), history: { rolledBack: vi.fn(() => false) } } as never,
     };
     const dependencies = projectDependencies(store);
-    const reservations = new ProviderTerminalResumeRegistry();
+    dependencies.turns = { checkoutActivityConversationIds: vi.fn(() => []) } as never;
+    dependencies.terminals = { liveSessionScopes: vi.fn(() => []) } as never;
+    const reservations = new ProviderTerminalResumeRegistry(store.conversationWork);
     dependencies.providerTerminalResumes = reservations;
     const pending = createProjectWorkspaceCommandHandler(dependencies)(
       {} as never,
@@ -380,9 +387,11 @@ describe("Duo deletion command preflights", () => {
     await vi.waitFor(() => expect(sideEffects.restoreCheckpoint).toHaveBeenCalled());
     expect(reservations.isActive(conversationId)).toBe(true);
     expect(reservations.acquire(conversationId)).toBe(false);
+    expect(store.conversationWork!.restoreBlocksConversation(conversationId)).toBe(true);
     finishRestore();
     await expect(pending).resolves.toBe("handled");
     expect(reservations.isActive(conversationId)).toBe(false);
+    expect(store.conversationWork!.restoreBlocksConversation(conversationId)).toBe(false);
   });
 
   it.each([

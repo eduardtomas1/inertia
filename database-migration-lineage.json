@@ -837,6 +837,77 @@
       "version": 116,
       "name": "PersistAgentSecretRequests",
       "digest": "aa02fbf1bf5b7dd19de856d62b2607adf42815bda71c863e75010816ad479abe"
+    },
+    {
+      "version": 117,
+      "name": "OrchestrationV2EventStore",
+      "digest": "14352751a33d9760068b0b9a9919af1fc980532338eb8364ed3829ea3dfc27ec"
+    },
+    {
+      "version": 118,
+      "name": "SupportNativePiProvider",
+      "digest": "a9de6e5eaac91b1368e41a98b91d06d217e25a430d37ded354a0261247bf29e7",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/native-pi-provider.ts",
+          "symbols": [
+            "PI_TABLES",
+            "piTableDefinition",
+            "quotePiIdentifier",
+            "rebuildPiTable"
+          ],
+          "digest": "fe4a81aa38ad781d74b81f888a37110c5aa1570355c92509be8856589a84e203"
+        }
+      ]
+    },
+    {
+      "version": 119,
+      "name": "SupportCursorSdkHarness",
+      "digest": "89c821f3039bb61c450d2ad599f3f29c50501f618dc6696152890dad8d6a32b1",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/cursor-sdk-provider.ts",
+          "symbols": [
+            "cursorSdkIdentifier",
+            "rebuildCursorSdkTable"
+          ],
+          "digest": "a4b2b915273b9dcbee7d5c3124517ac2a711f37bf2042d9a27cb9adc5efbb15b"
+        }
+      ]
+    },
+    {
+      "version": 120,
+      "name": "RaiseConversationContextSupplementBound",
+      "digest": "8748d19e1aec86e3c80c0c7c1223ea01bdd3325de0a06e6f1fff248ce92beeb8"
+    },
+    {
+      "version": 121,
+      "name": "PersistDelegatedTasks",
+      "digest": "75924c5e171c4aa31e3cb0eacec5de102879407372862d30f7cea0c06690dd80",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/delegated-tasks.ts",
+          "symbols": [
+            "DELEGATION_OPERATION_TOOLS",
+            "addDelegationColumn",
+            "delegationColumns",
+            "delegationCompletionCheck",
+            "delegationIdentifier",
+            "widenDelegationOperationTools"
+          ],
+          "digest": "eb48ddfc0ac1da849f2e0f62b3095129099c2de405bb85409bdaaac81713ffe1"
+        }
+      ]
+    },
+    {
+      "version": 122,
+      "name": "PersistDelegationAutomaticWakes",
+      "digest": "a03439e096e8ee3d6f5d2c1b3e149bbfd71067e93fee11e56cc0874e3f717cf0"
+    },
+    {
+      "version": 123,
+      "name": "OrchestrationV2ReceiptStatusAndProjectionMetadata",
+      "digest": "855e52519559e70586ba197de3262d1fea863a7d16526f4dc83e376972f0cb87"
     }
   ]
 }

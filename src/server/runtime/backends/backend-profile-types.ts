@@ -3,6 +3,7 @@ import type { ClaudeCompatibleBackendProfile } from "../../../shared/claude-back
 import type { RuntimeStore } from "../../database";
 
 export interface BackendCredentialBroker {
+  saveCursorSdk?(secret: string, signal?: AbortSignal): Promise<BackendCredentialStatus>;
   resolve(
     secretReference: string,
     signal?: AbortSignal,

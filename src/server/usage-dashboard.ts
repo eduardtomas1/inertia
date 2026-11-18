@@ -106,6 +106,7 @@ export const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   opencode: "OpenCode",
   antigravity: "Antigravity",
   grok: "Grok",
+  pi: "Pi",
 };
 
 const PRICE_LIST_UNAVAILABLE_REASON =

@@ -6,6 +6,7 @@ import { ConversationAttachmentStore } from "../../src/node/conversation-attachm
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { queuedRouteIdentity } from "../../src/server/persistence/queued-message-repository";
 import { LimitResetScheduler } from "../../src/server/usage/limit-reset-scheduler";
+import { mockCommandOrchestration } from "../support/orchestration-command-mocks";
 import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises, turnControllerTestProviderInfo } from "../support/turn-controller-runtime";
 
 afterEach(cleanupTurnControllerTestDirectories);
@@ -15,7 +16,7 @@ describe("reset dispatch through ordinary turn admission", () => {
     const acquireFollowUpAdmission = vi.fn(() => ({ supportsImages: false, release: vi.fn() }));
     const steer = vi.fn();
     const dependencies = {
-      store: { conversation: () => ({ id: conversationId, archivedAt: null }) },
+      store: { orchestration: mockCommandOrchestration(), conversation: () => ({ id: conversationId, projectId: "project", archivedAt: null }) },
       turns: { isActive: () => true, acquireFollowUpAdmission, steer },
       providerTerminalResumes: { isActive: () => false },
       send: vi.fn(), broadcast: vi.fn(), broadcastSnapshot: vi.fn(),

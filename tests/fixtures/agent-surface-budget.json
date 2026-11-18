@@ -98,6 +98,12 @@
       "cursorKimi": 519,
       "opencode": 518
     },
+    "inertia_fork_history": {
+      "claude": 586,
+      "codex": 482,
+      "cursorKimi": 586,
+      "opencode": 586
+    },
     "inertia_list_conversations": {
       "claude": 477,
       "codex": 373,
@@ -111,16 +117,16 @@
       "opencode": 410
     },
     "inertia_request_context": {
-      "claude": 933,
-      "codex": 827,
-      "cursorKimi": 933,
-      "opencode": 933
+      "claude": 1021,
+      "codex": 915,
+      "cursorKimi": 1021,
+      "opencode": 1021
     },
     "inertia_create_conversation": {
-      "claude": 1409,
-      "codex": 1303,
-      "cursorKimi": 1409,
-      "opencode": 1409
+      "claude": 1414,
+      "codex": 1308,
+      "cursorKimi": 1414,
+      "opencode": 1414
     },
     "inertia_send_message": {
       "claude": 546,
@@ -157,6 +163,30 @@
       "codex": 378,
       "cursorKimi": 484,
       "opencode": 484
+    },
+    "inertia_delegate_task": {
+      "claude": 1824,
+      "codex": 1718,
+      "cursorKimi": 1824,
+      "opencode": 1824
+    },
+    "inertia_get_task_status": {
+      "claude": 421,
+      "codex": 317,
+      "cursorKimi": 421,
+      "opencode": 421
+    },
+    "inertia_wait_for_task": {
+      "claude": 492,
+      "codex": 388,
+      "cursorKimi": 492,
+      "opencode": 492
+    },
+    "inertia_cancel_task": {
+      "claude": 599,
+      "codex": 494,
+      "cursorKimi": 600,
+      "opencode": 599
     },
     "inertia_request_secret": {
       "claude": 1178,
@@ -216,20 +246,20 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 24589,
-      "withoutBrowser": 13168
+      "withBrowser": 28604,
+      "withoutBrowser": 17183
     },
     "codex": {
-      "withBrowser": 21028,
-      "withoutBrowser": 11284
+      "withBrowser": 24520,
+      "withoutBrowser": 14776
     },
     "cursorKimi": {
-      "withBrowser": 24598,
-      "withoutBrowser": 13168
+      "withBrowser": 28614,
+      "withoutBrowser": 17184
     },
     "opencode": {
-      "withBrowser": 24589,
-      "withoutBrowser": 13168
+      "withBrowser": 28604,
+      "withoutBrowser": 17183
     }
   }
 }

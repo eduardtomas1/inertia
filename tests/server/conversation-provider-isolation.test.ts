@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,7 +60,7 @@ function fixture() {
   } as unknown as ConversationCommandDependencies;
   const update = (providerId: ProviderId, legacy = false) => createConversationCommandHandler(commandDependencies)({} as never, {
     type: "conversation.update",
-    requestId: "11111111-1111-4111-8111-111111111111",
+    requestId: randomUUID(),
     payload: {
       conversationId: conversation.id,
       ...(legacy ? { providerId } : { modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId })) }),

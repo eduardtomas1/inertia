@@ -155,6 +155,24 @@ if (message.method === "thread/start" || message.method === "thread/resume") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "missing-rollout-resume" && message.method === "thread/resume") {
     return send({ id: message.id, error: { code: -32600, message: "no rollout found for thread id " + message.params.threadId } });
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "active-writer-resume" && message.method === "thread/resume") {
+    return send({ id: message.id, error: { code: -32600, message: "thread " + message.params.threadId + " already has an active writer" } });
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "active-writer-other-code" && message.method === "thread/resume") {
+    return send({ id: message.id, error: { code: -32603, message: "thread " + message.params.threadId + " already has an active writer" } });
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "active-writer-no-code" && message.method === "thread/resume") {
+    return send({ id: message.id, error: { message: "thread " + message.params.threadId + " already has an active writer" } });
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "active-writer-string-code" && message.method === "thread/resume") {
+    return send({ id: message.id, error: { code: "-32600", message: "thread " + message.params.threadId + " already has an active writer" } });
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "active-writer-delayed" && message.method === "thread/resume") {
+    const id = message.id;
+    const threadIdentifier = message.params.threadId;
+    setTimeout(() => send({ id, error: { code: -32600, message: "thread " + threadIdentifier + " already has an active writer" } }), 400);
+    return;
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "rejected-resume" && message.method === "thread/resume") {
     return send({ id: message.id, error: { code: -32603, message: "rollout file is corrupt" } });
   }
@@ -163,7 +181,8 @@ if (message.method === "thread/start" || message.method === "thread/resume") {
   }
   threadId = message.params.threadId || "thread-new";
   send({ id: message.id, result: {
-    thread: { id: threadId },
+    thread: { id: threadId, ...(process.env.INERTIA_APP_SERVER_THREAD_STATUS
+      ? { status: { type: process.env.INERTIA_APP_SERVER_THREAD_STATUS, activeFlags: [] } } : {}) },
     model: message.params.model ?? "fake",
     modelProvider: message.params.modelProvider ?? "openai",
     serviceTier: message.params.serviceTier ?? null,
@@ -285,7 +304,24 @@ if (message.method === "thread/goal/clear") {
   send({ method: "thread/goal/cleared", params: { threadId } });
   return;
 }
+if (message.method === "thread/inject_items") {
+  // INERTIA_APP_SERVER_INJECT: ok (default), slow, unknown-method, unknown-variant, invalid-request, error, malformed, close, hold.
+  const inject = process.env.INERTIA_APP_SERVER_INJECT ?? "ok";
+  if (inject === "hold") return;
+  if (inject === "slow") return setTimeout(() => send({ id: message.id, result: {} }), 150);
+  if (inject === "close") return process.stdout.end();
+  if (inject === "unknown-method") return send({ id: message.id, error: { code: -32601, message: "Method not found" } });
+  // What App Server 0.169.0 answers for a method it does not know.
+  if (inject === "unknown-variant") return send({ id: message.id, error: { code: -32600, message: "Invalid request: unknown variant \`thread/inject_items\`, expected one of \`initialize\`, \`thread/start\`" } });
+  if (inject === "invalid-request") return send({ id: message.id, error: { code: -32600, message: "Invalid request: missing field \`items\`" } });
+  if (inject === "error") return send({ id: message.id, error: { code: -32603, message: "history write failed" } });
+  if (inject === "malformed") return send({ id: message.id, result: "injected" });
+  return send({ id: message.id, result: {} });
+}
 if (message.method === "turn/start") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-start-error") {
+    return send({ id: message.id, error: { code: -32603, message: "turn could not start" } });
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO?.startsWith("steer-answer-")) {
     send({ id: message.id, result: { turn: turnShape(turnId, "inProgress", null, null) } });
     sendBatch([
@@ -339,6 +375,8 @@ if (message.method === "turn/start") {
   }
   send({ id: message.id, result: { turn: turnShape(turnId, "inProgress", null, null) } });
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-completed-before-response") return;
+  // The response accepts the turn; turn/started never follows (a Stop racing it).
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-start-response-only") return;
   if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {
     return process.stdout.write(
       "x".repeat(16 * 1024 * 1024 + 1) + "\\n"

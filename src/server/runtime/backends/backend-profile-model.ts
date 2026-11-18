@@ -35,6 +35,7 @@ export const PROVIDER_IDS: readonly ProviderId[] = [
   "opencode",
   "antigravity",
   "grok",
+  "pi",
 ];
 
 export function normalizedBaseUrl(

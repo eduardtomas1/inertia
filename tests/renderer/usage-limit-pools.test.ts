@@ -119,7 +119,7 @@ describe("usage filters", () => {
 
   it("offers every known provider and adds custom backends once", () => {
     const profile = usageAccount({ id: "profile:a", providerId: "custom", providerLabel: "Work key" });
-    expect(usageProviderOptions(null).map(({ label }) => label)).toEqual(["Codex", "Claude", "Cursor", "Kimi Code", "OpenCode", "Antigravity", "Grok"]);
+    expect(usageProviderOptions(null).map(({ label }) => label)).toEqual(["Codex", "Claude", "Cursor", "Kimi Code", "OpenCode", "Antigravity", "Grok", "Pi"]);
     expect(usageProviderOptions({ accounts: [codex(), profile, profile], sources: [], checkedAt: null }).at(-1)).toEqual({ id: "custom", label: "Custom backends" });
   });
 });

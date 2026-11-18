@@ -47,6 +47,7 @@ import type { TurnSecretOutputFilter } from "./turn-secret-output";
 import type { AuthoritativeRunStateEngine } from "../run-state-engine";
 import type { WatcherNoteAttribution } from "../../../shared/watcher";
 import type { DuoComparisonBrief } from "../../../shared/duo-comparison-brief";
+import type { CommandSource } from "../../orchestration-v2/types";
 
 export interface TurnTimerScheduler extends DeltaTimerScheduler {}
 
@@ -70,6 +71,7 @@ export interface TurnProviderRuntime {
     conversationId: string,
     identity: { runId: string; turnId: string },
     graceMs?: number,
+    hooks?: { escalated?(): void },
   ): Promise<"missing" | "identity-mismatch" | "settled" | "force-detached">;
   isRunning(conversationId: string): boolean;
   ownsRun(
@@ -258,6 +260,7 @@ export interface ReadOnlyWatcherTurn {
 export interface FollowUpSteerOptions {
   providerContent?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   queuedMessageId?: string;
 }
 
@@ -266,6 +269,8 @@ export interface TurnSettledEvidence {
 }
 
 export interface QueueTurnRequest {
+  /** Original validated ingress command for durable acknowledgement replay. */
+  orchestrationRequest?: CommandSource;
   queuedMessageId?: string;
   limitResetPlanId?: string;
   restartContinuationPlanId?: string;
@@ -277,6 +282,7 @@ export interface QueueTurnRequest {
   duoComparison?: DuoComparisonBrief;
   authorizedWatcherWakeId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   content: string;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];
@@ -358,6 +364,13 @@ export interface NativeGoalStartAcknowledgement {
 export interface ActiveTurn {
   diagnosticFailureCode?: "turn.inactivity-timeout" | "turn.lifetime-timeout";
   turn: AgentTurn;
+  /**
+   * The run's current V2 attempt, read when the provider starts and replaced
+   * by the in-run fresh-session fallback. Provider observations carry the
+   * attempt they were started under and write nothing once it is replaced.
+   * Null or absent for a run V2 never admitted.
+   */
+  attemptId?: string | null;
   conversation: Conversation;
   providerInput: ProviderRunInput;
   /**
@@ -396,6 +409,8 @@ export interface ActiveTurn {
   providerStopStarted: boolean;
   sessionAfter: string | null;
   providerSessionTitle?: string;
+  /** This turn's restored history for native delivery; absent or null when it has none to deliver. */
+  nativeHistory?: AssembledTurnRequest["nativeHistory"] | null;
   freshSessionRequest?: ((excludedMessageId: string) => AssembledTurnRequest) | null;
   lastUsage: AgentTurnUsageSnapshot | null;
   assistantText: string;

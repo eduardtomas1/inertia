@@ -47,6 +47,11 @@ async function openPanel(): Promise<ReturnType<Page["getByRole"]>> {
   return panel;
 }
 
+test("opens without sending a request the chat window is not allowed to make", async () => {
+  await expect(popup.getByRole("main").getByRole("textbox", { name: "Message" })).toBeVisible();
+  await expect(popup.getByRole("alert")).toHaveCount(0);
+});
+
 test("opens the main window's tools beside the chat, without the Browser", async () => {
   const panel = await openPanel();
   const launcher = panel.getByRole("group", { name: "Open a surface" });

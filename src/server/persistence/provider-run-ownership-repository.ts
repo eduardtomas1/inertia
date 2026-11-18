@@ -44,7 +44,12 @@ export function releaseProviderRecoveryRecords(
 }
 
 export class ProviderRunOwnershipRepository {
-  constructor(private readonly database: Database.Database) {}
+  constructor(
+    private readonly database: Database.Database,
+    private readonly onOwnershipChanged?: (
+      identity: { turnId: string; runId: string }, cleanup: "pending" | "confirmed",
+    ) => void,
+  ) {}
 
   record(
     turnId: string,
@@ -53,6 +58,16 @@ export class ProviderRunOwnershipRepository {
     runtimeGenerationId: string,
     systemBootId: string,
     createdAt: string,
+  ): void {
+    this.database.transaction(() => {
+      this.recordOwned(turnId, conversationId, runId, runtimeGenerationId, systemBootId, createdAt);
+      this.onOwnershipChanged?.({ turnId, runId }, "pending");
+    })();
+  }
+
+  private recordOwned(
+    turnId: string, conversationId: string, runId: string,
+    runtimeGenerationId: string, systemBootId: string, createdAt: string,
   ): void {
     if (!validRuntimeGenerationId(runtimeGenerationId)) {
       throw new Error("The provider run ownership generation is invalid.");
@@ -85,16 +100,19 @@ export class ProviderRunOwnershipRepository {
   }
 
   clear(turnId: string, runId: string): void {
-    this.database.prepare(`
-      DELETE FROM provider_run_ownership
-      WHERE turn_id = ? AND run_id = ?
-    `).run(turnId, runId);
+    this.database.transaction(() => {
+      const removed = this.database.prepare(`DELETE FROM provider_run_ownership
+        WHERE turn_id = ? AND run_id = ?`).run(turnId, runId);
+      if (removed.changes > 0) this.onOwnershipChanged?.({ turnId, runId }, "confirmed");
+    })();
   }
 
   clearRuntimeGeneration(runtimeGenerationId: string): void {
-    this.database.prepare(`
-      DELETE FROM provider_run_ownership WHERE runtime_generation_id = ?
-    `).run(runtimeGenerationId);
+    this.database.transaction(() => {
+      const rows = this.database.prepare(`SELECT * FROM provider_run_ownership WHERE runtime_generation_id = ?`)
+        .all(runtimeGenerationId) as OwnedProviderRunRow[];
+      for (const row of rows) this.clear(row.turn_id, row.run_id);
+    })();
   }
 
   clearPriorBootSessions(systemBootId: string): void {
@@ -102,10 +120,11 @@ export class ProviderRunOwnershipRepository {
       throw new Error("The provider run ownership boot identity is invalid.");
     }
     if (systemBootId === "unavailable") return;
-    this.database.prepare(`
-      DELETE FROM provider_run_ownership
-      WHERE system_boot_id <> ? AND system_boot_id <> 'unavailable'
-    `).run(systemBootId);
+    this.database.transaction(() => {
+      const rows = this.database.prepare(`SELECT * FROM provider_run_ownership
+        WHERE system_boot_id <> ? AND system_boot_id <> 'unavailable'`).all(systemBootId) as OwnedProviderRunRow[];
+      for (const row of rows) this.clear(row.turn_id, row.run_id);
+    })();
   }
 
   forTurn(turnId: string): OwnedProviderRun | null {

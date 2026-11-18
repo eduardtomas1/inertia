@@ -13,6 +13,7 @@ import {
 } from "../codex/developer-instructions";
 import { createCodexPromptCacheClock } from "../codex/usage";
 import {
+  CODEX_THREAD_IN_USE_MESSAGE,
   codexAccessPolicy,
   codexServiceTierMatches,
   validateCodexModelProvider,
@@ -35,10 +36,13 @@ import {
 import { providerFailureMessage } from "./adapters";
 import {
   providerRunTerminal,
+  type ProviderHistoryInjection,
   type ProviderRunInput,
   type ProviderRunResult,
 } from "./contracts";
 import { markdownPlanSteps } from "./markdown-plan-steps";
+import { createCodexNativeConversationOperations } from "./codex-native-conversation";
+import { trackNativeConversationRun } from "./native-conversation-run-tracking";
 
 export const CODEX_APP_SERVER_HARNESS_CAPABILITIES = {
   lifecycle: {
@@ -85,6 +89,31 @@ interface CodexCompactionTurnState {
   startedAtMs: number | null;
 }
 
+/**
+ * The run's injection authority, reporting the negotiation outcome: an App
+ * Server that accepted `thread/inject_items` supports it; one that does not
+ * know the method does not, for this run only (as T3, nothing is cached).
+ */
+function codexHistoryInjection(
+  authority: ProviderHistoryInjection,
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
+): ProviderHistoryInjection {
+  return {
+    items: authority.items,
+    prompt: authority.prompt,
+    begin: () => authority.begin(),
+    delivered: () => {
+      const recorded = authority.delivered();
+      if (recorded) emitter.capability("history-injection", true);
+      return recorded;
+    },
+    unsupported: () => {
+      emitter.capability("history-injection", false);
+      return authority.unsupported();
+    },
+  };
+}
+
 function codexServiceTier(
   input: AgentHarnessStartOptions["input"],
 ): "priority" | null | undefined {
@@ -105,12 +134,14 @@ export interface CodexAppServerHarnessDependencies {
 export function createCodexAppServerHarness(
   dependencies: CodexAppServerHarnessDependencies = {},
 ): AgentHarness {
+  const activeNativeConversations = new Set<string>();
   return {
     id: "codex-app-server",
     providerId: "codex",
     capabilities: CODEX_APP_SERVER_HARNESS_CAPABILITIES,
+    nativeConversation: createCodexNativeConversationOperations(activeNativeConversations, dependencies.withControlClient),
     supports: (input) => input.providerId === "codex",
-    start: (options) => startCodexRun(options, dependencies),
+    start: (options) => trackNativeConversationRun(activeNativeConversations, options, (tracked) => startCodexRun(tracked, dependencies)),
   };
 }
 
@@ -179,6 +210,7 @@ function startCodexRun(
       goalContinuationExpected:
         options.input.goalContinuationExpected === true,
       ...(options.hostTools ? { hostTools: options.hostTools } : {}),
+      ...(options.historyInjection ? { historyInjection: codexHistoryInjection(options.historyInjection, emitter) } : {}),
       planMode: options.input.interactionMode === "plan" && options.input.readOnlyProfile !== "watcher",
       access: options.input.access,
       ...(options.input.readOnlyProfile ? { readOnlyProfile: options.input.readOnlyProfile } : {}),
@@ -186,6 +218,8 @@ function startCodexRun(
       ...(options.input.sessionInstruction ? { sessionDeveloperInstructions: options.input.sessionInstruction } : {}),
       onText: emitter.text,
       onTextBoundary: emitter.textBoundary,
+      onNativeBoundary: (threadId, turnId, phase) => emitter.nativeBoundary({ nativeConversationId: threadId,
+        nativeSessionId: null, nativeTurnId: turnId, persistedHeadId: phase === "settled" ? turnId : null, phase }),
       onActivity: emitter.activity,
       onSession: (sessionId) => {
         // The App Server has returned the exact opened/resumed thread and has
@@ -276,6 +310,10 @@ function startCodexRun(
       );
       const message = continuationError === "stale-provider-session"
         ? staleProviderSessionDecision().reason
+        : continuationError === "thread-in-use"
+          // Not a rejected or missing session: the turn is refused and the
+          // saved session stays, so no fresh session splits the conversation.
+          ? CODEX_THREAD_IN_USE_MESSAGE
         : compatibilityError === "full-access-unsupported"
           ? "This Codex App Server version does not support Full Access. Update Codex CLI and try again."
           : compatibilityError === "fast-mode-unsupported"
@@ -305,6 +343,9 @@ function startCodexRun(
         ...(continuationError === "resume-rejected" && !compatibilityError
           ? { resumeRejected: true as const }
           : {}),
+        // Refused at thread/resume: turn/start, which carries the prompt and
+        // any handoff, was never sent.
+        ...(continuationError === "thread-in-use" ? { notDelivered: true as const } : {}),
       };
       emitter.status("failed", message);
       return {

@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import { RuntimeStore } from "../../src/server/database";
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
-import { createRestartContinuationRuntime } from "../../src/server/runtime/restart-continuation-runtime";
+import { createRestartContinuationRuntime, RESTART_CONTINUATION_PROMPT } from "../../src/server/runtime/restart-continuation-runtime";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   cleanupTurnControllerTestDirectories,
@@ -23,6 +23,7 @@ import {
   type TurnControllerTestRuntime,
 } from "../support/turn-controller-runtime";
 import { startTestRuntime } from "../support/test-runtime";
+import { mockCommandOrchestration } from "../support/orchestration-command-mocks";
 
 afterEach(cleanupTurnControllerTestDirectories);
 
@@ -79,7 +80,7 @@ describe.each(["codex", "claude"] as const)("%s chat continued after an app upda
       expect(runtime.store.restartContinuations.forConversation(runtime.conversationId))
         .toMatchObject({ state: "completed", turnId: latest.id });
       expect(runtime.store.conversationDetail(runtime.conversationId)!.messages.at(-1))
-        .toMatchObject({ role: "user", content: "Continue from where you stopped." });
+        .toMatchObject({ role: "user", content: RESTART_CONTINUATION_PROMPT });
       expect(runtime.provider.runCount).toBe(2);
       expect(latest.providerSessionBefore).toBe("native-session");
       expect(runtime.provider.input?.sessionId).toBe("native-session");
@@ -96,14 +97,14 @@ describe("restart continuation dispatch admission", () => {
     const acquireFollowUpAdmission = vi.fn(() => ({ supportsImages: false, release: vi.fn() }));
     const steer = vi.fn();
     const dependencies = {
-      store: { conversation: () => ({ id: conversationId, archivedAt: null }) },
+      store: { orchestration: mockCommandOrchestration(), conversation: () => ({ id: conversationId, projectId: randomUUID(), archivedAt: null }) },
       turns: { isActive: () => true, acquireFollowUpAdmission, steer },
       providerTerminalResumes: { isActive: () => false },
       send: vi.fn(), broadcast: vi.fn(), broadcastSnapshot: vi.fn(),
       restartContinuationDispatch: { planId: randomUUID(), assertCurrent: () => undefined },
     } as unknown as TurnInteractionCommandDependencies;
     await expect(createTurnInteractionCommandHandler(dependencies)(null as unknown as WebSocket, {
-      type: "message.send", requestId: randomUUID(), payload: { conversationId, content: "Continue from where you stopped.", attachments: [], activate: false },
+      type: "message.send", requestId: randomUUID(), payload: { conversationId, content: RESTART_CONTINUATION_PROMPT, attachments: [], activate: false },
     })).rejects.toThrow("busy");
     expect(acquireFollowUpAdmission).not.toHaveBeenCalled();
     expect(steer).not.toHaveBeenCalled();

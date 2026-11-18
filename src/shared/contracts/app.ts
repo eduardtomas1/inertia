@@ -233,6 +233,7 @@ export interface AppSettings {
   compactBeforeCacheExpires: boolean;
   claudeAutoCompactWindow: number | null;
   codexAutoCompactTokenLimit: number | null;
+  delegationAutomaticWakes: boolean;
   /** Local display aliases only; provider authentication remains provider-owned. */
   providerIdentityLabels: ProviderIdentityLabels;
   /** App-local Cmd/Ctrl chords; the primary modifier is never remapped. */
@@ -410,6 +411,7 @@ export const defaultSettings: AppSettings = {
   compactBeforeCacheExpires: DEFAULT_COMPACT_BEFORE_CACHE_EXPIRES,
   claudeAutoCompactWindow: DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW,
   codexAutoCompactTokenLimit: DEFAULT_CODEX_AUTO_COMPACT_LIMIT,
+  delegationAutomaticWakes: true,
   providerIdentityLabels: {},
   keybindings: DEFAULT_APP_KEYBINDINGS,
   workingIndicator: { ...DEFAULT_WORKING_INDICATOR },

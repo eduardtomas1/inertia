@@ -6,8 +6,17 @@ import type { ProviderHostToolBridge } from "../../src/server/provider/contracts
 import {
   INERTIA_HOST_MCP_NAME,
   INERTIA_SECRET_MCP_NAME,
+  INERTIA_WAIT_MCP_NAME,
   OPENCODE_SECRET_MCP_TIMEOUT_MS,
+  OPENCODE_WAIT_HOST_TOOLS,
+  OPENCODE_WAIT_MCP_TIMEOUT_MS,
+  OPENCODE_WAIT_TOOL_WORK_MS,
 } from "../../src/server/provider/host-tool-mcp-config";
+import { HOST_TOOL_APPROVAL_TIMEOUT_MS } from "../../src/server/provider/host-tool-runtime";
+import { AGENT_CONTEXT_TOOL_DEFINITION } from "../../src/server/runtime/agent-context-tool";
+import { AGENT_THREAD_TOOL_DEFINITIONS } from "../../src/server/runtime/agent-thread-tool-definitions";
+import { DELEGATION_WAIT_MAX_MS } from "../../src/shared/orchestration-delegation";
+import { DELEGATED_WAIT_CALL_BUDGET_MS } from "../../src/server/runtime/delegation/task-wait";
 import { createOpenCodeHostTools, openCodePermissions, type OpenCodeHostTools } from "../../src/server/provider/opencode-host-tools";
 import { hostToolActivityTitle } from "../../src/shared/activity-display";
 import { SECRET_REQUEST_TOOL_NAME, SECRET_REQUEST_WAIT_MS_BY_PROVIDER } from "../../src/node/agent-secrets";
@@ -132,5 +141,44 @@ describe("OpenCode secret request MCP scope", () => {
     expect(rules).toContainEqual({ permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" });
     expect(hostToolActivityTitle({ kind: "tool", title: `${INERTIA_SECRET_MCP_NAME}_${SECRET_REQUEST_TOOL_NAME}`, status: "running" }))
       .toBe("Asking for a secret");
+  });
+
+  it("serves tools that wait on the user or another chat from a server whose timeout covers an approval and the longest wait", async () => {
+    const waiting = ["inertia_delegate_task", "inertia_wait_for_task", "inertia_request_context", "inertia_create_conversation"];
+    const { added } = await install(["inertia_list_conversations", "inertia_get_task_status", ...waiting]);
+    expect(added.map(({ name, config }) => [name, config.timeout])).toEqual([
+      [INERTIA_HOST_MCP_NAME, 30_000],
+      [INERTIA_WAIT_MCP_NAME, OPENCODE_WAIT_MCP_TIMEOUT_MS],
+    ]);
+    expect(OPENCODE_WAIT_MCP_TIMEOUT_MS).toBeGreaterThan(HOST_TOOL_APPROVAL_TIMEOUT_MS + DELEGATION_WAIT_MAX_MS);
+    // A 45 s wait alone outlasts the main server's 30 s, so the wait tools stay on their own server.
+    expect(DELEGATION_WAIT_MAX_MS).toBeGreaterThan(30_000);
+    // The server also carries creation (an isolated worktree) and the 5 min context chooser after an approval, so its
+    // timeout does not follow the delegated wait's maximum; the wait call keeps its own 375 s budget.
+    expect(OPENCODE_WAIT_MCP_TIMEOUT_MS).toBe(HOST_TOOL_APPROVAL_TIMEOUT_MS + OPENCODE_WAIT_TOOL_WORK_MS + 60_000);
+    expect(OPENCODE_WAIT_MCP_TIMEOUT_MS).toBe(960_000);
+    expect(OPENCODE_WAIT_TOOL_WORK_MS).toBeGreaterThan(5 * 60_000 + DELEGATION_WAIT_MAX_MS);
+    expect(DELEGATED_WAIT_CALL_BUDGET_MS.opencode).toBeLessThan(OPENCODE_WAIT_MCP_TIMEOUT_MS);
+    const [main, waits] = added as [AddedServer, AddedServer];
+    const names = async (server: AddedServer) => ((await rpc(server, { jsonrpc: "2.0", id: 1, method: "tools/list" }))
+      .result as { tools: Array<{ name: string }> }).tools.map(({ name }) => name).sort();
+    expect(await names(main)).toEqual(["inertia_get_task_status", "inertia_list_conversations"]);
+    expect(await names(waits)).toEqual([...waiting].sort());
+    expect(await rpc(main, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "inertia_delegate_task", arguments: {} } }))
+      .toMatchObject({ error: { code: -32602 } });
+    expect(await rpc(waits, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "inertia_wait_for_task", arguments: {} } }))
+      .toMatchObject({ result: { content: [{ type: "text", text: JSON.stringify({ tool: "inertia_wait_for_task" }) }] } });
+
+    const rules = openCodePermissions("supervised", "build");
+    expect(rules).toContainEqual({ permission: `${INERTIA_WAIT_MCP_NAME}_*`, pattern: "*", action: "allow" });
+    expect(openCodePermissions("full", "build", "watcher"))
+      .toContainEqual({ permission: `${INERTIA_WAIT_MCP_NAME}_*`, pattern: "*", action: "allow" });
+  });
+
+  it("lists only real approval-gated or waiting host tools as long waits, and adds no wait server without them", async () => {
+    const known = new Set([...AGENT_THREAD_TOOL_DEFINITIONS.map(({ name }) => name), AGENT_CONTEXT_TOOL_DEFINITION.name]);
+    for (const tool of OPENCODE_WAIT_HOST_TOOLS) expect(known.has(tool), tool).toBe(true);
+    const plain = await install(["inertia_list_conversations", "inertia_get_task_status"]);
+    expect(plain.added.map(({ name }) => name)).toEqual([INERTIA_HOST_MCP_NAME]);
   });
 });

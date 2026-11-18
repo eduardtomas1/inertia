@@ -15,6 +15,7 @@ import type {
   CheckpointSummary,
   Conversation,
   ConversationLatestTurnSummary,
+  GitStatusSnapshot,
   Project,
   ProviderId,
   ProviderMaintenanceProviderId,
@@ -152,6 +153,14 @@ function unsavedChatQueueRunner(run: QueueCommandRunner): QueueCommandRunner {
   return unsaved;
 }
 
+export function savedChatRunner<Runner>(
+  run: Runner | undefined,
+  draft: Pick<Conversation, "id"> | null,
+  conversations: readonly Pick<Conversation, "id">[] | undefined,
+): Runner | undefined {
+  return !draft || conversations?.some(({ id }) => id === draft.id) ? run : undefined;
+}
+
 interface StableSceneCallbacks {
   setActionError: Dispatch<SetStateAction<string | null>>;
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
@@ -200,8 +209,13 @@ export function chatQueueRunner(
   draft: Conversation | null,
   conversations: readonly Pick<Conversation, "id">[] | undefined,
 ): QueueCommandRunner | undefined {
-  if (!run || !draft || conversations?.some(({ id }) => id === draft.id)) return run;
-  return unsavedChatQueueRunner(run);
+  return savedChatRunner(run, draft, conversations) ?? (run && unsavedChatQueueRunner(run));
+}
+
+export function chatCheckoutBranch(
+  gitStatus: Pick<GitStatusSnapshot, "isRepository" | "branch"> | null,
+): string | null | undefined {
+  return gitStatus?.isRepository ? gitStatus.branch : undefined;
 }
 
 export function visibleChatConversation(
@@ -241,7 +255,9 @@ export function visibleChatProjection(
       ? projection.usage
       : null,
     contextPackets: detailOwned ? projection.detail?.contextPackets ?? [] : [],
+    rolledBackTurnIds: detailOwned ? projection.detail?.rolledBackTurnIds : undefined,
     watcherWakes: detailOwned ? projection.detail?.watcherWakes : undefined,
+    delegation: detailOwned ? projection.detail?.delegation : undefined,
     history: projectionOwned ? projection.history : undefined,
   };
 }
@@ -715,7 +731,7 @@ export function createWorkspaceSceneModel({
           onChange: actions.selectGlobalChatProject,
         },
       } : {}),
-      checkoutBranch: workspaceTools.gitStatus?.branch ?? null,
+      checkoutBranch: chatCheckoutBranch(workspaceTools.gitStatus),
       latestTurnSummary: visibleConversationLatestTurnSummary(
         persistedConversation,
         conversation,
@@ -769,14 +785,16 @@ export function createWorkspaceSceneModel({
       promptContext: workspaceTools.pendingDiffContext,
       contextSources: workspaceOptions.contextSources,
       contextPackets: chatProjection.contextPackets,
+      rolledBackTurnIds: chatProjection.rolledBackTurnIds,
       watcherWakes: chatProjection.watcherWakes,
+      delegation: chatProjection.delegation,
+      conversations: connection.snapshot?.conversations,
+      onDelegationCommand: actions.run,
+      onOpenConversation: actions.openConversation,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
+      onForkCommand: savedChatRunner(actions.run, draftConversation, snapshotConversations),
       onSecretRequestCommand: actions.run,
-      onQueueCommand: chatQueueRunner(
-        actions.runQueueCommand,
-        draftConversation,
-        connection.snapshot?.conversations,
-      ),
+      onQueueCommand: chatQueueRunner(actions.runQueueCommand, draftConversation, snapshotConversations),
       onLimitResetCommand: actions.runLimitResetCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
@@ -1126,6 +1144,7 @@ export function createWorkspaceSceneModel({
           Boolean(conversationIsRunning
             && canStopSubagentTrace(trace, projection.turns)),
         onStopSubagent: stopSubagent,
+        onObservedChildCommand: actions.run,
       },
       plan: {
         steps: panelPlanSteps,

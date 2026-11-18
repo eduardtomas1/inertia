@@ -35,6 +35,7 @@ interface ProviderIdentifiedInstallation {
 }
 
 export interface ProviderCapabilityAuthorityOptions {
+  cursorSdkEvidence?(): ProviderProtocolInstallationEvidence | undefined;
   metadataCache: ProviderMetadataCache;
   resolvedExecutable(providerId: ProviderId): string | undefined;
   installationFingerprint(
@@ -282,6 +283,13 @@ export class ProviderCapabilityAuthority {
     >> = {},
     modelId: string | null = null,
   ) {
+    if (harnessId === "cursor-sdk") {
+      const evidence = this.options.cursorSdkEvidence?.();
+      return runtimeProviderCapabilityAttestation({ providerId, harnessId, backendProfile, compatibility,
+        executable: evidence?.executable, installation: { executable: evidence?.executable ?? null, version: evidence?.version ?? null },
+        installationFingerprint: evidence?.installationFingerprint ?? null, protocolEvidence: evidence,
+        evidenceTrusted: Boolean(evidence), additionalConfigured, additionalNegotiated });
+    }
     const executable = this.options.resolvedExecutable(providerId);
     const installation = this.options.metadataCache.nativeScope(providerId);
     const installationFingerprint = executable && installation.version

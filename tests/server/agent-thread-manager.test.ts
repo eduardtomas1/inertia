@@ -77,6 +77,8 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
   let followUps = 0;
   let followUpAdmission = true;
   const turns = {
+    acquireTurnAdmission: async (conversationId: string) => active.has(conversationId) ? null
+      : { conversationId, token: Symbol("test-admission"), release: () => undefined },
     isActive: (conversationId: string) => active.has(conversationId),
     activeConversationIds: () => [...active.keys()],
     activeIdentity: (conversationId: string) => active.get(conversationId) ?? null,
@@ -121,6 +123,12 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
       return current?.turnId === identity.turnId && current.runId === identity.runId
         ? active.delete(conversationId) : false;
     },
+    cancelExact: vi.fn((conversationId: string, identity: { turnId: string; runId: string }) => {
+      const current = active.get(conversationId);
+      return current?.turnId === identity.turnId && current.runId === identity.runId
+        ? active.delete(conversationId) : false;
+    }),
+    isReleasing: (conversationId: string) => active.has(conversationId),
     waitForProviderCleanup: async () => undefined,
     acquireFollowUpAdmission: (conversationId: string) => (
       active.has(conversationId) && followUpAdmission
@@ -267,6 +275,50 @@ describe("AgentThreadManager", () => {
 
       expect(await stopped).toMatchObject({ success: false, text: expect.stringContaining("approved turn is no longer active") });
       expect(turns.activeIdentity(conversationId)).toEqual({ turnId: replacement.turn.id, runId: replacement.turn.runId });
+      expect(store.orchestration.runControl.attemptInterrupt(store.orchestration.currentAttemptId(replacement.turn.runId)!))
+        .toBeNull();
+    } finally { store.close(); }
+  });
+
+  it("stops a managed chat through the receipted Stop command under the agent actor", async () => {
+    const { manager, source, sourceTurn, store, turns } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const created = await bridge.invoke(call("inertia_create_conversation", { title: "Child", prompt: "Original work" }));
+      const { conversationId, turnId } = JSON.parse(created.text) as { conversationId: string; turnId: string };
+      const runId = store.agentTurn(turnId).runId;
+      const stopCall = call("inertia_stop_conversation", { conversationId });
+      expect(await bridge.invoke(stopCall)).toMatchObject({ success: true });
+      expect(turns.cancelExact).toHaveBeenCalledWith(conversationId, { turnId, runId });
+      expect(turns.isActive(conversationId)).toBe(false);
+
+      const projectId = store.conversation(conversationId).projectId;
+      const receipts = (store as unknown as { database: { prepare(sql: string): { all(...args: unknown[]): unknown[] } } })
+        .database.prepare(`SELECT actor_id AS actorId, command_id AS commandId, command_type AS commandType, status
+          FROM orchestration_v2_receipts WHERE thread_id = ? AND command_type = 'agent.stop'`).all(conversationId);
+      expect(receipts).toEqual([{ actorId: "agent", commandId: expect.stringMatching(/^agent-stop:/u), commandType: "agent.stop",
+        status: "accepted" }]);
+      const { commandId } = receipts[0] as { commandId: string };
+      const command = { type: "agent.stop", requestId: commandId,
+        payload: { conversationId, expectedTurnId: turnId, expectedRunId: runId } };
+      expect(store.orchestration.events.receipt({ actorId: "agent", commandId, projectId, threadId: conversationId }, command))
+        .toMatchObject({ result: { stop: "untracked", runId } });
+      expect(turns.cancelExact).toHaveBeenCalledOnce();
+    } finally { store.close(); }
+  });
+
+  it("tells the agent nothing was stopped when the approved turn ended on its own before the cancel", async () => {
+    const { manager, source, sourceTurn, store, turns } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const created = await bridge.invoke(call("inertia_create_conversation", { title: "Child", prompt: "Original work" }));
+      const { conversationId } = JSON.parse(created.text) as { conversationId: string };
+      // The turn settles on its own between the Stop's intake and its cancel.
+      turns.cancelExact.mockImplementationOnce((id: string) => { turns.cancel(id); return false; });
+      const result = await bridge.invoke(call("inertia_stop_conversation", { conversationId }));
+      expect(result.success).toBe(true);
+      expect(JSON.parse(result.text)).toMatchObject({ conversationId, stopped: false,
+        next: "The approved turn had already ended, so nothing was stopped." });
     } finally { store.close(); }
   });
 
@@ -1236,7 +1288,7 @@ describe("AgentThreadManager", () => {
           "Fix it and call inertia_create_conversation again.",
         ].join("\n")],
         ["inertia_create_conversation", { title: "x", prompt: "y", route: { providerId: "anthropic" } }, [
-          "route.providerId: expected one of codex, claude, cursor, kimi, opencode, antigravity, grok",
+          "route.providerId: expected one of codex, claude, cursor, kimi, opencode, antigravity, grok, pi",
           "Fix it and call inertia_create_conversation again.",
         ].join("\n")],
         ["inertia_send_message", { conversationId: "55555555-5555-4555-8555-555555555555", message: "hi" }, [

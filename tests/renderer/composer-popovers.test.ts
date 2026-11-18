@@ -133,6 +133,26 @@ describe("Composer popover state", () => {
     expect(placement.top + Math.min(popover.height, placement.maxHeight)).toBeLessThanOrEqual(boundary.bottom - 8);
   });
 
+  it("keeps the trigger gap when a tall popover fills the space below a fractional trigger", () => {
+    // Empty-thread centering can leave the trigger on a fractional edge. A
+    // popover that needs all of the space below must not be clamped back
+    // over the gap when its top edge is rounded to a whole pixel.
+    for (const bottom of [487.625, 487.5, 487.375, 487]) {
+      const trigger = { top: bottom - 30, right: 400, bottom, left: 240 };
+      const placement = calculateComposerPopoverPlacement({
+        trigger,
+        boundary: { top: 48, right: 1_200, bottom: 920, left: 200 },
+        popover: { width: 320, height: 900 },
+        preferredVertical: "below",
+      });
+      const height = Math.min(900, placement.maxHeight);
+      expect(placement.vertical).toBe("below");
+      expect(Number.isInteger(placement.top)).toBe(true);
+      expect(placement.top, `gap below ${bottom}`).toBeGreaterThanOrEqual(bottom + 3.5);
+      expect(placement.top + height, `bottom edge below ${bottom}`).toBeLessThanOrEqual(912);
+    }
+  });
+
   it("measures a popover by its layout box while its entrance scale runs", () => {
     const layout = { left: 922, top: 89, width: 250, height: 420 };
     const scale = 0.98;

@@ -2,6 +2,7 @@ import type { AgentApprovalDecision } from "../../src/shared/contracts";
 import {
   providerRunTerminal,
   type ProviderEvent,
+  type ProviderFreshSessionFallback,
   type ProviderRunCallbacks,
   type ProviderRunInput,
   type ProviderRunResult,
@@ -87,6 +88,18 @@ export class FakeTurnProvider implements TurnProviderRuntime {
 
   emit(event: ProviderEvent): void {
     this.callbacks?.onEvent?.(event);
+  }
+
+  /**
+   * Acts as the provider layer does after a rejected resume whose process
+   * cleanup is confirmed: asks for the fresh-session fallback and, when it is
+   * granted, routes later events to the replacement attempt.
+   */
+  freshSession(): ProviderFreshSessionFallback | null {
+    const callbacks = this.callbacks;
+    const replacement = callbacks?.freshSessionFallback?.({ priorCleanup: "confirmed" }) ?? null;
+    if (callbacks && replacement?.onEvent) this.callbacks = { ...callbacks, onEvent: replacement.onEvent };
+    return replacement;
   }
 
   resolve(result: Partial<ProviderRunResult> = {}): void {

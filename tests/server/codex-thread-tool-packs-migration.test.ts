@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { CodexThreadToolPackRepository } from "../../src/server/persistence/codex-thread-tool-pack-repository";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
+import { removeOrchestratorV2FromFixture } from "../support/legacy-project-settings-schema";
 import {
   CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION,
   codexThreadToolPacksMigration,
@@ -59,6 +60,7 @@ describe("PersistCodexThreadToolPacks migration", () => {
     const legacy = new Database(databasePath);
     legacy.exec("DROP TABLE codex_thread_tool_packs");
     legacy.prepare("UPDATE conversations SET provider_session_id = ? WHERE id = ?").run("thread-before-upgrade", chat.id);
+    removeOrchestratorV2FromFixture(legacy);
     legacy.prepare("DELETE FROM schema_migrations WHERE version >= ?").run(CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION);
     expect(tableExists(legacy, "table", "codex_thread_tool_packs")).toBe(false);
     const before = legacy.prepare("SELECT * FROM conversations ORDER BY id").all();

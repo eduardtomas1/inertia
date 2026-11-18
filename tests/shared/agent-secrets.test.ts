@@ -28,7 +28,7 @@ import {
 import { BACKEND_CREDENTIAL_MASK, isBackendSecretReference } from "../../src/shared/backend-credentials";
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
 import { secretRequestResultValidators } from "../../src/shared/contracts/secret-request-results";
-import { PROVIDER_IDS } from "../../src/server/runtime/backends/backend-profile-model";
+import { PROVIDER_IDS } from "../../src/server/provider/contracts";
 
 const pending: SecretRequestReference = {
   requestId: randomUUID(),
@@ -111,6 +111,7 @@ describe("secret request routes", () => {
       opencode: "remote-mcp",
       antigravity: "prompt-fallback",
       grok: "acp-mcp",
+      pi: "remote-mcp",
     });
     expect(Object.isFrozen(SECRET_REQUEST_ROUTES)).toBe(true);
   });

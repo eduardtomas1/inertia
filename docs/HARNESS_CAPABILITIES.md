@@ -105,6 +105,29 @@ does not use the allowance. Arguments that fail validation return
 tools. A Codex thread registers it from its next new provider
 thread.
 
+OpenCode cancels a host tool call at its MCP server's `timeout` with
+`notifications/cancelled`, and the host call is then cancelled too. The chat
+tools that wait for the user's approval or for another chat
+(`inertia_create_conversation`, `inertia_send_message`,
+`inertia_stop_conversation`, `inertia_archive_conversation`,
+`inertia_delegate_task`, `inertia_wait_for_task`, `inertia_cancel_task` and
+`inertia_request_context`) are therefore served to OpenCode from a second
+server, `inertia-chat-waits`. Its timeout, 16 minutes, covers a five-minute
+approval followed by up to ten minutes of work (creating an isolated
+worktree, the five-minute context chooser, or a delegated wait), plus one
+minute. A 45-second delegated wait alone already outlasts the 30-second
+server. A delegated wait on OpenCode returns within 375 seconds of the call's
+start (the approval's five minutes, the 45-second wait and 30 seconds), so a
+slow approval or chat creation shortens the wait instead of losing the call.
+Every other tool keeps
+the 30-second server, and the secret request keeps its own server.
+`inertia_delegate_task` in wait mode that is cancelled after it created the
+child chat leaves no handle with the agent. If the agent then sends the same
+request again in the same turn, Inertia reuses that chat instead of creating a
+second one. A request with a `clientRequestId` replays through its key, as it
+does on every provider. The wait-for-chat tool above stays on the 30-second
+server and keeps its 20-second cap.
+
 ### Reading chat context
 
 `inertia.orchestration` also carries `inertia_request_context`, which lets an
@@ -487,13 +510,13 @@ own compaction.
 
 Discovery refuses a Claude Code or OpenCode installation older than its
 security floor. The floors, the reason each one exists, Antigravity's headless
-floor and the OpenCode 2 ceiling are defined together in
+floor and the OpenCode major-version ceiling are defined together in
 `src/server/provider/provider-version-floors.ts`.
 
 | Provider | Supported | Why |
 | --- | --- | --- |
 | Claude Code | 2.1.309 or newer | Inertia passes `managedSettings` with `disableAllHooks`, `disableSkillShellExecution` and `useAutoModeDuringPlan: false`, so plan-mode commands reach Inertia's approval instead of the auto mode classifier, which reviews them by default whenever auto mode is available; Claude Code before 2.1.309 dropped host-supplied managed settings, so those hook and skill-shell restrictions silently did not apply. 2.1.309 also carries the fixes for GHSA-5j29-h97v-84ch (a symlink race lets writes escape the project; fixed in 2.1.129) and GHSA-pq7j-f95f-qfcv (a plugin pinned-commit bypass; fixed in 2.1.179). |
-| OpenCode | 1.18.22 or newer, below 2 | GHSA-632h-h47v-g4x4: a cross-site request to `/global/upgrade` on `opencode serve` installs arbitrary packages (fixed in 1.18.22). The random basic-auth password Inertia gives its owned server reduces this risk but does not remove it. OpenCode 2 is not supported yet. |
+| OpenCode | 1.18.22 or newer, below 3 | GHSA-632h-h47v-g4x4: a cross-site request to `/global/upgrade` on `opencode serve` installs arbitrary packages (fixed in 1.18.22). The random basic-auth password Inertia gives its owned server reduces this risk but does not remove it. OpenCode 3 is not supported yet. |
 | Antigravity | 1.2.2 or newer | First release with the headless stream-json contract below. |
 
 Below a security floor, discovery runs only the version probe. It never runs

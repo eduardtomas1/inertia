@@ -30,6 +30,7 @@ const PROVIDER_INSTALLATION_PACKAGES: Readonly<
   opencode: "opencode-ai",
   antigravity: null,
   grok: null,
+  pi: "@earendil-works/pi-coding-agent",
 };
 
 export function providerInstallationPackageIdentity(

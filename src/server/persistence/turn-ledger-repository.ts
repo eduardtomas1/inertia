@@ -33,9 +33,12 @@ import {
   RUNTIME_INTERRUPTION_REASONS,
   type RuntimeInterruption,
 } from "../runtime/turns/turn-runtime-interruption-note";
-import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { CONTEXT_COMPACTION_ACTIVITY_TITLES } from "../provider/context-compaction-activity";
 import { assertConversationProvider } from "./conversation-provider-policy";
+import { assertNativeControlIdle } from "../orchestration-v2/native-control-fence";
+import { dropRestoredHistoryRecord } from "./turn-restored-history-record";
+import { harnessDeclaresCapability } from "../provider/capability-manifest";
+import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import { completeRestartContinuationPlan } from "./restart-continuation-repository";
 import {
@@ -81,6 +84,14 @@ type TurnLedgerPersistenceContext = Pick<
     packetIds: readonly string[],
   ): ConversationContextDelivery[];
 };
+
+/** Activity kinds only a running provider turn produces (status notices are not). */
+const TURN_SCOPED_ACTIVITY_KINDS = "'command', 'tool', 'file', 'reasoning'";
+
+/** A harness that reports turn acceptance proves progress with turn-scoped activity only. */
+function providerTurnProgress(harnessId: string): "turn-scoped" | "any" {
+  return harnessDeclaresCapability(harnessId, "turn-acceptance") ? "turn-scoped" : "any";
+}
 
 export class TurnLedgerRepository {
   constructor(private readonly context: TurnLedgerPersistenceContext) {}
@@ -262,6 +273,7 @@ export class TurnLedgerRepository {
    */
   begin(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
     return this.context.database.transaction(() => {
+      assertNativeControlIdle(this.context.database, input.conversationId);
       assertConversationProvider(this.context, input.conversationId, input.providerId);
       if (input.providerSessionInvalidation) {
         if ((input.providerSessionBefore ?? null) !== null) {
@@ -292,7 +304,7 @@ export class TurnLedgerRepository {
         input.attachments ?? [],
         null,
         input.requestedAt,
-        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, duoComparison: input.duoComparison, customAgentCall: input.customAgentCall },
+        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, delegatedCompletion: input.delegatedCompletion, duoComparison: input.duoComparison, customAgentCall: input.customAgentCall },
       );
       const turn = this.create({
         ...input,
@@ -388,7 +400,7 @@ export class TurnLedgerRepository {
   savedSessionKeepsFailing(conversationId: string, sessionId: string): boolean {
     const attempts = this.context.database.prepare(`
       SELECT turn.status, turn.terminal_reason, turn.provider_session_before,
-        turn.terminal_assistant_message_id,
+        turn.terminal_assistant_message_id, turn.harness_id,
         CASE WHEN json_valid(turn.session_recovery_json)
           THEN json_extract(turn.session_recovery_json, '$.resumeRejected')
         END AS resume_rejected,
@@ -398,7 +410,13 @@ export class TurnLedgerRepository {
             AND activities.turn_id = turn.id
             AND activities.kind <> 'error'
             AND NOT (activities.kind = 'status' AND activities.title = ?)
-        ) AS progressed
+        ) AS progressed,
+        EXISTS(
+          SELECT 1 FROM activities
+          WHERE activities.conversation_id = turn.conversation_id
+            AND activities.turn_id = turn.id
+            AND activities.kind IN (${TURN_SCOPED_ACTIVITY_KINDS})
+        ) AS worked
       FROM agent_turns AS turn
       WHERE turn.conversation_id = ?
       ORDER BY turn.requested_at DESC, turn.id DESC
@@ -409,14 +427,16 @@ export class TurnLedgerRepository {
       provider_session_before: string | null;
       terminal_assistant_message_id: string | null;
       resume_rejected: number | null;
+      harness_id: string;
       progressed: 0 | 1;
+      worked: 0 | 1;
     }>;
     const rejectedTwice = attempts.length === 2 && attempts.every((attempt) =>
       attempt.status === "failed"
       && attempt.provider_session_before === sessionId
       && attempt.resume_rejected === 1
       && attempt.terminal_assistant_message_id === null
-      && attempt.progressed === 0
+      && (providerTurnProgress(attempt.harness_id) === "turn-scoped" ? attempt.worked : attempt.progressed) === 0
       && (attempt.terminal_reason === "provider-error"
         || attempt.terminal_reason === "provider-process-exit"
         || attempt.terminal_reason === "provider-process-crash"));
@@ -578,9 +598,11 @@ export class TurnLedgerRepository {
 
   /**
    * The most recent provider handoff that restored at least one earlier
-   * message onto this route.
-   * A genuine handoff directly follows a turn on another provider; later
-   * same-provider harness changes never count.
+   * message onto this route: a turn that directly follows a turn on another
+   * provider and restored history, whether onto a new session or as a delta
+   * into one it resumed (a switch back resumes with `same-continuation`).
+   * Same-provider harness changes never count, and neither does a turn
+   * settled as not delivered, whose history never reached the provider.
    */
   latestProviderHandoffOnRoute(
     conversationId: string,
@@ -590,7 +612,8 @@ export class TurnLedgerRepository {
     const row = this.context.database.prepare(`
       SELECT handoff.requested_at FROM agent_turns AS handoff
       WHERE handoff.conversation_id = @conversationId
-        AND handoff.continuation_reason_code = 'harness-changed'
+        AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS run WHERE run.kind = 'run' AND run.id = handoff.run_id
+          AND json_extract(run.payload_json, '$.delivery') = 'not-delivered')
         AND (CASE WHEN json_valid(handoff.session_recovery_json)
           THEN json_extract(handoff.session_recovery_json, '$.restoredMessageCount')
         END) > 0
@@ -615,26 +638,39 @@ export class TurnLedgerRepository {
     return row ? { requestedAt: row.requested_at } : null;
   }
 
+  /**
+   * Marks a rejected resume for the two-strike rule (`savedSessionKeepsFailing`).
+   * A turn that resent missed history already has a restored-history record;
+   * the marker joins it instead of being dropped, so a retry that carries the
+   * prompt of a turn the provider never accepted still counts.
+   */
   recordRejectedResume(turnId: string, sessionId: string): void {
     this.context.database.prepare(`
       UPDATE agent_turns
-      SET session_recovery_json = '{"resumeRejected":true}'
-      WHERE id = ? AND provider_session_before = ? AND session_recovery_json IS NULL
+      SET session_recovery_json = CASE WHEN session_recovery_json IS NULL THEN '{"resumeRejected":true}'
+        ELSE json_set(session_recovery_json, '$.resumeRejected', json('true')) END
+      WHERE id = ? AND provider_session_before = ?
+        AND (session_recovery_json IS NULL OR json_valid(session_recovery_json))
     `).run(turnId, sessionId);
   }
 
-  turnHasProviderActivity(conversationId: string, turnId: string): boolean {
+  /**
+   * Whether the provider worked on this turn. On a harness that reports turn
+   * acceptance only a command, tool, file change or reasoning counts: Codex
+   * records configuration, deprecation, MCP startup and thread notices as
+   * status activities while it opens a thread, before any turn exists. Other
+   * harnesses count any activity but errors and the checkpoint notice.
+   */
+  turnHasProviderActivity(conversationId: string, turnId: string, harnessId: string): boolean {
+    const turnScoped = providerTurnProgress(harnessId) === "turn-scoped";
     const row = this.context.database.prepare(`
       SELECT EXISTS(
         SELECT 1 FROM activities
-        WHERE conversation_id = ? AND turn_id = ? AND kind <> 'error'
-          AND NOT (kind = 'status' AND title = ?)
+        WHERE conversation_id = ? AND turn_id = ? AND ${turnScoped
+          ? `kind IN (${TURN_SCOPED_ACTIVITY_KINDS})`
+          : "kind <> 'error' AND NOT (kind = 'status' AND title = ?)"}
       ) AS progressed
-    `).get(
-      conversationId,
-      turnId,
-      TURN_CHECKPOINT_UNAVAILABLE_TITLE,
-    ) as { progressed: 0 | 1 };
+    `).get(conversationId, turnId, ...(turnScoped ? [] : [TURN_CHECKPOINT_UNAVAILABLE_TITLE])) as { progressed: 0 | 1 };
     return row.progressed === 1;
   }
 
@@ -1019,6 +1055,7 @@ export class TurnLedgerRepository {
     const current = this.get(turnId);
     if (isAgentTurnTerminalStatus(current.status)) return { settled: false, turn: current };
     try {
+      if (update.providerDelivery === "not-delivered") dropRestoredHistoryRecord(this.context.database, turnId);
       return {
         settled: true,
         turn: this.updateLifecycle(turnId, update),

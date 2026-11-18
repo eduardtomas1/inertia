@@ -25,6 +25,7 @@ import {
 } from "../../../shared/conversation-context";
 import { byteLength } from "../../persistence/bounded-message-text";
 import type { ConversationContextDelivery } from "../../persistence/conversation-context-transport";
+import type { ProviderHistoryResponseItem } from "../../provider/contracts";
 import {
   MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
   type DocumentAttachmentContext,
@@ -119,12 +120,20 @@ export interface PersistedTurnExecutionContext {
 }
 
 export interface AssembledTurnRequest {
+  contextHandoff?: import("../../../shared/orchestration-backings").PreparedContextHandoff;
   visibleContent: string;
   executionPrompt: string;
   imagePaths: string[];
   persistence: PersistedTurnExecutionContext;
   conversationContextDeliveries: ConversationContextDelivery[];
   sessionRecovery: TurnSessionRecovery | null;
+  restoredItemIds?: readonly string[];
+  /**
+   * The restored history for native delivery: its items, and the prompt with
+   * everything but the restored-history block. `executionPrompt` keeps the
+   * block, for a harness that delivers it inline.
+   */
+  nativeHistory?: { items: readonly ProviderHistoryResponseItem[]; prompt: string };
 }
 
 export interface RestoredChatHistory {
@@ -132,6 +141,10 @@ export interface RestoredChatHistory {
   messageCount: number;
   omittedMessageCount: number;
   withheldMessageCount?: number;
+  itemIds?: readonly string[];
+  omittedItemIds?: readonly string[];
+  /** The first block's history as Responses API items, when it can be delivered natively instead. */
+  injectionItems?: readonly ProviderHistoryResponseItem[];
 }
 
 export interface ConversationContextMaterialization {
@@ -157,7 +170,7 @@ export interface AssembleTurnRequestInput {
   internalInstructions?: readonly HiddenProviderInstruction[];
   sessionInstructionDigest?: string;
   promptWithheld?: true;
-  restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
+  restoredHistory?: (capacityBytes: number, currentPromptBytes: number) => RestoredChatHistory | null;
   /**
    * The chat's tracked Inertia-local goal as one bounded, neutralized line
    * from `trackedGoalContextLine`. It travels as execution context, never as a
@@ -866,13 +879,15 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   if (carriedFit) append(carried, carriedFit);
 
   let sessionRecovery: TurnSessionRecovery | null = null;
+  let restoredItemIds: readonly string[] | undefined;
+  let injected: { items: readonly ProviderHistoryResponseItem[]; block: (typeof providerContexts)[number] } | undefined;
   if (input.restoredHistory) {
     const history = input.restoredHistory(Math.min(
       MAX_CONVERSATION_CONTEXT_TURN_BYTES,
       MAX_EXECUTION_PAYLOAD_BYTES - assembledPayloadBytes
         - (providerContexts.length === 0 ? EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES : 0)
         - MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET * CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES,
-    ));
+    ), assembledPayloadBytes);
     if (history) {
       const fitRestored = (blocks: RestoredChatHistory["blocks"]) => {
         const restored = blocks.map((block) => providerContext({
@@ -893,6 +908,11 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
           ?? (required.length < history.blocks.length ? fitRestored(required) : null);
       const fits = selected !== null;
       if (selected) append(selected.restored, selected.fit);
+      if (selected && history.itemIds) restoredItemIds = [...history.itemIds];
+      // The first block is the required history; optional supplements stay in the prompt either way.
+      if (selected && history.itemIds && history.injectionItems) {
+        injected = { items: history.injectionItems, block: selected.restored[0]! };
+      }
       sessionRecovery = {
         ...(fits
           ? {
@@ -935,6 +955,9 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     imagePaths,
     conversationContextDeliveries,
     sessionRecovery,
+    ...(restoredItemIds ? { restoredItemIds } : {}),
+    ...(injected ? { nativeHistory: { items: injected.items,
+      prompt: buildPrompt(providerContexts.filter((context) => context !== injected!.block)) } } : {}),
     persistence: {
       manifest: {
         version: 1,

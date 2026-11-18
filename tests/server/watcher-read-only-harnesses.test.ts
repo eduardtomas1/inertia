@@ -25,7 +25,7 @@ import {
 } from "../../src/server/provider/claude-watcher-permissions";
 import { readOnlyCommandReminder } from "../../src/server/runtime/watcher/read-only-commands";
 import type { ProviderRunInput } from "../../src/server/provider/contracts";
-import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
+import { INERTIA_HOST_MCP_NAME, INERTIA_WAIT_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
 import { openCodePermissions, openCodeWatcherCommandAllowed } from "../../src/server/provider/opencode-host-tools";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
 import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED } from "../../src/server/provider/acp-watcher";
@@ -1007,6 +1007,7 @@ describe("watcher turns on the OpenCode SDK harness", () => {
       { permission: "read", pattern: "*.env", action: "deny" },
       { permission: "read", pattern: "*.env.*", action: "deny" },
       { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
+      { permission: `${INERTIA_WAIT_MCP_NAME}_*`, pattern: "*", action: "allow" },
     ]);
     expect(capture.offeredTools).toEqual(["bash", "read", "glob", "grep", "list"]);
     expect(capture.prompt).toEqual({ agent: null, system: `[inertia-watcher]\n${WATCHER_ROLE}` });
@@ -1120,7 +1121,7 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     }
     expect(evaluate(merged, "bash", "git diff > out.txt")).toBe("ask");
     expect(evaluate(merged, "external_directory", "/etc/*")).toBe("deny");
-    for (const tool of ["read", "glob", "grep", "list", `${INERTIA_HOST_MCP_NAME}_inertia_request_context`]) {
+    for (const tool of ["read", "glob", "grep", "list", `${INERTIA_WAIT_MCP_NAME}_inertia_request_context`]) {
       expect(evaluate(merged, tool, "src/parser.ts")).toBe("allow");
     }
     const openCodeDefaultReads: PermissionRuleset = [

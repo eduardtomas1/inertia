@@ -21,7 +21,7 @@ import type {
 } from "./interactions";
 
 const HOST_TOOL_APPROVAL_ID_PREFIX = "inertia-host-tool:";
-const HOST_TOOL_APPROVAL_TIMEOUT_MS = 5 * 60_000;
+export const HOST_TOOL_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 export const MAX_HOST_TOOL_CALLS = 1_024;
 /**
  * Calls that end without using the allowance (a wait that timed out) still

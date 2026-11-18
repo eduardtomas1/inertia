@@ -14,6 +14,7 @@ import type {
   ProviderRunFailure,
   ProviderRunResult,
 } from "../../provider/contracts";
+import { OrchestrationStateUnreadable } from "../../orchestration-v2/types";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import type {
   ActiveTurn,
@@ -22,6 +23,73 @@ import type {
 } from "./turn-controller-types";
 
 export const MAX_ASSISTANT_TEXT = 4 * 1024 * 1024;
+
+type DeferStart = (barrier: Promise<void>, resume: () => boolean) => boolean;
+
+function deferredTurnStart(
+  track: (value: Promise<void>) => void,
+  startable: () => boolean,
+  fail: (error?: unknown) => void,
+): DeferStart {
+  return (barrier, resume) => {
+    track(barrier.then(() => {
+      if (!startable()) return;
+      let resumed: boolean;
+      try {
+        resumed = resume();
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      if (!resumed) fail();
+    }));
+    return true;
+  };
+}
+
+/** Shown when the saved orchestration state a start reads no longer decodes. */
+export const TURN_START_STATE_UNREADABLE_MESSAGE = "Inertia couldn't read this chat's saved state, so the turn didn't start.";
+
+export function unstartedTurnError(error: unknown): string {
+  return error instanceof OrchestrationStateUnreadable ? TURN_START_STATE_UNREADABLE_MESSAGE : publicTurnError(error);
+}
+
+/**
+ * Runs a turn's start through its durable start intent. Before `dispatch`
+ * returns, nothing has reached the provider path, so a failure there (such as
+ * a projection that no longer reads) settles the turn through `failed` instead
+ * of leaving it queued with its chat blocked; this holds for a start deferred
+ * behind the previous turn's capture too. A failure after hand-off propagates
+ * as before.
+ */
+export function dispatchTurnStart(input: {
+  dispatchStart(dispatch: () => boolean, defer: DeferStart): boolean;
+  dispatch(): boolean;
+  track(value: Promise<void>): void;
+  startable(): boolean;
+  refused(): void;
+  failed(message: string): void;
+}): boolean {
+  let handedOff = false;
+  const failUnstarted = (error: unknown): false => {
+    if (handedOff) throw error;
+    input.failed(unstartedTurnError(error));
+    return false;
+  };
+  try {
+    return input.dispatchStart(() => {
+      const accepted = input.dispatch();
+      handedOff = true;
+      return accepted;
+    }, deferredTurnStart(input.track, input.startable, (error) => {
+      if (error === undefined) input.refused();
+      else failUnstarted(error);
+    }));
+  } catch (error) {
+    return failUnstarted(error);
+  }
+}
+
 export const MAX_REASONING_TEXT = 512 * 1024;
 export const DEFAULT_TURN_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
 export const DEFAULT_TURN_MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000;
@@ -217,6 +285,7 @@ export function normalizedProviderRunFailure(
     ...(reported?.terminalEvent ? { terminalEvent: reported.terminalEvent } : {}),
     ...(reported?.activityId ? { activityId: reported.activityId } : {}),
     ...(reported?.usageLimited ? { usageLimited: true as const } : {}),
+    ...(reported?.notDelivered ? { notDelivered: true as const } : {}),
     technicalDetail,
   };
 }

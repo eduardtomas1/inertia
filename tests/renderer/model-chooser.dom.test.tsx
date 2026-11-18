@@ -120,7 +120,7 @@ describe("model chooser active route", () => {
     const select = vi.fn();
     render(<ModelChooser routes={routes} selectedRoute={routes[0]!} onSelect={select} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    const search = screen.getByRole("combobox", { name: "Search models" });
+    const search = await screen.findByRole("combobox", { name: "Search models" });
     const grid = screen.getByRole("grid", { name: "Model results" });
     expect(search).toHaveAttribute("aria-expanded", "true");
     expect(search).toHaveAttribute("aria-haspopup", "grid");
@@ -175,7 +175,7 @@ describe("model chooser active route", () => {
     try {
       const workspace = view.container.querySelector(".chat-workspace")!;
       fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-      const chooser = screen.getByRole("dialog", { name: "Choose model" });
+      const chooser = await screen.findByRole("dialog", { name: "Choose model" });
       Object.defineProperties(chooser, {
         clientHeight: { configurable: true, value: 241 },
         scrollHeight: { configurable: true, value: 241 },
@@ -196,7 +196,9 @@ describe("model chooser active route", () => {
         callback(16);
       }
       expect(chooser).toHaveAttribute("data-popover-vertical", "below");
-      expect(chooser.style.maxHeight).toBe("415.46875px");
+      // The space below runs from the whole-pixel top edge (488) to the
+      // padded workspace bottom (903), so a chooser filling it stays inside.
+      expect(chooser.style.maxHeight).toBe("415px");
       expect(chooser.getBoundingClientRect().top).toBe(488);
       expect(screen.getByRole("combobox")).toHaveFocus();
       expect(pendingFrames.size).toBe(0);
@@ -447,7 +449,7 @@ describe("model chooser active route", () => {
     expect(first.querySelectorAll(".model-chooser-row-favorite"))
       .toHaveLength(1);
 
-    const search = screen.getByRole("combobox", { name: "Search models" });
+    const search = await screen.findByRole("combobox", { name: "Search models" });
     routeKeyReads = 0;
     fireEvent.keyDown(search, { key: "End" });
     await waitFor(() => {
@@ -491,7 +493,7 @@ describe("model chooser active route", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    const search = screen.getByRole("combobox", { name: "Search models" });
+    const search = await screen.findByRole("combobox", { name: "Search models" });
     fireEvent.change(search, { target: { value: "Team Model" } });
     fireEvent.keyDown(search, { key: "End" });
     await waitFor(() => {
@@ -562,7 +564,7 @@ describe("model chooser active route", () => {
     expect(screen.getByTitle("Unready Model")).toBeInTheDocument();
   });
 
-  it("shows the source list on the first commit once the idle prefetch has loaded it", async () => {
+  it("shows the prefetched source list when the lazy chooser first commits", async () => {
     vi.resetModules();
     const { ModelChooser: FreshModelChooser } = await import("../../src/renderer/src/components/ModelChooser");
     const { prefetchFrequentSurfaces } = await import("../../src/renderer/src/components/lazySurfaceLoaders");
@@ -575,6 +577,7 @@ describe("model chooser active route", () => {
 
     act(() => { fireEvent.click(screen.getByRole("button", { name: /Choose model/u })); });
 
+    await screen.findByRole("dialog", { name: "Choose model" });
     expect(screen.getByRole("toolbar", { name: "Model sources filters" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Model sources" })).not.toHaveAttribute("aria-busy");
   });

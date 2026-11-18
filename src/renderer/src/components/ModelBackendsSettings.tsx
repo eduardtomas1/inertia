@@ -1,3 +1,4 @@
+import { CursorSdkEntry } from "./cursor-sdk/CursorSdkEntry";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 
@@ -43,6 +44,7 @@ export type ModelBackendsSettingsProps = BackendProfileActions & {
 };
 
 function keyListNote(providerId: ProviderId): string | null {
+  if (providerId === "pi") return "Pi keeps its own accounts and API keys. Use Pi’s /login command or its native configuration.";
   if (providerId === "opencode") {
     return "OpenCode keeps its own keys. Use Sign in through OpenCode to run opencode auth login.";
   }
@@ -113,6 +115,7 @@ function ProviderAccessCard({
         onConnect={onConnect}
         onRefresh={onRefresh}
       />
+      {providerId === "cursor" && <CursorSdkEntry />}
       {providerId === "antigravity" && (
         <p className="backend-provider-policy">{ANTIGRAVITY_POLICY_NOTE}</p>
       )}

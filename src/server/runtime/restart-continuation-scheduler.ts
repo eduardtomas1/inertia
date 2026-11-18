@@ -2,6 +2,7 @@ import type { RuntimeStore } from "../database";
 import { queuedRouteIdentity } from "../persistence/queued-message-repository";
 import type { RestartContinuationPlan, RestartContinuationPlanInput } from "../persistence/restart-continuation-repository";
 import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
+import { scheduledPlanSettled } from "./scheduled-plan-settlements";
 import { UPDATE_HOLD_MESSAGE } from "./update-hold";
 
 const POLL_MS = 5_000;
@@ -124,7 +125,7 @@ export class RestartContinuationScheduler {
   private async advance(plan: RestartContinuationPlan): Promise<void> {
     const readiness = this.readiness(plan);
     if (readiness.kind === "stale") {
-      this.store.restartContinuations.cancel(plan, readiness.reason);
+      this.retire(plan, "cancelled", readiness.reason);
       return;
     }
     if (readiness.kind === "wait" || this.dependencies.busy(plan.conversationId)) return;
@@ -143,7 +144,7 @@ export class RestartContinuationScheduler {
   private failed(plan: RestartContinuationPlan, error: unknown): void {
     const readiness = this.readiness(plan);
     if (readiness.kind === "stale") {
-      this.store.restartContinuations.cancel(plan, readiness.reason);
+      this.retire(plan, "cancelled", readiness.reason);
       return;
     }
     if (this.dependencies.signal.aborted || this.dependencies.held()) {
@@ -152,11 +153,19 @@ export class RestartContinuationScheduler {
     }
     const message = publicRuntimeError(error);
     if (plan.attempts >= MAX_ATTEMPTS) {
-      this.store.restartContinuations.block(plan, message);
+      this.retire(plan, "blocked", message);
       return;
     }
     this.store.restartContinuations.release(plan, message);
     this.retryAt.set(plan.id, Date.now() + RETRY_BASE_MS * 3 ** (plan.attempts - 1));
+  }
+
+  private retire(plan: RestartContinuationPlan, state: "blocked" | "cancelled", reason: string): void {
+    const retired = state === "blocked" ? this.store.restartContinuations.block(plan, reason)
+      : this.store.restartContinuations.cancel(plan, reason);
+    if (!retired) return;
+    scheduledPlanSettled(this.store, { kind: "restart-continuation", conversationId: plan.conversationId, planId: plan.id,
+      turnId: plan.interruptedTurnId, state });
   }
 
   private hasWaitingPlans(): boolean {

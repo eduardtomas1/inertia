@@ -1,0 +1,33 @@
+.cursor-sdk-account {
+  display: grid;
+  gap: 12px;
+  padding-block: 12px;
+  max-width: 56ch;
+}
+
+.cursor-sdk-account p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.cursor-sdk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cursor-sdk-models {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  max-height: 180px;
+  overflow: auto;
+}
+
+.cursor-sdk-models ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}

@@ -16,6 +16,7 @@ import {
   CODEX_CHILD_INTERRUPT_TIMEOUT_MS,
   CODEX_APP_SERVER_MAX_QUEUED_STDIN_BYTES,
   CODEX_ROOT_INTERRUPT_TIMEOUT_MS,
+  CODEX_THREAD_IN_USE_MESSAGE,
   CODEX_TRANSPORT_CLOSE_GRACE_MS,
   MAX_CODEX_PENDING_CANCELLATION_REQUESTS,
   MAX_CODEX_PENDING_CLIENT_REQUESTS,
@@ -43,6 +44,10 @@ import {
   type JsonObject,
 } from "./protocol";
 import { codexWatcherThreadConfig } from "./read-only-thread-config";
+import { injectCodexHistory } from "./app-server-history-injection";
+import {
+  CodexErrorResponse, CodexRequestRefusedError, isCodexActiveWriterError, type CodexRequestFailureRecording,
+} from "./app-server-request-errors";
 import {
   codexResumedThreadWithheldInstructions,
   codexThreadStartTools,
@@ -85,15 +90,12 @@ import {
 } from "../provider/provider-natural-close";
 import { createOwnedProcessTreeTermination } from "../process-lifecycle";
 
-class CodexRequestRefusedError extends Error {}
-class CodexErrorResponse extends CodexRequestRefusedError {}
-
 interface PendingClientRequest {
   method: string;
   resolve: (value: JsonObject) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
-  recordFailure: boolean;
+  recordFailure: CodexRequestFailureRecording;
   onResponseFrame?: (result?: JsonObject) => void;
 }
 
@@ -410,7 +412,7 @@ export function startCodexAppServerRun(
     method: string,
     params: JsonObject,
     onResponseFrame?: (result?: JsonObject) => void,
-    recordFailure = true,
+    recordFailure: CodexRequestFailureRecording = true,
     timeoutMs = options.rpcTimeoutMs ?? CODEX_RPC_TIMEOUT_MS,
     useCancellationReserve = false,
   ): Promise<JsonObject> => {
@@ -618,14 +620,15 @@ export function startCodexAppServerRun(
       if (error) {
         const errorMessage =
           boundedText(error.message, 4_000) ?? `${pending.method} failed.`;
-        if (pending.recordFailure) {
+        const code = typeof error.code === "number" && Number.isSafeInteger(error.code) ? error.code : null;
+        if (typeof pending.recordFailure === "function" ? pending.recordFailure(code, errorMessage) : pending.recordFailure) {
           rememberFailure(
             "codex-error",
             "Codex rejected a protocol request.",
             errorMessage,
           );
         }
-        pending.reject(new CodexErrorResponse(errorMessage));
+        pending.reject(new CodexErrorResponse(errorMessage, code));
       } else {
         pending.resolve(objectValue(message.result) ?? {});
       }
@@ -906,7 +909,7 @@ interface OpenCodexTurnOptions {
     method: string,
     params: JsonObject,
     onResponseFrame?: (result?: JsonObject) => void,
-    recordFailure?: boolean,
+    recordFailure?: CodexRequestFailureRecording,
   ) => Promise<JsonObject>;
   notify: (method: string, params?: JsonObject) => void;
   setProviderThreadId: (threadId: string) => void;
@@ -1041,6 +1044,10 @@ export async function openCodexTurn({
         ...threadConfig,
       });
     } catch (error) {
+      if (isCodexActiveWriterError(error)) {
+        setContinuationError("thread-in-use");
+        throw new Error(CODEX_THREAD_IN_USE_MESSAGE);
+      }
       if (isStaleResumeError(error)) {
         setContinuationError("stale-provider-session");
         throw new Error(staleProviderSessionDecision().reason);
@@ -1084,6 +1091,9 @@ export async function openCodexTurn({
   if (!options.sessionId) recordCodexThreadRegistration(openedThreadId, options.hostTools);
   setProviderThreadId(openedThreadId);
   options.onSession?.(openedThreadId);
+  // After the thread opens and before goal/set or turn/start; never into an active turn (T3 8b21cbdf1).
+  const prompt = await injectCodexHistory({ history: options.historyInjection, prompt: options.prompt, threadId: openedThreadId,
+    thread, turnActive: activeTurnId() !== undefined, cancelRequested: isCancelRequested, request });
   if (isCancelRequested()) {
     finish("cancelled", null, null);
     return;
@@ -1152,7 +1162,7 @@ export async function openCodexTurn({
       throw new Error("Codex received an invalid selected skill.");
     }
   }
-  const turnPrompt = withoutInternalProviderInstructions(options.prompt, withheldInstructions);
+  const turnPrompt = withoutInternalProviderInstructions(prompt, withheldInstructions);
   const input: JsonObject[] = [{
     type: "text",
     text: sessionInstructionApplied || sessionDeveloperInstructions === undefined
@@ -1199,6 +1209,9 @@ export async function openCodexTurn({
   }, (result) => {
     const respondedTurnId = boundedText(objectValue(result?.turn)?.id, 512);
     setRequestedTurnId?.(respondedTurnId);
+    // Codex accepted the turn: record it before anything else, so a Stop racing `turn/started` keeps the prompt
+    // delivered. `turn/started` repeats the same boundary, which records nothing new.
+    if (respondedTurnId && !isSettled()) options.onNativeBoundary?.(openedThreadId, respondedTurnId, "started");
     // Same stdout chunk or earlier: notifications for this turn that arrived
     // before the response are applied now, so a turn that already started (or
     // finished) is neither lost nor resurrected as running below.

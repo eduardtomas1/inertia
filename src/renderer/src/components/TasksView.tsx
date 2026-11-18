@@ -463,8 +463,9 @@ export function TasksView({
 
   const stopTodo = useCallback((todo: Todo): void => {
     if (!todo.conversationId) return;
-    void request({ type: "agent.stop", payload: { conversationId: todo.conversationId } }).catch(() => undefined);
-  }, [request]);
+    void request({ type: "agent.stop", payload: { conversationId: todo.conversationId,
+      expectedTurnId: conversationsById.get(todo.conversationId)?.latestTurn?.id } }).catch(() => undefined);
+  }, [conversationsById, request]);
 
   const startTodo = useCallback(async (
     todo: Todo,

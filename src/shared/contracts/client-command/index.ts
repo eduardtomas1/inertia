@@ -17,6 +17,10 @@ import { todoCommandSchemas } from "./todos";
 import { libraryCommandSchemas } from "./library";
 import { updatesCommandSchemas } from "./updates";
 import { watcherCommandSchemas } from "./watcher";
+import { forkCommandSchemas } from "./forks";
+import { cursorSdkCommandSchemas } from "./cursor-sdk";
+import { delegationCommandSchemas } from "./delegation";
+import { observedChildCommandSchemas } from "./observed-children";
 import { worktreeCommandSchemas } from "./worktrees";
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
@@ -32,6 +36,10 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...libraryCommandSchemas,
   ...updatesCommandSchemas,
   ...watcherCommandSchemas,
+  ...forkCommandSchemas,
+  ...cursorSdkCommandSchemas,
+  ...delegationCommandSchemas,
+  ...observedChildCommandSchemas,
   ...gitCommandSchemas,
   ...gitHistoryCommandSchemas,
   ...workspaceCommandSchemas,

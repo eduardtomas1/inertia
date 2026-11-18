@@ -14,6 +14,7 @@ import type {
   ModelSelection,
   ProviderModel,
   ProviderRateLimit,
+  ProviderSlashCommand,
   ProviderSkillInput,
   ProviderUpdateRequirement,
   SubagentModelSource,
@@ -370,6 +371,7 @@ export interface ProviderMetadataEvent extends ProviderEventBase {
   metadata: {
     models?: ProviderModel[];
     rateLimits?: ProviderRateLimit[];
+    commands?: ProviderSlashCommand[];
   };
   source: "provider" | "session";
   /** False denotes a sparse update that must merge by stable item id. */

@@ -69,7 +69,10 @@ import {
 } from "./cursor-acp-framing";
 import { selectAcpAgentAuthMethod } from "./acp-auth";
 import { AcpCompactionProjection, unconfirmedAcpCompactionFailure } from "./acp-compaction-projection";
-import { parseAcpSessionNotification } from "./acp-json-rpc";
+import {
+  AcpCommandAdvertisements,
+  parseAcpSessionNotificationOrIgnoredCommands,
+} from "./acp-command-advertisement";
 import { AcpPromptFrames } from "./acp-prompt-frames";
 import {
   cursorQuestions,
@@ -231,6 +234,7 @@ function startCursorRun(
   });
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
   const compactions = new AcpCompactionProjection("Cursor", "cursor", emitter);
+  const commandAdvertisements = new AcpCommandAdvertisements("cursor", emitter, options.input.sessionId);
   const inbandErrors = new CursorInbandErrors();
   let subagentSequence = 0;
   const toolActivities = new Map<
@@ -331,10 +335,14 @@ function startCursorRun(
     })
     .onNotification(acp.methods.client.session.update, (value) =>
       handleCursorProviderEvent(
-        () => parseAcpSessionNotification(value) as SessionNotification,
+        () => parseAcpSessionNotificationOrIgnoredCommands(value) as SessionNotification | null,
         "Cursor ACP sent an invalid session update.",
       ), ({ params }) => {
+      if (params === null) return;
       const safeParams = secretRedactor.streamNotification(params);
+      if (!cancelRequested && safeParams.update.sessionUpdate === "available_commands_update") {
+        commandAdvertisements.observe(safeParams.sessionId, safeParams.update.availableCommands);
+      }
       if (!sessionId || safeParams.sessionId !== sessionId || cancelRequested) return;
       if (
         acceptsCommandAdvertisement
@@ -602,6 +610,7 @@ function startCursorRun(
       sessionId = created.sessionId;
       todoSessions.reset(sessionId);
       emitter.session(sessionId);
+      commandAdvertisements.establish(sessionId);
       modes = created.modes;
       configOptions = created.configOptions;
     }

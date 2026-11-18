@@ -1,5 +1,6 @@
 import type { ConversationBackgroundTasksLoader } from "../../hooks/useAppRuntimeActions";
 import type { DraftSkillsProjection } from "../../hooks/useDraftSkills";
+import type { ProviderCommandsLoader } from "../../hooks/useAgentWorkflows";
 import type { LimitResetCommandRunner } from "../composer/limitResetClient";
 import type { ComponentProps, Dispatch, SetStateAction } from "react";
 import type {
@@ -152,6 +153,14 @@ function unsavedChatQueueRunner(run: QueueCommandRunner): QueueCommandRunner {
   return unsaved;
 }
 
+function providerCommandsLoader(
+  actions: Pick<WorkspaceSceneActions, "listProviderCommands" | "previewProviderCommands">,
+  draft: boolean,
+): { onListProviderCommands?: ProviderCommandsLoader } {
+  const load = draft ? actions.previewProviderCommands : actions.listProviderCommands;
+  return load ? { onListProviderCommands: load } : {};
+}
+
 interface StableSceneCallbacks {
   setActionError: Dispatch<SetStateAction<string | null>>;
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
@@ -278,6 +287,8 @@ export interface WorkspaceSceneActions {
     context?: TurnRequestContext,
   ) => Promise<ConversationCompactAndSendResult>;
   listSkills: (forceReload?: boolean) => Promise<void>;
+  listProviderCommands?: ProviderCommandsLoader;
+  previewProviderCommands?: ProviderCommandsLoader;
   setGoal: (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -796,6 +807,7 @@ export function createWorkspaceSceneModel({
         ? { onCompactAndSendMessage: actions.compactAndSendMessage }
         : {}),
       onListSkills: draftConversation && draftSkills ? draftSkills.list : actions.listSkills,
+      ...providerCommandsLoader(actions, draftConversation !== null),
       onPromptPresetCommand: actions.run,
       onRespondToApproval: actions.respondToApproval,
       onRespondToInput: actions.respondToInput,

@@ -385,6 +385,22 @@ describe("detached chat runtime authority", () => {
     expect(project("55555555-5555-4555-8555-555555555555")).toEqual({ type: "runtime.cursor", sync });
   });
 
+  it("lets a detached chat list provider commands for its own conversation only", () => {
+    const list = (payload: Extract<ClientCommand, { type: "agent.commands.list" }>["payload"]): ClientCommand => ({
+      type: "agent.commands.list",
+      requestId: REQUEST,
+      payload,
+    });
+    expect(rejection(list({ conversationId: CONVERSATION }))).toBeNull();
+    expect(rejection(list({ conversationId: OTHER_CONVERSATION }))).toBe("That request is unavailable in a detached chat.");
+    for (const providerId of ["codex", "claude"] as const) {
+      expect(rejection(list({ draftConversationId: CONVERSATION, projectId: PROJECT, providerId })))
+        .toBe("That request is unavailable in a detached chat.");
+    }
+    expect(mainRejection(list({ conversationId: OTHER_CONVERSATION }))).toBeNull();
+    expect(mainRejection(list({ draftConversationId: OTHER_CONVERSATION, projectId: OTHER_PROJECT, providerId: "claude" }))).toBeNull();
+  });
+
   it("keeps draft skill previews in the main window", () => {
     const command = {
       type: "agent.skills.preview",

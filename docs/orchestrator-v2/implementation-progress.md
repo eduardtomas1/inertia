@@ -2980,3 +2980,517 @@ native rollback started in a checkout other than the one the session last ran
 in (it still needs the session's backing in that checkout); and the C6
 injection package, which will credit native-delivered ids through the same
 coverage path.
+
+## G11 part 2: Codex native history injection — 2026-11-17
+
+Status: uncommitted on top of `5543eaa8` (PR #686), macOS arm64, Node 22.
+T3 anchors are at `b05c505b`; injection is unchanged on T3 main since then.
+Brief: [t3code-delta-2026-11-14.md](t3code-delta-2026-11-14.md) section C6.
+
+### Mechanism
+
+A turn that carries a portable handoff (restore or delta) on Codex App Server
+appends its restored history to the native thread with `thread/inject_items`
+after `thread/start` or `thread/resume` and before `turn/start` (before
+`thread/goal/set` for a goal start), and its prompt omits the restored-history
+block (T3 `CodexAdapterV2.injectHistory`, `deliverContextHandoffs`,
+`ProviderTurnStartService.startWithHandoffs`).
+
+- **Capability.** `history-injection` joins `PROVIDER_CAPABILITY_IDS`
+  (`src/server/provider/capability-manifest.ts`): Codex `negotiated`, every
+  other harness `unavailable`. The run coordinator offers the injection
+  authority to a harness only when a successful negotiation would make the
+  capability available to that run (`run-coordinator.ts`,
+  `historyInjectionAdmitted`), so a custom backend whose observed ceiling does
+  not include it, or any other harness, never receives it. The Codex harness
+  reports the outcome as a capability observation (`true` on acceptance,
+  `false` on an unknown method). As in T3 nothing is cached: every turn tries.
+- **Items.** Unchanged `portableHistoryResponseItems` (T3 `historyResponseItems`):
+  the coverage context as a `user`/`input_text` item, historical user items as
+  `input_text`, everything else as `assistant`/`output_text`, each with the
+  inline rendering's provenance label and its already neutralized text. Only
+  the required history block is injected; optional supplements (handoff
+  outcome, referenced-chat blocks) stay in the prompt, as T3 keeps side-chat
+  and restart context inline. Injected history is text only: the current
+  prompt's images, files and skills stay on `turn/start`, which is always sent
+  as a prompted start.
+- **Preparation.** Assembly keeps producing the inline prompt and, beside it,
+  `nativeHistory`: the items and the same prompt without the restored block
+  (`request-context.ts`). The run carries the inline prompt; the authority
+  (`ProviderHistoryInjection`, `src/server/provider/contracts.ts`) carries the
+  items and the native prompt, so a harness that does not inject delivers
+  inline by construction. The budget is unchanged (`portableHistoryCost` is
+  already the larger of both encodings).
+- **Authority.** `turnHistoryInjection` (`src/server/runtime/turns/turn-history-injection.ts`)
+  binds three durable steps to one attempt: `begin`, `delivered`,
+  `unsupported` (`ProviderBackingRepository.historyInjection`). Each commits
+  before returning and returns false, writing nothing, unless the run's
+  current attempt owns the handoff in the expected state; `begin` is also
+  refused once a Stop is recorded on the attempt. It is not offered above
+  64,000 JSON bytes (`MAX_HISTORY_INJECTION_BYTES`); the transport checks the
+  bound again. The G9 fresh-session replacement gets its own authority for
+  its own restore (T3 injects into the fresh thread too); the rejected
+  attempt's authority is stripped from the replacement and could no longer
+  write anyway.
+- **Transport** (`src/server/codex/app-server-history-injection.ts`). Nothing is
+  sent, and the history stays inline, when a turn is active on the thread
+  (`activeTurnId`, or `thread.status.type === "active"` in the open response),
+  after a Stop, above the bound, or when `begin` is refused. The request uses
+  the surrounding timeout and cancellation. An unknown method returns the
+  inline prompt; any other error, a response that is not a JSON object, a
+  transport close, a timeout or a Stop throws, and no turn starts. After
+  `delivered`, the existing cancellation check runs before `turn/start`.
+  Request error classes moved to `app-server-request-errors.ts`; a request can
+  now decide by code and message whether its error becomes the run's failure.
+
+### Delivery records
+
+The handoff is prepared `inline` as before. The new optional `method` field on
+`context.handoff-state-changed` changes it while the handoff is `dispatching`:
+
+| Step | Event | T3 |
+| --- | --- | --- |
+| dispatch (unchanged, before the provider starts) | `dispatching`, no method | – |
+| `begin`, before the request | `dispatching` + `native` | `pending` |
+| accepted, before `turn/start` | `delivered` + `native`; the session's backing becomes `ready` | `injected` |
+| unknown method | `dispatching` + `inline`; delivered later by provider output | inline fallback |
+| error, malformed, close, timeout, Stop | stays `dispatching` + `native`; settlement makes it `uncertain` | `pending` stays |
+
+The projector allows a method change only while `dispatching`, a
+`dispatching → dispatching` event only to change the method, and a delivery
+that keeps the method; an event without `method` keeps the handoff's method,
+so every older event replays to the same row. Provider output never delivers a
+`native` handoff (`acknowledge` only delivers `inline` ones). Inline handoffs
+keep the old event shape. No migration, no projection-version bump.
+
+Settlement: a handoff still `dispatching` + `native` is never abandoned, even
+when the provider claims nothing was delivered; it becomes `uncertain` and the
+session's backing is retired as `uncertain-delivery` through the existing
+invalidation. The next turn finds no usable backing and `sessionRetired`
+blocks the unbacked path, so it starts a fresh thread with the full restore
+(T3 `ContextHandoffDelivery.ts:113-122`, `ProviderTurnStartService.ts:1255-1269`).
+
+Coverage: `delivered` readies the backing, so the existing settlement path
+credits the handoff's `itemIds` and `omittedItemIds` whatever the turn's
+outcome (T3: an injected handoff stays covered after a failed turn). The
+turn's own messages are credited only once Codex accepted the turn (see
+Review fixes, 1). A turn that fails after injection resumes the same thread
+next time with only newer items, including its own unsent prompt.
+
+### Findings on the requested angles
+
+- **Native rollback (G12).** A native rewind now also uncredits the items and
+  omitted ids that delivered handoffs of rolled-back runs brought into the
+  rewound session (`rolledBackHandoffItems`,
+  `src/server/orchestration-v2/history-rollback-repository.ts`), inline or
+  injected; a rollback that keeps the injecting run keeps them. In reachable
+  flows the existing trim already removes them, because Inertia's native
+  rollback needs a retained boundary on the same session, so the delivered
+  items are messages of rolled-back turns. The new rule covers the remaining
+  case (a later delta offering an older item outside the 256-candidate window).
+  Both directions are tested; both tests also pass without the new rule
+  (guards). Not verified: whether Codex `thread/revert` keeps items injected
+  between turns (the probe below shows they are recorded outside any turn);
+  uncrediting is the safe choice either way.
+- **G9 fresh-session fallback.** A rejected resume happens before injection, so
+  the handoff is abandoned exactly as before and the replacement's restore is
+  prepared under the replacement attempt, which receives its own authority. A
+  turn that fails after a successful injection keeps the delivery and the
+  coverage, and the next turn resumes the thread. If injection was ambiguous,
+  the session is retired and the next turn starts fresh.
+- **Relocation (C5).** The relocated backing is the handoff's target; dispatch
+  and `delivered` find it through the attempt's session in the run's checkout,
+  so a relocated delta is injected into the resumed thread (same native id,
+  new cwd) and credited to the relocated row.
+- **Ids.** Every new event carries the handoff, run and attempt ids; the
+  repository checks the run's current attempt and the projector re-checks the
+  attempt, run, thread, target backing and native session.
+- **Replay.** Rebuild and a reopened store give identical rows for native,
+  inline-fallback, uncertain and rollback logs, and for an inline log without
+  `method`.
+- **Bounds and neutralization.** Items are at most 64,000 JSON bytes; text is
+  the portable source's neutralized text with the same labels as inline.
+
+### Deliberate differences from T3 Code
+
+- **Unknown method.** T3 treats only JSON-RPC -32601 as "not supported". The
+  installed App Server 0.169.0 answers an unknown method with -32600
+  "Invalid request: unknown variant `<method>`" (observed, below), so under
+  T3's rule an App Server without `thread/inject_items` would fail every
+  injecting turn and retire its session. Inertia also treats that exact
+  decode failure as unsupported; any other -32600 stays ambiguous.
+- **Prepared method.** T3 writes `pending` only around the request; Inertia's
+  dispatch already marks the handoff `dispatching` before the provider
+  starts, so `native` is the method change at `begin`. The record never claims
+  native delivery a harness did not attempt.
+- **Malformed response.** T3's decoder rejects a non-object response; Inertia
+  checks for a JSON object explicitly and fails the turn.
+- **Goal starts.** The transport injects before `thread/goal/set`, but
+  Inertia's goal starts still carry no handoff (their delta waits for the next
+  prompted turn, as before), so this path is not reached in production.
+- **Unclean restart.** A runtime restart after `delivered` still retires the
+  session (existing unclean-recovery rule); T3 would keep the injected
+  coverage.
+
+### Also in this package: work reserve (T3 `9ec71438c`)
+
+`portableHistoryBudget` reserves `min(max(16,000, window / 4), window / 2)` for
+work, as T3's `handoffBudget` since 2026-11-15, so a 20,000 window leaves
+10,000 for history instead of at most 4,000. The image-batch test's 20,000
+window cases now expect room for one image.
+
+### Real-protocol check
+
+`codex app-server` 0.169.0 with `CODEX_HOME` set to an empty scratch folder
+(no credentials, no `turn/start`): `thread/start` succeeded without auth;
+`thread/inject_items` with a user and an assistant message answered `{}`;
+`thread/read` showed the thread `idle`, and the rollout recorded both as
+`response_item`s after the thread's setup, outside any turn. An unknown method
+answered -32600 "unknown variant". `thread/revert` over injected items was not
+exercised (it needs turns).
+
+### Tests
+
+- `tests/server/codex-app-server-history-injection.test.ts` (new, portable,
+  15 cases): success on a new and a resumed thread, order and exact items, the
+  native prompt, images kept on `turn/start`; -32601 and 0.169.0's unknown
+  variant fall back inline in the same turn without failing; malformed
+  response, another error, another -32600 and a transport close fail without
+  `turn/start`; Stop during the request; items at exactly 64,000 bytes sent
+  whole and 64,001 kept inline; a refused `begin` and a refused `delivered`;
+  an active thread; inject before `thread/goal/set`; no authority.
+- `tests/server/orchestration-history-injection.test.ts` (new, portable,
+  15 cases): native delivery recorded before the turn, steps one-shot, output
+  never delivers a native handoff, coverage, next turn resumes without a
+  handoff, rebuild; an injected delta stays covered after a failed turn and
+  the retry resumes with newer items only; the unknown-method event sequence;
+  transport close and Stop retire the session as `uncertain-delivery` and
+  restore on a fresh thread; a Stop refuses `begin`; a not-delivered claim
+  cannot undo a started injection; the fallback replacement's own authority
+  and the stale one; the older log without `method` replays and reopens
+  unchanged and the older payload parses; forged method transitions are
+  refused; G12 rollback keeping and removing the injecting run; and three
+  cases over the real transport and the App Server fixture (success,
+  `turn/start` failing after injection, unknown method).
+- `orchestration-portable-history`: the small-window work reserve.
+  `orchestration-backings`, `harness-backend-routing`,
+  `provider-capability-manifest`: updated for the reserve and the 29th
+  capability.
+
+Against the sources before this package all new cases fail except four
+guards: the active thread, no authority, the inline log replay and the
+fixture's unknown-method case (inline was already the behaviour). The two G12
+cases fail before the package because they inject, but pass with only the new
+rollback rule reverted, so they guard it rather than prove it.
+
+Verification (2026-11-17, macOS arm64, Node 22): the full Vitest suite passed
+20,461 tests with 174 skipped in 1,621 files (1,607 passed, 14 skipped).
+`npm run test:portable` passed 4,389 tests with 31 skipped in 269 files
+(2 skipped). `typecheck`, `lint` and `check:architecture` passed. The full
+`npm run check`, the Electron scenarios and a packaged build were not run.
+
+Not exercised: a Codex turn with real credentials after injection (model
+behaviour on injected items), `thread/revert` over injected items, an App
+Server that predates `thread/inject_items`, the capability gate for a custom
+Codex backend (by code reading: its observed ceiling excludes
+`history-injection`, so it stays inline), Windows and Linux. The persisted
+execution manifest still lists the restored block for an injected turn; it is
+audit data and no prompt is rebuilt from it.
+
+### Review fixes (independent review, 2026-11-17)
+
+1. **The turn's own prompt is credited only once Codex accepted the turn**
+   (MEDIUM). `delivered` readies the backing before `turn/start`, and
+   settlement then credited the turn's own messages, so after Codex → Claude →
+   Codex with the injection accepted and `turn/start` rejected (or a Stop
+   between `delivered` and `turn/start`), the next turn resumed `codex-native`
+   without "Return to Codex". Settlement now credits a natively delivered
+   run's own messages only with evidence that the provider accepted the turn:
+   completion, a native turn boundary (`turn/started`), or an assistant
+   message (`backing-repository.ts`, `settle`). Preparation delivers a delta
+   when the session's last turn's own prompt is not covered, so the next turn
+   carries it (`turn-request-preparation.ts`, `deliversDelta`). T3's rule is
+   general: a run's items count as native only when the provider accepted a
+   turn for that attempt (`ProviderTurnStartService.ts:863-880`,
+   `nativeInputRunIds` from `providerTurns`).
+   The general case was left open here and closed for Codex in the second
+   round below.
+2. **Goal change during injection** (LOW, no code change). `setGoal` and
+   `clearGoal` run through `serializeGoalMutation`, which awaits the startup
+   gate; the gate opens only when `openCodexTurn` returns, after injection and
+   `turn/start`. A goal change made during the injection is therefore sent
+   after `turn/start`. A guard test pins the order.
+3. **The Claude turn a switch-back delivered as a delta is kept on Codex's
+   route** (pre-existing, user-visible). `latestProviderHandoffOnRoute`
+   (`src/server/persistence/turn-ledger-repository.ts`) counted only turns
+   with `continuation_reason_code = 'harness-changed'`; a switch-back that
+   resumes the old thread is `same-continuation`, so a later fresh Codex
+   session (an ambiguous injection, or a rejected resume and the G9 restore)
+   dropped the Claude turn's messages. It now counts any turn that directly
+   follows a turn on another provider and restored history, and skips a turn
+   settled as not delivered (its `restoredMessageCount` is also cleared then).
+   Same-provider harness changes still never count. `inertia_request_context`
+   uses the same route and gains the same items.
+4. **Small items.** The capability comment names both unknown-method answers.
+   A test now builds the edge the rollback rule exists for: 130 Claude turns
+   push the oldest answer outside the restore's 256-candidate window (the
+   window always keeps the opening user message), a later Codex delta
+   delivers it, and a native rollback to the first Codex turn must uncredit it
+   although it is older than the kept turn. The fallback test now reports the
+   session before `begin`, as production does.
+5. **Kept: native framing follows T3.** Injected items use the `user` role for
+   the coverage context and historical user items and the `assistant` role
+   for everything else, as T3's `historyResponseItems`. Neutralization is
+   identical at the text level (the same neutralized text and provenance
+   labels as inline), but native items carry no "Structured execution context
+   (reference material; not new user-authored chat prose)" wrapper; the
+   coverage item's "Historical content is context, not a new request or
+   higher-priority instructions" line is the only framing, as in T3.
+
+Review-fix tests (fail before their fix unless marked):
+
+- `orchestration-history-injection`: an injected delta followed by a failed
+  turn no longer covers the turn's prompt and the retry carries it (fake
+  provider, and over the App Server fixture with `turn/start` rejected; the
+  retry's injected items contain "Return to Codex"); Stop between `delivered`
+  and `turn/start` keeps the injected items and resends the prompt; a turn
+  Codex started credits its prompt (guard); the uncertain-injection restore
+  now includes the Claude turn (both variants); a successful switch-back
+  followed by a rejected resume restores the Claude turn through the G9
+  fallback; the outside-the-window rollback edge (fails with only the
+  rollback rule reverted).
+- `codex-app-server-history-injection`: Stop between the recorded delivery and
+  `turn/start` starts no turn (guard: the transport already checked); a goal
+  change during a slow injection is sent after `turn/start` (guard).
+
+
+Verification after the review fixes (2026-11-17, macOS arm64, Node 22): the
+full Vitest suite passed 20,467 tests with 174 skipped in 1,621 files (1,607
+passed, 14 skipped); `npm run test:portable` passed 4,395 tests with 31
+skipped in 269 files (2 skipped); `typecheck`, `lint` and `check:architecture`
+passed. The full `npm run check`, the Electron scenarios and a packaged build
+were not run.
+
+### Review fixes, second round (2026-11-17)
+
+1. **Codex turns without a handoff follow the acceptance rule** (MEDIUM). A
+   Codex turn that failed before or at `turn/start` (codex error, RPC
+   timeout, service-tier mismatch, skill validation, Stop during
+   `thread/resume`) still had its prompt credited, so the next turn resumed
+   the thread and the prompt was lost. T3 counts a run's items only with an
+   accepted provider turn and resends missed runs for every provider
+   (`ProviderTurnStartService.ts:863-880`, `:1052-1059`, `prepareRetryHandoff`
+   `:1085-1118`). New manifest capability `turn-acceptance`
+   (`capability-manifest.ts`; Codex `native`, every other harness
+   `unavailable`, read through `harnessDeclaresCapability`): on such a
+   harness, settlement treats a run without acceptance evidence as not
+   delivered. Evidence is completion, a native turn boundary on the attempt,
+   an inline handoff its output delivered, an assistant message, or provider
+   activity (the fresh-session fallback's notion of activity). Without it the
+   backing returns to its state before dispatch (`provider.backing-restored`)
+   and the prompt is not credited, so the next turn's delta resends it. A run
+   whose injected history was delivered keeps that coverage and only its
+   prompt is left out. **Open item:** Claude, the CLI harnesses, ACP, Cursor,
+   OpenCode, Antigravity and Pi keep crediting the prompt of a turn they never
+   accepted. They report no acceptance: their prompt travels with process
+   start or a request whose acceptance Inertia does not record, so the only
+   general evidence would be output, and requiring it would resend the prompt
+   of every turn stopped or failed before output as a "context added" delta
+   with a visible restored-history notice. Each needs its own acceptance
+   evidence before it declares `turn-acceptance`.
+2. **A retry that never starts keeps the native thread** (LOW-MEDIUM). With
+   item 1, an inline handoff still `dispatching` on a run without acceptance
+   evidence is abandoned and the backing restored, instead of becoming
+   `uncertain`; previously the retry of an injected switch-back that was
+   stopped before injection made the third turn start fresh. As in T3, a
+   handoff is pending only around the injection: a `dispatching` + `native`
+   handoff (an ambiguous injection) still retires the session.
+3. **Acceptance from the `turn/start` response** (LOW). When the response
+   carries a turn id, the transport reports the `started` boundary
+   (`app-server-run.ts`), before replaying earlier notifications; the later
+   `turn/started` repeats it and records nothing new. A Stop racing
+   `turn/started` keeps the prompt delivered. Limit: once the controller has
+   processed a Stop it ignores the provider's later events, so a response
+   arriving after that is not recorded and the prompt is resent as history
+   (a duplicate, the safe side).
+4. **Handoff outcome** (LOW). `providerHandoffReason`
+   (`turn-context-facts.ts`) skips rolled-back turns. Decision: the "Handoff
+   outcome" block stays on every restore and delta that carries the route's
+   handoff, not only on a turn that is itself the handoff or a fresh restore.
+   Whether a turn "is the handoff" is not reliable from route state: when a
+   switch-back is not accepted, its retry is the turn that first brings the
+   other provider's items, but it is no longer the route turn, so the
+   narrower rule would drop the explanation exactly there. The block is
+   optional and dropped first under budget.
+5. **Nits.** The comment on the not-delivered guard in
+   `TurnLedgerRepository.settle` now says the route marker excludes
+   not-delivered runs itself (the guard stays: it is unreachable and keeps
+   older rows as written). `historyInjection("begin")` is one-shot per
+   handoff: a handoff that already changed method (an unknown method) cannot
+   begin again.
+
+6. **Found while verifying: the two-strike rule kept working with resent
+   prompts.** With item 1 a retry after a rejected resume resends the missed
+   prompt, so the retry has a restored-history record, and
+   `recordRejectedResume` only wrote its `resumeRejected` marker into an empty
+   record: the second rejection went unmarked and the chat kept resuming a
+   broken session. The marker now joins an existing record
+   (`turn-ledger-repository.ts`), and the codec drops it before validating the
+   record (`codecs.ts`), so the shared `TurnSessionRecovery` shape is
+   unchanged. `turn-session-fallback-policy` "starts fresh after two rejected
+   resumes" and "retires a session it started once that session has completed
+   a turn" fail with item 1 and without this fix. Two of its cases were
+   aligned with the new rule: the thread-in-use failure now carries
+   `notDelivered`, as the Codex harness reports it, and the uncertain fresh
+   session reports acceptance before failing.
+
+Second-round tests (fail before their fix unless marked):
+
+- `orchestration-history-injection`, "turn acceptance": `turn/start` failing
+  without a handoff and Stop during `thread/resume` restore the backing and
+  resend the prompt; two consecutive failures resend both prompts; the retry
+  of an injected switch-back stopped before injection keeps `codex-native` for
+  the third turn; one injection per attempt. Guards: Stop after
+  `turn/started`, Stop racing the response once acceptance was recorded, a
+  tool-only failed turn, and an ambiguous injection still retiring the
+  session.
+- `codex-app-server-history-injection`: the `turn/start` response reports the
+  accepted turn before `turn/started` (fixture `turn-start-response-only`).
+- `orchestration-history-rollback`: a rolled-back Claude turn is never named
+  as the reason the chat moved.
+- `orchestration-backing-relocation`: the uncertain-session case now reports
+  acceptance before failing silently, since a Codex turn without acceptance is
+  no longer uncertain; `provider-capability-manifest` and
+  `harness-backend-routing` cover the 30th capability.
+
+
+Verification after the second round (2026-11-18, macOS arm64, Node 22):
+`typecheck`, `lint` and `check:architecture` passed. The full Vitest suite
+passed 20,478 tests with 174 skipped in 1,621 files (1,607 passed, 14
+skipped). `npm run test:portable` ran 4,437 tests: 4,400 passed and 31 were
+skipped. Six failed on timeouts of 770–970 s each while the machine slept
+mid-run. Rerun alone, five passed; the sixth timed out again the same way
+and then passed on its own in 3 s. None of the six touches C6 code. The full
+`npm run check`, the Electron scenarios and a packaged build were not run.
+
+### Review fixes, third round (2026-11-18)
+
+1. **Thread-open notices no longer count as acceptance** (MEDIUM-HIGH). Codex
+   records `mcpServer/startupStatus/updated` (also with `threadId: null`),
+   `configWarning`, `deprecationNotice` and thread environment and settings
+   notices as status activities on the turn while it opens the thread, before
+   `turn/start`; the acceptance check counted any activity, so a failed or
+   stopped `turn/start` after such a notice still credited the prompt.
+   Decision: on a harness that declares `turn-acceptance`, activity is no
+   evidence at all. Since round two an accepted Codex turn always records a
+   native turn boundary (the `turn/start` response or `turn/started`), and
+   every turn-scoped item (command, tool, file change, reasoning) follows that
+   boundary, so counting those kinds would add nothing. Evidence is now
+   completion, the boundary, an inline handoff its output delivered, or an
+   assistant message (`backing-repository.ts`, `turnAccepted`).
+   The same notices also blocked the G9 fresh-session fallback
+   (`turnHasProviderActivity`) and the two-strike rule
+   (`savedSessionKeepsFailing`). On a harness that declares
+   `turn-acceptance`, both now count only turn-scoped activity (command, tool,
+   file change, reasoning); a rejected resume or a missing session happens
+   while the thread opens, before any turn. Other harnesses keep counting any
+   activity but errors and the checkpoint notice: a Claude status notice such
+   as "Compacting context" can be genuine turn progress, and they report no
+   acceptance to tell the two apart.
+2. **An unaccepted turn is not delivered anywhere** (LOW). Acceptance is
+   decided once in `synchronize` (`ProviderBackingRepository.unaccepted`):
+   - The run records `delivery: "not-delivered"` unless its history was
+     injected, so `deliveredRouteTurnId` skips it; the projector now accepts
+     the field on any terminal status but `completed` (older events only ever
+     carried it on `failed`, so they replay unchanged).
+   - Its restored-history record is dropped unless its history was injected,
+     so neither the failed turn nor the next one shows a stale "N earlier
+     messages restored", and `latestProviderHandoffOnRoute` skips it. The
+     clearing (`turn-restored-history-record.ts`) is shared with the explicit
+     not-delivered path, keeps a withheld count and a rejected-resume marker,
+     and drops the old `harness-changed` guard, which the route marker no
+     longer needs. `settleAgentTurn` returns the turn re-read after
+     orchestration settlement.
+   - Merge-back packets travel with the prompt, so they settle as
+     undelivered for any unaccepted turn, even one whose history was injected
+     (the injection carries only history); an attached merge-back becomes
+     `undelivered`. (This round also returned the rollback cursor to
+     `pending`; corrected below: the cursor is a launch option, not part of
+     the prompt.)
+
+Third-round tests (fail before their fix unless marked):
+
+- `orchestration-history-injection`: `turn/start` failing after a
+  thread-open notice resends the prompt; an unaccepted switch-back records
+  `not-delivered`, drops its restored notice, keeps the switch due
+  (`deliveredRouteTurnId` is the Claude turn) and resends both the Claude
+  turn and the prompt; a turn whose history was injected keeps its notice and
+  no `delivery` marker (guard). The tool-only case now follows production
+  order (boundary, then the command).
+- `orchestration-history-rollback`: the existing uncertain-cursor case now
+  reports acceptance first (the round's pending-cursor case was replaced in
+  the final fixes).
+- `orchestration-merge-back`: findings stay `undelivered` when Codex never
+  accepted the carrying turn; the existing uncertain case reports acceptance
+  first.
+- `turn-session-fallback-policy`: a Codex configuration notice before a
+  missing session no longer blocks the fresh-session restart; the
+  status-notice blocking case now runs on Claude (guard).
+- `session-continuity`: two Codex resumes with only status notices count for
+  the two-strike rule, and a Claude harness still counts the notice; the
+  "made progress" case uses a command.
+
+Verification after the third round (2026-11-18, macOS arm64, Node 22, each
+run alone under `caffeinate -i`): `typecheck`, `lint` and `check:architecture`
+passed; the full Vitest suite passed 20,485 tests with 174 skipped in 1,621
+files (1,607 passed, 14 skipped); `npm run test:portable` passed 4,411 tests
+with 31 skipped in 269 files (267 passed, 2 skipped). The full `npm run
+check`, the Electron scenarios and a packaged build were not run.
+
+### Final review fixes (2026-11-18)
+
+1. **Route lookup without a window** (LOW). `deliveredRouteTurnId` looked
+   back 16 turns and fell back to the newest; with every unaccepted Codex
+   start now `not-delivered`, a switch from Claude followed by 16 failed
+   Codex starts made the first working session withhold the Claude turn. It
+   now selects the newest turn whose run is not `not-delivered`, walking the
+   chat's `(conversation_id, requested_at, id)` index newest first and
+   stopping at the first match (bounded by the chat's own turns), and returns
+   null when no turn ever reached a provider; preparation then treats the
+   switch as still due instead of taking the newest turn's provider.
+2. **Rollback cursor** (rationale corrected). The cursor's continuation
+   (`resume-cursor`, `new-session`) is a launch option the harness applies
+   when it opens the session, before any turn; it does not travel with the
+   prompt, so turn acceptance says nothing about it. Of the two options, the
+   safer is to keep the cursor out of the acceptance rule: an unaccepted turn
+   leaves a dispatched cursor `uncertain` (its backing continues portably), and
+   only an explicit refusal returns it to `pending`, as before C6. Returning
+   it to pending could re-apply a cursor that opening the session already
+   applied. In production the case does not arise: Codex, the only harness
+   that declares `turn-acceptance`, rolls back with `thread/revert` and
+   returns no continuation.
+3. **Codex compaction** (no change). Codex compaction runs through
+   `providers.compact` with a fresh run and turn id outside turn admission
+   (`conversation-compaction-commands.ts`), so they have no V2 run and never
+   reach `synchronize` or the acceptance rule (`unaccepted` returns false for a
+   run V2 never admitted). Emitting a boundary when the compact turn starts,
+   the option closer to T3 (which records the compact turn as a provider
+   turn), was tried and rejected: a native boundary also feeds the rollback
+   physical head (`physicalHead` reads the newest boundary and needs it
+   `settled`), so a started-only compaction boundary would make native
+   rollback and fork unavailable after every compaction.
+
+Final tests: `orchestration-history-injection` keeps a switch due across 17
+failed Codex starts and returns no route turn when none reached a provider
+(both fail before); a run V2 never admitted is never unaccepted (guard).
+`orchestration-history-rollback`: an unaccepted turn leaves its dispatched
+cursor `uncertain` and continues on a fresh session (fails before).
+
+
+Verification after the final fixes (2026-11-18, macOS arm64, Node 22, each
+run alone under `caffeinate -i` after the other worktree's suite finished):
+`typecheck`, `lint` and `check:architecture` passed; the full Vitest suite
+passed 20,488 tests with 174 skipped in 1,621 files (1,607 passed, 14
+skipped); `npm run test:portable` passed 4,414 tests with 31 skipped in 269
+files (267 passed, 2 skipped). The full `npm run check`, the Electron scenarios
+and a packaged build were not run.

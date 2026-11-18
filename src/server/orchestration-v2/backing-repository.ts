@@ -14,6 +14,7 @@ import { relocatedBackingId } from "./backing-projector";
 import type { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint, durableJson } from "./json";
 import { providerInstanceId } from "./provider-instance";
+import { harnessDeclaresCapability } from "../provider/capability-manifest";
 import { OrchestrationConflict } from "./types";
 
 const UNCLEAN_RECOVERY_REASONS = new Set(["runtime-restart", "runtime-crash"]);
@@ -113,15 +114,19 @@ export class ProviderBackingRepository {
   /**
    * The latest turn that was not settled as not delivered. The provider
    * received nothing for such a turn, so it did not move the conversation
-   * onto its route. Looks back over at most 16 turns.
+   * onto its route. Null when no turn reached a provider: the switch any of
+   * them attempted is still due. The walk follows the chat's
+   * `(conversation_id, requested_at, id)` index newest first and stops at the
+   * first delivered turn, so it is bounded by the chat's own turns; unaccepted
+   * Codex starts can make that run longer than any fixed window.
    */
   deliveredRouteTurnId(threadId: string): string | null {
-    const rows = this.database.prepare(`SELECT turn.id,
-        json_extract(run.payload_json, '$.delivery') AS delivery FROM agent_turns AS turn
+    const row = this.database.prepare(`SELECT turn.id FROM agent_turns AS turn
       LEFT JOIN orchestration_v2_entities AS run ON run.kind = 'run' AND run.id = turn.run_id
-      WHERE turn.conversation_id = ? ORDER BY turn.requested_at DESC, turn.id DESC LIMIT 16`)
-      .all(threadId) as { id: string; delivery: string | null }[];
-    return rows.find(({ delivery }) => delivery !== "not-delivered")?.id ?? rows[0]?.id ?? null;
+      WHERE turn.conversation_id = ?
+        AND (run.payload_json IS NULL OR json_extract(run.payload_json, '$.delivery') IS NOT 'not-delivered')
+      ORDER BY turn.requested_at DESC, turn.id DESC LIMIT 1`).get(threadId) as { id: string } | undefined;
+    return row?.id ?? null;
   }
 
   /** `relocatedFrom`: the run relocates this backing first, so its target is not projected yet. */
@@ -226,14 +231,49 @@ export class ProviderBackingRepository {
   acknowledge(runId: string): void {
     const run = this.run(runId);
     if (!run) return;
-    const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", run.attemptId)?.value);
-    const backing = attempt.nativeSessionId ? this.find({ threadId: run.threadId, providerId: run.providerId,
-      workspaceKey: run.workspaceKey, identity: this.turnIdentity(run.turnId), nativeSessionId: attempt.nativeSessionId }) : null;
+    const backing = this.attemptBacking(run);
     if (!backing || backing.status === "retired" || backing.lastRunId !== run.id) return;
     this.database.transaction(() => {
       const handoff = this.handoff(run.id);
-      if (handoff?.state === "dispatching") this.changeHandoff(handoff, "delivered", backing);
+      // A native handoff is delivered only by the injection's own response, never by later output.
+      if (handoff?.state === "dispatching" && handoff.method === "inline") this.changeHandoff(handoff, "delivered", backing);
       if (backing.status !== "ready") this.record({ ...backing, status: "ready" }, run.id, run.attemptId);
+    }).immediate();
+  }
+
+  /**
+   * Native history injection (T3 `deliverContextHandoffs`). `begin` commits before the request
+   * (T3 `pending`): the dispatching handoff becomes `native`. `delivered` commits the provider's
+   * acceptance before the turn starts (T3 `injected`); it readies the session's backing, so the
+   * handoff's items are credited at settlement whatever the turn's outcome. `unsupported`: the
+   * provider refused the method before changing history, so the handoff goes inline in the same
+   * turn. Each returns false, writing nothing, unless the run's current attempt owns the handoff
+   * in the expected state; a Stop already recorded on the attempt also refuses `begin`.
+   */
+  historyInjection(runId: string, attemptId: string, step: "begin" | "delivered" | "unsupported"): boolean {
+    return this.database.transaction(() => {
+      const run = this.run(runId);
+      const handoff = run?.attemptId === attemptId ? this.handoff(runId) : null;
+      if (!run || handoff?.attemptId !== attemptId || handoff.state !== "dispatching"
+        || handoff.method !== (step === "begin" ? "inline" : "native")) return false;
+      if (step === "begin") {
+        const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", attemptId)?.value);
+        // One injection per attempt: a handoff that already changed method (refused as unknown) stays inline.
+        const changedMethod = this.database.prepare(`SELECT 1 FROM orchestration_v2_events
+          WHERE thread_id = ? AND type = 'context.handoff-state-changed'
+            AND json_extract(payload_json, '$.handoffId') = ? AND json_extract(payload_json, '$.method') IS NOT NULL LIMIT 1`)
+          .get(run.threadId, handoff.id) !== undefined;
+        if (attempt.interruptRequestedAt !== null || changedMethod) return false;
+        this.changeHandoff(handoff, "dispatching", undefined, "native");
+      } else if (step === "unsupported") {
+        this.changeHandoff(handoff, "dispatching", undefined, "inline");
+      } else {
+        const found = this.attemptBacking(run);
+        const backing = found && found.status !== "retired" && found.lastRunId === run.id ? found : null;
+        this.changeHandoff(handoff, "delivered", backing, "native");
+        if (backing && backing.status !== "ready") this.record({ ...backing, status: "ready" }, run.id, run.attemptId);
+      }
+      return true;
     }).immediate();
   }
 
@@ -242,7 +282,28 @@ export class ProviderBackingRepository {
    * The handoff is abandoned rather than uncertain, the backing returns to its
    * state before this run's dispatch, and the turn adds nothing to its coverage.
    */
-  settle(turn: AgentTurn, undelivered = false): void {
+  /**
+   * Whether the run's turn is known not to have reached its provider: the
+   * harness reports turn acceptance (or the run's history was injected before
+   * its turn), and nothing shows the provider accepted the turn. T3 counts a
+   * run's items only with an accepted provider turn and resends missed runs
+   * (`ProviderTurnStartService.ts:863-880`, `:1052-1118`).
+   */
+  unaccepted(turn: AgentTurn): boolean {
+    const run = this.run(turn.runId);
+    if (!run) return false;
+    const handoff = this.handoff(run.id);
+    return (this.historyInjected(handoff) || harnessDeclaresCapability(turn.harnessId, "turn-acceptance"))
+      && !this.turnAccepted(turn, run, handoff);
+  }
+
+  /** Whether the run's restored history reached its session by injection. */
+  historyInjected(handoff: ContextHandoff | null): boolean {
+    return handoff?.state === "delivered" && handoff.method === "native";
+  }
+
+  /** `unaccepted`: decided once by the caller (`unaccepted(turn)` before settlement), else here. */
+  settle(turn: AgentTurn, undelivered = false, unacceptedTurn?: boolean): void {
     if (!isAgentTurnTerminalStatus(turn.status)) return;
     const run = this.run(turn.runId);
     if (!run) return;
@@ -252,14 +313,24 @@ export class ProviderBackingRepository {
     const backing = attempt.nativeSessionId ? this.find({ threadId: run.threadId, providerId: run.providerId,
       workspaceKey: run.workspaceKey, identity: turn.continuationIdentity, nativeSessionId: attempt.nativeSessionId }) : null;
     const handoff = this.handoff(run.id);
-    if (handoff?.state === "prepared" || (undelivered && handoff?.state === "dispatching")) {
+    // Injection may have reached the session in part: never abandoned, and never resumed (T3: a `pending`
+    // delivery on the current native thread makes the next turn start fresh with a full restore).
+    const nativeUncertain = handoff?.state === "dispatching" && handoff.method === "native";
+    const nativeDelivered = this.historyInjected(handoff);
+    // Without acceptance evidence nothing but an injection reached the session: the prompt and an inline handoff
+    // were not delivered (see `unaccepted`).
+    const unaccepted = unacceptedTurn ?? ((nativeDelivered || harnessDeclaresCapability(turn.harnessId, "turn-acceptance"))
+      && !this.turnAccepted(turn, run, handoff));
+    const notDelivered = undelivered || (unaccepted && !nativeUncertain && !nativeDelivered);
+    if (handoff?.state === "prepared" || (notDelivered && handoff?.state === "dispatching" && !nativeUncertain)) {
       this.changeHandoff(handoff, "abandoned");
     } else if (handoff?.state === "dispatching") this.changeHandoff(handoff, "uncertain", backing);
-    if (backing?.lastRunId === run.id && UNCLEAN_RECOVERY_REASONS.has(turn.terminalReason ?? "")) {
+    if (backing && (nativeUncertain
+      || (backing.lastRunId === run.id && UNCLEAN_RECOVERY_REASONS.has(turn.terminalReason ?? "")))) {
       this.invalidate(backing, "uncertain-delivery");
       return;
     }
-    if (undelivered) {
+    if (notDelivered) {
       if (backing?.lastRunId === run.id && backing.status !== "retired") this.restoreBeforeRun(backing, run.id);
       return;
     }
@@ -267,11 +338,29 @@ export class ProviderBackingRepository {
     const rows = this.database.prepare(`SELECT id FROM messages WHERE conversation_id = ? AND turn_id = ?
       AND role IN ('user','assistant') ORDER BY created_at, rowid LIMIT ?`)
       .all(run.threadId, run.turnId, MAX_BACKING_COVERAGE_ITEMS + 1) as { id: string }[];
+    // An injection delivered before a turn Codex never accepted: its items are in the thread, the prompt is not.
     const coverage = [...new Set([...backing.coveredItemIds,
       ...(handoff?.state === "delivered" ? [...handoff.itemIds, ...handoff.omittedItemIds ?? []] : []),
-      ...rows.map(({ id }) => id)])];
+      ...(unaccepted ? [] : rows.map(({ id }) => id))])];
     this.record({ ...backing, coveredItemIds: coverage.slice(-MAX_BACKING_COVERAGE_ITEMS),
       coverageComplete: backing.coverageComplete && coverage.length <= MAX_BACKING_COVERAGE_ITEMS }, run.id, run.attemptId);
+  }
+
+  /**
+   * Evidence that the provider accepted the run's turn, on a harness that
+   * reports acceptance: completion, a native turn boundary on its attempt (the
+   * `turn/start` response or `turn/started`), an inline handoff its output
+   * delivered, or an assistant message. Activity is not evidence: Codex
+   * records configuration, deprecation, MCP startup and thread notices as
+   * status activities while it opens the thread, before any turn exists, and
+   * every turn-scoped item (command, tool, file change, reasoning) follows the
+   * boundary that already counts.
+   */
+  private turnAccepted(turn: AgentTurn, run: OrchestrationRun, handoff: ContextHandoff | null): boolean {
+    if (turn.status === "completed" || this.events.projection("native-boundary", run.attemptId)
+      || (handoff?.state === "delivered" && handoff.method === "inline")) return true;
+    return this.database.prepare(`SELECT 1 FROM messages WHERE conversation_id = ? AND turn_id = ?
+      AND role = 'assistant' LIMIT 1`).get(run.threadId, run.turnId) !== undefined;
   }
 
   /**
@@ -337,6 +426,13 @@ export class ProviderBackingRepository {
     return row ? orchestrationRunSchema.parse(row.value) : null;
   }
 
+  /** The backing of the native session the run's current attempt works on, in the run's checkout. */
+  private attemptBacking(run: OrchestrationRun): ProviderBacking | null {
+    const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", run.attemptId)?.value);
+    return attempt.nativeSessionId ? this.find({ threadId: run.threadId, providerId: run.providerId,
+      workspaceKey: run.workspaceKey, identity: this.turnIdentity(run.turnId), nativeSessionId: attempt.nativeSessionId }) : null;
+  }
+
   private record(backing: ProviderBacking, runId: string, attemptId: string, beforeDispatch?: ProviderBacking): void {
     const previous = this.get(backing.id);
     if (previous && durableJson({ ...backing, updatedAt: previous.updatedAt }) === durableJson(previous)) return;
@@ -346,11 +442,13 @@ export class ProviderBackingRepository {
   }
 
   private changeHandoff(handoff: ContextHandoff, state: "dispatching" | "delivered" | "uncertain" | "abandoned",
-    backing?: ProviderBacking | null): void {
+    backing?: ProviderBacking | null, method?: ContextHandoff["method"]): void {
     const run = this.run(handoff.runId)!;
     this.commit(handoff.threadId, run.projectId, { type: "context.handoff-state-changed", payload: {
       handoffId: handoff.id, runId: handoff.runId, attemptId: handoff.attemptId, state,
       targetBackingId: backing?.id ?? handoff.targetBackingId, nativeSessionId: backing?.nativeSessionId ?? handoff.nativeSessionId,
+      // Written only when native delivery is involved, so inline handoffs keep the event shape older logs replay.
+      ...(method ? { method } : {}),
     } });
   }
 

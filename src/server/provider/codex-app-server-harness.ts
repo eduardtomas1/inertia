@@ -36,6 +36,7 @@ import {
 import { providerFailureMessage } from "./adapters";
 import {
   providerRunTerminal,
+  type ProviderHistoryInjection,
   type ProviderRunInput,
   type ProviderRunResult,
 } from "./contracts";
@@ -86,6 +87,31 @@ interface CodexCompactionTurnState {
   itemCompleted: boolean;
   itemId: string | null;
   startedAtMs: number | null;
+}
+
+/**
+ * The run's injection authority, reporting the negotiation outcome: an App
+ * Server that accepted `thread/inject_items` supports it; one that does not
+ * know the method does not, for this run only (as T3, nothing is cached).
+ */
+function codexHistoryInjection(
+  authority: ProviderHistoryInjection,
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
+): ProviderHistoryInjection {
+  return {
+    items: authority.items,
+    prompt: authority.prompt,
+    begin: () => authority.begin(),
+    delivered: () => {
+      const recorded = authority.delivered();
+      if (recorded) emitter.capability("history-injection", true);
+      return recorded;
+    },
+    unsupported: () => {
+      emitter.capability("history-injection", false);
+      return authority.unsupported();
+    },
+  };
 }
 
 function codexServiceTier(
@@ -184,6 +210,7 @@ function startCodexRun(
       goalContinuationExpected:
         options.input.goalContinuationExpected === true,
       ...(options.hostTools ? { hostTools: options.hostTools } : {}),
+      ...(options.historyInjection ? { historyInjection: codexHistoryInjection(options.historyInjection, emitter) } : {}),
       planMode: options.input.interactionMode === "plan" && options.input.readOnlyProfile !== "watcher",
       access: options.input.access,
       ...(options.input.readOnlyProfile ? { readOnlyProfile: options.input.readOnlyProfile } : {}),

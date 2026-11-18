@@ -409,6 +409,8 @@ export interface ActiveTurn {
   providerStopStarted: boolean;
   sessionAfter: string | null;
   providerSessionTitle?: string;
+  /** This turn's restored history for native delivery; absent or null when it has none to deliver. */
+  nativeHistory?: AssembledTurnRequest["nativeHistory"] | null;
   freshSessionRequest?: ((excludedMessageId: string) => AssembledTurnRequest) | null;
   lastUsage: AgentTurnUsageSnapshot | null;
   assistantText: string;

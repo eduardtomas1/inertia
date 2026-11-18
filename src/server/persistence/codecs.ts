@@ -582,6 +582,11 @@ function persistedSessionRecovery(value: string | null): AgentTurn["sessionRecov
   } catch {
     return null;
   }
+  // The rejected-resume marker is ledger bookkeeping (`recordRejectedResume`), not part of the record.
+  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && "resumeRejected" in parsed) {
+    const { resumeRejected: _marker, ...record } = parsed as Record<string, unknown>;
+    parsed = record;
+  }
   return isTurnSessionRecovery(parsed) ? parsed : null;
 }
 

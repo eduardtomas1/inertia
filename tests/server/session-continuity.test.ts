@@ -497,7 +497,7 @@ describe("a saved session that keeps failing to open", () => {
     count: number,
     outcome: {
       terminalReason?: string;
-      activityKind?: "status" | "error";
+      activityKind?: "status" | "error" | "command";
       answered?: boolean;
       rejected?: boolean;
       checkpointNotice?: boolean;
@@ -568,12 +568,21 @@ describe("a saved session that keeps failing to open", () => {
     const f = await failedResumes(2, { checkpointNotice: true });
     expect(f.store.turnLedgerRepository.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(true);
     const latest = f.store.latestAgentTurnForConversation(f.conversation.id)!;
-    expect(f.store.turnLedgerRepository.turnHasProviderActivity(f.conversation.id, latest.id)).toBe(false);
+    expect(f.store.turnLedgerRepository.turnHasProviderActivity(f.conversation.id, latest.id, latest.harnessId)).toBe(false);
+  });
+
+  it("counts a Codex resume that recorded only a status notice as failing (no turn existed yet)", async () => {
+    const f = await failedResumes(2, { activityKind: "status" });
+    expect(f.store.turnLedgerRepository.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(true);
+    const latest = f.store.latestAgentTurnForConversation(f.conversation.id)!;
+    expect(f.store.turnLedgerRepository.turnHasProviderActivity(f.conversation.id, latest.id, latest.harnessId)).toBe(false);
+    // A harness that reports no turn acceptance keeps counting any activity.
+    expect(f.store.turnLedgerRepository.turnHasProviderActivity(f.conversation.id, latest.id, "claude-agent-sdk")).toBe(true);
   });
 
   it.each([
     ["only one resume has failed", 1, {}],
-    ["the provider made progress before failing", 2, { activityKind: "status" }],
+    ["the provider made progress before failing", 2, { activityKind: "command" }],
     ["the provider had started answering", 2, { answered: true }],
     ["the turn never reached the provider", 2, { terminalReason: "turn-start-failed" }],
     ["the provider did not reject the resume", 2, { rejected: false }],

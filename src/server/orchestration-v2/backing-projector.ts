@@ -80,8 +80,13 @@ export function projectBackingEvent(event: OrchestrationBackingEvent, envelope: 
   const allowed: Record<string, readonly string[]> = { prepared: ["dispatching", "abandoned"], dispatching: ["delivered", "uncertain", "abandoned"],
     delivered: [], uncertain: [], abandoned: [] };
   const { state, targetBackingId, nativeSessionId } = event.payload;
+  // An event without a method keeps the handoff's (every event before native injection). A method changes only
+  // while dispatching, and staying in `dispatching` is allowed only to change it.
+  const method = event.payload.method ?? prior.method;
+  const methodChange = prior.state === "dispatching" && state === "dispatching" && method !== prior.method;
   if (prior.runId !== run.id || prior.attemptId !== attempt.id || prior.threadId !== run.threadId
-    || !allowed[prior.state]!.includes(state)
+    || (!allowed[prior.state]!.includes(state) && !methodChange)
+    || (method !== prior.method && !methodChange)
     || (prior.targetBackingId !== null && prior.targetBackingId !== targetBackingId)
     || (prior.nativeSessionId !== null && prior.nativeSessionId !== nativeSessionId)) {
     throw new OrchestrationConflict("revision-conflict");
@@ -91,7 +96,7 @@ export function projectBackingEvent(event: OrchestrationBackingEvent, envelope: 
     if (backing.threadId !== run.threadId || backing.providerInstanceId !== run.providerInstanceId
       || backing.nativeSessionId !== nativeSessionId) throw new OrchestrationConflict("scope-conflict");
   }
-  return [{ kind: "context-handoff", id: prior.id, value: { ...prior, state, targetBackingId, nativeSessionId,
+  return [{ kind: "context-handoff", id: prior.id, value: { ...prior, state, method, targetBackingId, nativeSessionId,
     updatedAt: envelope.createdAt } }];
 }
 

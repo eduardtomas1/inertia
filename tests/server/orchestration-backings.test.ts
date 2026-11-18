@@ -487,12 +487,14 @@ describe("portable history budget inputs", () => {
         expect(portableHistoryCost(selected.items, selected.context)).toBeLessThanOrEqual(budget);
       }
       expect(portableHistoryBudget({ currentPromptBytes, imageCount: count, modelWindow: 2_000_000 })).toBe(16_000);
-      expect(portableHistoryBudget({ currentPromptBytes, imageCount: count, modelWindow: 20_000 })).toBe(0);
-      expect(portableHistoryBudget({ currentPromptBytes, imageCount: count, nativeUsedTokens: 0, reportedWindow: 20_000 })).toBe(0);
+      // A 20,000 window reserves half for work (T3 9ec71438c): one image still leaves room, two do not.
+      const smallWindow = count === 1 ? 20_000 - 10_000 - currentPromptBytes - 8_192 : 0;
+      expect(portableHistoryBudget({ currentPromptBytes, imageCount: count, modelWindow: 20_000 })).toBe(smallWindow);
+      expect(portableHistoryBudget({ currentPromptBytes, imageCount: count, nativeUsedTokens: 0, reportedWindow: 20_000 })).toBe(smallWindow);
       const compacting = portableHistoryBudgetInputs({ attachments: [], imageCount: count, configuredWindow: null,
         limits: { modelWindow: 1_000_000, autoCompactThreshold: 20_000 }, target: null });
       expect(compacting).toMatchObject({ modelWindow: 1_000_000, autoCompactThreshold: 20_000 });
-      expect(portableHistoryBudget({ ...compacting, currentPromptBytes })).toBe(0);
+      expect(portableHistoryBudget({ ...compacting, currentPromptBytes })).toBe(smallWindow);
     }
   });
 });

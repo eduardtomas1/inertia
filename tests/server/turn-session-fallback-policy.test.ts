@@ -266,9 +266,10 @@ describe("fresh-session fallback through the real wrapper and turn controller", 
   it.each([
     ["a command", { kind: "command", phase: "completed", label: "rm -rf build", activityId: "cmd-1" }],
     ["a tool call", { kind: "tool", phase: "started", label: "Read file", activityId: "tool-1" }],
-    ["a status notice", { kind: "system", phase: "info", label: "Compacting context" }],
-  ])("%s before the rejection stops the restart and keeps one attempt", async (_label, activity) => {
-    const { runtime } = await establishedChat();
+    ["a status notice on a harness without turn acceptance", { kind: "system", phase: "info", label: "Compacting context" }, "claude"],
+  ] as const)("%s before the rejection stops the restart and keeps one attempt", async (_label, activity,
+    providerId?: "codex" | "claude") => {
+    const { runtime } = await establishedChat(providerId ?? "codex");
     const provider = swapProvider(runtime);
     try {
       const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." });
@@ -282,6 +283,24 @@ describe("fresh-session fallback through the real wrapper and turn controller", 
         providerSessionBefore: "saved-session",
       });
       expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBeNull();
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+});
+
+describe("Codex notices recorded while the thread opens", () => {
+  it("restarts on a fresh session after a configuration notice, which is not turn progress", async () => {
+    const { runtime } = await establishedChat();
+    const provider = swapProvider(runtime);
+    try {
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." });
+      runtime.controller.start(queued.turn.id);
+      provider.attempts[0]!.emit({ type: "activity", kind: "system", phase: "info", label: "Config needs attention" });
+      provider.attempts[0]!.finish({ status: "failed", error: unavailable.message, failure: unavailable });
+      await flushTurnControllerTestPromises();
+      expect(provider.attempts).toHaveLength(2);
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();
@@ -402,12 +421,17 @@ describe("retiring a saved session after repeated rejected resumes", () => {
     runtime: Runtime,
     content: string,
     failure: NonNullable<ProviderRunResult["failure"]>,
-    options: { sessionId?: string } = {},
+    options: { sessionId?: string; accepted?: true } = {},
   ) {
     const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content });
     runtime.controller.start(queued.turn.id);
     if (options.sessionId) {
       runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: options.sessionId });
+    }
+    if (options.accepted) {
+      // Codex accepted the turn (`turn/started`) before it failed.
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "native-boundary",
+        nativeConversationId: options.sessionId!, nativeSessionId: null, nativeTurnId: content, persistedHeadId: null, phase: "started" });
     }
     runtime.provider.resolve({
       status: "failed",
@@ -440,7 +464,7 @@ describe("retiring a saved session after repeated rejected resumes", () => {
     const { runtime } = await establishedChat();
     try {
       // The failure shape the Codex harness reports for an active-writer refusal.
-      const inUse = { reason: "codex-error", message: CODEX_THREAD_IN_USE_MESSAGE } as const;
+      const inUse = { reason: "codex-error", message: CODEX_THREAD_IN_USE_MESSAGE, notDelivered: true } as const;
       for (const content of ["1", "2"]) {
         expect(await failTurn(runtime, content, inUse)).toMatchObject({ status: "failed",
           providerSessionBefore: "saved-session", sessionRecovery: null });
@@ -510,7 +534,7 @@ describe("retiring a saved session after repeated rejected resumes", () => {
     try {
       await failTurn(runtime, "1", rejected);
       await failTurn(runtime, "2", rejected);
-      const fresh = await failTurn(runtime, "3", outage, { sessionId: "second-session" });
+      const fresh = await failTurn(runtime, "3", outage, { sessionId: "second-session", accepted: true });
       expect(fresh).toMatchObject({ providerSessionBefore: null, continuationReasonCode: "stale-provider-session" });
       expect(runtime.store.orchestration.backings.handoff(fresh.runId)?.state).toBe("uncertain");
       expect((await failTurn(runtime, "4", rejected)).providerSessionBefore).toBeNull();

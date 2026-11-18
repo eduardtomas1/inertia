@@ -8,6 +8,7 @@ import { createConversationCommandHandler, type ConversationCommandDependencies 
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import type { NativeConversationRequest, NativeConversationResult } from "../../src/server/provider/native-conversation-operations";
 import { PROVIDER_HANDOFF_FILES_LABEL } from "../../src/server/persistence/provider-handoff-files";
+import { providerHandoffReason } from "../../src/server/persistence/turn-context-facts";
 import type { ServerEvent, TurnGitArtifactFile } from "../../src/shared/contracts";
 import { modelSelectionSchema, providerNativeModelSelection } from "../../src/shared/model-routing";
 import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises,
@@ -161,6 +162,9 @@ describe("deferred native history rollback", () => {
       await rollback(runtime, deps, first.id);
       send(runtime, "Ambiguous resume");
       expect(runtime.provider.input?.nativeContinuation).toEqual(cursor);
+      // Codex accepted the turn, then failed without output: whether the cursor was consumed is unknown.
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "native-boundary", nativeConversationId: "source-native",
+        nativeSessionId: null, nativeTurnId: "ambiguous", persistedHeadId: null, phase: "started" });
       runtime.provider.resolve({ status: "failed" });
       await flushTurnControllerTestPromises();
       expect(runtime.store.orchestration.history.cursor(runtime.conversationId)?.continuationState).toBe("uncertain");
@@ -169,6 +173,30 @@ describe("deferred native history rollback", () => {
       expect(runtime.provider.input?.nativeContinuation).toBeUndefined();
       expect(runtime.provider.input?.prompt).toContain("first answer");
       expect(runtime.provider.input?.prompt).not.toContain("second answer");
+      runtime.provider.resolve({ text: "Fresh", sessionId: "replacement-native" });
+      await flushTurnControllerTestPromises();
+    } finally { runtime.store.close(); }
+  });
+
+  it("keeps a dispatched cursor uncertain when the turn was never accepted: the cursor applies at session open", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await finish(runtime, "first");
+      await finish(runtime, "second");
+      const deps = dependencies(runtime, async (request) => completed(request, "resume-cursor",
+        { nativeConversationId: "source-native", headId: "first", persistedHeadId: "second", continuation: cursor }));
+      await rollback(runtime, deps, first.id);
+      send(runtime, "Never started");
+      expect(runtime.store.orchestration.history.cursor(runtime.conversationId)?.continuationState).toBe("dispatched");
+      runtime.provider.resolve({ status: "failed", sessionId: "source-native", error: "Codex rejected the turn.",
+        failure: { reason: "codex-error", message: "Codex rejected the turn." } });
+      await flushTurnControllerTestPromises();
+      // Whether opening the session applied the cursor is unknown: never resume it, continue portably.
+      expect(runtime.store.orchestration.history.cursor(runtime.conversationId)?.continuationState).toBe("uncertain");
+      expect(invalidations(runtime)).toEqual([expect.objectContaining({ reason: "uncertain-delivery" })]);
+      send(runtime, "Fresh after the unknown cursor");
+      expect(runtime.provider.input?.sessionId).toBeUndefined();
+      expect(runtime.provider.input?.nativeContinuation).toBeUndefined();
       runtime.provider.resolve({ text: "Fresh", sessionId: "replacement-native" });
       await flushTurnControllerTestPromises();
     } finally { runtime.store.close(); }
@@ -403,6 +431,31 @@ describe("deferred native history rollback", () => {
       expect(sent.map((event) => event.type === "request.result" ? [event.requestId, (event.result as { transfer: string }).transfer] : event.type))
         .toEqual([["rollback-a", "native"], ["rollback-b", "unchanged"]]);
       expect(deps.providers.nativeConversation).toHaveBeenCalledOnce();
+    } finally { runtime.store.close(); }
+  });
+});
+
+describe("handoff outcome after a rollback", () => {
+  it("never names a rolled-back turn as the reason the chat moved", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await finish(runtime, "first");
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "claude",
+        modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "claude-test" }) });
+      const claude = send(runtime, "Claude request");
+      const message = "Claude failed.";
+      runtime.provider.resolve({ status: "failed", sessionId: "claude-native", error: message,
+        failure: { reason: "provider-error", message } });
+      await flushTurnControllerTestPromises();
+      const database = (runtime.store as unknown as { database: import("better-sqlite3").Database }).database;
+      const later = "2999-01-01T00:00:00.000Z";
+      expect(providerHandoffReason(database, runtime.conversationId, later, "codex")).toBe("from Claude after its last turn failed");
+      const deps = dependencies(runtime, async (request) => ({ operationId: request.operationId, identity: request.source.identity,
+        status: "unsupported", reason: "native-history-control-unavailable" }));
+      await expect(rollback(runtime, deps, first.id)).resolves.toMatchObject({ transfer: "portable" });
+      expect(runtime.store.orchestration.history.rolledBack(claude.id)).toBe(true);
+      // The only other-provider turn was rolled back: nothing explains a move any more.
+      expect(providerHandoffReason(database, runtime.conversationId, later, "codex")).toBeNull();
     } finally { runtime.store.close(); }
   });
 });

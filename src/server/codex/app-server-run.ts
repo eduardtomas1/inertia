@@ -44,6 +44,10 @@ import {
   type JsonObject,
 } from "./protocol";
 import { codexWatcherThreadConfig } from "./read-only-thread-config";
+import { injectCodexHistory } from "./app-server-history-injection";
+import {
+  CodexErrorResponse, CodexRequestRefusedError, isCodexActiveWriterError, type CodexRequestFailureRecording,
+} from "./app-server-request-errors";
 import {
   codexResumedThreadWithheldInstructions,
   codexThreadStartTools,
@@ -86,29 +90,12 @@ import {
 } from "../provider/provider-natural-close";
 import { createOwnedProcessTreeTermination } from "../process-lifecycle";
 
-class CodexRequestRefusedError extends Error {}
-class CodexErrorResponse extends CodexRequestRefusedError {
-  constructor(message: string, readonly code: number | null = null) {
-    super(message);
-  }
-}
-
-// Codex holds a per-thread writer lock while the thread is loaded in any App
-// Server sharing the same CODEX_HOME (the Codex app, CLI or an IDE extension),
-// and refuses a second writer this way. A fresh session would split the
-// conversation from that client, so this is neither a rejected nor a missing
-// session (T3 Code a445272c7).
-function isCodexActiveWriterError(error: unknown): boolean {
-  return error instanceof CodexErrorResponse && error.code === -32600
-    && error.message.includes("already has an active writer");
-}
-
 interface PendingClientRequest {
   method: string;
   resolve: (value: JsonObject) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
-  recordFailure: boolean;
+  recordFailure: CodexRequestFailureRecording;
   onResponseFrame?: (result?: JsonObject) => void;
 }
 
@@ -425,7 +412,7 @@ export function startCodexAppServerRun(
     method: string,
     params: JsonObject,
     onResponseFrame?: (result?: JsonObject) => void,
-    recordFailure = true,
+    recordFailure: CodexRequestFailureRecording = true,
     timeoutMs = options.rpcTimeoutMs ?? CODEX_RPC_TIMEOUT_MS,
     useCancellationReserve = false,
   ): Promise<JsonObject> => {
@@ -633,15 +620,15 @@ export function startCodexAppServerRun(
       if (error) {
         const errorMessage =
           boundedText(error.message, 4_000) ?? `${pending.method} failed.`;
-        if (pending.recordFailure) {
+        const code = typeof error.code === "number" && Number.isSafeInteger(error.code) ? error.code : null;
+        if (typeof pending.recordFailure === "function" ? pending.recordFailure(code, errorMessage) : pending.recordFailure) {
           rememberFailure(
             "codex-error",
             "Codex rejected a protocol request.",
             errorMessage,
           );
         }
-        pending.reject(new CodexErrorResponse(errorMessage,
-          typeof error.code === "number" && Number.isSafeInteger(error.code) ? error.code : null));
+        pending.reject(new CodexErrorResponse(errorMessage, code));
       } else {
         pending.resolve(objectValue(message.result) ?? {});
       }
@@ -922,7 +909,7 @@ interface OpenCodexTurnOptions {
     method: string,
     params: JsonObject,
     onResponseFrame?: (result?: JsonObject) => void,
-    recordFailure?: boolean,
+    recordFailure?: CodexRequestFailureRecording,
   ) => Promise<JsonObject>;
   notify: (method: string, params?: JsonObject) => void;
   setProviderThreadId: (threadId: string) => void;
@@ -1104,6 +1091,9 @@ export async function openCodexTurn({
   if (!options.sessionId) recordCodexThreadRegistration(openedThreadId, options.hostTools);
   setProviderThreadId(openedThreadId);
   options.onSession?.(openedThreadId);
+  // After the thread opens and before goal/set or turn/start; never into an active turn (T3 8b21cbdf1).
+  const prompt = await injectCodexHistory({ history: options.historyInjection, prompt: options.prompt, threadId: openedThreadId,
+    thread, turnActive: activeTurnId() !== undefined, cancelRequested: isCancelRequested, request });
   if (isCancelRequested()) {
     finish("cancelled", null, null);
     return;
@@ -1172,7 +1162,7 @@ export async function openCodexTurn({
       throw new Error("Codex received an invalid selected skill.");
     }
   }
-  const turnPrompt = withoutInternalProviderInstructions(options.prompt, withheldInstructions);
+  const turnPrompt = withoutInternalProviderInstructions(prompt, withheldInstructions);
   const input: JsonObject[] = [{
     type: "text",
     text: sessionInstructionApplied || sessionDeveloperInstructions === undefined
@@ -1219,6 +1209,9 @@ export async function openCodexTurn({
   }, (result) => {
     const respondedTurnId = boundedText(objectValue(result?.turn)?.id, 512);
     setRequestedTurnId?.(respondedTurnId);
+    // Codex accepted the turn: record it before anything else, so a Stop racing `turn/started` keeps the prompt
+    // delivered. `turn/started` repeats the same boundary, which records nothing new.
+    if (respondedTurnId && !isSettled()) options.onNativeBoundary?.(openedThreadId, respondedTurnId, "started");
     // Same stdout chunk or earlier: notifications for this turn that arrived
     // before the response are applied now, so a turn that already started (or
     // finished) is neither lost nor resurrected as running below.

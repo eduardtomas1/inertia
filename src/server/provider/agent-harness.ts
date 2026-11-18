@@ -15,6 +15,7 @@ import type {
   ProviderMetadataEvent,
   ProviderRunInput,
   ProviderRunResult,
+  ProviderHistoryInjection,
   ProviderHostToolBridge,
   ProviderSteerInput,
   ProviderSessionEvent,
@@ -352,6 +353,12 @@ export interface AgentHarnessStartOptions {
   harnessConfiguration?: ProviderHarnessLaunchConfiguration;
   callbacks?: AgentHarnessCallbacks;
   hostTools?: ProviderHostToolBridge;
+  /**
+   * Exact-attempt authority to deliver the restored history natively. Passed
+   * only where the run can negotiate `history-injection`; a harness that does
+   * not use it sends `input.prompt`, which keeps the history inline.
+   */
+  historyInjection?: ProviderHistoryInjection;
 }
 
 export interface CodexAppServerRunExtension {

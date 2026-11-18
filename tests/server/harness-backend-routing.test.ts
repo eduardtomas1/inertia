@@ -134,7 +134,7 @@ describe("ProviderManager harness backend routing", () => {
       installationVerified: false,
       installedVersion: null,
       currentlyAvailableCount: 0,
-      declaredCapabilityCount: 28,
+      declaredCapabilityCount: 30,
       hostToolBridgeAvailable: false,
     });
     await manager.detect("claude");
@@ -146,11 +146,11 @@ describe("ProviderManager harness backend routing", () => {
       harnessId: "claude-agent-sdk",
       installationVerified: true,
       installedVersion: "2.1.0",
-      declaredCapabilityCount: 28,
+      declaredCapabilityCount: 30,
       hostToolBridgeAvailable: true,
     });
     expect(verifiedContract.currentlyAvailableCount).toBeGreaterThan(0);
-    expect(verifiedContract.capabilities).toHaveLength(28);
+    expect(verifiedContract.capabilities).toHaveLength(30);
     expect(verifiedContract.capabilities).toContainEqual({ id: "text-streaming", state: "available" });
     expect(verifiedContract.capabilities).toContainEqual({ id: "goals", state: "unsupported" });
     expect(verifiedContract.capabilities).toContainEqual({ id: "performance-modes", state: "negotiation-required" });

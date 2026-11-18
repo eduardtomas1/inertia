@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { orchestrationIdSchema } from "../../shared/orchestration-v2";
+import type { ProviderHistoryResponseItem } from "../provider/contracts";
 
 /** Audited T3 handoff policy: bounded intact entries, deterministic priorities, no model summarizer. */
 export const DEFAULT_PORTABLE_HISTORY_BUDGET = 16_000;
@@ -85,7 +86,9 @@ export function portableHistoryBudget(input: {
   const current = nonnegative(input.currentPromptBytes, "current prompt size")
     + nonnegative(input.imageCount, "image count") * 8_192
     + nonnegative(input.otherAttachmentCount ?? 0, "attachment count") * 4_096;
-  return Math.max(0, Math.min(cap, window - native - current - Math.max(16_000, Math.ceil(window / 4))));
+  // T3 9ec71438c: the work reserve never takes more than half a small window.
+  const workReserve = Math.min(Math.max(16_000, Math.ceil(window / 4)), Math.ceil(window / 2));
+  return Math.max(0, Math.min(cap, window - native - current - workReserve));
 }
 
 function itemText(item: PortableHistoryItem): string {
@@ -97,10 +100,11 @@ export function renderPortableHistory(items: readonly PortableHistoryItem[], con
   return [context, ...items.map(itemText)].join("\n\n");
 }
 
-export function portableHistoryResponseItems(items: readonly PortableHistoryItem[], context: string) {
+/** T3 `historyResponseItems`: what native injection appends; each item's text is the inline rendering's. */
+export function portableHistoryResponseItems(items: readonly PortableHistoryItem[], context: string): ProviderHistoryResponseItem[] {
   return [
     { type: "message", role: "user", content: [{ type: "input_text", text: context }] },
-    ...items.map((item) => ({ type: "message", role: item.role,
+    ...items.map((item): ProviderHistoryResponseItem => ({ type: "message", role: item.role,
       content: [{ type: item.role === "user" ? "input_text" : "output_text", text: itemText(item) }] })),
   ];
 }

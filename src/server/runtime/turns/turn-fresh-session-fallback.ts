@@ -9,6 +9,7 @@ import type {
 } from "../../provider/contracts";
 import { broadcastTurnConversationShell } from "./turn-controller-support";
 import type { ActiveTurn, TurnControllerHooks } from "./turn-controller-types";
+import { turnHistoryInjection } from "./turn-history-injection";
 
 export function providerSessionUnavailable(result: ProviderRunResult): boolean {
   return result.status === "failed" && result.failure?.sessionUnavailable === true;
@@ -81,6 +82,7 @@ export function applyFreshSessionFallback(
     || store.turnLedgerRepository.turnHasProviderActivity(
       active.conversation.id,
       active.turn.id,
+      active.turn.harnessId,
     )
   ) return null;
   const request = active.freshSessionRequest(active.turn.userMessageId);
@@ -120,6 +122,9 @@ export function applyFreshSessionFallback(
   active.sessionAfter = null;
   active.lastUsage = null;
   active.freshSessionRequest = null;
+  // The replacement's restored history, prepared and dispatching under the replacement attempt (T3 injects into the
+  // fresh thread too); the rejected attempt's authority can no longer write.
+  active.nativeHistory = request.contextHandoff ? request.nativeHistory ?? null : null;
   // The restart is committed. A failed broadcast must not make the wrapper keep
   // the rejected attempt's result for a turn that already moved on.
   try {
@@ -132,5 +137,6 @@ export function applyFreshSessionFallback(
     // Clients reconcile from the next snapshot.
   }
   // The fresh harness reports under the replacement attempt.
-  return { prompt: request.executionPrompt, onEvent: route(active.attemptId) };
+  const historyInjection = turnHistoryInjection(store, active, active.attemptId);
+  return { prompt: request.executionPrompt, onEvent: route(active.attemptId), ...(historyInjection ? { historyInjection } : {}) };
 }

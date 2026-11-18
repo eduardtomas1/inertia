@@ -170,6 +170,9 @@ describe("a backing follows its native session across checkouts (T3 restart_and_
       runtime.store.updateConversation(runtime.conversationId, { providerId: "codex", modelSelection: codexSelection });
       const silent = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex" });
       runtime.controller.start(silent.turn.id);
+      // Codex accepted the turn (it reports acceptance), then failed without output: delivery is uncertain.
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "native-boundary", nativeConversationId: "codex-native",
+        nativeSessionId: null, nativeTurnId: "silent", persistedHeadId: null, phase: "started" });
       runtime.provider.resolve({ status: "failed", sessionId: "codex-native", text: "" });
       await flushTurnControllerTestPromises();
       const a1 = runtime.store.orchestration.backings.find(lookup(runtime, "codex", original))!;

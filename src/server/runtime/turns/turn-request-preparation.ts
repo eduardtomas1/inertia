@@ -26,7 +26,7 @@ import {
   providerBackgroundWork,
   type ProviderActivityEvent,
 } from "../../provider/contracts";
-import { PortableHistoryBudgetError } from "../../orchestration-v2/portable-history";
+import { PortableHistoryBudgetError, portableHistoryResponseItems } from "../../orchestration-v2/portable-history";
 import { relocatedBackingId as relocatedProviderBackingId } from "../../orchestration-v2/backing-projector";
 import { sessionCwdMobility } from "../../provider/session-cwd-mobility";
 import { AuthoritativeRunStateEngine } from "../run-state-engine";
@@ -534,10 +534,11 @@ export function resolveTurnRequest(
   // A turn whose context handoff never reached its provider did not move the
   // conversation onto that route; the switch it attempted is still due.
   const routeTurnId = latestTurn ? dependencies.store.orchestration.backings.deliveredRouteTurnId(conversation.id) : null;
-  const routeTurn = routeTurnId === null || routeTurnId === latestTurn?.id ? latestTurn
+  const routeTurn = routeTurnId === null ? null : routeTurnId === latestTurn?.id ? latestTurn
     : dependencies.store.agentTurn(routeTurnId);
-  const providerHandoff = routeTurn !== null
-    && routeTurn.providerId !== route.providerId;
+  // No turn ever reached a provider: whatever switch those turns attempted is still due.
+  const providerHandoff = latestTurn !== null
+    && (routeTurn === null || routeTurn.providerId !== route.providerId);
   const restoredHistoryRoute = () => {
     const { backendProfileId, endpointIdentity } = route.continuationIdentity;
     const handoffBefore = providerHandoff
@@ -598,7 +599,8 @@ export function resolveTurnRequest(
       return offer(null, null);
     }
     return offer({ ...history, itemIds: history.selection.items.map(({ id }) => id),
-      omittedItemIds: history.selection.omittedItemIds },
+      omittedItemIds: history.selection.omittedItemIds,
+      injectionItems: portableHistoryResponseItems(history.selection.items, history.selection.context) },
     target ? target.id === relocation?.id ? relocatedBackingId : target.id : null);
   };
   const assembleOnFreshSession = (excludedMessageId?: string) => {
@@ -624,8 +626,11 @@ export function resolveTurnRequest(
     && request.goalStart === undefined;
   const deltaTarget = canResume && reusableBacking && request.goalStart === undefined ? reusableBacking : null;
   const deferredDeltaOnly = deltaTarget !== null && latestTurn?.id === deltaTarget.lastTurnId;
+  // The session's last turn may not have reached it: a withheld prompt (goal start), or a prompt whose
+  // turn never started after its history was injected (its message is then not covered).
   const deliversDelta = deltaTarget !== null
-    && (!deferredDeltaOnly || dependencies.store.turnLedgerRepository.promptWithheld(deltaTarget.lastTurnId));
+    && (!deferredDeltaOnly || dependencies.store.turnLedgerRepository.promptWithheld(deltaTarget.lastTurnId)
+      || !deltaTarget.coveredItemIds.includes(dependencies.store.agentTurn(deltaTarget.lastTurnId).userMessageId));
   const assembleOnResumedSession = () => {
     offeredHistory = null;
     const assembled = assembleTurnRequest({
@@ -847,6 +852,7 @@ export function resolveTurnRequest(
           deferredSettlement: null,
           providerStopStarted: false,
           sessionAfter: canResume ? resumeSessionId : null,
+          nativeHistory: contextHandoff ? assembled.nativeHistory ?? null : null,
           freshSessionRequest: canResume && request.goalStart === undefined
             ? assembleOnFreshSession
             : null,

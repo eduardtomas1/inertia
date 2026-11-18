@@ -249,6 +249,39 @@ export interface ProviderFreshSessionFallback {
    * run's `onEvent`, as the rejected attempt's did.
    */
   onEvent?: (event: ProviderEvent) => void;
+  /** Native delivery of the replacement's restored history, bound to the replacement attempt. */
+  historyInjection?: ProviderHistoryInjection;
+}
+
+/** The largest restored history a harness may inject, as JSON bytes: the portable history budget's cap. */
+export const MAX_HISTORY_INJECTION_BYTES = 64_000;
+
+/** One raw Responses API message item of restored history (T3 `historyResponseItems`). */
+export interface ProviderHistoryResponseItem {
+  type: "message";
+  role: "user" | "assistant";
+  content: [{ type: "input_text" | "output_text"; text: string }];
+}
+
+/**
+ * Process-local, exact-attempt authority to deliver a turn's restored history
+ * natively (capability `history-injection`; T3 `injectHistory`). The prompt the
+ * run carries keeps the history inline; a harness that injects sends `prompt`
+ * instead. Each step commits durably before it returns and returns false when
+ * nothing was recorded, so a harness never injects or starts a turn the record
+ * does not describe.
+ */
+export interface ProviderHistoryInjection {
+  /** The coverage context as a user item, then one labelled item per historical item; at most 64,000 JSON bytes. */
+  readonly items: readonly ProviderHistoryResponseItem[];
+  /** The turn's prompt without its restored-history block. */
+  readonly prompt: string;
+  /** Before the request. False: send nothing and keep the history inline. */
+  begin(): boolean;
+  /** The provider accepted the items; before the turn starts. False: start no turn. */
+  delivered(): boolean;
+  /** The provider does not know the method and changed nothing: the history goes inline in this turn. */
+  unsupported(): boolean;
 }
 
 export type ProviderBackgroundWork = "none" | "pending";
@@ -517,6 +550,8 @@ export interface ProviderRunCallbacks {
   onSubagent?: (event: ProviderSubagentEvent) => void;
   /** Process-local, exact-turn authority for audited Inertia host tools. */
   hostTools?: ProviderHostToolBridge;
+  /** Offered to the harness only where `history-injection` can be negotiated for the run. */
+  historyInjection?: ProviderHistoryInjection;
 }
 
 export interface ProviderHostToolDefinition {

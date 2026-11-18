@@ -131,7 +131,8 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
         || (run.startedAt !== null && payload.startedAt !== run.startedAt)
         || (run.completedAt !== null && payload.completedAt !== run.completedAt)
         || (isAgentTurnTerminalStatus(payload.status) !== (payload.completedAt !== null))
-        || (payload.delivery !== undefined && payload.status !== "failed")) {
+        // Not delivered: a failed refusal, or (C6) any turn its provider never accepted, stopped or interrupted too.
+        || (payload.delivery !== undefined && (!isAgentTurnTerminalStatus(payload.status) || payload.status === "completed"))) {
         throw new OrchestrationConflict("revision-conflict");
       }
       const terminal = isAgentTurnTerminalStatus(payload.status);

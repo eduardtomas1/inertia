@@ -168,6 +168,14 @@ describe("provider capability manifests", () => {
       .toBe("unavailable");
     expect(capability(codex, "custom-backend").support).toBe("negotiated");
     expect(capability(codex, "endpoint-selection").support).toBe("negotiated");
+    // Native history injection is negotiated per run on Codex App Server and offered nowhere else; only Codex
+    // reports turn acceptance (its turn/start turn id and turn/started).
+    expect(capability(codex, "history-injection").support).toBe("negotiated");
+    expect(capability(codex, "turn-acceptance").support).toBe("native");
+    for (const other of productionProviderCapabilityManifests().filter(({ harnessId }) => harnessId !== "codex-app-server")) {
+      expect(capability(other, "history-injection").support).toBe("unavailable");
+      expect(capability(other, "turn-acceptance").support).toBe("unavailable");
+    }
 
     const claude = manifest("claude-agent-sdk");
     expect(capability(claude, "images").support).toBe("native");

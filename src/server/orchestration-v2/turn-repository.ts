@@ -37,6 +37,7 @@ import { OrchestrationCommandLanes } from "./command-lanes";
 import { OrchestrationCommandAuthority } from "./command-authority";
 import { RunControlRepository } from "./run-control-repository";
 import { providerInstanceId } from "./provider-instance";
+import { dropRestoredHistoryRecord } from "../persistence/turn-restored-history-record";
 import {
   OrchestrationConflict,
   OrchestrationProjectionVerificationError,
@@ -274,6 +275,11 @@ export class OrchestratedTurnRepository {
     return null;
   }
 
+  /** One step of native history delivery, for the run's current attempt only; false writes nothing. */
+  historyInjection(runId: string, attemptId: string, step: "begin" | "delivered" | "unsupported"): boolean {
+    return this.backings.historyInjection(runId, attemptId, step);
+  }
+
   attempts(runId: string): OrchestrationAttempt[] {
     const row = this.events.projection("run", runId);
     if (!row) return [];
@@ -350,6 +356,12 @@ export class OrchestratedTurnRepository {
     const stale = staleAttemptObservation(this.events, run, observer);
     if (stale) return stale;
     const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", run.attemptId)?.value);
+    // Decided once: on a harness that reports acceptance, a turn its provider never accepted delivered its prompt
+    // to no one. Unless its history was injected, the run did not reach the provider at all.
+    const explicit = delivery === "not-delivered";
+    const unaccepted = isAgentTurnTerminalStatus(turn.status) && this.backings.unaccepted(turn);
+    const injected = unaccepted && this.backings.historyInjected(this.backings.handoff(turn.runId));
+    const notDelivered = (explicit && turn.status === "failed") || (unaccepted && !injected);
     const event: OrchestrationDomainEvent = { type: "run.status-changed", payload: {
       runId: turn.runId, attemptId: run.attemptId, status: turn.status,
       executionState: turn.runState?.state ?? turn.status,
@@ -358,7 +370,7 @@ export class OrchestratedTurnRepository {
       startedAt: turn.startedAt, completedAt: turn.completedAt,
       terminalMessageId: turn.terminalAssistantMessageId,
       nativeSessionId: turn.providerSessionAfter ?? turn.providerSessionBefore,
-      ...(delivery === "not-delivered" && turn.status === "failed" ? { delivery } : {}),
+      ...(notDelivered ? { delivery: "not-delivered" as const } : {}),
     } };
     const before = { ...event.payload, status: run.status, stateRevision: run.stateRevision,
       executionState: run.executionState, providerState: run.providerState,
@@ -374,10 +386,15 @@ export class OrchestratedTurnRepository {
       expectedRevision: this.events.revision(run.threadId), events: [event],
       ...(capture && !this.effects.get(capture.id) ? { effects: [capture] } : {}), result: null });
     if (isAgentTurnTerminalStatus(turn.status)) this.effects.retirePending(this.startEffectId(turn.runId), "run-settled");
-    const undelivered = delivery === "not-delivered";
-    this.backings.settle(turn, undelivered);
-    this.history.settleRun(turn, (backing) => this.backings.invalidate(backing, "uncertain-delivery"), undelivered);
-    this.mergeBacks.settleRun(turn, undelivered);
+    if (unaccepted && !injected && !explicit) dropRestoredHistoryRecord(this.database, turn.id);
+    this.backings.settle(turn, explicit, unaccepted);
+    // A rollback cursor is a launch option the harness applies when it opens the session, before any turn, so
+    // acceptance says nothing about it: only an explicit refusal returns it to pending; otherwise an applied-or-not
+    // cursor stays uncertain and its backing continues portably. (Codex, the one harness that reports acceptance,
+    // rolls back with `thread/revert` and returns no continuation.) Merge-back packets travel with the prompt, so
+    // an unaccepted turn delivered none, even when its history was injected.
+    this.history.settleRun(turn, (backing) => this.backings.invalidate(backing, "uncertain-delivery"), explicit);
+    this.mergeBacks.settleRun(turn, explicit || unaccepted);
     if (turn.runState?.state === "cancelling" && attempt.interruptRequestedAt === null) {
       const interrupted: OrchestrationDomainEvent = { type: "attempt.interrupt-requested",
         payload: { runId: run.id, attemptId: attempt.id } };

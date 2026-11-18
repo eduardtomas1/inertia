@@ -109,6 +109,17 @@ describe("T3-compatible portable history selection", () => {
       .toThrow(PortableHistoryBudgetError);
   });
 
+  it("caps the work reserve at half of a small window (T3 9ec71438c)", () => {
+    // The former reserve, max(16,000, window / 4), took 16,000 of a 20,000 window and left 4,000 at most.
+    expect(portableHistoryBudget({ currentPromptBytes: 0, imageCount: 0, modelWindow: 20_000 })).toBe(10_000);
+    expect(portableHistoryBudget({ currentPromptBytes: 2_000, imageCount: 0, modelWindow: 20_000 })).toBe(8_000);
+    expect(portableHistoryBudget({ currentPromptBytes: 0, imageCount: 0, modelWindow: 16_000 })).toBe(8_000);
+    expect(portableHistoryBudget({ currentPromptBytes: 0, imageCount: 0, modelWindow: 32_000 })).toBe(16_000);
+    // Larger windows keep the quarter reserve (or 16,000), below the configured 64,000 cap or at it.
+    expect(portableHistoryBudget({ currentPromptBytes: 0, imageCount: 0, modelWindow: 128_000, configuredCap: 64_000 })).toBe(64_000);
+    expect(portableHistoryBudget({ currentPromptBytes: 0, imageCount: 0, modelWindow: 80_000, configuredCap: 64_000 })).toBe(60_000);
+  });
+
   it("rejects foreign identity, duplicate entries and unsupported private state", () => {
     const first = item("1", "user", "Question");
     expect(() => selectPortableHistory({ threadId: "other", items: [first], budget: 16_000 })).toThrow("identity");

@@ -10,6 +10,7 @@ import {
   type ProviderEvent,
   type ProviderFreshSessionFallback,
   type ProviderFreshSessionPrior,
+  type ProviderHistoryInjection,
   type ProviderRunFailure,
   type ProviderRunResult,
 } from "./contracts";
@@ -20,6 +21,8 @@ export interface HarnessFreshSessionReplacement {
   prompt: string;
   /** The replacement attempt's own event route; defaults to the first attempt's. */
   callbacks?: AgentHarnessCallbacks;
+  /** The replacement attempt's own injection authority, already admitted for the run. */
+  historyInjection?: ProviderHistoryInjection;
 }
 
 /**
@@ -30,10 +33,14 @@ export interface HarnessFreshSessionReplacement {
 export function routedFreshSessionFallback(
   fallback: ((prior: ProviderFreshSessionPrior) => ProviderFreshSessionFallback | null) | undefined,
   route: (onEvent: (event: ProviderEvent) => void) => AgentHarnessCallbacks,
+  historyInjectionAdmitted: () => boolean = () => false,
 ): ((prior: ProviderFreshSessionPrior) => HarnessFreshSessionReplacement | null) | undefined {
   return fallback && ((prior) => {
     const replacement = fallback(prior);
-    return replacement?.onEvent ? { prompt: replacement.prompt, callbacks: route(replacement.onEvent) } : replacement;
+    if (!replacement) return null;
+    const historyInjection = replacement.historyInjection && historyInjectionAdmitted() ? replacement.historyInjection : undefined;
+    return { prompt: replacement.prompt, ...(replacement.onEvent ? { callbacks: route(replacement.onEvent) } : {}),
+      ...(historyInjection ? { historyInjection } : {}) };
   });
 }
 
@@ -129,10 +136,12 @@ export function startHarnessWithFreshSessionFallback(
         nativeContinuation: _nativeContinuation,
         ...input
       } = options.input;
-      const { nativeContinuation: _startContinuation, ...fresh } = options;
+      // The rejected attempt's injection authority is bound to that attempt; only the replacement's own may be used.
+      const { nativeContinuation: _startContinuation, historyInjection: _firstInjection, ...fresh } = options;
       const next = harness.start({
         ...fresh,
         environment,
+        ...(replacement.historyInjection ? { historyInjection: replacement.historyInjection } : {}),
         input: { ...input, prompt: replacement.prompt },
         callbacks: {
           onEvent: (event) => {

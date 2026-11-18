@@ -94,6 +94,7 @@ import { resolveTurnHostTools } from "./turn-provider-host-tools";
 import { TurnSecretRequests } from "./turn-secret-output";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
+import { turnHistoryInjection } from "./turn-history-injection";
 
 export type {
   QueuedTurn,
@@ -842,7 +843,7 @@ export class TurnController {
       // Read after recording ownership, which can itself replace the attempt.
       const startedAttemptId = active.attemptId = this.store.orchestration.currentAttemptId(active.turn.runId);
       const result = this.providers.run(active.providerInput, {
-        hostTools,
+        hostTools, historyInjection: turnHistoryInjection(this.store, active, startedAttemptId),
         onStarted: () => {
           if (active.runState.isTerminal() || this.closing) {
             requestProviderCancellation(this.providers, active.conversation.id);

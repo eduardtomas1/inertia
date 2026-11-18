@@ -14,7 +14,7 @@ import { MAX_CONVERSATION_CONTEXT_SUPPLEMENT_BYTES, MAX_CONVERSATION_CONTEXT_SUP
 import { mergeBackResultSchema } from "../../src/shared/orchestration-merge-back";
 import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
 import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises,
-  type TurnControllerTestRuntime } from "../support/turn-controller-runtime";
+  turnControllerTestIdentity, type TurnControllerTestRuntime } from "../support/turn-controller-runtime";
 
 afterEach(() => { vi.restoreAllMocks(); return cleanupTurnControllerTestDirectories(); });
 
@@ -22,10 +22,13 @@ let requestSequence = 0;
 const requestId = () => `00000000-0000-4000-8000-${String(++requestSequence).padStart(12, "0")}`;
 
 async function finish(runtime: TurnControllerTestRuntime, label: string, conversationId = runtime.conversationId,
-  status: "completed" | "failed" = "completed", packetIds: readonly string[] = []) {
+  status: "completed" | "failed" = "completed", packetIds: readonly string[] = [], accepted = false) {
   const queued = runtime.controller.queue({ conversationId, content: `${label} request`,
     ...(packetIds.length ? { context: { conversationContextPacketIds: [...packetIds] }, contextRequestId: requestId() } : {}) });
   runtime.controller.start(queued.turn.id);
+  // Codex accepted the turn (`turn/started`) before it failed: delivery of the prompt is then uncertain.
+  if (accepted) runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "native-boundary",
+    nativeConversationId: "codex-merge-native", nativeSessionId: null, nativeTurnId: label, persistedHeadId: null, phase: "started" });
   const prompt = runtime.provider.input?.prompt ?? "";
   runtime.provider.resolve(status === "completed" ? { text: `${label} answer` } : { status: "failed" });
   await flushTurnControllerTestPromises();
@@ -220,7 +223,7 @@ describe("fork context merge-back", () => {
     try {
       const { first, child } = await forkWithWork(runtime);
       const attempt = mergeBack(runtime, child.id);
-      await finish(runtime, "parent-ambiguous", runtime.conversationId, "failed", [attempt.packetId]);
+      await finish(runtime, "parent-ambiguous", runtime.conversationId, "failed", [attempt.packetId], true);
       expect(runtime.store.orchestration.mergeBacks.get(attempt.mergeBackId)?.state).toBe("uncertain");
       const retry = mergeBack(runtime, child.id);
       expect(retry).toMatchObject({ turnCount: 2 });
@@ -231,6 +234,16 @@ describe("fork context merge-back", () => {
       await expect(portableRollback(runtime, runtime.conversationId, first.turn.id)).resolves.toMatchObject({ rolledBackTurns: 2 });
       expect(runtime.store.orchestration.history.rolledBack(delivered.turn.id)).toBe(true);
       expect(mergeBack(runtime, child.id)).toMatchObject({ turnCount: 2 });
+    } finally { runtime.store.close(); }
+  });
+
+  it("keeps findings undelivered when Codex never accepted the turn that carried them", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const { child } = await forkWithWork(runtime);
+      const attempt = mergeBack(runtime, child.id);
+      await finish(runtime, "parent-unaccepted", runtime.conversationId, "failed", [attempt.packetId]);
+      expect(runtime.store.orchestration.mergeBacks.get(attempt.mergeBackId)?.state).toBe("undelivered");
     } finally { runtime.store.close(); }
   });
 

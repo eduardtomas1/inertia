@@ -618,6 +618,8 @@ export class ProviderRunCoordinator {
               model: launchOptions.modelArgument ?? undefined,
             };
         active.harnessStartInvoked = true;
+        // Offered only where a successful negotiation would make `history-injection` available to this run.
+        const historyInjectionAdmitted = () => runCapabilityAvailable("history-injection", ["history-injection"]);
         harnessRun = startHarnessWithFreshSessionFallback(harness, {
           input: launchInput,
           cursorSdk: this.options.cursorSdk,
@@ -637,6 +639,7 @@ export class ProviderRunCoordinator {
             : {}),
           callbacks: providerCallbacksFromHarness(compatibilityEmitter, observeCapability),
           ...(callbacks.hostTools ? { hostTools: callbacks.hostTools } : {}),
+          ...(callbacks.historyInjection && historyInjectionAdmitted() ? { historyInjection: callbacks.historyInjection } : {}),
         }, routedFreshSessionFallback(callbacks.freshSessionFallback, (onEvent) => {
           // Capability evidence belongs to one harness process; the replacement observes its own and,
           // opening a fresh session, owes no session-resume evidence.
@@ -645,7 +648,7 @@ export class ProviderRunCoordinator {
           requiredCapabilities = requiredCapabilitiesFor(replacementInput);
           currentEmitter = compatibilityEmitter.rebind(onEvent);
           return providerCallbacksFromHarness(currentEmitter, observeCapability);
-        }));
+        }, historyInjectionAdmitted));
       } finally {
         releaseLaunch();
       }

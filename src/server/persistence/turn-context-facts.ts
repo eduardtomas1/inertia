@@ -117,6 +117,9 @@ export function providerHandoffReason(
     FROM agent_turns AS turn
     WHERE turn.conversation_id = ? AND turn.provider_id <> ? AND turn.requested_at <= ?
       AND turn.association = 'authoritative'
+      -- A rolled-back turn is no longer history; it cannot be why the chat moved.
+      AND turn.id NOT IN (SELECT id FROM orchestration_v2_entities
+        WHERE kind = 'rolled-back-turn' AND thread_id = turn.conversation_id)
     ORDER BY turn.requested_at DESC, turn.rowid DESC
     LIMIT 1
   `).get(conversationId, providerId, before) as

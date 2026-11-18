@@ -32,6 +32,14 @@ export const PROVIDER_CAPABILITY_IDS = [
   "endpoint-selection",
   "performance-modes",
   "native-session-id",
+  /** Restored history appended to the native thread before the turn (Codex `thread/inject_items`). */
+  "history-injection",
+  /**
+   * The harness records when the provider accepted a turn (a native turn
+   * boundary), so a turn without that evidence is known not to have reached
+   * the session. Codex reports `turn/start`'s turn id and `turn/started`.
+   */
+  "turn-acceptance",
 ] as const;
 
 export type ProviderCapabilityId = (typeof PROVIDER_CAPABILITY_IDS)[number];
@@ -286,6 +294,10 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       "custom-backend": "negotiated",
       "endpoint-selection": "negotiated",
       "performance-modes": "negotiated",
+      // An App Server that does not know `thread/inject_items` refuses it (-32601, or 0.169.0's -32600
+      // "unknown variant") and the turn goes inline.
+      "history-injection": "negotiated",
+      "turn-acceptance": "native",
     },
   },
   {
@@ -495,6 +507,13 @@ const MANIFEST_BY_HARNESS = new Map(
 
 export function productionProviderCapabilityManifests(): readonly ProviderCapabilityManifest[] {
   return MANIFESTS;
+}
+
+/** Whether a harness's manifest declares `capabilityId` at all (any support but `unavailable`). */
+export function harnessDeclaresCapability(harnessId: string, capabilityId: ProviderCapabilityId): boolean {
+  // Persisted turns may name a harness no manifest knows; those declare nothing.
+  const support = providerCapabilityManifest(harnessId as KnownHarnessId)?.capabilities.find(({ id }) => id === capabilityId)?.support;
+  return support !== undefined && support !== "unavailable";
 }
 
 export function providerCapabilityManifest(

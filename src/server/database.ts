@@ -802,8 +802,10 @@ export class RuntimeStore {
     turnId: string,
     update: AgentTurnSettlementUpdate,
   ): AgentTurnSettlementResult {
-    return this.orchestration.lifecycle(turnId, () => settleProjectedAgentTurn(this.database, this, update.projection,
+    const result = this.orchestration.lifecycle(turnId, () => settleProjectedAgentTurn(this.database, this, update.projection,
       () => this.turnLedgerRepository.settle(turnId, update)), update.providerDelivery);
+    // Orchestration settlement may drop the restored-history record of a turn its provider never accepted.
+    return result.settled ? { ...result, turn: this.agentTurn(turnId) } : result;
   }
 
   settleConversation(conversationId: string, settled: boolean): Conversation {

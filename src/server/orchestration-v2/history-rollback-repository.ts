@@ -6,7 +6,9 @@ import {
   MAX_ROLLBACK_TURNS, historyCursorSchema, type ConversationRollbackResult, type HistoryCursor, type HistoryEvent, type HistoryRollbackPlan,
   type RollbackFiles,
 } from "../../shared/orchestration-history";
-import { providerBackingSchema, type OrchestrationBackingEvent, type ProviderBacking } from "../../shared/orchestration-backings";
+import {
+  contextHandoffSchema, providerBackingSchema, type OrchestrationBackingEvent, type ProviderBacking,
+} from "../../shared/orchestration-backings";
 import { nativeControlSchema, type NativeControl } from "../../shared/orchestration-native-control";
 import { orchestrationIdSchema } from "../../shared/orchestration-identities";
 import { orchestrationNativeBoundarySchema } from "../../shared/orchestration-native-boundary";
@@ -228,13 +230,34 @@ export class HistoryRollbackRepository {
     if (native) {
       if (!active) throw new OrchestrationConflict("revision-conflict");
       const replaced = native.backing.continuation?.kind === "new-session";
+      const uncredited = this.rolledBackHandoffItems(threadId, active.nativeSessionId, plan.rolledBackTurnIds);
       this.commit(threadId, projectId, { type: "provider.backing-rewound", payload: { rollbackId: native.control.id,
         backingId: active.id, nativeSessionId: native.backing.nativeConversationId,
-        coveredItemIds: replaced ? [] : active.coveredItemIds.filter((item) => !removed.has(item)),
+        coveredItemIds: replaced ? [] : active.coveredItemIds.filter((item) => !removed.has(item) && !uncredited.has(item)),
         coverageComplete: active.coverageComplete } });
     }
     this.database.prepare("UPDATE conversations SET provider_session_id = ? WHERE id = ? AND project_id = ?")
       .run(native?.backing.nativeConversationId ?? null, threadId, projectId);
+  }
+
+  /**
+   * Items a rolled-back run delivered into this native session, inline or injected, with the ids its
+   * selection omitted. They are older than the run, so trimming the run's own messages leaves them,
+   * but a native rewind to before the run removes what it delivered: the session must not claim them.
+   * A session that keeps the run keeps its coverage.
+   */
+  private rolledBackHandoffItems(threadId: string, nativeSessionId: string, turnIds: readonly string[]): Set<string> {
+    const rows = this.database.prepare(`SELECT handoff.payload_json FROM orchestration_v2_entities AS handoff
+      JOIN agent_turns AS turn ON turn.run_id = json_extract(handoff.payload_json, '$.runId')
+      WHERE handoff.thread_id = ? AND handoff.kind = 'context-handoff' AND turn.conversation_id = ?
+        AND turn.id IN (SELECT value FROM json_each(?))
+        AND json_extract(handoff.payload_json, '$.state') = 'delivered'
+        AND json_extract(handoff.payload_json, '$.nativeSessionId') = ?`)
+      .all(threadId, threadId, JSON.stringify(turnIds), nativeSessionId) as { payload_json: string }[];
+    return new Set(rows.flatMap(({ payload_json }) => {
+      const handoff = contextHandoffSchema.parse(JSON.parse(payload_json));
+      return [...handoff.itemIds, ...handoff.omittedItemIds ?? []];
+    }));
   }
 
   private *backings(threadId: string): Generator<ProviderBacking> {

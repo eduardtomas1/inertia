@@ -62,10 +62,16 @@ export const orchestrationBackingEventSchema = z.discriminatedUnion("type", [
     coveredItemIds: z.array(id).max(MAX_BACKING_COVERAGE_ITEMS), coverageComplete: z.boolean(),
   }).strict() }).strict(),
   z.object({ type: z.literal("context.handoff-prepared"), payload: contextHandoffSchema }).strict(),
+  /**
+   * `method` (optional; absent on events written before native history injection) changes how
+   * the handoff reaches the session: `native` before `thread/inject_items` is sent, back to
+   * `inline` when the provider does not know the method. Absent keeps the handoff's method.
+   */
   z.object({ type: z.literal("context.handoff-state-changed"), payload: z.object({
     handoffId: id, runId: id, attemptId: id,
     state: z.enum(["dispatching", "delivered", "uncertain", "abandoned"]),
     targetBackingId: id.nullable(), nativeSessionId: nativeId.nullable(),
+    method: z.enum(["inline", "native"]).optional(),
   }).strict() }).strict(),
 ]);
 

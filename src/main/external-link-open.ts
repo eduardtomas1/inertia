@@ -32,7 +32,10 @@ export async function openDesktopLink(
           path = path.slice(0, -location.length);
         }
       }
-      const error = await openAuthorizedProjectPath(path, "open-externally", shell, platform);
+      if (path.includes("::$") || (platform === "win32" && path.replace(/^[a-z]:/iu, "").includes(":"))) {
+        throw new Error("Alternate stream links cannot be opened.");
+      }
+      const error = await openAuthorizedProjectPath(path, "open-link", shell, platform);
       if (error) throw new Error("File handler failed.");
     } catch { throw new Error("The local file could not be opened."); }
     return;

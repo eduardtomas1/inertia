@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { parse } from "yaml";
 import { createEvidencePlan, EVIDENCE_JOBS, outputsForEvidencePlan, PLATFORMS } from "../../scripts/ci/evidence-plan.mjs";
@@ -406,4 +406,104 @@ it("reports every scheduled nightly through the candidate reporter with read-onl
   expect(steps[1]!.uses).toMatch(/^actions\/github-script@/u);
   expect(steps[1]!.with?.script).toContain("/scripts/ci/nightly-report.mjs");
   expect(steps[1]!.with?.script).toContain("workflowId: \"ci.yml\"");
+});
+
+type ContractStep = { name?: string; id?: string; if?: string; uses?: string; run?: string; with?: Record<string, unknown> };
+
+const workflowFiles = readdirSync(".github/workflows").filter((name) => /\.ya?ml$/u.test(name))
+  .map((name) => `.github/workflows/${name}`);
+const actionFiles = readdirSync(".github/actions").map((name) => `.github/actions/${name}/action.yml`);
+
+function stepsOf(file: string): Array<ContractStep & { job?: string }> {
+  const document = parse(source(file));
+  if (document.runs) return document.runs.steps as ContractStep[];
+  return Object.entries(document.jobs as Record<string, { uses?: string; steps?: ContractStep[] }>)
+    .flatMap(([job, entry]) => [
+      ...(entry.uses ? [{ uses: entry.uses, job }] : []),
+      ...(entry.steps ?? []).map((step) => ({ ...step, job })),
+    ]);
+}
+
+it("pins every external action to a full commit and never persists checkout credentials", () => {
+  let checkouts = 0;
+  for (const file of [...workflowFiles, ...actionFiles]) {
+    for (const step of stepsOf(file)) {
+      if (!step.uses || step.uses.startsWith("./")) continue;
+      expect(step.uses, `${file} ${step.name ?? step.job}`).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/u);
+      if (!step.uses.startsWith("actions/checkout@")) continue;
+      checkouts += 1;
+      expect(step.with?.["persist-credentials"], `${file} ${step.job}`).toBe(false);
+    }
+  }
+  expect(checkouts).toBeGreaterThan(0);
+});
+
+it("release jobs never restore a cache entry that another workflow on main could write", () => {
+  const steps = stepsOf(".github/workflows/release-platforms.yml");
+  const linuxPackages = steps.filter((step) => step.uses === "./.github/actions/install-linux-packages");
+  const dependencies = steps.filter((step) => step.uses === "./.github/actions/install-dependencies");
+  expect(linuxPackages.map(({ job }) => job)).toEqual(["build", "unit", "electron"]);
+  expect(dependencies.map(({ job }) => job)).toEqual(["quality"]);
+  for (const step of [...linuxPackages, ...dependencies]) expect(step.with?.cache, step.job).toBe("false");
+  expect(steps.filter((step) => step.uses?.startsWith("actions/cache"))).toEqual([]);
+  for (const step of steps.filter((entry) => entry.name === "Install locked dependencies" && entry.run)) {
+    expect(step.run).toBe("npm ci");
+  }
+
+  const dependencyAction = parse(source(".github/actions/install-dependencies/action.yml"));
+  expect(dependencyAction.inputs.cache.default).toBe("true");
+  const dependencySteps = dependencyAction.runs.steps as ContractStep[];
+  for (const step of dependencySteps.filter((entry) => entry.uses?.startsWith("actions/cache"))) {
+    expect(step.if, step.name).toContain("inputs.cache == 'true'");
+  }
+  const install = dependencySteps.find((step) => step.name === "Install locked dependencies")!;
+  expect(install.if).toBe("steps.dependencies.outputs.cache-hit != 'true'");
+});
+
+it("installs Linux packages only after a signed index refresh and reuses only archives that match it", () => {
+  const text = source(".github/actions/install-linux-packages/action.yml");
+  const action = parse(text);
+  expect(action.inputs.cache.default).toBe("true");
+  expect(text).not.toContain("/var/lib/apt/lists");
+  expect(text).not.toMatch(/\[\s*trusted=yes|AllowUnauthenticated|allow-unauthenticated|allow-insecure/iu);
+  const steps = action.runs.steps as ContractStep[];
+  const index = (name: string) => steps.findIndex((step) => step.name === name);
+  const restore = steps[index("Restore cached package archives")]!;
+  const refresh = steps[index("Refresh the signed package index")]!;
+  const reuse = steps[index("Reuse cached archives that match the signed index")]!;
+  const download = steps[index("Download packages verified by the signed index")]!;
+  const stage = steps[index("Stage downloaded archives for the cache")]!;
+  const save = steps[index("Save downloaded package archives")]!;
+  const installStep = steps[index("Install packages")]!;
+  expect(restore.if).toBe("inputs.cache == 'true'");
+  expect(restore.uses).toMatch(/^actions\/cache\/restore@/u);
+  expect(steps.find((step) => step.id === "key")!.run).toContain("linux-packages-v3-");
+  expect(refresh.if).toBeUndefined();
+  expect(refresh.run).toContain("Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg");
+  expect(refresh.run).toMatch(/sudo apt-get .* update\n/u);
+  expect(reuse.if).toBe("steps.restore.outputs.cache-hit == 'true'");
+  expect(reuse.run).toContain("--print-uris");
+  expect(reuse.run).toContain("sha512sum");
+  expect(reuse.run).toContain('sudo rm -f -- "$archives/$file"');
+  expect(download.if).toBeUndefined();
+  expect(download.run).toContain("install --download-only");
+  expect(stage.if).toBe("inputs.cache == 'true' && steps.restore.outputs.cache-hit != 'true'");
+  expect(save.if).toBe(stage.if);
+  expect(installStep.run).toContain("install --no-download");
+  expect([index("Restore cached package archives"), index("Refresh the signed package index"),
+    index("Reuse cached archives that match the signed index"), index("Download packages verified by the signed index"),
+    index("Stage downloaded archives for the cache"), index("Save downloaded package archives"), index("Install packages")])
+    .toEqual([1, 2, 3, 4, 5, 6, 7]);
+});
+
+it("fails production audits on moderate advisories and the full tree on unreviewed high ones", () => {
+  const audits = (file: string) => stepsOf(file)
+    .filter((step) => step.run?.startsWith("npm audit") || step.run === "npm run check:dependency-audit")
+    .map(({ run }) => run);
+  const expected = [
+    "npm audit --omit=dev --audit-level=moderate",
+    "npm run check:dependency-audit",
+  ];
+  expect(audits(".github/workflows/ci.yml")).toEqual([...expected, ...expected]);
+  expect(audits(".github/workflows/release-platforms.yml")).toEqual(expected);
 });

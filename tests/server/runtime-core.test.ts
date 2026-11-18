@@ -22,6 +22,26 @@ describe("runtime boundary helpers", () => {
     expect(isAllowedRuntimeOrigin("null")).toBe(false);
   });
 
+  it("rejects origins that only resemble the bundle or a loopback host", () => {
+    for (const origin of [
+      undefined,
+      "",
+      "file://",
+      "inertia://attacker",
+      "inertia://bundle.attacker.example",
+      "http://localhost.attacker.example",
+      "http://127.0.0.1.attacker.example",
+      "http://attacker.example?localhost",
+      "http://127.0.0.2",
+      "http://0.0.0.0:5173",
+      "ws://localhost:5173",
+      "chrome-extension://localhost",
+      "not a url",
+    ]) {
+      expect(isAllowedRuntimeOrigin(origin), String(origin)).toBe(false);
+    }
+  });
+
   it("keeps wire decoding separate from command execution", () => {
     expect(parseRuntimeCommand(Buffer.from("not json"), false).error).toMatchObject({ message: "Command must be valid JSON." });
     expect(parseRuntimeCommand(Buffer.from("{}"), true).error).toMatchObject({ message: "Binary commands are not supported." });

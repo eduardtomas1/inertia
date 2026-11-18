@@ -1,0 +1,10 @@
+{
+  "exceptions": [
+    {
+      "advisory": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "reason": "Build and test tooling only (vite, vitest, tinyglobby, fdir, electron-builder). Its globs come from this repository's own configuration, never from users, and no patched picomatch release exists yet.",
+      "expires": "2026-12-31"
+    }
+  ]
+}

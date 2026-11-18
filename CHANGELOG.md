@@ -2,6 +2,41 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Security
+
+- On Windows, a repository can no longer run its own program in place of Git,
+  Node or the command processor. A `git.exe`, `node.cmd` or `cmd.exe`
+  committed to a project used to be picked up from the project folder when
+  Inertia ran Git or started Codex, OpenCode, Kimi, Grok, Cursor or
+  Antigravity there. Inertia now finds Git by its full path and never looks
+  in the project folder for a program it starts itself. Your own terminal and
+  project actions keep your usual Windows setting.
+- Clicking a link to a file outside the project opens it only when it is
+  plain text, Markdown, JSON or YAML, an image, a PDF, or audio or video.
+  Anything else, including scripts, Office and OpenDocument files, CSV and
+  Remote Desktop or Windows library files, is shown in its folder instead.
+  Windows spellings that disguised a project file as an outside one are
+  refused.
+- A local program can no longer crash Inertia's background service by
+  opening and resetting a connection to it, and idle connections are closed
+  within seconds.
+- If Inertia cannot remove its Tailscale Serve address when Private Connect
+  turns off, it keeps the local port closed and retries, instead of leaving
+  the address open for another program on the computer to answer. An address
+  left by a session that ended abruptly is removed at the next start, and
+  Private Connect turns back on once it is gone. Paired browsers are signed
+  out only if another program was found holding the old port.
+- Antigravity's Gemini key is hidden if the agent ever prints it, and xAI,
+  Groq and Gemini keys, and secrets in web addresses, are hidden in activity
+  details and issue reports.
+- Updated `hono`, `@hono/node-server` and `minimatch` past their published
+  advisories. Release builds no longer reuse cached packages from other
+  workflows. Checks now fail on moderate advisories in shipped dependencies,
+  and on any high advisory in build tools unless it has a reviewed,
+  expiring exception.
+
 ## 0.0.83 — 2026-11-11
 
 Calmer chats, Grok, custom agents you call by name, secrets that never enter

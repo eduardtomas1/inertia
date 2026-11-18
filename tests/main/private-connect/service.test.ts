@@ -653,11 +653,13 @@ describe("Private Connect service lifecycle", () => {
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
     await first.shutdown();
     expect(firstCalls.disable).toHaveLength(1);
+    expect(memory.saved()).toMatchObject({ servePort: 8443, serveTarget: null });
     const secondCalls = { ensure: [] as unknown[][], disable: [] as number[] };
     const second = await createServiceWith(memory, testTailscale(secondCalls));
     await second.startIfEnabled();
     expect(second.state()).toMatchObject({ enabled: true, status: "ready" });
-    expect(secondCalls.ensure[0]?.slice(0, 3)).toEqual([expect.any(Number), 8443, `http://127.0.0.1:${firstCalls.ensure[0]?.[0] as number}`]);
+    expect(secondCalls.ensure[0]?.slice(0, 2)).toEqual([expect.any(Number), 8443]);
+    expect(memory.saved()).toMatchObject({ servePort: 8443, serveTarget: `http://127.0.0.1:${secondCalls.ensure[0]?.[0] as number}` });
     expect(second.session(cookie)).not.toBeNull();
     expect(second.issueWebSocketTicket(second.session(cookie)!)).toMatch(/^[A-Za-z0-9_-]{43}$/u);
   });

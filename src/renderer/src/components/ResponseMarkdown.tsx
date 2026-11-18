@@ -44,7 +44,7 @@ import { highlightedSourceHtml } from "../utils/sourceHighlighting";
 import { createBoundedCache } from "../utils/boundedCache";
 import { applicationRendererScheme, workspaceImagePreviewUrl } from "@shared/workspace-image-preview";
 import { markdownHeadingDomId } from "../utils/markdownHeading";
-import { encodedLocalFilePath, localFileUrl, parseLocalFileUrl } from "@shared/local-file-url";
+import { encodedLocalFilePath, localFileLocationSuffix, localFileUrl, parseLocalFileUrl } from "@shared/local-file-url";
 import {
   MarkdownImageSchedulerProvider,
   useMarkdownImageSchedule,
@@ -285,6 +285,29 @@ function normalizedPath(value: string): string {
   return `${prefix}${segments.join("/")}` || (absolute ? prefix : ".");
 }
 
+function windowsStyleRoot(root: string): boolean {
+  return /^[a-z]:\//iu.test(root)
+    || root.startsWith("//")
+    || (typeof navigator !== "undefined" && navigator.platform.startsWith("Win"));
+}
+
+function caseInsensitiveRoot(root: string): boolean {
+  return windowsStyleRoot(root)
+    || /^\/(?:Users|Volumes)(?:\/|$)/u.test(root)
+    || (typeof navigator !== "undefined" && navigator.platform.startsWith("Mac"));
+}
+
+function aliasedLocalPath(candidate: string, root: string, literalPath: boolean): boolean {
+  const location = literalPath ? "" : localFileLocationSuffix(candidate);
+  const path = location ? candidate.slice(0, -location.length) : candidate;
+  if (path.includes("::$")) return true;
+  if (!windowsStyleRoot(root) && !/^(?:[a-z]:\/|\/\/)/iu.test(path)) return false;
+  const rest = path.replace(/^(?:[a-z]:\/|\/\/|\/)/iu, "");
+  return rest.split("/").some((segment) => segment.includes(":")
+    || /~\d/u.test(segment)
+    || /[. ]$/u.test(segment));
+}
+
 export function resolveResponseLink(
   projectRoot: string,
   rawHref: string,
@@ -381,14 +404,15 @@ export function resolveResponseLink(
   const candidate = normalizedPath(
     isAbsolute ? resolvedDecoded : `${base}/${resolvedDecoded}`,
   );
-  const insensitive = /^[a-z]:\//iu.test(root) || root.startsWith("//");
+  const insensitive = caseInsensitiveRoot(root);
   const comparableRoot = insensitive ? root.toLocaleLowerCase("en-US") : root;
   const comparableCandidate = insensitive ? candidate.toLocaleLowerCase("en-US") : candidate;
   if (comparableCandidate !== comparableRoot && !comparableCandidate.startsWith(`${comparableRoot}/`)) {
+    if (aliasedLocalPath(candidate, root, encodedPathDelimiter)) return { kind: "unsafe" };
     const url = localFileUrl(candidate, encodedPathDelimiter);
     return url ? { kind: "local", path: candidate, url } : { kind: "unsafe" };
   }
-  const relativePath = candidate === root ? "." : candidate.slice(root.length + 1);
+  const relativePath = comparableCandidate === comparableRoot ? "." : candidate.slice(root.length + 1);
   return relativePath
     ? {
         kind: "project",

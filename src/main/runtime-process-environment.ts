@@ -12,6 +12,7 @@ import {
   isTestProviderBinDirectory,
   TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY,
 } from "../node/test-provider-bin-directory";
+import { WINDOWS_NO_CURRENT_DIRECTORY_SEARCH_KEY } from "../node/windows-current-directory-search";
 
 const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "ALLUSERSPROFILE",
@@ -367,6 +368,12 @@ export function runtimeProcessEnvironment(
   const providerBinDirectory = environmentValue(environment, TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY, platform);
   if (sanitized.NODE_ENV === "test" && isTestProviderBinDirectory(providerBinDirectory, platform)) {
     sanitized[TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY] = providerBinDirectory;
+  }
+  const currentDirectorySearch = platform === "win32"
+    ? environmentValue(environment, WINDOWS_NO_CURRENT_DIRECTORY_SEARCH_KEY, platform)
+    : undefined;
+  if (currentDirectorySearch !== undefined) {
+    sanitized[WINDOWS_NO_CURRENT_DIRECTORY_SEARCH_KEY] = currentDirectorySearch;
   }
   return sanitized;
 }

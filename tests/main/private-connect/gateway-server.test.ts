@@ -14,7 +14,7 @@ import {
   type PrivateConnectGatewayHost,
   type PrivateConnectSession,
 } from "../../../src/main/private-connect/gateway-server";
-import { PRIVATE_CONNECT_LIMITS, type PrivateConnectRequest, type PrivateConnectResponse } from "../../../src/shared/private-connect/protocol";
+import { PRIVATE_CONNECT_LIMITS, PRIVATE_CONNECT_SOCKET_CLOSE, type PrivateConnectRequest, type PrivateConnectResponse } from "../../../src/shared/private-connect/protocol";
 
 const session: PrivateConnectSession = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -443,5 +443,80 @@ describe("Private Connect loopback gateway", () => {
     const afterDrain = await request("10");
     expect(afterDrain.status).toBe(200);
     expect(admitted).toBe(PRIVATE_CONNECT_LIMITS.inFlightRequestsPerSession + 1);
+  });
+
+  it("keeps its port bound while quarantined and answers every request with 503", async () => {
+    const opened: string[] = [];
+    const { server, address } = await startServer({ ...host(), openSession: (value) => { opened.push(value.id); } });
+    const hostValue = hostHeader(address);
+    const socket = new WebSocket(`ws://${hostValue}/api/ws?ticket=ticket`, { headers: { Host: hostValue, Origin: `https://${hostValue}` } });
+    await once(socket, "open");
+    const closed = once(socket, "close");
+
+    server.quarantine();
+
+    const [code] = await closed as [number];
+    expect(code).toBe(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable);
+    expect(server.address()).toEqual(address);
+    const cookie = "__Host-inertia-private-connect=session-token";
+    for (const [path, headers] of [
+      ["/", {}],
+      ["/service-worker.js", { "Service-Worker": "script" }],
+      ["/rogue-worker.js", { "Service-Worker": "script" }],
+      ["/.well-known/inertia/private-connect", {}],
+      ["/api/session/csrf", { Cookie: cookie }],
+    ] as const) {
+      const response = await fetch(`http://${hostValue}${path}`, { headers: { Host: hostValue, ...headers } });
+      expect(response.status).toBe(503);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(response.headers.get("content-type")).toContain("application/json");
+      expect(await response.text()).not.toContain(session.csrf);
+    }
+    const mutation = await fetch(`http://${hostValue}/api/session/ws-ticket`, { method: "POST", headers: { Host: hostValue, Origin: `https://${hostValue}`, Cookie: cookie, "Content-Type": "application/json", "x-inertia-private-connect-csrf": session.csrf }, body: "{}" });
+    expect(mutation.status).toBe(503);
+    const rejected = new WebSocket(`ws://${hostValue}/api/ws?ticket=ticket`, { headers: { Host: hostValue, Origin: `https://${hostValue}` } });
+    await expect(once(rejected, "open")).rejects.toBeInstanceOf(Error);
+    expect(opened).toHaveLength(1);
+  });
+
+  it("binds a requested loopback port", async () => {
+    const { server, address } = await startServer();
+    await server.stop();
+    const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-"));
+    const holder = new PrivateConnectGatewayServer({ host: host(), staticRoot: root });
+    servers.push(holder);
+    holder.quarantine();
+    await expect(holder.start(address.port)).resolves.toEqual({ port: address.port, host: "127.0.0.1" });
+    const response = await fetch(`http://${hostHeader(address)}/`, { headers: { Host: hostHeader(address) } });
+    expect(response.status).toBe(503);
+    const other = new PrivateConnectGatewayServer({ host: host(), staticRoot: root });
+    servers.push(other);
+    await expect(other.start(70_000)).rejects.toThrow("port is invalid");
+  });
+
+  it("retires a service worker registered from any script other than the packaged worker", async () => {
+    const { address } = await startServer();
+    const hostValue = hostHeader(address);
+    const rogue = await fetch(`http://${hostValue}/assets/evil-worker.js?v=1`, { headers: { Host: hostValue, "Service-Worker": "script" } });
+    expect(rogue.status).toBe(200);
+    expect(rogue.headers.get("content-type")).toContain("text/javascript");
+    expect(rogue.headers.get("service-worker-allowed")).toBe("/");
+    expect(rogue.headers.get("cache-control")).toBe("no-store");
+    const source = await rogue.text();
+    expect(source).toContain("self.registration.unregister()");
+    expect(source).toContain("skipWaiting");
+    const packaged = await fetch(`http://${hostValue}/service-worker.js`, { headers: { Host: hostValue, "Service-Worker": "script" } });
+    expect(await packaged.text()).toBe("self.addEventListener('fetch', () => undefined);");
+    const ordinary = await fetch(`http://${hostValue}/assets/evil-worker.js`, { headers: { Host: hostValue } });
+    expect(ordinary.status).toBe(404);
+    const invalidHost = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest({ hostname: "127.0.0.1", port: address.port, path: "/assets/evil-worker.js", headers: { Host: "attacker.example", "Service-Worker": "script" } }, (response) => {
+        response.resume();
+        response.once("end", () => resolve(response.statusCode ?? 0));
+      });
+      request.once("error", reject);
+      request.end();
+    });
+    expect(invalidHost).toBe(400);
   });
 });

@@ -461,6 +461,8 @@ describe("credential families and bounded scanning", () => {
   it.each([
     "AKIA0123456789ABCDEF",
     "AIza0123456789abcdefghij0123456789",
+    "xai-syntheticfixturecredential0123456789",
+    "gsk_syntheticfixturecredential0123456789",
     "glpat-syntheticfixturecredential",
     "npm_syntheticfixturecredential",
     "DATABASE_PASSWORD=syntheticfixturecredential",

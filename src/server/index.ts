@@ -4,7 +4,6 @@ import { createCliConversationCommandHandler } from "./runtime/commands/cli-conv
 import { githubIssuePublisher } from "./git/github-issue-report";
 import { storeMascotStatus } from "./runtime/mascot-status";
 import { randomBytes } from "node:crypto";
-import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import WebSocket from "ws";
 import {
@@ -107,7 +106,7 @@ import { createSecretRequestCommandHandler } from "./runtime/commands/secret-req
 import { createAgentWorkflowCommandHandler } from "./runtime/commands/agent-workflow-commands";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
 import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/agent-thread-runtime";
-import { attachRuntimeWebSocketBoundary } from "./runtime/websocket-boundary";
+import { attachRuntimeWebSocketBoundary, createRuntimeHttpServer } from "./runtime/websocket-boundary";
 import { TrustedAttachmentResolver, conversationAttachmentReadRoots } from "./runtime/attachments/trusted-attachment-resolver";
 import { PrivateGeneratedAttachmentStore } from "./runtime/attachments/private-generated-attachments";
 import { unavailableSecureFileBroker } from "./secure-files";
@@ -407,19 +406,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const token = randomBytes(32).toString("base64url");
   const websocketPath = `/runtime/${token}`;
   const runtimeCommandDrainWaiters = new Set<() => void>();
-  const server = createServer((_request, response) => {
-    response.writeHead(404, {
-      "Cache-Control": "no-store",
-      "Content-Security-Policy": "default-src 'none'",
-      "Content-Type": "text/plain; charset=utf-8",
-      "X-Content-Type-Options": "nosniff",
-    });
-    response.end("Not found");
-  });
-  server.headersTimeout = 5_000;
-  server.requestTimeout = 10_000;
-  server.keepAliveTimeout = 1_000;
-  server.maxHeadersCount = 32;
+  const server = createRuntimeHttpServer();
   const canStopWorkspaceRun = (run: AppSnapshot["runs"][number]): boolean => {
     if (run.status !== "running" && run.status !== "waiting") return false;
     if (run.kind === "check" || run.kind === "service" || run.kind === "source-control") {

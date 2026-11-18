@@ -4,6 +4,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  userWindowsCurrentDirectorySearch,
+  windowsCurrentDirectorySearchSetting,
+} from "../../src/node/windows-current-directory-search";
 import { GitError } from "../../src/server/git/types";
 import { RuntimeStore } from "../../src/server/database";
 import { defaultProjectPreferences } from "../../src/shared/project-preferences";
@@ -168,6 +172,8 @@ describe("workspace run controller", () => {
         cols: 80, rows: 24, onStarted: vi.fn() });
       expect(replaceProcess).toHaveBeenCalledTimes(1);
       expect(replaceProcess.mock.calls[0]?.[4]).toEqual(action.args);
+      expect(windowsCurrentDirectorySearchSetting(replaceProcess.mock.calls[0]![5]))
+        .toBe(process.platform === "win32" ? userWindowsCurrentDirectorySearch() : undefined);
       expect(runtime.terminals.inputs).toEqual([]);
       const run = runtime.store.shellSnapshot().runs.find(({ actionId }) => actionId === `custom:${action.id}`)!;
       expect(run.status).toBe(earlyExit ? "succeeded" : "running");

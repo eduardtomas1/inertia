@@ -347,25 +347,19 @@ describe("resolveResponseLink Windows and case aliases", () => {
     expect(resolveResponseLink("/work/project", "C:/work/PROJEC~1/x.pyw")).toEqual(unsafe);
   });
 
-  it("treats a case-only alias of a Windows, macOS or UNC root as a project file", () => {
-    vi.stubGlobal("navigator", { platform: "Win32" });
+  it("treats a case-only alias of a Windows drive or UNC root as a project file", () => {
     expect(resolveResponseLink(windowsRoot, "../CoolRepo/x.pyw")).toEqual({ kind: "project", relativePath: "x.pyw", action: "reveal" });
     expect(resolveResponseLink(windowsRoot, "C:/USERS/ME/COOLREPO")).toEqual({ kind: "project", relativePath: ".", action: "reveal" });
-    vi.stubGlobal("navigator", { platform: "MacIntel" });
-    expect(resolveResponseLink("/opt/work/coolrepo", "../CoolRepo/x.pyw")).toEqual({ kind: "project", relativePath: "x.pyw", action: "reveal" });
-    expect(resolveResponseLink("/opt/work/coolrepo", "file:///opt/work/COOLREPO/src/a.ts#L3")).toEqual({
-      kind: "project", relativePath: "src/a.ts", action: "reveal", location: { startLine: 3, endLine: 3 },
-    });
-    vi.stubGlobal("navigator", { platform: "Linux x86_64" });
-    expect(resolveResponseLink("/Users/me/coolrepo", "../CoolRepo/x.pyw")).toEqual({ kind: "project", relativePath: "x.pyw", action: "reveal" });
     expect(resolveResponseLink("\\\\Server\\Share\\coolrepo", "//server/share/CoolRepo/x.pyw")).toEqual({ kind: "project", relativePath: "x.pyw", action: "reveal" });
   });
 
-  it("keeps a case-sensitive Linux root case-sensitive", () => {
-    vi.stubGlobal("navigator", { platform: "Linux x86_64" });
-    expect(resolveResponseLink("/home/me/coolrepo", "../CoolRepo/x.txt")).toEqual({
-      kind: "local", path: "/home/me/CoolRepo/x.txt", url: "file:///home/me/CoolRepo/x.txt",
-    });
+  it.each([
+    ["/home/me/coolrepo", "../CoolRepo/x.txt", "/home/me/CoolRepo/x.txt"],
+    ["/Volumes/work/repo", "../Repo/notes.md", "/Volumes/work/Repo/notes.md"],
+    ["/Users/me/coolrepo", "../CoolRepo/x.txt", "/Users/me/CoolRepo/x.txt"],
+  ])("keeps the POSIX root %s case-sensitive so %s names its own target", (root, href, path) => {
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    expect(resolveResponseLink(root, href)).toEqual({ kind: "local", path, url: `file://${path}` });
   });
 
   it("keeps ordinary project, absolute, outside-project and web links working", () => {

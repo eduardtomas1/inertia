@@ -286,15 +286,7 @@ function normalizedPath(value: string): string {
 }
 
 function windowsStyleRoot(root: string): boolean {
-  return /^[a-z]:\//iu.test(root)
-    || root.startsWith("//")
-    || (typeof navigator !== "undefined" && navigator.platform.startsWith("Win"));
-}
-
-function caseInsensitiveRoot(root: string): boolean {
-  return windowsStyleRoot(root)
-    || /^\/(?:Users|Volumes)(?:\/|$)/u.test(root)
-    || (typeof navigator !== "undefined" && navigator.platform.startsWith("Mac"));
+  return /^[a-z]:\//iu.test(root) || root.startsWith("//");
 }
 
 function aliasedLocalPath(candidate: string, root: string, literalPath: boolean): boolean {
@@ -404,7 +396,7 @@ export function resolveResponseLink(
   const candidate = normalizedPath(
     isAbsolute ? resolvedDecoded : `${base}/${resolvedDecoded}`,
   );
-  const insensitive = caseInsensitiveRoot(root);
+  const insensitive = windowsStyleRoot(root);
   const comparableRoot = insensitive ? root.toLocaleLowerCase("en-US") : root;
   const comparableCandidate = insensitive ? candidate.toLocaleLowerCase("en-US") : candidate;
   if (comparableCandidate !== comparableRoot && !comparableCandidate.startsWith(`${comparableRoot}/`)) {

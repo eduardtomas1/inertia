@@ -3,17 +3,28 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
+import { createGrokAcpHarness } from "../../src/server/provider/grok-acp-harness";
 import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
 import type { AgentHarnessCallbacks } from "../../src/server/provider/agent-harness";
 import { portableFixtureRoot, portableNodeExecutable, removePortableFixture,
-  waitFor, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
+  waitFor, writeNodeFlagExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(removePortableFixture)); });
 
+type AcpDriftProvider = "cursor" | "kimi" | "grok";
+
+const AGENT_NAMES: Record<AcpDriftProvider, string> = { cursor: "Cursor", kimi: "Kimi Code", grok: "Grok" };
+
+function driftHarness(providerId: AcpDriftProvider) {
+  if (providerId === "cursor") return createCursorAcpHarness({ controlRpcTimeoutMs: 5_000 });
+  if (providerId === "kimi") return createKimiAcpHarness({ controlRpcTimeoutMs: 5_000 });
+  return createGrokAcpHarness({ controlRpcTimeoutMs: 5_000 });
+}
+
 function fixture(
-  providerId: "cursor" | "kimi",
+  providerId: AcpDriftProvider,
   stalledMethod?: string,
   update?: object | object[],
   replay?: object,
@@ -21,8 +32,7 @@ function fixture(
   const root = portableFixtureRoot(`${providerId} adapter drift`);
   roots.push(root);
   const marker = join(root, "requests.jsonl");
-  const command = portableNodeExecutable(root, `${providerId}-drift`);
-  writeNodeSubcommand(root, "acp", `
+  const source = `
 const fs = require("node:fs");
 const frame = (value) => JSON.stringify(value) + "\\n";
 const send = (value) => process.stdout.write(frame(value));
@@ -33,8 +43,12 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   if (message.method === ${JSON.stringify(stalledMethod ?? "never")}) return;
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: {
     protocolVersion: 1, agentCapabilities: { loadSession: true },
-    agentInfo: { name: ${JSON.stringify(providerId === "kimi" ? "Kimi Code" : "Cursor")}, version: "test" }
+    ${providerId === "grok" ? `authMethods: [{ id: "cached_token", name: "Saved login" }],` : ""}
+    agentInfo: { name: ${JSON.stringify(AGENT_NAMES[providerId])}, version: "test" }
   } });
+  if (message.method === "authenticate" || message.method === "session/set_mode") {
+    return send({ jsonrpc: "2.0", id: message.id, result: {} });
+  }
   if (message.method === "session/load") {
     const replay = ${JSON.stringify(replay ?? null)};
     if (replay) send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: replay } });
@@ -52,17 +66,22 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
     return process.stdout.write(burst);
   }
 });
-`);
-  const harness = providerId === "cursor"
-    ? createCursorAcpHarness({ controlRpcTimeoutMs: 5_000 })
-    : createKimiAcpHarness({ controlRpcTimeoutMs: 5_000 });
+`;
+  let command: string;
+  if (providerId === "grok") {
+    command = writeNodeFlagExecutable(root, "grok", source);
+  } else {
+    command = portableNodeExecutable(root, `${providerId}-drift`);
+    writeNodeSubcommand(root, "acp", source);
+  }
+  const harness = driftHarness(providerId);
   return { marker, start: (callbacks: AgentHarnessCallbacks = {}) => harness.start({ executable: command, environment: process.env, callbacks, providerNativeToolsAvailable: false, input: nativeProviderRunInput({
     providerId, conversationId: "drift-test", cwd: root, prompt: "Test",
     sessionId: "drift-session", interactionMode: "build", access: "supervised",
   }) }) };
 }
 
-describe.each(["cursor", "kimi"] as const)("%s ACP drift regressions", (providerId) => {
+describe.each(["cursor", "kimi", "grok"] as const)("%s ACP drift regressions", (providerId) => {
   it.each(["initialize", "session/load"])("cancels a resumed session stalled at %s", async (method) => {
     const { start, marker } = fixture(providerId, method);
     const run = start();
@@ -123,6 +142,23 @@ describe.each(["cursor", "kimi"] as const)("%s ACP drift regressions", (provider
     const result = await start().result;
     expect(result).toMatchObject({ status: "completed", text: "Done", cleanupConfirmed: true });
     expect(result.error).toBeUndefined();
+  });
+
+  it("keeps ACP session references out of tool output and completes the turn", async () => {
+    const { start } = fixture(providerId, undefined, {
+      sessionUpdate: "tool_call", toolCallId: "tool-with-reference", title: "Delegate", kind: "other", status: "completed",
+      content: [
+        { type: "session", sessionId: "child-session" },
+        { type: "session", sessionId: 42 },
+        { type: "content", content: { type: "text", text: "Delegated" } },
+      ],
+    });
+    const details: string[] = [];
+    const result = await start({ onEvent: (event) => {
+      if (event.type === "activity" && event.activityId?.endsWith("tool-with-reference")) details.push(event.detail ?? "");
+    } }).result;
+    expect(result).toMatchObject({ status: "completed", text: "Done", cleanupConfirmed: true });
+    expect(details).toEqual(["Output:\nDelegated"]);
   });
 
   it.each([

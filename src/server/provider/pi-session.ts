@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, mkdir, open, opendir, realpath } from "node:fs/promises";
+import { lstat, mkdir, open, opendir, readdir, realpath, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
@@ -36,20 +36,93 @@ export async function ensurePiSessionDirectory(path: string, signal?: AbortSigna
   }
 }
 
-export async function readPiSessionHeader(path: string, root: string, signal?: AbortSignal): Promise<JsonObject> {
+const MAX_SESSION_BYTES = 256 * 1024 * 1024;
+const MAX_SESSION_ENTRIES = 20_000;
+
+/** Opens an owned session file: directly inside `root`, a plain single-link regular file, bounded, not replaced. */
+async function openOwnedPiSessionFile(path: string, root: string, signal?: AbortSignal) {
   signal?.throwIfAborted();
   if (!isContainedPath(root, path) || dirname(path) !== root
     || !await plainPathComponents(root, path, { signal }) || await realpath(path) !== path) {
     throw new Error("Pi session reference escaped its owned directory.");
   }
   const before = await lstat(path);
-  if (!before.isFile() || before.isSymbolicLink() || before.size > 256 * 1024 * 1024) throw new Error("Pi session is not a bounded regular file.");
+  if (!before.isFile() || before.isSymbolicLink() || before.size > MAX_SESSION_BYTES) throw new Error("Pi session is not a bounded regular file.");
   const handle = await open(path, constants.O_RDONLY | FILE_OPEN_NO_FOLLOW);
   try {
     const opened = await handle.stat();
     if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || await realpath(path) !== path) {
       throw new Error("Pi session identity changed while opening.");
     }
+    return { handle, size: opened.size, links: opened.nlink };
+  } catch (error) { await handle.close(); throw error; }
+}
+
+/** A session file whose entries Inertia cannot read within its limits; a copy of it cannot be verified (an ordinary failure). */
+export class PiSessionFormatError extends Error {
+  constructor() { super("Pi session entries are invalid or exceed their limits."); }
+}
+
+/**
+ * The ids of a session file's entries in file order, read without Pi as Pi reads them (`loadEntriesFromFile`): every
+ * line after the header, skipping blank and unparseable ones. The owned file stays readable when the checkout it
+ * names was removed. Bounded by the file and entry limits.
+ */
+export async function readPiSessionEntryIds(path: string, root: string, signal?: AbortSignal): Promise<string[]> {
+  const { handle, size } = await openOwnedPiSessionFile(path, root, signal);
+  try {
+    // Not fatal: Pi decodes the same way and keeps such a line.
+    const decoder = new TextDecoder("utf-8");
+    const ids: string[] = [];
+    let pending = Buffer.alloc(0); let offset = 0; let header = true;
+    const take = (line: Buffer): void => {
+      if (header) { header = false; return; }
+      const text = decoder.decode(line);
+      if (!text.trim()) return;
+      // Pi skips a line it cannot parse (`parseSessionEntryLine`), such as a last line torn by a killed process.
+      let parsed: unknown;
+      try { parsed = JSON.parse(text); } catch { return; }
+      const entry = objectValue(parsed);
+      if (!entry || typeof entry.id !== "string" || !entry.id || entry.id.length > 512 || ids.length >= MAX_SESSION_ENTRIES) {
+        throw new PiSessionFormatError();
+      }
+      ids.push(entry.id);
+    };
+    const chunk = Buffer.alloc(1024 * 1024);
+    while (offset < size) {
+      signal?.throwIfAborted();
+      const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, size - offset), offset);
+      if (!bytesRead) break;
+      offset += bytesRead;
+      pending = Buffer.concat([pending, chunk.subarray(0, bytesRead)]);
+      let newline = pending.indexOf(10);
+      while (newline >= 0) { take(pending.subarray(0, newline)); pending = pending.subarray(newline + 1); newline = pending.indexOf(10); }
+      if (pending.length > 32 * 1024 * 1024) throw new PiSessionFormatError();
+    }
+    take(pending);
+    return ids;
+  } finally { await handle.close(); }
+}
+
+/**
+ * Removes a session file this run created and never announced (a copy whose start failed), best effort. Only a
+ * single-link regular file directly in `root`, named for `sessionId`, whose header names that session.
+ */
+export async function removeUnannouncedPiSession(root: string, sessionId: string, path: string): Promise<boolean> {
+  try {
+    if (!isPiSessionId(sessionId) || dirname(path) !== root || !basename(path).endsWith(`_${sessionId}.jsonl`)) return false;
+    const header = await readPiSessionHeader(path, root);
+    const { handle, links } = await openOwnedPiSessionFile(path, root);
+    await handle.close();
+    if (header.id !== sessionId || links !== 1) return false;
+    await unlink(path);
+    return true;
+  } catch { return false; }
+}
+
+export async function readPiSessionHeader(path: string, root: string, signal?: AbortSignal): Promise<JsonObject> {
+  const { handle } = await openOwnedPiSessionFile(path, root, signal);
+  try {
     const buffer = Buffer.alloc(64 * 1024);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     signal?.throwIfAborted();
@@ -63,7 +136,19 @@ export async function readPiSessionHeader(path: string, root: string, signal?: A
   } finally { await handle.close(); }
 }
 
-export async function findPiSessionFile(root: string, sessionId: string, cwd: string, signal?: AbortSignal): Promise<string> {
+/** The session's file does not exist (any longer); a resume can only start a new session. */
+export class PiSessionMissingError extends Error {
+  constructor() { super("The selected Pi session no longer exists."); }
+}
+
+/** Whether a session header's cwd names `cwd`: the same path, or both resolve to the same folder. A missing folder matches only itself. */
+export async function piSessionInCheckout(headerCwd: string, cwd: string): Promise<boolean> {
+  if (headerCwd === cwd) return true;
+  try { return await realpath(headerCwd) === await realpath(cwd); } catch { return false; }
+}
+
+/** The owned file of a session and its header, whichever checkout the header names. */
+export async function locatePiSessionFile(root: string, sessionId: string, signal?: AbortSignal): Promise<{ file: string; cwd: string }> {
   if (!isPiSessionId(sessionId)) throw new Error("Pi session ID is invalid.");
   const directory = await opendir(root);
   let found: string | undefined; let count = 0;
@@ -74,12 +159,24 @@ export async function findPiSessionFile(root: string, sessionId: string, cwd: st
     if (!entry.isFile() || entry.isSymbolicLink() || found) throw new Error("Pi session reference is unsafe or ambiguous.");
     found = join(root, entry.name);
   }
-  if (!found) throw new Error("The selected Pi session no longer exists.");
+  if (!found) throw new PiSessionMissingError();
   const header = await readPiSessionHeader(found, root, signal);
-  if (header.id !== sessionId || await realpath(header.cwd as string) !== await realpath(cwd)) {
-    throw new Error("Pi session does not belong to the selected workspace.");
-  }
-  return found;
+  if (header.id !== sessionId) throw new Error("Pi session header has invalid native identity.");
+  return { file: found, cwd: header.cwd as string };
+}
+
+export async function findPiSessionFile(root: string, sessionId: string, cwd: string, signal?: AbortSignal): Promise<string> {
+  const located = await locatePiSessionFile(root, sessionId, signal);
+  if (!await piSessionInCheckout(located.cwd, cwd)) throw new Error("Pi session does not belong to the selected workspace.");
+  return located.file;
+}
+
+/** The names in the owned session folder, to tell a session Pi creates from one that already existed. */
+export async function listPiSessionFiles(root: string, signal?: AbortSignal): Promise<Set<string>> {
+  signal?.throwIfAborted();
+  const names = await readdir(root);
+  if (names.length > 10_000) throw new Error("Pi session directory exceeds its lookup limit.");
+  return new Set(names);
 }
 
 export async function requireUnusedPiSessionId(root: string, sessionId: string, signal?: AbortSignal): Promise<void> {

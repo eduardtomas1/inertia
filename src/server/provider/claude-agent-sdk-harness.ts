@@ -74,6 +74,7 @@ import { createClaudeTaskControls } from "./claude-task-controls";
 import {
   CLAUDE_STARTUP_FAILURE_RESULTS,
   CLAUDE_TRANSCRIPT_FLUSH,
+  claudeSessionNotFound,
   claudeSessionUnavailable,
   claudeStartupFailure,
 } from "./claude-startup-failure";
@@ -84,7 +85,9 @@ import {
 import { createClaudeHostTools } from "./claude-host-tools";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
-import { createClaudeNativeConversationOperations, claudeNativeContinuationOptions, readClaudePersistedNativeHead } from "./claude-native-conversation";
+import {
+  claudeNativeContinuationOptions, claudeSessionStoredElsewhere, createClaudeNativeConversationOperations, readClaudePersistedNativeHead,
+} from "./claude-native-conversation";
 import { trackNativeConversationRun } from "./native-conversation-run-tracking";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
@@ -271,6 +274,7 @@ function startClaudeRun(
     ...(options.input.autoCompactWindow ? { autoCompactWindow: options.input.autoCompactWindow } : {}),
   };
   let sessionUnavailable = false;
+  let sessionNotFound = false;
   const ownedProcess = createClaudeOwnedQueryProcess(
     "Claude Code process tree",
     lifecycleDependencies,
@@ -458,6 +462,7 @@ function startClaudeRun(
         const observed = eventBudget.observe(next.value);
         const message = observed.value as SDKMessage;
         sessionUnavailable ||= options.input.sessionId !== undefined && claudeSessionUnavailable(message);
+        sessionNotFound ||= options.input.sessionId !== undefined && claudeSessionNotFound(message);
         if (observed.shortened && !announcedShortenedEvent) {
           announcedShortenedEvent = true;
           emitter.activity("system", "info", "Shortened a large Claude update", {
@@ -861,11 +866,15 @@ function startClaudeRun(
       };
     }
     const child = ownedProcess.child();
+    // An older Claude Code finds a transcript only in the cwd's project folder; say when the session is still stored.
+    const storedElsewhere = sessionNotFound && terminal.failure && options.input.sessionId !== undefined
+      && await claudeSessionStoredElsewhere(options.input.sessionId, options.input.cwd, options.environment);
     terminal = {
       ...terminal,
       exitCode: child?.exitCode ?? null,
       signal: child?.signalCode ?? null,
-      ...(sessionUnavailable && terminal.failure ? { failure: { ...terminal.failure, sessionUnavailable: true as const } } : {}),
+      ...(sessionUnavailable && terminal.failure ? { failure: { ...terminal.failure, sessionUnavailable: true as const,
+        ...(storedElsewhere ? { sessionStoredElsewhere: true as const } : {}) } } : {}),
     };
     if (terminal.cleanupConfirmed && authoritativeSessionId && terminal.sessionId === authoritativeSessionId) {
       const head = await readClaudePersistedNativeHead(authoritativeSessionId, options.input.cwd, options.environment);

@@ -7,7 +7,8 @@ import { providerRunTerminal, ProviderSteerDeliveryUnknownError, type ProviderRu
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { CursorSdkCleanupError, openCursorSdkWorker } from "./cursor-sdk-process";
 import { cursorSdkStateRoot, type CursorSdkConfiguration } from "./cursor-sdk-service";
-import { cursorSdkStoreDirectory } from "./cursor-sdk-store";
+import { cursorSdkAgentStoreDirectory, cursorSdkStoreDirectory, cursorSdkStoreHasJournal, CursorSdkStoreMissingError } from "./cursor-sdk-store";
+import { cursorSdkStorePlan } from "./cursor-sdk-store-plan";
 import { providerUnconfirmedCleanup } from "./provider-unconfirmed-cleanup";
 import { AcpSecretRedactor } from "./acp-redaction";
 
@@ -31,16 +32,30 @@ const eventSchema = z.object({ authority: cursorSdkAuthoritySchema, message: z.o
 const hostSchema = z.object({ authority: cursorSdkAuthoritySchema, callId: z.string().uuid(), tool: z.string().min(1).max(128), arguments: z.unknown() }).strict();
 const resultSchema = z.object({ agentId: z.string().min(1).max(512), id: z.string().min(1).max(512), status: z.enum(["finished", "cancelled", "error"]) }).passthrough();
 
-export type CursorSdkRunStateRootResolver = (configuration: CursorSdkConfiguration, workspace: string, providerInstanceId: string) => Promise<string>;
+/** `existing`: the store of the checkout a moved chat's agent was created in; it is opened, never created. */
+export type CursorSdkRunStateRootResolver = (configuration: CursorSdkConfiguration, workspace: string, providerInstanceId: string,
+  existing?: boolean) => Promise<string>;
 
 const STORAGE_UNAVAILABLE = "Cursor SDK durable storage is unavailable on this platform or workspace.";
 
-async function resolveCursorSdkRunStateRoot(configuration: CursorSdkConfiguration, workspace: string, instance: string): Promise<string> {
-  return await cursorSdkStoreDirectory(await cursorSdkStateRoot(configuration), workspace, instance);
+async function resolveCursorSdkRunStateRoot(configuration: CursorSdkConfiguration, workspace: string, instance: string,
+  existing = false): Promise<string> {
+  return await cursorSdkStoreDirectory(await cursorSdkStateRoot(configuration), workspace, instance, existing);
+}
+
+/** An agent's own store (`cursorSdkStorePlan`) and whether it holds a journal; `create` makes it, otherwise null when it does not exist. */
+export type CursorSdkAgentStateRootResolver = (configuration: CursorSdkConfiguration, providerInstanceId: string, agentId: string,
+  create: boolean) => Promise<{ directory: string; journal: boolean } | null>;
+
+async function resolveCursorSdkAgentStateRoot(configuration: CursorSdkConfiguration, instance: string, agentId: string,
+  create: boolean): Promise<{ directory: string; journal: boolean } | null> {
+  const directory = await cursorSdkAgentStoreDirectory(await cursorSdkStateRoot(configuration), instance, agentId, create);
+  return directory === null ? null : { directory, journal: await cursorSdkStoreHasJournal(directory) };
 }
 
 export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencies: {
   openWorker?: typeof openCursorSdkWorker; resolveStateRoot?: CursorSdkRunStateRootResolver;
+  resolveAgentStateRoot?: CursorSdkAgentStateRootResolver;
 } = {}): AgentHarnessRun {
   const { input } = options;
   const emit = createAgentHarnessEmitter("cursor", input.conversationId, options.callbacks, input.runId, input.turnId, input.cwd, "cursor-sdk");
@@ -72,14 +87,46 @@ export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencie
     let status: ProviderRunResult["status"] = "failed";
     let cleanupConfirmed = true;
     let failure = "Cursor SDK execution failed.";
+    let sessionUnavailable = false;
     const watchdog = setTimeout(() => { timedOut = true; cancel(true); }, CURSOR_SDK_RUN_TIMEOUT_MS); watchdog.unref();
     try {
       emit.status("starting");
       if (!options.cursorSdk?.credentials || input.imagePaths?.length || input.skills?.length || options.nativeContinuation
         || input.modelSelection.reasoningEffort || input.reasoningEffort || input.modelSelection.contextWindowOverride
         || !input.modelSelection.modelId || input.modelSelection.modelId === "provider-default") throw new Error("Cursor SDK launch options are unavailable.");
-      const stateRoot = await (dependencies.resolveStateRoot ?? resolveCursorSdkRunStateRoot)(options.cursorSdk, input.cwd, authority.providerInstanceId)
-        .catch((error: unknown) => { failure = STORAGE_UNAVAILABLE; throw error; });
+      // Cursor's store is per checkout. A chat that moved here with its agent runs it from the agent's own store,
+      // adopted the first time from the store of the checkout it was created in (`storeWorkspace`; T3
+      // `cursorStoreCwd`); the agent runs here. See cursorSdkStorePlan.
+      const storeWorkspace = input.sessionId && input.sessionOriginCwd && input.sessionOriginCwd !== input.cwd
+        ? input.sessionOriginCwd : undefined;
+      const resolveStateRoot = dependencies.resolveStateRoot ?? resolveCursorSdkRunStateRoot;
+      const resolveAgentStateRoot = dependencies.resolveAgentStateRoot ?? resolveCursorSdkAgentStateRoot;
+      const instance = authority.providerInstanceId;
+      const configuration = options.cursorSdk;
+      const { plan, stateRoot, agentStateRoot, adoptFrom } = await (async () => {
+        const agentStore = input.sessionId ? await resolveAgentStateRoot(configuration, instance, input.sessionId, false) : null;
+        // Only a store that does not exist is missing; any other lookup failure is a storage error.
+        const originStore = storeWorkspace !== undefined && !agentStore?.journal
+          ? await resolveStateRoot(configuration, storeWorkspace, instance, true).catch((error: unknown) => {
+            if (error instanceof CursorSdkStoreMissingError) return undefined;
+            throw error;
+          }) : undefined;
+        const plan = cursorSdkStorePlan({ resumed: input.sessionId !== undefined, moved: storeWorkspace !== undefined,
+          agentJournal: agentStore?.journal === true, originStore: originStore !== undefined });
+        if (plan === "unavailable") return { plan, stateRoot: "", agentStateRoot: undefined, adoptFrom: undefined };
+        const agentStateRoot = plan === "agent" ? agentStore!.directory
+          : plan === "adopt" ? (await resolveAgentStateRoot(configuration, instance, input.sessionId!, true))?.directory : undefined;
+        if (plan === "adopt" && !agentStateRoot) throw new Error("Cursor SDK agent store could not be created.");
+        return { plan, agentStateRoot, adoptFrom: plan === "adopt" ? originStore : undefined,
+          stateRoot: agentStateRoot ?? await resolveStateRoot(configuration, input.cwd, instance) };
+      })().catch((error: unknown) => { failure = STORAGE_UNAVAILABLE; throw error; });
+      if (plan === "unavailable") {
+        // The chat moved, its agent never got a store of its own and the store it was created in is gone: the
+        // agent's records no longer exist, so only a new session can continue (decided before any worker starts).
+        sessionUnavailable = true;
+        failure = "The Cursor SDK session's store no longer exists.";
+        throw new Error(failure);
+      }
       const apiKey = await options.cursorSdk.credentials.resolve(CURSOR_SDK_SECRET_REFERENCE, controller.signal);
       if (!apiKey) throw new Error("Cursor SDK login is required.");
       redact.addSecrets([apiKey]);
@@ -122,7 +169,9 @@ export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencie
         } });
       live = true; emit.status("running");
       const completed = resultSchema.parse(await worker.channel.request("start", { authority, apiKey, stateRoot,
-        prompt: input.prompt, sessionId: input.sessionId, model: input.modelSelection.modelId,
+        prompt: input.prompt, sessionId: input.sessionId, ...(storeWorkspace !== undefined ? { storeWorkspace } : {}),
+        ...(agentStateRoot ? { agentStateRoot } : {}), ...(agentStateRoot && adoptFrom ? { adoptFrom } : {}),
+        model: input.modelSelection.modelId,
         nativeTools: !options.providerNativeToolsAvailable ? "none" : input.access === "full" && input.interactionMode !== "plan" ? "full" : "read",
         tools: host?.definitions().map(({ name, description, inputSchema, readOnly }) => ({ name, description, inputSchema, readOnly })) ?? [],
       }, CURSOR_SDK_RUN_TIMEOUT_MS));
@@ -143,9 +192,11 @@ export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencie
       finished = true;
     }
     emit.status(status, status === "failed" ? failure : undefined);
-    return { ...providerRunTerminal(input, status), sessionId, text, textTruncated: false, exitCode: null, signal: null,
+    const unavailable = status === "failed" && sessionUnavailable
+      ? { reason: "provider-error" as const, message: failure, sessionUnavailable: true as const } : undefined;
+    return { ...providerRunTerminal(input, status, unavailable), sessionId, text, textTruncated: false, exitCode: null, signal: null,
       cleanupConfirmed, ...(!cleanupConfirmed && (worker?.child ?? uncertainChild) ? providerUnconfirmedCleanup((worker?.child ?? uncertainChild)!) : {}),
-      ...(status === "failed" ? { error: failure } : {}) };
+      ...(status === "failed" ? { error: failure } : {}), ...(unavailable ? { failure: unavailable } : {}) };
   })();
   return { harnessId: "cursor-sdk", providerId: "cursor", result, cancel, extension: { kind: "cursor-sdk",
     respondToApproval: (id, decision) => host?.respondToApproval(id, decision) ?? false, respondToInput: () => false,

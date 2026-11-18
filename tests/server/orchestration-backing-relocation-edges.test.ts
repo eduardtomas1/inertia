@@ -23,6 +23,8 @@ import {
 afterEach(() => { vi.restoreAllMocks(); return cleanupTurnControllerTestDirectories(); });
 
 const claudeSelection = providerNativeModelSelection({ providerId: "claude", modelId: "claude-test" });
+const kimiSelection = providerNativeModelSelection({ providerId: "kimi", modelId: "kimi-test" });
+const piSelection = providerNativeModelSelection({ providerId: "pi", modelId: "test/model" });
 
 /** Every chat of the runtime resolves to `checkout` once it is set, like a chat handed to a worktree. */
 async function movable(runtime: TurnControllerTestRuntime) {
@@ -63,7 +65,7 @@ function events(runtime: TurnControllerTestRuntime, threadId = runtime.conversat
   return runtime.store.orchestration.events.readEvents({ projectId, threadId, limit: 500 });
 }
 
-const identityOf = (runtime: TurnControllerTestRuntime, providerId: "codex" | "claude", conversationId = runtime.conversationId) =>
+const identityOf = (runtime: TurnControllerTestRuntime, providerId: "codex" | "claude" | "pi", conversationId = runtime.conversationId) =>
   runtime.store.agentTurnsForConversation(conversationId).filter((turn) => turn.providerId === providerId).at(-1)!.continuationIdentity;
 
 function importChat(runtime: TurnControllerTestRuntime, providerId: "codex" | "claude", sessionId: string) {
@@ -77,31 +79,76 @@ function importChat(runtime: TurnControllerTestRuntime, providerId: "codex" | "c
 }
 
 describe("a session without a backing in a moved checkout", () => {
-  it("starts an imported Claude session fresh in another checkout, and resumes an imported Codex session there", async () => {
+  it.each(["claude", "codex"] as const)("resumes an imported %s session in a moved checkout, and fails closed when the provider says it is gone", async (providerId) => {
+    const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId, modelId: "provider-default" }) });
+    try {
+      const { moved, moveTo } = await movable(runtime);
+      const sessionId = randomUUID();
+      const chat = importChat(runtime, providerId, sessionId);
+      moveTo(chat, moved);
+      const send = runtime.controller.queue({ conversationId: chat, content: "Continue in the worktree." });
+      expect(send.turn.providerSessionBefore).toBe(sessionId);
+      runtime.controller.start(send.turn.id);
+      expect(runtime.provider.input).toMatchObject({ sessionId, cwd: moved });
+      expect(runtime.provider.input?.prompt).not.toContain("Earlier imported work");
+
+      // Codex finds threads by id under CODEX_HOME, and a current Claude Code searches its whole home, so a
+      // refusal without a stored copy elsewhere means the session is gone: the import fails closed as in A.
+      expect(runtime.provider.freshSession()).toBeNull();
+      const gone = "The saved provider session is no longer available.";
+      runtime.provider.resolve({ status: "failed", sessionId, error: gone,
+        failure: { reason: "provider-error", message: gone, sessionUnavailable: true } });
+      await flushTurnControllerTestPromises();
+      const label = providerId === "codex" ? "Codex" : "Claude Code";
+      const failures = (runtime.store.conversationDetail(chat)?.activities ?? []).filter(({ kind, turnId }) => kind === "error" && turnId === send.turn.id);
+      expect(failures).toEqual([expect.objectContaining({ title: `The original ${label} session for this imported chat is no longer available.` })]);
+      expect(runtime.store.conversation(chat).providerSessionId).toBe(sessionId);
+    } finally { await runtime.controller.dispose(); runtime.store.close(); }
+  });
+
+  it("starts an imported Claude session fresh in a moved checkout when Claude Code cannot reach its stored transcript", async () => {
     const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }) });
     try {
       const { moved, moveTo } = await movable(runtime);
-      const claudeSession = randomUUID();
-      const claudeChat = importChat(runtime, "claude", claudeSession);
-      moveTo(claudeChat, moved);
-      const claude = runtime.controller.queue({ conversationId: claudeChat, content: "Continue in the worktree." });
-      expect(claude.turn.providerSessionBefore).toBeNull();
-      runtime.controller.start(claude.turn.id);
-      expect(runtime.provider.input).toMatchObject({ cwd: moved });
-      expect(runtime.provider.input?.sessionId).toBeUndefined();
-      expect(runtime.provider.input?.prompt).toContain("Earlier imported work");
-      runtime.provider.resolve({ status: "completed", sessionId: randomUUID() });
+      const sessionId = randomUUID();
+      const chat = importChat(runtime, "claude", sessionId);
+      moveTo(chat, moved);
+      const send = runtime.controller.queue({ conversationId: chat, content: "Continue in the worktree." });
+      runtime.controller.start(send.turn.id);
+      // An older Claude Code looks only in B's project folder; the transcript is still in A's.
+      const replacement = runtime.provider.freshSession({ priorCleanup: "confirmed", sessionStoredElsewhere: true });
+      expect(replacement?.prompt).toContain("Earlier imported work");
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), conversationId: chat, type: "session", sessionId: "fresh-in-b" });
+      runtime.provider.resolve({ status: "completed", sessionId: "fresh-in-b", text: "Continued fresh in B" });
       await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(send.turn.id)).toMatchObject({ status: "completed", providerSessionAfter: "fresh-in-b" });
+      expect(runtime.store.conversation(chat).providerSessionId).toBe("fresh-in-b");
+      expect(runtime.controller.queue({ conversationId: chat, content: "And again." }).turn.providerSessionBefore).toBe("fresh-in-b");
+    } finally { await runtime.controller.dispose(); runtime.store.close(); }
+  });
 
-      const codexSession = randomUUID();
-      const codexChat = importChat(runtime, "codex", codexSession);
-      moveTo(codexChat, moved);
-      const codex = runtime.controller.queue({ conversationId: codexChat, content: "Continue in the worktree." });
-      expect(codex.turn.providerSessionBefore).toBe(codexSession);
-      runtime.controller.start(codex.turn.id);
-      expect(runtime.provider.input).toMatchObject({ sessionId: codexSession, cwd: moved });
-      runtime.provider.resolve({ status: "completed", sessionId: codexSession });
+  it("releases an imported Claude session whose stored transcript Claude Code could not reach, after the fallback was declined", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }) });
+    try {
+      const { moved, moveTo } = await movable(runtime);
+      const sessionId = randomUUID();
+      const chat = importChat(runtime, "claude", sessionId);
+      moveTo(chat, moved);
+      const send = runtime.controller.queue({ conversationId: chat, content: "Continue in the worktree." });
+      runtime.controller.start(send.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), conversationId: chat, type: "text", text: "Partial" });
+      expect(runtime.provider.freshSession()).toBeNull();
+      const message = `No conversation found with session ID: ${sessionId}`;
+      runtime.provider.resolve({ status: "failed", sessionId, error: message,
+        failure: { reason: "provider-error", message, sessionUnavailable: true, sessionStoredElsewhere: true } });
       await flushTurnControllerTestPromises();
+      const errors = (runtime.store.conversationDetail(chat)?.activities ?? []).filter(({ kind, turnId }) => kind === "error" && turnId === send.turn.id);
+      expect(errors.map(({ title }) => title)).not.toContain("The original Claude Code session for this imported chat is no longer available.");
+      expect(runtime.store.conversation(chat).providerSessionId).toBeNull();
+      const retry = runtime.controller.queue({ conversationId: chat, content: "Try again." });
+      expect(retry.turn.providerSessionBefore).toBeNull();
+      runtime.controller.start(retry.turn.id);
+      expect(runtime.provider.input?.prompt).toContain("Earlier imported work");
     } finally { await runtime.controller.dispose(); runtime.store.close(); }
   });
 
@@ -175,13 +222,14 @@ describe("a session without a backing in a moved checkout", () => {
     } finally { runtime.store.close(); }
   });
 
-  it("follows a native fork moved before its first send: Codex resumes it with inherited coverage, Claude starts fresh", async () => {
-    for (const providerId of ["codex", "claude"] as const) {
+  it("follows a native fork moved before its first send: Codex, Claude and Pi resume it with inherited coverage", async () => {
+    for (const providerId of ["codex", "claude", "pi"] as const) {
       const runtime = await createTurnControllerTestRuntime();
       try {
         const { moved, moveTo } = await movable(runtime);
-        if (providerId === "claude") {
-          runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
+        if (providerId !== "codex") {
+          runtime.store.updateConversation(runtime.conversationId, { providerId,
+            modelSelection: providerId === "claude" ? claudeSelection : piSelection });
         }
         const first = await nativeTurn(runtime, "first");
         const parent = runtime.store.conversation(runtime.conversationId);
@@ -197,16 +245,13 @@ describe("a session without a backing in a moved checkout", () => {
         moveTo(child.id, moved);
         const send = runtime.controller.queue({ conversationId: child.id, content: "Continue the fork in a worktree" });
         runtime.controller.start(send.turn.id);
-        expect(runtime.provider.input).toMatchObject({ cwd: moved });
-        if (providerId === "codex") {
-          expect(send.turn.providerSessionBefore).toBe("fork-native");
-          expect(runtime.provider.input?.prompt).not.toContain("first answer");
-        } else {
-          expect(send.turn.providerSessionBefore).toBeNull();
-          expect(runtime.provider.input?.prompt).toContain("first answer");
-        }
-        const session = providerId === "codex" ? "fork-native" : "claude-fork-fresh";
-        runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: session });
+        expect(runtime.provider.input).toMatchObject({ cwd: moved, sessionId: "fork-native" });
+        expect(send.turn.providerSessionBefore).toBe("fork-native");
+        expect(runtime.provider.input?.prompt).not.toContain("first answer");
+        // Pi continues a copy of the fork made in the moved checkout; the fork had no backing to move yet.
+        const session = providerId === "pi" ? "fork-copy" : "fork-native";
+        runtime.provider.emit({ ...turnControllerTestIdentity(runtime), conversationId: child.id, type: "session", sessionId: session,
+          ...(providerId === "pi" ? { forkedFrom: "fork-native" } : {}) });
         runtime.provider.resolve({ text: "Fork continued", sessionId: session });
         await flushTurnControllerTestPromises();
         const backing = runtime.store.orchestration.backings.find({ threadId: child.id, providerId,
@@ -216,7 +261,7 @@ describe("a session without a backing in a moved checkout", () => {
           .map(({ id }) => id);
         expect(inherited.length).toBeGreaterThan(0);
         // The native fork already holds its inherited history; the next delta must not send it again.
-        if (providerId === "codex") expect(backing.coveredItemIds).toEqual(expect.arrayContaining(inherited));
+        expect(backing.coveredItemIds).toEqual(expect.arrayContaining(inherited));
       } finally { runtime.store.close(); }
     }
   });
@@ -292,12 +337,13 @@ describe("native history control after a relocation", () => {
     const runtime = await createTurnControllerTestRuntime();
     try {
       const { moved, moveTo } = await movable(runtime);
-      runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
-      const first = await nativeTurn(runtime, "first", runtime.conversationId, "claude-native");
+      // Kimi ACP has not shown that it resumes a session from another cwd.
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "kimi", modelSelection: kimiSelection });
+      const first = await nativeTurn(runtime, "first", runtime.conversationId, "kimi-native");
       moveTo(runtime.conversationId, moved);
-      const inB = await nativeTurn(runtime, "in-b", runtime.conversationId, "claude-fresh-b");
+      const inB = await nativeTurn(runtime, "in-b", runtime.conversationId, "kimi-fresh-b");
       expect(inB.turn.providerSessionBefore).toBeNull();
-      const deps = revertingTo(runtime, "first", "claude-native");
+      const deps = revertingTo(runtime, "first", "kimi-native");
       await expect(rollbackTo(runtime, deps, first.turn.id, "rollback-fresh-harness"))
         .resolves.toMatchObject({ transfer: "portable", retainedTurnId: first.turn.id });
       expect(deps.providers.nativeConversation).not.toHaveBeenCalled();

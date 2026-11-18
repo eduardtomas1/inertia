@@ -69,16 +69,30 @@ export class ProviderBackingRepository {
   }
 
   /**
+   * The checkout a native session was created in, as far as V2 recorded it: the oldest run whose turn ended
+   * on the session (a relocation never creates one), else the native fork that created it. Null when nothing
+   * records it, as for a session last used by a turn from before V2 runs. A harness that keeps its native
+   * store per checkout finds the session there (T3 `cursorStoreCwd`).
+   */
+  sessionOriginWorkspaceKey(threadId: string, nativeSessionId: string): string | null {
+    return this.sessionCheckout(threadId, nativeSessionId, "ASC");
+  }
+
+  /**
    * The checkout a native session without a backing last ran in, as far as
    * V2 recorded it: the newest run whose turn ended on the session, else the
    * native fork that created it. Null when nothing records it, as for a
    * session last used by a turn from before V2 runs.
    */
   sessionWorkspaceKey(threadId: string, nativeSessionId: string): string | null {
+    return this.sessionCheckout(threadId, nativeSessionId, "DESC");
+  }
+
+  private sessionCheckout(threadId: string, nativeSessionId: string, order: "ASC" | "DESC"): string | null {
     const run = this.database.prepare(`SELECT json_extract(run.payload_json, '$.workspaceKey') AS workspace_key
       FROM agent_turns AS turn JOIN orchestration_v2_entities AS run ON run.kind = 'run' AND run.id = turn.run_id
       WHERE turn.conversation_id = ? AND turn.provider_session_after = ?
-      ORDER BY turn.requested_at DESC, turn.rowid DESC LIMIT 1`).get(threadId, nativeSessionId) as
+      ORDER BY turn.requested_at ${order}, turn.rowid ${order} LIMIT 1`).get(threadId, nativeSessionId) as
       { workspace_key: string | null } | undefined;
     if (run?.workspace_key) return run.workspace_key;
     const row = this.events.projection("fork-native-backing", threadId);
@@ -161,7 +175,36 @@ export class ProviderBackingRepository {
     }).immediate();
   }
 
-  observeSession(turn: AgentTurn, nativeSessionId: string, observer?: AttemptObserver): StaleAttemptObservation | null {
+  /**
+   * The run's harness continues `nativeSessionId`, a copy of the resumed `fromNativeSessionId` made in the run's
+   * checkout (Pi; T3 keeps the provider thread and repoints its native ref). The backing this run took over moves
+   * to the copy with its coverage, and the attempt and the run's handoff follow it, before the session is observed.
+   * Nothing is written unless the run's current attempt works on the resumed session's backing in its checkout.
+   */
+  forkSession(turn: AgentTurn, fromNativeSessionId: string, nativeSessionId: string, observer?: AttemptObserver): StaleAttemptObservation | null {
+    const run = this.run(turn.runId);
+    if (!run || fromNativeSessionId === nativeSessionId) return null;
+    const stale = staleAttemptObservation(this.events, run, observer);
+    if (stale) return stale;
+    this.database.transaction(() => {
+      const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", run.attemptId)?.value);
+      const source = this.latest(run.threadId, run.providerInstanceId, run.workspaceKey, fromNativeSessionId);
+      if (attempt.nativeSessionId !== fromNativeSessionId || !source || source.status === "retired" || source.lastRunId !== run.id
+        || this.latest(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId)) return;
+      const handoff = this.handoff(run.id);
+      const followed = handoff?.targetBackingId === source.id && (handoff.state === "prepared" || handoff.state === "dispatching");
+      this.commit(run.threadId, run.projectId, { type: "provider.backing-forked", payload: { runId: run.id,
+        attemptId: run.attemptId, backingId: source.id, fromNativeSessionId, nativeSessionId,
+        handoffId: followed ? handoff.id : null } });
+    }).immediate();
+    return null;
+  }
+
+  /**
+   * `forkedFrom`: the session the harness copied into `nativeSessionId` (see `forkSession`). When that session had
+   * no backing to move (a native fork before its first send), the copy inherits the native fork's coverage.
+   */
+  observeSession(turn: AgentTurn, nativeSessionId: string, observer?: AttemptObserver, forkedFrom?: string): StaleAttemptObservation | null {
     const run = this.run(turn.runId);
     if (!run) return null;
     const stale = staleAttemptObservation(this.events, run, observer);
@@ -173,7 +216,10 @@ export class ProviderBackingRepository {
       workspaceKey: run.workspaceKey, nativeSessionId });
     const timestamp = new Date().toISOString();
     const handoff = this.handoff(run.id);
-    const inherited = previous ? null : this.nativeForkCoverage(run.threadId, run.providerInstanceId, nativeSessionId);
+    const copied = forkedFrom !== undefined && forkedFrom !== nativeSessionId && turn.providerSessionBefore === forkedFrom
+      ? forkedFrom : null;
+    const inherited = previous ? null : this.nativeForkCoverage(run.threadId, run.providerInstanceId, nativeSessionId)
+      ?? (copied ? this.nativeForkCoverage(run.threadId, run.providerInstanceId, copied) : null);
     const moved = previous || inherited ? [] : this.movedBackings(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
     const [carried] = moved;
     const status = previous?.lastRunId === run.id ? previous.status
@@ -377,8 +423,10 @@ export class ProviderBackingRepository {
     if (!row) return;
     const before = providerBackingSchema.parse((JSON.parse(row.payload_json) as { beforeDispatch: unknown }).beforeDispatch);
     if (before.status === "retired" || before.lastRunId === runId) return;
+    // A backing that moved to a copy of its session during the run (`forkSession`) keeps the copy: it holds the
+    // same history the backing held before dispatch.
     this.commit(backing.threadId, backing.projectId, { type: "provider.backing-restored", payload: { runId,
-      backing: providerBackingSchema.parse({ ...before, coveredItemIds: backing.coveredItemIds,
+      backing: providerBackingSchema.parse({ ...before, nativeSessionId: backing.nativeSessionId, coveredItemIds: backing.coveredItemIds,
         coverageComplete: backing.coverageComplete, updatedAt: new Date().toISOString() }) } });
   }
 

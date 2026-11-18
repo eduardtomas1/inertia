@@ -11,6 +11,16 @@ import { broadcastTurnConversationShell } from "./turn-controller-support";
 import type { ActiveTurn, TurnControllerHooks } from "./turn-controller-types";
 import { turnHistoryInjection } from "./turn-history-injection";
 
+/**
+ * The imported session when a refusal means it is gone, so the chat fails closed and keeps its link. Not when
+ * Claude Code only could not reach a transcript that is still stored under another project folder of its home
+ * (an older Claude Code resuming from a moved checkout): that turn starts fresh like any other.
+ */
+function importedSessionFailingClosed(store: RuntimeStore, active: ActiveTurn, storedElsewhere: boolean | undefined) {
+  const imported = importedSession(store, active.conversation.id, active.providerInput.sessionId);
+  return imported && !(imported.providerId === "claude" && storedElsewhere === true) ? imported : null;
+}
+
 export function providerSessionUnavailable(result: ProviderRunResult): boolean {
   return result.status === "failed" && result.failure?.sessionUnavailable === true;
 }
@@ -33,16 +43,18 @@ export function importedSessionUnavailableMessage(
   active: ActiveTurn,
   result: ProviderRunResult,
 ): string | null {
-  const provider = providerSessionUnavailable(result) ? importedSession(store, active.conversation.id, active.providerInput.sessionId)?.providerId : null;
+  const provider = providerSessionUnavailable(result)
+    ? importedSessionFailingClosed(store, active, result.failure?.sessionStoredElsewhere)?.providerId : null;
   return provider ? `The original ${cliProviderLabel(provider)} session for this imported chat is no longer available.` : null;
 }
 
 export function releaseUnavailableProviderSession(
   store: RuntimeStore,
   active: ActiveTurn,
+  result: ProviderRunResult,
 ): void {
   const sessionId = active.providerInput.sessionId;
-  if (importedSession(store, active.conversation.id, sessionId)) return;
+  if (importedSessionFailingClosed(store, active, result.failure?.sessionStoredElsewhere)) return;
   // Without a session id the lookup would match any backing of the route.
   const backing = sessionId ? store.orchestration.backings.find({ threadId: active.conversation.id,
     providerId: active.turn.providerId, workspaceKey: store.conversationPath(active.conversation.id),
@@ -78,7 +90,7 @@ export function applyFreshSessionFallback(
     || active.reasoningId !== null
     || active.approvalIds.size > 0
     || active.inputIds.size > 0
-    || importedSession(store, active.conversation.id, expectedSessionId) !== null
+    || importedSessionFailingClosed(store, active, prior.sessionStoredElsewhere) !== null
     || store.turnLedgerRepository.turnHasProviderActivity(
       active.conversation.id,
       active.turn.id,
@@ -104,6 +116,7 @@ export function applyFreshSessionFallback(
   active.attemptId = restarted.attemptId;
   const {
     sessionId: _sessionId,
+    sessionOriginCwd: _sessionOriginCwd,
     performanceModeTransition: _performanceModeTransition,
     goalContinuationExpected: _goalContinuationExpected,
     nativeContinuation: _nativeContinuation,

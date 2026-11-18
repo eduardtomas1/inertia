@@ -35,9 +35,18 @@ const STARTUP_FAILURE_MESSAGES: Record<SDKStartupFailureReason, string> = {
 
 export function claudeSessionUnavailable(message: SDKMessage): boolean {
   if (message.type !== "result" || message.subtype === "success") return false;
-  return message.startup_failure_reason === "worktree_resume_refused"
-    || (message.num_turns === 0 && message.errors.some((error) =>
-      typeof error === "string" && error.startsWith("No conversation found with session ID")));
+  return message.startup_failure_reason === "worktree_resume_refused" || claudeSessionNotFound(message);
+}
+
+/**
+ * Claude Code did not find the session to resume ("No conversation found with session ID"), as opposed to a
+ * deliberate refusal such as `worktree_resume_refused`. Only this answer can come from a Claude Code that
+ * looks for transcripts in the cwd's project folder alone.
+ */
+export function claudeSessionNotFound(message: SDKMessage): boolean {
+  if (message.type !== "result" || message.subtype === "success" || message.startup_failure_reason !== undefined) return false;
+  return message.num_turns === 0 && message.errors.some((error) =>
+    typeof error === "string" && error.startsWith("No conversation found with session ID"));
 }
 
 export function claudeStartupFailure(

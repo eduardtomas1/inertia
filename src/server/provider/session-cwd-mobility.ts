@@ -20,17 +20,21 @@ const SESSION_CWD_MOBILITY: Readonly<Record<AgentHarnessId, SessionCwdMobility>>
   "codex-app-server": "resume",
   // `codex exec resume` with another folder is not covered by a fixture.
   "codex-cli": "fresh",
-  // Claude Code keeps each transcript under the project folder named after the
-  // session's cwd; Inertia resumes an imported session from its original cwd
-  // (src/server/cli-import/resume-cwd.ts). A resume from another cwd is unverified.
-  "claude-agent-sdk": "fresh",
-  "claude-cli": "fresh",
-  // findPiSessionFile refuses a session whose header names another workspace.
-  // T3 forks the session file into the new cwd (bebaf3ec0); not adopted yet.
-  "pi-rpc": "fresh",
-  // CursorSdkSession refuses a stored agent whose cwd is another workspace.
-  // T3 resumes from the recorded store cwd (a18a458f2); not adopted yet.
-  "cursor-sdk": "fresh",
+  // `--resume <id>` with the new cwd: Claude Code finds the transcript in the
+  // cwd's project folder, then in its git worktrees' folders, then in the only
+  // project folder of the Claude home that holds it, and keeps appending to that
+  // file (observed with 2.1.299 and the bundled 2.1.319; fixtures in
+  // tests/server/claude-moved-checkout-resume.test.ts). An older Claude Code
+  // (2.1.98) answers "No conversation found with session ID", which starts the
+  // turn fresh with the portable history (G9 fallback).
+  "claude-agent-sdk": "resume",
+  "claude-cli": "resume",
+  // Pi records the checkout a session was created in; the harness continues a `pi --fork` copy made in
+  // the new checkout and the backing follows the copy (`provider.backing-forked`; T3 bebaf3ec0).
+  "pi-rpc": "resume",
+  // Cursor keys its store by checkout: a moved chat's agent is resumed from the store of the checkout
+  // it was created in (`sessionOriginCwd`: the oldest run that ended on it) and runs in the new one (T3 a18a458f2).
+  "cursor-sdk": "resume",
   "cursor-acp": "fresh",
   "cursor-cli": "fresh",
   "kimi-acp": "fresh",

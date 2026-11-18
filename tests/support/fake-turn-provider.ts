@@ -3,6 +3,7 @@ import {
   providerRunTerminal,
   type ProviderEvent,
   type ProviderFreshSessionFallback,
+  type ProviderFreshSessionPrior,
   type ProviderRunCallbacks,
   type ProviderRunInput,
   type ProviderRunResult,
@@ -95,9 +96,9 @@ export class FakeTurnProvider implements TurnProviderRuntime {
    * cleanup is confirmed: asks for the fresh-session fallback and, when it is
    * granted, routes later events to the replacement attempt.
    */
-  freshSession(): ProviderFreshSessionFallback | null {
+  freshSession(prior: ProviderFreshSessionPrior = { priorCleanup: "confirmed" }): ProviderFreshSessionFallback | null {
     const callbacks = this.callbacks;
-    const replacement = callbacks?.freshSessionFallback?.({ priorCleanup: "confirmed" }) ?? null;
+    const replacement = callbacks?.freshSessionFallback?.(prior) ?? null;
     if (callbacks && replacement?.onEvent) this.callbacks = { ...callbacks, onEvent: replacement.onEvent };
     return replacement;
   }

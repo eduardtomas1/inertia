@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { startCursorSdkRun } from "../../src/server/provider/cursor-sdk-harness";
+import { CursorSdkStoreMissingError } from "../../src/server/provider/cursor-sdk-store";
 import type { openCursorSdkWorker } from "../../src/server/provider/cursor-sdk-process";
 import type { CursorSdkStart } from "../../src/node/cursor-sdk-protocol";
 import { nativeProviderRunInput } from "./model-route-fixture";
@@ -15,7 +16,19 @@ afterEach(async () => { await Promise.all(roots.splice(0).map((path) => rm(path,
 async function fixture(body?: (input: CursorSdkStart, handle: Parameters<typeof openCursorSdkWorker>[0]["handle"]) => Promise<unknown>) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "cursor-sdk-harness-"))); roots.push(root);
   const store = join(root, "store");
-  const resolveStateRoot = vi.fn(async () => { await mkdir(store, { recursive: true }); return await realpath(store); });
+  const originStores = { missing: new Set<string>(), broken: new Set<string>() };
+  const resolveStateRoot = vi.fn(async (_configuration: unknown, workspace: string, _instance: string, existing?: boolean) => {
+    if (existing && originStores.missing.has(workspace)) throw new CursorSdkStoreMissingError();
+    if (existing && originStores.broken.has(workspace)) throw new Error("EACCES");
+    if (existing) return `${workspace}#origin-store`;
+    await mkdir(store, { recursive: true }); return await realpath(store);
+  });
+  /** Agent id → whether its own store holds a journal. */
+  const agentStores = new Map<string, boolean>();
+  const resolveAgentStateRoot = vi.fn(async (_configuration: unknown, _instance: string, agentId: string, create: boolean) => {
+    if (create && !agentStores.has(agentId)) agentStores.set(agentId, false);
+    return agentStores.has(agentId) ? { directory: `${root}/agent-store-${agentId}`, journal: agentStores.get(agentId)! } : null;
+  });
   const resolveSecret = vi.fn(async () => "synthetic-test-token");
   const events: AgentHarnessEvent[] = [];
   const close = vi.fn(async () => undefined);
@@ -35,8 +48,9 @@ async function fixture(body?: (input: CursorSdkStart, handle: Parameters<typeof 
   const options: AgentHarnessStartOptions = { input, executable: "unused-cli", environment: {}, providerNativeToolsAvailable: true,
     cursorSdk: { stateRoot: join(root, "providers"), credentials: { resolve: resolveSecret, status: async () => ({ hasSecret: true, credentialGeneration: "generation" }) } },
     callbacks: { onEvent: (event: AgentHarnessEvent) => events.push(event) } };
-  return { start: () => startCursorSdkRun(options, { openWorker, resolveStateRoot }), startWithDefaultStorage: () => startCursorSdkRun(options, { openWorker }),
-    options, events, request, close, openWorker, store, resolveStateRoot, resolveSecret };
+  return { start: () => startCursorSdkRun(options, { openWorker, resolveStateRoot, resolveAgentStateRoot }),
+    startWithDefaultStorage: () => startCursorSdkRun(options, { openWorker }),
+    options, events, request, close, openWorker, store, resolveStateRoot, resolveAgentStateRoot, agentStores, originStores, resolveSecret };
 }
 
 describe("Cursor SDK production harness", () => {
@@ -47,6 +61,68 @@ describe("Cursor SDK production harness", () => {
     expect(f.request).toHaveBeenCalledWith("start", expect.objectContaining({ apiKey: "synthetic-test-token", nativeTools: "read", stateRoot: f.store,
       authority: expect.objectContaining({ conversationId: f.options.input.conversationId, runId: f.options.input.runId, turnId: f.options.input.turnId, workspace: f.options.input.cwd }) }), 1800000);
     expect(f.close).toHaveBeenCalledOnce(); expect(JSON.stringify(f.events)).not.toContain("synthetic-test-token");
+  });
+  it("runs a moved chat's agent from its own store, adopted from the store of the checkout it was created in", async () => {
+    const f = await fixture();
+    const origin = join(f.options.input.cwd, "removed-original-checkout");
+    f.options.input = { ...f.options.input, sessionId: "native-session", sessionOriginCwd: origin };
+    expect(await f.start().result).toMatchObject({ status: "completed", sessionId: "native-session" });
+    // The original checkout is a recorded key: it may be gone, and its store is looked up, never created.
+    expect(f.resolveStateRoot).toHaveBeenCalledWith(f.options.cursorSdk, origin, expect.any(String), true);
+    expect(f.resolveAgentStateRoot.mock.calls.map(([, , agentId, create]) => [agentId, create]))
+      .toEqual([["native-session", false], ["native-session", true]]);
+    const agentStore = `${f.options.input.cwd}/agent-store-native-session`;
+    const start = f.request.mock.calls.find(([method]) => method === "start")![1] as CursorSdkStart;
+    expect(start).toMatchObject({ sessionId: "native-session", storeWorkspace: origin, stateRoot: agentStore,
+      agentStateRoot: agentStore, adoptFrom: `${origin}#origin-store`, authority: expect.objectContaining({ workspace: f.options.input.cwd }) });
+    // An adopted agent no longer needs its original store.
+    f.agentStores.set("native-session", true); f.request.mockClear(); f.resolveStateRoot.mockClear();
+    await f.start().result;
+    expect(f.resolveStateRoot).not.toHaveBeenCalledWith(f.options.cursorSdk, origin, expect.any(String), true);
+    const again = f.request.mock.calls.find(([method]) => method === "start")![1] as CursorSdkStart;
+    expect(again).toMatchObject({ agentStateRoot: agentStore, storeWorkspace: origin });
+    expect(again).not.toHaveProperty("adoptFrom");
+  });
+  it("keeps running an adopted agent from its own store back in its original checkout, and other agents from theirs", async () => {
+    const f = await fixture();
+    f.agentStores.set("adopted-session", true);
+    for (const [sessionId, agentStateRoot] of [["adopted-session", `${f.options.input.cwd}/agent-store-adopted-session`],
+      ["local-session", undefined]] as const) {
+      f.request.mockClear();
+      f.options.input = { ...f.options.input, sessionId, sessionOriginCwd: undefined as unknown as string };
+      await f.start().result;
+      expect(f.resolveAgentStateRoot).toHaveBeenCalledWith(f.options.cursorSdk, expect.any(String), sessionId, false);
+      const start = f.request.mock.calls.find(([method]) => method === "start")![1] as CursorSdkStart;
+      expect(start.agentStateRoot).toBe(agentStateRoot);
+      expect(start.stateRoot).toBe(agentStateRoot ?? f.store);
+      expect(start).not.toHaveProperty("adoptFrom");
+      expect(start).not.toHaveProperty("storeWorkspace");
+    }
+    expect(f.agentStores.has("local-session")).toBe(false);
+  });
+  it("reports a moved agent whose stores are gone unavailable before starting a worker, and fails other lookup errors as storage errors", async () => {
+    for (const kind of ["missing", "broken"] as const) {
+      const f = await fixture();
+      const origin = join(f.options.input.cwd, "original-checkout");
+      f.originStores[kind].add(origin);
+      f.options.input = { ...f.options.input, sessionId: "native-session", sessionOriginCwd: origin };
+      const result = await f.start().result;
+      expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true });
+      expect(result.failure?.sessionUnavailable).toBe(kind === "missing" ? true : undefined);
+      if (kind === "broken") expect(result.error).toContain("storage is unavailable");
+      expect(f.openWorker).not.toHaveBeenCalled(); expect(f.resolveSecret).not.toHaveBeenCalled();
+      expect(f.agentStores.has("native-session")).toBe(false);
+    }
+  });
+  it("ignores a session origin without a session or in the same checkout", async () => {
+    for (const resumed of [false, true]) {
+      const f = await fixture();
+      f.options.input = { ...f.options.input, ...(resumed
+        ? { sessionId: "native-session", sessionOriginCwd: f.options.input.cwd } : { sessionOriginCwd: "/elsewhere" }) };
+      expect(await f.start().result).toMatchObject({ status: "completed" });
+      expect(f.resolveStateRoot).toHaveBeenCalledWith(f.options.cursorSdk, f.options.input.cwd, expect.any(String));
+      expect(f.request.mock.calls.find(([method]) => method === "start")![1]).not.toHaveProperty("storeWorkspace");
+    }
   });
   it("rejects foreign application event authority", async () => {
     const f = await fixture(async (input, handle) => {

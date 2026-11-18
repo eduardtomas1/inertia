@@ -2771,6 +2771,9 @@ Before this entry every harness resumed the conversation's session in the new
 checkout on the first turn after a move; Pi and the Cursor SDK then refused
 it. They now start fresh with the portable history.
 
+(Updated 2026-11-18: Claude, Pi and the Cursor SDK now resume too; see
+"Checkout mobility for Claude, Pi and the Cursor SDK".)
+
 Deliberate differences from T3 Code:
 
 - Only Codex App Server resumes across checkouts. Claude, Pi, Cursor SDK and
@@ -4012,3 +4015,1015 @@ under `caffeinate -i`: `typecheck`, `lint` and `check:architecture` passed;
 14 skipped); `npm run test:portable` passed 4,444 tests with 31 skipped in
 271 files (269 passed, 2 skipped). The full `npm run check`, the Electron
 scenarios and a packaged build were not run.
+
+## Checkout mobility for Claude, Pi and the Cursor SDK — 2026-11-18
+
+Status: uncommitted on top of `e375dc1b` (PR #686), macOS arm64, Node 22, with
+the Cursor SDK store tests also run on Linux. T3 anchors are at `b387e3a17`.
+This closes the open items of G11 part 1b (section 3 of the G11 completion
+entry): a chat that moves to another checkout now keeps its native
+conversation on Claude, Pi and the Cursor SDK as it already did on Codex App
+Server, following T3's `restart_and_resume` on a workspace change
+(`ProviderSessionTransitionPolicy.ts:73-75`) for every provider.
+
+The C5 table of section 3 now reads:
+
+| Harness | How the session follows the chat | Mobility |
+| --- | --- | --- |
+| `codex-app-server` | `thread/resume` with the new `cwd` (unchanged) | resume |
+| `claude-agent-sdk`, `claude-cli` | `--resume <id>` with the new `cwd`; Claude Code finds the transcript in the cwd's project folder, the repository's worktrees, or the only project folder of the Claude home holding it, and keeps appending there. Inertia's transcript reads look it up the same way | resume |
+| `pi-rpc` | The harness copies the session into the run's checkout with `pi --fork` and continues the copy; `provider.backing-forked` moves the backing to the copy | resume |
+| `cursor-sdk` | The first run in another checkout copies the agent's records from its checkout's store into a store of its own and resumes it there from then on | resume |
+| the rest | not proven | fresh |
+
+An older Claude Code (2.1.98 was checked) refuses a resume from another
+folder; the turn then starts fresh with the portable history (G9).
+
+The implementation was split in two parallel packages (Claude; Pi and Cursor
+SDK), merged, and reviewed independently in two rounds per package. Every
+finding was fixed except the ones recorded under each package's open risks.
+
+### Claude
+
+T3 resumes a Claude thread by native session id with `cwd` = the new workspace
+on any workspace change (`ProviderSessionTransitionPolicy.ts:73-75`,
+`restart_and_resume`) and leaves the lookup to Claude Code. Its fork says "A
+moved project still has its transcript under the original cwd. Let the SDK
+find the session by ID within this Claude home" (`ClaudeAdapterV2.ts:14535`).
+`claudeTranscriptState` (`:13918`) scans every project folder for
+`<id>.jsonl`. When Claude Code cannot find a session on resume, the next start
+is fresh (`629d5083b`). T3 has no Claude Code version gate.
+
+#### What Claude Code does with `--resume` from another cwd (run, not only read)
+
+Experiment: the real binaries run without credentials. Each run had a
+temporary `HOME` and `CLAUDE_CONFIG_DIR`, a dummy API key, and
+`ANTHROPIC_BASE_URL` pointing at a fake Messages API on 127.0.0.1 that recorded
+each request and streamed a short reply. Each run had a 60 s kill and used
+`-p --output-format stream-json --verbose --tools ""`. Turn 1 ran in
+repository A with `--session-id`. Turn 2 ran with `--resume <id>` from either
+(i) a `git worktree add` checkout of A or (ii) an unrelated folder. The scripts were kept outside the repository.
+
+| Claude Code | (i) worktree of A | (ii) unrelated folder |
+| --- | --- | --- |
+| 2.1.319 (bundled with SDK 0.3.319) | resumes; the request carries the prior history (3 messages); new entries are appended to the original file in A's project folder with `cwd` = the new folder; no copy, no `relocated` marker; the model gets a "# Environment update" reminder | same as (i) |
+| 2.1.299 (user install) | (not run) | same as 2.1.319 |
+| 2.1.98 (Homebrew cask) | refuses | refuses |
+
+A 2.1.98 refusal is a single stream-json line on stdout: a `result` with
+`subtype: error_during_execution`, `num_turns: 0`,
+`errors: ["No conversation found with session ID: <id>"]`, a **new random
+`session_id`** and no `system/init`. The process exits with code 1.
+
+Code reading of the 2.1.319 binary agrees. The resume loader runs
+`_Z(id) ?? xgr(id) ?? Pgr(id)`, in this order:
+
+- `_Z(id)` reads `<id>.jsonl` in the cwd's project folder.
+- `xgr(id)` tries the same file in the project folders of every
+  `git worktree list` entry (`tengu_resume_worktree_fallback`).
+- `Pgr(id)` calls `VKe`, which scans every folder under `projects/` and
+  accepts exactly one match (`tengu_transcript_id_scan_fallback`).
+
+The binary of 2.1.98 has neither telemetry string; 2.1.299 has both.
+`relocated`/`relocatedCwd` records come only from `relocateSessionTranscript`,
+which moves the file when a session changes directory inside a run (`cd`, a
+worktree tool). A resume never writes them.
+
+The SDK side, run with SDK 0.3.319:
+
+- `getSessionMessages(id, {dir: B})` without a store finds the session when B
+  is a worktree of A. It returns `[]` for the unrelated folder. Without `dir`,
+  it scans everything.
+- With a `sessionStore`, `getSessionMessages` (`NXe`) and `forkSession`
+  (`FXe`) call `store.load({projectKey: In(dir)})` and have no fallback. This
+  is the path Inertia uses.
+
+#### Mechanism
+
+- **Mobility.** `claude-agent-sdk` and `claude-cli` are now `resume`
+  (`src/server/provider/session-cwd-mobility.ts:23-31`). A moved Claude chat
+  relocates its ready, coverage-complete backing exactly as Codex App Server
+  does (`provider.backing-relocated`, delta handoff only). It resumes with
+  `resume` = the original id and `cwd` = the new checkout. `claude-cli` has no
+  registered harness. It would launch the same Claude Code, so it gets the
+  same value, and the table still lists every harness.
+- **Inertia's transcript reads follow the session.**
+  `ScopedClaudeTranscriptStore.sourceProjectKey`
+  (`src/server/provider/claude-native-conversation.ts:89`) backs three reads:
+  `readClaudePersistedNativeHead` (the settled head after every run), native
+  rollback, and native fork. It looks for the source in the cwd's project
+  folder first. Failing that, it takes exactly one other folder of the same
+  Claude home that holds `<id>.jsonl`. This is Claude Code's own order, minus
+  the git-worktree step.
+  - Folders are read with `opendir`. Symlinked entries are skipped, and so are
+    names that fail the project-key check. The scan stops after 20,000
+    folders. The abort signal and filesystem test seam are checked on every
+    step.
+  - The chosen file then goes through the existing `plainPathComponents`,
+    bounded-read and changed-during-read checks.
+  - None or several matches leave the cwd's folder, which reads as
+    `native-transcript-unavailable`.
+  - A configured `CLAUDE_CODE_PROJECT_DIR_NAME` is never widened.
+  - The folder found is remembered per (Claude home, session id), up to 256
+    entries in memory. The next read checks the cwd's folder, then the
+    remembered folder (a regular file, not a symlink), and runs the full
+    search only if the transcript is gone from there. Without this, a moved
+    chat rescanned the whole home on every settle, up to 20,000 sequential
+    `lstat` calls inside the 2 s head-read deadline. The remembered path skips
+    the uniqueness check.
+  - Trade-off, decided: a second copy that appears after the folder was
+    remembered is not noticed by head reads, rollback or fork. They keep
+    using the remembered file, which is the one Claude Code had been
+    appending to. The evidence that lifts an import's fail-closed rule
+    (below) never uses the memory; it always runs the full unique search.
+  - A native fork is still written to the cwd's project folder. Any Claude
+    Code version resumes it there directly. If Claude Code never ran in that
+    checkout, the folder is created first (`ensureProjectFolder`): mode 0700,
+    directly under a canonical, non-symlinked `projects` folder whose identity
+    is checked again after `mkdir`. An existing folder (`EEXIST`) is accepted.
+    In both cases the persist path's checks still apply (plain components,
+    `realpath` equal to the path, a directory and not a symlink, parent
+    identity during the exclusive create). Before this fix, such a fork was
+    refused with `unsafe-native-transcript-directory`.
+- **Refusal after a move (question 3).** A `No conversation found` result
+  with `num_turns: 0` was already `sessionUnavailable`
+  (`src/server/provider/claude-startup-failure.ts:36`). The G9 wrapper
+  (`src/server/provider/fresh-session-fallback.ts`) restarts the turn on a
+  fresh session with the full portable history. The relocated backing is not
+  left `ready`. The 2.1.98 shape (only a `result`, a foreign session id) is now
+  a fixture. No version gate, as in T3.
+- **Imported sessions (question 4).**
+  - `unbackedSessionRanHere` applies only to `fresh` harnesses, so an imported
+    Claude session moved to another checkout now resumes there. Its cwd is
+    still the checkout: `importedResumeCwd` is unchanged and keeps the
+    original spelling only for the same checkout.
+  - An imported session that a provider refuses still fails closed: no G9
+    fallback, the link is kept, and the error reads "The original … session
+    for this imported chat is no longer available". This holds whatever the
+    checkout, for every provider. Codex App Server finds threads by id under
+    `CODEX_HOME`, and a current Claude Code searches its whole home, so a
+    refusal means the session is gone.
+  - The one exception is a Claude refusal whose transcript Inertia still
+    finds. The Claude harness runs `claudeSessionStoredElsewhere`
+    (`src/server/provider/claude-native-conversation.ts`) only after a result
+    that `claudeSessionNotFound` classifies
+    (`src/server/provider/claude-startup-failure.ts`): "No conversation found
+    with session ID", `num_turns: 0`, and no `startup_failure_reason`.
+    - `worktree_resume_refused` is excluded. That is a current Claude Code
+      refusing on purpose, and its transcript is in another folder by
+      construction. It is still `sessionUnavailable` for ordinary sessions.
+    - With `CLAUDE_CODE_STARTUP_FAILURE_RESULTS=1`, the bundled 2.1.319 still
+      reports not-found with no reason; this was checked with the binary.
+    - The search uses the same scoped store, a 2 s deadline and always the
+      full unique search, never the remembered folder. It returns true only
+      when the transcript is found in exactly one project folder other than
+      the cwd's.
+    - It returns false for a relative `CLAUDE_CONFIG_DIR`. Claude Code
+      resolves that path itself, while `claudeUserConfigHome` would read
+      `~/.claude`, so a match there proves nothing about the home Claude
+      Code searched. Resolving against the cwd, as T3 does, was not adopted:
+      Claude Code's own rule for a relative path is unverified. In that case the failure carries
+    `sessionStoredElsewhere: true` (`ProviderRunFailure`), and the G9 wrapper
+    copies it into `ProviderFreshSessionPrior`. Only an older Claude Code
+    that cannot see the transcript from B lands here.
+  - `importedSessionFailingClosed`
+    (`src/server/runtime/turns/turn-fresh-session-fallback.ts`) then lifts the
+    rule for that turn only, for `providerId` "claude" with the flag. The turn
+    starts fresh with the imported history, or, if the fallback is declined,
+    the session is released. Codex never sets the flag.
+- **The C5 review-fix-1 decisions, revisited.**
+  - A Claude session whose producing run ran elsewhere and whose backing was
+    retired still starts fresh (`sessionRetired`).
+  - A Claude native fork moved before its first send now resumes with its
+    inherited coverage, like Codex.
+  - An unrecorded session still resumes.
+
+Other cwd-dependent Claude reads (no change):
+
+- `readClaudeSessionTitle` uses `getSessionInfo(id, {dir})` without a store.
+  It finds a session moved to a worktree of the same repository but not one
+  moved to an unrelated folder. It only titles a chat whose first message is
+  still replaceable.
+- Terminal resume and `/compact` run `--resume` from the current checkout, so
+  they inherit the same Claude Code lookup. Both did so before this change for
+  a chat moved before its first turn there.
+- `claude-memory.ts` reads the cwd's project memory, which is what Claude Code
+  itself uses after a move.
+
+#### Deliberate differences from T3 Code
+
+- **One file, not every copy.** T3's `claudeTranscriptState` accepts any copy
+  in any project folder. Inertia's reads accept the cwd's folder or exactly
+  one other folder, as Claude Code's own `VKe` does. Several copies elsewhere
+  read as unavailable, so rollback and fork fall back to portable. The reason
+  is that Inertia's reads feed native rollback and fork, which must act on the
+  file Claude Code will append to. Claude Code checks git worktrees before
+  scanning, so with several copies it may pick one that Inertia refuses to
+  guess.
+- **No git-worktree step in Inertia's lookup.** Running `git worktree list`
+  inside a 2 s transcript read would add a Git child process to every
+  settled-head read. The unique scan covers the moved-worktree case whenever
+  the session has one transcript, which is how Claude Code writes it.
+- **Imported Claude sessions may start fresh after a refusal only with
+  evidence.** T3 has no import fail-closed rule. Inertia keeps that rule and
+  lifts it only when its own search of the Claude home still finds that
+  transcript, so the refusal cannot mean the session is gone.
+- **No return to A's session after an older Claude Code refused in B (T3
+  parity, decided).** The relocation retires A's backing when the move turn is
+  admitted. If an older Claude Code (2.1.98) then refuses `--resume` from B,
+  G9 starts a fresh session in B, and that becomes the chat's current
+  conversation. Moving back to A resumes the fresh session through the same
+  relocation, not the original one; the original stays on disk, unused. T3
+  resumes regardless of version and replaces the session the same way. The
+  cost: on an outdated Claude Code, one move permanently trades the native
+  session for a fresh one with the portable history, plus one refused start.
+  We accept it for three reasons:
+  - Keeping a per-checkout session alive only for old Claude Code would
+    bring back the dual-session model that C5 removed.
+  - It would need a version probe we chose not to add.
+  - The portable history carries the conversation either way.
+
+#### Alternatives weighed
+
+- **Version-gate the mobility on the detected Claude Code version (rejected).**
+  The exact first version with the fallbacks is unknown (between 2.1.98 and
+  2.1.299), and T3 has no gate. A refusal costs one start that makes no API
+  call (`num_turns: 0`), and G9 then restarts the turn in the same send.
+- **Record the creation cwd of each session and pass it as `dir`
+  (rejected).** It needs new state across runs, imports and native forks, and
+  it misses transcripts that Claude Code itself moved during a run with
+  `relocateSessionTranscript`.
+- **Keep moved imported Claude sessions fresh, as C5 did (rejected).** A
+  current Claude Code resumes them natively. The narrowed fail-closed rule
+  keeps the C5 outcome (fresh with history) for an older Claude Code, one
+  refused start later.
+- **Drop `dir` and the store, letting the SDK scan (rejected).** That would
+  give up Inertia's filesystem authority (symlink, bound and changed-during-read
+  checks) that the scoped store exists for.
+
+#### Tests
+
+- `tests/server/claude-moved-checkout-resume.test.ts` (new, portable, 3
+  cases):
+  - A resume in checkout B: the query gets `cwd` = B and `resume` = the
+    original id, with no `sessionId`. The settled `native-boundary` reads
+    the head from A's project folder, and the transcript is not rewritten.
+    Fails before: `persistedHeadId` was `null`.
+  - The 2.1.98 refusal shape: a result-only message with a foreign session
+    id, `num_turns: 0` and "No conversation found". The second launch runs in
+    B without `resume` and completes. The fallback receives
+    `{ priorCleanup: "confirmed", sessionStoredElsewhere: true }`, because the
+    transcript is still in A's folder. Fails before the review fixes (no
+    flag).
+  - The same refusal after the transcript was deleted: the prior carries no
+    flag (guard).
+  - Second review, each failing against the first review fixes. No flag is set for:
+    - a `worktree_resume_refused` result (the reviewer's probe)
+    - a relative `CLAUDE_CONFIG_DIR`, with the transcript under
+      `HOME/.claude`
+    - a second copy made after a head read remembered the folder
+  - `claude-startup-failure.test.ts`: `claudeSessionNotFound` is true for
+    not-found, and false for `worktree_resume_refused` and for
+    `num_turns: 3`.
+- `tests/server/claude-native-conversation.test.ts`, new block "a transcript
+  after the chat moved to another checkout" (6 cases):
+  - The settled head is read from the original folder (fails before).
+  - Native rollback leaves the source and B's folder untouched (fails
+    before).
+  - A native fork is written to B's folder (fails before).
+  - Two other folders holding the session are refused, and the cwd's own
+    folder still wins (guard).
+  - A symlinked project folder is ignored (guard, not on Windows).
+  - A configured project folder name is not widened (guard).
+  - Review fix: a fork into a checkout with no project folder creates it with
+    mode 0700 and writes the fork there. Fails before with
+    `unsafe-native-transcript-directory`, as in the reviewer's repro.
+  - Review fix: a second read of a moved session probes only the cwd's folder
+    and the remembered folder (counted through the filesystem seam, with five
+    decoy folders). After the transcript moves to a decoy folder, the full
+    search runs again and finds it. Fails before (every read rescanned).
+- `tests/server/orchestration-backing-relocation.test.ts`:
+  - The mobility table now expects `resume` for both Claude harnesses.
+  - New Claude case. The first turn after A → B relocates (the event names
+    the source and relocated ids), resumes `claude-native` with `cwd` = B and
+    sends only the delta. On refusal, the G9 replacement carries the full
+    history. The turn completes on the fresh session, the relocated row is no
+    longer `ready`, and the next turn resumes the fresh session. Fails before.
+  - The "harness that cannot resume there" case now uses Kimi ACP.
+- `tests/server/orchestration-backing-relocation-edges.test.ts`:
+  - Imported Claude and Codex sessions moved to B resume there with
+    `cwd` = B. A plain refusal (no stored copy elsewhere) fails closed: no
+    fallback, the import's "no longer available" error, the link kept. Both
+    fail against the first Claude change, which relaxed the rule on any cwd mismatch.
+  - An imported Claude session moved to B whose refusal carries
+    `sessionStoredElsewhere` starts fresh with the imported history, and the
+    next turn resumes the fresh session.
+  - The same flag with the fallback declined (the provider had already
+    produced text) releases the session, and the retry starts fresh with the
+    history.
+  - The native-fork case now expects Claude to resume with inherited coverage
+    like Codex. Fails before.
+  - The portable-rollback guard for a fresh harness now uses Kimi ACP.
+- Unchanged and still passing: `cli-conversation-import.test.ts` "fails an
+  imported %s chat closed when its native session is gone" (own checkout),
+  `turn-fresh-session-fallback`, `turn-session-fallback-policy`,
+  `claude-startup-failure`, `resume-cwd`.
+
+Failing-before check, first commit: with `src/` stashed, 6 of the new or
+changed cases fail. With only `resume-cwd.ts` and
+`turn-fresh-session-fallback.ts` stashed, the 3 imported cases fail. With only
+`claude-native-conversation.ts` stashed, the 3 transcript cases and the
+harness head case fail.
+
+Failing-before check, review fixes: with `src/` reset to the first Claude change, 5 cases
+fail:
+- the Claude and Codex fail-closed import cases
+- the stored-elsewhere prior
+- the fork without a project folder
+- the remembered folder
+
+#### Verification
+
+All on 2026-11-18, macOS arm64, Node 22.
+
+- `npm run typecheck`, `npm run lint` and `npm run check:architecture`
+  passed.
+- Focused Vitest passed: 30 files, 534 tests. The files: the relocation pair,
+  the two Claude native and harness files, the CLI import tests, the G9
+  fallback and policy tests, `orchestration-backings`, `-forks`,
+  `-history-rollback`, `-history-retrieval`, `-history-injection`,
+  `-context-exhaustion`, `-portable-history`, `orchestration-v2-attempts`,
+  `agent-context-tool`, `agent-thread-manager`, `conversation-context-v3`,
+  `compact-and-send-command`, the provider terminal resume tests, the
+  conversation title service, the worktree ownership and identity tests,
+  `duo-worktree-adoption`, `claude-agent-sdk-harness` and `-start`.
+- After the review fixes: `typecheck`, `lint` and `check:architecture`
+  passed. Focused Vitest passed: 19 files, 282 tests. The files: the relocation
+  pair, the Claude native and moved-resume files, `claude-startup-failure`,
+  four `claude-agent-sdk-*` harness files, `cli-conversation-import`,
+  `resume-cwd`, the G9 fallback and policy tests,
+  `session-unavailable-classification`, `orchestration-backings`, `-forks`,
+  `-history-rollback`, `-history-injection` and `orchestration-v2-attempts`.
+  The reviewer's reproduction of the fork defect passes.
+- After the second review: `typecheck`, `lint` and `check:architecture`
+  passed. Focused Vitest passed: 13 files, 192 tests (the Claude, relocation,
+  import and G9 files). The reviewer's probe now sees no flag.
+- Not run: the full suite, `npm run test:portable` and `npm run check`, per
+  the package's working rules.
+
+#### Not exercised
+
+- A real Anthropic account. The experiment used a fake local Messages API.
+- Windows and Linux. Junctions and symlinks are skipped through
+  `Dirent.isDirectory()`, and only the POSIX symlink case is tested.
+- Resume through the `claude-agent-sdk` harness end to end against the real
+  binary. The harness was exercised with SDK fixtures; the binary was run
+  directly.
+- A Claude Code version between 2.1.98 and 2.1.299, so the first version with
+  the fallbacks is unknown.
+- `readClaudeSessionTitle` after a move to an unrelated folder.
+
+#### Open risks
+
+- Every resume after a move on Claude Code older than the fallbacks costs one
+  refused start, plus a bounded home search, before G9 restarts the turn. G9 applies only while the turn
+  has no provider activity. Otherwise the session is released and the next
+  send starts fresh.
+- Terminal resume of a moved chat on such a Claude Code prints "No
+  conversation found" in the user's terminal.
+- If a Claude home holds the same session id in several project folders (for
+  example, a user copied transcripts), Inertia's reads refuse to guess.
+  Rollback and fork then fall back to portable, and the settled head is not
+  recorded.
+
+### Cursor SDK
+
+The first change below resumed a moved agent from its original checkout's store; the review fix that follows it replaced that with a store of the agent's own. Both are kept because the finding explains the second design.
+
+**Finding (installed `@cursor/sdk` 1.0.38, read from `node_modules` and run
+offline with Inertia's own store records).** With a custom `LocalAgentStore`,
+Cursor scopes every store read to the agents whose `cwd` equals the caller's
+`local.cwd`: `Agent.resume` builds its platform through `Cr()` with
+`scopedWorkspaceRef = workspaceRef = local.cwd`, and `getScopedAgentDocument`
+returns null for any other `cwd`. A resume of an agent created in A with
+`local.cwd = B` fails with `AgentNotFoundError` ("Agent … not found").
+`createAgentPlatform({ localStore, workspaceRef: A }).resumeAgent(id, { local: { cwd: B, store } })`
+finds it; the platform's `workspaceRef` is used only by `createAgent`, the
+executor runs in `local.cwd` (`cr()` → `workingDirectory`), and follow-up runs
+keep the agent document's `cwd` (A). `createAgentPlatform` and `resumeAgent`
+exist in 1.0.38. This is exactly T3's `cursorStoreCwd` path.
+
+Inertia adds a second layer T3 does not have: its store is one journal
+directory per provider instance **and checkout**
+(`cursorSdkStoreDirectory`, sha256 of `[instanceId, workspace]`, journal header
+pins the workspace; `src/server/provider/cursor-sdk-store.ts`). A chat that
+moved to B therefore has to open A's store directory, not only scope the
+platform to A.
+
+**Mechanism.**
+
+- **Where the agent lives.** `ProviderRunInput.sessionOriginCwd`
+  (`src/server/provider/contracts.ts`) names the checkout the resumed session
+  was created in when it is not the run's `cwd`. Preparation sets it for every
+  resume (`turn-request-preparation.ts:461`, `:709`) from
+  `ProviderBackingRepository.sessionOriginWorkspaceKey` (`backing-repository.ts:77`):
+  the oldest V2 run whose turn ended on the session, else the completed native
+  fork that created it; null when nothing records the session. Other harnesses
+  ignore the field; both fresh-session fallbacks strip it with `sessionId`
+  (`turn-fresh-session-fallback.ts`, `provider/fresh-session-fallback.ts`), and
+  `validateProviderRunInput` refuses it without a session or as a relative
+  path (`adapters.ts:302`).
+- **Harness** (`cursor-sdk-harness.ts:86-91`, `:135`). With a session and an
+  origin other than `cwd`, it resolves the origin checkout's store with
+  `existing = true` and passes `storeWorkspace` to the worker. The worker
+  start schema accepts `storeWorkspace` only with a `sessionId` and only when it
+  differs from the authority workspace (`src/node/cursor-sdk-protocol.ts:21-27`).
+- **Store** (`cursor-sdk-store.ts:79-104`, `:141`, `:168`). `existing` mode
+  never creates a directory or a journal, accepts a checkout that no longer
+  exists (a removed worktree is still the store's key; it must be absolute and
+  normalized), and still requires the journal header to name that checkout.
+  The default mode is unchanged except that the workspace must also be
+  normalized (it already had to be canonical).
+- **Session** (`cursor-sdk-session.ts:33-40`, `:73-94`). The stored agent must
+  be one the opened store recorded for its own checkout (`source.cwd ===
+  storeWorkspace`), idle, without an active run; a `storeWorkspace` without a
+  session or equal to the workspace is refused before any SDK call.
+  `resumeCursorSdkAgent` keeps the plain `Agent.resume` when the agent was
+  created here and otherwise resumes through `createAgentPlatform` scoped to
+  the origin checkout; `local.cwd` stays the run's checkout, so tools, the
+  worker's `cwd` and Inertia's authority are the new checkout.
+- **Mobility.** `cursor-sdk` is now `resume` (`session-cwd-mobility.ts`), so a
+  moved chat relocates its backing at admission (C5) and the first turn in B
+  carries only the items the agent has not seen.
+
+**Choices weighed.**
+
+- *Record the store cwd (T3 `nativeMetadata.cursorStoreCwd`)* would need a new
+  field on the strict backing schema, written by `observeSession` and carried
+  by the relocation projector. The information is already in the event log:
+  the run that created the agent ran in the store's checkout. Deriving it adds
+  no schema change and also covers a session without a backing.
+- *Derive it from the oldest backing row* (first draft) fails for a session
+  that had no backing before it first ran elsewhere: the first row is then the
+  new checkout's. The oldest run that ended on the session does not.
+- *Relax Inertia's own check* (`source.cwd !== workspace`) alone cannot work:
+  the agent is in another store directory, and Cursor would still not find it.
+- *One store per provider instance* (instead of per checkout) would make the
+  agent's own `cwd` the store key, but it changes the on-disk layout of
+  existing stores and serializes every chat of an instance on the store's
+  exclusive lock. Rejected.
+
+**Deliberate differences from T3.**
+
+- The store checkout is derived from recorded runs, not stored as provider
+  thread metadata (above).
+- The origin checkout's store is opened in `existing` mode: a moved chat never
+  creates a store for a checkout, and a removed checkout does not block the
+  resume. T3 constructs its JSONL store per app, not per checkout.
+
+**Tests.**
+
+- `tests/server/cursor-sdk-session.test.ts`: a moved agent resumes with the
+  origin store and `local.cwd` = the new checkout; from another checkout's
+  store only an agent recorded for that checkout (an agent whose `cwd` is the
+  current or a third checkout is refused before resume); `storeWorkspace`
+  without a session or equal to the workspace is refused before create or
+  resume. Against the installed SDK with Inertia's `CursorSdkStoreRecords`: a
+  plain `Agent.resume` in the new checkout reports not found (drift guard for
+  the SDK behaviour above), `resumeCursorSdkAgent` scoped to a third checkout
+  reports not found, scoped to the origin finds the agent, and the agent
+  document keeps its `cwd`; the same-checkout path keeps `Agent.resume` and
+  never builds a platform. The existing exact-resume case now expects the
+  third `resume` argument.
+- `tests/server/cursor-sdk-harness.test.ts`: a moved session resolves the
+  origin store with `existing = true` and sends `storeWorkspace`; an origin
+  without a session, or equal to `cwd`, is ignored (guard).
+- `tests/server/cursor-sdk-store.test.ts` (Linux only): the origin store opens
+  after its checkout is removed; `existing` mode creates no directory for an
+  unknown checkout or instance, no journal in an empty store, and refuses a
+  journal for another checkout and a non-normalized path.
+- `tests/server/orchestration-backing-relocation.test.ts`: the mobility table
+  lists `cursor-sdk` as `resume`; a session created in A carries
+  `sessionOriginCwd = A` in B and in a third checkout and none back in A;
+  `sessionOriginWorkspaceKey` returns the oldest run's checkout while
+  `sessionWorkspaceKey` returns the newest.
+
+Failing before: with the sources of `e375dc1b` and the new tests, all eight new
+or changed behavioural cases fail (the session, harness, mobility and
+preparation cases; the two SDK cases because the helper did not exist). The
+"ignores a session origin" harness case is a guard and passes before.
+
+**Not exercised.** A real Cursor account or a `send` against Cursor's servers
+(resume and the store lookup were run offline against the installed SDK); the
+Linux store tests (macOS host, Docker not running); Windows.
+
+**Open risks.**
+
+- (Resolved by the review fix below: a moved chat no longer takes the origin
+  checkout's store lock.)
+- A session last used by a turn from before V2 runs has no recorded origin; in
+  another checkout it is looked up in that checkout's store, fails, and starts
+  fresh after the two-strike rule. Before this change it also failed.
+
+#### Cursor SDK review fix: moved agents get their own store (2026-11-18)
+
+**Finding** (MEDIUM-HIGH, Linux). The first Cursor change resumed a moved agent from the
+origin checkout's store, and the worker holds that store's exclusive lock
+(`flock LOCK_EX|LOCK_NB`) for the whole run. Two Cursor SDK chats handed from
+the project root to two worktrees therefore could not run at once: the second
+failed with "Cursor SDK native store is already in use", surfaced as a generic
+failure that counts toward the two-strike rule, which then discards the agent.
+Before that change each worktree started fresh in its own store and did not
+contend.
+
+**T3.** T3 passes no custom store: the SDK's default SQLite store, which
+allows concurrent writers, so it has no such lock.
+
+**Choice: adopt the agent into a store of its own on its first move**
+(`cursorSdkStorePlan`, `src/server/provider/cursor-sdk-store-plan.ts`).
+New agents still live in their checkout's store, shared by that checkout's
+chats as before. The first time a chat runs its agent in another checkout the
+worker adopts it (`prepareCursorSdkAgentStore`, `cursor-sdk-store.ts`) into
+`cursor-sdk/<sha256(["agent", instance, agentId])>` (`cursorSdkAgentStoreDirectory`):
+
+- The origin journal is read without its lock (`readCursorSdkStoreSnapshot`):
+  it is append-only and every record is one line, so its complete lines are a
+  state the store had; a line still being written by a chat running there is
+  left out. The origin store is never written.
+- `CursorSdkStoreRecords.exportAgent` takes the agent's runs, checkpoints, run
+  events and finally the agent document, unchanged (its `cwd` stays the
+  origin; the platform scoped to it finds the agent, as before). The records
+  are re-validated, credential checks included, by replay.
+- The agent store is written in full under `.adopting-<uuid>`, fsynced and
+  renamed to the journal name, so it holds the whole agent or no journal. A
+  stale staging file from an interrupted adoption is removed and the adoption
+  redone; a store that has a journal is never replaced.
+- From then on the agent runs from its own store wherever the chat runs,
+  including back in the origin checkout (the harness always looks the agent
+  store up first, `cursor-sdk-harness.ts`), so the origin's stale copy is
+  never used again. Only one chat runs that agent, so its store's lock is
+  never contended. A moved chat with no agent store and no origin store fails
+  with "store unavailable".
+
+Rejected:
+
+- *(a) Adopt into the run's checkout store.* That store is shared and locked
+  by the chats running in that checkout, so the adoption itself contends.
+  Every move copies the agent again, and moving back must replace a stale copy
+  in a journal whose only removal is per-record delete mutations, which is
+  neither atomic nor crash-safe.
+- *(b) Bounded wait, then a retryable "busy" failure.* The lock is held for a
+  whole run (up to 30 minutes), so parallel worktrees would still be refused,
+  only more politely.
+- *(c) A multi-writer journal (lock per append, re-read the tail before each
+  write).* Fixes same-checkout contention too, but it redesigns the durable
+  store's concurrency and in-memory replay model.
+
+Same-checkout contention is unchanged for agents that never move, and lower
+for adopted agents, which no longer use the checkout store.
+
+Review-fix tests:
+
+- `cursor-sdk-session` (macOS): `cursorSdkStorePlan` for new, unmoved, moved,
+  adopted, returned and unavailable cases (new module); two agents created by
+  the installed SDK in one checkout store are each exported into their own
+  store, which holds only that agent with its checkpoint, run and run events;
+  each resumes in its own worktree from its own store; the checkout store's
+  records are unchanged. Fails before (`exportAgent` did not exist).
+- `cursor-sdk-harness` (macOS): a moved run creates the agent store, looks up
+  the origin store without creating it, and sends `agentStateRoot` and
+  `adoptFrom`; back in the original checkout an adopted agent keeps its own
+  store and an unmoved agent gets none. Both fail before.
+- `cursor-sdk-store` (Linux only, not run here): two agents adopted while the
+  origin store is held open and locked by another chat; the origin journal
+  is byte-identical afterwards; both agent stores open at the same time, each
+  with only its agent; a repeated adoption leaves an agent store and its newer
+  records untouched; a stale staging file is replaced; an agent missing from
+  the origin leaves its store empty.
+
+Not exercised: the Linux store and worker paths (adoption I/O, the lock-free
+read next to a live writer); they need Linux with the Linux native modules.
+
+Remaining risks: the origin store keeps a stale copy of every adopted agent,
+and nothing compacts it; losing an adopted agent's store alone resumes that
+stale copy (review fix 4 below).
+
+#### Cursor SDK agent-store review fixes (2026-11-18)
+
+1. **Only a settled agent is adopted** (MEDIUM-LOW). The lock-free snapshot
+   can catch an agent between its run's and its own terminal write (the SDK
+   writes them separately, e.g. a previous worker still alive after an
+   unconfirmed cleanup). Such a copy could never be resumed and, once renamed
+   into place, would be used forever. `CursorSdkStoreRecords.exportAgent` now
+   requires the agent `idle`, without `activeRunId`, and every run `finished`,
+   `error`, `cancelled` or `expired`; otherwise it throws before anything is
+   written, and a later turn adopts again.
+2. **Adoption is serialized and self-repairing** (LOW). `prepareCursorSdkAgentStore`
+   runs under an exclusive non-blocking `flock` of the agent store directory
+   (`withCursorSdkAgentStoreLock`). The journal check, the staging sweep and
+   the rename therefore never interleave with another adopter; a second
+   adopter fails "already in use" and writes nothing. Staging files are
+   removed also when a journal exists, so a leftover can no longer make
+   `openCursorSdkStore` refuse the store ("unrecognized data"). The worker
+   runs this preparation for every agent-store run, adopting only when
+   `adoptFrom` is given. The earlier store test's "parallel" wording is gone:
+   it adopts one agent after the other, and a separate test holds the lock to
+   prove a raced adopter is refused.
+3. **The harness decides the store before the worker starts** (LOW).
+   `cursorSdkStoreDirectory` in lookup mode throws `CursorSdkStoreMissingError`
+   only when the namespace or the store does not exist; containment, permission
+   and descriptor errors stay storage errors (`STORAGE_UNAVAILABLE`). The
+   harness looks up the agent store (`{ directory, journal }`), consults the
+   origin store only when the agent has no journal yet, and runs
+   `cursorSdkStorePlan` itself. For `unavailable` (moved, never adopted,
+   original store gone) it fails with `failure.sessionUnavailable` before
+   creating any directory, starting a worker or reading the credential; the
+   in-turn fresh-session fallback then starts a new session with the portable
+   history. The agent directory is created only for an adoption.
+4. **Losing an adopted agent's store: recorded as a risk** (LOW, decided).
+   Nothing outside the agent store records an adoption. A marker next to it
+   (in `cursor-sdk/`) is lost together with it in the realistic loss modes
+   (deleting or restoring the state folder). A marker in the origin store
+   needs that store's lock or a write into a journal another chat holds. A
+   marker in Inertia's database needs a new event or field. If the agent
+   store alone is lost, the agent resumes from the stale copy in its original
+   checkout's store, missing the turns it ran after the move.
+5. **Boundary.** `agentStateRoot` and `adoptFrom` get the same NUL and length
+   checks as `storeWorkspace`, and `adoptFrom` equal to `agentStateRoot` is
+   refused.
+
+Tests (macOS ones fail against the first agent-store change):
+
+- `cursor-sdk-session`: export refuses an agent as the SDK leaves it after
+  create, an idle agent with an open run, and a running agent with finished
+  runs, and exports it once settled (fails before); the plan table with the
+  new inputs (fails before: changed signature); the worker start schema
+  refuses `adoptFrom === agentStateRoot`, NUL in either path, an oversized
+  path, `adoptFrom` without `storeWorkspace` and either path without a
+  session (fails before). The parallel-worktrees export test now settles its
+  agents first (passes before; guard).
+- `cursor-sdk-harness`: a moved run looks up, then creates, the agent store,
+  sends it as `stateRoot` and `agentStateRoot` with `adoptFrom`, and once
+  adopted no longer consults the origin store; back in the original
+  checkout an adopted agent keeps its store and an unmoved agent creates
+  none; a missing origin store is `sessionUnavailable`, and a broken lookup
+  is a storage error, both without a worker, a credential read or an agent
+  directory (all fail before).
+- `cursor-sdk-store` (Linux only). New: "never copies an agent caught
+  mid-run, and lets a later adoption copy it once settled"; "adopts under the
+  agent store's lock and clears staging left beside a journal" (includes the
+  raced adopter and `CursorSdkStoreMissingError`). Rewritten for the new API:
+  "adopts agents of a checkout store another chat holds into their own
+  stores, without its lock and without changing it" (now also: preparing an
+  agent store without a journal and without an adoption source fails).
+
+### Pi
+
+**Problem.** Pi writes the launch folder into a session file's header, and
+`findPiSessionFile` refused a header naming another checkout. T3 (`bebaf3ec0`,
+`packages/provider-pi/src/server/adapter.ts` `sessionFileInCwd` /
+`forkSessionIntoCwd`) copies the file into the new cwd with a short-lived
+`pi --fork <file>` (extensions and tools disabled) when it registers the
+thread, switches to the copy and keeps its provider thread, so coverage
+survives; only `nativeThreadRef` moves to the copy. A copy has a new session
+id chosen by Pi. In Inertia a backing names its native session, and the C5
+relocation commits at admission on the *same* session.
+
+**Mechanism.**
+
+- **Harness** (`src/server/provider/pi-rpc-harness.ts:102-125`, `:168`,
+  `:234-240`). `locatePiSessionFile` (`pi-session.ts:78`) finds the session's
+  owned file and header whatever checkout it names. When the header names the
+  run's checkout (`piSessionInCheckout`: same path, or same folder by realpath;
+  a removed folder matches only itself) the file is resumed as before.
+  Otherwise `forkPiSessionIntoCheckout` (`pi-native-conversation.ts:43`)
+  launches `pi --mode rpc --no-extensions --no-context-files --session-dir …
+  --fork <file> --no-tools` in the run's checkout, without the user's
+  `INERTIA_PI_ARGS`, under the run's abort signal, and requires: a distinct,
+  redaction-safe session id and file in the owned folder, an idle session, a
+  well-formed history tree with a safe head, and that the new file's header
+  names the run's checkout. The process tree is always closed; an unconfirmed
+  close is reported as unconfirmed cleanup with the fork's child. The main
+  connection then resumes the copy, `get_state` must attest the copy's id,
+  and the first `session` event carries `forkedFrom: <resumed id>`.
+- **Unavailable session.** A missing session file, or a copy that fails
+  (refused, malformed, unsafe id, timeout), is reported as
+  `failure.sessionUnavailable` before any session is announced. The runtime's
+  existing in-turn fallback (`turn-fresh-session-fallback.ts`) then retires the
+  relocated backing (`native-resume-failed`) and restarts the turn on a fresh
+  session with the full portable history. A Stop during the copy kills the
+  fork's process tree and reports `cancelled`, never unavailable.
+- **Event** `provider.backing-forked {runId, attemptId, backingId,
+  fromNativeSessionId, nativeSessionId, handoffId}`
+  (`src/shared/orchestration-backings.ts:62`). `ProviderBackingRepository.forkSession`
+  (`backing-repository.ts:184`) commits it from the session event, before
+  `observeSession` (`turn-provider-event-projector.ts:151`), only when the
+  run's current attempt works on the resumed session, that session's backing
+  in the run's checkout is not retired and was taken over by this run, and no
+  backing of the copy exists there; otherwise it writes nothing and the copy
+  is observed as any new session. The projector (`backing-projector.ts:127`)
+  repoints that same row to the copy (id, coverage, status, selection and
+  `lastRunId` unchanged), sets the attempt's native session to the copy and,
+  when the run's prepared or dispatching handoff targets that row, its
+  `nativeSessionId`. It refuses another instance, project, checkout or run, a
+  retired row, an attempt or row on another session, an unchanged session id
+  and a handoff of another run, attempt or target. One new event type with its
+  own projection; the review fixes below add lookup rows and raise
+  `ORCHESTRATION_V2_PROJECTION_VERSION` to 3 (no SQL migration).
+- **Not delivered.** `restoreBeforeRun` (`backing-repository.ts:411-423`) hands
+  a backing back as dispatch found it but keeps the copy's session id: the copy
+  holds the history the backing held before dispatch. Without this a refused
+  turn after a copy hit a `revision-conflict` in settlement (the restored row
+  named the original session).
+- **Mobility.** `pi-rpc` is `resume`. A → B relocates at admission (C5), the
+  harness copies the session into B, and the backing follows the copy; the
+  next turn in B resumes the copy in place with only the new items; B → A
+  relocates the copy and copies it again into A.
+
+**Options weighed** (a Fable 5.2 advisor reviewed the choice; its holes and
+the fixes are listed below).
+
+- *(a) Copy during preparation, relocate onto the copy at admission.* Keeps
+  the run on one session from admission on, but `prepareTurnRequest`, the
+  queue and admission are synchronous; a provider process there means making
+  them asynchronous. A copy made before an admission that then refuses
+  (`checkout-changed`, cleanup pending, a concurrent send) is orphaned, and a
+  queued message's preparation has no Stop. Rejected as disproportionate.
+- *(b) Copy in the harness at dispatch and move the backing by event* —
+  chosen. It is where T3 copies (thread registration, at session start), the
+  copy is cancellable with the run, and nothing is copied for a run that is
+  never admitted.
+- *(b′) A new backing row for the copy* (retire the relocated row, create a
+  copy row) would need the handoff to change its target backing, which the
+  handoff projector refuses for every other event. Repointing the row the
+  run took over keeps the handoff's target and matches T3 (the provider thread
+  keeps its id).
+- *Extending `observeSession`'s carry instead of a new event* does not work:
+  `latest` and `movedBackings` match on the session id, so the copy would be
+  recorded with empty, complete coverage beside a live original row.
+- *Fork with a session id chosen by Inertia* (`--fork <file> --session-id <id>`)
+  would let admission name the copy in advance, but the combination is not
+  documented and could not be checked without Pi.
+- *(c) Keep Pi `fresh`*: the moved chat restarts with the full portable
+  history. No invariant forces it, so T3 is followed.
+
+**Advisor findings and how they were handled.**
+
+1. A copy that fails after the relocation committed would leave a failed turn
+   and, for a relocation without a handoff, a `ready` backing that the same
+   turn credits: fixed by reporting `sessionUnavailable` (in-turn fresh
+   fallback).
+2. A session created by a native-fork rollback and moved before its first
+   turn has no recorded origin: Pi does not use the origin at all; like T3 it
+   copies whenever the header names another checkout.
+3. The fresh-session fallback and `releaseUnavailableProviderSession` look the
+   backing up by the session the run resumed: not reachable after a copy,
+   because `sessionUnavailable` is only reported before any session is
+   announced (the harness test asserts both together).
+4. Instruction delivery keys a session's origin on its first turn with
+   `provider_session_before = null`; the move turn has the original session
+   there, so the hidden instruction pack is sent once more on the turn after
+   the move (benign; not pinned by a test).
+5. Found while testing, not by the advisor: the not-delivered restore above.
+
+**Deliberate differences from T3.**
+
+- The backing row, not a provider thread, follows the copy; the handoff and
+  attempt follow in the same event.
+- Copy failures restart the turn on a fresh session with the portable
+  history (T3 fails the registration).
+- The copy's history tree, head and header are checked, but it is not
+  compared entry by entry with the original, unlike Inertia's native fork
+  (`pi-native-conversation.ts`): the original may live in a removed checkout,
+  where Pi cannot be launched, and no run can write to it meanwhile (the chat
+  runs one turn at a time and the harness tracks the session as active). T3
+  checks only that the file is distinct.
+- The copy is made without the user's `INERTIA_PI_ARGS` (as Inertia's native
+  fork); T3 keeps the launch arguments.
+
+**Tests.**
+
+- `tests/server/pi-rpc-harness.test.ts` (portable; the fake models `--fork` as
+  Pi does: a new file with a new id whose header names the launch folder, and
+  `--session` reads the file's header): a moved session, from an existing and
+  from a removed checkout, is copied by a fork process launched in the run's
+  checkout with `--no-tools --no-extensions --no-context-files` and without
+  `--session`, the run resumes the copy, the original file is unchanged, and
+  only the first session event carries `forkedFrom`; a session of this
+  checkout resumes in place without a fork (guard); a copy that returns the
+  original session or a secret-bearing id is reported unavailable, announces
+  no session and leaks nothing; a hanging copy is stopped with its process
+  tree and reports `cancelled` without `failure`; a missing session is now
+  `failure.sessionUnavailable`, and no process is spawned.
+- `tests/server/orchestration-backing-relocation.test.ts`: the mobility table
+  lists `pi-rpc` as `resume`; A → B with a handoff, then a session announced as
+  forked: `provider.backing-forked` with the run, attempt, relocated row and
+  handoff; the row keeps its coverage under the copy; attempt and handoff name
+  the copy; settlement credits the B turn and delivers the handoff; nothing is
+  invalidated; the next turn in B resumes the copy with only new items and no
+  origin; B → A relocates the copy with `sessionOriginCwd = B`; rebuild
+  equality. A refused (not delivered) turn after a copy hands the row back on
+  the copy, `ready`, with the earlier coverage, and the retry targets it. A
+  copy that cannot be made restarts the turn fresh with the full history and
+  retires the relocated row (guard). A fork claim for a session the attempt
+  does not work on writes nothing (guard). Forged forked events (other row,
+  other source session, unchanged id, forged attempt, forged handoff, another
+  run) are refused (guard).
+
+Failing before (the sources before the Pi change, with the new tests): the mobility case,
+the forked relocation case, the four harness cases (moved copy, could-not-move,
+hanging copy, missing session as unavailable), and the not-delivered restore
+(which fails against the code without its own fix with a `revision-conflict`).
+The guards above pass before.
+
+**Not exercised.** A real Pi binary (none installed; `which pi` finds nothing
+and no Pi package is in `node_modules`): that `pi --fork` writes the launch
+folder into the copy's header is taken from T3's adapter and from Inertia's
+existing native fork, which depends on the same behaviour; the fixtures model
+it. Windows and Linux.
+
+**Open risks.**
+
+- Every move of a Pi chat leaves the original file in Pi's session folder (T3
+  leaves it too); unannounced copies are removed (review fix 5) except one a
+  crashed fork never reported.
+- A native rollback to a turn from before a Pi move is portable: the earlier
+  boundaries belong to the original session (`nativeTarget` requires the
+  boundary's session to be the backing's).
+- A Pi run that fails after the copy but before announcing it (bridge startup
+  timeout), or whose copy fails for an ordinary reason, leaves the relocated
+  row `ready` when the move had no handoff, and credits the run's own message
+  as before for any Pi failure; the next turn copies the original again.
+- The copy check assumes Pi's head after `--fork` is the file's last entry
+  and that `get_entries` lists every non-header line of the file in order,
+  as Inertia's fixtures and native fork assume; a Pi that differs would
+  refuse every move as unavailable (fresh start with the portable history).
+- Projection version 3 makes every existing database rebuild its
+  orchestration projections once on first open.
+
+#### Pi review fixes (independent review of the first Pi change, 2026-11-18)
+
+1. **A Pi native fork moved before its first send keeps its inherited
+   coverage** (MEDIUM). Such a fork has no backing yet, so `forkSession` had
+   nothing to move and the copy was recorded with empty, "complete" coverage;
+   the next delta re-sent the inherited history. `observeSession` now takes
+   the session event's `forkedFrom` and, when the run resumed that session
+   (`turn.providerSessionBefore`), gives the copy the native fork's coverage
+   (`backing-repository.ts:204-222`).
+2. **The copy is proven new and proven a copy** (MEDIUM). Before launching
+   `pi --fork`, the owned session folder is listed; an answer naming the
+   original, a file that already existed or an id that already had a file is
+   refused (a session of another chat in this checkout passed before). The
+   copy's `get_entries` ids, in order, and its head must equal the original
+   file's entry ids and last entry, read directly from the owned file
+   (`readPiSessionEntryIds`, `pi-session.ts:70`; the file stays in the owned
+   folder when its checkout is removed, so no Pi process is needed there); a
+   Pi that ignores `--fork` and starts an empty session is refused
+   (`forkPiSessionIntoCheckout`, `pi-native-conversation.ts:54`).
+3. **Only definite outcomes make the session unavailable** (MEDIUM-LOW).
+   `sessionUnavailable` (which retires the session for good through the
+   in-turn fallback) is now reported only for a missing file or a
+   `PiForkRefusedError` (`pi-native-conversation.ts:44`): Pi answered with the
+   original or an existing session, the copy is not a copy or names another
+   checkout, or the original's entries cannot be read (`PiSessionFormatError`;
+   every retry would fail the same way). Timeouts, transport failures, a
+   crashed fork process, an unsafe id and unconfirmed cleanup are ordinary
+   failures that keep the backing (`pi-rpc-harness.ts:108-131`).
+4. **`provider.backing-forked` is checked from projections alone** (LOW). The
+   projector (`backing-projector.ts:166-190`) now also refuses a run that has
+   ended, a copy session that already has a live backing in the same chat,
+   instance and checkout, and a `handoffId` other than the run attempt's
+   prepared or dispatching handoff that targets the backing (so `null` is
+   refused while one exists). Projections can only be read by kind and id, so
+   the backing projector now writes two lookup rows with every write
+   (`backing-projector.ts:11-48`): `backing-session` (keyed by chat, instance,
+   checkout and native session; names the live backing) and `attempt-handoff`
+   (keyed by attempt; names the handoff prepared for it).
+   `ORCHESTRATION_V2_PROJECTION_VERSION` is now 3 (`projector.ts:21`), so the
+   existing `maintainProjections` check rebuilds every database's projections
+   once on first open and the lookup rows exist for every past run. No SQL
+   migration; no event is reinterpreted.
+5. **Unannounced copies are removed** (LOW). A copy whose run ends before the
+   session event (startup, bridge or attestation failure), and a copy Pi
+   created that is then refused, is deleted best effort once no Pi process of
+   the run can still write it (`removeUnannouncedPiSession`,
+   `pi-session.ts:106`; `pi-rpc-harness.ts:232`): only a single-link regular
+   file directly in the owned folder, named and headed for the session id
+   this run learned. A fork that crashes before reporting its session leaves
+   a file whose id Inertia never learned; it is not deleted, because the
+   folder is shared with other chats' Pi processes.
+
+Review-fix tests (each fails against the first Pi change):
+
+- `orchestration-backing-relocation-edges`: the "native fork moved before its
+  first send" case now covers Pi; the copy (`fork-copy`, `forkedFrom:
+  fork-native`) carries the inherited items. The session event now uses the
+  fork chat's identity (before, the case's session event was silently ignored
+  and the result came only from the run's terminal session).
+- `pi-rpc-harness`: a fork answered with the original, with another chat's
+  existing session of this checkout, or with an empty session is
+  `sessionUnavailable`, announces nothing, keeps both existing files and
+  leaves no copy; a crashed fork and a secret-bearing copy id fail without
+  `sessionUnavailable`, keep the original and leave the folder as it was; a
+  copy whose resumed run exits before announcing it is removed. The fake now
+  serves `get_entries` from the session file it resumed or wrote.
+- `orchestration-backing-relocation`: the forked projection checked with a
+  projection reader only: it writes the copy's `backing-session` row, and
+  refuses `handoffId: null` while the run's handoff targets the backing, a
+  copy session with a live backing in the scope, and an ended run.
+
+#### Pi copy-proof fix (re-review of the Pi review fixes, 2026-11-18)
+
+The copy check of review fix 2 was stricter than Pi, and every mismatch was a
+definite refusal (`sessionUnavailable`: the session retired). Checked against
+Pi 1.0.2's published source (`@earendil-works/pi-coding-agent`, read from an
+`npm pack` download without executing it): `SessionManager.forkFrom` copies
+every parsed non-header entry with its id; `loadEntriesFromFile` skips blank
+and unparseable lines (`parseSessionEntryLine`) and completes a torn last line
+of the file it loads with a newline; `_buildIndex` makes the last entry the
+head; `sdk.js` appends a `thinking_level_change` ("Restore missing settings
+metadata for older sessions") when the branch has none, and new sessions get
+`model_change` and `thinking_level_change`.
+
+- `readPiSessionEntryIds` reads as Pi does: blank and unparseable lines are
+  skipped (a torn last line), and UTF-8 is decoded without failing.
+- `piForkCopyHolds` (`pi-native-conversation.ts`): the copy must start with
+  the original's entry ids; after them only `thinking_level_change` and
+  `model_change` entries may follow; the head is the copy's last entry.
+- Definite (`PiForkRefusedError`, `sessionUnavailable`) only for: Pi answered
+  with the original or an existing session, or the copy is empty or foreign
+  (does not start with the original's entries). Ordinary failures that keep
+  the session: an original Inertia cannot read within its limits (an entry
+  without an id, more than 20,000 entries, a line over 32 MB), a copy holding
+  more than the original plus settings metadata (the original grew between
+  the read and the fork, e.g. resumed in a terminal), an unexpected head, and
+  a copy that names another file or checkout.
+- Pi completes a torn last line in the original when it loads it for the
+  fork (it appends a newline); Inertia itself still only reads the file.
+
+Tests (fail against the sources before this fix):
+
+- `pi-native-conversation`: `piForkCopyHolds` accepts the original's entries,
+  with `thinking_level_change`/`model_change` after them, and an empty pair;
+  refuses an empty, foreign or reordered copy as `PiForkRefusedError`, and a
+  grown or misheaded copy as an ordinary error.
+- `pi-rpc-harness` (the fake now copies like `forkFrom`, skipping
+  unparseable lines, and can append settings metadata or an entry the
+  original gained): a moved session with a torn last line is copied and
+  continued, with and without appended settings metadata; an original with
+  an entry Inertia cannot read fails without `sessionUnavailable` and without
+  spawning a fork; a copy that grew fails without `sessionUnavailable` and is
+  removed. The reviewer's probe, which asserted the defect, no longer reports the
+  torn session unavailable.
+
+Note: raising the projection version from 2 to 3 (review fix 4) replays every
+`provider.backing-forked` event through the stricter projector; an event
+written by the first Pi change could fail it. Only development databases of
+this unreleased branch can hold such events; accepted.
+
+### Cursor SDK and Pi verification (before the combined run)
+
+Linux (coordinator, Node 22 container, non-root, after the agent-store review fixes):
+`cursor-sdk-store` (27), `cursor-sdk-session` (16) and `cursor-sdk-harness`
+(13) passed, including the Linux-only adoption tests.
+
+After the Pi copy-proof fix: `pi-rpc-harness`, `pi-native-conversation`,
+`native-pi-provider-migration`, `orchestration-backing-relocation`,
+`orchestration-backing-relocation-edges`, `orchestration-history-rollback`,
+`orchestration-forks` and `native-conversation-service` (8 files, 91 tests)
+passed; `typecheck`, `lint` and `check:architecture` passed.
+
+After the review fixes: all 24 `orchestration-*` files, the Pi, fallback,
+Cursor SDK, query-plan and migration files above (41 files, 723 tests) passed;
+`typecheck`, `lint` and `check:architecture` passed.
+
+Before the review fixes, focused files (all passed): `cursor-sdk-session`, `cursor-sdk-harness`,
+`orchestration-backing-relocation`, `orchestration-backing-relocation-edges`,
+`orchestration-backings`, `orchestration-history-rollback`,
+`orchestration-forks`, `orchestration-context-exhaustion`,
+`orchestration-history-retrieval`, `turn-fresh-session-fallback`,
+`provider-session-fallback`, `session-unavailable-classification`,
+`pi-rpc-harness`, `pi-native-conversation`, `native-pi-provider-migration`,
+`pi-bridge`, `pi-events`, `provider-capability-manifest`,
+`native-conversation-service`, `provider-conformance`, `cursor-sdk-migration`,
+`backend-profile-controller` (22 files, 359 tests). `cursor-sdk-store` runs only
+on Linux and was skipped. `npm run typecheck`, `npm run lint` and
+`npm run check:architecture` passed. The full Vitest suite, the full
+`npm run test:portable` and `npm run check` were not run (one suite at a time
+on this machine; the integrator runs them).
+
+### Combined verification (2026-11-18)
+
+Verification on the merged tree, 2026-11-18, macOS arm64, Node 22.23.2:
+`typecheck`, `lint` and `check:architecture` passed. The full Vitest suite
+passed 20,568 tests with 179 skipped in 1,624 files (1,610 passed, 14
+skipped). `npm run test:portable` passed 4,491 tests with 36 skipped in 272
+files (2 skipped). On Linux (Node 22 container, non-root, `npm ci
+--ignore-scripts`), `cursor-sdk-store`, `cursor-sdk-session` and
+`cursor-sdk-harness` passed 56 tests, including the store and adoption tests
+that are skipped on macOS.
+
+Not run: the full `npm run check`, the Electron scenarios, a packaged build,
+Windows, and real Anthropic, Pi or Cursor accounts. No Pi binary was run (the
+fixtures follow Pi 1.0.2's published source); the Claude Code binaries were
+run only against a local fake Messages API; the Cursor SDK was run offline.

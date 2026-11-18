@@ -5,9 +5,9 @@ import { join } from "node:path";
 import type { ToolName } from "@cursor/sdk";
 import { CursorSdkChannel } from "../../node/cursor-sdk-channel";
 import { cursorSdkStartSchema } from "../../node/cursor-sdk-protocol";
-import { CursorSdkSession } from "./cursor-sdk-session";
+import { CursorSdkSession, resumeCursorSdkAgent } from "./cursor-sdk-session";
 import { loadCursorSdk, verifyCursorSdkPlatform } from "./cursor-sdk-loader";
-import { openCursorSdkStore } from "./cursor-sdk-store";
+import { openCursorSdkStore, prepareCursorSdkAgentStore } from "./cursor-sdk-store";
 
 let session: CursorSdkSession | undefined;
 let used = false;
@@ -66,12 +66,21 @@ async function handle(method: string, params: unknown): Promise<unknown> {
   const input = cursorSdkStartSchema.parse(params);
   if (await realpath(process.cwd()) !== input.authority.workspace) throw new Error("Worker workspace mismatch.");
   const sdk = loadCursorSdk();
-  const store = await openCursorSdkStore(input.stateRoot, input.authority.workspace, input.apiKey);
+  // The harness chose the store (cursorSdkStorePlan): the checkout's, or the agent's own, which is adopted from the
+  // store of the checkout the agent was created in when `adoptFrom` is given.
+  const storeWorkspace = input.storeWorkspace;
+  if (input.agentStateRoot !== undefined) {
+    await prepareCursorSdkAgentStore(input.agentStateRoot, input.adoptFrom === undefined ? undefined
+      : { sourceDirectory: input.adoptFrom, workspace: storeWorkspace!, agentId: input.sessionId!, secret: input.apiKey });
+  }
+  const store = await openCursorSdkStore(input.agentStateRoot ?? input.stateRoot,
+    storeWorkspace ?? input.authority.workspace, input.apiKey, input.agentStateRoot !== undefined || storeWorkspace !== undefined);
   const native: ToolName[] = input.nativeTools === "none" ? [] : input.nativeTools === "read"
     ? ["read", "ls", "grep", "glob"] : ["read", "ls", "grep", "glob", "write", "edit", "shell"];
   try {
     session = new CursorSdkSession(input.authority, {
-      store, create: (options) => sdk.Agent.create(options), resume: (id, options) => sdk.Agent.resume(id, options),
+      store, ...(storeWorkspace !== undefined ? { storeWorkspace } : {}), create: (options) => sdk.Agent.create(options),
+      resume: (id, options, from) => resumeCursorSdkAgent(sdk, id, options, from),
       assertAuthority: () => controller.signal.throwIfAborted(), model: input.model,
       tools: [...native, ...(input.tools.length ? ["mcp" as const] : [])],
       emit: async (message) => { await channel.request("event", { authority: input.authority, message }); },

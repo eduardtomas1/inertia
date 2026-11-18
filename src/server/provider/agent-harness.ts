@@ -444,7 +444,8 @@ export interface AgentHarnessEmitter {
     message?: string,
     providerState?: string,
   ) => void;
-  session: (sessionId: string) => void;
+  /** `forkedFrom`: the resumed session this one copies into the run's checkout (see `ProviderSessionEvent`). */
+  session: (sessionId: string, forkedFrom?: string) => void;
   nativeBoundary: (boundary: Omit<ProviderNativeBoundaryEvent, keyof ProviderEventBase | "type">) => void;
   sessionTitle: (sessionId: string, title: string) => void;
   goalUpdated: (sessionId: string, goal: ProviderGoalSnapshot) => void;
@@ -528,7 +529,8 @@ export function createAgentHarnessEmitter(
       ...(message ? { message } : {}),
       ...(providerState ? { providerState } : {}),
     }),
-    session: (sessionId) => emit({ ...base, type: "session", sessionId }),
+    session: (sessionId, forkedFrom) => emit({ ...base, type: "session", sessionId,
+      ...(forkedFrom !== undefined && forkedFrom !== sessionId ? { forkedFrom } : {}) }),
     nativeBoundary: (boundary) => {
       const valid = (id: unknown): id is string => typeof id === "string" && id.length > 0 && id.length <= 512 && !/[\u0000-\u0020\u007f]/u.test(id);
       if (!valid(boundary.nativeConversationId) || ![boundary.nativeSessionId, boundary.nativeTurnId, boundary.persistedHeadId].every((id) => id === null || valid(id))) return;

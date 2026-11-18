@@ -299,6 +299,10 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       throw new ProviderRuntimeError("invalid_input", "A provider option is invalid.");
     }
   }
+  if (input.sessionOriginCwd !== undefined && (input.sessionId === undefined || !isAbsolute(input.sessionOriginCwd)
+    || input.sessionOriginCwd.length > 4096 || input.sessionOriginCwd.includes("\0"))) {
+    throw new ProviderRuntimeError("invalid_input", "A provider option is invalid.");
+  }
   const imagePaths = input.imagePaths ?? [];
   if (imagePaths.length > MAX_PROVIDER_REQUEST_IMAGE_COUNT) {
     throw new ProviderRuntimeError("invalid_input", "Too many images were attached.");

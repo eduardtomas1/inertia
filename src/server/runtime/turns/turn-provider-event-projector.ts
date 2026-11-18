@@ -146,8 +146,11 @@ export class TurnProviderEventProjector {
         break;
       }
       case "session":
-        // A stale attempt's session must not become the turn's or the chat's.
-        if (this.options.store.orchestration.backings.observeSession(active.turn, event.sessionId, observer)) break;
+        // A stale attempt's session must not become the turn's or the chat's. A session the harness forked from the
+        // resumed one into this checkout takes over the resumed session's backing first.
+        if (event.forkedFrom !== undefined
+          && this.options.store.orchestration.backings.forkSession(active.turn, event.forkedFrom, event.sessionId, observer)) break;
+        if (this.options.store.orchestration.backings.observeSession(active.turn, event.sessionId, observer, event.forkedFrom)) break;
         updateActiveTurnProviderSession(active, event.sessionId);
         this.options.store.updateConversation(active.conversation.id, {
           providerSessionId: event.sessionId,

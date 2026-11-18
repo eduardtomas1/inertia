@@ -19,6 +19,7 @@ const mutationSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("delete"), table: tableSchema, keys: z.array(z.string()).max(100_000) }).strict(),
 ]);
 export type CursorSdkStoreMutation = z.infer<typeof mutationSchema>;
+const TERMINAL_RUN_STATUSES = new Set<string>(["finished", "error", "cancelled", "expired"]);
 type Table = z.infer<typeof tableSchema>;
 type Row = LocalAgentDocument | LocalAgentRunDocument | LocalAgentRunEventDocument | z.infer<typeof checkpointSchema>;
 function clone<T>(value: T): T { return structuredClone(value); }
@@ -51,6 +52,30 @@ export class CursorSdkStoreRecords implements LocalAgentStore {
   private readonly tables: Record<Table, Map<string, Row>> = { agents: new Map(), runs: new Map(), checkpoints: new Map(), runEvents: new Map() };
   constructor(private readonly check: () => void, private readonly persist: (mutation: CursorSdkStoreMutation) => void,
     readonly dispose: () => Promise<void>, private readonly secret?: string) {}
+
+  /**
+   * Every record of one agent as `put` mutations: its runs, checkpoints and run events, then the agent document
+   * last. Replaying them into an empty store reproduces the agent there (adoption into the agent's own store).
+   * Only a settled agent is exported: idle, without an active run, every run terminal. A store still being written
+   * (a previous run's worker not yet gone) can hold an agent between its run's and its own terminal write; such a
+   * copy could never be resumed, so it is refused and a later turn copies again.
+   */
+  exportAgent(agentId: string): CursorSdkStoreMutation[] {
+    const agent = this.tables.agents.get(agentId) as LocalAgentDocument | undefined;
+    if (!agent) throw new Error("Cursor SDK agent is not in this store.");
+    const runs = [...this.tables.runs.values()].filter((row) => (row as LocalAgentRunDocument).agentId === agentId) as LocalAgentRunDocument[];
+    if (agent.status !== "idle" || agent.activeRunId || runs.some((run) => !TERMINAL_RUN_STATUSES.has(run.status))) {
+      throw new Error("Cursor SDK agent is not settled in this store.");
+    }
+    const runIds = new Set(runs.map((run) => run.runId));
+    const put = (table: Table, rows: Row[]): CursorSdkStoreMutation[] => rows.map((value) => ({ operation: "put", table, value: clone(value) }));
+    return [
+      ...put("runs", runs),
+      ...put("checkpoints", [...this.tables.checkpoints.values()].filter((row) => (row as z.infer<typeof checkpointSchema>).agentId === agentId)),
+      ...put("runEvents", [...this.tables.runEvents.values()].filter((row) => runIds.has((row as LocalAgentRunEventDocument).runId))),
+      ...put("agents", [agent]),
+    ];
+  }
 
   replay(input: unknown): void {
     const mutation = mutationSchema.parse(input);

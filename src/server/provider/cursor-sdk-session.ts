@@ -10,13 +10,33 @@ export interface CursorSdkAuthority {
 
 export interface CursorSdkSessionDependencies {
   create(options: AgentOptions): Promise<SDKAgent>;
-  resume(id: string, options: Partial<AgentOptions>): Promise<SDKAgent>;
+  /** `storeWorkspace`: the checkout whose store holds the agent, when it is not the session's workspace. */
+  resume(id: string, options: Partial<AgentOptions>, storeWorkspace?: string): Promise<SDKAgent>;
   store: LocalAgentStore;
+  /**
+   * The checkout the resumed agent was created in, when the chat moved to `authority.workspace` with it.
+   * `store` is that checkout's store; the agent runs in `authority.workspace`.
+   */
+  storeWorkspace?: string;
   assertAuthority(authority: Readonly<CursorSdkAuthority>): void;
   emit(message: SDKMessage): Promise<void>;
   model?: string;
   tools?: ToolName[];
   customTools?(sessionId: () => string | undefined): Record<string, SDKCustomTool>;
+}
+
+/**
+ * Resumes an agent. Cursor keys custom-store lookups by `local.cwd`, so an agent created in another
+ * checkout is found only through a platform scoped to that checkout; `local.cwd` still sets where it runs
+ * (T3 a18a458f2, `CursorAgentSdk.ts`).
+ */
+export async function resumeCursorSdkAgent(sdk: Pick<typeof import("@cursor/sdk"), "Agent" | "createAgentPlatform">,
+  id: string, options: Partial<AgentOptions>, storeWorkspace?: string): Promise<SDKAgent> {
+  if (storeWorkspace === undefined || storeWorkspace === options.local?.cwd) return await sdk.Agent.resume(id, options);
+  const localStore = options.local?.store;
+  if (!localStore) throw new Error("Cursor SDK moved resume requires its store.");
+  const platform = await sdk.createAgentPlatform({ localStore, workspaceRef: storeWorkspace });
+  return await platform.resumeAgent(id, options);
 }
 
 const MAX_MESSAGE_BYTES = 1024 * 1024;
@@ -50,13 +70,18 @@ export class CursorSdkSession {
     boundedText(prompt);
     if (!apiKey.trim() || Buffer.byteLength(apiKey) > 16_384) throw new Error("Cursor SDK credential is invalid.");
     this.check();
+    const { storeWorkspace } = this.dependencies;
+    if (storeWorkspace !== undefined && (!sessionId || storeWorkspace === this.authority.workspace)) {
+      throw new Error("Cursor SDK store workspace is invalid.");
+    }
     this.active = true;
     try {
       const { store } = this.dependencies;
       if (sessionId) {
         const source = await store.agents.get({ agentId: sessionId });
         this.check();
-        if (!source || source.agentId !== sessionId || source.cwd !== this.authority.workspace
+        // The agent must be one this store recorded for its own checkout: the session's, or the one it moved from.
+        if (!source || source.agentId !== sessionId || source.cwd !== (storeWorkspace ?? this.authority.workspace)
           || source.activeRunId || source.status !== "idle") throw new Error("Cursor SDK session cannot be resumed.");
       }
       const options: AgentOptions = {
@@ -66,7 +91,7 @@ export class CursorSdkSession {
         local: { cwd: this.authority.workspace, store, settingSources: [], enableAgentRetries: false,
           ...(this.dependencies.customTools ? { customTools: this.dependencies.customTools(() => this.agent?.agentId) } : {}) },
       };
-      this.agent = sessionId ? await this.dependencies.resume(sessionId, options) : await this.dependencies.create(options);
+      this.agent = sessionId ? await this.dependencies.resume(sessionId, options, storeWorkspace) : await this.dependencies.create(options);
       this.check();
       if (!this.agent.agentId || (sessionId && this.agent.agentId !== sessionId)) throw new Error("Cursor SDK session identity changed.");
       this.run = await this.agent.send(prompt);

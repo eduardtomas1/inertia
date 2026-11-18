@@ -1,6 +1,6 @@
 // @inertia-test-suite portable
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getSessionMessages, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -187,6 +187,107 @@ describe("Claude native conversation control", () => {
     }
     expect(result).toMatchObject({ status: "completed", effect: "resume-cursor" });
     expect(await readdir(directory)).toEqual([`${sourceId}.jsonl`]);
+  });
+});
+
+/** The project folder Claude Code names after a cwd, as the installed SDK derives it. */
+async function projectFolder(cwd: string): Promise<string> {
+  let key = "";
+  await getSessionMessages(randomUUID(), { dir: cwd, sessionStore: {
+    append: async () => { throw new Error("Unexpected write"); },
+    load: async (value) => { key = value.projectKey; return []; },
+  } });
+  return join(root, "config", "projects", key);
+}
+
+describe("a transcript after the chat moved to another checkout", () => {
+  // Resumed from another cwd, Claude Code keeps appending to the transcript in the folder of the cwd the
+  // session started in (verified with the bundled Claude Code 2.1.319, see session-cwd-mobility.ts).
+  let moved: NativeConversationLaunch;
+  let movedFolder: string;
+  beforeEach(async () => {
+    const cwd = join(root, "moved-checkout");
+    await mkdir(cwd);
+    movedFolder = await projectFolder(cwd);
+    await mkdir(movedFolder, { recursive: true });
+    moved = { ...launch, cwd };
+  });
+
+  it("reads the settled head from the session's original project folder", async () => {
+    expect(await readClaudePersistedNativeHead(sourceId, moved.cwd, moved.environment)).toBe(ids[3]);
+  });
+
+  it("rolls back natively without touching the original transcript", async () => {
+    expect(await createClaudeNativeConversationOperations(new Set()).execute({ ...request, kind: "rollback" }, moved))
+      .toMatchObject({ status: "completed", effect: "resume-cursor", backing: { nativeConversationId: sourceId, headId: ids[1] } });
+    expect(await readFile(transcript, "utf8")).toBe(sourceText);
+    expect(await readdir(movedFolder)).toEqual([]);
+  });
+
+  it("forks into the moved checkout's project folder, where any Claude Code resumes it", async () => {
+    const result = await createClaudeNativeConversationOperations(new Set()).execute(request, moved);
+    if (result.status !== "completed") throw new Error(JSON.stringify(result));
+    expect(await readdir(movedFolder)).toEqual([`${result.backing.nativeConversationId}.jsonl`]);
+    expect(await readdir(directory)).toEqual([`${sourceId}.jsonl`]);
+    expect(await readFile(transcript, "utf8")).toBe(sourceText);
+  });
+
+  it("creates the project folder of a checkout Claude Code never ran in for a fork", async () => {
+    const cwd = join(root, "new-worktree");
+    await mkdir(cwd);
+    const folder = await projectFolder(cwd);
+    const result = await createClaudeNativeConversationOperations(new Set()).execute(request, { ...launch, cwd });
+    if (result.status !== "completed") throw new Error(JSON.stringify(result));
+    expect(await readdir(folder)).toEqual([`${result.backing.nativeConversationId}.jsonl`]);
+    if (process.platform !== "win32") expect((await stat(folder)).mode & 0o777).toBe(0o700);
+    expect(await readFile(transcript, "utf8")).toBe(sourceText);
+  });
+
+  it("remembers the folder that holds a moved session instead of rescanning the home on every read", async () => {
+    for (let index = 0; index < 5; index += 1) await mkdir(join(root, "config", "projects", `-other-project-${index}`));
+    const probes = async () => {
+      const paths: string[] = [];
+      const ops = createClaudeNativeConversationOperations(new Set(), {
+        beforeOperation: (operation, path) => { if (operation === "lstat" && path.endsWith(`${sourceId}.jsonl`)) paths.push(path); },
+      });
+      expect(await ops.execute({ ...request, kind: "rollback" }, moved)).toMatchObject({ status: "completed" });
+      return [...new Set(paths)];
+    };
+    expect((await probes()).length).toBeGreaterThan(5);
+    expect(await probes()).toEqual([join(movedFolder, `${sourceId}.jsonl`), transcript]);
+    // A transcript Claude Code moved on is found again by a full search.
+    const elsewhere = join(root, "config", "projects", "-other-project-3");
+    await rename(transcript, join(elsewhere, `${sourceId}.jsonl`));
+    expect((await probes()).length).toBeGreaterThan(5);
+    expect(await readClaudePersistedNativeHead(sourceId, moved.cwd, moved.environment)).toBe(ids[3]);
+  });
+
+  it("refuses a session held by more than one other project folder", async () => {
+    const copy = join(root, "config", "projects", "-copied-project");
+    await mkdir(copy);
+    await writeFile(join(copy, `${sourceId}.jsonl`), sourceText);
+    expect(await readClaudePersistedNativeHead(sourceId, moved.cwd, moved.environment)).toBeNull();
+    expect(await createClaudeNativeConversationOperations(new Set()).execute({ ...request, kind: "rollback" }, moved))
+      .toMatchObject({ status: "rejected", reason: "native-transcript-unavailable" });
+    // The cwd's own folder still wins, as in Claude Code's own resume.
+    expect(await readClaudePersistedNativeHead(sourceId, launch.cwd, launch.environment)).toBe(ids[3]);
+  });
+
+  it.skipIf(process.platform === "win32")("ignores a project folder reached through a symlink", async () => {
+    const outside = join(root, "outside-project");
+    await mkdir(outside);
+    await writeFile(join(outside, `${sourceId}.jsonl`), sourceText);
+    await rm(transcript);
+    await symlink(outside, join(root, "config", "projects", "-linked-project"));
+    expect(await readClaudePersistedNativeHead(sourceId, moved.cwd, moved.environment)).toBeNull();
+    expect(await createClaudeNativeConversationOperations(new Set()).execute({ ...request, kind: "rollback" }, moved))
+      .toMatchObject({ status: "rejected", reason: "native-transcript-unavailable" });
+  });
+
+  it("keeps a configured project folder name exact", async () => {
+    const environment = { ...launch.environment, CLAUDE_CODE_PROJECT_DIR_NAME: "-configured-project" };
+    await mkdir(join(root, "config", "projects", "-configured-project"));
+    expect(await readClaudePersistedNativeHead(sourceId, moved.cwd, environment)).toBeNull();
   });
 });
 

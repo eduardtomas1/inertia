@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, mkdir, open, opendir, realpath } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 
 import {
   forkSession, getSessionMessages,
@@ -11,7 +11,10 @@ import {
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
 import { claudeEnvironmentValue, claudeUserConfigHome, plainPathComponents, readBoundedRegularFile } from "./claude-config-files";
 import { controlNativeConversation, type NativeMutationProgress } from "./native-conversation-control";
-import { createClaudeSkillDeadline, raceClaudeSkillOperation, type ClaudeSkillFilesystemTestSeam } from "./claude-skill-operation";
+import {
+  checkClaudeSkillOperation, createClaudeSkillDeadline, raceClaudeSkillOperation, runClaudeSkillFilesystemOperation,
+  type ClaudeSkillFilesystemTestSeam, type ClaudeSkillOperationControl,
+} from "./claude-skill-operation";
 import {
   NativeConversationRejection, retainedNativeHead,
   type NativeConversationContinuation, type NativeConversationOperations,
@@ -19,6 +22,18 @@ import {
 
 const MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024;
 const MAX_TRANSCRIPT_ENTRIES = 20_000;
+const MAX_PROJECT_FOLDERS = 20_000;
+const PROJECT_KEY = /^[^/\\\u0000-\u001f\u007f]{1,240}$/u;
+const MAX_REMEMBERED_FOLDERS = 256;
+/** The other project folder last found holding a session, by Claude home and session id, so a moved chat's
+ * every settle does not rescan the whole home. Advisory: the file is checked again before it is used. */
+const rememberedFolders = new Map<string, string>();
+
+function rememberFolder(memoryKey: string, projectKey: string): void {
+  rememberedFolders.delete(memoryKey);
+  rememberedFolders.set(memoryKey, projectKey);
+  if (rememberedFolders.size > MAX_REMEMBERED_FOLDERS) rememberedFolders.delete(rememberedFolders.keys().next().value!);
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 function reject(reason: string): never { throw new NativeConversationRejection("rejected", reason); }
@@ -40,6 +55,8 @@ function parseTranscript(bytes: Buffer, sessionId: string): SessionStoreEntry[] 
 class ScopedClaudeTranscriptStore implements SessionStore {
   private source: SessionStoreEntry[] | null = null;
   private projectKey: string | null = null;
+  /** Whether the source was read from a project folder other than the cwd's. */
+  loadedElsewhere = false;
   private fork: { sessionId: string; entries: SessionStoreEntry[]; bytes: Buffer } | null = null;
 
   constructor(
@@ -48,12 +65,14 @@ class ScopedClaudeTranscriptStore implements SessionStore {
     private readonly signal: AbortSignal,
     private readonly configuredProjectKey: string | undefined,
     private readonly filesystem?: ClaudeSkillFilesystemTestSeam,
+    /** False where the answer is evidence that must hold now: the full unique search always runs. */
+    private readonly useRememberedFolder = true,
   ) {}
 
   private checkKey(key: SessionKey): void {
     this.signal.throwIfAborted();
     if (key.subpath !== undefined || !UUID.test(key.sessionId)
-      || !/^[^/\\\u0000-\u001f\u007f]{1,240}$/u.test(key.projectKey)
+      || !PROJECT_KEY.test(key.projectKey)
       || key.projectKey === "." || key.projectKey === ".."
       || (this.projectKey !== null && key.projectKey !== this.projectKey)
       || (this.configuredProjectKey !== undefined && key.projectKey !== this.configuredProjectKey)) {
@@ -62,13 +81,71 @@ class ScopedClaudeTranscriptStore implements SessionStore {
     this.projectKey = key.projectKey;
   }
 
+  private async hasTranscript(projectKey: string, control: ClaudeSkillOperationControl): Promise<boolean> {
+    const path = join(this.home, "projects", projectKey, `${this.sourceId}.jsonl`);
+    try {
+      const status = await runClaudeSkillFilesystemOperation(control, "lstat", path, async () => await lstat(path));
+      return status.isFile();
+    } catch {
+      checkClaudeSkillOperation(control);
+      return false;
+    }
+  }
+
+  /**
+   * The project folder that holds the source transcript. Claude Code names the folder after the cwd the
+   * session started in and keeps appending there when the session is resumed from another checkout, so a
+   * moved chat's transcript stays in its first checkout's folder. Like Claude Code's own `--resume`, look in
+   * the cwd's folder first, then accept exactly one other folder of this Claude home that holds the session
+   * (T3: "let the SDK find the session by ID within this Claude home"). None or several leave the cwd's
+   * folder, which reads as unavailable. A configured project folder name is never widened.
+   */
+  private async sourceProjectKey(key: SessionKey, control: ClaudeSkillOperationControl): Promise<string> {
+    if (this.configuredProjectKey !== undefined || await this.hasTranscript(key.projectKey, control)) return key.projectKey;
+    const memoryKey = `${this.home}\u0000${this.sourceId}`;
+    const remembered = this.useRememberedFolder ? rememberedFolders.get(memoryKey) : undefined;
+    if (remembered !== undefined && remembered !== key.projectKey && await this.hasTranscript(remembered, control)) return remembered;
+    rememberedFolders.delete(memoryKey);
+    const found = await this.searchProjectFolders(key, control);
+    if (found !== null) rememberFolder(memoryKey, found);
+    return found ?? key.projectKey;
+  }
+
+  private async searchProjectFolders(key: SessionKey, control: ClaudeSkillOperationControl): Promise<string | null> {
+    const projects = join(this.home, "projects");
+    if (!await plainPathComponents(this.home, projects, control)) return null;
+    let found: string | null = null;
+    let folders = 0;
+    try {
+      const directory = await runClaudeSkillFilesystemOperation(control, "opendir", projects, async () => await opendir(projects));
+      try {
+        for await (const entry of directory) {
+          checkClaudeSkillOperation(control);
+          if (!entry.isDirectory() || entry.name === key.projectKey || !PROJECT_KEY.test(entry.name)
+            || entry.name === "." || entry.name === "..") continue;
+          if ((folders += 1) > MAX_PROJECT_FOLDERS) return null;
+          if (!await this.hasTranscript(entry.name, control)) continue;
+          if (found !== null) return null;
+          found = entry.name;
+        }
+      } finally {
+        await directory.close().catch(() => undefined);
+      }
+    } catch {
+      checkClaudeSkillOperation(control);
+      return null;
+    }
+    return found;
+  }
+
   async load(key: SessionKey): Promise<SessionStoreEntry[] | null> {
     this.checkKey(key);
     if (key.sessionId === this.fork?.sessionId) return this.fork.entries;
     if (key.sessionId !== this.sourceId) reject("native-session-mismatch");
     if (this.source) return this.source;
-    const path = join(this.home, "projects", key.projectKey, `${key.sessionId}.jsonl`);
     const control = { ...this.filesystem, signal: this.signal };
+    const sourceKey = await this.sourceProjectKey(key, control);
+    const path = join(this.home, "projects", sourceKey, `${key.sessionId}.jsonl`);
     if (!await plainPathComponents(this.home, path, control)) reject("native-transcript-unavailable");
     const before = await lstat(path, { bigint: true });
     const bytes = await readBoundedRegularFile(
@@ -81,6 +158,7 @@ class ScopedClaudeTranscriptStore implements SessionStore {
       || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
       || BigInt(bytes.length) !== after.size) reject("native-history-changed-during-read");
     this.source = parseTranscript(bytes, this.sourceId);
+    this.loadedElsewhere = sourceKey !== key.projectKey;
     return this.source;
   }
 
@@ -94,11 +172,40 @@ class ScopedClaudeTranscriptStore implements SessionStore {
     this.fork = { sessionId: key.sessionId, entries: parseTranscript(bytes, key.sessionId), bytes };
   }
 
+  /**
+   * Creates the cwd's project folder when Claude Code has never run there (a fork into a new checkout), as
+   * Claude Code would: private, directly under a canonical `projects` folder, never through a symlink. An
+   * existing entry is left to the caller's identity checks.
+   */
+  private async ensureProjectFolder(directory: string, control: ClaudeSkillOperationControl): Promise<void> {
+    try {
+      await lstat(directory);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const projects = join(this.home, "projects");
+    if (!await plainPathComponents(this.home, projects, control) || await realpath(projects) !== projects) {
+      reject("unsafe-native-transcript-directory");
+    }
+    const parent = await lstat(projects);
+    if (!parent.isDirectory()) reject("unsafe-native-transcript-directory");
+    this.signal.throwIfAborted();
+    try {
+      await mkdir(directory, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const currentParent = await lstat(projects);
+    if (currentParent.dev !== parent.dev || currentParent.ino !== parent.ino) reject("unsafe-native-transcript-directory");
+  }
+
   async persist(sessionId: string, progress: NativeMutationProgress): Promise<void> {
     if (!this.fork || this.fork.sessionId !== sessionId || !this.projectKey) throw new Error("Native fork was not captured.");
     const directory = join(this.home, "projects", this.projectKey);
     const path = join(directory, `${sessionId}.jsonl`);
     const control = { signal: this.signal };
+    await this.ensureProjectFolder(directory, control);
     if (!await plainPathComponents(this.home, directory, control) || await realpath(directory) !== directory) {
       reject("unsafe-native-transcript-directory");
     }
@@ -200,6 +307,31 @@ export async function readClaudePersistedNativeHead(sessionId: string, cwd: stri
       return messages.at(-1)!.uuid;
     })(), deadline.signal);
   } catch { return null; }
+  finally { deadline.dispose(); }
+}
+
+/**
+ * After Claude Code refused to resume a session from `cwd`: whether the session's transcript is still in this
+ * Claude home, in exactly one project folder other than the cwd's. Then only that Claude Code could not find it
+ * from here (it predates the moved-cwd lookup); otherwise the session is really gone.
+ */
+export async function claudeSessionStoredElsewhere(sessionId: string, cwd: string, environment: NodeJS.ProcessEnv): Promise<boolean> {
+  if (!UUID.test(sessionId)) return false;
+  // Claude Code resolves a relative CLAUDE_CONFIG_DIR itself; Inertia would read ~/.claude instead, a
+  // different home whose contents prove nothing about the one Claude Code searched.
+  const configured = claudeEnvironmentValue(environment, "CLAUDE_CONFIG_DIR")?.trim();
+  if (configured && !isAbsolute(configured)) return false;
+  const deadline = createClaudeSkillDeadline(2_000, "Claude session lookup timed out.");
+  try {
+    return await raceClaudeSkillOperation((async () => {
+      const home = await claudeUserConfigHome(environment, { signal: deadline.signal });
+      if (!home) return false;
+      const store = new ScopedClaudeTranscriptStore(home, sessionId, deadline.signal, claudeEnvironmentValue(environment, "CLAUDE_CODE_PROJECT_DIR_NAME"),
+        undefined, false);
+      const messages = await getSessionMessages(sessionId, { dir: cwd, sessionStore: store, includeSystemMessages: true, limit: MAX_TRANSCRIPT_ENTRIES });
+      return messages.length > 0 && messages.every((message) => message.session_id === sessionId) && store.loadedElsewhere;
+    })(), deadline.signal);
+  } catch { return false; }
   finally { deadline.dispose(); }
 }
 

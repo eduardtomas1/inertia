@@ -5,10 +5,49 @@ import {
   orchestrationAttemptSchema, orchestrationRunSchema, type OrchestrationAttempt, type OrchestrationRun,
 } from "../../shared/orchestration-v2";
 import { nativeControlSchema } from "../../shared/orchestration-native-control";
+import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { commandFingerprint } from "./json";
 import { OrchestrationConflict, type OrchestrationEvent, type ProjectionReader, type ProjectionWrite } from "./types";
 
+/**
+ * Lookup rows the projector reads back (projection version 3): `backing-session` names the live backing of a native
+ * session in one chat, provider instance and checkout; `attempt-handoff` names the handoff prepared for an attempt.
+ * They let `provider.backing-forked` be checked from projections alone.
+ */
+const BACKING_SESSION = "backing-session";
+const ATTEMPT_HANDOFF = "attempt-handoff";
+
+function backingSessionKey(backing: Pick<ProviderBacking, "threadId" | "providerInstanceId" | "workspaceKey" | "nativeSessionId">): string {
+  return commandFingerprint({ threadId: backing.threadId, instanceId: backing.providerInstanceId,
+    workspaceKey: backing.workspaceKey, nativeSessionId: backing.nativeSessionId });
+}
+
+/** The live backing of `nativeSessionId` in the scope of `scope`, if the lookup row names one that still holds it. */
+function liveSessionBacking(read: ProjectionReader, scope: ProviderBacking, nativeSessionId: string): ProviderBacking | null {
+  const key = read(BACKING_SESSION, backingSessionKey({ ...scope, nativeSessionId }))?.value as { backingId?: unknown } | undefined;
+  const row = typeof key?.backingId === "string" ? read("provider-backing", key.backingId) : null;
+  const backing = row ? providerBackingSchema.parse(row.value) : null;
+  return backing && backing.status !== "retired" && backing.threadId === scope.threadId && backing.nativeSessionId === nativeSessionId
+    && backing.providerInstanceId === scope.providerInstanceId && backing.workspaceKey === scope.workspaceKey ? backing : null;
+}
+
 export function projectBackingEvent(event: OrchestrationBackingEvent, envelope: OrchestrationEvent,
+  read: ProjectionReader): ProjectionWrite[] {
+  const writes = projectBackingWrites(event, envelope, read);
+  const lookups: ProjectionWrite[] = [];
+  for (const write of writes) {
+    if (write.kind === "provider-backing") {
+      const backing = providerBackingSchema.parse(write.value);
+      if (backing.status !== "retired") lookups.push({ kind: BACKING_SESSION, id: backingSessionKey(backing), value: { backingId: backing.id } });
+    } else if (write.kind === "context-handoff" && event.type === "context.handoff-prepared") {
+      const handoff = contextHandoffSchema.parse(write.value);
+      lookups.push({ kind: ATTEMPT_HANDOFF, id: handoff.attemptId, value: { handoffId: handoff.id } });
+    }
+  }
+  return [...writes, ...lookups];
+}
+
+function projectBackingWrites(event: OrchestrationBackingEvent, envelope: OrchestrationEvent,
   read: ProjectionReader): ProjectionWrite[] {
   if (event.type === "provider.backing-invalidated") {
     const row = read("provider-backing", event.payload.backingId);
@@ -36,6 +75,7 @@ export function projectBackingEvent(event: OrchestrationBackingEvent, envelope: 
   if (run.threadId !== envelope.threadId || run.projectId !== envelope.projectId
     || attempt.id !== run.attemptId || attempt.runId !== run.id) throw new OrchestrationConflict("scope-conflict");
   if (event.type === "provider.backing-relocated") return relocated(event.payload, envelope, read, run, attempt);
+  if (event.type === "provider.backing-forked") return forked(event.payload, envelope, read, run, attempt);
   if (event.type === "provider.session-cleared") {
     if (attempt.nativeSessionId !== event.payload.expectedNativeSessionId) throw new OrchestrationConflict("revision-conflict");
     return [{ kind: "attempt", id: attempt.id, value: { ...attempt, nativeSessionId: null,
@@ -121,6 +161,41 @@ function relocated(payload: Extract<OrchestrationBackingEvent, { type: "provider
   return [{ kind: "provider-backing", id: source.id, value: { ...source, status: "retired", updatedAt: envelope.createdAt } },
     { kind: "provider-backing", id: payload.backingId, value: providerBackingSchema.parse({ ...source, id: payload.backingId,
       workspaceKey: payload.workspaceKey, createdAt: envelope.createdAt, updatedAt: envelope.createdAt }) }];
+}
+
+function forked(payload: Extract<OrchestrationBackingEvent, { type: "provider.backing-forked" }>["payload"],
+  envelope: OrchestrationEvent, read: ProjectionReader, run: OrchestrationRun, attempt: OrchestrationAttempt): ProjectionWrite[] {
+  const row = read("provider-backing", payload.backingId);
+  if (!row || row.threadId !== envelope.threadId) throw new OrchestrationConflict("scope-conflict");
+  const source = providerBackingSchema.parse(row.value);
+  if (source.providerInstanceId !== run.providerInstanceId || source.projectId !== run.projectId
+    || source.workspaceKey !== run.workspaceKey || source.lastRunId !== run.id
+    || source.nativeSessionId !== payload.fromNativeSessionId || attempt.nativeSessionId !== payload.fromNativeSessionId
+    || payload.nativeSessionId === payload.fromNativeSessionId) throw new OrchestrationConflict("scope-conflict");
+  // Only while the run is live, never onto a session another live backing of this scope already holds, and the
+  // run's handoff for this backing must move with it.
+  if (source.status === "retired" || isAgentTurnTerminalStatus(run.status)
+    || liveSessionBacking(read, source, payload.nativeSessionId)) throw new OrchestrationConflict("revision-conflict");
+  const indexed = read(ATTEMPT_HANDOFF, attempt.id)?.value as { handoffId?: unknown } | undefined;
+  const current = typeof indexed?.handoffId === "string" ? read("context-handoff", indexed.handoffId) : null;
+  const active = current ? contextHandoffSchema.parse(current.value) : null;
+  const expected = active && active.targetBackingId === source.id && (active.state === "prepared" || active.state === "dispatching")
+    ? active.id : null;
+  if (payload.handoffId !== expected) throw new OrchestrationConflict("scope-conflict");
+  const writes: ProjectionWrite[] = [
+    { kind: "provider-backing", id: source.id, value: { ...source, nativeSessionId: payload.nativeSessionId, updatedAt: envelope.createdAt } },
+    { kind: "attempt", id: attempt.id, value: { ...attempt, nativeSessionId: payload.nativeSessionId } },
+  ];
+  if (payload.handoffId !== null) {
+    const handoff = contextHandoffSchema.parse(read("context-handoff", payload.handoffId)?.value);
+    if (handoff.runId !== run.id || handoff.attemptId !== attempt.id || handoff.targetBackingId !== source.id
+      || handoff.nativeSessionId !== payload.fromNativeSessionId || !["prepared", "dispatching"].includes(handoff.state)) {
+      throw new OrchestrationConflict("scope-conflict");
+    }
+    writes.push({ kind: "context-handoff", id: handoff.id, value: { ...handoff, nativeSessionId: payload.nativeSessionId,
+      updatedAt: envelope.createdAt } });
+  }
+  return writes;
 }
 
 function rewound(payload: Extract<OrchestrationBackingEvent, { type: "provider.backing-rewound" }>["payload"],

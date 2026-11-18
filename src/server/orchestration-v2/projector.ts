@@ -17,7 +17,8 @@ import { isDelegationEvent, projectDelegationEvent } from "./delegation-projecto
 import { isRunControlEvent, projectRunControlEvent } from "./run-control-projector";
 import { OrchestrationConflict, type ProjectEvent, type ProjectionWrite } from "./types";
 
-export const ORCHESTRATION_V2_PROJECTION_VERSION = 2;
+/** 3: backing lookup rows (`backing-session`, `attempt-handoff`) for `provider.backing-forked`. */
+export const ORCHESTRATION_V2_PROJECTION_VERSION = 3;
 
 export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   const event = orchestrationDomainEventSchema.parse({ type: envelope.type, payload: envelope.payload });
@@ -47,7 +48,7 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   }
   if (event.type === "provider.backing-recorded" || event.type === "provider.backing-invalidated" || event.type === "provider.session-cleared"
     || event.type === "provider.backing-rewound" || event.type === "provider.backing-restored"
-    || event.type === "provider.backing-relocated"
+    || event.type === "provider.backing-relocated" || event.type === "provider.backing-forked"
     || event.type === "context.handoff-prepared" || event.type === "context.handoff-state-changed") {
     return projectBackingEvent(event, envelope, read);
   }

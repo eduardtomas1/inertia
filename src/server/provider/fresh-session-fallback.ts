@@ -119,7 +119,8 @@ export function startHarnessWithFreshSessionFallback(
     let replacement: HarnessFreshSessionReplacement | null;
     try {
       // Checked above: the rejected attempt's process cleanup is confirmed.
-      replacement = fallback({ priorCleanup: "confirmed" });
+      replacement = fallback({ priorCleanup: "confirmed",
+        ...(outcome.failure.sessionStoredElsewhere ? { sessionStoredElsewhere: true as const } : {}) });
     } catch {
       return keep();
     }
@@ -131,6 +132,7 @@ export function startHarnessWithFreshSessionFallback(
     try {
       const {
         sessionId: _sessionId,
+        sessionOriginCwd: _sessionOriginCwd,
         performanceModeTransition: _performanceModeTransition,
         goalContinuationExpected: _goalContinuationExpected,
         nativeContinuation: _nativeContinuation,

@@ -54,6 +54,15 @@ export const orchestrationBackingEventSchema = z.discriminatedUnion("type", [
     runId: id, attemptId: id, fromBackingId: id, backingId: id,
     workspaceKey: z.string().min(1).max(4_096),
   }).strict() }).strict(),
+  /**
+   * The run's harness continues a copy of the resumed session made in the run's checkout (Pi `--fork`;
+   * T3 repoints the provider thread's `nativeThreadRef` and keeps its coverage). The backing the run works on
+   * now names the copy: same row, coverage and status; the attempt and the run's handoff follow it.
+   */
+  z.object({ type: z.literal("provider.backing-forked"), payload: z.object({
+    runId: id, attemptId: id, backingId: id, fromNativeSessionId: nativeId, nativeSessionId: nativeId,
+    handoffId: id.nullable(),
+  }).strict() }).strict(),
   z.object({ type: z.literal("provider.backing-invalidated"), payload: z.object({
     backingId: id, reason: z.enum(["uncertain-delivery", "native-resume-failed", "workspace-changed", "rolled-back", "context-exhausted"]),
   }).strict() }).strict(),

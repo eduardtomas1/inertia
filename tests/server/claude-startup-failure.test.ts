@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
-import { claudeSessionUnavailable, claudeStartupFailure } from "../../src/server/provider/claude-startup-failure";
+import { claudeSessionNotFound, claudeSessionUnavailable, claudeStartupFailure } from "../../src/server/provider/claude-startup-failure";
 import { startHarnessWithFreshSessionFallback } from "../../src/server/provider/fresh-session-fallback";
 import {
   CLAUDE_PROTOCOL_SESSION_ID,
@@ -113,6 +113,11 @@ describe("Claude startup failures", () => {
     expect(claudeSessionUnavailable(failedResult({ startup_failure_reason: "proxy_invalid" }))).toBe(false);
     expect(claudeSessionUnavailable(claudeSuccessResult("Done"))).toBe(false);
     expect(claudeSessionUnavailable(claudeSystem("init"))).toBe(false);
+    // Only the not-found answer may come from a Claude Code that cannot see the transcript from this cwd.
+    expect(claudeSessionNotFound(missingSession)).toBe(true);
+    expect(claudeSessionNotFound(failedResult({ startup_failure_reason: "worktree_resume_refused",
+      errors: [`No conversation found with session ID: ${savedSessionId}`] }))).toBe(false);
+    expect(claudeSessionNotFound(failedResult({ num_turns: 3, errors: [`No conversation found with session ID: ${savedSessionId}`] }))).toBe(false);
   });
 
   it("explains a session on an API provider that managed settings do not allow", () => {

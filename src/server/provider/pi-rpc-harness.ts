@@ -10,14 +10,15 @@ import { providerRunTerminal, ProviderSteerDeliveryUnknownError, type ProviderRu
 import { createProviderHostToolMcpSession, type ProviderHostToolMcpSession } from "./host-tool-mcp-http";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { trackNativeConversationRun } from "./native-conversation-run-tracking";
-import { createPiNativeConversationOperations, piActiveEntries } from "./pi-native-conversation";
+import { createPiNativeConversationOperations, forkPiSessionIntoCheckout, piActiveEntries, PiForkCleanupError, PiForkRefusedError } from "./pi-native-conversation";
 import { PiDialogs } from "./pi-dialogs";
 import { PiEvents } from "./pi-events";
 import { piLaunchConfiguration, piNativeTools, piRpcArguments, validatePiLaunchResources } from "./pi-launch";
 import { piModels, piUsage } from "./pi-models";
 import { piImages, stagePiBridge } from "./pi-resources";
 import { openPiRpcConnection, type PiRpcConnection } from "./pi-rpc";
-import { ensurePiSessionDirectory, findPiSessionFile, piSessionState, requireUnusedPiSessionId } from "./pi-session";
+import { ensurePiSessionDirectory, locatePiSessionFile, piSessionInCheckout, PiSessionMissingError, piSessionState, removeUnannouncedPiSession,
+  requireUnusedPiSessionId } from "./pi-session";
 import { providerUnconfirmedCleanup } from "./provider-unconfirmed-cleanup";
 import { validatePiSkills } from "./pi-skills";
 
@@ -55,6 +56,11 @@ function startPiRun(options: AgentHarnessStartOptions, dependencies: PiRpcHarnes
   let cancelled = false; let live = false; let finished = false;
   let timedOut = false; let uncertainSteer = false; let imageInputAvailable = false;
   let sessionId = input.sessionId;
+  // Set while the resumed session cannot be found or moved here: the turn can only continue on a new session.
+  let sessionUnavailable = false;
+  let forkChild: PiRpcConnection["child"] | undefined;
+  // A copy this run made and has not announced yet; removed if the run ends before announcing it.
+  let unannouncedCopy: { id: string; file: string; root: string } | undefined;
   let stopped: Promise<void> | undefined;
   let steerTail: Promise<unknown> = Promise.resolve();
   const controller = new AbortController();
@@ -96,7 +102,33 @@ function startPiRun(options: AgentHarnessStartOptions, dependencies: PiRpcHarnes
       await validatePiLaunchResources(config);
       const root = await ensurePiSessionDirectory(config.sessionDirectory, controller.signal);
       if (continuation) await requireUnusedPiSessionId(root, continuation.nativeConversationId, controller.signal);
-      const sessionFile = input.sessionId && !continuation ? await findPiSessionFile(root, input.sessionId, input.cwd, controller.signal) : undefined;
+      let sessionFile: string | undefined;
+      let expectedSessionId = input.sessionId;
+      let forkedFrom: string | undefined;
+      if (input.sessionId && !continuation) {
+        // Only a definite outcome makes the session unavailable (the runtime then retires it and starts fresh):
+        // its file is gone, or Pi definitely did not copy it. Timeouts, transport failures and a crashed or
+        // unconfirmed fork process are ordinary failures that keep the session for the next turn.
+        const definite = (error: unknown) => error instanceof PiSessionMissingError || error instanceof PiForkRefusedError;
+        let located: Awaited<ReturnType<typeof locatePiSessionFile>>;
+        try { located = await locatePiSessionFile(root, input.sessionId, controller.signal); }
+        catch (error) { sessionUnavailable = definite(error); throw error; }
+        if (await piSessionInCheckout(located.cwd, input.cwd)) sessionFile = located.file;
+        else {
+          // The chat moved here with this session. Pi keeps the checkout a session was created in, so continue a copy
+          // made in this checkout (T3 bebaf3ec0); the runtime moves the backing and its coverage to the copy.
+          try {
+            const forked = await forkPiSessionIntoCheckout({ config, environment: options.environment, root,
+              sourceId: input.sessionId, sourceFile: located.file, cwd: input.cwd, signal: controller.signal, redact,
+              dependencies: { spawnProcess: dependencies.spawnProcess, terminateProcessTree: dependencies.terminateProcessTree } });
+            sessionFile = forked.file; expectedSessionId = forked.id; forkedFrom = input.sessionId; unannouncedCopy = { ...forked, root };
+          } catch (error) {
+            if (error instanceof PiForkCleanupError) { forkChild = error.child; cleanupConfirmed = false; }
+            sessionUnavailable = definite(error);
+            throw error;
+          }
+        }
+      }
       if (options.hostTools) {
         host = new ProviderHostToolRuntime({ bridge: options.hostTools, conversationId: input.conversationId, turnId: input.turnId,
           cwd: input.cwd, onApproval: (request) => emit.rich({ type: "approval", request }),
@@ -136,10 +168,10 @@ function startPiRun(options: AgentHarnessStartOptions, dependencies: PiRpcHarnes
       // Attach both outcomes immediately; late failures are observed by every lifecycle wait.
       void transportFailed.catch(() => undefined);
       await Promise.race([bridgeReady, startup, transportFailed, cancellation]); clearTimeout(startupTimer);
-      const state = piSessionState(await connection.request("get_state"), root, input.sessionId);
+      const state = piSessionState(await connection.request("get_state"), root, expectedSessionId);
       if (state.streaming || state.compacting || state.pending) throw new Error("Pi session is already active.");
       if (redact.payload(state.id) !== state.id) throw new Error("Pi returned an unsafe native identity.");
-      sessionId = state.id; emit.session(sessionId);
+      sessionId = state.id; emit.session(sessionId, forkedFrom); unannouncedCopy = undefined;
       emit.nativeBoundary({ nativeConversationId: sessionId, nativeSessionId: sessionId, nativeTurnId: null, persistedHeadId: null, phase: "started" });
       const models = piModels(await connection.request("get_available_models"), state.model);
       emit.rich({ type: "metadata", metadata: { models: redact.payload(models) }, source: "session", complete: true });
@@ -182,7 +214,8 @@ function startPiRun(options: AgentHarnessStartOptions, dependencies: PiRpcHarnes
       emit.nativeBoundary({ nativeConversationId: sessionId, nativeSessionId: sessionId, nativeTurnId: head, persistedHeadId: head, phase: "settled" });
       if (events.failed) throw new Error("Pi did not complete the request successfully.");
       status = "completed";
-    } catch {
+    } catch (caught) {
+      if (caught instanceof PiForkCleanupError) { forkChild = caught.child; cleanupConfirmed = false; }
       status = cancelled && !timedOut && !uncertainSteer ? "cancelled" : "failed";
       if (timedOut) error = "Pi exceeded the bounded run deadline.";
       else if (uncertainSteer) error = "Pi could not confirm follow-up delivery.";
@@ -195,6 +228,8 @@ function startPiRun(options: AgentHarnessStartOptions, dependencies: PiRpcHarnes
         catch { cleanupConfirmed = false; }
       }
       try { await mcp?.close(); } catch { cleanupConfirmed = false; hostCleanupFailed = true; }
+      // Only once no Pi process of this run can still write it: orphaned copies would fill the session folder.
+      if (unannouncedCopy && cleanupConfirmed) await removeUnannouncedPiSession(unannouncedCopy.root, unannouncedCopy.id, unannouncedCopy.file);
       if (cleanupConfirmed) await resources?.dispose().catch(() => undefined);
       else if (connection && resources) {
         const retained = resources; void providerUnconfirmedCleanup(connection.child).cleanupConfirmation.then((confirmed) => {
@@ -204,9 +239,13 @@ function startPiRun(options: AgentHarnessStartOptions, dependencies: PiRpcHarnes
       events.finish();
     }
     emit.status(status, error);
-    return { ...providerRunTerminal(input, status), sessionId, text: events.text.toString(), textTruncated: events.text.truncated,
+    const failure = status === "failed" && sessionUnavailable && error
+      ? { reason: "provider-error" as const, message: error, sessionUnavailable: true as const } : undefined;
+    const unconfirmedChild = connection?.child ?? forkChild;
+    return { ...providerRunTerminal(input, status, failure), sessionId, text: events.text.toString(), textTruncated: events.text.truncated,
       exitCode: connection?.child.exitCode ?? null, signal: connection?.child.signalCode ?? null,
-      cleanupConfirmed, ...(!cleanupConfirmed && !hostCleanupFailed && connection ? providerUnconfirmedCleanup(connection.child) : {}), ...(error ? { error } : {}) };
+      cleanupConfirmed, ...(!cleanupConfirmed && !hostCleanupFailed && unconfirmedChild ? providerUnconfirmedCleanup(unconfirmedChild) : {}),
+      ...(error ? { error } : {}), ...(failure ? { failure } : {}) };
   })();
   return { harnessId: "pi-rpc", providerId: "pi", result, cancel,
     extension: { kind: "pi-rpc", respondToApproval: (id, decision) => host?.respondToApproval(id, decision) || dialogs?.approval(id, decision) || false,

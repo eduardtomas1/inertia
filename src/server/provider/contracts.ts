@@ -116,6 +116,13 @@ interface ProviderRunRequest {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
+  /**
+   * The checkout `sessionId` was first recorded in, when it is not `cwd` (the
+   * chat moved there with its native session). A harness whose native store is
+   * keyed by checkout reads the session from that checkout's store and runs it
+   * in `cwd` (Cursor SDK; T3 `cursorStoreCwd`). Other harnesses ignore it.
+   */
+  sessionOriginCwd?: string;
   nativeContinuation?: import("./native-conversation-operations").NativeConversationContinuation;
   /**
    * Exact native Fast value advertised for the selected model. Presence means
@@ -224,6 +231,12 @@ export interface ProviderRunFailure {
   terminalEvent?: string;
   activityId?: string;
   sessionUnavailable?: true;
+  /**
+   * With `sessionUnavailable`: the provider could not find the session from this cwd, yet its stored copy is
+   * still in the provider's home under another folder (Claude Code older than its moved-cwd lookup). The
+   * session is not gone, only out of this provider's reach here.
+   */
+  sessionStoredElsewhere?: true;
   resumeRejected?: true;
   /**
    * Definite: the provider refused before the request reached the native
@@ -240,6 +253,8 @@ export interface ProviderRunFailure {
  */
 export interface ProviderFreshSessionPrior {
   readonly priorCleanup: "confirmed";
+  /** Copied from the rejected attempt's failure (`ProviderRunFailure.sessionStoredElsewhere`). */
+  readonly sessionStoredElsewhere?: true;
 }
 
 export interface ProviderFreshSessionFallback {
@@ -363,6 +378,12 @@ export interface ProviderStatusEvent extends ProviderEventBase {
 export interface ProviderSessionEvent extends ProviderEventBase {
   type: "session";
   sessionId: string;
+  /**
+   * The run's resumed session, when the harness continues a copy of it made in the run's checkout instead
+   * (Pi keeps the checkout a session was created in). The copy holds the same history, so the runtime moves the
+   * resumed session's backing and coverage to it. Only the first session event of a run carries it.
+   */
+  forkedFrom?: string;
 }
 
 /** Provider-authored inclusive history anchor; null means unproved, never an inferred application ID. */

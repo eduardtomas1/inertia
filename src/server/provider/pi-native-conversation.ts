@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 
 import { objectValue, type JsonObject } from "../codex/protocol";
 import { AcpSecretRedactor } from "./acp-redaction";
 import { controlNativeConversation } from "./native-conversation-control";
 import { nativeId, NativeConversationRejection, retainedNativeHead, type NativeConversationOperations } from "./native-conversation-operations";
-import { piLaunchConfiguration, piRpcArguments } from "./pi-launch";
-import { openPiRpcConnection, type PiRpcOptions } from "./pi-rpc";
-import { ensurePiSessionDirectory, findPiSessionFile, piSessionState } from "./pi-session";
+import { piLaunchConfiguration, piRpcArguments, type PiLaunchConfiguration } from "./pi-launch";
+import { openPiRpcConnection, type PiRpcConnection, type PiRpcOptions } from "./pi-rpc";
+import { ensurePiSessionDirectory, findPiSessionFile, listPiSessionFiles, locatePiSessionFile, piSessionInCheckout, piSessionState,
+  readPiSessionEntryIds, removeUnannouncedPiSession } from "./pi-session";
 
 export function piActiveEntries(value: unknown): { entries: JsonObject[]; leafId: string | null } {
   const record = objectValue(value);
@@ -28,6 +29,90 @@ export function piActiveEntries(value: unknown): { entries: JsonObject[]; leafId
     seen.add(cursor); branch.push(entry); cursor = entry.parentId as string | null;
   }
   return { entries: branch.reverse(), leafId: record.leafId as string | null };
+}
+
+/** The fork process could not be confirmed stopped; `child` is its process for the caller's cleanup proof. */
+export class PiForkCleanupError extends Error {
+  constructor(readonly child: PiRpcConnection["child"]) { super("Pi fork cleanup is unconfirmed."); }
+}
+
+/**
+ * Pi definitely did not copy the session here: it answered with the original or with a session that already
+ * existed, or with an empty or foreign history. Retrying cannot help. Everything else (transport failures, timeouts,
+ * unsafe identities, an original Inertia cannot read, a copy that grew or names another file or checkout) is an
+ * ordinary failure that keeps the session.
+ */
+export class PiForkRefusedError extends Error {}
+
+/** Entries Pi appends when it opens a session that lacks them (sdk.js "Restore missing settings metadata"). */
+const PI_SETTINGS_METADATA = new Set(["thinking_level_change", "model_change"]);
+
+/**
+ * Whether Pi's copy holds the original's history. `pi --fork` copies every entry with its id (`forkFrom`); opening
+ * the copy may append settings metadata, which then is the head. A copy that does not start with the original's
+ * entries is empty or foreign (definite); one that holds more than the original plus settings metadata (the
+ * original grew meanwhile) is an ordinary failure.
+ */
+export function piForkCopyHolds(sourceIds: readonly string[], copied: readonly (JsonObject | undefined)[], leafId: string | null): void {
+  const ids = copied.map((entry) => entry?.id);
+  if (ids.length < sourceIds.length || sourceIds.some((id, index) => ids[index] !== id)) {
+    throw new PiForkRefusedError("Pi's copy does not hold the original session's history.");
+  }
+  if (copied.slice(sourceIds.length).some((entry) => !PI_SETTINGS_METADATA.has(String(entry?.type)))) {
+    throw new Error("Pi's copy holds entries the original did not have when it was read.");
+  }
+  if (leafId !== (ids.at(-1) ?? null)) throw new Error("Pi's copy has an unexpected head.");
+}
+
+/**
+ * Copies a session into `cwd` with a short-lived `pi --fork` (no tools, extensions or context files) and returns
+ * the new session. Pi records the launch folder as the fork's cwd; resuming the original file would keep the
+ * checkout it was created in (T3 `forkSessionIntoCwd`, bebaf3ec0). Inertia only reads the source file (Pi itself
+ * completes a torn last line when it loads one). The copy must be a session file that did not exist before, whose
+ * header names `cwd`, and that holds the original's entries (`piForkCopyHolds`). A copy Pi created but that is
+ * refused is removed when its process is confirmed stopped.
+ */
+export async function forkPiSessionIntoCheckout(input: {
+  config: PiLaunchConfiguration; environment: NodeJS.ProcessEnv; root: string; sourceId: string; sourceFile: string;
+  cwd: string; signal: AbortSignal; redact: AcpSecretRedactor;
+  dependencies?: Pick<PiRpcOptions, "spawnProcess" | "terminateProcessTree">;
+}): Promise<{ id: string; file: string }> {
+  // An original Inertia cannot read within its limits is an ordinary failure: Pi itself may still resume it in place.
+  const sourceEntries = await readPiSessionEntryIds(input.sourceFile, input.root, input.signal);
+  const existing = await listPiSessionFiles(input.root, input.signal);
+  const target = openPiRpcConnection({ executable: input.config.executable, environment: input.environment, cwd: input.cwd,
+    args: piRpcArguments({ ...input.config, args: [] }, { forkFile: input.sourceFile }), signal: input.signal,
+    ...input.dependencies });
+  let forked: { id: string; file: string } | undefined;
+  let created: { id: string; file: string } | undefined;
+  let failure: unknown;
+  try {
+    const state = piSessionState(await target.request("get_state"), input.root);
+    const name = basename(state.file);
+    if (state.id === input.sourceId || state.file === input.sourceFile || existing.has(name)
+      || [...existing].some((entry) => entry.endsWith(`_${state.id}.jsonl`))) {
+      throw new PiForkRefusedError("Pi did not create a new session for the copy.");
+    }
+    created = { id: state.id, file: state.file };
+    if (input.redact.payload(state.id) !== state.id) throw new Error("Pi returned an unsafe native identity.");
+    if (state.streaming || state.compacting || state.pending) throw new Error("Pi fork is not idle.");
+    const record = objectValue(await target.request("get_entries"));
+    piActiveEntries(record);
+    const copied = Array.isArray(record?.entries) ? record.entries.map((entry) => objectValue(entry)) : [];
+    piForkCopyHolds(sourceEntries, copied, (record?.leafId ?? null) as string | null);
+    const head = record?.leafId as string | null;
+    if (head !== null && input.redact.payload(head) !== head) throw new Error("Pi returned an unsafe native anchor.");
+    const located = await locatePiSessionFile(input.root, state.id, input.signal);
+    if (located.file !== state.file) throw new Error("Pi's copy is not the file it reported.");
+    if (!await piSessionInCheckout(located.cwd, input.cwd)) throw new Error("Pi's copy names another checkout.");
+    forked = created;
+  } catch (error) { failure = error; }
+  try { await target.close(); } catch { throw new PiForkCleanupError(target.child); }
+  if (!forked) {
+    if (created) await removeUnannouncedPiSession(input.root, created.id, created.file);
+    throw failure;
+  }
+  return forked;
 }
 
 export function createPiNativeConversationOperations(active: ReadonlySet<string>,

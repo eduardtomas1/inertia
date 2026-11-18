@@ -1135,7 +1135,7 @@ export class TurnController {
     const outcomeAlreadyRequested = active.deferredSettlement !== null;
     if (!outcomeAlreadyRequested) recordRejectedProviderResume(this.store, active, result);
     if (!outcomeAlreadyRequested && providerSessionUnavailable(result)) {
-      releaseUnavailableProviderSession(this.store, active);
+      releaseUnavailableProviderSession(this.store, active, result);
     } else if (!outcomeAlreadyRequested && result.sessionId) {
       updateActiveTurnProviderSession(active, result.sessionId);
       this.store.updateConversation(active.conversation.id, {

@@ -3,7 +3,8 @@ import { renameSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cursorSdkStoreDirectory, openCursorSdkStore } from "../../src/server/provider/cursor-sdk-store";
+import { cursorSdkAgentStoreDirectory, cursorSdkStoreDirectory, cursorSdkStoreHasJournal, CursorSdkStoreMissingError, openCursorSdkStore,
+  prepareCursorSdkAgentStore, withCursorSdkAgentStoreLock } from "../../src/server/provider/cursor-sdk-store";
 
 const race = vi.hoisted(() => ({ beforeOpen: undefined as ((path: unknown) => void) | undefined, beforeWrite: undefined as (() => void) | undefined }));
 vi.mock("node:fs", async (original) => {
@@ -212,6 +213,116 @@ describe.skipIf(process.platform !== "linux")("Cursor SDK descriptor-contained d
       const disk = await readFile(join(directory, "native-store.v1.jsonl"), "utf8");
       expect(disk).not.toContain(secret); expect(disk).not.toContain("apiKey");
     } finally { await store.dispose(); }
+  });
+  it("opens the store of a checkout a chat moved from, even after that checkout is removed, and never creates one", async () => {
+    const { root, workspace, directory } = await scoped();
+    const created = await openCursorSdkStore(directory, workspace);
+    try { await created.agents.create({ agent: document(workspace) }); } finally { await created.dispose(); }
+    await rm(workspace, { recursive: true });
+    // A removed worktree is still the store's recorded key; the default mode requires it to exist.
+    await expect(cursorSdkStoreDirectory(root, workspace, "instance-a")).rejects.toThrow();
+    expect(await cursorSdkStoreDirectory(root, workspace, "instance-a", true)).toBe(directory);
+    const moved = await openCursorSdkStore(directory, workspace, undefined, true);
+    try { expect(await moved.agents.get({ agentId: "agent-test" })).toMatchObject({ cwd: workspace }); }
+    finally { await moved.dispose(); }
+
+    const unknown = join(root, "never-used");
+    const before = await readdir(join(root, "cursor-sdk"));
+    await expect(cursorSdkStoreDirectory(root, unknown, "instance-a", true)).rejects.toThrow();
+    await expect(cursorSdkStoreDirectory(root, workspace, "instance-b", true)).rejects.toThrow();
+    expect(await readdir(join(root, "cursor-sdk"))).toEqual(before);
+    await expect(cursorSdkStoreDirectory(root, `${workspace}/../workspace`, "instance-a", true)).rejects.toThrow("canonical");
+  });
+  it("opens an existing store only when its journal names the moved-from checkout", async () => {
+    const { root, workspace, directory } = await scoped();
+    await expect(openCursorSdkStore(directory, workspace, undefined, true)).rejects.toThrow();
+    expect(await readdir(directory)).toEqual([]);
+    const created = await openCursorSdkStore(directory, workspace); await created.dispose();
+    await expect(openCursorSdkStore(directory, join(root, "other"), undefined, true)).rejects.toThrow("identity");
+  });
+  it("adopts agents of a checkout store another chat holds into their own stores, without its lock and without changing it", async () => {
+    const { root, workspace, directory } = await scoped();
+    const journal = join(directory, "native-store.v1.jsonl");
+    const held = await openCursorSdkStore(directory, workspace);
+    try {
+      for (const agentId of ["agent-one", "agent-two", "agent-three"]) {
+        await held.agents.create({ agent: { ...document(workspace), agentId } });
+        await held.runs.create({ run: { agentId, runId: `${agentId}-run`, turnNumber: 1, status: "finished", createdAt: 1, updatedAt: 2 } });
+      }
+      const before = await readFile(journal);
+      expect(await cursorSdkAgentStoreDirectory(root, "instance-a", "agent-one", false)).toBeNull();
+      // One after the other (adoption is synchronous I/O); the checkout store stays locked by the chat running there.
+      const own: { agentId: string; agentDirectory: string }[] = [];
+      for (const agentId of ["agent-one", "agent-two"]) {
+        const agentDirectory = (await cursorSdkAgentStoreDirectory(root, "instance-a", agentId, true))!;
+        expect(await cursorSdkStoreHasJournal(agentDirectory)).toBe(false);
+        await prepareCursorSdkAgentStore(agentDirectory, { sourceDirectory: directory, workspace, agentId });
+        expect(await cursorSdkStoreHasJournal(agentDirectory)).toBe(true);
+        own.push({ agentId, agentDirectory });
+      }
+      expect(await readFile(journal)).toEqual(before);
+      // Both moved chats hold their own stores at once.
+      const stores = await Promise.all(own.map(({ agentDirectory }) => openCursorSdkStore(agentDirectory, workspace, undefined, true)));
+      try {
+        for (const [index, store] of stores.entries()) {
+          expect((await store.agents.list()).items.map(({ agentId }) => agentId)).toEqual([own[index]!.agentId]);
+          expect(await store.runs.get({ agentId: own[index]!.agentId, runId: `${own[index]!.agentId}-run` })).toMatchObject({ status: "finished" });
+        }
+        await stores[0]!.runs.update({ run: { agentId: "agent-one", runId: "agent-one-run", turnNumber: 1, status: "finished", createdAt: 1, updatedAt: 3 } });
+      } finally { await Promise.all(stores.map((store) => store.dispose())); }
+      // An adopted store is never replaced, so the agent's newer records survive a repeated adoption.
+      const ownJournal = await readFile(join(own[0]!.agentDirectory, "native-store.v1.jsonl"));
+      await prepareCursorSdkAgentStore(own[0]!.agentDirectory, { sourceDirectory: directory, workspace, agentId: "agent-one" });
+      expect(await readFile(join(own[0]!.agentDirectory, "native-store.v1.jsonl"))).toEqual(ownJournal);
+      // An interrupted adoption leaves only a staging file, which the next adoption replaces.
+      const third = (await cursorSdkAgentStoreDirectory(root, "instance-a", "agent-three", true))!;
+      await writeFile(join(third, ".adopting-interrupted"), "partial", { mode: 0o600 });
+      await expect(prepareCursorSdkAgentStore(third)).rejects.toThrow("no journal");
+      await prepareCursorSdkAgentStore(third, { sourceDirectory: directory, workspace, agentId: "agent-three" });
+      expect(await readdir(third)).toEqual(["native-store.v1.jsonl"]);
+      const missing = (await cursorSdkAgentStoreDirectory(root, "instance-a", "missing-agent", true))!;
+      await expect(prepareCursorSdkAgentStore(missing, { sourceDirectory: directory, workspace, agentId: "missing-agent" })).rejects.toThrow("not in this store");
+      expect(await readdir(missing)).toEqual([]);
+    } finally { await held.dispose(); }
+  });
+  it("never copies an agent caught mid-run, and lets a later adoption copy it once settled", async () => {
+    const { root, workspace, directory } = await scoped();
+    const held = await openCursorSdkStore(directory, workspace);
+    try {
+      await held.agents.create({ agent: { ...document(workspace), agentId: "agent-busy", status: "running", activeRunId: "busy-run" } });
+      await held.runs.create({ run: { agentId: "agent-busy", runId: "busy-run", turnNumber: 1, status: "running", createdAt: 1, updatedAt: 2 } });
+      const agentDirectory = (await cursorSdkAgentStoreDirectory(root, "instance-a", "agent-busy", true))!;
+      await expect(prepareCursorSdkAgentStore(agentDirectory, { sourceDirectory: directory, workspace, agentId: "agent-busy" }))
+        .rejects.toThrow("not settled");
+      expect(await readdir(agentDirectory)).toEqual([]);
+      // The SDK settles the run, then the agent, with separate writes.
+      await held.runs.update({ run: { agentId: "agent-busy", runId: "busy-run", turnNumber: 1, status: "finished", createdAt: 1, updatedAt: 3 } });
+      await expect(prepareCursorSdkAgentStore(agentDirectory, { sourceDirectory: directory, workspace, agentId: "agent-busy" }))
+        .rejects.toThrow("not settled");
+      await held.agents.update({ agent: { ...document(workspace), agentId: "agent-busy", status: "idle", activeRunId: null } });
+      await prepareCursorSdkAgentStore(agentDirectory, { sourceDirectory: directory, workspace, agentId: "agent-busy" });
+      expect(await readdir(agentDirectory)).toEqual(["native-store.v1.jsonl"]);
+    } finally { await held.dispose(); }
+  });
+  it("adopts under the agent store's lock and clears staging left beside a journal", async () => {
+    const { root, workspace, directory } = await scoped();
+    const created = await openCursorSdkStore(directory, workspace);
+    try { await created.agents.create({ agent: { ...document(workspace), agentId: "agent-raced" } }); } finally { await created.dispose(); }
+    const agentDirectory = (await cursorSdkAgentStoreDirectory(root, "instance-a", "agent-raced", true))!;
+    const adoption = { sourceDirectory: directory, workspace, agentId: "agent-raced" };
+    // A second adopter of the same agent is refused while the first holds the lock, and writes nothing (the
+    // adoption runs synchronously inside the held lock; its promise settles afterwards).
+    const raced = withCursorSdkAgentStoreLock(agentDirectory, () => prepareCursorSdkAgentStore(agentDirectory, adoption));
+    await expect(raced).rejects.toThrow("already in use");
+    expect(await readdir(agentDirectory)).toEqual([]);
+    await prepareCursorSdkAgentStore(agentDirectory, adoption);
+    await writeFile(join(agentDirectory, ".adopting-leftover"), "partial", { mode: 0o600 });
+    await expect(openCursorSdkStore(agentDirectory, workspace, undefined, true)).rejects.toThrow("unrecognized");
+    await prepareCursorSdkAgentStore(agentDirectory);
+    expect(await readdir(agentDirectory)).toEqual(["native-store.v1.jsonl"]);
+    const store = await openCursorSdkStore(agentDirectory, workspace, undefined, true);
+    try { expect(await store.agents.get({ agentId: "agent-raced" })).toMatchObject({ cwd: workspace }); } finally { await store.dispose(); }
+    await expect(cursorSdkStoreDirectory(root, join(root, "never-ran-here"), "instance-a", true)).rejects.toBeInstanceOf(CursorSdkStoreMissingError);
   });
   it("refuses a second same-namespace writer until the first descriptor closes", async () => {
     const { workspace, directory } = await scoped();

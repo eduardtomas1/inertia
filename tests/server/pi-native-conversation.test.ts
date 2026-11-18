@@ -2,7 +2,7 @@
 import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createPiNativeConversationOperations, piActiveEntries } from "../../src/server/provider/pi-native-conversation";
+import { createPiNativeConversationOperations, piActiveEntries, piForkCopyHolds, PiForkRefusedError } from "../../src/server/provider/pi-native-conversation";
 import type { NativeConversationRequest } from "../../src/server/provider/native-conversation-operations";
 import { findPiSessionFile } from "../../src/server/provider/pi-session";
 import { portableFixtureRoot, removePortableFixture, writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
@@ -102,5 +102,23 @@ describe("Pi native history",()=>{
     expect(JSON.stringify(result)).not.toContain("fixture-pi-native-secret");
     if (kind === "session") expect(result).not.toHaveProperty("createdNativeConversationId");
     expect(readFileSync(f.sourceFile, "utf8")).toBe(before);
+  });
+});
+
+describe("Pi copy of a moved session",()=>{
+  const entry=(id:string,type="message")=>({type,id,parentId:null});
+  it("accepts the original's entries followed only by settings metadata, with the last entry as head",()=>{
+    expect(()=>piForkCopyHolds(["a","b"],[entry("a"),entry("b")],"b")).not.toThrow();
+    expect(()=>piForkCopyHolds(["a"],[entry("a"),entry("t","thinking_level_change"),entry("m","model_change")],"m")).not.toThrow();
+    expect(()=>piForkCopyHolds([],[],null)).not.toThrow();
+  });
+  it("refuses an empty or foreign copy as definite and a grown or misheaded copy as ordinary",()=>{
+    for(const copied of [[],[entry("x")],[entry("b"),entry("a")]]) {
+      expect(()=>piForkCopyHolds(["a","b"],copied,copied.at(-1)?.id??null)).toThrow(PiForkRefusedError);
+    }
+    for(const [copied,leaf] of [[[entry("a"),entry("later")],"later"],[[entry("a"),entry("t","thinking_level_change")],"a"]] as const) {
+      let error:unknown;try{piForkCopyHolds(["a"],[...copied],leaf);}catch(caught){error=caught;}
+      expect(error).toBeInstanceOf(Error);expect(error).not.toBeInstanceOf(PiForkRefusedError);
+    }
   });
 });

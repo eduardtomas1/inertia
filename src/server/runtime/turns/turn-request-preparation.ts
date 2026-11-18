@@ -458,6 +458,8 @@ export function resolveTurnRequest(
   const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
     && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
   const canResume = continuation.action === "resume-session";
+  const sessionOrigin = canResume
+    ? dependencies.store.orchestration.backings.sessionOriginWorkspaceKey(conversation.id, resumeSessionId!) : null;
   const nativeContinuation = canResume ? dependencies.store.orchestration.history.continuationFor({ threadId: conversation.id,
     providerInstanceId: providerInstanceId(route.providerId, route.continuationIdentity),
     workspaceKey: dependencies.store.conversationPath(conversation.id), nativeSessionId: resumeSessionId! }) : null;
@@ -682,6 +684,9 @@ export function resolveTurnRequest(
       codexContextWindow(dependencies.store, conversation.id, modelSelection),
     )
     : null;
+  const providerCwd = canResume
+    ? importedResumeCwd(dependencies.store, conversation.id, resumeSessionId, dependencies.store.conversationPath(conversation.id))
+    : dependencies.store.conversationPath(conversation.id);
   const providerInput = {
     providerId: route.providerId,
     harnessId: route.harnessId,
@@ -692,9 +697,7 @@ export function resolveTurnRequest(
     conversationId: conversation.id,
     runId,
     turnId,
-    cwd: canResume
-      ? importedResumeCwd(dependencies.store, conversation.id, resumeSessionId, dependencies.store.conversationPath(conversation.id))
-      : dependencies.store.conversationPath(conversation.id),
+    cwd: providerCwd,
     prompt: assembled.executionPrompt,
     model: routeSelection.modelId === "provider-default"
       ? undefined
@@ -703,6 +706,7 @@ export function resolveTurnRequest(
     interactionMode: conversation.interactionMode,
     access: conversation.accessMode,
     sessionId: canResume ? resumeSessionId! : undefined,
+    ...(sessionOrigin !== null && sessionOrigin !== providerCwd ? { sessionOriginCwd: sessionOrigin } : {}),
     ...(nativeContinuation ? { nativeContinuation: nativeContinuation.continuation } : {}),
     ...(supportedFastMode ? { supportedFastMode } : {}),
     ...(canResume

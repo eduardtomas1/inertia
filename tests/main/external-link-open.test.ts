@@ -45,10 +45,12 @@ it.runIf(process.platform !== "win32")("prefers literal filenames and never fall
   const literal = `${path}:42`;
   writeFileSync(literal, "Literal filename", { mode: 0o600 });
   await openDesktopLink(pathToFileURL(path).href + ":42", shell);
-  expect(shell.openPath).toHaveBeenLastCalledWith(literal);
+  expect(shell.showItemInFolder).toHaveBeenLastCalledWith(literal);
+  expect(shell.openPath).not.toHaveBeenCalled();
   rmSync(literal);
   await expect(openDesktopLink(pathToFileURL(path).href + "%3A42", shell)).rejects.toThrow("could not be opened");
-  expect(shell.openPath).toHaveBeenCalledTimes(1);
+  expect(shell.showItemInFolder).toHaveBeenCalledTimes(1);
+  expect(shell.openPath).not.toHaveBeenCalled();
 });
 
 it.each([

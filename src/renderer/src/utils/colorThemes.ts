@@ -31,4 +31,20 @@ export const COLOR_THEME_OPTIONS: readonly ColorThemeOption[] = [
     id: "iris",
     label: "Iris",
   },
+  {
+    id: "graphite",
+    label: "Graphite",
+  },
+  {
+    id: "blossom",
+    label: "Blossom",
+  },
+  {
+    id: "lagoon",
+    label: "Lagoon",
+  },
+  {
+    id: "saffron",
+    label: "Saffron",
+  },
 ];

@@ -231,10 +231,10 @@
   border: 1px solid var(--line);
 }
 .composer-popover .prompt-preset-editor-actions > .primary-button {
-  color: var(--accent-text);
+  color: var(--accent-fill-text);
   border-color: transparent;
-  background: var(--accent);
+  background: var(--accent-fill);
 }
 .composer-popover .prompt-preset-editor-actions > .primary-button:not(:disabled):hover {
-  background: var(--accent-hover);
+  background: var(--accent-fill-hover);
 }

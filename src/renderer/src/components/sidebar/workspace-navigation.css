@@ -205,8 +205,8 @@
   height: 28px;
   padding: 0 8px;
   border-radius: var(--radius-xs);
-  color: var(--accent-text);
-  background: var(--accent);
+  color: var(--accent-fill-text);
+  background: var(--accent-fill);
   font-size: var(--text-sm);
   font-weight: 500;
 }

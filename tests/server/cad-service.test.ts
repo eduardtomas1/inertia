@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CadError } from "../../src/server/cad/cad-hosts";
 import {
@@ -23,6 +23,16 @@ import {
   SKP_DOCUMENT_ID,
 } from "../helpers/cad-fake-host";
 import { removeTemporaryDirectory } from "../helpers/temporary-directory";
+
+/**
+ * Gives a queued write time to reach the host if serialization were broken.
+ * A slow machine can only make an assertion that it did not start pass, never fail.
+ */
+async function settleWrites(): Promise<void> {
+  await settle();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settle();
+}
 
 const roots: string[] = [];
 const START = Date.UTC(2026, 10, 21, 12, 0, 0);
@@ -304,14 +314,14 @@ describe("CadService apply", () => {
     const firstId = await propose(cad);
     const secondId = await propose(cad);
     const first = cad.apply({ proposalId: firstId });
-    await settle();
+    // Each apply first reads the receipt log, so wait for the host call itself, not a fixed number of turns.
+    await vi.waitFor(() => expect(started).toBe(1));
     const second = cad.apply({ proposalId: secondId });
-    await settle();
+    await settleWrites();
     expect(started).toBe(1);
     answers[0]!.resolve({ status: "applied" });
     expect((await first).status).toBe("applied");
-    await settle();
-    expect(started).toBe(2);
+    await vi.waitFor(() => expect(started).toBe(2));
     answers[1]!.resolve({ status: "rejected" });
     expect((await second).status).toBe("rejected");
   });
@@ -322,9 +332,9 @@ describe("CadService apply", () => {
     host.handlers.apply = () => answer.promise;
     const { cad } = await service([host]);
     const applying = cad.apply({ proposalId: await propose(cad) });
-    await settle();
+    await vi.waitFor(() => expect(host.calls.map(({ method }) => method)).toEqual(["preview", "apply"]));
     const saving = cad.saveCopy({ documentId: SKP_DOCUMENT_ID, destination: join(tmpdir(), "copy.skp") });
-    await settle();
+    await settleWrites();
     expect(host.calls.map(({ method }) => method)).toEqual(["preview", "apply"]);
     answer.resolve({ status: "applied" });
     await applying;

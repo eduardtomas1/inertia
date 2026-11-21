@@ -14,6 +14,20 @@ import {
   type CadHostStatus,
   type CadSetupResult,
 } from "./cad-hosts";
+import {
+  CAD_GUIDE_AUTOCAD,
+  CAD_GUIDE_PRESENTATION,
+  CAD_GUIDE_SKETCHUP,
+} from "./bridge-sources";
+import { CadExporter, type CadExportInput, type CadExportResult } from "./cad-export";
+
+export type CadGuideTopic = "autocad" | "sketchup" | "presentation";
+
+const GUIDES: Readonly<Record<CadGuideTopic, string>> = {
+  autocad: CAD_GUIDE_AUTOCAD,
+  sketchup: CAD_GUIDE_SKETCHUP,
+  presentation: CAD_GUIDE_PRESENTATION,
+};
 
 const PROPOSAL_TTL_MS = 30 * 60 * 1000;
 const MAX_PROPOSALS = 200;
@@ -124,6 +138,8 @@ export interface CadPreview {
 export interface CadStatus {
   hosts: Omit<CadHostStatus, "documents">[];
   documents: CadDocument[];
+  /** Whether AutoCAD's console is installed, so inertia_cad_export works. */
+  headless: boolean;
 }
 
 interface Proposal {
@@ -146,6 +162,10 @@ export interface CadServiceOptions {
   platform?: NodeJS.Platform;
   /** Test-only shortening seam for the `pending` answer; production callers omit it. */
   applyWaitMs?: number;
+  /** Where AutoCAD's console is looked up for exports; without it, exports are unavailable. */
+  exports?: { programFiles?: string | undefined; systemRoot?: string | undefined };
+  /** Test seam: an exporter with a fake process runner. */
+  exporter?: CadExporter;
 }
 
 function decodeWith<T>(schema: z.ZodType<T>, app: CadApp, value: unknown): T {
@@ -272,6 +292,7 @@ export class CadService {
   private readonly platform: NodeJS.Platform;
   private readonly applyWaitMs: number;
   private receiptsLoaded: Promise<void> | undefined;
+  private readonly exporter: CadExporter | undefined;
 
   constructor(options: CadServiceOptions) {
     this.hosts = options.hosts;
@@ -279,6 +300,14 @@ export class CadService {
     this.now = options.now ?? Date.now;
     this.platform = options.platform ?? process.platform;
     this.applyWaitMs = options.applyWaitMs ?? APPLY_WAIT_MS;
+    this.exporter = options.exporter ?? (options.exports === undefined ? undefined : new CadExporter({
+      stateDirectory: options.stateDirectory,
+      platform: this.platform,
+      ...(options.exports.programFiles === undefined ? {} : { programFiles: options.exports.programFiles }),
+      ...(options.exports.systemRoot === undefined ? {} : { systemRoot: options.exports.systemRoot }),
+      documents: async () => (await Promise.all(this.hostsFor("autocad").map(async (host) => await host.status())))
+        .flatMap((status) => status.documents),
+    }));
   }
 
   hostFor(documentId: string): CadHost {
@@ -294,11 +323,36 @@ export class CadService {
   }
 
   async status(app?: CadApp, signal?: AbortSignal): Promise<CadStatus> {
-    const statuses = await Promise.all(this.hostsFor(app).map((host) => host.status(signal)));
+    const [statuses, headless] = await Promise.all([
+      Promise.all(this.hostsFor(app).map((host) => host.status(signal))),
+      this.exporter?.headless() ?? Promise.resolve(false),
+    ]);
     return {
       hosts: statuses.map(({ documents: _documents, ...rest }) => rest),
       documents: statuses.flatMap((hostStatus) => hostStatus.documents),
+      headless,
     };
+  }
+
+  guide(topic: CadGuideTopic): { topic: CadGuideTopic; guide: string } {
+    return { topic, guide: GUIDES[topic] };
+  }
+
+  /** The file an export would write, for the approval card of a custom destination. */
+  async exportDestination(input: CadExportInput): Promise<string> {
+    return await this.requireExporter().destinationFor(input);
+  }
+
+  /** Runs AutoCAD's console on a copy; the open session and the original are never touched. */
+  async export(input: CadExportInput, signal?: AbortSignal): Promise<CadExportResult> {
+    return await this.requireExporter().export(input, signal);
+  }
+
+  private requireExporter(): CadExporter {
+    if (this.exporter === undefined) {
+      throw new CadError("UNSUPPORTED_PLATFORM", "Exports need full AutoCAD on Windows.");
+    }
+    return this.exporter;
   }
 
   /** Sets up only `app` when given, so one app's missing install never fails the other. */
@@ -313,10 +367,19 @@ export class CadService {
   }
 
   async query(input: { documentId: string } & Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return await this.read("query", input, signal);
+    // Units are in inertia_cad_document_info and the tool description; repeating them costs every page.
+    const { units: _units, ...rows } = await this.read("query", input, signal);
+    return rows;
   }
 
-  async info(input: { documentId: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async info(input: { documentId: string; style?: boolean | undefined }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    const host = this.hostFor(input.documentId);
+    if (input.style === true && host.app !== "autocad") {
+      throw new CadError(
+        "INVALID_REQUEST",
+        `style works only in AutoCAD; call inertia_cad_document_info without it for ${appLabel(host.app)}.`,
+      );
+    }
     return await this.read("info", input, signal);
   }
 

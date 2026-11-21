@@ -106,7 +106,8 @@ describe("CAD tools in a project that turned them on", () => {
     const runtime = await surface(true);
     const result = await invoke(runtime.bridge, "inertia_cad_status");
     expect(result.success).toBe(true);
-    expect(JSON.parse(result.text)).toEqual({ hosts: [], documents: [] });
+    // No exporter is wired in this surface, so AutoCAD's console is not available.
+    expect(JSON.parse(result.text)).toEqual({ hosts: [], documents: [], headless: false });
   });
 
   it("are registered on a new Codex thread and recorded with their digest", async () => {

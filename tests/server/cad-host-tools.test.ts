@@ -80,9 +80,10 @@ const row = (index: number): Json => ({ id: String(index), name: `Object ${index
 const rows = (count: number): Json[] => Array.from({ length: count }, (_, index) => row(index));
 
 describe("CAD tool catalogue", () => {
-  it("defines the nine inertia_cad tools", () => {
+  it("defines the eleven inertia_cad tools", () => {
     expect([...CAD_TOOL_NAMES]).toEqual([
       "inertia_cad_status",
+      "inertia_cad_guide",
       "inertia_cad_setup",
       "inertia_cad_get_selection",
       "inertia_cad_query_objects",
@@ -90,12 +91,15 @@ describe("CAD tool catalogue", () => {
       "inertia_cad_capture_view",
       "inertia_cad_preview_changes",
       "inertia_cad_apply_changes",
+      "inertia_cad_export",
       "inertia_cad_save_copy",
     ]);
     const hints = Object.fromEntries(CAD_TOOL_DEFINITIONS.map(({ name, readOnly, destructive }) => [name, { readOnly, destructive }]));
     expect(hints.inertia_cad_preview_changes).toEqual({ readOnly: true, destructive: false });
     expect(hints.inertia_cad_apply_changes).toEqual({ readOnly: false, destructive: true });
     expect(hints.inertia_cad_document_info).toEqual({ readOnly: true, destructive: false });
+    expect(hints.inertia_cad_guide).toEqual({ readOnly: true, destructive: false });
+    expect(hints.inertia_cad_export).toEqual({ readOnly: false, destructive: false });
   });
 
   it("answers unknown_tool for a name it does not own", async () => {

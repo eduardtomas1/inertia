@@ -3,10 +3,16 @@
   "unit": "UTF-8 bytes",
   "tools": {
     "inertia_cad_status": {
-      "claude": 407,
-      "codex": 303,
-      "cursorKimi": 407,
-      "opencode": 407
+      "claude": 457,
+      "codex": 353,
+      "cursorKimi": 457,
+      "opencode": 457
+    },
+    "inertia_cad_guide": {
+      "claude": 511,
+      "codex": 407,
+      "cursorKimi": 511,
+      "opencode": 511
     },
     "inertia_cad_setup": {
       "claude": 453,
@@ -21,22 +27,22 @@
       "opencode": 623
     },
     "inertia_cad_query_objects": {
-      "claude": 2163,
-      "codex": 2059,
-      "cursorKimi": 2163,
-      "opencode": 2163
+      "claude": 2244,
+      "codex": 2140,
+      "cursorKimi": 2244,
+      "opencode": 2244
     },
     "inertia_cad_document_info": {
-      "claude": 720,
-      "codex": 616,
-      "cursorKimi": 720,
-      "opencode": 720
+      "claude": 955,
+      "codex": 851,
+      "cursorKimi": 955,
+      "opencode": 955
     },
     "inertia_cad_capture_view": {
-      "claude": 930,
-      "codex": 826,
-      "cursorKimi": 930,
-      "opencode": 930
+      "claude": 978,
+      "codex": 874,
+      "cursorKimi": 978,
+      "opencode": 978
     },
     "inertia_cad_preview_changes": {
       "claude": 7733,
@@ -45,10 +51,16 @@
       "opencode": 7733
     },
     "inertia_cad_apply_changes": {
-      "claude": 847,
-      "codex": 743,
-      "cursorKimi": 848,
-      "opencode": 847
+      "claude": 970,
+      "codex": 866,
+      "cursorKimi": 971,
+      "opencode": 970
+    },
+    "inertia_cad_export": {
+      "claude": 1781,
+      "codex": 1675,
+      "cursorKimi": 1781,
+      "opencode": 1781
     },
     "inertia_cad_save_copy": {
       "claude": 830,
@@ -262,7 +274,7 @@
     }
   },
   "instructions": {
-    "inertia-cad": 321,
+    "inertia-cad": 400,
     "inertia-frontend-workbench": 541,
     "inertia-orchestration": 623,
     "inertia-workspace": 482,
@@ -273,22 +285,22 @@
     "claude": {
       "withBrowser": 24589,
       "withoutBrowser": 13168,
-      "withCad": 39616
+      "withCad": 42524
     },
     "codex": {
       "withBrowser": 21028,
       "withoutBrowser": 11284,
-      "withCad": 35116
+      "withCad": 37814
     },
     "cursorKimi": {
       "withBrowser": 24598,
       "withoutBrowser": 13168,
-      "withCad": 39626
+      "withCad": 42534
     },
     "opencode": {
       "withBrowser": 24589,
       "withoutBrowser": 13168,
-      "withCad": 39616
+      "withCad": 42524
     }
   }
 }

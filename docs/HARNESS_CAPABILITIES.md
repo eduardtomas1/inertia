@@ -335,14 +335,15 @@ user approves in a dialog inside the CAD app. It is off unless the project's
 is withheld from every transport, and unlike other withheld packs a Codex
 thread does not register its tools at `thread/start`
 (`registeredOnlyWhenOffered`), so projects that never use CAD carry none of its
-roughly 15 KiB of tool definitions. The pack is created only when Inertia runs
+roughly 18 KiB of tool definitions. The pack is created only when Inertia runs
 on Windows or macOS, where AutoCAD and SketchUp desktop run. A Codex thread started while the setting
 was off gains the tools only in a new chat. A call made after the setting is
 turned off answers `cad_disabled`.
 
 | Tool | Approval |
 | --- | --- |
-| `inertia_cad_status`, `inertia_cad_get_selection`, `inertia_cad_query_objects`, `inertia_cad_document_info`, `inertia_cad_capture_view`, `inertia_cad_preview_changes` | Read-only; none. |
+| `inertia_cad_status`, `inertia_cad_guide`, `inertia_cad_get_selection`, `inertia_cad_query_objects`, `inertia_cad_document_info`, `inertia_cad_capture_view`, `inertia_cad_preview_changes` | Read-only; none. |
+| `inertia_cad_export` | None to its own folder, since it works on a copy; an Inertia approval card for any other destination. |
 | `inertia_cad_setup` | An Inertia approval card listing the SketchUp Plugins files it writes. |
 | `inertia_cad_apply_changes` | The Yes/No dialog inside AutoCAD or SketchUp, which shows the change. |
 | `inertia_cad_save_copy` | An Inertia approval card naming the new file. |

@@ -24,6 +24,8 @@ $MaxCoordinate = 1e12
 $MaxVertices = 200
 $MaxLayers = 1000
 $MaxBlocks = 500
+$MaxStyles = 100
+$MaxLayouts = 100
 # The server kills the bridge at its deadline (60 s for reads), so work stops well before it.
 $DefaultWorkMs = 35000
 $DeadlineMarginMs = 15000
@@ -422,7 +424,7 @@ function Resolve-Document($Acad, [string]$DocumentId, [switch]$RequireActive) {
       return $doc
     }
   }
-  Fail 'DOCUMENT_NOT_FOUND' 'That drawing is no longer open in AutoCAD. Call cad_status for current documents.'
+  Fail 'DOCUMENT_NOT_FOUND' 'That drawing is no longer open in AutoCAD. Call inertia_cad_status for current documents.'
 }
 
 function Get-LayoutMap($Doc) {
@@ -974,7 +976,7 @@ function Get-WritableEntity($Doc, [string]$Handle, $LayoutMap, $Plan) {
   $layerName = $null
   try { $layerName = [string]$entity.Layer } catch { }
   if ([string]::IsNullOrEmpty($layerName)) {
-    Fail 'NOT_DRAWING_OBJECT' "Handle $Handle is a $(Get-ShortType ([string]$entity.ObjectName)), not a drawing object. Use handles from cad_query_objects or cad_get_selection."
+    Fail 'NOT_DRAWING_OBJECT' "Handle $Handle is a $(Get-ShortType ([string]$entity.ObjectName)), not a drawing object. Use handles from inertia_cad_query_objects or inertia_cad_get_selection."
   }
   if (-not $LayoutMap.ContainsKey([string]$entity.OwnerID)) {
     Fail 'NESTED_TARGET' "$(Get-Label $entity) is inside a block definition; editing it would change every insert of that block. Pick top-level objects."
@@ -1290,8 +1292,80 @@ function Save-Copy($Acad, $Params) {
   return [ordered]@{ documentId = Get-DocumentId $doc; path = $path; bytes = (Get-Item -LiteralPath $path).Length; originalPath = $source }
 }
 
+function Read-SysVar($Doc, [string]$Name) {
+  try { return $Doc.GetVariable($Name) } catch { return $null }
+}
+
+# EntityColor packs the color method in its high byte (0xC2 is RGB) and the RGB in the low three.
+function Get-TrueColorHex($Layer) {
+  try {
+    $color = $Layer.TrueColor
+    $packed = [int]$color.EntityColor
+    $method = ($packed -shr 24) -band 0xFF
+    if ($method -eq 0xC2) { return '#{0:x6}' -f ($packed -band 0xFFFFFF) }
+    if ($method -ge 0xC0 -and $method -le 0xC8) { return $null }
+    if ([int]$color.ColorMethod -ne 0xC2) { return $null }
+    return '#{0:x2}{1:x2}{2:x2}' -f [int]$color.Red, [int]$color.Green, [int]$color.Blue
+  } catch { return $null }
+}
+
+function Get-Lineweight($Value) {
+  switch ([int]$Value) {
+    -1 { return 'ByLayer' }
+    -2 { return 'ByBlock' }
+    -3 { return 'Default' }
+  }
+  return [int]$Value / 100
+}
+
+# COM has no layer transparency; AutoCAD keeps it in AcCmTransparency xdata, where 0x02000000 marks
+# an alpha in the low byte. A layer without that xdata is opaque.
+function Get-LayerTransparency($Layer) {
+  try {
+    $types = $null
+    $values = $null
+    $Layer.GetXData('AcCmTransparency', [ref]$types, [ref]$values)
+    if ($null -eq $types) { return 0 }
+    $types = @($types)
+    $values = @($values)
+    for ($i = 0; $i -lt $types.Count; $i++) {
+      if ([int]$types[$i] -ne 1071) { continue }
+      $raw = [int]$values[$i]
+      if ((($raw -shr 24) -band 0xFF) -ne 2) { return $null }
+      return [int][Math]::Round((255 - ($raw -band 0xFF)) * 100 / 255)
+    }
+    return 0
+  } catch { return $null }
+}
+
+function Get-TextStyleRow($Style, [string]$Name) {
+  $row = [ordered]@{ name = $Name; font = $null; height = $null; widthFactor = $null }
+  try {
+    $file = [string]$Style.fontFile
+    if ($file) { $row.font = $file }
+    # Only TrueType styles have a typeface; SHX styles are named by their font file.
+    if (-not $file -or $file -match '\.(ttf|ttc|otf)$') {
+      $face = ''; $bold = $false; $italic = $false; $charset = 0; $pitch = 0
+      $Style.GetFont([ref]$face, [ref]$bold, [ref]$italic, [ref]$charset, [ref]$pitch)
+      if ($face) { $row.font = [string]$face }
+    }
+  } catch { $row.partial = $true }
+  Add-Field $row 'height' { Get-Rounded $Style.Height }
+  Add-Field $row 'widthFactor' { Get-Rounded $Style.Width }
+  return $row
+}
+
+function Get-LayoutRow($Layout) {
+  $row = [ordered]@{ name = [string]$Layout.Name; paper = $null; device = $null; plotStyleTable = $null }
+  Add-Field $row 'paper' { [string]$Layout.CanonicalMediaName | Where-Object { $_ } }
+  Add-Field $row 'device' { [string]$Layout.ConfigName | Where-Object { $_ } }
+  Add-Field $row 'plotStyleTable' { [string]$Layout.StyleSheet | Where-Object { $_ } }
+  return $row
+}
+
 function Get-Info($Acad, $Params) {
   $doc = Resolve-Document $Acad ([string]$Params.documentId)
+  $style = $Params.style -eq $true
   $extents = $null
   try {
     $min = @($doc.GetVariable('EXTMIN'))
@@ -1303,14 +1377,20 @@ function Get-Info($Acad, $Params) {
   foreach ($layer in $doc.Layers) {
     if ($layers.Count -ge $MaxLayers) { break }
     if (Test-OutOfTime) { $outOfTime = $true; break }
-    [void]$layers.Add([ordered]@{
-        name     = [string]$layer.Name
-        on       = [bool]$layer.LayerOn
-        frozen   = [bool]$layer.Freeze
-        locked   = [bool]$layer.Lock
-        color    = [int]$layer.Color
-        linetype = [string]$layer.Linetype
-      })
+    $row = [ordered]@{
+      name     = [string]$layer.Name
+      on       = [bool]$layer.LayerOn
+      frozen   = [bool]$layer.Freeze
+      locked   = [bool]$layer.Lock
+      color    = [int]$layer.Color
+      linetype = [string]$layer.Linetype
+    }
+    if ($style) {
+      $row.trueColor = Get-TrueColorHex $layer
+      $row.lineweight = $(try { Get-Lineweight $layer.Lineweight } catch { $null })
+      $row.transparency = Get-LayerTransparency $layer
+    }
+    [void]$layers.Add($row)
   }
   $blocks = New-Object System.Collections.ArrayList
   $blocksTruncated = $false
@@ -1329,10 +1409,55 @@ function Get-Info($Acad, $Params) {
     layersTruncated = [int]$doc.Layers.Count -gt $layers.Count
     blocks          = $blocks.ToArray()
     blocksTruncated = $blocksTruncated
-    layouts         = @(foreach ($layout in $doc.Layouts) { [string]$layout.Name })
+    layouts         = $(if (-not $style) { , @(foreach ($layout in $doc.Layouts) { [string]$layout.Name }) })
     entityCount     = [int]$doc.ModelSpace.Count
     ucsIsWorld      = $(try { [int]$doc.GetVariable('WORLDUCS') -eq 1 } catch { $null })
     viewTwistDeg    = $(try { Get-Rounded ([double]$doc.GetVariable('VIEWTWIST') * 180 / [Math]::PI) 3 } catch { $null })
+  }
+  if ($style) {
+    $layouts = New-Object System.Collections.ArrayList
+    $result.layoutsTruncated = $false
+    foreach ($layout in $doc.Layouts) {
+      if ($layouts.Count -ge $MaxLayouts) { $result.layoutsTruncated = $true; break }
+      if (Test-OutOfTime) { $outOfTime = $true; $result.layoutsTruncated = $true; break }
+      [void]$layouts.Add((Get-LayoutRow $layout))
+    }
+    $result.layouts = $layouts.ToArray()
+    $textStyles = New-Object System.Collections.ArrayList
+    $result.textStyles = $null; $result.textStylesTruncated = $false
+    foreach ($textStyle in $doc.TextStyles) {
+      if ($textStyles.Count -ge $MaxStyles) { $result.textStylesTruncated = $true; break }
+      if (Test-OutOfTime) { $outOfTime = $true; $result.textStylesTruncated = $true; break }
+      $name = [string]$textStyle.Name
+      # Shape files for complex linetypes are unnamed text styles; xref styles carry a pipe.
+      if ($name -and -not $name.Contains('|')) { [void]$textStyles.Add((Get-TextStyleRow $textStyle $name)) }
+    }
+    $result.textStyles = $textStyles.ToArray()
+    $dimNames = New-Object System.Collections.ArrayList
+    $result.dimStyles = $null; $result.dimStylesTruncated = $false
+    foreach ($dimStyle in $doc.DimStyles) {
+      if ($dimNames.Count -ge $MaxStyles) { $result.dimStylesTruncated = $true; break }
+      if (Test-OutOfTime) { $outOfTime = $true; $result.dimStylesTruncated = $true; break }
+      $name = [string]$dimStyle.Name
+      if (-not $name.Contains('|')) { [void]$dimNames.Add($name) }
+    }
+    # DIMTXT and the rest report the active style with any unsaved overrides, as new dimensions get them.
+    $result.dimStyles = [ordered]@{
+      names  = $dimNames.ToArray()
+      active = [ordered]@{
+        name     = Read-SysVar $doc 'DIMSTYLE'
+        dimtxt   = Get-Rounded (Read-SysVar $doc 'DIMTXT') 6
+        dimasz   = Get-Rounded (Read-SysVar $doc 'DIMASZ') 6
+        dimscale = Get-Rounded (Read-SysVar $doc 'DIMSCALE') 6
+        dimdec   = $(try { [int]$doc.GetVariable('DIMDEC') } catch { $null })
+      }
+    }
+    $result.current = [ordered]@{
+      layer     = Read-SysVar $doc 'CLAYER'
+      textStyle = Read-SysVar $doc 'TEXTSTYLE'
+      dimStyle  = $result.dimStyles.active.name
+      ltscale   = Get-Rounded (Read-SysVar $doc 'LTSCALE') 6
+    }
   }
   if ($outOfTime) { $result.partial = $true; $result.timeBudgetHit = $true }
   return $result

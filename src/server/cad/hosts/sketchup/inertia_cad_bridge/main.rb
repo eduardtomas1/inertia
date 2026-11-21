@@ -129,7 +129,7 @@ module Inertia
     def self.model_for(document_id, require_active = false)
       model = @models[document_id.to_s]
       unless model_alive?(model)
-        fail!('DOCUMENT_NOT_FOUND', 'That SketchUp model is no longer open. Call cad_status for current documents.')
+        fail!('DOCUMENT_NOT_FOUND', 'That SketchUp model is no longer open. Call inertia_cad_status for current documents.')
       end
       if require_active && model != Sketchup.active_model
         fail!('INACTIVE_DOCUMENT', 'Bring this model to the front in SketchUp, then try again.')

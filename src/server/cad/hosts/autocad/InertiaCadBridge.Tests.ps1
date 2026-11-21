@@ -37,6 +37,24 @@ class FakeSelectionSet : System.Collections.IEnumerable {
   [System.Collections.IEnumerator] GetEnumerator() { return $this.Entities.GetEnumerator() }
 }
 
+# A block definition: enumerable like the real AcadBlock, with a real Count.
+class FakeBlock : System.Collections.IEnumerable {
+  [System.Collections.ArrayList]$Items = (New-Object System.Collections.ArrayList)
+  [int]$Count = 0
+  [object] Item([int]$Index) { return $this.Items[$Index] }
+  [void] Add($Entity) { [void]$this.Items.Add($Entity); $this.Count = $this.Items.Count }
+  [System.Collections.IEnumerator] GetEnumerator() { return $this.Items.GetEnumerator() }
+}
+
+# A class method returns its object as is on Windows PowerShell 5.1 and 7; a script method may not.
+class FakeBlocks {
+  [hashtable]$Definitions = @{}
+  [object] Item([string]$Name) {
+    if (-not $this.Definitions.ContainsKey($Name)) { throw "Unknown block $Name" }
+    return $this.Definitions[$Name]
+  }
+}
+
 function New-FakeEntity([string]$Handle, [string]$ObjectName, [string]$Layer, [string]$Owner, [hashtable]$Properties = @{}) {
   $entity = [pscustomobject]@{ Handle = $Handle; ObjectName = $ObjectName; Layer = $Layer; Color = 256; OwnerID = $Owner; Deleted = $false }
   foreach ($key in $Properties.Keys) { Add-Member -InputObject $entity -NotePropertyName $key -NotePropertyValue $Properties[$key] }
@@ -123,10 +141,11 @@ function New-FakeAutoCAD {
   $title = New-FakeEntity '5F' 'AcDbBlockReference' '0' 2 @{ Name = 'TITLE'; EffectiveName = 'TITLE'; HasAttributes = $true; InsertionPoint = @(0.0, 0.0, 0.0); Rotation = 0.0; XScaleFactor = 1.0; YScaleFactor = 1.0; ZScaleFactor = 1.0; Attribute = $attribute }
   Add-Member -InputObject $title -MemberType ScriptMethod -Name GetAttributes -Value { , @($this.Attribute) }
   $registry['5F'] = $title
-  $frame = [FakeCollection]::new()
-  [void]$frame.Items.Add((New-FakeEntity '6A' 'AcDbLine' '0' 77 @{ StartPoint = @(0.0, 0.0, 0.0); EndPoint = @(420.0, 0.0, 0.0) }))
-  $blocks = [pscustomobject]@{ Definitions = @{ TITLE = $frame } }
-  Add-Member -InputObject $blocks -MemberType ScriptMethod -Name Item -Value { param($Name) $definition = $this.Definitions[[string]$Name]; if ($null -eq $definition) { throw 'Unknown block' }; return , $definition }
+  $frame = [FakeBlock]::new()
+  $frame.Add((New-FakeEntity '6A' 'AcDbLine' '0' 77 @{ StartPoint = @(0.0, 0.0, 0.0); EndPoint = @(420.0, 0.0, 0.0) }))
+  $frame.Add((New-FakeEntity '6B' 'AcDbText' '0' 77 @{ TextString = 'TITLE'; InsertionPoint = @(10.0, 10.0, 0.0) }))
+  $blocks = [FakeBlocks]::new()
+  $blocks.Definitions['TITLE'] = $frame
   Add-Member -InputObject $doc -MemberType NoteProperty -Name Blocks -Value $blocks
   $doc.Pickfirst = @('1A', '2C', '5F')
 

@@ -57,6 +57,22 @@ original as `<name> (Inertia copy <date and time>)`; a path the agent chooses
 must be on a local drive, not a network share. In AutoCAD, save the drawing
 first; a drawing with unsaved changes can't be copied.
 
+## Exports and drawing standards
+
+With full AutoCAD installed, agents can also run AutoCAD's console in the
+background on a copy of a saved drawing: render an area as an image to look at
+it, plot a PDF at a scale on A4 to A0 paper, export a DXF, or build a new DWG
+from a drawing the agent prepared. Building on one of your drawings as a
+template keeps your layers, text styles and dimension styles. The open drawing
+and the original file are never touched, and the agent works from the last
+saved version, so save first if you want your latest changes included.
+Exports of your drawings go to Inertia's own folder; if the agent wants to write
+somewhere else, Inertia asks you to approve the file first.
+
+Agents can read your drawing's standards (layer colours and line weights, text
+and dimension styles, each layout's paper and plot style) and read Inertia's
+built-in guides on the CAD workflow and on presenting drawings before they draw.
+
 ## What agents can edit
 
 - **AutoCAD**, in drawing units: add lines, polylines, circles, and text;
@@ -88,6 +104,8 @@ projects when their terms require it.
   dialog in AutoCAD.
 - **AutoCAD is not found.** Make sure full AutoCAD for Windows is open with a
   drawing.
+- **The agent doesn't see new CAD options after an update.** Agents keep the tool
+  list from when their chat started. Start a new chat after updating Inertia.
 - **Remove the SketchUp extension.** Quit SketchUp, then delete
   `inertia_cad_bridge.rb` and the `inertia_cad_bridge` folder from SketchUp's
   Plugins folder: `%APPDATA%\SketchUp\SketchUp 20XX\SketchUp\Plugins` on

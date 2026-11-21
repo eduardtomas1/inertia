@@ -154,10 +154,38 @@ const SAMPLES: Record<string, { valid: Input[]; invalid: Input[] }> = {
     ],
   },
   inertia_cad_document_info: {
-    valid: [{ documentId: DOC }, { documentId: ACAD_DOC }, { documentId: "x".repeat(1024) }],
+    valid: [
+      { documentId: DOC }, { documentId: ACAD_DOC }, { documentId: "x".repeat(1024) },
+      { documentId: ACAD_DOC, style: true }, { documentId: ACAD_DOC, style: false },
+    ],
     invalid: [
       {}, { documentId: "skp:" }, { documentId: "x".repeat(1025) }, { documentId: 42 },
       { documentId: DOC, limit: 10 }, { documentId: DOC, extra: true },
+      { documentId: ACAD_DOC, style: "true" }, { documentId: ACAD_DOC, style: 1 },
+    ],
+  },
+  inertia_cad_guide: {
+    valid: [{ topic: "autocad" }, { topic: "sketchup" }, { topic: "presentation" }],
+    invalid: [{}, { topic: "AutoCAD" }, { topic: "revit" }, { topic: "" }, { topic: "autocad", extra: true }, { topic: 1 }],
+  },
+  inertia_cad_export: {
+    valid: [
+      { source: ACAD_DOC, format: "png" },
+      { source: "C:\\Work\\Plan.dwg", format: "pdf", area: { min: [0, 0], max: [10, 5] }, layout: "A1", mmPerUnit: 20, paper: "A3", plotStyle: "monochrome.ctb" },
+      { source: "C:\\Work\\facade.dxf", format: "dwg", template: ACAD_DOC, destination: "C:\\Work\\facade.dwg" },
+      { source: ACAD_DOC, format: "dxf", mmPerUnit: 1e-6 },
+      { source: ACAD_DOC, format: "pdf", mmPerUnit: 1e6, paper: "A0" },
+    ],
+    invalid: [
+      {}, { source: ACAD_DOC }, { format: "png" }, { source: "x", format: "png" }, { source: ACAD_DOC, format: "svg" },
+      { source: ACAD_DOC, format: "PNG" }, { source: "x".repeat(1025), format: "png" },
+      { source: ACAD_DOC, format: "pdf", paper: "Letter" }, { source: ACAD_DOC, format: "pdf", paper: "a3" },
+      { source: ACAD_DOC, format: "pdf", mmPerUnit: 0 }, { source: ACAD_DOC, format: "pdf", mmPerUnit: 1e7 },
+      { source: ACAD_DOC, format: "pdf", mmPerUnit: "20" },
+      { source: ACAD_DOC, format: "png", area: { min: [0, 0] } }, { source: ACAD_DOC, format: "png", area: { min: [0, 0, 0], max: [1, 1] } },
+      { source: ACAD_DOC, format: "png", area: { min: [0, 0], max: [1, 1], mode: "window" } },
+      { source: ACAD_DOC, format: "png", layout: "" }, { source: ACAD_DOC, format: "dwg", template: "x" },
+      { source: ACAD_DOC, format: "pdf", destination: "C:" }, { source: ACAD_DOC, format: "png", extra: true },
     ],
   },
   inertia_cad_capture_view: {

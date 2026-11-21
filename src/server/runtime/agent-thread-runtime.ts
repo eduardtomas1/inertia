@@ -10,6 +10,7 @@ import type { RuntimeStore } from "../database";
 import type { ProviderManager } from "../providers";
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
 import { createCadHosts } from "../cad/cad-hosts";
+import { environmentValue } from "../environment";
 import { CadService } from "../cad/cad-service";
 import { AgentThreadManager } from "./agent-thread-manager";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
@@ -83,7 +84,14 @@ export function createAgentThreadRuntime(
   const cadDirectory = join(dependencies.dataDirectory, "cad");
   // AutoCAD and SketchUp desktop run only on Windows and macOS; elsewhere the pack is never offered.
   const cadTools = process.platform === "win32" || process.platform === "darwin"
-    ? new CadHostTools(new CadService({ hosts: createCadHosts(cadDirectory), stateDirectory: cadDirectory }))
+    ? new CadHostTools(new CadService({
+      hosts: createCadHosts(cadDirectory),
+      stateDirectory: cadDirectory,
+      exports: {
+        programFiles: environmentValue(process.env, "ProgramFiles"),
+        systemRoot: environmentValue(process.env, "SystemRoot"),
+      },
+    }))
     : undefined;
   return {
     creation,

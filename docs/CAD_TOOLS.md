@@ -4,9 +4,10 @@ The user guide is [AutoCAD and SketchUp](user/cad.md). This page covers how
 the tools work.
 
 The `inertia.cad` capability pack
-([harness capabilities](HARNESS_CAPABILITIES.md#inertiacad)) adds nine tools:
+([harness capabilities](HARNESS_CAPABILITIES.md#inertiacad)) adds eleven tools:
 `inertia_cad_status`, `inertia_cad_setup`, `inertia_cad_get_selection`,
 `inertia_cad_query_objects`, `inertia_cad_document_info`, `inertia_cad_capture_view`,
+`inertia_cad_export`, `inertia_cad_guide`,
 `inertia_cad_preview_changes`, `inertia_cad_apply_changes`, and
 `inertia_cad_save_copy`.
 
@@ -44,6 +45,25 @@ The `inertia.cad` capability pack
   cancelled call never cancels it. A failure before the dialog (busy,
   offline, undo off) leaves the proposal usable; an answer lost after it is
   recorded as `unknown`.
+- **Exports.** `inertia_cad_export` runs AutoCAD's `accoreconsole.exe` (found
+  through the registry or `Program Files\Autodesk\AutoCAD 20xx`) on a copy of
+  the saved file, with `/isolate` in Inertia's own profile, through the same
+  restricted process runner, one export at a time, within 55 seconds across its
+  passes. Script lines are printable ASCII and only use names AutoCAD itself
+  listed; paths never appear in scripts. `png` renders an area on white, `pdf`
+  plots at `mmPerUnit` on A4 to A0 (paper matched by its dimensions, so
+  localized names work), `dxf` exports, and `dwg` builds a drawing from a DXF,
+  optionally on a copy of the user's drawing as a template. Outputs never
+  overwrite anything except Inertia's own earlier exports, matched by hash in
+  `<data>/cad/exports.jsonl`; exports of the user's drawings go to
+  `<data>/cad/exported/`, and another destination needs the user's approval.
+  `liveUnsaved` flags an open drawing newer than the saved file.
+- **Style and guides.** `inertia_cad_document_info` with `style: true` adds layer
+  true colour, lineweight and transparency, text and dimension styles, the
+  current layer, styles and LTSCALE, and each layout's paper, device and plot
+  style, under the read tripwire. `inertia_cad_guide` returns one of three
+  short embedded guides (`autocad`, `sketchup`, `presentation`), kept in
+  `src/server/cad/guides` and embedded with the bridges.
 - **Results** are kept under the 32 KiB host-tool result limit by returning
   fewer rows: a query continues with `nextCursor`, a selection says
   `truncated`, and long change lists report `changesShown` and `changesTotal`.

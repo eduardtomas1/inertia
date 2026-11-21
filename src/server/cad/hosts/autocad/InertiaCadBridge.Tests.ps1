@@ -124,12 +124,53 @@ function Add-FakeEntity($Doc, $Entity) {
   return $Entity
 }
 
+# Like AcadAcCmColor: EntityColor carries the AcColorMethod (0xC0 ByLayer, 0xC2 RGB, 0xC3 ACI) in its high byte.
+function New-FakeTrueColor([int]$Method, [int]$Value) {
+  $rgb = $(if ($Method -eq 0xC2) { $Value } else { 0 })
+  return [pscustomobject]@{
+    ColorMethod = $Method; EntityColor = [int](($Method - 256) * 16777216 + $Value)
+    ColorIndex = $(if ($Method -eq 0xC3) { $Value } else { 256 })
+    Red = ($rgb -shr 16) -band 0xFF; Green = ($rgb -shr 8) -band 0xFF; Blue = $rgb -band 0xFF
+  }
+}
+
 function New-FakeAutoCAD([string]$Name = 'Plan.dwg', [switch]$Empty) {
   $registry = @{}
   $layers = [FakeCollection]::new()
-  $layers.Factory = { param($Name) [pscustomobject]@{ Name = $Name; Lock = $false; Color = 7; LayerOn = $true; Freeze = $false; Linetype = 'Continuous' } }
-  [void]$layers.Add('0'); [void]$layers.Add('A-WALL'); [void]$layers.Add('A-ANNO')
+  $layers.Factory = {
+    param($Name)
+    # Lineweight is ACAD_LWEIGHT: hundredths of a millimetre, or -1 ByLayer, -2 ByBlock, -3 Default.
+    $layer = [pscustomobject]@{ Name = $Name; Lock = $false; Color = 7; LayerOn = $true; Freeze = $false; Linetype = 'Continuous'; TrueColor = (New-FakeTrueColor 0xC3 7); Lineweight = -3; XData = $null }
+    Add-Member -InputObject $layer -MemberType ScriptMethod -Name GetXData -Value {
+      param([string]$App, [ref]$Types, [ref]$Values)
+      if ($App -eq 'AcCmTransparency' -and $null -ne $this.XData) { $Types.Value = [int16[]]@(1001, 1071); $Values.Value = [object[]]@($App, $this.XData) }
+    }
+    return $layer
+  }
+  [void]$layers.Add('0')
+  $wall = $layers.Add('A-WALL'); $wall.TrueColor = New-FakeTrueColor 0xC2 0x804020; $wall.Lineweight = 50; $wall.XData = 0x0200007F
+  $anno = $layers.Add('A-ANNO'); $anno.Lineweight = 18; $anno.XData = 0x0100002A
   $locked = $layers.Add('LOCKED'); $locked.Lock = $true
+  $textStyles = [FakeCollection]::new()
+  $textStyles.Factory = {
+    param($Name)
+    $style = [pscustomobject]@{ Name = $Name; fontFile = 'txt.shx'; Height = 0.0; Width = 1.0; TypeFace = ''; FontCalls = 0; OnFont = $null }
+    Add-Member -InputObject $style -MemberType ScriptMethod -Name GetFont -Value {
+      param([ref]$TypeFace, [ref]$Bold, [ref]$Italic, [ref]$Charset, [ref]$PitchAndFamily)
+      $this.FontCalls++
+      if ($null -ne $this.OnFont) { & $this.OnFont }
+      $TypeFace.Value = $this.TypeFace; $Bold.Value = $false; $Italic.Value = $false; $Charset.Value = 0; $PitchAndFamily.Value = 34
+    }
+    return $style
+  }
+  $standardText = $textStyles.Add('Standard'); $standardText.fontFile = 'arial.ttf'; $standardText.TypeFace = 'Arial'
+  $romans = $textStyles.Add('ROMANS'); $romans.fontFile = 'romans.shx'; $romans.Height = 2.5; $romans.Width = 0.8
+  [void]$textStyles.Add(''); [void]$textStyles.Add('SITE|NOTES')
+  $dimStyles = [FakeCollection]::new()
+  $dimStyles.Factory = { param($Name) [pscustomobject]@{ Name = $Name } }
+  foreach ($dimName in 'Standard', 'ISO-25', 'A-1to50', 'SITE|ISO-25') { [void]$dimStyles.Add($dimName) }
+  $paperModel = [pscustomobject]@{ Name = 'Model'; Block = [pscustomobject]@{ ObjectID = 1 }; CanonicalMediaName = 'Letter'; ConfigName = 'None'; StyleSheet = '' }
+  $paperA1 = [pscustomobject]@{ Name = 'A1'; Block = [pscustomobject]@{ ObjectID = 2 }; CanonicalMediaName = 'ISO_full_bleed_A1_(841.00_x_594.00_MM)'; ConfigName = 'DWG To PDF.pc3'; StyleSheet = 'monochrome.ctb' }
 
   $blocks = [FakeBlocks]::new()
   foreach ($blockName in '*Model_Space', '*Paper_Space', '*Paper_Space0', '*U12', '*D3', 'TITLE', 'DOOR', 'SITE', 'SITE|TREE', 'A1-LAYOUT') {
@@ -139,8 +180,8 @@ function New-FakeAutoCAD([string]$Name = 'Plan.dwg', [switch]$Empty) {
   }
 
   $doc = [pscustomobject]@{
-    Name = $Name; FullName = ''; Saved = $true; ReadOnly = $false; Layers = $layers
-    Layouts = @([pscustomobject]@{ Name = 'Model'; Block = [pscustomobject]@{ ObjectID = 1 } }, [pscustomobject]@{ Name = 'A1'; Block = [pscustomobject]@{ ObjectID = 2 } })
+    Name = $Name; FullName = ''; Saved = $true; ReadOnly = $false; Layers = $layers; TextStyles = $textStyles; DimStyles = $dimStyles
+    Layouts = @($paperModel, $paperA1)
     Blocks = $blocks
     Undo = (New-Object System.Collections.ArrayList); Registry = $registry; NextHandle = 500; Pickfirst = @(); DeletedSets = 0
     ActiveLayout = [pscustomobject]@{ Name = 'Model' }; Dbmod = 0; PickfirstVar = 1; FailSelect = $false; CmdActive = 0; UndoCtl = 5; FailEndUndo = $false
@@ -154,6 +195,9 @@ function New-FakeAutoCAD([string]$Name = 'Plan.dwg', [switch]$Empty) {
       'CMDACTIVE' { $this.CmdActive } 'UNDOCTL' { $this.UndoCtl } 'VIEWCTR' { , [double[]]$this.ViewCtr } 'VIEWSIZE' { $this.ViewSize }
       'EXTMIN' { , [double[]]$this.ExtMin } 'EXTMAX' { , [double[]]$this.ExtMax }
       'DWGTITLED' { $(if ($this.FullName) { 1 } else { 0 }) }
+      'CLAYER' { 'A-WALL' } 'TEXTSTYLE' { 'ROMANS' } 'DIMSTYLE' { 'A-1to50' } 'LTSCALE' { 50.0 }
+      'DIMTXT' { 2.5 } 'DIMASZ' { 2.0 } 'DIMSCALE' { 50.0 } 'DIMDEC' { [int16]0 }
+      default { throw "Unknown system variable $Name" }
     }
   }
   Add-Member -InputObject $doc -MemberType ScriptMethod -Name StartUndoMark -Value { [void]$this.Undo.Add('start') }
@@ -431,6 +475,29 @@ $emptyInfo = (Invoke-FakeRead $acad 'info' @{ documentId = $documentId }).result
 Assert-Equal @($null, 2, $true) @($emptyInfo.extents, @($emptyInfo.layers).Count, $emptyInfo.layersTruncated) 'info drops invalid extents and caps layers'
 $MaxLayers = 1000
 $doc.ExtMin = @(0.0, 0.0, 0.0); $doc.ExtMax = @(1000.0, 500.0, 0.0)
+
+$stateBefore = @($doc.Dbmod, $doc.ModelSpace.Count, $doc.Layers.Count)
+$styled = (Invoke-FakeRead $acad 'info' @{ documentId = $documentId; style = $true }).result
+Assert-Equal $stateBefore @($doc.Dbmod, $doc.ModelSpace.Count, $doc.Layers.Count) 'a style read leaves DBMOD and counts unchanged'
+Assert-Equal @('documentId', 'units', 'extents', 'layers', 'layersTruncated', 'blocks', 'blocksTruncated', 'layouts', 'entityCount', 'ucsIsWorld', 'viewTwistDeg', 'layoutsTruncated', 'textStyles', 'textStylesTruncated', 'dimStyles', 'dimStylesTruncated', 'current') @($styled.PSObject.Properties.Name) 'info with style adds the style sections'
+Assert-Equal ([ordered]@{ name = 'A-WALL'; on = $true; frozen = $false; locked = $false; color = 7; linetype = 'Continuous'; trueColor = '#804020'; lineweight = 0.5; transparency = 50 }) $styled.layers[1] 'style layers add an RGB colour, lineweight in mm and transparency'
+Assert-Equal @(@($null, 'Default', 0), @($null, 0.18, $null)) @(@($styled.layers[0].trueColor, $styled.layers[0].lineweight, $styled.layers[0].transparency), @($styled.layers[2].trueColor, $styled.layers[2].lineweight, $styled.layers[2].transparency)) 'index colours have no true colour, Default stays a name, and opaque or unreadable transparency is 0 or null'
+Assert-Equal @([ordered]@{ name = 'Standard'; font = 'Arial'; height = 0; widthFactor = 1 }, [ordered]@{ name = 'ROMANS'; font = 'romans.shx'; height = 2.5; widthFactor = 0.8 }) $styled.textStyles 'text styles name TrueType typefaces or SHX files and skip unnamed and xref styles'
+Assert-Equal @(1, 0) @(($doc.TextStyles.Items | ForEach-Object FontCalls)[0..1]) 'only TrueType styles ask for their typeface'
+Assert-Equal ([ordered]@{ names = @('Standard', 'ISO-25', 'A-1to50'); active = [ordered]@{ name = 'A-1to50'; dimtxt = 2.5; dimasz = 2; dimscale = 50; dimdec = 0 } }) $styled.dimStyles 'dim styles list names and the active style''s sizes'
+Assert-Equal ([ordered]@{ layer = 'A-WALL'; textStyle = 'ROMANS'; dimStyle = 'A-1to50'; ltscale = 50 }) $styled.current 'current reports layer, styles and LTSCALE'
+Assert-Equal @([ordered]@{ name = 'Model'; paper = 'Letter'; device = 'None'; plotStyleTable = $null }, [ordered]@{ name = 'A1'; paper = 'ISO_full_bleed_A1_(841.00_x_594.00_MM)'; device = 'DWG To PDF.pc3'; plotStyleTable = 'monochrome.ctb' }) $styled.layouts 'style layouts carry paper, device and plot style table'
+Assert-Equal @($false, $false, $false) @($styled.layoutsTruncated, $styled.textStylesTruncated, $styled.dimStylesTruncated) 'short style lists are complete'
+$MaxStyles = 1; $MaxLayouts = 1
+$cappedStyle = (Invoke-FakeRead $acad 'info' @{ documentId = $documentId; style = $true }).result
+Assert-Equal @(1, $true, 1, $true, 1, $true) @(@($cappedStyle.textStyles).Count, $cappedStyle.textStylesTruncated, @($cappedStyle.dimStyles.names).Count, $cappedStyle.dimStylesTruncated, @($cappedStyle.layouts).Count, $cappedStyle.layoutsTruncated) 'style lists are capped and flagged'
+$MaxStyles = 100; $MaxLayouts = 100
+$slowStyle = (Invoke-FakeRead $acad 'info' @{ documentId = $documentId; style = $true; deadlineMs = 0 }).result
+Assert-Equal @(0, 0, $true, $true, $true) @(@($slowStyle.textStyles).Count, @($slowStyle.layouts).Count, $slowStyle.textStylesTruncated, $slowStyle.layoutsTruncated, $slowStyle.timeBudgetHit) 'a style read out of time returns what it has'
+$standardText = $doc.TextStyles.Item('Standard')
+$standardText.OnFont = { $doc.Dbmod = $doc.Dbmod -bor 1 }
+Assert-Equal 'READ_MODIFIED_DRAWING' (Invoke-Fake $acad 'info' @{ documentId = $documentId; style = $true }).error.code 'a style read that modifies the drawing fails loudly'
+$standardText.OnFont = $null; $doc.Dbmod = 0
 
 $realRow = ${function:Get-EntityRow}
 ${function:Get-EntityRow} = { param($Entity, $LayoutMap, $Options = @{}, $Extent = $null) $Entity.Delete(); & $realRow $Entity $LayoutMap $Options $Extent }

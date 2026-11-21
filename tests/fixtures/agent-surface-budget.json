@@ -45,16 +45,16 @@
       "opencode": 978
     },
     "inertia_cad_preview_changes": {
-      "claude": 7733,
-      "codex": 7629,
-      "cursorKimi": 7733,
-      "opencode": 7733
+      "claude": 8642,
+      "codex": 8538,
+      "cursorKimi": 8642,
+      "opencode": 8642
     },
     "inertia_cad_apply_changes": {
-      "claude": 970,
-      "codex": 866,
-      "cursorKimi": 971,
-      "opencode": 970
+      "claude": 748,
+      "codex": 644,
+      "cursorKimi": 749,
+      "opencode": 748
     },
     "inertia_cad_export": {
       "claude": 1781,
@@ -274,7 +274,7 @@
     }
   },
   "instructions": {
-    "inertia-cad": 400,
+    "inertia-cad": 433,
     "inertia-frontend-workbench": 541,
     "inertia-orchestration": 623,
     "inertia-workspace": 482,
@@ -285,22 +285,22 @@
     "claude": {
       "withBrowser": 24589,
       "withoutBrowser": 13168,
-      "withCad": 42524
+      "withCad": 43244
     },
     "codex": {
       "withBrowser": 21028,
       "withoutBrowser": 11284,
-      "withCad": 37814
+      "withCad": 38534
     },
     "cursorKimi": {
       "withBrowser": 24598,
       "withoutBrowser": 13168,
-      "withCad": 42534
+      "withCad": 43254
     },
     "opencode": {
       "withBrowser": 24589,
       "withoutBrowser": 13168,
-      "withCad": 42524
+      "withCad": 43244
     }
   }
 }

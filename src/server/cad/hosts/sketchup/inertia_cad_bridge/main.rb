@@ -3,8 +3,8 @@
 # A loopback TCP server that Inertia connects to. Every request runs on
 # SketchUp's main thread from a UI timer, carries the per-session token from the
 # discovery file, and uses one JSON object per line. Reads never change the
-# model. Edits are re-validated against the preview's fingerprints, shown to
-# the designer in a native Yes/No dialog, and applied as one undoable operation.
+# model. Edits are re-validated against the preview's fingerprints and applied
+# as one undoable operation.
 # There is deliberately no way to run arbitrary Ruby through this bridge.
 require 'socket'
 require 'json'
@@ -16,7 +16,7 @@ require 'tmpdir'
 
 module Inertia
   module CadBridge
-    BRIDGE_VERSION = '1.1.0'.freeze
+    BRIDGE_VERSION = '1.2.0'.freeze
     PROTOCOL = 1
     MAX_REQUEST_BYTES = 1024 * 1024
     MM_PER_INCH = 25.4
@@ -617,7 +617,7 @@ module Inertia
           fingerprints['revision'] = revision(model_id(model)).to_s
           ids_param(op).each do |raw_id|
             entity = target.call(raw_id)
-            # SketchUp deletes every face an erased edge bounds; the dialog line says so too.
+            # SketchUp deletes every face an erased edge bounds; the change row says so too.
             edge = entity.is_a?(Sketchup::Edge)
             warnings << 'Erasing an edge also deletes the faces it bounds.' if edge
             changes << {
@@ -677,12 +677,8 @@ module Inertia
       (expected.keys | actual.keys).reject { |key| expected[key] == actual[key] }
     end
 
-    def self.approved?(message)
-      UI.messagebox(message.to_s, MB_YESNO) == IDYES
-    end
-
-    # Inertia stops reading at deadlineAt and hangs up when it gives up, so a request past either must
-    # not change the model: nobody would learn that it did.
+    # Inertia stops reading at deadlineAt and hangs up when it gives up, so a request that waited past
+    # either while SketchUp was busy must not change the model: nobody would learn that it did.
     def self.abandoned?(params)
       deadline = params['deadlineAt']
       return true if deadline.is_a?(Numeric) && Time.now.to_f * 1000 >= deadline
@@ -697,31 +693,18 @@ module Inertia
       true
     end
 
-    def self.expired(id)
-      { 'documentId' => id, 'status' => 'expired', 'revision' => revision(id) }
-    end
-
     def self.apply(params)
       model = model_for(params['documentId'], true)
       id = model_id(model)
-      return expired(id) if abandoned?(params)
-      stale = stale_keys(params['expectedFingerprints'], plan(model, params['operations'])[:fingerprints])
+      fail!('HOST_TIMEOUT', 'Inertia stopped waiting before SketchUp reached this edit, so nothing was changed.') if abandoned?(params)
+      planned = plan(model, params['operations'])
+      stale = stale_keys(params['expectedFingerprints'], planned[:fingerprints])
       unless stale.empty?
         fail!('TARGET_CHANGED', "The model changed since the preview (#{stale.first(5).join(', ')}). Preview the change again.")
       end
-      return { 'documentId' => id, 'status' => 'rejected', 'revision' => revision(id) } unless approved?(params['approvalMessage'])
-      return expired(id) if abandoned?(params)
-      # The designer said Yes, so Inertia never retries from here: failures report as consumed.
+      # From here Inertia never retries: failures report as consumed.
       begin
-        # The dialog was modal, but re-check: the designer may have switched tabs.
-        model = model_for(params['documentId'], true)
-        planned = plan(model, params['operations'])
-        stale = stale_keys(params['expectedFingerprints'], planned[:fingerprints])
-        fail!('TARGET_CHANGED', 'The model changed while the approval dialog was open. Preview again.') unless stale.empty?
         started = model.start_operation(params['title'].to_s.empty? ? 'Inertia edit' : "Inertia: #{params['title']}", true)
-      rescue BridgeError => error
-        raise if error.code == 'TARGET_CHANGED'
-        fail!('APPLY_FAILED', "#{error.message} Nothing was changed.")
       rescue StandardError => error
         fail!('APPLY_FAILED', "SketchUp could not start the edit, so nothing was changed: #{error.message}")
       end
@@ -868,7 +851,7 @@ module Inertia
       remove_discovery
     end
 
-    # The approval dialog runs a nested event loop that can fire this timer
+    # A host call that spins a nested event loop can fire this timer
     # again; @busy keeps requests strictly one at a time.
     def self.tick
       return if @busy || @server.nil?
@@ -881,7 +864,7 @@ module Inertia
           @clients[socket] = { buffer: String.new, seen: monotonic }
         end
         @clients.keys.each { |socket| service(socket) }
-        # After servicing, so a request that arrived during a long dialog is still answered.
+        # After servicing, so a request that arrived during a long call is still answered.
         now = monotonic
         @clients.select { |_, client| now - client[:seen] > IDLE_SECONDS }.each_key { |socket| close_client(socket) }
       rescue StandardError => error

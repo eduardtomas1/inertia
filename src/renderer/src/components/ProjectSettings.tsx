@@ -164,7 +164,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
           options={{ inherit: "Default (On)", true: "On", false: "Off" }}
           onChange={(value) => void setPreference("project-browser-access", "browserAccess", value === "inherit" ? null : value === "true")} />
       </SettingRow>
-      <SettingRow id="project-cad-access" title="Agent CAD tools" description="Lets agents read the AutoCAD drawings and SketchUp models open on this computer and propose edits you approve inside the app. New chats pick up a change." notice={notice("project-cad-access")}>
+      <SettingRow id="project-cad-access" title="Agent CAD tools" description="Lets agents read the AutoCAD drawings and SketchUp models open on this computer and edit them when you ask. New chats pick up a change." notice={notice("project-cad-access")}>
         <ProjectSelect label="Agent CAD tools" value={preferences.cadAccess === true ? "true" : "false"} disabled={unavailable} inactive={saving}
           options={{ false: "Off", true: "On" }}
           onChange={(value) => void setPreference("project-cad-access", "cadAccess", value === "true" ? true : null)} />

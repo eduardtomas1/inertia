@@ -12,8 +12,8 @@ module Inertia
       else
         extension = SketchupExtension.new('Inertia CAD Bridge', 'inertia_cad_bridge/main')
         extension.description =
-          'Lets agents in Inertia read the open model and apply only the edits you approve.'
-        extension.version = '1.1.0'
+          'Lets agents in Inertia read the open model and apply the edits you ask for.'
+        extension.version = '1.2.0'
         extension.creator = 'Inertia'
         Sketchup.register_extension(extension, true)
       end

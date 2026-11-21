@@ -9,7 +9,6 @@ Read before reading or editing a designer's open SketchUp model. `inertia_cad_ex
 - Erase without explicit consent for those exact objects. Erasing an edge deletes its faces. Prefer `skp.set_hidden` or a tag, which are reversible.
 - Tidy tags, names, nesting, hidden state or materials nobody asked about.
 - Tag faces or edges. Raw geometry stays Untagged; only groups and components carry tags.
-- Read while an apply is `pending`. The approval dialog blocks SketchUp, so reads time out; call `inertia_cad_apply_changes` again instead.
 
 ## MUST
 
@@ -25,7 +24,7 @@ Read before reading or editing a designer's open SketchUp model. `inertia_cad_ex
 3. `inertia_cad_get_selection`. A non-empty `editingInside` means a group is open for editing: before you edit, ask the designer to close it, because entering or leaving one makes erase previews stale.
 4. `inertia_cad_query_objects` for lookups (`fields: "compact"` on big models).
 5. If reading answers the request, stop there.
-6. To edit: preview, tell the designer what will change, apply, then capture to verify.
+6. To edit: preview, tell the user what will change, apply, then capture to verify. There is no dialog: the user's request is the approval, so apply only what they asked for, even while the designer is working.
 
 ## Editing the model
 

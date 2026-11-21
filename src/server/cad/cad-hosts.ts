@@ -115,12 +115,9 @@ const AUTOCAD_STATUS_TIMEOUT_MS = 25_000;
  */
 export const HOST_UNREADABLE = "HOST_UNREADABLE";
 
-/**
- * When Inertia stops waiting, and which process waits, so a bridge never acts on a request nobody
- * will read: AutoCAD closes its dialog in time, and SketchUp refuses a late approval.
- */
+/** When Inertia stops waiting, so a bridge never starts work on a request nobody will read. */
 function withDeadline(params: Record<string, unknown>, timeoutMs: number): Record<string, unknown> {
-  return { ...params, deadlineAt: Date.now() + timeoutMs, parentPid: process.pid };
+  return { ...params, deadlineAt: Date.now() + timeoutMs };
 }
 
 export const appLabel = (app: CadApp): string => (app === "autocad" ? "AutoCAD" : "SketchUp");

@@ -25,6 +25,8 @@ const OPERATIONS: Record<string, Input> = {
   "acad.set_text": { handles: ["2A"], text: "" },
   "acad.set_attribute": { handles: ["2A"], tag: "ROOM", value: "" },
   "acad.move": { handles: ["2A"], vector: [1, 2] },
+  "acad.set_rotation": { handles: ["2A"], rotationDeg: 0 },
+  "acad.rotate": { handles: ["2A"], basePoint: [0, 0], angleDeg: 90 },
   "acad.erase": { handles: ["2A"] },
   "acad.add_line": { start: [0, 0], end: [1, 1, 1] },
   "acad.add_polyline": { points: [[0, 0], [1, 1]] },
@@ -57,6 +59,7 @@ function previewSamples(): { valid: Input[]; invalid: Input[] } {
     preview(operation("acad.add_line", { layer: "0" })),
     preview(operation("acad.add_circle", { center: [0, 0, 0], layer: "0" })),
     preview(operation("acad.move", { vector: [1, 2, 3] })),
+    preview(operation("acad.set_rotation", { rotationDeg: -216.5 }), operation("acad.rotate", { basePoint: [1, 2, 3], angleDeg: 343 })),
     preview(operation("skp.create_material", { alpha: 0 }), operation("skp.create_material", { alpha: 1 })),
     preview(operation("skp.add_box", { name: "", tag: "Walls", material: "Oak" })),
     preview(operation("skp.set_hidden", { hidden: false })),
@@ -78,6 +81,11 @@ function previewSamples(): { valid: Input[]; invalid: Input[] } {
     preview(operation("acad.set_color", { color: 1.5 })),
     preview(operation("acad.set_text", { text: "t".repeat(2001) })),
     preview(operation("acad.move", { vector: [1] })),
+    preview({ op: "acad.set_rotation", handles: ["2A"] }),
+    preview(operation("acad.set_rotation", { rotationDeg: "90" })),
+    preview({ op: "acad.rotate", handles: ["2A"], angleDeg: 90 }),
+    preview(operation("acad.rotate", { basePoint: [0] })),
+    preview(operation("acad.rotate", { vectorMm: [0, 0, 1] })),
     preview(operation("acad.move", { vector: [1, 2, 3, 4] })),
     preview(operation("acad.move", { vector: ["1", 2] })),
     preview(operation("acad.erase", { handles: [] })),
@@ -271,7 +279,7 @@ describe("CAD tool schemas", () => {
     const items = ((operations.properties as Record<string, Schema>).operations!.items ?? {}) as Schema;
     const branches = (items.anyOf ?? []) as Schema[];
     const advertised = branches.map((branch) => ((branch.properties as Record<string, Schema>).op!).const);
-    expect(advertised).toHaveLength(20);
+    expect(advertised).toHaveLength(22);
     expect(advertised.sort()).toEqual(Object.keys(OPERATIONS).sort());
   });
 

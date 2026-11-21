@@ -8,10 +8,6 @@ require 'tmpdir'
 require 'json'
 require 'socket'
 
-MB_YESNO = 4
-IDYES = 6
-IDNO = 7
-
 module Geom
   class Vector3d
     attr_reader :x, :y, :z
@@ -94,15 +90,14 @@ module Geom
 end
 
 module UI
-  @answers = []
   @timers = []
   class << self
-    attr_accessor :answers, :timers, :messages
+    attr_accessor :timers, :messages
   end
 
   def self.messagebox(message, _type)
     (@messages ||= []) << message
-    @answers.shift || IDNO
+    nil
   end
 
   def self.start_timer(_seconds, _repeat, &block)
@@ -445,7 +440,6 @@ class BridgeTest < Minitest::Test
   def setup
     Bridge.instance_variable_set(:@models, {})
     Bridge.instance_variable_set(:@revisions, {})
-    UI.answers = []
     UI.messages = []
     @model = Sketchup::Model.new
     Sketchup.active_model = @model
@@ -553,18 +547,6 @@ class BridgeTest < Minitest::Test
     assert_includes preview['warnings'], 'Erasing an edge also deletes the faces it bounds.'
   end
 
-  # Runs the block with Bridge.approved? replaced, so a test can act while the dialog is open.
-  def with_dialog(on_dialog)
-    original = Bridge.method(:approved?)
-    Bridge.define_singleton_method(:approved?) do |_message|
-      on_dialog.call
-      true
-    end
-    yield
-  ensure
-    Bridge.define_singleton_method(:approved?, original)
-  end
-
   def hidden_chair_operations
     [{ 'op' => 'skp.set_hidden', 'ids' => [@loose_chair.persistent_id.to_s], 'hidden' => true }]
   end
@@ -573,38 +555,28 @@ class BridgeTest < Minitest::Test
     operations = hidden_chair_operations
     preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
     call('apply', { 'documentId' => @document_id, 'operations' => operations,
-                    'expectedFingerprints' => preview['fingerprints'], 'approvalMessage' => 'Apply?' }.merge(extra))
+                    'expectedFingerprints' => preview['fingerprints'] }.merge(extra))
   end
 
-  def test_a_request_past_its_deadline_is_never_shown_or_applied
-    UI.answers = [IDYES]
-    result = apply_hidden_chair('deadlineAt' => 0)['result']
-    assert_equal 'expired', result['status']
-    assert_empty UI.messages
+  def test_a_request_past_its_deadline_is_never_applied
+    assert_equal 'HOST_TIMEOUT', apply_hidden_chair('deadlineAt' => 0)['error']['code']
     refute @loose_chair.hidden?
+    assert_empty @model.operations
   end
 
-  def test_an_approval_after_inertia_hung_up_is_not_applied
+  def test_a_request_after_inertia_hung_up_is_not_applied
     server = TCPServer.new('127.0.0.1', 0)
     client = TCPSocket.new('127.0.0.1', server.addr[1])
     peer = server.accept
+    client.close
+    IO.select([peer], nil, nil, 1)
     Bridge.instance_variable_set(:@current_client, peer)
-    with_dialog(-> { client.close; IO.select([peer], nil, nil, 1) }) do
-      assert_equal 'expired', apply_hidden_chair['result']['status']
-    end
+    assert_equal 'HOST_TIMEOUT', apply_hidden_chair['error']['code']
     refute @loose_chair.hidden?
     assert_empty @model.operations
   ensure
     Bridge.instance_variable_set(:@current_client, nil)
     [peer, server].each { |io| io&.close }
-  end
-
-  def test_a_failure_after_the_designer_said_yes_is_reported_as_consumed
-    with_dialog(-> { Sketchup.active_model = Sketchup::Model.new }) do
-      response = apply_hidden_chair
-      assert_equal 'APPLY_FAILED', response['error']['code']
-    end
-    refute @loose_chair.hidden?
   end
 
   def test_the_transport_caps_clients_and_drops_idle_ones
@@ -651,40 +623,27 @@ class BridgeTest < Minitest::Test
     assert_equal 'SHARED_DEFINITION', response['error']['code']
   end
 
-  def test_preview_then_approved_apply_is_one_operation
+  def test_preview_then_apply_is_one_operation_without_a_dialog
     operations = [{ 'op' => 'skp.set_tag', 'ids' => [@loose_chair.persistent_id.to_s], 'tag' => 'Walls' }]
     preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
     assert_equal 'Untagged', preview['changes'].first['before']
     assert_equal 'Layer0', @loose_chair.layer.name, 'preview must not change the model'
-    UI.answers = [IDYES]
     applied = call('apply', 'documentId' => @document_id, 'operations' => operations,
-                            'expectedFingerprints' => preview['fingerprints'], 'approvalMessage' => 'Apply?', 'title' => 'Retag')['result']
+                            'expectedFingerprints' => preview['fingerprints'], 'title' => 'Retag')['result']
     assert_equal 'applied', applied['status']
     assert_equal 'Walls', @loose_chair.layer.name
     assert_equal [[:start, 'Inertia: Retag'], [:commit]], @model.operations
-    assert_equal ['Apply?'], UI.messages
+    assert_empty UI.messages
   end
 
-  def test_rejected_approval_leaves_the_model_untouched
-    operations = [{ 'op' => 'skp.set_hidden', 'ids' => [@loose_chair.persistent_id.to_s], 'hidden' => true }]
-    preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
-    UI.answers = [IDNO]
-    result = call('apply', 'documentId' => @document_id, 'operations' => operations,
-                           'expectedFingerprints' => preview['fingerprints'], 'approvalMessage' => 'Apply?')['result']
-    assert_equal 'rejected', result['status']
-    refute @loose_chair.hidden?
-    assert_empty @model.operations
-  end
-
-  def test_a_target_changed_after_preview_is_refused_before_asking
+  def test_a_target_changed_after_preview_is_refused_before_any_step
     operations = [{ 'op' => 'skp.rename', 'ids' => [@loose_chair.persistent_id.to_s], 'name' => 'Desk chair' }]
     preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
     @loose_chair.transform!(Geom::Transformation.new([1, 0, 0]))
-    UI.answers = [IDYES]
     response = call('apply', 'documentId' => @document_id, 'operations' => operations,
-                             'expectedFingerprints' => preview['fingerprints'], 'approvalMessage' => 'Apply?')
+                             'expectedFingerprints' => preview['fingerprints'])
     assert_equal 'TARGET_CHANGED', response['error']['code']
-    assert_empty UI.messages
+    assert_empty @model.operations
     assert_equal 'Loose chair', @loose_chair.name
   end
 
@@ -694,7 +653,6 @@ class BridgeTest < Minitest::Test
       { 'op' => 'skp.set_tag', 'ids' => [@loose_chair.persistent_id.to_s], 'tag' => 'Furniture' }
     ]
     preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
-    UI.answers = [IDYES]
     call('apply', 'documentId' => @document_id, 'operations' => operations, 'expectedFingerprints' => preview['fingerprints'])
     assert_equal 'Furniture', @loose_chair.layer.name
   end
@@ -702,7 +660,6 @@ class BridgeTest < Minitest::Test
   def test_moves_in_millimetres
     operations = [{ 'op' => 'skp.move', 'ids' => [@loose_chair.persistent_id.to_s], 'vectorMm' => [254, 0, 0] }]
     preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
-    UI.answers = [IDYES]
     call('apply', 'documentId' => @document_id, 'operations' => operations, 'expectedFingerprints' => preview['fingerprints'])
     assert_in_delta 60.0, @loose_chair.transformation.offset[0], 1e-9
   end
@@ -710,7 +667,6 @@ class BridgeTest < Minitest::Test
   def test_adds_a_box_group_with_an_upward_extrusion
     operations = [{ 'op' => 'skp.add_box', 'originMm' => [0, 0, 0], 'sizeMm' => [254, 254, 25.4], 'name' => 'Plinth', 'tag' => 'Walls' }]
     preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
-    UI.answers = [IDYES]
     response = call('apply', 'documentId' => @document_id, 'operations' => operations, 'expectedFingerprints' => preview['fingerprints'])
     assert response['ok'], response.inspect
     result = response['result']
@@ -726,7 +682,6 @@ class BridgeTest < Minitest::Test
     operations = [{ 'op' => 'skp.erase', 'ids' => [@loose_chair.persistent_id.to_s] }]
     preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
     @loose_chair.define_singleton_method(:erase!) { raise 'host refused' }
-    UI.answers = [IDYES]
     response = call('apply', 'documentId' => @document_id, 'operations' => operations, 'expectedFingerprints' => preview['fingerprints'])
     assert_equal 'APPLY_FAILED', response['error']['code']
     assert_equal [:abort], @model.operations.last
@@ -737,7 +692,6 @@ class BridgeTest < Minitest::Test
     operations = [{ 'op' => 'skp.erase', 'ids' => [group.persistent_id.to_s] }]
     preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
     group.entities.add_face([0, 0, 0], [1, 0, 0], [1, 1, 0])
-    UI.answers = [IDYES]
     response = call('apply', 'documentId' => @document_id, 'operations' => operations, 'expectedFingerprints' => preview['fingerprints'])
     assert_equal 'TARGET_CHANGED', response['error']['code']
     assert group.valid?
@@ -747,7 +701,6 @@ class BridgeTest < Minitest::Test
     operations = [{ 'op' => 'skp.erase', 'ids' => [@loose_chair.persistent_id.to_s] }]
     preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
     Bridge.bump(@document_id)
-    UI.answers = [IDYES]
     response = call('apply', 'documentId' => @document_id, 'operations' => operations, 'expectedFingerprints' => preview['fingerprints'])
     assert_equal 'TARGET_CHANGED', response['error']['code']
     assert @loose_chair.valid?
@@ -761,7 +714,6 @@ class BridgeTest < Minitest::Test
     ]
     preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
     assert_equal [%w[Untagged Walls], %w[Walls Untagged]], preview['changes'].map { |change| [change['before'], change['after']] }
-    UI.answers = [IDYES]
     call('apply', 'documentId' => @document_id, 'operations' => operations, 'expectedFingerprints' => preview['fingerprints'])
     assert_equal 'Layer0', @loose_chair.layer.name
   end

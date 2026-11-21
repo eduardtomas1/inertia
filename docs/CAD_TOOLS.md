@@ -17,8 +17,8 @@ The `inertia.cad` capability pack
   output (1 MiB) and runtime (10 minutes), and process-tree termination on
   timeout or cancellation. Inertia checks the script's content once per run
   and rewrites a damaged copy. The script reaches the running AutoCAD through
-  COM, shows the approval dialog, and groups each applied change into one undo
-  mark. Every read runs behind a tripwire: if DBMOD or the model space count
+  COM and groups each applied change into one undo mark, then regenerates the
+  active viewport. Every read runs behind a tripwire: if DBMOD or the model space count
   changes during it, it fails with `READ_MODIFIED_DRAWING`. An apply holds a
   per-session mutex and is refused while a command is active or undo is off.
 - **SketchUp.** The extension runs a JSON-lines server on `127.0.0.1` with a
@@ -29,22 +29,24 @@ The `inertia.cad` capability pack
   newest installed version.
   Setup writes only the extension's own files and refuses to write through a
   link at any of their paths.
-- **Proposals.** A preview records the target fingerprints and the exact text
-  of the approval dialog. Apply sends both; the bridge refuses the change when
-  a fingerprint no longer matches. Erasing an AutoCAD block insert also
+- **Proposals.** A preview records the target fingerprints. Apply runs at
+  once, with no dialog in the CAD app or in Inertia: the user's request in the
+  chat is the approval. The bridge refuses the change when a fingerprint no
+  longer matches, while a command is active, or while undo is off, and an
+  AutoCAD apply holds a session mutex. Erasing an AutoCAD block insert also
   fingerprints its block definition's objects, so a rescaled insert or an edited
-  definition is refused too. A proposal is sent to the CAD app at most
-  once: a retried apply returns the first outcome, and outcomes are kept in
+  definition is refused too. A proposal is sent to the CAD app at most once: a
+  retried apply returns the first outcome, and outcomes are kept in
   `<data>/cad/receipts.jsonl` (its newest 5,000 lines) so a retry after a
-  restart still finds them. Writes run one at a time. Every request carries
-  `deadlineAt` and `parentPid`: AutoCAD closes its dialog before the deadline
-  or when Inertia exits, and SketchUp refuses a late approval, answering
-  `expired` with nothing applied. An apply call answers `pending` after
-  25 seconds, under OpenCode's 30-second host-tool timeout, and keeps running:
-  calling again with the same proposal waits for the same dialog, and a
-  cancelled call never cancels it. A failure before the dialog (busy,
-  offline, undo off) leaves the proposal usable; an answer lost after it is
-  recorded as `unknown`.
+  restart still finds them. One write runs at a time, and another is refused
+  with `HOST_BUSY` instead of waiting in line, so every call answers within
+  28 seconds (under OpenCode's 30-second host-tool timeout), and a cancelled
+  call never cancels an edit already sent. Every request carries `deadlineAt`,
+  so a bridge never starts work nobody will read. A failure before any step
+  (busy, offline, undo off) leaves the proposal usable; an answer lost after
+  that is recorded as `unknown`. A SketchUp extension older than 1.2.0 still
+  shows its dialog; its `rejected` and `expired` answers are recorded with a
+  prompt to update it.
 - **Exports.** `inertia_cad_export` runs AutoCAD's `accoreconsole.exe` (found
   through the registry or `Program Files\Autodesk\AutoCAD 20xx`) on a copy of
   the saved file, with `/isolate` in Inertia's own profile, through the same

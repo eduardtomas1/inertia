@@ -31,20 +31,16 @@ const GUIDES: Readonly<Record<CadGuideTopic, string>> = {
 
 const PROPOSAL_TTL_MS = 30 * 60 * 1000;
 const MAX_PROPOSALS = 200;
-// Answers before OpenCode's 30-second host-tool timeout; the bridges stop reading early and page.
-const READ_TIMEOUT_MS = 28_000;
-// Covers the user reading the approval dialog; the restricted runner caps a process at 10 minutes.
-const APPLY_TIMEOUT_MS = 10 * 60 * 1000;
-// How long one apply call waits for the user before answering `pending`, under that same timeout.
-const APPLY_WAIT_MS = 25_000;
+// Every call, edits included, answers before OpenCode's 30-second host-tool timeout; reads stop
+// early and page.
+const CALL_TIMEOUT_MS = 28_000;
 const SAVE_TIMEOUT_MS = 120_000;
-const MAX_APPROVAL_LINES = 18;
 // Older receipts only answer retries of proposals that expired long ago.
 const MAX_RECEIPT_LINES = 5000;
 
 /**
- * Failures that leave the edit unsent or refused before the approval dialog, so it can be retried.
- * The bridges report anything after the user's click as PARTIALLY_APPLIED, APPLY_FAILED, or
+ * Failures that leave the edit unsent or refused before any step ran, so it can be retried.
+ * The bridges report anything from the first step on as PARTIALLY_APPLIED, APPLY_FAILED, or
  * APPLY_UNCONFIRMED instead, so these codes never stand for a consumed proposal.
  */
 const NOT_SENT_CODES = new Set([
@@ -75,13 +71,13 @@ export type CadChange = z.infer<typeof cadChangeSchema>;
 
 const hostPreviewSchema = z.object({
   documentId: z.string(),
-  documentName: z.string().optional(),
   changes: z.array(cadChangeSchema),
   fingerprints: z.record(z.string(), z.string()),
   warnings: z.array(z.string()),
 });
 
 const hostApplySchema = z.object({
+  // A SketchUp extension older than 1.2.0 still asks in a dialog and can answer rejected or expired.
   status: z.enum(["applied", "rejected", "expired"]),
   changes: z.array(cadChangeSchema).optional(),
   created: z.array(z.record(z.string(), z.unknown())).optional(),
@@ -101,7 +97,8 @@ const hostRecordSchema = z.record(z.string(), z.unknown());
 const cadReceiptSchema = z.object({
   proposalId: z.string(),
   documentId: z.string(),
-  status: z.enum(["applied", "rejected", "expired", "failed", "unknown", "partial"]),
+  // rejected and expired come only from an older SketchUp extension's dialog, or older receipts.
+  status: z.enum(["applied", "failed", "unknown", "partial", "rejected", "expired"]),
   message: z.string(),
   changes: z.array(cadChangeSchema),
   created: z.array(z.record(z.string(), z.unknown())),
@@ -109,10 +106,7 @@ const cadReceiptSchema = z.object({
 });
 export type CadReceipt = z.infer<typeof cadReceiptSchema>;
 
-/** A receipt, or `pending` while the user has not answered yet; never persisted. */
-export type CadApplyResult =
-  | (CadReceipt & { replayed?: true })
-  | (Omit<CadReceipt, "status"> & { status: "pending" });
+export type CadApplyResult = CadReceipt & { replayed?: true };
 
 export interface CadCaptureInput extends Record<string, unknown> {
   documentId: string;
@@ -149,7 +143,6 @@ interface Proposal {
   operations: CadOperation[];
   fingerprints: Record<string, string>;
   changes: CadChange[];
-  approvalMessage: string;
   title: string;
   expiresAt: number;
 }
@@ -160,8 +153,6 @@ export interface CadServiceOptions {
   stateDirectory: string;
   now?: () => number;
   platform?: NodeJS.Platform;
-  /** Test-only shortening seam for the `pending` answer; production callers omit it. */
-  applyWaitMs?: number;
   /** Where AutoCAD's console is looked up for exports; without it, exports are unavailable. */
   exports?: { programFiles?: string | undefined; systemRoot?: string | undefined };
   /** Test seam: an exporter with a fake process runner. */
@@ -179,57 +170,9 @@ function decodeWith<T>(schema: z.ZodType<T>, app: CadApp, value: unknown): T {
   return parsed.data;
 }
 
-// Names come from the drawing; line breaks and control or bidi characters could hide real lines.
-function singleLine(text: string): string {
-  return text.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ").replace(/\s{2,}/gu, " ").trim();
-}
-
-function show(value: unknown): string {
-  if (value === undefined || value === null || value === "") return "none";
-  const text = singleLine(typeof value === "string" ? value : JSON.stringify(value));
-  return text.length > 60 ? `${text.slice(0, 57)}...` : text;
-}
-
-const opName = (op: string): string => op.replace(/^[a-z]+\./u, "");
-// Destructive operations first, so the line cap can never hide one.
-const opRank = (op: string): number => (opName(op) === "erase" ? 0 : opName(op) === "move" ? 1 : 2);
-
-/** "Erase 500 objects", "Move 1 object", "Set layer (2)". */
-function opCount(op: string, count: number): string {
-  const name = opName(op);
-  if (name === "erase" || name === "move") {
-    return `${name === "erase" ? "Erase" : "Move"} ${count} ${count === 1 ? "object" : "objects"}`;
-  }
-  const words = name.replaceAll("_", " ");
-  return `${words.charAt(0).toUpperCase()}${words.slice(1)} (${count})`;
-}
-
-/** The exact text the user approves in the CAD app's dialog. */
-export function approvalMessage(documentName: string, unordered: readonly CadChange[]): string {
-  const changes = [...unordered].sort((a, b) => opRank(a.op) - opRank(b.op));
-  const counts = new Map<string, number>();
-  for (const change of changes) counts.set(change.op, (counts.get(change.op) ?? 0) + 1);
-  const summary = [...counts].map(([op, count]) => opCount(op, count)).join(", ");
-  const lines = changes.slice(0, MAX_APPROVAL_LINES).map((change) => {
-    const target = singleLine(change.target);
-    const line = change.before === undefined || change.before === null
-      ? `• ${target}: ${show(change.after)}`
-      : `• ${target}: ${singleLine(change.field)} ${show(change.before)} → ${show(change.after)}`;
-    return line.length > 160 ? `${line.slice(0, 157)}...` : line;
-  });
-  const more = changes.length > MAX_APPROVAL_LINES
-    ? `\n…and ${changes.length - MAX_APPROVAL_LINES} more change(s).`
-    : "";
-  return `An agent in Inertia wants to change ${show(documentName)}:\n${singleLine(summary)}\n\n${lines.join("\n")}${more}\n\nApply these changes? You can undo them in one step.`;
-}
-
 function operationTitle(operations: readonly CadOperation[]): string {
   const kinds = [...new Set(operations.map((operation) => operation.op.replace(/^[a-z]+\./u, "")))];
   return kinds.slice(0, 3).join(", ").replaceAll("_", " ");
-}
-
-function documentLabel(documentId: string, name: string | undefined): string {
-  return name ?? (basename(documentId.replace(/^acad:/u, "")) || documentId);
 }
 
 /** `Plan (Inertia copy 2026-11-21 163005).dwg`, in the user's local time. */
@@ -270,14 +213,26 @@ export function checkDestination(destination: string, platform: NodeJS.Platform,
   return path;
 }
 
-/** Runs one task at a time: CAD writes wait on a person, and dialogs must not stack. */
-class WriteQueue {
-  private tail: Promise<unknown> = Promise.resolve();
+/** Runs one task at a time: CAD writes are rare and must not interleave in the same app. */
+class WriteGate {
+  private busy = false;
 
+  /**
+   * Runs `task` now, or refuses with HOST_BUSY while another write runs. A write never waits in
+   * line: its timeout covers the whole call, so the answer arrives within a host-tool timeout and
+   * an edit never lands after its caller stopped listening. Nothing was sent, so a retry is safe.
+   */
   run<T>(task: () => Promise<T>): Promise<T> {
-    const next = this.tail.then(task, task);
-    this.tail = next.catch(() => undefined);
-    return next;
+    if (this.busy) {
+      return Promise.reject(new CadError(
+        "HOST_BUSY",
+        "Another CAD change or saved copy is still running. Nothing was sent; try the same request again in a moment.",
+      ));
+    }
+    this.busy = true;
+    return task().finally(() => {
+      this.busy = false;
+    });
   }
 }
 
@@ -288,9 +243,8 @@ export class CadService {
   private readonly proposals = new Map<string, Proposal>();
   private readonly receipts = new Map<string, CadReceipt>();
   private readonly inFlight = new Map<string, { proposal: Proposal; done: Promise<CadReceipt> }>();
-  private readonly writes = new WriteQueue();
+  private readonly writes = new WriteGate();
   private readonly platform: NodeJS.Platform;
-  private readonly applyWaitMs: number;
   private receiptsLoaded: Promise<void> | undefined;
   private readonly exporter: CadExporter | undefined;
 
@@ -299,7 +253,6 @@ export class CadService {
     this.receiptsFile = join(options.stateDirectory, "receipts.jsonl");
     this.now = options.now ?? Date.now;
     this.platform = options.platform ?? process.platform;
-    this.applyWaitMs = options.applyWaitMs ?? APPLY_WAIT_MS;
     this.exporter = options.exporter ?? (options.exports === undefined ? undefined : new CadExporter({
       stateDirectory: options.stateDirectory,
       platform: this.platform,
@@ -391,7 +344,7 @@ export class CadService {
         `extents and bbox work only in AutoCAD; ${appLabel(host.app)} captures its current view.`,
       );
     }
-    const result = await host.call("capture", input, { documentId: input.documentId, timeoutMs: READ_TIMEOUT_MS, signal });
+    const result = await host.call("capture", input, { documentId: input.documentId, timeoutMs: CALL_TIMEOUT_MS, signal });
     return decodeWith(hostCaptureSchema, host.app, result);
   }
 
@@ -411,7 +364,7 @@ export class CadService {
     const result = decodeWith(
       hostPreviewSchema,
       host.app,
-      await host.call("preview", input, { documentId: input.documentId, timeoutMs: READ_TIMEOUT_MS, signal }),
+      await host.call("preview", input, { documentId: input.documentId, timeoutMs: CALL_TIMEOUT_MS, signal }),
     );
     if (result.changes.length === 0) {
       return {
@@ -431,7 +384,6 @@ export class CadService {
       operations: input.operations,
       fingerprints: result.fingerprints,
       changes: result.changes,
-      approvalMessage: approvalMessage(documentLabel(input.documentId, result.documentName), result.changes),
       title: operationTitle(input.operations),
       expiresAt: now + PROPOSAL_TTL_MS,
     };
@@ -446,25 +398,25 @@ export class CadService {
   }
 
   /**
-   * Single use once sent: a retried proposalId answers with its first outcome and is never sent
-   * again. Answers `pending` while the user has not decided; calling again keeps waiting. The
-   * caller's cancellation never cancels an edit whose dialog the user can still approve.
+   * Applies at once, with no dialog: the user's request in the chat is the approval. Single use
+   * once sent: a retried proposalId answers with its first outcome and is never sent again. The
+   * caller's cancellation never cancels an edit the host may already be running.
    */
   async apply(input: { proposalId: string }): Promise<CadApplyResult> {
     const previous = await this.storedReceipt(input.proposalId);
     if (previous !== undefined) return { ...previous, replayed: true };
     const running = this.inFlight.get(input.proposalId);
-    if (running !== undefined) return await this.awaitReceipt(running.proposal, running.done);
+    if (running !== undefined) return await running.done;
     const proposal = this.proposals.get(input.proposalId);
     if (proposal === undefined || proposal.expiresAt <= this.now()) {
       this.proposals.delete(input.proposalId);
       throw new CadError("PROPOSAL_EXPIRED", "That proposal is unknown or expired. Call inertia_cad_preview_changes again.");
     }
-    // Single use once sent: only a failure before the approval dialog puts it back.
+    // Single use once sent: only a failure before any step puts it back.
     this.proposals.delete(proposal.id);
     const done = this.settle(proposal);
     this.inFlight.set(proposal.id, { proposal, done });
-    return await this.awaitReceipt(proposal, done);
+    return await done;
   }
 
   private settle(proposal: Proposal): Promise<CadReceipt> {
@@ -482,30 +434,6 @@ export class CadService {
         },
       )
       .finally(() => this.inFlight.delete(proposal.id));
-  }
-
-  /** The receipt, or `pending` once this call has waited long enough for a host-tool client. */
-  private async awaitReceipt(proposal: Proposal, done: Promise<CadReceipt>): Promise<CadApplyResult> {
-    let timer: NodeJS.Timeout | undefined;
-    const pending = new Promise<"pending">((resolve) => {
-      timer = setTimeout(() => resolve("pending"), this.applyWaitMs);
-      timer.unref();
-    });
-    try {
-      const outcome = await Promise.race([done, pending]);
-      if (outcome !== "pending") return outcome;
-      return {
-        proposalId: proposal.id,
-        documentId: proposal.documentId,
-        changes: proposal.changes,
-        created: [],
-        at: new Date(this.now()).toISOString(),
-        status: "pending",
-        message: "The user has not answered the approval dialog yet. Call inertia_cad_apply_changes again with the same proposalId to keep waiting; it is never applied twice.",
-      };
-    } finally {
-      clearTimeout(timer);
-    }
   }
 
   /** The destination a save would write, checked before the user approves it. */
@@ -546,7 +474,7 @@ export class CadService {
     signal?: AbortSignal,
   ): Promise<Record<string, unknown>> {
     const host = this.hostFor(input.documentId);
-    const result = await host.call(method, input, { documentId: input.documentId, timeoutMs: READ_TIMEOUT_MS, signal });
+    const result = await host.call(method, input, { documentId: input.documentId, timeoutMs: CALL_TIMEOUT_MS, signal });
     return decodeWith(hostRecordSchema, host.app, result);
   }
 
@@ -591,10 +519,9 @@ export class CadService {
           documentId: proposal.documentId,
           operations: proposal.operations,
           expectedFingerprints: proposal.fingerprints,
-          approvalMessage: proposal.approvalMessage,
           title: proposal.title,
         },
-        { documentId: proposal.documentId, timeoutMs: APPLY_TIMEOUT_MS },
+        { documentId: proposal.documentId, timeoutMs: CALL_TIMEOUT_MS },
       );
     } catch (error) {
       if (!(error instanceof CadError)) throw error;
@@ -615,13 +542,9 @@ export class CadService {
           created: parsed.data.created ?? [],
         };
       case "rejected":
-        return { ...base, status: "rejected", message: "The user declined this change. Nothing was modified." };
+        return { ...base, status: "rejected", message: `Nothing was modified: the user declined it in an older ${appLabel(host.app)} extension's dialog. Call inertia_cad_setup to update the extension.` };
       case "expired":
-        return {
-          ...base,
-          status: "expired",
-          message: "The user did not approve this change in time, so nothing was modified. Preview it again if it is still wanted.",
-        };
+        return { ...base, status: "expired", message: `Nothing was modified: an older ${appLabel(host.app)} extension's dialog was not answered in time. Call inertia_cad_setup to update the extension.` };
     }
   }
 

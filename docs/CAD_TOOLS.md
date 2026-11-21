@@ -38,7 +38,8 @@ The `inertia.cad` capability pack
   definition is refused too. A proposal is sent to the CAD app at most once: a
   retried apply returns the first outcome, and outcomes are kept in
   `<data>/cad/receipts.jsonl` (its newest 5,000 lines) so a retry after a
-  restart still finds them. Writes run one at a time, every call answers within
+  restart still finds them. One write runs at a time, and another is refused
+  with `HOST_BUSY` instead of waiting in line, so every call answers within
   28 seconds (under OpenCode's 30-second host-tool timeout), and a cancelled
   call never cancels an edit already sent. Every request carries `deadlineAt`,
   so a bridge never starts work nobody will read. A failure before any step

@@ -214,13 +214,25 @@ export function checkDestination(destination: string, platform: NodeJS.Platform,
 }
 
 /** Runs one task at a time: CAD writes are rare and must not interleave in the same app. */
-class WriteQueue {
-  private tail: Promise<unknown> = Promise.resolve();
+class WriteGate {
+  private busy = false;
 
+  /**
+   * Runs `task` now, or refuses with HOST_BUSY while another write runs. A write never waits in
+   * line: its timeout covers the whole call, so the answer arrives within a host-tool timeout and
+   * an edit never lands after its caller stopped listening. Nothing was sent, so a retry is safe.
+   */
   run<T>(task: () => Promise<T>): Promise<T> {
-    const next = this.tail.then(task, task);
-    this.tail = next.catch(() => undefined);
-    return next;
+    if (this.busy) {
+      return Promise.reject(new CadError(
+        "HOST_BUSY",
+        "Another CAD change or saved copy is still running. Nothing was sent; try the same request again in a moment.",
+      ));
+    }
+    this.busy = true;
+    return task().finally(() => {
+      this.busy = false;
+    });
   }
 }
 
@@ -231,7 +243,7 @@ export class CadService {
   private readonly proposals = new Map<string, Proposal>();
   private readonly receipts = new Map<string, CadReceipt>();
   private readonly inFlight = new Map<string, { proposal: Proposal; done: Promise<CadReceipt> }>();
-  private readonly writes = new WriteQueue();
+  private readonly writes = new WriteGate();
   private readonly platform: NodeJS.Platform;
   private receiptsLoaded: Promise<void> | undefined;
   private readonly exporter: CadExporter | undefined;

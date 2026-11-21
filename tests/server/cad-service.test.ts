@@ -25,16 +25,6 @@ import {
 } from "../helpers/cad-fake-host";
 import { removeTemporaryDirectory } from "../helpers/temporary-directory";
 
-/**
- * Gives a queued write time to reach the host if serialization were broken.
- * A slow machine can only make an assertion that it did not start pass, never fail.
- */
-async function settleWrites(): Promise<void> {
-  await settle();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  await settle();
-}
-
 const roots: string[] = [];
 const START = Date.UTC(2026, 10, 21, 12, 0, 0);
 const TTL_MS = 30 * 60 * 1000;
@@ -333,40 +323,44 @@ describe("CadService apply", () => {
     expect(host.calls.filter(({ method }) => method === "apply")).toHaveLength(1);
   });
 
-  it("runs writes one at a time", async () => {
+  it("refuses a second change while one runs, sending nothing and keeping its proposal", async () => {
     const host = sketchUpHost();
-    const answers = [deferred<unknown>(), deferred<unknown>()];
+    const answer = deferred<unknown>();
     let started = 0;
-    host.handlers.apply = () => answers[started++]!.promise;
-    const { cad } = await service([host]);
+    host.handlers.apply = () => {
+      started += 1;
+      return started === 1 ? answer.promise : { status: "applied" };
+    };
+    const { cad, directory } = await service([host]);
     const firstId = await propose(cad);
     const secondId = await propose(cad);
     const first = cad.apply({ proposalId: firstId });
     // Each apply first reads the receipt log, so wait for the host call itself, not a fixed number of turns.
     await vi.waitFor(() => expect(started).toBe(1));
-    const second = cad.apply({ proposalId: secondId });
-    await settleWrites();
+    // A write never waits in line: its answer must come within one call's timeout.
+    expect(await rejection(cad.apply({ proposalId: secondId }))).toMatchObject({ code: "HOST_BUSY" });
     expect(started).toBe(1);
-    answers[0]!.resolve({ status: "applied" });
+    answer.resolve({ status: "applied" });
     expect((await first).status).toBe("applied");
-    await vi.waitFor(() => expect(started).toBe(2));
-    answers[1]!.resolve({ status: "applied" });
-    expect((await second).status).toBe("applied");
+    expect((await cad.apply({ proposalId: secondId })).status).toBe("applied");
+    expect(started).toBe(2);
+    const receipts = (await readFile(join(directory, "receipts.jsonl"), "utf8")).trim().split("\n");
+    expect(receipts).toHaveLength(2);
   });
 
-  it("starts a save copy only after a running apply finishes", async () => {
+  it("refuses a save copy while a change runs, and runs it afterwards", async () => {
     const host = sketchUpHost();
     const answer = deferred<unknown>();
     host.handlers.apply = () => answer.promise;
     const { cad } = await service([host]);
     const applying = cad.apply({ proposalId: await propose(cad) });
     await vi.waitFor(() => expect(host.calls.map(({ method }) => method)).toEqual(["preview", "apply"]));
-    const saving = cad.saveCopy({ documentId: SKP_DOCUMENT_ID, destination: join(tmpdir(), "copy.skp") });
-    await settleWrites();
+    const copy = { documentId: SKP_DOCUMENT_ID, destination: join(tmpdir(), "copy.skp") };
+    expect(await rejection(cad.saveCopy(copy))).toMatchObject({ code: "HOST_BUSY" });
     expect(host.calls.map(({ method }) => method)).toEqual(["preview", "apply"]);
     answer.resolve({ status: "applied" });
     await applying;
-    await saving;
+    await cad.saveCopy(copy);
     expect(host.calls.map(({ method }) => method)).toEqual(["preview", "apply", "save_copy"]);
   });
 

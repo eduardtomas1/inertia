@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -489,6 +489,29 @@ describe("CadExporter", () => {
     const sameAsSource = await exporter.export({ source, format: "dxf" });
     expect(sameAsSource.path).toMatch(/facade \(Inertia export .*\)\.dxf$/u);
     expect(readFileSync(source, "utf8")).toBe("0\nEOF");
+  });
+
+  it("never writes over its source or template reached through a linked folder", async () => {
+    const { exporter, work, file } = await setup();
+    const agentDxf = file("facade.dxf", "0\nEOF");
+    const dwg = await exporter.export({ source: agentDxf, format: "dwg" });
+    // An export of Inertia's own DWG lands beside it with a stamped name, owned by its receipt.
+    const ownDxf = (await exporter.export({ source: dwg.path ?? "", format: "dxf" })).path ?? "";
+    expect(ownDxf).toMatch(/facade \(Inertia export .*\)\.dxf$/u);
+    const contents = readFileSync(ownDxf, "utf8");
+    const alias = join(dirname(work), "alias");
+    symlinkSync(work, alias, process.platform === "win32" ? "junction" : "dir");
+    const throughAlias = join(alias, basename(ownDxf));
+
+    const overSource = await failureOf(exporter.export({ source: throughAlias, format: "dxf", destination: ownDxf }));
+    expect(overSource.code).toBe("DESTINATION_EXISTS");
+    expect(readFileSync(ownDxf, "utf8")).toBe(contents);
+    expect(await exporter.destinationFor({ source: throughAlias, format: "dxf" })).not.toBe(ownDxf);
+
+    const overTemplate = await failureOf(exporter.export({
+      source: agentDxf, format: "dwg", template: join(alias, basename(dwg.path ?? "")), destination: dwg.path ?? "",
+    }));
+    expect(overTemplate.code).toBe("DESTINATION_EXISTS");
   });
 
   it("stops at the timeout and leaves no partial file anywhere", async () => {

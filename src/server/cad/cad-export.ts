@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, normalize, sep, win32 } from "node:path";
 
 import { z } from "zod";
@@ -135,6 +135,21 @@ const invalid = (message: string): CadError => new CadError("INVALID_REQUEST", m
 const windowsPaths = sep === "\\";
 const samePath = (a: string, b: string): boolean => (windowsPaths ? a.toLowerCase() === b.toLowerCase() : a === b);
 
+/**
+ * Whether two paths reach the same file, also through links, junctions or other spellings: a
+ * destination that is the source or the template must never be written.
+ */
+async function sameFile(a: string, b: string): Promise<boolean> {
+  if (samePath(a, b)) return true;
+  const [left, right] = await Promise.all([realpath(a).catch(() => undefined), realpath(b).catch(() => undefined)]);
+  if (left !== undefined && right !== undefined && samePath(left, right)) return true;
+  const [x, y] = await Promise.all([
+    stat(a, { bigint: true }).catch(() => undefined),
+    stat(b, { bigint: true }).catch(() => undefined),
+  ]);
+  return x !== undefined && y !== undefined && x.ino !== 0n && x.dev === y.dev && x.ino === y.ino;
+}
+
 /** Windows opens these as devices even with an extension, in any folder. */
 function reservedWindowsName(path: string): boolean {
   const stem = win32.basename(path).split(".")[0]?.replace(/[ .]+$/u, "") ?? "";
@@ -258,7 +273,7 @@ export class CadExporter {
     if (target === undefined) {
       throw invalid("A png without destination writes no file; the image is returned instead.");
     }
-    return (await this.delivery(target.path, target.explicit, prepared.source.path)).path;
+    return (await this.delivery(target.path, target.explicit, inputsOf(prepared))).path;
   }
 
   async export(input: CadExportInput, signal?: AbortSignal): Promise<CadExportResult> {
@@ -469,7 +484,7 @@ export class CadExporter {
       }
       const bytes = input.format === "png" ? await readFile(produced) : undefined;
       const target = await this.target(prepared);
-      const path = target === undefined ? undefined : await this.deliver(produced, target.path, target.explicit, source.path);
+      const path = target === undefined ? undefined : await this.deliver(produced, target.path, target.explicit, inputsOf(prepared));
       return { warnings, areaPlotted, paperSize, bytes, path };
     } finally {
       await rm(workDirectory, { recursive: true, force: true, maxRetries: 3 }).catch(() => undefined);
@@ -523,9 +538,10 @@ export class CadExporter {
    * Never overwrites, except a file Inertia exported there before that nobody changed since.
    * Otherwise an explicit destination fails and a default one gets a stamped name.
    */
-  private async delivery(target: string, explicit: boolean, sourcePath: string): Promise<{ path: string; replacing: boolean }> {
+  private async delivery(target: string, explicit: boolean, inputs: readonly string[]): Promise<{ path: string; replacing: boolean }> {
     let path = target;
-    const isSource = samePath(target, sourcePath);
+    // Compared as files, not strings: an alias of the source must not pass as an earlier export.
+    const isSource = (await Promise.all(inputs.map(async (input) => await sameFile(target, input)))).some(Boolean);
     if (isSource || (await fileExists(target))) {
       const existing = isSource ? undefined : await sha256File(target);
       const owned = existing !== undefined && (await this.ownedExports()).has(ledgerKey(target, existing));
@@ -542,8 +558,8 @@ export class CadExporter {
     return { path, replacing: path === target && !isSource && (await fileExists(target)) };
   }
 
-  private async deliver(produced: string, target: string, explicit: boolean, sourcePath: string): Promise<string> {
-    const { path, replacing } = await this.delivery(target, explicit, sourcePath);
+  private async deliver(produced: string, target: string, explicit: boolean, inputs: readonly string[]): Promise<string> {
+    const { path, replacing } = await this.delivery(target, explicit, inputs);
     const sha256 = await sha256File(produced);
     try {
       await mkdir(dirname(path), { recursive: true });
@@ -596,6 +612,10 @@ export class CadExporter {
     }
   }
 }
+
+/** The files an export reads, which it must never write. */
+const inputsOf = (prepared: Prepared): string[] =>
+  prepared.template === undefined ? [prepared.source.path] : [prepared.source.path, prepared.template.path];
 
 const ledgerKey = (path: string, sha256: string): string => `${windowsPaths ? path.toLowerCase() : path}\n${sha256}`;
 

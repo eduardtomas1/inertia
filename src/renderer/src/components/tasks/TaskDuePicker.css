@@ -143,14 +143,14 @@
 }
 
 .task-due-day.is-selected {
-  color: var(--accent-text);
-  background: var(--accent);
+  color: var(--accent-fill-text);
+  background: var(--accent-fill);
   box-shadow: none;
   opacity: 1;
 }
 
 .task-due-day.is-selected:hover {
-  background: var(--accent-hover);
+  background: var(--accent-fill-hover);
 }
 
 .task-due-day:focus-visible {

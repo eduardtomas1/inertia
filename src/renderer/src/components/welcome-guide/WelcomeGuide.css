@@ -772,8 +772,8 @@
 }
 
 .d-button {
-  color: var(--accent-text);
-  background: var(--accent);
+  color: var(--accent-fill-text);
+  background: var(--accent-fill);
   opacity: 0;
   animation: d-ship-button var(--demo-run);
 }

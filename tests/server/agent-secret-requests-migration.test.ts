@@ -28,7 +28,7 @@ afterEach(async () => {
 
 it("appends agent secret requests as schema 116 with role and file token checks", async () => {
   expect(AGENT_SECRET_REQUESTS_SCHEMA_VERSION).toBe(116);
-  expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(AGENT_SECRET_REQUESTS_SCHEMA_VERSION);
+  expect(CURRENT_DATABASE_SCHEMA_VERSION).toBeGreaterThanOrEqual(AGENT_SECRET_REQUESTS_SCHEMA_VERSION);
   expect(runtimeMigrationCatalog().find(({ version }) => version === 116)?.name).toBe(agentSecretRequestsMigration.name);
   const directory = await mkdtemp(join(tmpdir(), "inertia-agent-secret-requests-migration-"));
   directories.push(directory);
@@ -54,7 +54,7 @@ it("appends agent secret requests as schema 116 with role and file token checks"
   store.close();
   const database = new Database(path);
   try {
-    expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(116);
+    expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
     const reference = JSON.stringify({ requestId: randomUUID() });
     expect(() => database.prepare("UPDATE messages SET secret_request_json = ? WHERE id = ?").run(reference, turn.userMessageId))
       .toThrow(/CHECK constraint failed/u);

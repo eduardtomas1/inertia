@@ -72,7 +72,7 @@ describe("sidebar index presentation contracts", () => {
 
   it("raises the selected row as a tile whose ring stays inside the clipped list", () => {
     expect(css).toContain(".activity-thread.is-active {\n  background: var(--paper);\n  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), inset 0 0 0 1px var(--line-soft);\n}");
-    expect(css).toContain(':root[data-theme="dark"] .activity-thread.is-active {\n  background: var(--fill-strong);\n  box-shadow: inset 0 1px 0 var(--raised-edge), inset 0 0 0 1px var(--line-soft);\n}');
+    expect(css).toContain(':root[data-theme="dark"] .activity-thread.is-active {\n  background: var(--surface-raised);\n  box-shadow: inset 0 1px 0 var(--raised-edge), 0 1px 2px rgb(0 0 0 / 0.5);\n}');
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread\.is-active,\n  :root\[data-theme="dark"\] \.activity-thread\.is-active \{[^}]*background: Highlight;[^}]*box-shadow: none;/u);
   });
 });

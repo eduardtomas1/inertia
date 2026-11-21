@@ -9,6 +9,8 @@ import {
   MAX_WORKSPACE_FILE_EDIT_BYTES,
   type ServerEvent,
 } from "../src/shared/contracts";
+import { COLOR_THEME_IDS } from "../src/shared/contracts/app";
+import { validAppearanceSettings } from "../src/shared/contracts/appearance-settings-schema";
 import { serverEventSchema } from "../src/shared/contracts/server-event-schema";
 import { providerNativeModelSelection } from "../src/shared/model-routing";
 
@@ -795,6 +797,26 @@ describe("client command contract", () => {
         requestId,
         payload: { keybindings },
       }).success).toBe(false);
+    }
+  });
+
+  it("accepts every built-in color theme for each appearance and rejects unknown families", () => {
+    const parse = (payload: Record<string, unknown>) => clientCommandSchema.safeParse({
+      type: "settings.update",
+      requestId: crypto.randomUUID(),
+      payload,
+    }).success;
+    for (const theme of COLOR_THEME_IDS) {
+      expect(parse({ colorTheme: theme }), theme).toBe(true);
+      expect(parse({ lightColorTheme: theme, darkColorTheme: theme }), theme).toBe(true);
+      expect(validAppearanceSettings({ lightColorTheme: theme, darkColorTheme: theme }), theme).toBe(true);
+    }
+    expect(COLOR_THEME_IDS).toEqual(expect.arrayContaining(["graphite", "blossom", "lagoon", "saffron"]));
+    for (const theme of ["ultraviolet", "Saffron", "custom", "", null]) {
+      expect(parse({ colorTheme: theme }), String(theme)).toBe(false);
+      expect(parse({ lightColorTheme: theme }), String(theme)).toBe(false);
+      expect(parse({ darkColorTheme: theme }), String(theme)).toBe(false);
+      expect(validAppearanceSettings({ darkColorTheme: theme }), String(theme)).toBe(false);
     }
   });
 

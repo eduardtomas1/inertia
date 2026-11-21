@@ -7,6 +7,13 @@ import {
   COLOR_THEME_IDS,
   type ColorThemeId,
 } from "../../src/shared/contracts";
+import {
+  gamutMapChroma,
+  hexToOklch,
+  oklchToHex,
+  oklchToLinearRgb,
+  type OklchColor,
+} from "../../src/shared/theme/color-palette";
 import { createCascade } from "./css-cascade";
 import { parseCssRules, readRendererCss } from "./css-rules";
 
@@ -166,6 +173,14 @@ describe("visual contrast system", () => {
     }
     expect(contrast(tokens.get("accent-text")!, tokens.get("accent")!))
       .toBeGreaterThanOrEqual(4.5);
+    for (const fill of ["accent-fill", "accent-fill-hover"]) {
+      expect(contrast(tokens.get("accent-fill-text")!, tokens.get(fill)!), `${colorTheme} ${theme} --accent-fill-text on --${fill}`)
+        .toBeGreaterThanOrEqual(4.5);
+    }
+    for (const surface of ["bg", "surface", "surface-raised"]) {
+      expect(contrast(tokens.get("accent-fill")!, tokens.get(surface)!), `${colorTheme} ${theme} --accent-fill against --${surface}`)
+        .toBeGreaterThanOrEqual(3);
+    }
     expect(contrast(tokens.get("danger")!, tokens.get("danger-soft")!))
       .toBeGreaterThanOrEqual(4.5);
 
@@ -218,6 +233,11 @@ describe("visual contrast system", () => {
       blend(tokens.get("accent-text")!, surface, disabledOpacity),
       blend(tokens.get("accent")!, surface, disabledOpacity),
     ), `${colorTheme} ${theme} disabled accent action`)
+      .toBeGreaterThanOrEqual(3);
+    expect(contrast(
+      blend(tokens.get("accent-fill-text")!, surface, disabledOpacity),
+      blend(tokens.get("accent-fill")!, surface, disabledOpacity),
+    ), `${colorTheme} ${theme} disabled accent fill action`)
       .toBeGreaterThanOrEqual(3);
 
     const settledDim = Number.parseFloat(
@@ -475,16 +495,18 @@ function resolveColor(value: string, tokens: Map<string, string>): string | unde
 
 // Icons are non-text UI graphics, so WCAG 1.4.11 asks for 3:1.
 const primaryActionStates = [
-  { name: "send ready", classes: [], actionState: "send-ready", disabled: false, resting: false, hover: false, minimumContrast: 3 },
-  { name: "send hover", classes: [], actionState: "send-ready", disabled: false, resting: false, hover: true, minimumContrast: 3 },
-  { name: "send at rest", classes: [], actionState: "send-disabled", disabled: false, resting: true, hover: false, minimumContrast: 3 },
-  { name: "send at rest hover", classes: [], actionState: "send-disabled", disabled: false, resting: true, hover: true, minimumContrast: 3 },
-  { name: "sending", classes: ["send-button-loading"], actionState: "submitting", disabled: true, resting: false, hover: false, minimumContrast: 3 },
-  { name: "stop ready", classes: ["stop-button"], actionState: "stop-ready", disabled: false, resting: false, hover: false, minimumContrast: 3 },
-  { name: "stop hover", classes: ["stop-button"], actionState: "stop-ready", disabled: false, resting: false, hover: true, minimumContrast: 3 },
-  { name: "stopping", classes: ["stop-button"], actionState: "stop-pending", disabled: false, resting: false, hover: false, minimumContrast: 3 },
-  { name: "stop and send", classes: ["stop-button"], actionState: "stop-and-send", disabled: false, resting: false, hover: false, minimumContrast: 3 },
-  { name: "stop and send hover", classes: ["stop-button"], actionState: "stop-and-send", disabled: false, resting: false, hover: true, minimumContrast: 3 },
+  { name: "send ready", classes: [], actionState: "send-ready", motionState: "send", disabled: false, resting: false, hover: false, minimumContrast: 3 },
+  { name: "send hover", classes: [], actionState: "send-ready", motionState: "send", disabled: false, resting: false, hover: true, minimumContrast: 3 },
+  { name: "send at rest", classes: [], actionState: "send-disabled", motionState: "send", disabled: false, resting: true, hover: false, minimumContrast: 3 },
+  { name: "send at rest hover", classes: [], actionState: "send-disabled", motionState: "send", disabled: false, resting: true, hover: true, minimumContrast: 3 },
+  { name: "send unavailable", classes: [], actionState: "send-disabled", motionState: "send", disabled: true, resting: false, hover: false, minimumContrast: 3 },
+  { name: "sending", classes: ["send-button-loading"], actionState: "submitting", motionState: "sending", disabled: true, resting: false, hover: false, minimumContrast: 3 },
+  { name: "sending fallback", classes: ["send-button-loading"], actionState: "submitting", motionState: null, disabled: true, resting: false, hover: false, minimumContrast: 3 },
+  { name: "stop ready", classes: ["stop-button"], actionState: "stop-ready", motionState: "stop", disabled: false, resting: false, hover: false, minimumContrast: 3 },
+  { name: "stop hover", classes: ["stop-button"], actionState: "stop-ready", motionState: "stop", disabled: false, resting: false, hover: true, minimumContrast: 3 },
+  { name: "stopping", classes: ["stop-button"], actionState: "stop-pending", motionState: "stop", disabled: false, resting: false, hover: false, minimumContrast: 3 },
+  { name: "stop and send", classes: ["stop-button"], actionState: "stop-and-send", motionState: "stop", disabled: false, resting: false, hover: false, minimumContrast: 3 },
+  { name: "stop and send hover", classes: ["stop-button"], actionState: "stop-and-send", motionState: "stop", disabled: false, resting: false, hover: true, minimumContrast: 3 },
 ] as const;
 
 describe("composer primary action contrast", () => {
@@ -508,6 +530,8 @@ describe("composer primary action contrast", () => {
   const cascades = primaryActionStates.map((state) => {
     primary.className = ["icon-button", "send-button", ...state.classes].join(" ");
     primary.setAttribute("data-composer-action-state", state.actionState);
+    if (state.motionState) primary.setAttribute("data-motion-state", state.motionState);
+    else primary.removeAttribute("data-motion-state");
     primary.toggleAttribute("disabled", state.disabled);
     if (state.resting) primary.setAttribute("aria-disabled", "true");
     else primary.removeAttribute("aria-disabled");
@@ -526,31 +550,27 @@ describe("composer primary action contrast", () => {
       expect(color, `${state.name} icon color`).not.toBe("var(--text-muted)");
     }
     expect(cascades.find(({ state }) => state.name === "send ready")?.color)
-      .toBe("var(--accent-text)");
+      .toBe("var(--send-glyph)");
     expect(cascades.find(({ state }) => state.name === "stop ready")?.color)
-      .toBe("var(--surface-raised)");
-    expect(cascades.find(({ state }) => state.name === "stop and send")?.color)
-      .toBe("var(--danger)");
+      .toBe("var(--send-stop-glyph)");
   });
 
-  it("draws Stop agent as a status-failed disc and keeps Stop and send on the quiet fill", () => {
-    for (const name of ["stop ready", "stop hover", "stopping"]) {
+  it("draws every Stop state on the neutral stop disc, distinct from the coloured send core", () => {
+    for (const name of ["stop ready", "stop hover", "stopping", "stop and send", "stop and send hover"]) {
       const stop = cascades.find(({ state }) => state.name === name)!;
-      expect([stop.background, stop.color], name).toEqual(["var(--status-failed)", "var(--surface-raised)"]);
-    }
-    for (const name of ["stop and send", "stop and send hover"]) {
-      const stopAndSend = cascades.find(({ state }) => state.name === name)!;
-      expect([stopAndSend.background, stopAndSend.color], name).toEqual(["var(--fill)", "var(--danger)"]);
+      expect([stop.background, stop.color, stop.opacity], name).toEqual(["var(--send-stop)", "var(--send-stop-glyph)", "1"]);
     }
   });
 
-  it("keeps the send disc on the accent fill at rest, without a hover change, and the arrow in the accent text colour", () => {
-    for (const name of ["send at rest", "send at rest hover", "send ready"]) {
+  it("puts the ready and sending disc on the send core with the white glyph and the empty disc on quiet opaque glass", () => {
+    for (const name of ["send ready", "send hover", "sending"]) {
       const state = cascades.find(({ state: candidate }) => candidate.name === name)!;
-      expect([state.background, state.color], name).toEqual(["var(--accent)", "var(--accent-text)"]);
-      if (state.state.resting) expect(state.opacity, name).toBe("1");
+      expect([state.background, state.color, state.opacity], name).toEqual(["var(--send-core)", "var(--send-glyph)", "1"]);
     }
-    expect(cascades.find(({ state }) => state.name === "send hover")?.background).toBe("var(--accent-hover)");
+    for (const name of ["send at rest", "send at rest hover", "send unavailable", "sending fallback"]) {
+      const state = cascades.find(({ state: candidate }) => candidate.name === name)!;
+      expect([state.background, state.color, state.opacity], name).toEqual(["var(--send-empty)", "var(--send-empty-glyph)", "1"]);
+    }
   });
 
   it.each(themeCases)(
@@ -569,6 +589,12 @@ describe("composer primary action contrast", () => {
         const tokens = new Map(themed);
         for (const fill of ["fill", "fill-strong"] as const) {
           tokens.set(fill, blend(tokens.get("text")!, raised!, inkWeight(fill)));
+        }
+        const crown = crownDeclarations(theme);
+        tokens.set("send-glyph", expandedHex(crown.get("on-media")!));
+        tokens.set("send-core", oklchToHex(crownEndpoints(crown, hexToOklch(themed.get("accent")!))[0]!));
+        for (const name of ["send-empty", "send-empty-glyph", "send-stop", "send-stop-glyph"]) {
+          tokens.set(name, resolveColor(crown.get(name)!, tokens)!);
         }
         for (const { state, color, background, opacity } of cascades) {
           const label = `${colorTheme} ${theme} ${surfaceName} ${state.name}: ${color} on ${background}`;
@@ -600,5 +626,143 @@ describe("composer primary action contrast", () => {
       expect(contrast(tokens.get(ring!)!, tokens.get(surface)!), `${colorTheme} ${theme} --${ring} on --${surface}`)
         .toBeGreaterThanOrEqual(3);
     }
+  });
+});
+
+const crownCss = readFileSync(new URL("../../src/renderer/src/components/composer/ComposerSendActions.css", import.meta.url), "utf8")
+  .replace(/\r\n?/gu, "\n");
+const CROWN_GLYPH_SAFETY_RADIUS = 11;
+const CROWN_PRESS_DISPLACEMENT = 1;
+
+type OklchChannel = "l" | "c" | "h";
+
+function crownDeclarations(theme: "light" | "dark"): Map<string, string> {
+  const declarations = tokenDeclarations(cssBlock(":root"));
+  if (theme === "dark") {
+    for (const [name, value] of tokenDeclarations(cssBlock(':root[data-theme="dark"]'))) declarations.set(name, value);
+  }
+  return declarations;
+}
+
+function relativeChannel(expression: string, base: OklchColor): number {
+  if (/^[\d.]+$/u.test(expression)) return Number.parseFloat(expression);
+  if (/^[lch]$/u.test(expression)) return base[expression as OklchChannel];
+  const arithmetic = /^calc\((?<channel>[lch]) (?<operator>[+*-]) (?<operand>[\d.]+)\)$/u.exec(expression)?.groups;
+  if (arithmetic) {
+    const value = base[arithmetic.channel as OklchChannel];
+    const operand = Number.parseFloat(arithmetic.operand!);
+    return arithmetic.operator === "+" ? value + operand : arithmetic.operator === "-" ? value - operand : value * operand;
+  }
+  const clamped = /^clamp\((?<min>[\d.]+), (?<value>.+), (?<max>[\d.]+)\)$/u.exec(expression)?.groups;
+  if (clamped) {
+    return Math.min(Number.parseFloat(clamped.max!), Math.max(Number.parseFloat(clamped.min!), relativeChannel(clamped.value!, base)));
+  }
+  throw new Error(`Unsupported relative colour channel ${expression}`);
+}
+
+function crownEndpoint(name: string, declarations: Map<string, string>, accent: OklchColor): OklchColor {
+  const value = declarations.get(name);
+  const relative = value && /^oklch\(from var\(--(?<origin>[\w-]+)\) (?<channels>.+)\)$/u.exec(value)?.groups;
+  if (!relative) throw new Error(`--${name} is not a relative OKLCH colour`);
+  const base = relative.origin === "accent" ? accent : crownEndpoint(relative.origin!, declarations, accent);
+  const channels = relative.channels!.match(/clamp\([^()]*(?:\([^()]*\)[^()]*)*\)|calc\([^()]*\)|\S+/gu)!;
+  expect(channels, `--${name} channels`).toHaveLength(3);
+  const [l, c, h] = channels.map((channel) => relativeChannel(channel, base));
+  return { l: l!, c: c!, h: h! };
+}
+
+function crownEndpoints(declarations: Map<string, string>, accent: OklchColor): OklchColor[] {
+  return ["send-core", "send-a", "send-b", "send-deep"].map((name) => crownEndpoint(name, declarations, accent));
+}
+
+function crownGlyphHighlightBudget(): number {
+  const optics = /--send-optics: (?<value>[^;]+);/u.exec(crownCss)?.groups?.value ?? "";
+  const reflections = [...optics.matchAll(/radial-gradient\(ellipse (?<rx>[\d.]+)px (?<ry>[\d.]+)px at (?<x>[\d.]+)% (?<y>[\d.]+)% in srgb, color-mix\(in srgb, var\(--send-glyph\) (?<weight>[\d.]+)%, transparent\)/gu)];
+  expect(reflections.length).toBeGreaterThanOrEqual(2);
+  let budget = 0;
+  for (const { groups } of reflections) {
+    const [rx, ry, x, y, weight] = ["rx", "ry", "x", "y", "weight"].map((key) => Number.parseFloat(groups![key]!));
+    const dx = Math.max(0, Math.abs((x! / 100) * 32 - 16) - rx!);
+    const dy = Math.max(0, Math.abs((y! / 100) * 32 - 16) - ry!);
+    if (Math.hypot(dx, dy) < CROWN_GLYPH_SAFETY_RADIUS + CROWN_PRESS_DISPLACEMENT) budget += weight! / 100;
+  }
+  return budget;
+}
+
+function brightestCrownSurface(endpoint: OklchColor, highlight: number): Rgb {
+  const encode = (channel: number): number => channel <= 0.0031308 ? 12.92 * channel : 1.055 * channel ** (1 / 2.4) - 0.055;
+  let brightest: Rgb = [0, 0, 0];
+  for (const rendered of [endpoint, gamutMapChroma(endpoint)]) {
+    const bytes = oklchToLinearRgb(rendered)
+      .map((channel) => Math.min(255, Math.round(encode(Math.min(1, Math.max(0, channel))) * 255) + 1))
+      .map((channel) => channel * (1 - highlight) + 255 * highlight) as unknown as Rgb;
+    if (luminanceOf(bytes) > luminanceOf(brightest)) brightest = bytes;
+  }
+  return brightest;
+}
+
+function luminanceOf(channels: Rgb): number {
+  const linear = channels.map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  return linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722;
+}
+
+function crownGlyphContrast(glyph: string, endpoints: readonly OklchColor[]): number {
+  const glyphLuminance = luminance(glyph);
+  const budget = crownGlyphHighlightBudget();
+  return Math.min(...endpoints.map((endpoint) => {
+    const surface = luminanceOf(brightestCrownSurface(endpoint, budget));
+    return (Math.max(glyphLuminance, surface) + 0.05) / (Math.min(glyphLuminance, surface) + 0.05);
+  }));
+}
+
+function expandedHex(value: string): string {
+  return /^#[\da-f]{3}$/iu.test(value) ? `#${Array.from(value.slice(1), (digit) => digit + digit).join("")}` : value;
+}
+
+describe("composer send crown contrast", () => {
+  it("keeps every highlight that can cross the glyph inside the measured 6% white budget", () => {
+    expect(crownGlyphHighlightBudget()).toBe(0.06);
+    expect(crownCss).toMatch(/radial-gradient\(circle 16px at 50% 50% in srgb, transparent 83%/u);
+    expect(16 * 0.83).toBeGreaterThan(CROWN_GLYPH_SAFETY_RADIUS + CROWN_PRESS_DISPLACEMENT);
+  });
+
+  it.each(themeCases)("keeps the %s %s white arrow at 4.5:1 over every point of the crown field, its sweep and its ignition", (colorTheme, theme) => {
+    const tokens = themeTokens(theme, colorTheme);
+    const declarations = crownDeclarations(theme);
+    expect(declarations.get("send-glyph")).toBe("var(--on-media)");
+    const glyph = expandedHex(declarations.get("on-media")!);
+    expect(glyph).toBe("#ffffff");
+    const endpoints = crownEndpoints(declarations, hexToOklch(tokens.get("accent")!));
+    expect(crownGlyphContrast(glyph, endpoints), `${colorTheme} ${theme} crown glyph`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(["light", "dark"] as const)("keeps the %s white arrow at 4.5:1 over the crown of any custom accent hue and chroma", (theme) => {
+    const declarations = crownDeclarations(theme);
+    let minimum = Number.POSITIVE_INFINITY;
+    for (let hue = 0; hue < 360; hue += 1) {
+      for (const chroma of [0, 0.04, 0.08, 0.12, 0.16, 0.2, 0.3]) {
+        minimum = Math.min(minimum, crownGlyphContrast("#ffffff", crownEndpoints(declarations, { l: 0.6, c: chroma, h: hue })));
+      }
+    }
+    expect(minimum).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(themeCases)("draws the %s %s empty and stop discs as opaque neutral pairs at 4.5:1, with stop never taking the send colour", (colorTheme, theme) => {
+    const tokens = themeTokens(theme, colorTheme);
+    const declarations = crownDeclarations(theme);
+    const pair = (foreground: string, background: string): [string, string] => [
+      resolveColor(declarations.get(foreground)!, tokens)!,
+      resolveColor(declarations.get(background)!, tokens)!,
+    ];
+    const [emptyGlyph, empty] = pair("send-empty-glyph", "send-empty");
+    const [stopGlyph, stop] = pair("send-stop-glyph", "send-stop");
+    expect(contrast(emptyGlyph, empty), `${colorTheme} ${theme} empty`).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(stopGlyph, stop), `${colorTheme} ${theme} stop`).toBeGreaterThanOrEqual(4.5);
+    expect(hexToOklch(stop).c, `${colorTheme} ${theme} neutral stop`).toBeLessThan(0.03);
+    const core = crownEndpoints(declarations, hexToOklch(tokens.get("accent")!))[0]!;
+    expect(core.c, `${colorTheme} ${theme} coloured send core`).toBeGreaterThanOrEqual(0.1);
   });
 });

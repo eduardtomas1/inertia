@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTheme } from "../../src/renderer/src/hooks/useTheme";
 import { cacheCustomColor } from "../../src/renderer/src/utils/customTheme";
 import { buildCustomPaletteTokens } from "../../src/shared/theme/color-theme-spec";
+import { COLOR_THEME_IDS } from "../../src/shared/contracts";
 
 const bootstrap = readFileSync(resolve("src/renderer/public/theme-bootstrap.js"), "utf8");
 afterEach(() => { vi.restoreAllMocks(); document.documentElement.removeAttribute("style"); document.getElementById("inertia-custom-color-theme")?.remove(); window.localStorage.clear(); });
@@ -38,5 +39,12 @@ describe("custom theme rendering", () => {
     expect(document.documentElement.dataset.colorTheme).toBe("custom");
     expect(getComputedStyle(document.documentElement).getPropertyValue("--accent"))
       .toBe(Object.fromEntries(buildCustomPaletteTokens("#f97316", "dark")).accent);
+  });
+
+  it.each(COLOR_THEME_IDS)("paints the cached %s family before React starts", (colorTheme) => {
+    window.localStorage.setItem("inertia:theme-preference:v1", "light");
+    window.localStorage.setItem("inertia:color-theme:v1:light", colorTheme);
+    runInNewContext(bootstrap, { window, document, HTMLLinkElement });
+    expect(document.documentElement.dataset.colorTheme).toBe(colorTheme);
   });
 });

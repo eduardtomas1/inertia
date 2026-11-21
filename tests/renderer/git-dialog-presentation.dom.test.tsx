@@ -39,7 +39,7 @@ describe("git dialog presentation", () => {
     expect(rule(".commit-path-list")).not.toMatch(/border:|border-radius/u);
     expect(rule(".commit-path-heading")).toMatch(/font-size: var\(--text-sm\)/u);
     expect(css).not.toMatch(/\.commit-path-heading button \{[^}]*--accent/u);
-    expect(rule(".commit-path-list input")).toMatch(/accent-color: var\(--accent\)/u);
+    expect(rule(".commit-path-list input")).toMatch(/accent-color: var\(--accent-fill\)/u);
   });
 
   it("offers the draft option without a restating hint or a bold label", () => {

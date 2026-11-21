@@ -77,20 +77,28 @@ export async function expectSolidComposerSurface(dock: Locator): Promise<void> {
   expect(sample.paint[3]).toBe(255);
 }
 
-export async function expectRoundSendScalesOnHover(page: Page, send: Locator): Promise<void> {
+export async function expectRoundSendLiftsOnHover(page: Page, send: Locator): Promise<void> {
   const face = () => send.evaluate((button: HTMLElement) => ({
     width: button.offsetWidth,
     height: button.offsetHeight,
     radius: getComputedStyle(button).borderTopLeftRadius,
     transform: getComputedStyle(button).transform,
+    field: getComputedStyle(button, "::before").transform,
     icon: Math.round(button.querySelector("svg")!.getBoundingClientRect().width),
     visualWidth: Math.round(button.getBoundingClientRect().width * 100) / 100,
   }));
-  expect(await face()).toMatchObject({ width: 32, height: 32, radius: "50%", transform: "none", icon: 16 });
+  expect(await face()).toMatchObject({ width: 32, height: 32, radius: "50%", transform: "none", field: "none", icon: 16 });
   await send.hover();
-  await expect.poll(async () => (await face()).visualWidth).toBeCloseTo(33.6, 1);
+  await expect.poll(async () => (await face()).transform).toBe("matrix(1, 0, 0, 1, 0, -1)");
+  await expect.poll(async () => {
+    const field = (await face()).field;
+    const match = /^matrix\((?<a>[-\d.e]+), (?<b>[-\d.e]+)/u.exec(field);
+    return match ? Math.round(Math.atan2(Number(match.groups!.b), Number(match.groups!.a)) * 180 / Math.PI) : null;
+  }).toBe(14);
+  expect((await face()).visualWidth).toBe(32);
   await page.mouse.move(4, 4);
   await expect.poll(async () => (await face()).transform).toBe("none");
+  await expect.poll(async () => (await face()).field).toBe("none");
 }
 
 export async function expectSettingChips(settingFamily: Locator): Promise<void> {
@@ -506,7 +514,7 @@ async function inspectComposerAnatomy(dock: Locator): Promise<{
   iconButtons: number[];
   sendSize: number;
   centersAligned: boolean;
-  sendAtRest: { ariaDisabled: string | null; disabled: boolean; accentFill: boolean; accentArrow: boolean };
+  sendAtRest: { ariaDisabled: string | null; disabled: boolean; emptyFill: boolean; mutedArrow: boolean; fieldHidden: boolean };
 }> {
   return await dock.evaluate((element) => {
     const shown = (node: Element | null): node is HTMLElement => node instanceof HTMLElement
@@ -554,8 +562,9 @@ async function inspectComposerAnatomy(dock: Locator): Promise<{
       sendAtRest: {
         ariaDisabled: send.getAttribute("aria-disabled"),
         disabled: send.disabled,
-        accentFill: sendStyle.backgroundColor === paint("background-color", "--accent"),
-        accentArrow: sendStyle.color === paint("color", "--accent-text"),
+        emptyFill: sendStyle.backgroundColor === paint("background-color", "--send-empty"),
+        mutedArrow: sendStyle.color === paint("color", "--send-empty-glyph"),
+        fieldHidden: getComputedStyle(send, "::before").opacity === "0",
       },
     };
   });
@@ -597,7 +606,7 @@ export async function expectRestingComposerAnatomy(dock: Locator, branch: string
     iconButtons: [28, 28, 28],
     sendSize: 32,
     centersAligned: true,
-    sendAtRest: { ariaDisabled: "true", disabled: false, accentFill: true, accentArrow: true },
+    sendAtRest: { ariaDisabled: "true", disabled: false, emptyFill: true, mutedArrow: true, fieldHidden: true },
   });
   await expectBranchChip(dock, branch);
   const page = dock.page();

@@ -31,6 +31,7 @@ const STARTUP_FAILURE_MESSAGES: Record<SDKStartupFailureReason, string> = {
   sandbox_required_unavailable: "Claude Code requires its sandbox, which can't run on this computer. Install what it needs, such as bubblewrap on Linux, or ask your administrator.",
   initialize_not_first: "Claude Code didn't receive Inertia's start request first. If Claude Code runs through a wrapper script, make sure it passes input through unchanged.",
   config_file_invalid: "A Claude Code configuration file isn't valid JSON. Repair the file named in the details, then try again.",
+  managed_settings_not_delivered: "Claude Code couldn't read the managed settings Inertia sends when it starts. If Claude Code runs through a wrapper script, make sure it passes Inertia's arguments and input through unchanged.",
 };
 
 export function claudeSessionUnavailable(message: SDKMessage): boolean {

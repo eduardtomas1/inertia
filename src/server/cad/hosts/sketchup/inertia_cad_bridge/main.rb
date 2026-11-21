@@ -16,7 +16,7 @@ require 'tmpdir'
 
 module Inertia
   module CadBridge
-    BRIDGE_VERSION = '1.0.0'.freeze
+    BRIDGE_VERSION = '1.1.0'.freeze
     PROTOCOL = 1
     MAX_REQUEST_BYTES = 1024 * 1024
     MM_PER_INCH = 25.4
@@ -26,8 +26,12 @@ module Inertia
     MAX_OPERATIONS = 50
     MAX_TARGETS = 500
     MAX_COORDINATE_MM = 1.0e7
+    MAX_INFO_ITEMS = 500
+    MAX_CLIENTS = 8
+    IDLE_SECONDS = 10
     LENGTH_UNITS = { 0 => 'in', 1 => 'ft', 2 => 'mm', 3 => 'cm', 4 => 'm', 5 => 'yd' }.freeze
     QUERY_TYPES = %w[group component face edge text dimension image guide section_plane].freeze
+    AUTOCAD_ONLY_FILTERS = %w[layer layout textContains].freeze
 
     class BridgeError < StandardError
       attr_reader :code
@@ -231,12 +235,14 @@ module Inertia
       }
     end
 
-    def self.edge_length(edge, transform)
-      edge.start.position.transform(transform).distance(edge.end.position.transform(transform))
-    end
-
-    def self.summarize(entity, transform, depth = nil)
+    def self.summarize(entity, transform, depth = nil, compact = false)
       row = { 'id' => entity.persistent_id.to_s, 'type' => type_name(entity) }
+      if compact
+        row['tag'] = tag_label(entity.layer) if entity.respond_to?(:layer)
+        bounds = bounds_mm(entity.bounds, transform)
+        row['boundsMm'] = bounds if bounds
+        return row
+      end
       if container?(entity)
         row['name'] = entity.name.to_s
         row['definition'] = entity.definition.name.to_s
@@ -246,9 +252,11 @@ module Inertia
       material = entity.respond_to?(:material) ? entity.material : nil
       row['material'] = material_label(material) if material
       row['text'] = entity.text.to_s[0, 500] if entity.is_a?(Sketchup::Text)
-      # Measured in world space, like boundsMm, so scaled groups and components report their real size.
+      # Measured in world space, like boundsMm, so scaled groups report true sizes.
       row['areaMm2'] = (entity.area(transform) * MM_PER_INCH * MM_PER_INCH).round(1) if entity.is_a?(Sketchup::Face)
-      row['lengthMm'] = mm(edge_length(entity, transform)) if entity.is_a?(Sketchup::Edge)
+      if entity.is_a?(Sketchup::Edge)
+        row['lengthMm'] = mm(entity.start.position.transform(transform).distance(entity.end.position.transform(transform)))
+      end
       row['hidden'] = true if entity.respond_to?(:hidden?) && entity.hidden?
       row['locked'] = true if entity.respond_to?(:locked?) && entity.locked?
       row['shared'] = true unless unshared?(entity)
@@ -296,9 +304,44 @@ module Inertia
       end
     end
 
+    # A plan-view rectangle in millimetres: crossing keeps anything that touches it, window only
+    # what lies fully inside.
+    def self.within_param(value)
+      return nil if value.nil?
+      message = 'within needs min and max as [x, y] in millimetres, with min below max.'
+      fail!('INVALID_REQUEST', message) unless value.is_a?(Hash)
+      corners = [value['min'], value['max']]
+      unless corners.all? { |corner| corner.is_a?(Array) && corner.size == 2 && corner.all? { |v| v.is_a?(Numeric) && v.to_f.finite? } }
+        fail!('INVALID_REQUEST', message)
+      end
+      min, max = corners.map { |corner| corner.map(&:to_f) }
+      fail!('INVALID_REQUEST', message) if min[0] > max[0] || min[1] > max[1]
+      mode = (value['mode'] || 'crossing').to_s
+      fail!('INVALID_REQUEST', 'within.mode must be crossing or window.') unless %w[crossing window].include?(mode)
+      { min: min, max: max, window: mode == 'window' }
+    end
+
+    def self.in_area?(bounds, area)
+      return false if bounds.nil?
+      low = bounds['min']
+      high = bounds['max']
+      if area[:window]
+        low[0] >= area[:min][0] && low[1] >= area[:min][1] && high[0] <= area[:max][0] && high[1] <= area[:max][1]
+      else
+        high[0] >= area[:min][0] && low[0] <= area[:max][0] && high[1] >= area[:min][1] && low[1] <= area[:max][1]
+      end
+    end
+
     def self.query(params)
       model = model_for(params['documentId'])
       id = model_id(model)
+      foreign = AUTOCAD_ONLY_FILTERS.reject { |key| params[key].nil? }
+      unless foreign.empty?
+        fail!('INVALID_REQUEST', "#{foreign.join(', ')} only work in AutoCAD. In SketchUp, filter by tag, nameContains, or types.")
+      end
+      fields = (params['fields'] || 'full').to_s
+      fail!('INVALID_REQUEST', 'fields must be full or compact.') unless %w[full compact].include?(fields)
+      area = within_param(params['within'])
       types = Array(params['types']).map(&:to_s)
       types = %w[group component] if types.empty?
       unknown = types - QUERY_TYPES
@@ -321,6 +364,7 @@ module Inertia
           names << entity.definition.name.to_s if container?(entity)
           next unless names.any? { |name| name.downcase.include?(needle) }
         end
+        next if area && !in_area?(bounds_mm(entity.bounds, transform), area)
         matches << [entity, transform, depth]
       end
       page = matches[offset, limit] || []
@@ -330,10 +374,35 @@ module Inertia
         'units' => 'mm',
         'total' => matches.size,
         'counts' => counts,
-        'items' => page.map { |entity, transform, depth| summarize(entity, transform, depth) }
+        'items' => page.map { |entity, transform, depth| summarize(entity, transform, depth, fields == 'compact') }
       }
       result['nextCursor'] = (offset + limit).to_s if offset + limit < matches.size
       result['scanCapped'] = true if state[:capped]
+      result
+    end
+
+    def self.capped(result, key, items)
+      result[key] = items.first(MAX_INFO_ITEMS)
+      result["#{key}Truncated"] = true if items.size > MAX_INFO_ITEMS
+    end
+
+    def self.info(params)
+      model = model_for(params['documentId'])
+      id = model_id(model)
+      result = {
+        'documentId' => id,
+        'revision' => revision(id),
+        'units' => 'mm',
+        'displayUnits' => display_units(model),
+        'boundsMm' => bounds_mm(model.bounds, Geom::Transformation.new),
+        'entityCount' => model.entities.size
+      }
+      capped(result, 'tags', model.layers.map { |layer| { 'name' => tag_label(layer), 'visible' => layer.visible? } })
+      capped(result, 'materials', model.materials.map { |material| material_label(material) })
+      capped(result, 'scenes', model.pages.map { |page| page.name.to_s })
+      definitions = model.definitions.reject { |definition| definition.group? || definition.image? }
+      capped(result, 'componentDefinitions',
+             definitions.map { |definition| { 'name' => definition.name.to_s, 'instances' => definition.instances.size } })
       result
     end
 
@@ -548,7 +617,13 @@ module Inertia
           fingerprints['revision'] = revision(model_id(model)).to_s
           ids_param(op).each do |raw_id|
             entity = target.call(raw_id)
-            changes << { 'op' => kind, 'target' => label(entity), 'field' => 'entity', 'before' => 'present', 'after' => 'erased' }
+            # SketchUp deletes every face an erased edge bounds; the dialog line says so too.
+            edge = entity.is_a?(Sketchup::Edge)
+            warnings << 'Erasing an edge also deletes the faces it bounds.' if edge
+            changes << {
+              'op' => kind, 'target' => label(entity), 'field' => 'entity', 'before' => 'present',
+              'after' => edge ? 'erased, with the faces it bounds' : 'erased'
+            }
             steps << ->(_created) { entity.erase! if entity.valid? }
           end
         when 'skp.add_box'
@@ -606,20 +681,51 @@ module Inertia
       UI.messagebox(message.to_s, MB_YESNO) == IDYES
     end
 
+    # Inertia stops reading at deadlineAt and hangs up when it gives up, so a request past either must
+    # not change the model: nobody would learn that it did.
+    def self.abandoned?(params)
+      deadline = params['deadlineAt']
+      return true if deadline.is_a?(Numeric) && Time.now.to_f * 1000 >= deadline
+      client_gone?
+    end
+
+    def self.client_gone?
+      return false if @current_client.nil?
+      peek = @current_client.recv_nonblock(1, Socket::MSG_PEEK, exception: false)
+      peek.nil? || peek == ''
+    rescue IOError, SystemCallError
+      true
+    end
+
+    def self.expired(id)
+      { 'documentId' => id, 'status' => 'expired', 'revision' => revision(id) }
+    end
+
     def self.apply(params)
       model = model_for(params['documentId'], true)
       id = model_id(model)
+      return expired(id) if abandoned?(params)
       stale = stale_keys(params['expectedFingerprints'], plan(model, params['operations'])[:fingerprints])
       unless stale.empty?
         fail!('TARGET_CHANGED', "The model changed since the preview (#{stale.first(5).join(', ')}). Preview the change again.")
       end
       return { 'documentId' => id, 'status' => 'rejected', 'revision' => revision(id) } unless approved?(params['approvalMessage'])
-      # The dialog was modal, but re-check: the designer may have switched tabs.
-      model = model_for(params['documentId'], true)
-      planned = plan(model, params['operations'])
-      stale = stale_keys(params['expectedFingerprints'], planned[:fingerprints])
-      fail!('TARGET_CHANGED', 'The model changed while the approval dialog was open. Preview again.') unless stale.empty?
-      fail!('HOST_BUSY', 'SketchUp is busy with another operation. Finish it and try again.') unless model.start_operation(params['title'].to_s.empty? ? 'Inertia edit' : "Inertia: #{params['title']}", true)
+      return expired(id) if abandoned?(params)
+      # The designer said Yes, so Inertia never retries from here: failures report as consumed.
+      begin
+        # The dialog was modal, but re-check: the designer may have switched tabs.
+        model = model_for(params['documentId'], true)
+        planned = plan(model, params['operations'])
+        stale = stale_keys(params['expectedFingerprints'], planned[:fingerprints])
+        fail!('TARGET_CHANGED', 'The model changed while the approval dialog was open. Preview again.') unless stale.empty?
+        started = model.start_operation(params['title'].to_s.empty? ? 'Inertia edit' : "Inertia: #{params['title']}", true)
+      rescue BridgeError => error
+        raise if error.code == 'TARGET_CHANGED'
+        fail!('APPLY_FAILED', "#{error.message} Nothing was changed.")
+      rescue StandardError => error
+        fail!('APPLY_FAILED', "SketchUp could not start the edit, so nothing was changed: #{error.message}")
+      end
+      fail!('APPLY_FAILED', 'SketchUp was busy with another operation, so nothing was changed.') unless started
       created = []
       begin
         planned[:steps].each { |step| step.call(created) }
@@ -627,7 +733,11 @@ module Inertia
         model.abort_operation
         fail!('APPLY_FAILED', "SketchUp refused the edit, so nothing was changed: #{error.message}")
       end
-      model.commit_operation
+      begin
+        model.commit_operation
+      rescue StandardError => error
+        fail!('APPLY_UNCONFIRMED', "SketchUp may not have kept the edit (#{error.message}). Check the model and its undo history.")
+      end
       {
         'documentId' => id,
         'status' => 'applied',
@@ -668,6 +778,7 @@ module Inertia
       'documents' => :documents,
       'selection' => :selection,
       'query' => :query,
+      'info' => :info,
       'capture' => :capture,
       'preview' => :preview,
       'apply' => :apply,
@@ -730,6 +841,10 @@ module Inertia
       nil
     end
 
+    def self.monotonic
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
     def self.start
       return if @server
       @token = SecureRandom.hex(32)
@@ -759,12 +874,16 @@ module Inertia
       return if @busy || @server.nil?
       @busy = true
       begin
-        loop do
+        # Connections past the cap wait in the listen backlog until a slot frees.
+        while @clients.size < MAX_CLIENTS
           socket = @server.accept_nonblock(exception: false)
           break unless socket.is_a?(TCPSocket) || socket.is_a?(Socket) || socket.is_a?(BasicSocket)
-          @clients[socket] = String.new
+          @clients[socket] = { buffer: String.new, seen: monotonic }
         end
         @clients.keys.each { |socket| service(socket) }
+        # After servicing, so a request that arrived during a long dialog is still answered.
+        now = monotonic
+        @clients.select { |_, client| now - client[:seen] > IDLE_SECONDS }.each_key { |socket| close_client(socket) }
       rescue StandardError => error
         puts "[Inertia CAD Bridge] #{error.class}: #{error.message}"
       ensure
@@ -776,15 +895,35 @@ module Inertia
       chunk = socket.read_nonblock(65_536, exception: false)
       return if chunk == :wait_readable
       return close_client(socket) if chunk.nil?
-      buffer = @clients[socket]
+      client = @clients[socket]
+      client[:seen] = monotonic
+      buffer = client[:buffer]
       buffer << chunk
       return close_client(socket) if buffer.bytesize > MAX_REQUEST_BYTES
       while (newline = buffer.index("\n"))
         line = buffer.slice!(0..newline)
-        socket.write("#{JSON.generate(handle_line(line))}\n")
+        @current_client = socket
+        begin
+          response = handle_line(line)
+        ensure
+          @current_client = nil
+        end
+        socket.write("#{encode_response(response)}\n")
+        client[:seen] = monotonic
       end
     rescue IOError, SystemCallError
       close_client(socket)
+    end
+
+    # Always one line back, even for a result JSON cannot hold (invalid UTF-8, NaN). The request
+    # may already have run, so Inertia must treat this as an unknown outcome, not a failure.
+    def self.encode_response(response)
+      JSON.generate(response)
+    rescue StandardError => error
+      JSON.generate(
+        'v' => PROTOCOL, 'id' => response['id'].is_a?(String) ? response['id'] : nil, 'ok' => false,
+        'error' => { 'code' => 'HOST_UNREADABLE', 'message' => "SketchUp could not encode its answer (#{error.class})." }
+      )
     end
 
     def self.close_client(socket)

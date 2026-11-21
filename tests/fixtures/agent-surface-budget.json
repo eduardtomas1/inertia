@@ -15,40 +15,46 @@
       "opencode": 453
     },
     "inertia_cad_get_selection": {
-      "claude": 561,
-      "codex": 457,
-      "cursorKimi": 561,
-      "opencode": 561
+      "claude": 623,
+      "codex": 519,
+      "cursorKimi": 623,
+      "opencode": 623
     },
     "inertia_cad_query_objects": {
-      "claude": 1272,
-      "codex": 1168,
-      "cursorKimi": 1272,
-      "opencode": 1272
+      "claude": 2163,
+      "codex": 2059,
+      "cursorKimi": 2163,
+      "opencode": 2163
+    },
+    "inertia_cad_document_info": {
+      "claude": 720,
+      "codex": 616,
+      "cursorKimi": 720,
+      "opencode": 720
     },
     "inertia_cad_capture_view": {
-      "claude": 595,
-      "codex": 491,
-      "cursorKimi": 595,
-      "opencode": 595
+      "claude": 930,
+      "codex": 826,
+      "cursorKimi": 930,
+      "opencode": 930
     },
     "inertia_cad_preview_changes": {
-      "claude": 7582,
-      "codex": 7478,
-      "cursorKimi": 7582,
-      "opencode": 7582
+      "claude": 7733,
+      "codex": 7629,
+      "cursorKimi": 7733,
+      "opencode": 7733
     },
     "inertia_cad_apply_changes": {
-      "claude": 592,
-      "codex": 488,
-      "cursorKimi": 593,
-      "opencode": 592
+      "claude": 847,
+      "codex": 743,
+      "cursorKimi": 848,
+      "opencode": 847
     },
     "inertia_cad_save_copy": {
-      "claude": 725,
-      "codex": 619,
-      "cursorKimi": 725,
-      "opencode": 725
+      "claude": 830,
+      "codex": 724,
+      "cursorKimi": 830,
+      "opencode": 830
     },
     "inertia_browser_navigate": {
       "claude": 873,
@@ -267,22 +273,22 @@
     "claude": {
       "withBrowser": 24589,
       "withoutBrowser": 13168,
-      "withCad": 37097
+      "withCad": 39616
     },
     "codex": {
       "withBrowser": 21028,
       "withoutBrowser": 11284,
-      "withCad": 32701
+      "withCad": 35116
     },
     "cursorKimi": {
       "withBrowser": 24598,
       "withoutBrowser": 13168,
-      "withCad": 37107
+      "withCad": 39626
     },
     "opencode": {
       "withBrowser": 24589,
       "withoutBrowser": 13168,
-      "withCad": 37097
+      "withCad": 39616
     }
   }
 }

@@ -10,8 +10,9 @@ it inside the CAD app, and one Undo reverts each approved change.
 
 - **AutoCAD:** full AutoCAD for Windows. AutoCAD LT and AutoCAD for Mac are not
   supported.
-- **SketchUp:** SketchUp Pro or Studio desktop, on Windows or macOS. SketchUp
-  Free, SketchUp for Web, and SketchUp Go are not supported.
+- **SketchUp:** SketchUp Pro or Studio 2020 or newer, desktop, on Windows or
+  macOS. SketchUp Free, SketchUp for Web, and SketchUp Go are not supported.
+- The tools are offered only when Inertia runs on Windows or macOS.
 
 ## Get started
 
@@ -23,8 +24,8 @@ it inside the CAD app, and one Undo reverts each approved change.
 3. Ask the agent which CAD drawings are open. It reports each open drawing and
    model, and anything you need to fix first.
 4. For SketchUp, ask the agent to set up SketchUp the first time. Inertia asks
-   you to approve writing its extension into every installed SketchUp version's
-   Plugins folder; restart SketchUp afterwards. Ask again after updating
+   you to approve writing its extension into every installed SketchUp 2020 or
+   newer Plugins folder; restart SketchUp afterwards. Ask again after updating
    Inertia if the agent says the extension is outdated. AutoCAD needs no setup.
 
 ## How edits work
@@ -33,22 +34,28 @@ it inside the CAD app, and one Undo reverts each approved change.
    after. A preview never changes the drawing.
 2. The agent explains the change in the chat.
 3. When the agent applies it, AutoCAD or SketchUp shows a Yes/No dialog that
-   summarizes the change. Choose **Yes** to apply it or **No** to cancel. If the
-   agent seems to be waiting, switch to the CAD app to answer the dialog.
+   starts with a count of each kind of change, erases and moves first, then
+   lists them. Choose **Yes** to apply it or **No** to cancel. If the agent
+   seems to be waiting, switch to the CAD app to answer the dialog. Stopping the
+   chat doesn't cancel a dialog that is open; it closes on its own if nobody
+   answers in time, and nothing changes.
 4. Each approved change is one Undo step in the CAD app.
 
 A preview can be applied once, within 30 minutes. If the objects it changes
 were edited since the preview, nothing is applied and the agent prepares a new
 one. If the agent reports that the outcome is unknown, for example because the
 CAD app stopped responding, check the drawing before asking it to try again.
+Reading a drawing never changes it: if AutoCAD reports a change during a read,
+the agent stops and tells you not to save before you check the drawing.
 
 ## Save a copy
 
 Ask the agent to save a copy to keep a snapshot of your work. Inertia asks you
 to approve the file name first. Copies are always new files and never replace
 an existing file or re-save the original. By default the copy goes next to the
-original as `<name> (Inertia copy <date and time>)`. In AutoCAD, save the
-drawing first; a drawing with unsaved changes can't be copied.
+original as `<name> (Inertia copy <date and time>)`; a path the agent chooses
+must be on a local drive, not a network share. In AutoCAD, save the drawing
+first; a drawing with unsaved changes can't be copied.
 
 ## What agents can edit
 

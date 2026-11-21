@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +20,7 @@ import {
   CadError,
   createAutoCadHost,
   createSketchUpHost,
+  HOST_UNREADABLE,
   sketchUpSettingsBase,
 } from "../../src/server/cad/cad-hosts";
 import { RestrictedCliError } from "../../src/server/restricted-cli-runner";
@@ -143,8 +144,25 @@ describe("SketchUp host requests", () => {
       id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
       token: TOKEN,
       method: "query",
-      params: { documentId, tag: "Walls" },
+      params: { documentId, tag: "Walls", deadlineAt: expect.any(Number), parentPid: process.pid },
     }]);
+  });
+
+  it("tells the bridge when Inertia stops waiting and which process waits", async () => {
+    const { bridge, host } = await sketchUp((request, socket) => answer(socket, request, { ok: true, result: {} }));
+    const before = Date.now();
+    await host.call("apply", { documentId }, { documentId, timeoutMs: 600_000 });
+    const after = Date.now();
+    const params = bridge.connections[0]!.lines[0]!.params as Record<string, unknown>;
+    expect(params.parentPid).toBe(process.pid);
+    expect(params.deadlineAt).toBeGreaterThanOrEqual(before + 600_000);
+    expect(params.deadlineAt).toBeLessThanOrEqual(after + 600_000);
+  });
+
+  it("sends info as its own bridge method", async () => {
+    const { bridge, host } = await sketchUp((request, socket) => answer(socket, request, { ok: true, result: { units: "mm" } }));
+    expect(await host.call("info", { documentId }, { documentId, timeoutMs: 2_000 })).toEqual({ units: "mm" });
+    expect(bridge.connections[0]!.lines[0]).toMatchObject({ method: "info", params: { documentId } });
   });
 
   it("hangs up after the first answer line without waiting for the bridge to close", async () => {
@@ -171,11 +189,16 @@ describe("SketchUp host requests", () => {
     expect(error.message).toBe("Group 11 changed since the preview.");
   });
 
-  it("calls an unreadable answer HOST_ERROR", async () => {
+  it.each([
+    { label: "not JSON", line: "this is not json" },
+    { label: "the wrong shape", line: JSON.stringify({ result: 1 }) },
+    { label: "an error without a string code", line: JSON.stringify({ ok: false, error: { code: 7, message: "x" } }) },
+  ])("calls an answer that is $label HOST_UNREADABLE, since the request may have run", async ({ line }) => {
     const { host } = await sketchUp((_request, socket) => {
-      socket.write("this is not json\n");
+      socket.write(`${line}\n`);
     });
-    expect((await rejection(host.call("selection", { documentId }, { documentId, timeoutMs: 2_000 }))).code).toBe("HOST_ERROR");
+    const error = await rejection(host.call("apply", { documentId }, { documentId, timeoutMs: 2_000 }));
+    expect(error).toMatchObject({ code: HOST_UNREADABLE, message: "The SketchUp bridge sent an unreadable answer." });
   });
 
   it("times out a bridge that accepts the request but never answers", async () => {
@@ -199,12 +222,12 @@ describe("SketchUp host requests", () => {
     expect((await rejection(host.call("apply", { documentId }, { documentId, timeoutMs: 2_000 }))).code).toBe("HOST_OFFLINE");
   });
 
-  it("treats a request cancelled before it is sent as HOST_OFFLINE", async () => {
+  it("treats a request cancelled before it is sent as CANCELLED, never as an offline SketchUp", async () => {
     const { bridge, host } = await sketchUp(() => undefined);
     const controller = new AbortController();
     controller.abort();
     const error = await rejection(host.call("apply", { documentId }, { documentId, timeoutMs: 2_000, signal: controller.signal }));
-    expect(error.code).toBe("HOST_OFFLINE");
+    expect(error.code).toBe("CANCELLED");
     expect(bridge.connections.flatMap(({ lines }) => lines)).toEqual([]);
   });
 
@@ -272,7 +295,10 @@ describe("SketchUp setup and status", () => {
 
   it("reports setup_required until the extension is installed", async () => {
     const { base, host } = await settings();
-    expect(await host.status()).toMatchObject({ state: "setup_required", hint: expect.stringContaining("inertia_cad_setup") });
+    expect(await host.status()).toMatchObject({
+      state: "setup_required",
+      hint: expect.stringMatching(/inertia_cad_setup.*SketchUp 2025/u),
+    });
     expect(await host.setupPlan()).toEqual([
       join(plugins(base), "inertia_cad_bridge.rb"),
       join(plugins(base), "inertia_cad_bridge", "main.rb"),
@@ -330,9 +356,60 @@ describe("SketchUp setup and status", () => {
     await host.setup();
     const main = join(plugins(base), "inertia_cad_bridge", "main.rb");
     await writeFile(main, SKETCHUP_MAIN_RB.replace(`BRIDGE_VERSION = '${BRIDGE_VERSION}'`, "BRIDGE_VERSION = '0.9.0'"));
-    expect((await host.status()).state).toBe("setup_required");
+    expect(await host.status()).toMatchObject({ state: "setup_required", hint: expect.stringContaining("outdated") });
     await host.setup();
     expect((await host.status()).state).toBe("not_running");
+  });
+
+  it("reads the bridge version from the embedded main.rb", () => {
+    expect(BRIDGE_VERSION).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(SKETCHUP_MAIN_RB).toContain(`BRIDGE_VERSION = '${BRIDGE_VERSION}'`);
+  });
+
+  it("reports not_installed when only SketchUp versions older than 2020 exist", async () => {
+    const { base, host } = await settings(["SketchUp 2018", "SketchUp 2019"]);
+    expect(await host.status()).toEqual({
+      app: "sketchup",
+      state: "not_installed",
+      hint: expect.stringMatching(/SketchUp 2020 or newer.*SketchUp 2019/u),
+      documents: [],
+    });
+    expect(await host.setupPlan()).toEqual([]);
+    const error = await rejection(host.setup());
+    expect(error.code).toBe("NOT_INSTALLED");
+    expect(error.message).toMatch(/SketchUp 2020 or newer.*2018, 2019/u);
+    await expect(stat(plugins(base, "SketchUp 2019"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("installs only into SketchUp 2020 and newer", async () => {
+    const { base, host } = await settings(["SketchUp 2019", "SketchUp 2020"]);
+    expect(await host.setupPlan()).toEqual([
+      join(plugins(base, "SketchUp 2020"), "inertia_cad_bridge.rb"),
+      join(plugins(base, "SketchUp 2020"), "inertia_cad_bridge", "main.rb"),
+    ]);
+    expect((await host.setup()).installedFor).toEqual(["SketchUp 2020"]);
+    await expect(stat(plugins(base, "SketchUp 2019"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await host.status()).toMatchObject({ state: "not_running" });
+  });
+
+  it("judges the install by the newest SketchUp only", async () => {
+    const { base, host } = await settings(["SketchUp 2024", "SketchUp 2025"]);
+    await host.setup();
+    await rm(join(plugins(base, "SketchUp 2025"), "inertia_cad_bridge"), { recursive: true });
+    expect(await host.status()).toMatchObject({ state: "setup_required", hint: expect.stringContaining("SketchUp 2025") });
+    await host.setup();
+    await writeFile(
+      join(plugins(base, "SketchUp 2024"), "inertia_cad_bridge", "main.rb"),
+      "BRIDGE_VERSION = '0.1.0'",
+    );
+    expect(await host.status()).toMatchObject({ state: "not_running" });
+  });
+
+  it("asks for setup when the newest SketchUp has an outdated extension though an older one is current", async () => {
+    const { base, host } = await settings(["SketchUp 2024", "SketchUp 2025"]);
+    await host.setup();
+    await writeFile(join(plugins(base, "SketchUp 2025"), "inertia_cad_bridge", "main.rb"), "BRIDGE_VERSION = '0.1.0'");
+    expect(await host.status()).toMatchObject({ state: "setup_required", hint: expect.stringContaining("outdated") });
   });
 
   it("says a restart is needed when SketchUp is running during setup", async () => {
@@ -373,6 +450,26 @@ describe("SketchUp setup and status", () => {
     expect(await host.status()).toMatchObject({ state: "busy", documents: [], hint: expect.stringContaining("dialog") });
   });
 
+  it("reports an unreadable documents answer as a broken bridge, not as busy", async () => {
+    const { home, host } = await settings();
+    const bridge = await startBridge((_request, socket) => {
+      socket.write("<html>not the bridge</html>\n");
+    });
+    await writeDiscovery(home, bridge.port);
+    expect(await host.status()).toMatchObject({ state: "error", documents: [], hint: expect.stringContaining("inertia_cad_setup") });
+  });
+
+  it("reports busy, not broken, when one SketchUp is unreadable and another does not answer", async () => {
+    const { home, host } = await settings();
+    const unreadable = await startBridge((_request, socket) => {
+      socket.write("garbage\n");
+    });
+    const silent = await startBridge((_request, socket) => socket.destroy());
+    await writeDiscovery(home, unreadable.port);
+    await writeDiscovery(home, silent.port, { pid: process.ppid });
+    expect(await host.status()).toMatchObject({ state: "busy", documents: [] });
+  });
+
   it("reports a documents answer of the wrong shape as a broken bridge, not as busy", async () => {
     const { home, host } = await settings();
     const bridge = await startBridge((request, socket) => answer(socket, request, { ok: true, result: { documents: [{ name: 1 }] } }));
@@ -382,6 +479,18 @@ describe("SketchUp setup and status", () => {
       documents: [],
       hint: expect.stringContaining("inertia_cad_setup"),
     });
+  });
+
+  it("keeps a running SketchUp's discovery file when a status call is cancelled before it is sent", async () => {
+    const { home, host } = await settings();
+    await host.setup();
+    const bridge = await startBridge((request, socket) => answer(socket, request, { ok: true, result: { documents: [] } }));
+    const file = await writeDiscovery(home, bridge.port);
+    const controller = new AbortController();
+    controller.abort();
+    expect(await host.status(controller.signal)).toMatchObject({ state: "busy", documents: [] });
+    expect((await stat(file)).isFile()).toBe(true);
+    expect(await host.status()).toMatchObject({ state: "connected" });
   });
 
   it("drops a discovery file whose live pid has nothing listening on its port", async () => {
@@ -451,15 +560,74 @@ describe("AutoCAD host", () => {
     expect(executable).toBe(POWERSHELL);
     expect(args).toEqual(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-STA", "-File", join(state, SCRIPT_NAME)]);
     expect(options).toMatchObject({ cwd: state, timeoutMs: 4_321, signal: controller.signal });
-    expect(JSON.parse(options.input)).toEqual({ v: 1, id: expect.any(String), method: "query", params });
+    expect(JSON.parse(options.input)).toEqual({
+      v: 1,
+      id: expect.any(String),
+      method: "query",
+      params: { ...params, deadlineAt: expect.any(Number), parentPid: process.pid },
+    });
   });
 
-  it("keeps an existing script instead of rewriting it", async () => {
+  it("tells the bridge when Inertia stops waiting and which process waits", async () => {
+    const { host, runner } = await autoCad(stdout({ ok: true, result: { status: "applied" } }));
+    const before = Date.now();
+    await host.call("apply", { documentId: "acad:x" }, { documentId: "acad:x", timeoutMs: 600_000 });
+    const after = Date.now();
+    const { params } = JSON.parse(runner.mock.calls[0]![2].input) as { params: Record<string, unknown> };
+    expect(params.parentPid).toBe(process.pid);
+    expect(params.deadlineAt).toBeGreaterThanOrEqual(before + 600_000);
+    expect(params.deadlineAt).toBeLessThanOrEqual(after + 600_000);
+    expect(params.documentId).toBe("acad:x");
+  });
+
+  it("keeps an existing script whose content is current", async () => {
     const { host, state } = await autoCad(stdout({ ok: true, result: {} }));
     await mkdir(state, { recursive: true });
-    await writeFile(join(state, SCRIPT_NAME), "already here");
+    const script = join(state, SCRIPT_NAME);
+    await writeFile(script, `\uFEFF${AUTOCAD_BRIDGE_PS1}`);
+    const written = (await stat(script)).mtimeMs;
     await host.call("query", {}, { documentId: "acad:x", timeoutMs: 1_000 });
-    expect(await readFile(join(state, SCRIPT_NAME), "utf8")).toBe("already here");
+    expect(await readdir(state)).toEqual([SCRIPT_NAME]);
+    expect((await stat(script)).mtimeMs).toBe(written);
+  });
+
+  it.each([
+    { label: "edited", content: `\uFEFF${AUTOCAD_BRIDGE_PS1}\nInvoke-Something-Else` },
+    { label: "truncated", content: `\uFEFF${AUTOCAD_BRIDGE_PS1.slice(0, 100)}` },
+    { label: "missing its byte-order mark", content: AUTOCAD_BRIDGE_PS1 },
+  ])("replaces an existing script that was $label before PowerShell runs it", async ({ content }) => {
+    let seen = "";
+    const { host, state } = await autoCad(async (_executable, args) => {
+      seen = await readFile(args.at(-1)!, "utf8");
+      return { stdout: JSON.stringify({ ok: true, result: {} }) };
+    });
+    await mkdir(state, { recursive: true });
+    await writeFile(join(state, SCRIPT_NAME), content);
+    await host.call("query", {}, { documentId: "acad:x", timeoutMs: 1_000 });
+    expect(seen).toBe(`\uFEFF${AUTOCAD_BRIDGE_PS1}`);
+    expect(await readdir(state)).toEqual([SCRIPT_NAME]);
+  });
+
+  it("checks the script once per host and again for a new host", async () => {
+    const { host, state, runner } = await autoCad(stdout({ ok: true, result: {} }));
+    await host.call("query", {}, { documentId: "acad:x", timeoutMs: 1_000 });
+    const script = join(state, SCRIPT_NAME);
+    await writeFile(script, "edited while Inertia runs");
+    await host.call("query", {}, { documentId: "acad:x", timeoutMs: 1_000 });
+    expect(await readFile(script, "utf8")).toBe("edited while Inertia runs");
+    await createAutoCadHost("win32", state, POWERSHELL, runner).call("query", {}, { documentId: "acad:x", timeoutMs: 1_000 });
+    expect(await readFile(script, "utf8")).toBe(`\uFEFF${AUTOCAD_BRIDGE_PS1}`);
+  });
+
+  it("refuses to run when the script cannot be written", async () => {
+    const runner = vi.fn<AutoCadRunner>();
+    const { host, state } = await autoCad(runner);
+    // A folder where the script belongs: the rename fails and the content is not the script.
+    await mkdir(join(state, SCRIPT_NAME, "occupied"), { recursive: true });
+    const error = await rejection(host.call("apply", {}, { documentId: "acad:x", timeoutMs: 1_000 }));
+    expect(error).toMatchObject({ code: "SETUP_FAILED", message: expect.stringContaining("bridge script") });
+    expect(runner).not.toHaveBeenCalled();
+    expect((await readdir(state)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
   it("never starts PowerShell for a request cancelled before it starts", async () => {
@@ -482,14 +650,37 @@ describe("AutoCAD host", () => {
     { label: "not JSON", output: "WARNING: profile\n{}" },
     { label: "the wrong shape", output: JSON.stringify({ result: 1 }) },
     { label: "empty", output: "" },
-  ])("calls stdout that is $label HOST_ERROR", async ({ output }) => {
+  ])("calls stdout that is $label HOST_UNREADABLE", async ({ output }) => {
     const { host } = await autoCad(async () => ({ stdout: output }));
-    expect((await rejection(host.call("query", {}, { documentId: "acad:x", timeoutMs: 1_000 }))).code).toBe("HOST_ERROR");
+    const error = await rejection(host.call("query", {}, { documentId: "acad:x", timeoutMs: 1_000 }));
+    expect(error).toMatchObject({ code: HOST_UNREADABLE, message: "The AutoCAD bridge sent an unreadable answer." });
+  });
+
+  it("adds the end of PowerShell's stderr to an unreadable answer", async () => {
+    const stderr = `\r\n${"x".repeat(600)}File C:\\Inertia\\bridge.ps1 cannot be loaded because running scripts is disabled.\r\n`;
+    const { host } = await autoCad(async () => ({ stdout: "", stderr }));
+    const error = await rejection(host.call("apply", {}, { documentId: "acad:x", timeoutMs: 1_000 }));
+    expect(error.code).toBe(HOST_UNREADABLE);
+    expect(error.message).toBe(`The AutoCAD bridge sent an unreadable answer. PowerShell said: ${stderr.trim().slice(-500)}`);
+    expect(error.message).toContain("running scripts is disabled.");
+    expect(error.message).not.toContain("x".repeat(600));
+  });
+
+  it("adds nothing for blank stderr, and ignores stderr on a readable answer", async () => {
+    const blank = await autoCad(async () => ({ stdout: "nope", stderr: " \r\n " }));
+    expect((await rejection(blank.host.call("query", {}, { documentId: "acad:x", timeoutMs: 1_000 }))).message)
+      .toBe("The AutoCAD bridge sent an unreadable answer.");
+    const readable = await autoCad(async () => ({
+      stdout: JSON.stringify({ ok: false, error: { code: "STALE_TARGET", message: "Entity 2A changed." } }),
+      stderr: "WARNING: something",
+    }));
+    expect(await rejection(readable.host.call("apply", {}, { documentId: "acad:x", timeoutMs: 1_000 })))
+      .toMatchObject({ code: "STALE_TARGET", message: "Entity 2A changed." });
   });
 
   it.each([
     { code: "unavailable" as const, expected: "HOST_ERROR", message: "PowerShell could not start" },
-    { code: "output-limit" as const, expected: "HOST_ERROR", message: "fewer objects" },
+    { code: "output-limit" as const, expected: HOST_UNREADABLE, message: "fewer objects" },
     { code: "timeout" as const, expected: "HOST_TIMEOUT", message: "did not answer in time" },
     { code: "cleanup" as const, expected: "HOST_TIMEOUT", message: "did not answer in time" },
     { code: "failed" as const, expected: "HOST_DISCONNECTED", message: "stopped before it answered" },
@@ -502,12 +693,23 @@ describe("AutoCAD host", () => {
     expect(error.message).toContain(message);
   });
 
+  it("keeps what PowerShell printed when it exits with an error", async () => {
+    const { host } = await autoCad(async () => {
+      throw new RestrictedCliError("failed", "stopped", undefined, "File cannot be loaded because running scripts is disabled.");
+    });
+    const error = await rejection(host.call("apply", {}, { documentId: "acad:x", timeoutMs: 1_000 }));
+    expect(error).toMatchObject({
+      code: "HOST_DISCONNECTED",
+      message: expect.stringContaining("PowerShell said: File cannot be loaded because running scripts is disabled."),
+    });
+  });
+
   it("explains an oversized capture in terms of its size", async () => {
     const { host } = await autoCad(async () => {
       throw new RestrictedCliError("output-limit", "too much");
     });
     const error = await rejection(host.call("capture", {}, { documentId: "acad:x", timeoutMs: 1_000 }));
-    expect(error).toMatchObject({ code: "HOST_ERROR", message: expect.stringContaining("smaller maxWidth and maxHeight") });
+    expect(error).toMatchObject({ code: HOST_UNREADABLE, message: expect.stringContaining("smaller maxWidth and maxHeight") });
   });
 
   it("passes other runner failures through unchanged", async () => {
@@ -523,10 +725,13 @@ describe("AutoCAD host", () => {
     const { host, runner } = await autoCad(stdout({ ok: true, result: { documents: [drawing] } }));
     expect(await host.status()).toEqual({ app: "autocad", state: "connected", bridgeVersion: BRIDGE_VERSION, documents: [drawing] });
     expect(JSON.parse(runner.mock.calls[0]![2].input)).toMatchObject({ method: "documents", params: {} });
+    // Under OpenCode's 30-second host-tool timeout.
+    expect(runner.mock.calls[0]![2].timeoutMs).toBe(25_000);
   });
 
   it.each([
     { code: "HOST_OFFLINE", state: "not_running" },
+    { code: "HOST_UNAVAILABLE", state: "not_running" },
     { code: "NOT_INSTALLED", state: "not_installed" },
     { code: "HOST_BUSY", state: "busy" },
     { code: "COM_FAILURE", state: "error" },
@@ -542,6 +747,11 @@ describe("AutoCAD host", () => {
     expect((await timedOut.host.status()).state).toBe("error");
     const malformed = await autoCad(stdout({ ok: true, result: { documents: "none" } }));
     expect(await malformed.host.status()).toMatchObject({ state: "error", hint: expect.stringContaining("inertia_cad_setup") });
+    const unreadable = await autoCad(async () => ({ stdout: "", stderr: "Execution policy refused the script." }));
+    expect(await unreadable.host.status()).toMatchObject({
+      state: "error",
+      hint: expect.stringContaining("PowerShell said: Execution policy refused the script."),
+    });
   });
 
   it("has nothing to install on Windows", async () => {

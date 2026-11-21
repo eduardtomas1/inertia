@@ -17,12 +17,30 @@ $MaxLimit = 500
 $MaxScan = 5000
 $MaxOperations = 50
 $MaxTargets = 500
+$MaxPlanTargets = 2000
 # Objects of a block definition read into an erase fingerprint; each costs a few COM calls.
 $MaxBlockDigestObjects = 500
-$MaxCoordinate = 1e9
-$InteropVersion = 1
+$MaxCoordinate = 1e12
+$MaxVertices = 200
+$MaxLayers = 1000
+$MaxBlocks = 500
+# The server kills the bridge at its deadline (60 s for reads), so work stops well before it.
+$DefaultWorkMs = 35000
+$DeadlineMarginMs = 15000
+$DialogMarginMs = 30000
+$StaleSetSeconds = 600
+$ApplyMutexName = 'Local\InertiaCadApply'
+$ReadMethods = @('selection', 'query', 'capture', 'info')
+$Clock = [System.Diagnostics.Stopwatch]::StartNew()
+$StartedUtc = [DateTime]::UtcNow
+$DeadlineMs = $null
+$WorkUntilMs = $DefaultWorkMs
+$ParentPid = $null
 
-$InsUnits = @{ 0 = 'unitless'; 1 = 'in'; 2 = 'ft'; 3 = 'mi'; 4 = 'mm'; 5 = 'cm'; 6 = 'm'; 7 = 'km'; 8 = 'microinch'; 9 = 'mil'; 10 = 'yd'; 14 = 'dm' }
+$InsUnits = @{
+  0 = 'unitless'; 1 = 'in'; 2 = 'ft'; 3 = 'mi'; 4 = 'mm'; 5 = 'cm'; 6 = 'm'; 7 = 'km'; 8 = 'microinch'; 9 = 'mil'; 10 = 'yd'; 11 = 'angstrom'; 12 = 'nm'
+  13 = 'micron'; 14 = 'dm'; 15 = 'dam'; 16 = 'hm'; 17 = 'Gm'; 18 = 'au'; 19 = 'ly'; 20 = 'pc'; 21 = 'us-ft'; 22 = 'us-in'; 23 = 'us-yd'; 24 = 'us-mi'
+}
 $ShortTypes = @{
   AcDbLine = 'LINE'; AcDbPolyline = 'LWPOLYLINE'; AcDb2dPolyline = 'POLYLINE'; AcDb3dPolyline = 'POLYLINE'
   AcDbCircle = 'CIRCLE'; AcDbArc = 'ARC'; AcDbEllipse = 'ELLIPSE'; AcDbSpline = 'SPLINE'; AcDbPoint = 'POINT'
@@ -32,6 +50,8 @@ $ShortTypes = @{
   AcDbTable = 'ACAD_TABLE'; AcDbWipeout = 'WIPEOUT'; AcDbSolid = 'SOLID'; AcDb3dSolid = '3DSOLID'
   AcDbRegion = 'REGION'; AcDbFace = '3DFACE'
 }
+$TextAlignments = @('left', 'center', 'right', 'aligned', 'middle', 'fit', 'top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right')
+$MTextAttachments = @($null, 'top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right')
 
 # --- Errors -------------------------------------------------------------
 
@@ -117,12 +137,16 @@ namespace InertiaCad {
 }
 '@
 
-function Initialize-Interop {
-  if ($null -ne ('InertiaCad.MessageFilter' -as [type])) { return }
+function Get-InteropPath([string]$Source) {
   $base = $env:LOCALAPPDATA
   if ([string]::IsNullOrEmpty($base)) { $base = [System.IO.Path]::GetTempPath() }
-  $folder = Join-Path $base 'InertiaCad'
-  $dll = Join-Path $folder ("interop-$InteropVersion.dll")
+  return Join-Path (Join-Path $base 'InertiaCad') ("interop-$(Get-Hash $Source).dll")
+}
+
+function Initialize-Interop {
+  if ($null -ne ('InertiaCad.MessageFilter' -as [type])) { return }
+  $dll = Get-InteropPath $InteropSource
+  $folder = Split-Path -Parent $dll
   if (Test-Path -LiteralPath $dll) {
     try { Add-Type -Path $dll; return } catch { Remove-Item -LiteralPath $dll -Force -ErrorAction SilentlyContinue }
   }
@@ -140,7 +164,8 @@ function Connect-AutoCAD {
   return [System.Runtime.InteropServices.Marshal]::GetActiveObject('AutoCAD.Application')
 }
 
-function Request-Approval([string]$Message) {
+# Returns yes, no, or expired when the deadline nears or the Inertia server that asked is gone.
+function Request-Approval([string]$Message, $CloseAtMs, $Parent) {
   Add-Type -AssemblyName System.Windows.Forms
   # Inertia starts this process hidden, and Windows applies that to the first window
   # a process shows. Spend it on a throwaway form so the dialog is visible.
@@ -149,28 +174,124 @@ function Request-Approval([string]$Message) {
   $spent.Opacity = 0
   $spent.Show()
   $spent.Close()
-  $owner = New-Object System.Windows.Forms.Form
-  $owner.TopMost = $true
-  $owner.ShowInTaskbar = $false
-  $owner.StartPosition = 'CenterScreen'
-  $owner.FormBorderStyle = 'None'
-  $owner.Opacity = 0
-  $owner.Size = New-Object System.Drawing.Size 1, 1
-  $owner.Show()
-  $owner.Activate()
+  $form = New-Object System.Windows.Forms.Form
+  $form.Text = 'Inertia - approve AutoCAD edit'
+  $form.TopMost = $true
+  $form.StartPosition = 'CenterScreen'
+  $form.FormBorderStyle = 'FixedDialog'
+  $form.MinimizeBox = $false
+  $form.MaximizeBox = $false
+  $form.AutoSize = $true
+  $form.AutoSizeMode = 'GrowAndShrink'
+  $form.Padding = New-Object System.Windows.Forms.Padding 12
+  $layout = New-Object System.Windows.Forms.FlowLayoutPanel
+  $layout.FlowDirection = 'TopDown'
+  $layout.AutoSize = $true
+  $label = New-Object System.Windows.Forms.Label
+  $label.Text = $Message
+  $label.AutoSize = $true
+  $label.MaximumSize = New-Object System.Drawing.Size 560, 0
+  $buttons = New-Object System.Windows.Forms.FlowLayoutPanel
+  $buttons.AutoSize = $true
+  $buttons.Anchor = 'Right'
+  $yes = New-Object System.Windows.Forms.Button
+  $yes.Text = 'Yes'
+  $yes.DialogResult = 'Yes'
+  $no = New-Object System.Windows.Forms.Button
+  $no.Text = 'No'
+  $no.DialogResult = 'No'
+  $buttons.Controls.AddRange(@($yes, $no))
+  $layout.Controls.AddRange(@($label, $buttons))
+  $form.Controls.Add($layout)
+  $form.AcceptButton = $no
+  $form.CancelButton = $no
+  $form.ActiveControl = $no
+  $state = @{ expired = $false }
+  $timer = New-Object System.Windows.Forms.Timer
+  $timer.Interval = 500
+  $timer.Add_Tick({
+      if (($null -ne $CloseAtMs -and $script:Clock.ElapsedMilliseconds -ge $CloseAtMs) -or ($null -ne $Parent -and $Parent.HasExited)) {
+        $state.expired = $true
+        $form.Close()
+      }
+    })
+  $form.Add_Shown({ $form.Activate(); $timer.Start() })
   try {
-    $answer = [System.Windows.Forms.MessageBox]::Show($owner, $Message, 'Inertia - approve AutoCAD edit', 'YesNo', 'Question', 'Button2')
-    return $answer -eq [System.Windows.Forms.DialogResult]::Yes
+    $answer = $form.ShowDialog()
   } finally {
-    $owner.Close()
+    $timer.Dispose()
+    $form.Dispose()
   }
+  if ($state.expired) { return 'expired' }
+  if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) { return 'yes' }
+  return 'no'
 }
+
+function Enter-ApplyLock {
+  $mutex = New-Object System.Threading.Mutex($false, $ApplyMutexName)
+  $owned = $false
+  try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+  if (-not $owned) {
+    $mutex.Dispose()
+    Fail 'HOST_BUSY' 'Another Inertia edit is waiting for approval or running in AutoCAD. Try again when it is done.'
+  }
+  return $mutex
+}
+
+function Exit-ApplyLock($Mutex) {
+  try { $Mutex.ReleaseMutex() } catch { }
+  $Mutex.Dispose()
+}
+
+function Test-ApplyRunning {
+  try {
+    $mutex = Enter-ApplyLock
+    Exit-ApplyLock $mutex
+    return $false
+  } catch { return $true }
+}
+
+# --- Time ---------------------------------------------------------------
+
+function ConvertTo-UtcTime($Value) {
+  if ($Value -is [DateTime]) { return $Value.ToUniversalTime() }
+  $text = [string]$Value
+  $number = 0.0
+  if ($text -match '^\d+(\.\d+)?$' -and [double]::TryParse($text, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number)) {
+    return [DateTimeOffset]::FromUnixTimeMilliseconds([long]$number).UtcDateTime
+  }
+  $parsed = [DateTimeOffset]::MinValue
+  if ([DateTimeOffset]::TryParse($text, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed)) { return $parsed.UtcDateTime }
+  Fail 'INVALID_REQUEST' 'deadlineAt must be an ISO time or epoch milliseconds.'
+}
+
+# Deadlines count from when this process started; without one, reads keep the default budget and dialogs never expire.
+function Set-Deadline($Request, $Params, [System.Diagnostics.Stopwatch]$Clock, [DateTime]$StartedUtc) {
+  $script:Clock = $Clock
+  $script:DeadlineMs = $null
+  $at = $Request.deadlineAt
+  if ($null -eq $at) { $at = $Params.deadlineAt }
+  $ms = $Request.deadlineMs
+  if ($null -eq $ms) { $ms = $Params.deadlineMs }
+  if ($null -ne $at) { $script:DeadlineMs = ((ConvertTo-UtcTime $at) - $StartedUtc).TotalMilliseconds }
+  elseif ($null -ne $ms) { $script:DeadlineMs = [double]$ms }
+  $script:WorkUntilMs = $(if ($null -ne $script:DeadlineMs) { $script:DeadlineMs - $DeadlineMarginMs } else { $DefaultWorkMs })
+  $script:ParentPid = $Request.parentPid
+  if ($null -eq $script:ParentPid) { $script:ParentPid = $Params.parentPid }
+}
+
+function Test-OutOfTime { return $script:Clock.ElapsedMilliseconds -ge $script:WorkUntilMs }
 
 # --- Small helpers ------------------------------------------------------
 
 function Get-Rounded($Value, [int]$Digits = 4) {
   if ($null -eq $Value) { return $null }
   return [Math]::Round([double]$Value, $Digits)
+}
+
+function Get-Degrees($Radians) {
+  if ($null -eq $Radians) { return $null }
+  return Get-Rounded ([double]$Radians * 180 / [Math]::PI) 3
 }
 
 function Get-Point($Point) {
@@ -194,7 +315,7 @@ function Get-Limit($Params) {
 
 function Get-ShortType([string]$ObjectName) {
   if ($ShortTypes.ContainsKey($ObjectName)) { return $ShortTypes[$ObjectName] }
-  if ($ObjectName -like '*Dimension') { return 'DIMENSION' }
+  if ($ObjectName -like 'AcDb*Dimension*') { return 'DIMENSION' }
   return $ObjectName
 }
 
@@ -213,12 +334,50 @@ function Get-Coordinate($Value, [string]$Name) {
   for ($i = 0; $i -lt $items.Count; $i++) {
     $number = 0.0
     if (-not [double]::TryParse([string]$items[$i], [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number) -or
-      [double]::IsNaN($number) -or [double]::IsInfinity($number) -or [Math]::Abs($number) -gt $MaxCoordinate) {
-      Fail 'INVALID_REQUEST' "$Name must contain finite numbers."
+      -not ([Math]::Abs($number) -le $MaxCoordinate)) {
+      Fail 'INVALID_REQUEST' "$Name is out of range: each value must be a number within $MaxCoordinate drawing units of the origin."
     }
     $result[$i] = $number
   }
   return , $result
+}
+
+$MTextCodes = [regex]'\\(?:U\+([0-9A-Fa-f]{4})|S([^;]*);|([\\{}])|[PN~]|[fFHCcATQWp][^;]*;|[LlOoKk])|[{}]'
+
+function Get-PlainText([string]$Text) {
+  return $MTextCodes.Replace($Text, {
+      param($Match)
+      if ($Match.Groups[1].Success) { return [string][char][Convert]::ToInt32($Match.Groups[1].Value, 16) }
+      if ($Match.Groups[2].Success) { return $Match.Groups[2].Value -replace '[\^#]', '/' }
+      if ($Match.Groups[3].Success) { return $Match.Groups[3].Value }
+      if ($Match.Value -cmatch '^\\[PN~]$') { return ' ' }
+      return ''
+    })
+}
+
+function Get-Vertices($Coordinates, [int]$Stride, [int]$Keep) {
+  $vertices = New-Object System.Collections.ArrayList
+  for ($i = 0; $i + $Stride -le $Coordinates.Count -and $vertices.Count -lt $MaxVertices; $i += $Stride) {
+    [void]$vertices.Add(@(for ($j = 0; $j -lt $Keep; $j++) { Get-Rounded $Coordinates[$i + $j] }))
+  }
+  return , $vertices.ToArray()
+}
+
+function Get-Extent($Entity) {
+  $min = $null
+  $max = $null
+  try { $Entity.GetBoundingBox([ref]$min, [ref]$max) } catch { return $null }
+  if ($null -eq $min -or $null -eq $max) { return $null }
+  return @{ min = $min; max = $max }
+}
+
+# DBMOD 8 (window) and 16 (view) flip on every zoom or pan, which leaves the file on disk current.
+function Test-UnsavedChanges($Doc) {
+  try { return ([int]$Doc.GetVariable('DBMOD') -band -bnot 24) -ne 0 } catch { return -not [bool]$Doc.Saved }
+}
+
+function Get-UnitsName($Doc) {
+  try { return $InsUnits[[int]$Doc.GetVariable('INSUNITS')] } catch { return $null }
 }
 
 # --- Documents ----------------------------------------------------------
@@ -229,26 +388,25 @@ function Get-DocumentId($Doc) {
   return 'acad:' + $full
 }
 
-function Get-ActiveDocumentName($Acad) {
-  try { return [string]$Acad.ActiveDocument.Name } catch { return $null }
+function Get-ActiveDocumentId($Acad) {
+  try { return Get-DocumentId $Acad.ActiveDocument } catch { return $null }
 }
 
 function Get-Documents($Acad, $Params) {
-  $active = Get-ActiveDocumentName $Acad
+  $active = Get-ActiveDocumentId $Acad
   $list = New-Object System.Collections.ArrayList
   foreach ($doc in $Acad.Documents) {
-    $units = $null
-    try { $units = $InsUnits[[int]$doc.GetVariable('INSUNITS')] } catch { }
+    $id = Get-DocumentId $doc
     $full = [string]$doc.FullName
     [void]$list.Add([ordered]@{
-        documentId   = Get-DocumentId $doc
+        documentId   = $id
         app          = 'autocad'
         name         = [string]$doc.Name
         path         = $(if ([string]::IsNullOrEmpty($full)) { $null } else { $full })
-        modified     = -not [bool]$doc.Saved
-        active       = ([string]$doc.Name -eq $active)
+        modified     = Test-UnsavedChanges $doc
+        active       = ($id -eq $active)
         readOnly     = [bool]$doc.ReadOnly
-        displayUnits = $units
+        displayUnits = Get-UnitsName $doc
         activeLayout = $(try { [string]$doc.ActiveLayout.Name } catch { $null })
       })
   }
@@ -258,7 +416,7 @@ function Get-Documents($Acad, $Params) {
 function Resolve-Document($Acad, [string]$DocumentId, [switch]$RequireActive) {
   foreach ($doc in $Acad.Documents) {
     if ((Get-DocumentId $doc) -eq $DocumentId) {
-      if ($RequireActive -and ([string]$doc.Name -ne (Get-ActiveDocumentName $Acad))) {
+      if ($RequireActive -and $DocumentId -ne (Get-ActiveDocumentId $Acad)) {
         Fail 'INACTIVE_DOCUMENT' 'Switch AutoCAD to this drawing''s tab, then try again.'
       }
       return $doc
@@ -275,11 +433,77 @@ function Get-LayoutMap($Doc) {
   return $map
 }
 
+function Get-ModifiedState($Doc) {
+  $state = @{ dbmod = $null; count = $null }
+  try { $state.dbmod = [int]$Doc.GetVariable('DBMOD') } catch { }
+  try { $state.count = [int]$Doc.ModelSpace.Count } catch { }
+  return $state
+}
+
+# Reads must never change the drawing; if one did, stop before anything can save it.
+function Invoke-Read($Acad, $Params, [string]$Command) {
+  $doc = Resolve-Document $Acad ([string]$Params.documentId)
+  $applying = Test-ApplyRunning
+  $before = Get-ModifiedState $doc
+  $concurrent = $false
+  try {
+    $result = & $Command $Acad $Params
+  } finally {
+    $after = Get-ModifiedState $doc
+    if (($null -ne $before.dbmod -and -not ($before.dbmod -band 1) -and ($after.dbmod -band 1)) -or
+      ($null -ne $before.count -and $null -ne $after.count -and $after.count -lt $before.count)) {
+      $concurrent = $applying -or (Test-ApplyRunning)
+      if (-not $concurrent) {
+        Fail 'READ_MODIFIED_DRAWING' 'The drawing changed while Inertia was only reading it. Do not save it and do not undo anything yet: tell the designer, who may have been editing at the same time, and let them decide whether to undo.'
+      }
+    }
+  }
+  if ($concurrent) { $result.concurrentEdit = $true }
+  return $result
+}
+
 # --- Entities -----------------------------------------------------------
 
-function Get-EntityRow($Entity, $LayoutMap) {
+function Get-BoxRow($Extent) {
+  if ($null -eq $Extent) { return $null }
+  return , @(@((Get-Rounded $Extent.min[0]), (Get-Rounded $Extent.min[1])), @((Get-Rounded $Extent.max[0]), (Get-Rounded $Extent.max[1])))
+}
+
+# One property per try, so a row keeps what it could read when one property fails.
+function Add-Field($Row, [string]$Field, [scriptblock]$Read) {
+  try {
+    $value = & $Read
+    if ($null -ne $value) { $Row[$Field] = $value }
+  } catch { $Row.partial = $true }
+}
+
+# Polyline and old-style POLYLINE coordinates are in the object's coordinate system.
+function Add-Plane($Row, $Entity) {
+  $Row.elevation = Get-Rounded $Entity.Elevation
+  $normal = Get-Point $Entity.Normal
+  if ($null -ne $normal -and ($normal[0] -ne 0 -or $normal[1] -ne 0 -or $normal[2] -ne 1)) { $Row.normal = $normal }
+}
+
+function Get-ChordLength($Coordinates, [bool]$Closed) {
+  $sum = 0.0
+  $count = [int]($Coordinates.Count / 2)
+  if ($count -lt 2) { return 0.0 }
+  $last = $(if ($Closed) { $count } else { $count - 1 })
+  for ($i = 0; $i -lt $last; $i++) {
+    $j = ($i + 1) % $count
+    $sum += [Math]::Sqrt([Math]::Pow($Coordinates[2 * $j] - $Coordinates[2 * $i], 2) + [Math]::Pow($Coordinates[2 * $j + 1] - $Coordinates[2 * $i + 1], 2))
+  }
+  return $sum
+}
+
+function Get-EntityRow($Entity, $LayoutMap, $Options = @{}, $Extent = $null) {
   $objectName = [string]$Entity.ObjectName
   $row = [ordered]@{ handle = [string]$Entity.Handle; type = (Get-ShortType $objectName); layer = [string]$Entity.Layer }
+  if ($Options.bbox) {
+    if ($null -eq $Extent) { $Extent = Get-Extent $Entity }
+    $row.bbox = Get-BoxRow $Extent
+  }
+  if ($Options.compact) { return $row }
   try { $row.color = [int]$Entity.Color } catch { }
   $owner = [string]$Entity.OwnerID
   if ($LayoutMap.ContainsKey($owner)) { $row.layout = $LayoutMap[$owner] } else { $row.nested = $true }
@@ -288,15 +512,40 @@ function Get-EntityRow($Entity, $LayoutMap) {
       'AcDbLine' { $row.start = Get-Point $Entity.StartPoint; $row.end = Get-Point $Entity.EndPoint; $row.length = Get-Rounded $Entity.Length }
       'AcDbPolyline' {
         $row.closed = [bool]$Entity.Closed
-        $row.length = Get-Rounded $Entity.Length
+        $length = [double]$Entity.Length
+        $row.length = Get-Rounded $length
         $coordinates = @($Entity.Coordinates)
         $row.vertexCount = [int]($coordinates.Count / 2)
-        if ($row.vertexCount -le 50) {
-          $vertices = New-Object System.Collections.ArrayList
-          for ($i = 0; $i + 1 -lt $coordinates.Count; $i += 2) { [void]$vertices.Add(@((Get-Rounded $coordinates[$i]), (Get-Rounded $coordinates[$i + 1]))) }
-          $row.vertices = $vertices.ToArray()
+        $row.vertices = Get-Vertices $coordinates 2 2
+        if ($row.vertexCount -gt $MaxVertices) { $row.verticesTruncated = $true }
+        Add-Plane $row $Entity
+        # Arc segments make the length exceed the sum of chords, so straight polylines skip GetBulge.
+        if ([Math]::Abs($length - (Get-ChordLength $coordinates $row.closed)) -gt 1e-9 * [Math]::Max(1.0, $length)) {
+          $bulges = @(for ($i = 0; $i -lt $row.vertices.Count; $i++) { Get-Rounded $Entity.GetBulge($i) 6 })
+          if (@($bulges | Where-Object { $_ -ne 0 }).Count -gt 0) { $row.bulges = $bulges }
         }
         if ($row.closed) { $row.area = Get-Rounded $Entity.Area }
+      }
+      'AcDb[23]dPolyline' {
+        $flat = $objectName -eq 'AcDb2dPolyline'
+        $row.closed = [bool]$Entity.Closed
+        $row.length = Get-Rounded $Entity.Length
+        # Both kinds give three values per vertex; AutoCAD ignores a 2D polyline's Z (its elevation applies).
+        $coordinates = @($Entity.Coordinates)
+        $row.vertexCount = [int]($coordinates.Count / 3)
+        $row.vertices = Get-Vertices $coordinates 3 $(if ($flat) { 2 } else { 3 })
+        if ($row.vertexCount -gt $MaxVertices) { $row.verticesTruncated = $true }
+        if ($flat) { Add-Plane $row $Entity }
+      }
+      'AcDbSpline' {
+        $row.fitPointCount = [int]$Entity.NumberOfFitPoints
+        $row.controlPointCount = [int]$Entity.NumberOfControlPoints
+        $row.controlPoints = Get-Vertices @($Entity.ControlPoints) 3 3
+        if ($row.controlPointCount -gt $MaxVertices) { $row.controlPointsTruncated = $true }
+      }
+      'AcDbEllipse' {
+        $row.center = Get-Point $Entity.Center; $row.majorAxis = Get-Point $Entity.MajorAxis; $row.ratio = Get-Rounded $Entity.RadiusRatio 6
+        $row.startParam = Get-Rounded $Entity.StartParameter 6; $row.endParam = Get-Rounded $Entity.EndParameter 6
       }
       'AcDbCircle' { $row.center = Get-Point $Entity.Center; $row.radius = Get-Rounded $Entity.Radius }
       'AcDbArc' {
@@ -304,8 +553,21 @@ function Get-EntityRow($Entity, $LayoutMap) {
         $row.startAngleDeg = Get-Rounded ([double]$Entity.StartAngle * 180 / [Math]::PI) 3
         $row.endAngleDeg = Get-Rounded ([double]$Entity.EndAngle * 180 / [Math]::PI) 3
       }
-      'AcDbText' { $row.text = Limit-Text $Entity.TextString; $row.position = Get-Point $Entity.InsertionPoint; $row.height = Get-Rounded $Entity.Height }
-      'AcDbMText' { $row.text = Limit-Text $Entity.TextString; $row.position = Get-Point $Entity.InsertionPoint; $row.height = Get-Rounded $Entity.Height }
+      'AcDbText' {
+        $row.text = Limit-Text $Entity.TextString; $row.position = Get-Point $Entity.InsertionPoint; $row.height = Get-Rounded $Entity.Height
+        Add-Field $row 'style' { [string]$Entity.StyleName }
+        Add-Field $row 'widthFactor' { Get-Rounded $Entity.ScaleFactor }
+        Add-Field $row 'rotationDeg' { Get-Degrees $Entity.Rotation }
+        Add-Field $row 'alignment' { $TextAlignments[[int]$Entity.Alignment] }
+        # Only left-aligned text is anchored at its insertion point.
+        if ($row.alignment -and $row.alignment -ne 'left') { Add-Field $row 'alignmentPoint' { Get-Point $Entity.TextAlignmentPoint } }
+      }
+      'AcDbMText' {
+        $row.text = Limit-Text (Get-PlainText $Entity.TextString); $row.position = Get-Point $Entity.InsertionPoint; $row.height = Get-Rounded $Entity.Height
+        Add-Field $row 'style' { [string]$Entity.StyleName }
+        Add-Field $row 'width' { Get-Rounded $Entity.Width }
+        Add-Field $row 'attachment' { $MTextAttachments[[int]$Entity.AttachmentPoint] }
+      }
       'AcDbBlockReference' {
         $row.block = $(try { [string]$Entity.EffectiveName } catch { [string]$Entity.Name })
         $row.position = Get-Point $Entity.InsertionPoint
@@ -320,7 +582,36 @@ function Get-EntityRow($Entity, $LayoutMap) {
           $row.attributes = $attributes.ToArray()
         }
       }
-      '*Dimension' { $row.measurement = Get-Rounded $Entity.Measurement; $override = [string]$Entity.TextOverride; if ($override) { $row.textOverride = Limit-Text $override 200 } }
+      'AcDb*Dimension*' {
+        $row.measurement = Get-Rounded $Entity.Measurement
+        $override = [string]$Entity.TextOverride
+        if ($override) { $row.textOverride = Limit-Text $override 200 }
+        Add-Field $row 'textPosition' { Get-Point $Entity.TextPosition }
+        # AutoCAD's COM interface has no definition points for rotated, radial or diametric dimensions.
+        switch ($objectName) {
+          'AcDbRotatedDimension' { Add-Field $row 'rotationDeg' { Get-Degrees $Entity.Rotation } }
+          { @('AcDbAlignedDimension', 'AcDbArcDimension') -contains $_ } {
+            Add-Field $row 'extLine1Point' { Get-Point $Entity.ExtLine1Point }
+            Add-Field $row 'extLine2Point' { Get-Point $Entity.ExtLine2Point }
+          }
+          'AcDbArcDimension' { Add-Field $row 'center' { Get-Point $Entity.CenterPoint } }
+          'AcDb3PointAngularDimension' {
+            Add-Field $row 'center' { Get-Point $Entity.AngleVertex }
+            Add-Field $row 'extLine1Point' { Get-Point $Entity.ExtLine1EndPoint }
+            Add-Field $row 'extLine2Point' { Get-Point $Entity.ExtLine2EndPoint }
+          }
+          'AcDb2LineAngularDimension' {
+            Add-Field $row 'extLine1Start' { Get-Point $Entity.ExtLine1StartPoint }
+            Add-Field $row 'extLine1End' { Get-Point $Entity.ExtLine1EndPoint }
+            Add-Field $row 'extLine2Start' { Get-Point $Entity.ExtLine2StartPoint }
+            Add-Field $row 'extLine2End' { Get-Point $Entity.ExtLine2EndPoint }
+          }
+          'AcDbRadialDimensionLarge' {
+            Add-Field $row 'center' { Get-Point $Entity.Center }
+            Add-Field $row 'chordPoint' { Get-Point $Entity.ChordPoint }
+          }
+        }
+      }
       'AcDbHatch' { $row.pattern = [string]$Entity.PatternName; $row.area = Get-Rounded $Entity.Area }
     }
   } catch { $row.partial = $true }
@@ -366,28 +657,58 @@ function Get-Selection($Acad, $Params) {
   $set = $doc.PickfirstSelectionSet
   $count = [int]$set.Count
   $items = New-Object System.Collections.ArrayList
-  for ($i = 0; $i -lt [Math]::Min($count, $limit); $i++) { [void]$items.Add((Get-EntityRow $set.Item($i) $layoutMap)) }
-  return [ordered]@{
+  $outOfTime = $false
+  for ($i = 0; $i -lt [Math]::Min($count, $limit); $i++) {
+    if ($items.Count -gt 0 -and (Test-OutOfTime)) { $outOfTime = $true; break }
+    [void]$items.Add((Get-EntityRow $set.Item($i) $layoutMap))
+  }
+  $result = [ordered]@{
     documentId = Get-DocumentId $doc
-    units      = $(try { $InsUnits[[int]$doc.GetVariable('INSUNITS')] } catch { $null })
+    units      = Get-UnitsName $doc
     total      = $count
-    truncated  = $count -gt $limit
+    truncated  = $count -gt $items.Count
     items      = $items.ToArray()
   }
+  if ($outOfTime) { $result.partial = $true; $result.timeBudgetHit = $true }
+  if ($count -eq 0) {
+    if ((Get-DocumentId $doc) -ne (Get-ActiveDocumentId $Acad)) {
+      $result.hint = 'This drawing is not the active tab in AutoCAD, and AutoCAD only reports the selection of the active drawing. Switch to its tab, select the objects, and ask again.'
+    } elseif ($(try { [int]$doc.GetVariable('PICKFIRST') } catch { 1 }) -eq 0) {
+      $result.hint = 'PICKFIRST is 0 in AutoCAD, so objects selected outside a command are not readable. Set PICKFIRST to 1, select the objects again, and ask again.'
+    }
+  }
+  return $result
 }
 
-function Select-Entities($Doc, [string[]]$Types, [string]$Layer, [string]$Layout) {
+function Get-SetStamp { return [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
+
+function Select-Entities($Doc, [string[]]$Types, [string]$Layer, [string]$Layout, $Region) {
   $codes = New-Object 'System.Collections.Generic.List[int16]'
   $values = New-Object 'System.Collections.Generic.List[object]'
   if ($Types.Count -gt 0) { $codes.Add(0); $values.Add(($Types -join ',')) }
   if ($Layer) { $codes.Add(8); $values.Add($Layer) }
   if ($Layout -and $Layout -ne '*') { $codes.Add(410); $values.Add($Layout) }
-  $set = $Doc.SelectionSets.Add('INERTIACAD' + [guid]::NewGuid().ToString('N').Substring(0, 12))
   $missing = [System.Type]::Missing
-  if ($codes.Count -gt 0) {
-    $set.Select(5, $missing, $missing, [int16[]]$codes.ToArray(), [object[]]$values.ToArray())
-  } else {
-    $set.Select(5, $missing, $missing, $missing, $missing)
+  $mode = 5
+  $point1 = $missing
+  $point2 = $missing
+  if ($null -ne $Region) {
+    # Window and crossing pick from the view, so AutoCAD may skip off-screen objects or catch near ones; callers re-check bounding boxes.
+    $mode = $(if ($Region.window) { 0 } else { 1 })
+    $point1 = $Region.min
+    $point2 = $Region.max
+  }
+  $name = 'INERTIACAD{0}_{1}' -f (Get-SetStamp), [guid]::NewGuid().ToString('N').Substring(0, 6)
+  $set = $Doc.SelectionSets.Add($name)
+  try {
+    if ($codes.Count -gt 0) {
+      $set.Select($mode, $point1, $point2, [int16[]]$codes.ToArray(), [object[]]$values.ToArray())
+    } else {
+      $set.Select($mode, $point1, $point2, $missing, $missing)
+    }
+  } catch {
+    Remove-SelectionSet $set
+    throw
   }
   # The comma keeps PowerShell from unrolling the set into its entities; Delete() on those erases them.
   return , $set
@@ -401,6 +722,51 @@ function Remove-SelectionSet($Set) {
   if ($name -like 'INERTIACAD*') { try { $Set.Delete() } catch { } }
 }
 
+# A bridge killed on timeout never reaches its finally block, so earlier runs can leave sets behind.
+function Remove-StaleSelectionSets($Doc) {
+  $cutoff = (Get-SetStamp) - $StaleSetSeconds
+  $stale = New-Object System.Collections.ArrayList
+  $sets = $Doc.SelectionSets
+  for ($i = 0; $i -lt [int]$sets.Count; $i++) {
+    $set = $sets.Item($i)
+    $name = [string]$set.Name
+    if ($name -like 'INERTIACAD*' -and -not ($name -match '^INERTIACAD(\d+)_' -and [long]$Matches[1] -ge $cutoff)) { [void]$stale.Add($set) }
+  }
+  foreach ($set in $stale) { Remove-SelectionSet $set }
+}
+
+function Get-Region($Within, [string]$Name = 'within') {
+  if ($null -eq $Within) { return $null }
+  $a = Get-Coordinate $Within.min "$Name.min"
+  $b = Get-Coordinate $Within.max "$Name.max"
+  $mode = 'crossing'
+  if ($Within.mode) { $mode = [string]$Within.mode }
+  if (@('crossing', 'window') -notcontains $mode) { Fail 'INVALID_REQUEST' "$Name.mode must be crossing or window." }
+  $min = New-Object 'double[]' 3
+  $max = New-Object 'double[]' 3
+  for ($i = 0; $i -lt 2; $i++) { $min[$i] = [Math]::Min($a[$i], $b[$i]); $max[$i] = [Math]::Max($a[$i], $b[$i]) }
+  return @{ min = $min; max = $max; window = ($mode -eq 'window') }
+}
+
+function Test-Region($Extent, $Region) {
+  if ($null -eq $Extent) { return $true }
+  for ($i = 0; $i -lt 2; $i++) {
+    if ($Region.window) {
+      if ($Extent.min[$i] -lt $Region.min[$i] -or $Extent.max[$i] -gt $Region.max[$i]) { return $false }
+    } elseif ($Extent.max[$i] -lt $Region.min[$i] -or $Extent.min[$i] -gt $Region.max[$i]) { return $false }
+  }
+  return $true
+}
+
+function Get-SearchText($Entity) {
+  $text = ''
+  try { $text = [string]$Entity.TextString } catch { }
+  if ($text -match '[\\{]') { $text += ' ' + (Get-PlainText $text) }
+  try { if ([bool]$Entity.HasAttributes) { foreach ($attribute in @($Entity.GetAttributes())) { $text += ' ' + [string]$attribute.TextString } } } catch { }
+  try { $text += ' ' + [string]$Entity.EffectiveName } catch { }
+  return $text.ToLowerInvariant()
+}
+
 function Find-Entities($Acad, $Params) {
   $doc = Resolve-Document $Acad ([string]$Params.documentId)
   $limit = Get-Limit $Params
@@ -412,37 +778,72 @@ function Find-Entities($Acad, $Params) {
   if ($Params.layout) { $layout = [string]$Params.layout }
   $needle = $null
   if ($Params.textContains) { $needle = ([string]$Params.textContains).ToLowerInvariant() }
+  if ($Params.fields -and @('compact', 'full') -notcontains [string]$Params.fields) { Fail 'INVALID_REQUEST' 'fields must be compact or full.' }
+  $options = @{ compact = ($Params.fields -eq 'compact'); bbox = ($Params.bbox -eq $true) }
+  $region = Get-Region $Params.within
   $layoutMap = Get-LayoutMap $doc
-  $set = Select-Entities $doc $types ([string]$Params.layer) $layout
+  Remove-StaleSelectionSets $doc
+  $set = Select-Entities $doc $types ([string]$Params.layer) $layout $region
   try {
     $count = [int]$set.Count
     $items = New-Object System.Collections.ArrayList
     $total = $count
     $capped = $false
-    if ($null -eq $needle) {
-      for ($i = $offset; $i -lt [Math]::Min($count, $offset + $limit); $i++) { [void]$items.Add((Get-EntityRow $set.Item($i) $layoutMap)) }
+    $outOfTime = $false
+    $filtered = $false
+    if ($null -eq $needle -and $null -eq $region) {
+      for ($i = $offset; $i -lt [Math]::Min($count, $offset + $limit); $i++) {
+        if ($items.Count -gt 0 -and (Test-OutOfTime)) { $outOfTime = $true; break }
+        [void]$items.Add((Get-EntityRow $set.Item($i) $layoutMap $options))
+      }
     } else {
-      $total = 0
-      for ($i = 0; $i -lt $count; $i++) {
-        if ($i -ge $MaxScan) { $capped = $true; break }
+      # A text or region filter runs here, so the cursor is a scan position, not a match count:
+      # each call resumes where the last stopped and scans at least one object, so paging always
+      # progresses and a scan longer than one call's budget still reaches every match.
+      $filtered = $true
+      $positions = New-Object System.Collections.ArrayList
+      $resume = $null
+      $scanned = 0
+      $i = $offset
+      while ($i -lt $count) {
+        if ($scanned -ge $MaxScan) { $capped = $true; $resume = $i; break }
+        if ($scanned -gt 0 -and (Test-OutOfTime)) { $outOfTime = $true; $resume = $i; break }
         $entity = $set.Item($i)
-        $haystack = ''
-        try { $haystack = [string]$entity.TextString } catch { }
-        try { if ([bool]$entity.HasAttributes) { foreach ($attribute in @($entity.GetAttributes())) { $haystack += ' ' + [string]$attribute.TextString } } } catch { }
-        try { $haystack += ' ' + [string]$entity.EffectiveName } catch { }
-        if (-not $haystack.ToLowerInvariant().Contains($needle)) { continue }
-        if ($total -ge $offset -and $items.Count -lt $limit) { [void]$items.Add((Get-EntityRow $entity $layoutMap)) }
-        $total++
+        $i++
+        $scanned++
+        if ($null -ne $needle -and -not (Get-SearchText $entity).Contains($needle)) { continue }
+        $extent = $null
+        if ($null -ne $region) {
+          $extent = Get-Extent $entity
+          if (-not (Test-Region $extent $region)) { continue }
+        }
+        # A full page stops at the next match, which starts the next page.
+        if ($items.Count -ge $limit) { $resume = $i - 1; break }
+        [void]$items.Add((Get-EntityRow $entity $layoutMap $options $extent))
+        [void]$positions.Add($i - 1)
       }
     }
     $result = [ordered]@{
       documentId = Get-DocumentId $doc
-      units      = $(try { $InsUnits[[int]$doc.GetVariable('INSUNITS')] } catch { $null })
+      units      = Get-UnitsName $doc
       layout     = $layout
-      total      = $total
       items      = $items.ToArray()
     }
-    if ($offset + $limit -lt $total) { $result.nextCursor = [string]($offset + $limit) }
+    if ($filtered) {
+      # Objects of the requested types and layer, before the text or region filter.
+      $result.candidates = $count
+      if ($null -ne $resume -and $resume -lt $count) { $result.nextCursor = [string]$resume }
+      # Each row's scan position, so a caller that returns fewer rows can resume after the last one.
+      $result.scanPositions = $positions.ToArray()
+      if ($outOfTime) { $result.partial = $true; $result.timeBudgetHit = $true }
+    } else {
+      $result.total = $total
+      if ($outOfTime) {
+        $result.partial = $true
+        $result.timeBudgetHit = $true
+        if ($items.Count -gt 0) { $result.nextCursor = [string]($offset + $items.Count) }
+      } elseif ($offset + $limit -lt $total) { $result.nextCursor = [string]($offset + $limit) }
+    }
     if ($capped) { $result.scanCapped = $true }
     return $result
   } finally {
@@ -450,12 +851,70 @@ function Find-Entities($Acad, $Params) {
   }
 }
 
+function Get-CaptureRegion($Params) {
+  if ($Params.extents -eq $true -and $null -ne $Params.bbox) { Fail 'INVALID_REQUEST' 'Pass extents or bbox, not both.' }
+  if ($Params.extents -eq $true) { return @{ extents = $true } }
+  $region = Get-Region $Params.bbox 'bbox'
+  if ($null -ne $region -and ($region.min[0] -eq $region.max[0] -or $region.min[1] -eq $region.max[1])) { Fail 'INVALID_REQUEST' 'bbox needs a width and a height.' }
+  return $region
+}
+
+function Get-ViewState($Doc) {
+  return @{ center = @($Doc.GetVariable('VIEWCTR')); size = [double]$Doc.GetVariable('VIEWSIZE') }
+}
+
+function Test-SameView($A, $B) {
+  $tolerance = 1e-6 * $A.size
+  if ([Math]::Abs($A.size - $B.size) -gt $tolerance) { return $false }
+  for ($i = 0; $i -lt 2; $i++) { if ([Math]::Abs($A.center[$i] - $B.center[$i]) -gt $tolerance) { return $false } }
+  return $true
+}
+
+# ZoomExtents recomputes EXTMIN/EXTMAX, which marks the drawing's system variables as changed (DBMOD 4),
+# so zoom to the stored extents with a window and fall back to ZoomExtents only when they are unusable.
+function Get-ExtentsWindow($Doc) {
+  try {
+    $min = @($Doc.GetVariable('EXTMIN'))
+    $max = @($Doc.GetVariable('EXTMAX'))
+    $width = [double]$max[0] - [double]$min[0]
+    $height = [double]$max[1] - [double]$min[1]
+    if (-not ($width -gt 0 -and $height -gt 0)) { return $null }
+    $margin = 0.02 * [Math]::Max($width, $height)
+    return @{
+      min = [double[]]@(([double]$min[0] - $margin), ([double]$min[1] - $margin), 0.0)
+      max = [double[]]@(([double]$max[0] + $margin), ([double]$max[1] + $margin), 0.0)
+    }
+  } catch { return $null }
+}
+
 function Get-Capture($Acad, $Params) {
   $doc = Resolve-Document $Acad ([string]$Params.documentId) -RequireActive
+  $region = Get-CaptureRegion $Params
   [void][InertiaCad.Window]::SetProcessDPIAware()
   $handle = [IntPtr][long]$Acad.HWND
   if ([InertiaCad.Window]::IsIconic($handle)) { Fail 'CAPTURE_FAILED' 'AutoCAD is minimized. Restore its window and try again.' }
-  $bitmap = [InertiaCad.Window]::Capture($handle)
+  $saved = $null
+  $restored = $true
+  try {
+    if ($null -ne $region) {
+      $saved = Get-ViewState $doc
+      if ($region.extents) {
+        $window = Get-ExtentsWindow $doc
+        if ($null -eq $window) { $Acad.ZoomExtents() } else { $Acad.ZoomWindow($window.min, $window.max) }
+      } else { $Acad.ZoomWindow($region.min, $region.max) }
+      try { $Acad.Update() } catch { }
+    }
+    $bitmap = [InertiaCad.Window]::Capture($handle)
+  } finally {
+    # ZoomPrevious restores center, height, twist and direction from AutoCAD's own view history. It runs
+    # only when the view really moved, so a zoom that changed nothing never pops the designer's earlier view.
+    if ($null -ne $saved) {
+      try {
+        if (-not (Test-SameView $saved (Get-ViewState $doc))) { $Acad.ZoomPrevious() }
+        $restored = Test-SameView $saved (Get-ViewState $doc)
+      } catch { $restored = $false }
+    }
+  }
   if ($null -eq $bitmap) { Fail 'CAPTURE_FAILED' 'Windows could not capture the AutoCAD window.' }
   try {
     $maxWidth = [Math]::Min(2048, [Math]::Max(64, [int]$Params.maxWidth))
@@ -470,13 +929,15 @@ function Get-Capture($Acad, $Params) {
       $data = [Convert]::ToBase64String($stream.ToArray())
     } finally { $scaled.Dispose(); $stream.Dispose() }
   } finally { $bitmap.Dispose() }
-  return [ordered]@{
+  $result = [ordered]@{
     documentId = Get-DocumentId $doc
     width      = $width
     height     = $height
     pngBase64  = $data
     scene      = $(try { [string]$doc.ActiveLayout.Name } catch { $null })
   }
+  if (-not $restored) { $result.viewRestored = $false }
+  return $result
 }
 
 # --- Edits --------------------------------------------------------------
@@ -496,21 +957,30 @@ function Test-LayerName([string]$Name) {
 }
 
 function Get-Layer($Doc, [string]$Name) {
-  foreach ($layer in $Doc.Layers) { if ([string]$layer.Name -ieq $Name) { return $layer } }
-  return $null
+  try { return $Doc.Layers.Item($Name) } catch { return $null }
 }
 
 function Get-Label($Entity) {
   return "$(Get-ShortType ([string]$Entity.ObjectName)) $([string]$Entity.Handle)"
 }
 
+function Assert-InTime {
+  if (Test-OutOfTime) { Fail 'TIME_BUDGET' 'Checking this change took too long for one request. Split it into smaller changes.' }
+}
+
 function Get-WritableEntity($Doc, [string]$Handle, $LayoutMap, $Plan) {
+  Assert-InTime
   try { $entity = $Doc.HandleToObject($Handle) } catch { Fail 'TARGET_NOT_FOUND' "No object with handle $Handle in this drawing. Read the selection again." }
+  $layerName = $null
+  try { $layerName = [string]$entity.Layer } catch { }
+  if ([string]::IsNullOrEmpty($layerName)) {
+    Fail 'NOT_DRAWING_OBJECT' "Handle $Handle is a $(Get-ShortType ([string]$entity.ObjectName)), not a drawing object. Use handles from cad_query_objects or cad_get_selection."
+  }
   if (-not $LayoutMap.ContainsKey([string]$entity.OwnerID)) {
     Fail 'NESTED_TARGET' "$(Get-Label $entity) is inside a block definition; editing it would change every insert of that block. Pick top-level objects."
   }
-  $layer = Get-Layer $Doc ([string]$entity.Layer)
-  if ($null -ne $layer -and [bool]$layer.Lock) { Fail 'LOCKED' "$(Get-Label $entity) is on locked layer $([string]$entity.Layer). Unlock it in AutoCAD first." }
+  $layer = Get-Layer $Doc $layerName
+  if ($null -ne $layer -and [bool]$layer.Lock) { Fail 'LOCKED' "$(Get-Label $entity) is on locked layer $layerName. Unlock it in AutoCAD first." }
   $Plan.fingerprints['entity:' + $Handle] = Get-Fingerprint $entity
   return $entity
 }
@@ -523,6 +993,9 @@ function New-Plan($Acad, $Doc, $Operations) {
   $operations = @($Operations)
   if ($operations.Count -eq 0) { Fail 'INVALID_REQUEST' 'Give at least one operation.' }
   if ($operations.Count -gt $MaxOperations) { Fail 'INVALID_REQUEST' "At most $MaxOperations operations per change." }
+  $targetCount = 0
+  foreach ($op in $operations) { $targetCount += @($op.handles | Where-Object { $null -ne $_ }).Count }
+  if ($targetCount -gt $MaxPlanTargets) { Fail 'INVALID_REQUEST' "At most $MaxPlanTargets target handles per change. Split it into smaller changes." }
   $plan = @{
     changes      = New-Object System.Collections.ArrayList
     fingerprints = [ordered]@{}
@@ -534,6 +1007,7 @@ function New-Plan($Acad, $Doc, $Operations) {
   # Layers as earlier operations in this batch leave them, so a later one is never skipped as a no-op.
   $projectedLayers = @{}
   foreach ($op in $operations) {
+    Assert-InTime
     $kind = [string]$op.op
     switch ($kind) {
       'acad.create_layer' {
@@ -715,55 +1189,153 @@ function Get-Preview($Acad, $Params) {
 }
 
 function Invoke-Apply($Acad, $Params) {
-  $doc = Resolve-Document $Acad ([string]$Params.documentId) -RequireActive
-  $stale = Get-StaleKeys $Params.expectedFingerprints (New-Plan $Acad $doc $Params.operations).fingerprints
-  if ($stale.Count -gt 0) { Fail 'TARGET_CHANGED' "The drawing changed since the preview ($((@($stale) | Select-Object -First 5) -join ', ')). Preview the change again." }
-  if (-not (Request-Approval ([string]$Params.approvalMessage))) {
-    return [ordered]@{ documentId = Get-DocumentId $doc; status = 'rejected' }
+  $documentId = [string]$Params.documentId
+  $doc = Resolve-Document $Acad $documentId -RequireActive
+  $lock = Enter-ApplyLock
+  try {
+    $stale = Get-StaleKeys $Params.expectedFingerprints (New-Plan $Acad $doc $Params.operations).fingerprints
+    if ($stale.Count -gt 0) { Fail 'TARGET_CHANGED' "The drawing changed since the preview ($((@($stale) | Select-Object -First 5) -join ', ')). Preview the change again." }
+    if ([int]$doc.GetVariable('CMDACTIVE') -ne 0) { Fail 'HOST_BUSY' 'AutoCAD has a command or dialog open. Finish it and try again.' }
+    if (-not ([int]$doc.GetVariable('UNDOCTL') -band 1)) {
+      Fail 'UNDO_DISABLED' 'Undo is turned off in this drawing, so the edit could not be reverted. Turn it back on in AutoCAD (UNDO, then Control, All) and try again.'
+    }
+    $closeAtMs = $null
+    if ($null -ne $script:DeadlineMs) { $closeAtMs = $script:DeadlineMs - $DialogMarginMs }
+    $answer = 'expired'
+    if ($null -eq $closeAtMs -or $script:Clock.ElapsedMilliseconds -lt $closeAtMs) {
+      $parent = $null
+      if ($null -ne $script:ParentPid) { try { $parent = [System.Diagnostics.Process]::GetProcessById([int]$script:ParentPid) } catch { } }
+      if ($null -eq $script:ParentPid -or ($null -ne $parent -and -not $parent.HasExited)) {
+        $answer = Request-Approval ([string]$Params.approvalMessage) $closeAtMs $parent
+      }
+    }
+    if ($answer -ne 'yes') { return [ordered]@{ documentId = $documentId; status = $(if ($answer -eq 'no') { 'rejected' } else { 'expired' }) } }
+    return Invoke-ApprovedSteps $Acad $Params
+  } finally {
+    Exit-ApplyLock $lock
   }
-  $doc = Resolve-Document $Acad ([string]$Params.documentId) -RequireActive
-  $plan = New-Plan $Acad $doc $Params.operations
-  $stale = Get-StaleKeys $Params.expectedFingerprints $plan.fingerprints
-  if ($stale.Count -gt 0) { Fail 'TARGET_CHANGED' 'The drawing changed while the approval dialog was open. Preview again.' }
+}
+
+# RPC failures leave it unknown whether the call ran inside AutoCAD; AutoCAD's own refusals mean it did not.
+function Test-RpcFailure($ErrorRecord) {
+  for ($exception = $ErrorRecord.Exception; $null -ne $exception; $exception = $exception.InnerException) {
+    if ($exception -isnot [System.Runtime.InteropServices.COMException]) { continue }
+    $hr = [System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes([int]$exception.HResult), 0)
+    $code = $hr -band 0xFFFF
+    return (($hr -shr 16) -eq 0x8001) -or (($hr -shr 16) -eq 0x8007 -and $code -ge 1700 -and $code -le 1999)
+  }
+  return $false
+}
+
+# After the Yes the edit may have reached AutoCAD, so no failure here may read as "not sent": the server would retry and duplicate it.
+function Invoke-ApprovedSteps($Acad, $Params) {
+  $documentId = [string]$Params.documentId
+  # Without a deadline the designer may take as long as they like; the read budget must not fail the edit they approved.
+  if ($null -eq $script:DeadlineMs) { $script:WorkUntilMs = [double]::PositiveInfinity }
   $created = New-Object System.Collections.ArrayList
   $done = 0
+  $total = 0
+  $started = $false
   $script:StepLeftChanges = $false
-  $doc.StartUndoMark()
   try {
+    $doc = Resolve-Document $Acad $documentId -RequireActive
+    $plan = New-Plan $Acad $doc $Params.operations
+    $stale = Get-StaleKeys $Params.expectedFingerprints $plan.fingerprints
+    if ($stale.Count -gt 0) { Fail 'TARGET_CHANGED' 'The drawing changed while the approval dialog was open. Preview again.' }
+    $total = $plan.steps.Count
+    $doc.StartUndoMark()
+    $started = $true
     foreach ($step in $plan.steps) { Invoke-Step $doc $step $created; $done++ }
   } catch {
     $shape = Get-ErrorShape $_
-    $doc.EndUndoMark()
-    if ($done -eq 0 -and -not $script:StepLeftChanges) { Fail 'APPLY_FAILED' "AutoCAD refused the edit, so nothing was changed: $($shape.message)" }
-    Fail 'PARTIALLY_APPLIED' "AutoCAD stopped after $done of $($plan.steps.Count) steps: $($shape.message). One Undo in AutoCAD reverts the steps that ran."
+    if ($done -gt 0 -or $script:StepLeftChanges) { Fail 'PARTIALLY_APPLIED' "AutoCAD stopped after $done of $total steps: $($shape.message). One Undo in AutoCAD reverts the steps that ran." }
+    if (-not $started -and $shape.code -eq 'TARGET_CHANGED') { throw }
+    if ($started -and (Test-RpcFailure $_)) {
+      Fail 'APPLY_UNCONFIRMED' 'AutoCAD stopped answering during the edit, so it is unknown whether it ran. Check the drawing before trying again; if it ran, one Undo reverts it.'
+    }
+    Fail 'APPLY_FAILED' "AutoCAD refused the edit, so nothing was changed: $($shape.message)"
+  } finally {
+    if ($started) { try { $doc.EndUndoMark() } catch { } }
   }
-  $doc.EndUndoMark()
-  return [ordered]@{
-    documentId = Get-DocumentId $doc
-    status     = 'applied'
-    changes    = $plan.changes.ToArray()
-    created    = $created.ToArray()
+  return [ordered]@{ documentId = $documentId; status = 'applied'; changes = $plan.changes.ToArray(); created = $created.ToArray() }
+}
+
+function Get-CopyPath([string]$Path) {
+  $valid = $Path -match '^[A-Za-z]:\\' -and $Path.IndexOf(':', 2) -lt 0
+  if ($valid) { try { $Path = [System.IO.Path]::GetFullPath($Path) } catch { $valid = $false } }
+  if (-not $valid -or $Path -notmatch '^[A-Za-z]:\\' -or $Path.IndexOf(':', 2) -ge 0) {
+    Fail 'INVALID_REQUEST' 'The copy path must be a full path on a local drive, such as C:\Projects\Plan copy.dwg.'
   }
+  if ($Path -notmatch '\.dwg$') { Fail 'INVALID_REQUEST' 'The copy must be a .dwg file.' }
+  return $Path
 }
 
 function Save-Copy($Acad, $Params) {
   $doc = Resolve-Document $Acad ([string]$Params.documentId)
-  $path = [string]$Params.path
-  if ($path -notmatch '\.dwg$') { Fail 'INVALID_REQUEST' 'The copy must be a .dwg file.' }
+  $path = Get-CopyPath ([string]$Params.path)
   if (Test-Path -LiteralPath $path) { Fail 'ALREADY_EXISTS' 'A file already exists at that path. Pick a new name; copies never overwrite.' }
   if (-not (Test-Path -LiteralPath (Split-Path -Parent $path) -PathType Container)) { Fail 'INVALID_REQUEST' 'The destination folder does not exist.' }
   $source = [string]$doc.FullName
   if ([string]::IsNullOrEmpty($source) -or [int]$doc.GetVariable('DWGTITLED') -ne 1) {
     Fail 'UNTITLED_DOCUMENT' 'This drawing has never been saved. Save it once in AutoCAD, then ask for the copy again.'
   }
-  # AutoCAD's SAVE-to-another-name can mark the open drawing as saved even though
-  # its own file was not written, so a drawing with unsaved changes is refused
-  # instead: the designer decides when her working file is written.
-  if (-not [bool]$doc.Saved) {
-    Fail 'UNSAVED_CHANGES' 'The drawing has unsaved changes. Save it in AutoCAD (Ctrl+S) or undo them, then ask for the copy again.'
+  # Saving to another name would switch the designer's tab to the copy, so only the file on disk is copied.
+  if (Test-UnsavedChanges $doc) {
+    Fail 'UNSAVED_CHANGES' 'The applied edits are in the open drawing but not in its file yet. Ask the designer to save it (Ctrl+S) when happy, then save the copy.'
   }
-  Copy-Item -LiteralPath $source -Destination $path
+  try { [System.IO.File]::Copy($source, $path, $false) } catch {
+    if ([System.IO.File]::Exists($path)) { Fail 'ALREADY_EXISTS' 'A file already exists at that path. Pick a new name; copies never overwrite.' }
+    throw
+  }
   return [ordered]@{ documentId = Get-DocumentId $doc; path = $path; bytes = (Get-Item -LiteralPath $path).Length; originalPath = $source }
+}
+
+function Get-Info($Acad, $Params) {
+  $doc = Resolve-Document $Acad ([string]$Params.documentId)
+  $extents = $null
+  try {
+    $min = @($doc.GetVariable('EXTMIN'))
+    $max = @($doc.GetVariable('EXTMAX'))
+    if ((0..2 | Where-Object { -not ($min[$_] -le $max[$_]) }).Count -eq 0) { $extents = [ordered]@{ min = Get-Point $min; max = Get-Point $max } }
+  } catch { }
+  $outOfTime = $false
+  $layers = New-Object System.Collections.ArrayList
+  foreach ($layer in $doc.Layers) {
+    if ($layers.Count -ge $MaxLayers) { break }
+    if (Test-OutOfTime) { $outOfTime = $true; break }
+    [void]$layers.Add([ordered]@{
+        name     = [string]$layer.Name
+        on       = [bool]$layer.LayerOn
+        frozen   = [bool]$layer.Freeze
+        locked   = [bool]$layer.Lock
+        color    = [int]$layer.Color
+        linetype = [string]$layer.Linetype
+      })
+  }
+  $blocks = New-Object System.Collections.ArrayList
+  $blocksTruncated = $false
+  foreach ($block in $doc.Blocks) {
+    $name = [string]$block.Name
+    if ($name.StartsWith('*') -or $name.Contains('|') -or [bool]$block.IsLayout -or [bool]$block.IsXRef) { continue }
+    if ($blocks.Count -ge $MaxBlocks) { $blocksTruncated = $true; break }
+    if (Test-OutOfTime) { $outOfTime = $true; $blocksTruncated = $true; break }
+    [void]$blocks.Add($name)
+  }
+  $result = [ordered]@{
+    documentId      = Get-DocumentId $doc
+    units           = [ordered]@{ insUnits = (Get-UnitsName $doc); lunits = $(try { [int]$doc.GetVariable('LUNITS') } catch { $null }) }
+    extents         = $extents
+    layers          = $layers.ToArray()
+    layersTruncated = [int]$doc.Layers.Count -gt $layers.Count
+    blocks          = $blocks.ToArray()
+    blocksTruncated = $blocksTruncated
+    layouts         = @(foreach ($layout in $doc.Layouts) { [string]$layout.Name })
+    entityCount     = [int]$doc.ModelSpace.Count
+    ucsIsWorld      = $(try { [int]$doc.GetVariable('WORLDUCS') -eq 1 } catch { $null })
+    viewTwistDeg    = $(try { Get-Rounded ([double]$doc.GetVariable('VIEWTWIST') * 180 / [Math]::PI) 3 } catch { $null })
+  }
+  if ($outOfTime) { $result.partial = $true; $result.timeBudgetHit = $true }
+  return $result
 }
 
 function Get-Hello($Acad, $Params) {
@@ -786,21 +1358,23 @@ $Methods = @{
   preview   = 'Get-Preview'
   apply     = 'Invoke-Apply'
   save_copy = 'Save-Copy'
+  info      = 'Get-Info'
 }
 
 # --- Entry point --------------------------------------------------------
 
-function Invoke-Request([string]$Raw, [scriptblock]$Connect) {
+function Invoke-Request([string]$Raw, [scriptblock]$Connect, [System.Diagnostics.Stopwatch]$Clock = [System.Diagnostics.Stopwatch]::StartNew(), [DateTime]$StartedUtc = [DateTime]::UtcNow) {
   $response = [ordered]@{ v = $Protocol; id = $null; ok = $false }
   try {
     $request = $Raw | ConvertFrom-Json
     $response.id = $request.id
     $command = $Methods[[string]$request.method]
     if ($null -eq $command) { Fail 'UNSUPPORTED_OPERATION' "Unknown bridge method `"$($request.method)`"." }
-    $acad = & $Connect
     $params = $request.params
     if ($null -eq $params) { $params = New-Object PSObject }
-    $response.result = & $command $acad $params
+    Set-Deadline $request $params $Clock $StartedUtc
+    $acad = & $Connect
+    if ($ReadMethods -contains [string]$request.method) { $response.result = Invoke-Read $acad $params $command } else { $response.result = & $command $acad $params }
     $response.ok = $true
   } catch {
     $response.error = Get-ErrorShape $_
@@ -815,7 +1389,7 @@ function Main {
   # Callers that pipe from PowerShell prepend a byte-order mark; JSON parsing rejects it.
   $raw = [System.Text.Encoding]::UTF8.GetString($buffer.ToArray()).TrimStart([char]0xFEFF)
   try {
-    $json = Invoke-Request $raw { Initialize-Interop | Out-Null; Connect-AutoCAD }
+    $json = Invoke-Request $raw { Initialize-Interop | Out-Null; Connect-AutoCAD } $Clock $StartedUtc
   } finally {
     if ($null -ne ('InertiaCad.MessageFilter' -as [type])) { [InertiaCad.MessageFilter]::Revoke() }
   }

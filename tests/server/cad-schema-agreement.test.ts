@@ -133,19 +133,49 @@ const SAMPLES: Record<string, { valid: Input[]; invalid: Input[] }> = {
       { documentId: ACAD_DOC, types: ["LINE", "INSERT"], layer: "A-*", layout: "*", textContains: "ROOM", cursor: "0", limit: 50 },
       { documentId: DOC, types: [], tag: "Walls", nameContains: "Door", maxDepth: 0, cursor: "123456789" },
       { documentId: DOC, maxDepth: 32, types: Array.from({ length: 20 }, () => "group") },
+      { documentId: ACAD_DOC, bbox: true, fields: "compact" },
+      { documentId: ACAD_DOC, bbox: false, fields: "full" },
+      { documentId: ACAD_DOC, within: { min: [0, 0], max: [100.5, -2] } },
+      { documentId: ACAD_DOC, within: { min: [0, 0], max: [1, 1], mode: "crossing" } },
+      { documentId: DOC, within: { min: [-1e6, 0], max: [1e6, 1], mode: "window" }, fields: "compact", tag: "Walls" },
     ],
     invalid: [
       { documentId: DOC, cursor: "1234567890" }, { documentId: DOC, cursor: "-1" }, { documentId: DOC, cursor: "1.5" },
       { documentId: DOC, cursor: 5 }, { documentId: DOC, types: Array.from({ length: 21 }, () => "group") },
       { documentId: DOC, types: [""] }, { documentId: DOC, maxDepth: 33 }, { documentId: DOC, maxDepth: -1 },
       { documentId: DOC, layer: "" }, { documentId: DOC, textContains: "t".repeat(201) }, { documentId: DOC, fields: ["all"] },
+      { documentId: DOC, fields: "all" }, { documentId: DOC, fields: "" }, { documentId: DOC, fields: null },
+      { documentId: DOC, bbox: "true" }, { documentId: DOC, bbox: 1 }, { documentId: DOC, bbox: { min: [0, 0], max: [1, 1] } },
+      { documentId: DOC, within: { min: [0, 0] } }, { documentId: DOC, within: { max: [1, 1] } },
+      { documentId: DOC, within: { min: [0], max: [1, 1] } }, { documentId: DOC, within: { min: [0, 0, 0], max: [1, 1] } },
+      { documentId: DOC, within: { min: [0, 0], max: ["1", 1] } }, { documentId: DOC, within: { min: [0, 0], max: [1, 1], mode: "inside" } },
+      { documentId: DOC, within: { min: [0, 0], max: [1, 1], mode: "WINDOW" } },
+      { documentId: DOC, within: { min: [0, 0], max: [1, 1], layer: "0" } }, { documentId: DOC, within: [[0, 0], [1, 1]] },
+    ],
+  },
+  inertia_cad_document_info: {
+    valid: [{ documentId: DOC }, { documentId: ACAD_DOC }, { documentId: "x".repeat(1024) }],
+    invalid: [
+      {}, { documentId: "skp:" }, { documentId: "x".repeat(1025) }, { documentId: 42 },
+      { documentId: DOC, limit: 10 }, { documentId: DOC, extra: true },
     ],
   },
   inertia_cad_capture_view: {
-    valid: [{ documentId: DOC }, { documentId: DOC, maxWidth: 64, maxHeight: 2048 }],
+    valid: [
+      { documentId: DOC }, { documentId: DOC, maxWidth: 64, maxHeight: 2048 },
+      { documentId: ACAD_DOC, extents: true }, { documentId: ACAD_DOC, extents: false, maxWidth: 640 },
+      { documentId: ACAD_DOC, bbox: { min: [0, 0], max: [1200, 800.5] } },
+      { documentId: ACAD_DOC, bbox: { min: [-10, -10], max: [10, 10] }, maxHeight: 64 },
+    ],
     invalid: [
       { documentId: DOC, maxWidth: 63 }, { documentId: DOC, maxHeight: 2049 }, { documentId: DOC, maxWidth: 100.5 },
       { documentId: DOC, format: "jpeg" }, { maxWidth: 64 },
+      { documentId: ACAD_DOC, extents: "yes" }, { documentId: ACAD_DOC, extents: 1 }, { documentId: ACAD_DOC, extents: null },
+      { documentId: ACAD_DOC, bbox: true }, { documentId: ACAD_DOC, bbox: { min: [0, 0] } },
+      { documentId: ACAD_DOC, bbox: { max: [1, 1] } }, { documentId: ACAD_DOC, bbox: { min: [0, 0, 0], max: [1, 1] } },
+      { documentId: ACAD_DOC, bbox: { min: [0, 0], max: [1] } }, { documentId: ACAD_DOC, bbox: { min: [0, 0], max: [1, "1"] } },
+      { documentId: ACAD_DOC, bbox: { min: [0, 0], max: [1, 1], mode: "window" } },
+      { documentId: ACAD_DOC, bbox: [[0, 0], [1, 1]] },
     ],
   },
   inertia_cad_preview_changes: previewSamples(),
@@ -200,6 +230,14 @@ function fixtureRuntime(): ProviderHostToolRuntime {
 }
 
 describe("CAD tool schemas", () => {
+  it("have samples for every tool", () => {
+    expect(Object.keys(SAMPLES).sort()).toEqual(CAD_TOOL_DEFINITIONS.map(({ name }) => name).sort());
+    for (const [tool, samples] of Object.entries(SAMPLES)) {
+      expect(samples.valid.length, tool).toBeGreaterThan(0);
+      expect(samples.invalid.length, tool).toBeGreaterThan(0);
+    }
+  });
+
   it("cover every preview operation with a sample", () => {
     const operations = CAD_TOOL_DEFINITIONS.find(({ name }) => name === "inertia_cad_preview_changes")!.inputSchema as Schema;
     const items = ((operations.properties as Record<string, Schema>).operations!.items ?? {}) as Schema;

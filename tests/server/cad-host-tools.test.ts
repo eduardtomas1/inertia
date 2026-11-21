@@ -17,7 +17,9 @@ import {
   CAD_TOOL_DEFINITIONS,
   CAD_TOOL_NAMES,
   CadHostTools,
+  boundedQuery,
   fitRows,
+  fitSummary,
 } from "../../src/server/runtime/cad-host-tools";
 import { MAX_PROVIDER_HOST_TOOL_IMAGE_BYTES } from "../../src/shared/provider-host-tools";
 import {
@@ -74,14 +76,17 @@ function expectFailure(result: ProviderHostToolResult, code: string): Json {
 }
 
 const methods = (host: FakeCadHost): string[] => host.calls.map(({ method }) => method);
+const row = (index: number): Json => ({ id: String(index), name: `Object ${index}`, notes: "n".repeat(80) });
+const rows = (count: number): Json[] => Array.from({ length: count }, (_, index) => row(index));
 
 describe("CAD tool catalogue", () => {
-  it("defines the eight inertia_cad tools", () => {
+  it("defines the nine inertia_cad tools", () => {
     expect([...CAD_TOOL_NAMES]).toEqual([
       "inertia_cad_status",
       "inertia_cad_setup",
       "inertia_cad_get_selection",
       "inertia_cad_query_objects",
+      "inertia_cad_document_info",
       "inertia_cad_capture_view",
       "inertia_cad_preview_changes",
       "inertia_cad_apply_changes",
@@ -90,6 +95,7 @@ describe("CAD tool catalogue", () => {
     const hints = Object.fromEntries(CAD_TOOL_DEFINITIONS.map(({ name, readOnly, destructive }) => [name, { readOnly, destructive }]));
     expect(hints.inertia_cad_preview_changes).toEqual({ readOnly: true, destructive: false });
     expect(hints.inertia_cad_apply_changes).toEqual({ readOnly: false, destructive: true });
+    expect(hints.inertia_cad_document_info).toEqual({ readOnly: true, destructive: false });
   });
 
   it("answers unknown_tool for a name it does not own", async () => {
@@ -112,7 +118,17 @@ describe("CAD tool arguments and errors", () => {
     { tool: "inertia_cad_get_selection", args: {} },
     { tool: "inertia_cad_get_selection", args: { documentId: SKP_DOCUMENT_ID, extra: true } },
     { tool: "inertia_cad_query_objects", args: { documentId: SKP_DOCUMENT_ID, cursor: "-1" } },
+    { tool: "inertia_cad_query_objects", args: { documentId: ACAD_DOCUMENT_ID, bbox: "yes" } },
+    { tool: "inertia_cad_query_objects", args: { documentId: ACAD_DOCUMENT_ID, within: { min: [0, 0, 0], max: [1, 1] } } },
+    { tool: "inertia_cad_query_objects", args: { documentId: ACAD_DOCUMENT_ID, within: { min: [0, 0], max: [1, 1], mode: "inside" } } },
+    { tool: "inertia_cad_query_objects", args: { documentId: ACAD_DOCUMENT_ID, within: { min: [0, 0], max: [1, 1], z: 0 } } },
+    { tool: "inertia_cad_query_objects", args: { documentId: ACAD_DOCUMENT_ID, fields: "all" } },
+    { tool: "inertia_cad_document_info", args: {} },
+    { tool: "inertia_cad_document_info", args: { documentId: ACAD_DOCUMENT_ID, layers: true } },
     { tool: "inertia_cad_capture_view", args: { documentId: SKP_DOCUMENT_ID, maxWidth: 32 } },
+    { tool: "inertia_cad_capture_view", args: { documentId: ACAD_DOCUMENT_ID, extents: 1 } },
+    { tool: "inertia_cad_capture_view", args: { documentId: ACAD_DOCUMENT_ID, bbox: { min: [0, 0], max: [1] } } },
+    { tool: "inertia_cad_capture_view", args: { documentId: ACAD_DOCUMENT_ID, bbox: { min: [0, 0], max: [1, 1], mode: "window" } } },
     { tool: "inertia_cad_preview_changes", args: { documentId: SKP_DOCUMENT_ID, operations: [{ op: "skp.explode", ids: ["1"] }] } },
     { tool: "inertia_cad_preview_changes", args: { documentId: SKP_DOCUMENT_ID, operations: [] } },
     { tool: "inertia_cad_apply_changes", args: { proposalId: "" } },
@@ -152,6 +168,87 @@ describe("CAD tool arguments and errors", () => {
     });
     const { tools: cad } = await tools([sketchup]);
     await expect(cad.invoke(call("inertia_cad_get_selection", { documentId: SKP_DOCUMENT_ID }), true)).rejects.toThrow("bug");
+  });
+});
+
+describe("CAD reads", () => {
+  it("passes query filters, bbox, within and fields to the host", async () => {
+    const autocad = fakeCadHost("autocad", { query: () => ({ items: [], nextCursor: null }) });
+    const { tools: cad } = await tools([autocad]);
+    const args = {
+      documentId: ACAD_DOCUMENT_ID,
+      types: ["LINE"],
+      bbox: true,
+      within: { min: [0, 0], max: [100, 50], mode: "window" },
+      fields: "compact",
+      limit: 10,
+    };
+    expect((await cad.invoke(call("inertia_cad_query_objects", args), true)).success).toBe(true);
+    expect(autocad.calls).toEqual([expect.objectContaining({ method: "query", params: args })]);
+  });
+
+  it("asks the host for document info and returns it", async () => {
+    const info = { documentId: ACAD_DOCUMENT_ID, units: "mm", entityCount: 12, layers: [{ name: "0" }] };
+    const autocad = fakeCadHost("autocad", { info: () => info });
+    const { tools: cad } = await tools([autocad]);
+    const result = await cad.invoke(call("inertia_cad_document_info", { documentId: ACAD_DOCUMENT_ID }), true);
+    expect(result).toEqual({ success: true, text: JSON.stringify(info) });
+    expect(autocad.calls).toEqual([expect.objectContaining({
+      method: "info",
+      params: { documentId: ACAD_DOCUMENT_ID },
+      options: expect.objectContaining({ documentId: ACAD_DOCUMENT_ID, timeoutMs: 28_000 }),
+    })]);
+  });
+
+  it("fits a SketchUp summary by its tag and material lists", async () => {
+    const sketchup = fakeCadHost("sketchup", {
+      info: () => ({ documentId: SKP_DOCUMENT_ID, units: "mm", tags: rows(800), materials: rows(800), scenes: [] }),
+    });
+    const { tools: cad } = await tools([sketchup]);
+    const result = await cad.invoke(call("inertia_cad_document_info", { documentId: SKP_DOCUMENT_ID }), true);
+    expect(result.success).toBe(true);
+    expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(RESULT_LIMIT);
+    expect(body(result)).toMatchObject({ tagsTruncated: true, materialsTruncated: true });
+  });
+
+  it("cuts a long layer list and marks it truncated", async () => {
+    const layers = rows(1_000);
+    const autocad = fakeCadHost("autocad", { info: () => ({ documentId: ACAD_DOCUMENT_ID, entityCount: 9, layers }) });
+    const { tools: cad } = await tools([autocad]);
+    const result = await cad.invoke(call("inertia_cad_document_info", { documentId: ACAD_DOCUMENT_ID }), true);
+    expect(result.success).toBe(true);
+    expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(RESULT_LIMIT);
+    const info = body(result);
+    const kept = (info.layers as Json[]).length;
+    expect(kept).toBeGreaterThan(0);
+    expect(kept).toBeLessThan(1_000);
+    expect(info).toMatchObject({ documentId: ACAD_DOCUMENT_ID, entityCount: 9, layersTruncated: true, layers: rows(kept) });
+    expect(info.nextCursor).toBeUndefined();
+    expect(info.truncated).toBeUndefined();
+  });
+});
+
+describe("inertia_cad_apply_changes", () => {
+  it("keeps the edit running when the tool call is cancelled", async () => {
+    let finish!: (answer: unknown) => void;
+    const sketchup = fakeCadHost("sketchup", {
+      preview: () => previewAnswer(SKP_DOCUMENT_ID, [{ op: "skp.erase", target: "Group 1", field: "entity", before: "group" }]),
+      apply: () => new Promise((resolve) => {
+        finish = resolve;
+      }),
+    });
+    const { tools: cad } = await tools([sketchup]);
+    const preview = body(await cad.invoke(call("inertia_cad_preview_changes", {
+      documentId: SKP_DOCUMENT_ID, operations: [{ op: "skp.erase", ids: ["1"] }],
+    }), true));
+    const controller = new AbortController();
+    const request = { ...call("inertia_cad_apply_changes", { proposalId: preview.proposalId }), signal: controller.signal };
+    const applying = cad.invoke(request, true);
+    await vi.waitFor(() => expect(methods(sketchup)).toEqual(["preview", "apply"]));
+    controller.abort();
+    expect(sketchup.calls[1]!.options.signal).toBeUndefined();
+    finish({ status: "applied" });
+    expect(body(await applying)).toMatchObject({ proposalId: preview.proposalId, status: "applied" });
   });
 });
 
@@ -301,6 +398,29 @@ describe("inertia_cad_capture_view", () => {
     });
   });
 
+  it("refuses extents and bbox for SketchUp without calling the host", async () => {
+    const sketchup = capturing(png(8));
+    const { tools: cad } = await tools([sketchup]);
+    for (const extra of [{ extents: true }, { bbox: { min: [0, 0], max: [1, 1] } }]) {
+      expectFailure(await cad.invoke(call("inertia_cad_capture_view", { documentId: SKP_DOCUMENT_ID, ...extra }), true), "INVALID_REQUEST");
+    }
+    expect(methods(sketchup)).toEqual([]);
+  });
+
+  it("passes extents and bbox to AutoCAD", async () => {
+    const autocad = fakeCadHost("autocad", {
+      capture: () => ({ documentId: ACAD_DOCUMENT_ID, width: 64, height: 64, pngBase64: png(8) }),
+    });
+    const { tools: cad } = await tools([autocad]);
+    const bbox = { min: [-5, 0], max: [120.5, 80] };
+    expect((await cad.invoke(call("inertia_cad_capture_view", { documentId: ACAD_DOCUMENT_ID, extents: true }), true)).success).toBe(true);
+    expect((await cad.invoke(call("inertia_cad_capture_view", { documentId: ACAD_DOCUMENT_ID, bbox, maxWidth: 640 }), true)).success).toBe(true);
+    expect(autocad.calls.map(({ params }) => params)).toEqual([
+      { documentId: ACAD_DOCUMENT_ID, maxWidth: 1280, maxHeight: 1280, extents: true },
+      { documentId: ACAD_DOCUMENT_ID, maxWidth: 640, maxHeight: 1280, bbox },
+    ]);
+  });
+
   it("passes the requested size and leaves out a missing scene", async () => {
     const sketchup = capturing(png(8), null);
     const { tools: cad } = await tools([sketchup]);
@@ -322,8 +442,6 @@ describe("inertia_cad_capture_view", () => {
   });
 });
 
-const row = (index: number): Json => ({ id: String(index), name: `Object ${index}`, notes: "n".repeat(80) });
-const rows = (count: number): Json[] => Array.from({ length: count }, (_, index) => row(index));
 const bigChange = (index: number) => ({ op: "skp.rename", target: `Group ${index}`, field: "name", before: "b".repeat(60), after: "a".repeat(60) });
 
 describe("results cut to the size limit", () => {
@@ -434,6 +552,65 @@ describe("fitRows", () => {
   it("returns undefined when the rows are not a list or nothing fits", () => {
     expect(fitRows({ items: "x".repeat(100) }, "items", 0, 50)).toBeUndefined();
     expect(fitRows({ items: rows(5), header: "h".repeat(100) }, "items", 0, 50)).toBeUndefined();
+  });
+
+  it("resumes from a cursor function given how many rows were kept", () => {
+    const fitted = fitRows({ items: rows(50), nextCursor: "999" }, "items", (kept) => `at-${kept}`, 2_000)!;
+    expect(fitted.nextCursor).toBe(`at-${(fitted.items as Json[]).length}`);
+  });
+});
+
+describe("fitSummary", () => {
+  it("leaves a summary that fits untouched", () => {
+    const summary = { units: "mm", layers: rows(3) };
+    expect(fitSummary(summary)).toEqual(summary);
+  });
+
+  it("shortens whichever summary lists are longest and marks each one", () => {
+    const summary = { documentId: SKP_DOCUMENT_ID, units: "mm", tags: rows(400), materials: rows(400), scenes: rows(2) };
+    const fitted = fitSummary(summary, 4_000)!;
+    expect(Buffer.byteLength(JSON.stringify(fitted))).toBeLessThanOrEqual(4_000);
+    expect(fitted).toMatchObject({ documentId: SKP_DOCUMENT_ID, units: "mm", tagsTruncated: true, materialsTruncated: true });
+    expect(fitted.scenes).toEqual(rows(2));
+    expect(fitted.scenesTruncated).toBeUndefined();
+    expect((fitted.tags as Json[]).length).toBeGreaterThan(0);
+  });
+
+  it("fits an AutoCAD summary whose block list alone is too long", () => {
+    const fitted = fitSummary({ layers: rows(2), blocks: rows(2_000), layouts: ["Model"] }, 4_000)!;
+    expect(fitted).toMatchObject({ layers: rows(2), blocksTruncated: true, layouts: ["Model"] });
+  });
+
+  it("gives up only when no list is left to shorten", () => {
+    expect(fitSummary({ note: "n".repeat(200), tags: [] }, 50)).toBeUndefined();
+  });
+});
+
+describe("boundedQuery", () => {
+  it("passes a filtered page that fits through without its scan positions", () => {
+    const result = body(boundedQuery({ items: rows(2), nextCursor: "40", scanPositions: [3, 17] }, 0));
+    expect(result).toEqual({ items: rows(2), nextCursor: "40" });
+  });
+
+  it("resumes a trimmed filtered page after the scan position of the last row kept", () => {
+    const positions = Array.from({ length: 500 }, (_unused, index) => 10 + index * 3);
+    const result = boundedQuery({ items: rows(500), nextCursor: "9999", scanPositions: positions }, 0);
+    expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(RESULT_LIMIT);
+    const page = body(result);
+    const kept = (page.items as Json[]).length;
+    expect(kept).toBeGreaterThan(0);
+    expect(kept).toBeLessThan(500);
+    expect(page.nextCursor).toBe(String(positions[kept - 1]! + 1));
+    expect(page.scanPositions).toBeUndefined();
+  });
+
+  it("refuses a filtered page whose first row alone is too large instead of looping", () => {
+    expectFailure(boundedQuery({ items: [{ text: "x".repeat(40_000) }], scanPositions: [5] }, 0), "RESULT_TOO_LARGE");
+  });
+
+  it("pages an unfiltered query by row count as before", () => {
+    const page = body(boundedQuery({ items: rows(500), total: 900 }, 100));
+    expect(page.nextCursor).toBe(String(100 + (page.items as Json[]).length));
   });
 
   it("may keep zero rows when only the envelope fits", () => {

@@ -1,14 +1,17 @@
 // @inertia-test-suite portable
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CadError } from "../../src/server/cad/cad-hosts";
+import { CadError, HOST_UNREADABLE } from "../../src/server/cad/cad-hosts";
 import {
   approvalMessage,
+  type CadApplyResult,
   type CadChange,
+  type CadServiceOptions,
+  checkDestination,
   copyName,
   CadService,
 } from "../../src/server/cad/cad-service";
@@ -37,6 +40,8 @@ async function settleWrites(): Promise<void> {
 const roots: string[] = [];
 const START = Date.UTC(2026, 10, 21, 12, 0, 0);
 const TTL_MS = 30 * 60 * 1000;
+// Under OpenCode's 30-second host-tool timeout.
+const READ_TIMEOUT_MS = 28_000;
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(removeTemporaryDirectory));
@@ -57,14 +62,19 @@ function sketchUpHost(): FakeCadHost {
     apply: () => ({ status: "applied", created: [{ id: "99" }] }),
     selection: () => ({ items: [{ id: "11" }] }),
     query: () => ({ items: [], nextCursor: null }),
+    info: () => ({ units: "mm", layers: [] }),
     capture: () => ({ documentId: SKP_DOCUMENT_ID, width: 10, height: 8, pngBase64: "AAAA", scene: null }),
     save_copy: (params) => ({ saved: params.path }),
   });
 }
 
-async function service(hosts = [sketchUpHost()], clock = { now: START }) {
+async function service(
+  hosts = [sketchUpHost()],
+  clock = { now: START },
+  options: Partial<CadServiceOptions> = {},
+) {
   const directory = await stateDirectory();
-  const cad = new CadService({ hosts, stateDirectory: directory, now: () => clock.now });
+  const cad = new CadService({ hosts, stateDirectory: directory, now: () => clock.now, ...options });
   return { cad, directory, clock, host: hosts[0]! };
 }
 
@@ -112,15 +122,24 @@ describe("CadService reads", () => {
     expect(sketchup.setupCalls).toBe(2);
   });
 
-  it("forwards selection and query to the owning host with the read timeout", async () => {
+  it("forwards selection, query and info to the owning host with the read timeout", async () => {
     const { cad, host } = await service();
     expect(await cad.selection({ documentId: SKP_DOCUMENT_ID, limit: 5 })).toEqual({ items: [{ id: "11" }] });
     expect(await cad.query({ documentId: SKP_DOCUMENT_ID, tag: "Walls" })).toEqual({ items: [], nextCursor: null });
+    expect(await cad.info({ documentId: SKP_DOCUMENT_ID })).toEqual({ units: "mm", layers: [] });
     expect(host.calls.map(({ method, params, options }) => [method, params, options.documentId, options.timeoutMs]))
       .toEqual([
-        ["selection", { documentId: SKP_DOCUMENT_ID, limit: 5 }, SKP_DOCUMENT_ID, 60_000],
-        ["query", { documentId: SKP_DOCUMENT_ID, tag: "Walls" }, SKP_DOCUMENT_ID, 60_000],
+        ["selection", { documentId: SKP_DOCUMENT_ID, limit: 5 }, SKP_DOCUMENT_ID, READ_TIMEOUT_MS],
+        ["query", { documentId: SKP_DOCUMENT_ID, tag: "Walls" }, SKP_DOCUMENT_ID, READ_TIMEOUT_MS],
+        ["info", { documentId: SKP_DOCUMENT_ID }, SKP_DOCUMENT_ID, READ_TIMEOUT_MS],
       ]);
+  });
+
+  it("turns an info answer of the wrong shape into HOST_ERROR", async () => {
+    const host = sketchUpHost();
+    host.handlers.info = () => "units: mm";
+    const { cad } = await service([host]);
+    expect((await rejection(cad.info({ documentId: SKP_DOCUMENT_ID }))).code).toBe("HOST_ERROR");
   });
 
   it("refuses a documentId no host owns", async () => {
@@ -144,6 +163,38 @@ describe("CadService reads", () => {
     const capture = await cad.capture({ documentId: SKP_DOCUMENT_ID, maxWidth: 320, maxHeight: 200 });
     expect(capture).toEqual({ documentId: SKP_DOCUMENT_ID, width: 10, height: 8, pngBase64: "AAAA", scene: null });
     expect(host.calls[0]!.params).toEqual({ documentId: SKP_DOCUMENT_ID, maxWidth: 320, maxHeight: 200 });
+    expect(host.calls[0]!.options.timeoutMs).toBe(READ_TIMEOUT_MS);
+  });
+
+  it.each([
+    { label: "extents", extra: { extents: true } },
+    { label: "a bbox", extra: { bbox: { min: [0, 0], max: [10, 10] } } },
+  ])("refuses $label for a SketchUp capture without calling the host", async ({ extra }) => {
+    const { cad, host } = await service();
+    const error = await rejection(cad.capture({ documentId: SKP_DOCUMENT_ID, maxWidth: 64, maxHeight: 64, ...extra }));
+    expect(error.code).toBe("INVALID_REQUEST");
+    expect(error.message).toContain("only in AutoCAD");
+    expect(host.calls).toEqual([]);
+  });
+
+  it("captures SketchUp's current view when extents is false", async () => {
+    const { cad, host } = await service();
+    await cad.capture({ documentId: SKP_DOCUMENT_ID, maxWidth: 64, maxHeight: 64, extents: false });
+    expect(host.calls.map(({ method }) => method)).toEqual(["capture"]);
+  });
+
+  it("forwards extents and bbox to AutoCAD", async () => {
+    const autocad = fakeCadHost("autocad", {
+      capture: () => ({ documentId: ACAD_DOCUMENT_ID, width: 64, height: 64, pngBase64: "AAAA" }),
+    });
+    const { cad } = await service([autocad]);
+    const bbox = { min: [0, 0], max: [1200, 800] };
+    await cad.capture({ documentId: ACAD_DOCUMENT_ID, maxWidth: 640, maxHeight: 480, extents: true });
+    await cad.capture({ documentId: ACAD_DOCUMENT_ID, maxWidth: 640, maxHeight: 480, bbox });
+    expect(autocad.calls.map(({ params, options }) => [params, options.timeoutMs])).toEqual([
+      [{ documentId: ACAD_DOCUMENT_ID, maxWidth: 640, maxHeight: 480, extents: true }, READ_TIMEOUT_MS],
+      [{ documentId: ACAD_DOCUMENT_ID, maxWidth: 640, maxHeight: 480, bbox }, READ_TIMEOUT_MS],
+    ]);
   });
 });
 
@@ -182,7 +233,7 @@ describe("CadService preview", () => {
     expect(host.calls[0]).toMatchObject({
       method: "preview",
       params: { documentId: SKP_DOCUMENT_ID, operations: [SET_TAG] },
-      options: { timeoutMs: 60_000 },
+      options: { timeoutMs: READ_TIMEOUT_MS },
     });
   });
 
@@ -206,6 +257,8 @@ describe("CadService apply", () => {
     const receipt = await cad.apply({ proposalId });
     const apply = host.calls.find(({ method }) => method === "apply")!;
     expect(apply.options).toMatchObject({ documentId: SKP_DOCUMENT_ID, timeoutMs: 10 * 60 * 1000 });
+    // A cancelled tool call must never cancel an edit the user can still approve.
+    expect(apply.options.signal).toBeUndefined();
     expect(apply.params).toEqual({
       documentId: SKP_DOCUMENT_ID,
       operations: [SET_TAG, { ...SET_TAG, ids: ["12"] }, { op: "skp.add_box" }],
@@ -360,9 +413,11 @@ describe("CadService apply", () => {
   it.each([
     { thrown: new CadError("HOST_TIMEOUT", "late"), status: "unknown", message: "may or may not have been applied" },
     { thrown: new CadError("HOST_DISCONNECTED", "gone"), status: "unknown", message: "never sent again" },
+    { thrown: new CadError("APPLY_UNCONFIRMED", "no confirmation"), status: "unknown", message: "may or may not have been applied" },
+    { thrown: new CadError(HOST_UNREADABLE, "garbled"), status: "unknown", message: "may or may not have been applied" },
     { thrown: new CadError("PARTIALLY_APPLIED", "2 of 3 changes applied."), status: "partial", message: "2 of 3 changes applied." },
     { thrown: new CadError("STALE_TARGET", "Group 11 changed."), status: "failed", message: "STALE_TARGET: Group 11 changed." },
-    { thrown: new CadError("HOST_OFFLINE", "SketchUp is closed."), status: "failed", message: "HOST_OFFLINE: SketchUp is closed." },
+    { thrown: new CadError("APPLY_FAILED", "AutoCAD refused."), status: "failed", message: "APPLY_FAILED: AutoCAD refused." },
   ])("records $thrown.code as a $status receipt", async ({ thrown, status, message }) => {
     const host = sketchUpHost();
     host.handlers.apply = () => {
@@ -385,13 +440,193 @@ describe("CadService apply", () => {
     expect(receipt).toMatchObject({ status: "rejected", message: expect.stringContaining("declined"), created: [] });
   });
 
-  it("records an apply answer of the wrong shape as failed", async () => {
+  it.each([
+    { label: "an unknown status", answer: { status: "maybe" } },
+    { label: "no status", answer: { changes: [] } },
+    { label: "not an object", answer: "applied" },
+  ])("records an apply answer with $label as unknown, since the edit may have run", async ({ answer }) => {
     const host = sketchUpHost();
-    host.handlers.apply = () => ({ status: "maybe" });
+    host.handlers.apply = () => answer;
     const { cad } = await service([host]);
-    const receipt = await cad.apply({ proposalId: await propose(cad) });
-    expect(receipt.status).toBe("failed");
-    expect(receipt.message).toMatch(/^HOST_ERROR: /u);
+    const proposalId = await propose(cad);
+    const receipt = await cad.apply({ proposalId });
+    expect(receipt).toMatchObject({ proposalId, status: "unknown", message: expect.stringContaining("may or may not") });
+    expect(await cad.apply({ proposalId })).toEqual({ ...receipt, replayed: true });
+    expect(host.calls.filter(({ method }) => method === "apply")).toHaveLength(1);
+  });
+
+  it("records a host crash that is not a CadError as unknown", async () => {
+    const host = sketchUpHost();
+    host.handlers.apply = () => {
+      throw new RangeError("bridge bug");
+    };
+    const { cad } = await service([host]);
+    const proposalId = await propose(cad);
+    const receipt = await cad.apply({ proposalId });
+    expect(receipt).toMatchObject({ proposalId, status: "unknown", changes: [CHANGE] });
+    expect(await cad.apply({ proposalId })).toEqual({ ...receipt, replayed: true });
+  });
+
+  it("records a dialog the user let time out as expired", async () => {
+    const host = sketchUpHost();
+    host.handlers.apply = () => ({ status: "expired" });
+    const { cad, directory } = await service([host]);
+    const proposalId = await propose(cad);
+    const receipt = await cad.apply({ proposalId });
+    expect(receipt).toMatchObject({ proposalId, status: "expired", message: expect.stringContaining("nothing was modified"), created: [] });
+    const lines = (await readFile(join(directory, "receipts.jsonl"), "utf8")).trim().split("\n");
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([receipt]);
+    expect(await cad.apply({ proposalId })).toEqual({ ...receipt, replayed: true });
+  });
+});
+
+const NOT_SENT_CODES = [
+  "HOST_BUSY",
+  "HOST_OFFLINE",
+  "HOST_UNAVAILABLE",
+  "UNDO_DISABLED",
+  "TIME_BUDGET",
+  "INACTIVE_DOCUMENT",
+  "DOCUMENT_NOT_FOUND",
+  "NOT_INSTALLED",
+  "UNSUPPORTED_PLATFORM",
+  "SETUP_FAILED",
+  "UNAUTHORIZED",
+  "CANCELLED",
+];
+
+describe("CadService apply that never reached the dialog", () => {
+  it.each(NOT_SENT_CODES)("rejects %s, writes no receipt, and lets the same proposal be applied again", async (code) => {
+    const host = sketchUpHost();
+    let attempts = 0;
+    host.handlers.apply = () => {
+      attempts += 1;
+      if (attempts === 1) throw new CadError(code, `${code} detail`);
+      return { status: "applied" };
+    };
+    const { cad, directory } = await service([host]);
+    const proposalId = await propose(cad);
+    expect(await rejection(cad.apply({ proposalId }))).toMatchObject({ code, message: `${code} detail` });
+    const file = join(directory, "receipts.jsonl");
+    await expect(readFile(file, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    const receipt = await cad.apply({ proposalId });
+    expect(receipt).toMatchObject({ proposalId, status: "applied" });
+    expect(receipt).not.toHaveProperty("replayed");
+    expect(attempts).toBe(2);
+    const lines = (await readFile(file, "utf8")).trim().split("\n");
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([receipt]);
+  });
+
+  it("rejects every concurrent apply of the proposal with the same failure", async () => {
+    const host = sketchUpHost();
+    const answer = deferred<unknown>();
+    host.handlers.apply = () => answer.promise;
+    const { cad } = await service([host]);
+    const proposalId = await propose(cad);
+    const first = rejection(cad.apply({ proposalId }));
+    const second = rejection(cad.apply({ proposalId }));
+    await vi.waitFor(() => expect(host.calls.filter(({ method }) => method === "apply")).toHaveLength(1));
+    answer.reject(new CadError("HOST_BUSY", "Close the dialog."));
+    expect((await first).code).toBe("HOST_BUSY");
+    expect((await second).code).toBe("HOST_BUSY");
+    host.handlers.apply = () => ({ status: "applied" });
+    expect((await cad.apply({ proposalId })).status).toBe("applied");
+    expect(host.calls.filter(({ method }) => method === "apply")).toHaveLength(2);
+  });
+
+  it("does not put back a proposal that expired while it waited", async () => {
+    const host = sketchUpHost();
+    const { cad, clock } = await service([host]);
+    host.handlers.apply = () => {
+      clock.now = START + TTL_MS;
+      throw new CadError("HOST_BUSY", "Close the dialog.");
+    };
+    const proposalId = await propose(cad);
+    expect((await rejection(cad.apply({ proposalId }))).code).toBe("HOST_BUSY");
+    expect((await rejection(cad.apply({ proposalId }))).code).toBe("PROPOSAL_EXPIRED");
+    expect(host.calls.filter(({ method }) => method === "apply")).toHaveLength(1);
+  });
+});
+
+describe("CadService pending apply", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A SketchUp host whose apply waits for the test; `started` resolves once the host call begins. */
+  function waitingHost() {
+    const host = sketchUpHost();
+    const started = deferred<void>();
+    const answer = deferred<unknown>();
+    host.handlers.apply = () => {
+      started.resolve();
+      return answer.promise;
+    };
+    return { host, started, answer };
+  }
+
+  const applyCalls = (host: FakeCadHost): number => host.calls.filter(({ method }) => method === "apply").length;
+
+  it("answers pending after 25 seconds, and a second call waits on the same host call for the receipt", async () => {
+    const { host, started, answer } = waitingHost();
+    const { cad, directory } = await service([host]);
+    const proposalId = await propose(cad);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let firstResult: CadApplyResult | undefined;
+    const first = cad.apply({ proposalId }).then((result) => {
+      firstResult = result;
+      return result;
+    });
+    await started.promise;
+    await vi.advanceTimersByTimeAsync(24_999);
+    expect(firstResult).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await first).toEqual({
+      proposalId,
+      documentId: SKP_DOCUMENT_ID,
+      changes: [CHANGE],
+      created: [],
+      at: new Date(START).toISOString(),
+      status: "pending",
+      message: expect.stringContaining("same proposalId"),
+    });
+    // Fake timers keep the second call waiting however slow the receipt write is.
+    const second = cad.apply({ proposalId });
+    answer.resolve({ status: "applied", created: [{ id: "99" }] });
+    const receipt = await second;
+    expect(receipt).toMatchObject({ proposalId, status: "applied", created: [{ id: "99" }] });
+    expect(receipt).not.toHaveProperty("replayed");
+    expect(applyCalls(host)).toBe(1);
+    const lines = (await readFile(join(directory, "receipts.jsonl"), "utf8")).trim().split("\n");
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([receipt]);
+  });
+
+  it("waits only applyWaitMs before answering pending, without a second host call", async () => {
+    const { host, started, answer } = waitingHost();
+    const { cad } = await service([host], { now: START }, { applyWaitMs: 20 });
+    const proposalId = await propose(cad);
+    const first = await cad.apply({ proposalId });
+    await started.promise;
+    expect(first.status).toBe("pending");
+    expect((await cad.apply({ proposalId })).status).toBe("pending");
+    answer.resolve({ status: "rejected" });
+    await vi.waitFor(async () => expect((await cad.apply({ proposalId })).status).toBe("rejected"));
+    expect(applyCalls(host)).toBe(1);
+  });
+
+  it("keeps a pending edit alive for a later NOT_SENT failure to put the proposal back", async () => {
+    const { host, started, answer } = waitingHost();
+    const { cad } = await service([host], { now: START }, { applyWaitMs: 20 });
+    const proposalId = await propose(cad);
+    expect((await cad.apply({ proposalId })).status).toBe("pending");
+    await started.promise;
+    answer.reject(new CadError("HOST_BUSY", "Close the dialog."));
+    host.handlers.apply = () => ({ status: "applied" });
+    await vi.waitFor(async () => {
+      const result = await cad.apply({ proposalId }).catch((error: unknown) => error);
+      expect(result).toMatchObject({ status: "applied" });
+    });
+    expect(applyCalls(host)).toBe(2);
   });
 });
 
@@ -436,6 +671,62 @@ describe("CadService receipts", () => {
     expect(receipt.status).toBe("applied");
     expect(await cad.apply({ proposalId })).toEqual({ ...receipt, replayed: true });
     expect(host.calls.filter(({ method }) => method === "apply")).toHaveLength(1);
+  });
+
+  it("keeps only the newest 5000 lines of a long receipt file, with their outcomes", async () => {
+    const directory = await stateDirectory();
+    const file = join(directory, "receipts.jsonl");
+    const statuses = ["applied", "rejected", "expired", "failed", "unknown", "partial"] as const;
+    const stored = Array.from({ length: 5003 }, (_, index) => ({
+      proposalId: `cadp_old${index}`,
+      documentId: SKP_DOCUMENT_ID,
+      status: statuses[index % statuses.length]!,
+      message: `outcome ${index}`,
+      changes: [CHANGE],
+      created: [],
+      at: new Date(START).toISOString(),
+    }));
+    await writeFile(file, `${stored.map((receipt) => JSON.stringify(receipt)).join("\n")}\n`);
+    const host = sketchUpHost();
+    const cad = new CadService({ hosts: [host], stateDirectory: directory, now: () => START });
+    expect(await cad.apply({ proposalId: "cadp_old5002" })).toEqual({ ...stored[5002], replayed: true });
+    expect(await cad.apply({ proposalId: "cadp_old3" })).toEqual({ ...stored[3], replayed: true });
+    expect((await rejection(cad.apply({ proposalId: "cadp_old2" }))).code).toBe("PROPOSAL_EXPIRED");
+    const kept = (await readFile(file, "utf8")).trim().split("\n");
+    expect(kept.map((line) => JSON.parse(line) as unknown)).toEqual(stored.slice(3));
+    // New outcomes append to the trimmed file; the next start trims it to 5000 again.
+    const receipt = await cad.apply({ proposalId: await propose(cad) });
+    expect((await readFile(file, "utf8")).trim().split("\n")).toHaveLength(5001);
+    const restarted = new CadService({ hosts: [sketchUpHost()], stateDirectory: directory, now: () => START });
+    for (const index of [4, 5, 6, 7, 8, 9]) {
+      expect(await restarted.apply({ proposalId: `cadp_old${index}` })).toEqual({ ...stored[index], replayed: true });
+    }
+    expect(await restarted.apply({ proposalId: receipt.proposalId })).toEqual({ ...receipt, replayed: true });
+    expect((await rejection(restarted.apply({ proposalId: "cadp_old3" }))).code).toBe("PROPOSAL_EXPIRED");
+    expect((await readFile(file, "utf8")).trim().split("\n")).toHaveLength(5000);
+    expect(host.calls.filter(({ method }) => method === "apply")).toHaveLength(1);
+  });
+
+  it("leaves a receipt file of exactly 5000 lines as it is", async () => {
+    const { cad, directory } = await service();
+    const file = join(directory, "receipts.jsonl");
+    const receipt = await cad.apply({ proposalId: await propose(cad) });
+    const line = JSON.stringify(receipt);
+    const text = Array.from({ length: 5000 }, (_, index) => line.replace(receipt.proposalId, `cadp_n${index}`)).join("\n");
+    await writeFile(file, `${text}\n`);
+    const restarted = new CadService({ hosts: [sketchUpHost()], stateDirectory: directory, now: () => START });
+    expect(await restarted.apply({ proposalId: "cadp_n0" })).toMatchObject({ proposalId: "cadp_n0", replayed: true });
+    expect(await readFile(file, "utf8")).toBe(`${text}\n`);
+  });
+
+  it("reads receipts.jsonl once per service instance", async () => {
+    const { cad, directory } = await service();
+    const file = join(directory, "receipts.jsonl");
+    const receipt = await cad.apply({ proposalId: await propose(cad) });
+    await appendFile(file, `${JSON.stringify({ ...receipt, proposalId: "cadp_external" })}\n`);
+    expect((await rejection(cad.apply({ proposalId: "cadp_external" }))).code).toBe("PROPOSAL_EXPIRED");
+    const restarted = new CadService({ hosts: [sketchUpHost()], stateDirectory: directory, now: () => START });
+    expect(await restarted.apply({ proposalId: "cadp_external" })).toEqual({ ...receipt, proposalId: "cadp_external", replayed: true });
   });
 });
 
@@ -488,6 +779,18 @@ describe("CadService save copy", () => {
       .toBe(join(tmpdir(), "a.dwg"));
   });
 
+  it("checks an agent-supplied destination as a local Windows path on Windows", async () => {
+    const directory = await stateDirectory();
+    const cad = new CadService({ hosts: [fakeCadHost("autocad")], stateDirectory: directory, platform: "win32" });
+    expect(await cad.saveDestination({ documentId: ACAD_DOCUMENT_ID, destination: "C:/Projects/old/../Plan copy.dwg" }))
+      .toBe("C:\\Projects\\Plan copy.dwg");
+    for (const destination of ["\\\\server\\share\\a.dwg", "\\\\?\\C:\\a.dwg", "C:\\Projects\\Plan:hidden.dwg", "Projects\\a.dwg"]) {
+      const error = await rejection(cad.saveDestination({ documentId: ACAD_DOCUMENT_ID, destination }));
+      expect(error.code, destination).toBe("INVALID_REQUEST");
+      expect(error.message).toContain("local drive");
+    }
+  });
+
   it("sends save_copy with the destination as path", async () => {
     const destination = join(tmpdir(), "Copy.skp");
     const { cad, host } = await service();
@@ -500,13 +803,104 @@ describe("CadService save copy", () => {
   });
 });
 
+describe("checkDestination", () => {
+  function refusal(destination: string, platform: NodeJS.Platform, extension: string): CadError {
+    let caught: unknown;
+    try {
+      checkDestination(destination, platform, extension);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught, destination).toBeInstanceOf(CadError);
+    return caught as CadError;
+  }
+
+  it("accepts a local drive path on Windows and returns it normalized", () => {
+    expect(checkDestination("C:\\Projects\\Plan copy.dwg", "win32", ".dwg")).toBe("C:\\Projects\\Plan copy.dwg");
+    expect(checkDestination("C:\\Projects\\Console room.dwg", "win32", ".dwg")).toBe("C:\\Projects\\Console room.dwg");
+    expect(checkDestination("d:/Models/x/../House.SKP", "win32", ".skp")).toBe("d:\\Models\\House.SKP");
+  });
+
+  it.each([
+    { label: "a UNC share", destination: "\\\\server\\share\\a.dwg" },
+    { label: "a forward-slash UNC share", destination: "//server/share/a.dwg" },
+    { label: "a \\\\?\\ path", destination: "\\\\?\\C:\\a.dwg" },
+    { label: "a \\\\.\\ device path", destination: "\\\\.\\C:\\a.dwg" },
+    { label: "an alternate data stream after the name", destination: "C:\\a.dwg:evil" },
+    { label: "an alternate data stream named like a drawing", destination: "C:\\Projects\\Plan:evil.dwg" },
+    { label: "a drive-relative path", destination: "C:a.dwg" },
+    { label: "a path rooted on the current drive", destination: "\\Projects\\a.dwg" },
+    { label: "a relative path", destination: "Projects\\a.dwg" },
+    { label: "the wrong extension", destination: "C:\\Projects\\a.skp" },
+    { label: "no extension", destination: "C:\\Projects\\a" },
+    { label: "the NUL device name", destination: "C:\\Projects\\NUL.dwg" },
+    { label: "the CON device name in lower case", destination: "C:\\Projects\\con.dwg" },
+    { label: "a COM port name", destination: "C:\\COM1.dwg" },
+    { label: "a printer port name with trailing spaces", destination: "C:\\Projects\\LPT1 .dwg" },
+    { label: "a device name before a second extension", destination: "C:\\Projects\\aux.copy.dwg" },
+  ])("refuses $label on Windows", ({ destination }) => {
+    const error = refusal(destination, "win32", ".dwg");
+    expect(error.code).toBe("INVALID_REQUEST");
+    expect(error.message).toContain("C:\\Projects\\Plan copy.dwg");
+  });
+
+  it("accepts an absolute path elsewhere and refuses a relative one or the wrong extension", () => {
+    expect(checkDestination("/Users/x/a.skp", "darwin", ".skp")).toBe("/Users/x/a.skp");
+    expect(checkDestination("/Users/x/../x/b.SKP", "linux", ".skp")).toBe("/Users/x/b.SKP");
+    for (const destination of ["Users/x/a.skp", "./a.skp", "a.skp", "/Users/x/a.dwg", "/Users/x/a"]) {
+      const error = refusal(destination, "darwin", ".skp");
+      expect(error.code).toBe("INVALID_REQUEST");
+      expect(error.message).toContain("absolute path ending in .skp");
+    }
+  });
+});
+
 describe("approvalMessage", () => {
-  it("shows each change as before → after", () => {
+  it("shows a summary line, then each change as before → after", () => {
     expect(approvalMessage("House.skp", [CHANGE])).toBe(
-      "An agent in Inertia wants to change House.skp:\n\n"
+      "An agent in Inertia wants to change House.skp:\n"
+      + "Set tag (1)\n\n"
       + "• Group 11: tag Untagged → Walls"
       + "\n\nApply these changes? You can undo them in one step.",
     );
+  });
+
+  it("lists erasures first and moves second, under per-operation counts", () => {
+    const change = (op: string, target: string): CadChange => ({ op, target, field: "layer", before: "0", after: "Walls" });
+    const message = approvalMessage("Plan.dwg", [
+      change("acad.set_layer", "Line 2A"),
+      change("acad.move", "Line 2B"),
+      change("acad.erase", "Line 2C"),
+      change("acad.set_layer", "Line 2D"),
+      change("acad.erase", "Line 2E"),
+      change("acad.set_layer", "Line 2F"),
+    ]);
+    const lines = message.split("\n");
+    expect(lines[1]).toBe("Erase 2 objects, Move 1 object, Set layer (3)");
+    expect(lines.filter((line) => line.startsWith("• ")).map((line) => line.slice(2, 9)))
+      .toEqual(["Line 2C", "Line 2E", "Line 2B", "Line 2A", "Line 2D", "Line 2F"]);
+  });
+
+  it("never lets the line cap hide an erasure", () => {
+    const changes: CadChange[] = Array.from({ length: 20 }, (_, index) => ({ ...CHANGE, target: `Group ${index}` }));
+    changes.push({ op: "skp.erase", target: "Group 99", field: "entity", before: "group", after: null });
+    const message = approvalMessage("House.skp", changes);
+    expect(message.split("\n")[1]).toBe("Erase 1 object, Set tag (20)");
+    expect(message.split("\n").find((line) => line.startsWith("• "))).toBe("• Group 99: entity group → none");
+    expect(message).toContain("\n…and 3 more change(s).\n");
+  });
+
+  it("puts drawing names with line breaks, controls or bidi marks on one line", () => {
+    const message = approvalMessage("Site\u2029plan.dwg", [
+      { op: "acad.set_text", target: "Text\n• Fake line\u202e", field: "te\u2028xt", before: "a\u0000b", after: "c\td" },
+    ]);
+    expect(message).toBe(
+      "An agent in Inertia wants to change Site plan.dwg:\n"
+      + "Set text (1)\n\n"
+      + "• Text • Fake line: te xt a b → c d"
+      + "\n\nApply these changes? You can undo them in one step.",
+    );
+    expect(message).not.toMatch(/[\u0000\u202e\u2028\u2029\t]/u);
   });
 
   it("shows only the new value for a created object", () => {
@@ -553,11 +947,16 @@ describe("copyName", () => {
   it("adds a local-time stamp before the extension in the same folder", () => {
     const folder = join(tmpdir(), "drawings");
     const at = new Date(2026, 10, 21, 16, 5, 59).getTime();
-    expect(copyName(join(folder, "Plan.dwg"), at)).toBe(join(folder, "Plan (Inertia copy 2026-11-21 1605).dwg"));
+    expect(copyName(join(folder, "Plan.dwg"), at)).toBe(join(folder, "Plan (Inertia copy 2026-11-21 160559).dwg"));
   });
 
-  it("pads single-digit months, days, hours and minutes", () => {
-    const at = new Date(2027, 0, 2, 3, 4).getTime();
-    expect(copyName(join(tmpdir(), "House.v2.skp"), at)).toBe(join(tmpdir(), "House.v2 (Inertia copy 2027-01-02 0304).skp"));
+  it("pads single-digit months, days, hours, minutes and seconds", () => {
+    const at = new Date(2027, 0, 2, 3, 4, 5).getTime();
+    expect(copyName(join(tmpdir(), "House.v2.skp"), at)).toBe(join(tmpdir(), "House.v2 (Inertia copy 2027-01-02 030405).skp"));
+  });
+
+  it("gives copies saved a few seconds apart different names", () => {
+    const at = new Date(2026, 10, 21, 16, 5, 1).getTime();
+    expect(copyName(join(tmpdir(), "Plan.dwg"), at)).not.toBe(copyName(join(tmpdir(), "Plan.dwg"), at + 1_000));
   });
 });

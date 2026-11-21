@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -68,6 +68,7 @@ export type CadBridgeMethod =
   | "documents"
   | "selection"
   | "query"
+  | "info"
   | "capture"
   | "preview"
   | "apply"
@@ -93,14 +94,34 @@ export interface CadHost {
   setup(): Promise<CadSetupResult>;
 }
 
-/** Bumped with the bridges; status flags installs older than this. */
-export const BRIDGE_VERSION = "1.0.0";
+const bridgeVersionOf = (source: string): string | undefined =>
+  /BRIDGE_VERSION = '([^']+)'/u.exec(source)?.[1];
+
+/** The embedded SketchUp bridge's version; status flags installs that differ. */
+export const BRIDGE_VERSION = bridgeVersionOf(SKETCHUP_MAIN_RB) ?? "unknown";
+/** SketchUp 2017-2019 run a Ruby that lacks APIs the bridge uses. */
+const MIN_SKETCHUP_VERSION = "2020";
 const PROTOCOL = 1;
 const MAX_SKETCHUP_RESPONSE_BYTES = 48 * 1024 * 1024;
 // The restricted runner's ceiling; a larger AutoCAD answer is refused, not truncated.
 const MAX_AUTOCAD_RESPONSE_BYTES = 1024 * 1024;
 const STATUS_TIMEOUT_MS = 8_000;
-const AUTOCAD_STATUS_TIMEOUT_MS = 30_000;
+// Under OpenCode's 30-second host-tool timeout.
+const AUTOCAD_STATUS_TIMEOUT_MS = 25_000;
+
+/**
+ * The request reached the host, but its answer was unreadable or too large, so it may still have
+ * run. Callers treat it like `HOST_TIMEOUT`, never as "not applied".
+ */
+export const HOST_UNREADABLE = "HOST_UNREADABLE";
+
+/**
+ * When Inertia stops waiting, and which process waits, so a bridge never acts on a request nobody
+ * will read: AutoCAD closes its dialog in time, and SketchUp refuses a late approval.
+ */
+function withDeadline(params: Record<string, unknown>, timeoutMs: number): Record<string, unknown> {
+  return { ...params, deadlineAt: Date.now() + timeoutMs, parentPid: process.pid };
+}
 
 export const appLabel = (app: CadApp): string => (app === "autocad" ? "AutoCAD" : "SketchUp");
 
@@ -110,17 +131,16 @@ const bridgeResponseSchema = z.object({
   error: z.object({ code: z.string().max(64), message: z.string().max(2_000) }).optional(),
 });
 
-function unwrapResponse(raw: string, app: CadApp): unknown {
+function unwrapResponse(raw: string, app: CadApp, diagnostics = ""): unknown {
+  const unreadable = new CadError(HOST_UNREADABLE, `The ${appLabel(app)} bridge sent an unreadable answer.${diagnostics}`);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new CadError("HOST_ERROR", `The ${appLabel(app)} bridge sent an unreadable answer.`);
+    throw unreadable;
   }
   const response = bridgeResponseSchema.safeParse(parsed);
-  if (!response.success) {
-    throw new CadError("HOST_ERROR", `The ${appLabel(app)} bridge sent an unreadable answer.`);
-  }
+  if (!response.success) throw unreadable;
   if (response.data.ok) return response.data.result;
   throw new CadError(
     response.data.error?.code ?? "HOST_ERROR",
@@ -138,9 +158,6 @@ function decodeDocuments(app: CadApp, value: unknown): CadDocument[] {
   }
   return parsed.data.documents;
 }
-
-const bridgeVersionOf = (source: string): string | undefined =>
-  /BRIDGE_VERSION = '([^']+)'/u.exec(source)?.[1];
 
 const discoverySchema = z.object({
   app: z.literal("sketchup"),
@@ -210,11 +227,15 @@ function sketchUpRequest(
       if (error) reject(error);
       else resolve(line ?? "");
     };
-    const lost = (code: string, message: string): CadError =>
-      new CadError(sent ? code : "HOST_OFFLINE", message);
-    const onAbort = (): void => finish(lost("HOST_TIMEOUT", "The SketchUp request was cancelled."));
+    // Whether the request was sent decides "not applied" against "unknown". Before sending, only a
+    // refused connection means nothing listens (HOST_OFFLINE, a stale discovery file); a cancel or
+    // a connect that never completes says nothing about SketchUp, so status keeps its file.
+    const lost = (code: string, unsent: string, message: string): CadError =>
+      new CadError(sent ? code : unsent, message);
+    const onAbort = (): void => finish(lost("HOST_TIMEOUT", "CANCELLED", "The SketchUp request was cancelled."));
     const timer = setTimeout(() => finish(lost(
       "HOST_TIMEOUT",
+      "HOST_UNAVAILABLE",
       "SketchUp did not answer in time. It may be busy or showing a dialog.",
     )), timeoutMs);
     timer.unref();
@@ -223,18 +244,18 @@ function sketchUpRequest(
     socket.setEncoding("utf8");
     socket.on("connect", () => {
       sent = true;
-      socket.write(`${JSON.stringify({ v: PROTOCOL, id: randomUUID(), token: endpoint.token, method, params })}\n`);
+      socket.write(`${JSON.stringify({ v: PROTOCOL, id: randomUUID(), token: endpoint.token, method, params: withDeadline(params, timeoutMs) })}\n`);
     });
     socket.on("data", (chunk: string) => {
       received += chunk;
       if (received.length > MAX_SKETCHUP_RESPONSE_BYTES) {
-        return finish(new CadError("HOST_ERROR", "SketchUp sent more data than Inertia accepts."));
+        return finish(new CadError(HOST_UNREADABLE, "SketchUp sent more data than Inertia accepts."));
       }
       const end = received.indexOf("\n");
       if (end >= 0) finish(undefined, received.slice(0, end));
     });
-    socket.on("error", () => finish(lost("HOST_DISCONNECTED", "The connection to SketchUp failed.")));
-    socket.on("close", () => finish(lost("HOST_DISCONNECTED", "SketchUp closed the connection.")));
+    socket.on("error", () => finish(lost("HOST_DISCONNECTED", "HOST_OFFLINE", "The connection to SketchUp failed.")));
+    socket.on("close", () => finish(lost("HOST_DISCONNECTED", "HOST_OFFLINE", "SketchUp closed the connection.")));
   }).then((raw) => unwrapResponse(raw, "sketchup"));
 }
 
@@ -329,33 +350,35 @@ export function createSketchUpHost(home: string, settingsBase: string | undefine
         { force: true },
       ).catch(() => undefined)));
       const live = answers.filter((answer) => !gone.includes(answer));
-      const folders = await sketchUpVersionFolders(settingsBase);
-      const installed = await Promise.all(folders.map((folder) => installedVersion(folder.plugins)));
-      const anyInstalled = installed.some((version) => version !== undefined);
-      const outdated = installed.some((version) => version !== undefined && version !== BRIDGE_VERSION);
       if (live.length === 0) {
-        if (folders.length === 0) {
+        // The newest SketchUp is the one the user opens, so its copy decides.
+        const newest = (await sketchUpVersionFolders(settingsBase)).at(-1);
+        if (newest === undefined || newest.version < MIN_SKETCHUP_VERSION) {
           return {
             app: "sketchup",
             state: "not_installed",
-            hint: "SketchUp Pro desktop was not found. Open it once after installing so it creates its settings folder.",
+            hint: newest === undefined
+              ? "SketchUp Pro desktop was not found. Open it once after installing so it creates its settings folder."
+              : `Inertia needs SketchUp ${MIN_SKETCHUP_VERSION} or newer; only SketchUp ${newest.version} was found.`,
             documents: [],
           };
         }
-        const ready = anyInstalled && !outdated;
+        const installed = await installedVersion(newest.plugins);
         return {
           app: "sketchup",
-          state: ready ? "not_running" : "setup_required",
-          hint: ready
+          state: installed === BRIDGE_VERSION ? "not_running" : "setup_required",
+          hint: installed === BRIDGE_VERSION
             ? "Open SketchUp (restart it if it was open while the extension was installed)."
-            : "Call inertia_cad_setup to install the SketchUp extension, then restart SketchUp.",
+            : installed === undefined
+              ? `Call inertia_cad_setup to install the extension for SketchUp ${newest.version}, then restart SketchUp.`
+              : "The SketchUp extension is outdated. Call inertia_cad_setup, then restart SketchUp.",
           documents: [],
         };
       }
       const documents = live.flatMap((answer) => answer.documents);
       const failed = live.every(({ error }) => error !== undefined);
       // A malformed answer is an outdated or broken bridge, not a busy SketchUp.
-      const broken = failed && live.every(({ error }) => error?.code === "HOST_ERROR");
+      const broken = failed && live.every(({ error }) => error?.code === "HOST_ERROR" || error?.code === HOST_UNREADABLE);
       const stale = live.some(({ endpoint }) => endpoint.bridgeVersion !== BRIDGE_VERSION);
       const first = live[0]?.endpoint;
       return {
@@ -378,18 +401,21 @@ export function createSketchUpHost(home: string, settingsBase: string | undefine
       return await sketchUpRequest(endpoint, method, params, timeoutMs, signal);
     },
     async setupPlan() {
-      const folders = await sketchUpVersionFolders(settingsBase);
+      const folders = (await sketchUpVersionFolders(settingsBase)).filter((folder) => folder.version >= MIN_SKETCHUP_VERSION);
       return folders.flatMap((folder) => [
         join(folder.plugins, "inertia_cad_bridge.rb"),
         join(folder.plugins, "inertia_cad_bridge", "main.rb"),
       ]);
     },
     async setup() {
-      const folders = await sketchUpVersionFolders(settingsBase);
+      const found = await sketchUpVersionFolders(settingsBase);
+      const folders = found.filter((folder) => folder.version >= MIN_SKETCHUP_VERSION);
       if (folders.length === 0) {
         throw new CadError(
           "NOT_INSTALLED",
-          "SketchUp desktop was not found. Install SketchUp Pro or Studio and open it once, then run setup again.",
+          found.length === 0
+            ? "SketchUp desktop was not found. Install SketchUp Pro or Studio and open it once, then run setup again."
+            : `Inertia needs SketchUp ${MIN_SKETCHUP_VERSION} or newer; only SketchUp ${found.map((folder) => folder.version).join(", ")} was found.`,
         );
       }
       try {
@@ -415,6 +441,7 @@ const AUTOCAD_UNSUPPORTED = "AutoCAD automation needs full AutoCAD on Windows.";
 
 const AUTOCAD_STATES: Readonly<Record<string, CadHostState>> = {
   HOST_OFFLINE: "not_running",
+  HOST_UNAVAILABLE: "not_running",
   NOT_INSTALLED: "not_installed",
   HOST_BUSY: "busy",
 };
@@ -423,12 +450,14 @@ export type AutoCadRunner = (
   executable: string,
   args: readonly string[],
   options: { cwd: string; input: string; timeoutMs: number; signal?: AbortSignal | undefined },
-) => Promise<{ stdout: string }>;
+) => Promise<{ stdout: string; stderr?: string }>;
 
 const restrictedRunner: AutoCadRunner = async (executable, args, options) => await runRestrictedCli(executable, args, {
   ...options,
   maxOutputBytes: MAX_AUTOCAD_RESPONSE_BYTES,
   failureMessage: "The AutoCAD bridge stopped unexpectedly.",
+  // Keeps what PowerShell printed, such as a policy that refused the script, for the error.
+  classifyFailure: (output) => output.trim().slice(-500) || null,
 });
 
 /** Exported so tests can supply the platform, state folder, and process runner. */
@@ -442,13 +471,29 @@ export function createAutoCadHost(
   const scriptPath = join(stateDirectory, `InertiaCadBridge-${digest}.ps1`);
 
   // Windows PowerShell 5.1 reads a script without a byte-order mark in the ANSI code page.
+  const script = `\uFEFF${AUTOCAD_BRIDGE_PS1}`;
+  const current = (): Promise<boolean> => readFile(scriptPath, "utf8").then((text) => text === script, () => false);
+  // Checked once per run: a damaged or edited copy is replaced before PowerShell runs it.
+  let verified = false;
   const ensureScript = async (): Promise<void> => {
-    if (await stat(scriptPath).then(() => true, () => false)) return;
+    if (verified) return;
+    if (await current()) {
+      verified = true;
+      return;
+    }
     try {
       await mkdir(dirname(scriptPath), { recursive: true });
       const temporary = `${scriptPath}.${process.pid}.${randomUUID()}.tmp`;
-      await writeFile(temporary, `\uFEFF${AUTOCAD_BRIDGE_PS1}`);
-      await rename(temporary, scriptPath);
+      await writeFile(temporary, script);
+      try {
+        await rename(temporary, scriptPath);
+      } catch (error) {
+        // A concurrent first call may have put the same script there, and Windows refuses to
+        // replace a file another PowerShell is reading.
+        await rm(temporary, { force: true });
+        if (!(await current())) throw error;
+      }
+      verified = true;
     } catch {
       throw new CadError("SETUP_FAILED", "Could not write the AutoCAD bridge script.");
     }
@@ -465,13 +510,14 @@ export function createAutoCadHost(
     if (signal?.aborted) throw new CadError("CANCELLED", "The request was cancelled before it reached AutoCAD.");
     await ensureScript();
     let stdout: string;
+    let stderr: string | undefined;
     try {
-      ({ stdout } = await run(
+      ({ stdout, stderr } = await run(
         powershell,
         ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-STA", "-File", scriptPath],
         {
           cwd: stateDirectory,
-          input: JSON.stringify({ v: PROTOCOL, id: randomUUID(), method, params }),
+          input: JSON.stringify({ v: PROTOCOL, id: randomUUID(), method, params: withDeadline(params, timeoutMs) }),
           timeoutMs,
           signal,
         },
@@ -481,9 +527,10 @@ export function createAutoCadHost(
       switch (error.code) {
         case "unavailable":
           throw new CadError("HOST_ERROR", "Windows PowerShell could not start.");
+        // The request ran; only its answer was too large, so an apply's outcome is unknown.
         case "output-limit":
           throw new CadError(
-            "HOST_ERROR",
+            HOST_UNREADABLE,
             method === "capture"
               ? "The AutoCAD capture is too large. Try a smaller maxWidth and maxHeight."
               : "AutoCAD sent more data than Inertia accepts. Ask for fewer objects with limit.",
@@ -491,11 +538,17 @@ export function createAutoCadHost(
         case "timeout":
         case "cleanup":
           throw new CadError("HOST_TIMEOUT", "AutoCAD did not answer in time. It may be busy or showing a dialog.");
+        // PowerShell exited with an error, possibly mid-apply, so the outcome is unknown.
         default:
-          throw new CadError("HOST_DISCONNECTED", "The AutoCAD bridge stopped before it answered.");
+          throw new CadError(
+            "HOST_DISCONNECTED",
+            `The AutoCAD bridge stopped before it answered.${error.reason ? ` PowerShell said: ${error.reason}` : ""}`,
+          );
       }
     }
-    return unwrapResponse(stdout.trim(), "autocad");
+    // Why PowerShell printed no JSON, such as an execution policy that refuses the script.
+    const diagnostics = stderr?.trim() ? ` PowerShell said: ${stderr.trim().slice(-500)}` : "";
+    return unwrapResponse(stdout.trim(), "autocad", diagnostics);
   };
 
   return {

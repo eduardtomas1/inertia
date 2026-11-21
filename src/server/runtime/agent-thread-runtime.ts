@@ -81,10 +81,10 @@ export function createAgentThreadRuntime(
   secrets.start();
   void secrets.restore();
   const cadDirectory = join(dependencies.dataDirectory, "cad");
-  const cadTools = new CadHostTools(new CadService({
-    hosts: createCadHosts(cadDirectory),
-    stateDirectory: cadDirectory,
-  }));
+  // AutoCAD and SketchUp desktop run only on Windows and macOS; elsewhere the pack is never offered.
+  const cadTools = process.platform === "win32" || process.platform === "darwin"
+    ? new CadHostTools(new CadService({ hosts: createCadHosts(cadDirectory), stateDirectory: cadDirectory }))
+    : undefined;
   return {
     creation,
     contextRequests,
@@ -94,7 +94,7 @@ export function createAgentThreadRuntime(
       contextRequests,
       creation,
       agentSecrets: secrets,
-      cadTools,
+      ...(cadTools ? { cadTools } : {}),
     }),
   };
 }

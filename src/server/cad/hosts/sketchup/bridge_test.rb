@@ -151,6 +151,10 @@ module Sketchup
       @name = name
     end
 
+    def visible?
+      true
+    end
+
     def display_name
       name == 'Layer0' ? 'Untagged' : name
     end
@@ -239,9 +243,8 @@ module Sketchup
       @pushed = distance
     end
 
-    # One square inch in its own space; SketchUp's Face#area scales by a transformation.
     def area(transformation = nil)
-      transformation.nil? ? 1.0 : transformation.scale**2
+      transformation ? transformation.scale**2 : 1.0
     end
 
     def bounds
@@ -252,19 +255,7 @@ module Sketchup
   Vertex = Struct.new(:position)
 
   class Edge < Drawingelement
-    attr_reader :start, :end
-
-    # One inch long in its own space.
-    def initialize(model)
-      super(model)
-      @start = Vertex.new(Geom::Point3d.new(0, 0, 0))
-      @end = Vertex.new(Geom::Point3d.new(1, 0, 0))
-    end
-
-    # Like SketchUp's Edge#length: in the edge's own space, never scaled.
-    def length
-      1.0
-    end
+    attr_accessor :start, :end
   end
   class Text < Drawingelement; end
   class Dimension < Drawingelement; end
@@ -281,7 +272,7 @@ module Sketchup
     end
 
     def add_group
-      definition = ComponentDefinition.new(@model, 'Group#1')
+      definition = ComponentDefinition.new(@model, 'Group#1', true)
       group = Group.new(@model, definition)
       group.parent = @owner
       self << group
@@ -299,10 +290,20 @@ module Sketchup
   class ComponentDefinition
     attr_reader :name, :entities, :instances
 
-    def initialize(model, name)
+    def initialize(model, name, group = false)
       @name = name
+      @group = group
       @entities = Entities.new(model, self)
       @instances = []
+      model.definitions << self
+    end
+
+    def group?
+      @group
+    end
+
+    def image?
+      false
     end
   end
 
@@ -341,6 +342,10 @@ module Sketchup
 
   class Selection < Array; end
 
+  class Pages < Array
+    attr_accessor :selected_page
+  end
+
   class View
     def vpwidth
       1600
@@ -358,10 +363,12 @@ module Sketchup
 
   class Model
     attr_accessor :title, :path, :active_path, :operations, :fail_next_step
-    attr_reader :entities, :layers, :materials, :selection, :registry
+    attr_reader :entities, :layers, :materials, :selection, :registry, :definitions, :pages
 
     def initialize
       @registry = {}
+      @definitions = []
+      @pages = Pages.new
       @layers = Collection.new(Layer, [Layer.new('Layer0')])
       @materials = Collection.new(Material, [])
       @entities = Entities.new(self, self)
@@ -412,8 +419,8 @@ module Sketchup
       View.new
     end
 
-    def pages
-      Struct.new(:selected_page).new(nil)
+    def bounds
+      Geom::BoundingBox.new(Geom::Point3d.new(0, 0, 0), Geom::Point3d.new(110, 60, 10))
     end
 
     def save_copy(path)
@@ -486,23 +493,156 @@ class BridgeTest < Minitest::Test
     assert_equal [1270.0, 1270.0, 0.0], loose['boundsMm']['min']
   end
 
-  def test_measures_faces_and_edges_in_world_space_inside_a_scaled_group
-    group = @model.entities.add_group
-    group.entities.add_face
-    edge = Sketchup::Edge.new(@model)
-    edge.parent = group.definition
-    group.entities << edge
-    group.transform!(Geom::Transformation.new([0, 0, 0], 2.0))
-    rows = call('query', 'documentId' => @document_id, 'types' => %w[face edge])['result']['items']
-    face = rows.find { |row| row['type'] == 'face' }
-    line = rows.find { |row| row['type'] == 'edge' }
-    assert_equal (4 * 25.4 * 25.4).round(1), face['areaMm2'], 'a square inch scaled 2x is four square inches'
-    assert_equal 50.8, line['lengthMm'], 'an inch scaled 2x is two inches'
-  end
-
   def test_query_rejects_unknown_types
     response = call('query', 'documentId' => @document_id, 'types' => ['wall'])
     assert_equal 'INVALID_REQUEST', response['error']['code']
+  end
+
+  def test_query_refuses_autocad_filters_and_points_to_tags
+    response = call('query', 'documentId' => @document_id, 'layer' => 'Walls')
+    assert_equal 'INVALID_REQUEST', response['error']['code']
+    assert_includes response['error']['message'], 'tag'
+  end
+
+  def test_query_filters_by_plan_area_and_trims_rows_when_compact
+    window = call('query', 'documentId' => @document_id, 'types' => ['component'], 'fields' => 'compact',
+                           'within' => { 'min' => [1200, 1200], 'max' => [1600, 1600], 'mode' => 'window' })['result']
+    assert_equal 1, window['total']
+    assert_equal @loose_chair.persistent_id.to_s, window['items'].first['id']
+    assert_equal %w[id type tag boundsMm], window['items'].first.keys
+    crossing = call('query', 'documentId' => @document_id, 'types' => ['component'],
+                             'within' => { 'min' => [0, 0], 'max' => [30, 30] })['result']
+    assert_equal [@room_a, @nested_chair].map { |entity| entity.persistent_id.to_s }, crossing['items'].map { |row| row['id'] }
+    reversed = call('query', 'documentId' => @document_id, 'within' => { 'min' => [10, 10], 'max' => [0, 0] })
+    assert_equal 'INVALID_REQUEST', reversed['error']['code']
+  end
+
+  def test_measures_faces_and_edges_inside_a_scaled_group_in_world_units
+    group = @model.entities.add_group
+    group.transformation = Geom::Transformation.new([0, 0, 0], 2.0)
+    group.entities.add_face([0, 0, 0], [1, 0, 0], [1, 1, 0])
+    edge = Sketchup::Edge.new(@model)
+    edge.parent = group.definition
+    edge.start = Sketchup::Vertex.new(Geom::Point3d.new(0, 0, 0))
+    edge.end = Sketchup::Vertex.new(Geom::Point3d.new(1, 0, 0))
+    group.entities << edge
+    rows = call('query', 'documentId' => @document_id, 'types' => %w[face edge])['result']['items']
+    assert_in_delta 4 * 25.4 * 25.4, rows.find { |row| row['type'] == 'face' }['areaMm2'], 0.1
+    assert_in_delta 50.8, rows.find { |row| row['type'] == 'edge' }['lengthMm'], 0.01
+  end
+
+  def test_info_summarizes_the_model
+    @model.pages << Struct.new(:name).new('Plan view')
+    result = call('info', 'documentId' => @document_id)['result']
+    assert_equal 'mm', result['units']
+    assert_equal [2794.0, 1524.0, 254.0], result['boundsMm']['max']
+    assert_equal [{ 'name' => 'Untagged', 'visible' => true }, { 'name' => 'Walls', 'visible' => true }], result['tags']
+    assert_equal ['Plan view'], result['scenes']
+    assert_equal [{ 'name' => 'Room', 'instances' => 2 }, { 'name' => 'Chair', 'instances' => 2 }], result['componentDefinitions']
+    assert_equal 3, result['entityCount']
+    refute result.key?('tagsTruncated')
+  end
+
+  def test_erasing_an_edge_warns_that_its_faces_go_too
+    edge = Sketchup::Edge.new(@model)
+    edge.parent = @model
+    @model.entities << edge
+    preview = call('preview', 'documentId' => @document_id,
+                              'operations' => [{ 'op' => 'skp.erase', 'ids' => [edge.persistent_id.to_s] }])['result']
+    assert_includes preview['changes'].first['after'], 'faces'
+    assert_includes preview['warnings'], 'Erasing an edge also deletes the faces it bounds.'
+  end
+
+  # Runs the block with Bridge.approved? replaced, so a test can act while the dialog is open.
+  def with_dialog(on_dialog)
+    original = Bridge.method(:approved?)
+    Bridge.define_singleton_method(:approved?) do |_message|
+      on_dialog.call
+      true
+    end
+    yield
+  ensure
+    Bridge.define_singleton_method(:approved?, original)
+  end
+
+  def hidden_chair_operations
+    [{ 'op' => 'skp.set_hidden', 'ids' => [@loose_chair.persistent_id.to_s], 'hidden' => true }]
+  end
+
+  def apply_hidden_chair(extra = {})
+    operations = hidden_chair_operations
+    preview = call('preview', 'documentId' => @document_id, 'operations' => operations)['result']
+    call('apply', { 'documentId' => @document_id, 'operations' => operations,
+                    'expectedFingerprints' => preview['fingerprints'], 'approvalMessage' => 'Apply?' }.merge(extra))
+  end
+
+  def test_a_request_past_its_deadline_is_never_shown_or_applied
+    UI.answers = [IDYES]
+    result = apply_hidden_chair('deadlineAt' => 0)['result']
+    assert_equal 'expired', result['status']
+    assert_empty UI.messages
+    refute @loose_chair.hidden?
+  end
+
+  def test_an_approval_after_inertia_hung_up_is_not_applied
+    server = TCPServer.new('127.0.0.1', 0)
+    client = TCPSocket.new('127.0.0.1', server.addr[1])
+    peer = server.accept
+    Bridge.instance_variable_set(:@current_client, peer)
+    with_dialog(-> { client.close; IO.select([peer], nil, nil, 1) }) do
+      assert_equal 'expired', apply_hidden_chair['result']['status']
+    end
+    refute @loose_chair.hidden?
+    assert_empty @model.operations
+  ensure
+    Bridge.instance_variable_set(:@current_client, nil)
+    [peer, server].each { |io| io&.close }
+  end
+
+  def test_a_failure_after_the_designer_said_yes_is_reported_as_consumed
+    with_dialog(-> { Sketchup.active_model = Sketchup::Model.new }) do
+      response = apply_hidden_chair
+      assert_equal 'APPLY_FAILED', response['error']['code']
+    end
+    refute @loose_chair.hidden?
+  end
+
+  def test_the_transport_caps_clients_and_drops_idle_ones
+    Dir.mktmpdir do |home|
+      previous = Dir.method(:home)
+      Dir.singleton_class.send(:define_method, :home) { home }
+      clock = [0.0]
+      monotonic = Bridge.method(:monotonic)
+      Bridge.define_singleton_method(:monotonic) { clock[0] }
+      sockets = []
+      begin
+        UI.timers = []
+        Bridge.start
+        port = JSON.parse(File.read(File.join(home, '.inertia-cad', 'hosts', "sketchup-#{Process.pid}.json")))['port']
+        sockets = Array.new(Bridge::MAX_CLIENTS + 1) { TCPSocket.new('127.0.0.1', port) }
+        UI.timers.each(&:call)
+        assert_equal Bridge::MAX_CLIENTS, Bridge.instance_variable_get(:@clients).size
+        clock[0] = Bridge::IDLE_SECONDS + 1.0
+        UI.timers.each(&:call)
+        UI.timers.each(&:call)
+        assert_operator Bridge.instance_variable_get(:@clients).size, :<=, 1, 'idle clients are dropped and the waiting one accepted'
+        ready = IO.select([sockets.first], nil, nil, 1)
+        assert ready, 'a dropped client sees the connection close'
+        assert_nil sockets.first.read_nonblock(1, exception: false)
+      ensure
+        sockets.each(&:close)
+        Bridge.stop
+        Bridge.define_singleton_method(:monotonic, monotonic)
+        Dir.singleton_class.send(:define_method, :home, previous)
+      end
+    end
+  end
+
+  def test_answers_even_when_the_result_cannot_be_encoded
+    answer = JSON.parse(Bridge.encode_response('v' => 1, 'id' => 'r1', 'ok' => true, 'result' => { 'x' => Float::NAN }))
+    assert_equal false, answer['ok']
+    assert_equal 'r1', answer['id']
+    assert_equal 'HOST_UNREADABLE', answer['error']['code']
   end
 
   def test_refuses_to_edit_a_component_shared_by_several_parents

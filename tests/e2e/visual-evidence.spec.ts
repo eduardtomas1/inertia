@@ -3,9 +3,10 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import type { ColorThemeId } from "../../src/shared/contracts";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { waitForStableSample } from "./support/stable-sample";
-import { setAppearanceInPlace } from "./support/appearance";
+import { setAppearanceInPlace, updateSettingsInPlace } from "./support/appearance";
 import { capturePageWebSockets, publishCapturedWebSocketEvent } from "./support/browser-websocket-fixture";
 import { openTerminalDock, closeWorkspaceTools, ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 import {
@@ -27,8 +28,12 @@ const evidenceDirectory = process.env.INERTIA_VISUAL_EVIDENCE_DIR
 const selectedSurfaces = new Set((process.env.INERTIA_VISUAL_EVIDENCE_SURFACES ?? "")
   .split(",").map((name) => name.trim()).filter(Boolean));
 const WINDOW = { width: 1440, height: 860 } as const;
-const THEMES = ["light", "dark"] as const;
-type Theme = (typeof THEMES)[number];
+const ALL_THEMES = ["light", "dark"] as const;
+type Theme = (typeof ALL_THEMES)[number];
+const selectedThemes = new Set((process.env.INERTIA_VISUAL_EVIDENCE_APPEARANCES ?? "")
+  .split(",").map((name) => name.trim()).filter(Boolean));
+const THEMES = ALL_THEMES.filter((theme) => selectedThemes.size === 0 || selectedThemes.has(theme));
+const colors = process.env.INERTIA_VISUAL_EVIDENCE_COLORS ?? "";
 interface Size { width: number; height: number }
 const WIDE: Size = { width: 1440, height: 920 };
 const EXTRA_SIZES: readonly Size[] = [{ width: 760, height: 600 }, { width: 1920, height: 1200 }];
@@ -623,6 +628,13 @@ test.beforeAll(async () => {
   await expect(heading(VISUAL_TITLES.finished)).toBeVisible();
   await publishLiveRequests();
   await closeWorkspaceTools(page);
+  if (colors.startsWith("#")) {
+    const [color, muted] = colors.split(":");
+    await updateSettingsInPlace(app, { lightCustomColor: color, darkCustomColor: color, mutedCustomColors: muted === "muted" });
+  } else if (colors) {
+    const family = colors as ColorThemeId;
+    await updateSettingsInPlace(app, { lightColorTheme: family, darkColorTheme: family });
+  }
 });
 
 test.afterEach(async ({ browserName: _browserName }, testInfo) => {

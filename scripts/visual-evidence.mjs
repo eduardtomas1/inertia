@@ -11,24 +11,28 @@ const largeCaptureBytes = 400 * 1024;
 function usage(message) {
   if (message) process.stderr.write(`${message}\n\n`);
   process.stderr.write([
-    "Usage: node scripts/visual-evidence.mjs --out <dir> [--replace] [--surfaces <a,b>]",
+    "Usage: node scripts/visual-evidence.mjs --out <dir> [--replace] [--surfaces <a,b>] [--appearances <light,dark>] [--colors <family|#hex|#hex:muted>]",
     "",
     "Captures the visual evidence set from this worktree's built bundle (run `npm run build:bundle` first).",
     "  --out <dir>       Folder for the PNG files; created when missing.",
     "  --replace         Delete the PNG files already in that folder before capturing.",
     "  --surfaces <a,b>  Capture only these surfaces (names as in the README).",
+    "  --appearances <a> Capture only these appearances (light, dark).",
+    "  --colors <c>      Color family (inertia, grove, ...) or custom colour (#0d9488, #0d9488:muted) for both appearances.",
     "",
   ].join("\n"));
   process.exit(2);
 }
 
 function parseArguments(argv) {
-  const options = { out: null, replace: false, surfaces: null };
+  const options = { out: null, replace: false, surfaces: null, appearances: null, colors: null };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--out") options.out = argv[++index] ?? usage("--out needs a folder.");
     else if (argument === "--replace") options.replace = true;
     else if (argument === "--surfaces") options.surfaces = argv[++index] ?? usage("--surfaces needs a list.");
+    else if (argument === "--appearances") options.appearances = argv[++index] ?? usage("--appearances needs a list.");
+    else if (argument === "--colors") options.colors = argv[++index] ?? usage("--colors needs a family or colour.");
     else if (argument === "--help" || argument === "-h") usage();
     else usage(`Unknown argument: ${argument}`);
   }
@@ -48,9 +52,13 @@ for (const built of ["out/main/index.js", "out/preload", "out/renderer/index.htm
 
 await mkdir(outDirectory, { recursive: true });
 const selected = options.surfaces?.split(",").map((name) => name.trim()).filter(Boolean) ?? [];
-const captureName = /^(?<surface>.+)-(?:light|dark)-\d+x\d+\.png$/u;
+const appearances = options.appearances?.split(",").map((name) => name.trim()).filter(Boolean) ?? [];
+if (appearances.some((name) => name !== "light" && name !== "dark")) usage("--appearances takes light and dark.");
+if (options.colors && !/^(?:[a-z]+|#[0-9a-f]{6}(?::muted)?)$/iu.test(options.colors)) usage("--colors takes a family name or a six-digit hex colour.");
+const captureName = /^(?<surface>.+)-(?<appearance>light|dark)-\d+x\d+\.png$/u;
 const owned = (name) => name.endsWith(".png")
-  && (selected.length === 0 || selected.includes(captureName.exec(name)?.groups?.surface ?? ""));
+  && (selected.length === 0 || selected.includes(captureName.exec(name)?.groups?.surface ?? ""))
+  && (appearances.length === 0 || appearances.includes(captureName.exec(name)?.groups?.appearance ?? ""));
 const existing = (await readdir(outDirectory)).filter(owned);
 if (existing.length > 0) {
   if (!options.replace) {
@@ -71,6 +79,8 @@ const exitCode = await new Promise((resolveExit, rejectExit) => {
       ...process.env,
       INERTIA_VISUAL_EVIDENCE_DIR: outDirectory,
       INERTIA_VISUAL_EVIDENCE_SURFACES: selected.join(","),
+      INERTIA_VISUAL_EVIDENCE_APPEARANCES: appearances.join(","),
+      INERTIA_VISUAL_EVIDENCE_COLORS: options.colors ?? "",
     },
     shell: false,
     stdio: "inherit",

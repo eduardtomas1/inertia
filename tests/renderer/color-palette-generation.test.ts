@@ -135,6 +135,17 @@ describe("generated color palettes", () => {
     expect(families).not.toMatch(/--(?:bg|surface-raised|fill|fill-strong|line|scrollbar-thumb|shadow-float-alpha|raised-edge):/u);
   });
 
+  it.each(PALETTE_FAMILIES)("keeps the %s light accent fill on the light accent and solves a separate dark fill", (family) => {
+    const light = palette(family, "light");
+    expect([light["accent-fill"], light["accent-fill-hover"], light["accent-fill-text"]])
+      .toEqual([light.accent, light["accent-hover"], light["accent-text"]]);
+    const dark = palette(family, "dark");
+    expect(dark["accent-fill"]).not.toBe(dark.accent);
+    expect(oklchOf(dark["accent-fill-text"]!).l).toBeGreaterThan(0.95);
+    expect(repoFile("src/renderer/src/styles.css"))
+      .toMatch(/\n  --accent-fill: var\(--accent\);\n  --accent-fill-hover: var\(--accent-hover\);\n  --accent-fill-text: var\(--accent-text\);/u);
+  });
+
   it("covers exactly the shipped color theme identities", () => {
     expect([...PALETTE_FAMILIES]).toEqual([...COLOR_THEME_IDS]);
   });

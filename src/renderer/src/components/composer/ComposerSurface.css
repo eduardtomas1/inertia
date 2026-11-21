@@ -276,7 +276,7 @@
   }
 }
 .composer-input-actions {
-  --composer-send-size: max(32px, var(--composer-control-height));
+  --composer-send-size: 32px;
   position: static;
   z-index: 1;
   display: flex;
@@ -298,39 +298,20 @@
   min-height: var(--composer-send-size);
   flex: 0 0 var(--composer-send-size);
   margin-left: 0;
-  transition:
-    color var(--dur) var(--ease),
-    background var(--dur) var(--ease),
-    transform var(--dur) var(--ease);
 }
-.composer-shell .composer-input-actions .send-button[aria-disabled="true"] {
-  border-color: transparent;
-  color: var(--accent-text);
-  background: var(--accent);
-  opacity: 1;
+.composer-shell .composer-input-actions :where(.send-button) {
+  border: 1px solid transparent;
+  color: var(--send-glyph);
+  background: var(--send-core);
 }
-.composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"], .has-label):hover {
-  transform: scale(1.05);
+.composer-shell .composer-input-actions :where(.send-button:is(:disabled, [aria-disabled="true"])) {
+  color: var(--send-empty-glyph);
+  background: var(--send-empty);
 }
-@container (max-width: 420px) {
-  .composer-shell .composer-input-actions .send-button.has-label:not(:disabled, [aria-disabled="true"]):hover {
-    transform: scale(1.05);
-  }
-}
-.composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"]):active {
-  transform: scale(0.97);
-}
-.composer-shell .composer-input-actions .send-button:is([data-composer-action-state="stop-ready"], [data-composer-action-state="stop-pending"]) {
-  border-color: transparent;
-  color: var(--surface-raised);
-  background: var(--status-failed);
-}
-.composer-shell .composer-input-actions .send-button .composer-send-motion-icon path {
-  fill: transparent;
-}
-.composer-shell .composer-input-actions .send-button:is([data-composer-action-state="stop-ready"], [data-composer-action-state="stop-pending"]) .composer-send-motion-icon path {
-  fill: currentColor;
-  transition: fill var(--dur) var(--ease) var(--dur-fast);
+.composer-shell .composer-input-actions :where(.send-button.stop-button) {
+  border-color: var(--send-stop-line);
+  color: var(--send-stop-glyph);
+  background: var(--send-stop);
 }
 .composer-handoff-notice {
   display: flex;
@@ -398,13 +379,7 @@
   .composer-shell .composer > .composer-surface {
     transition: none;
   }
-  .composer-shell .composer-chip,
-  .composer-shell .composer-input-actions .send-button,
-  .composer-shell .composer-input-actions .send-button:is([data-composer-action-state="stop-ready"], [data-composer-action-state="stop-pending"]) .composer-send-motion-icon path {
+  .composer-shell .composer-chip {
     transition: none;
-  }
-  .composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"]):is(:hover, :active),
-  .composer-shell .composer-input-actions .send-button.has-label:not(:disabled, [aria-disabled="true"]):hover {
-    transform: none;
   }
 }

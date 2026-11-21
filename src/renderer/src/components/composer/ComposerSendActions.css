@@ -1,18 +1,3 @@
-.send-button[data-motion-state="sending"] .composer-send-motion-icon {
-  animation: spin 800ms linear infinite;
-}
-
-.app-shell[data-document-visible="false"]
-  .send-button[data-motion-state="sending"] .composer-send-motion-icon {
-  animation-play-state: paused;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .send-button[data-motion-state="sending"] .composer-send-motion-icon {
-    animation: none;
-  }
-}
-
 .composer:has(> .composer-queue) {
   margin-top: 48px;
 }
@@ -179,9 +164,127 @@
   .composer-history-chip {
     border-color: ButtonText;
   }
+}
 
-  .send-button[aria-disabled="true"] {
-    border-color: GrayText;
-    color: GrayText;
+.composer-shell .composer-input-actions .send-button {
+  --send-turn: 14deg;
+  --send-refraction: rotate(-4deg);
+  --send-field: radial-gradient(circle 11px at 50% 48% in srgb, var(--send-core), color-mix(in srgb, var(--send-core) 72%, var(--send-deep)) 68%, transparent 100%), conic-gradient(from 195deg in srgb, var(--send-deep), var(--send-b) 34deg, var(--send-deep) 57deg, var(--send-core) 90deg, var(--send-a) 126deg, var(--send-deep) 153deg, var(--send-b) 189deg, var(--send-core) 214deg, var(--send-a) 253deg, var(--send-deep) 279deg, var(--send-b) 315deg, var(--send-deep));
+  --send-optics: radial-gradient(ellipse 2px .65px at 30% 6% in srgb, color-mix(in srgb, var(--send-glyph) 55%, transparent), transparent 100%), radial-gradient(ellipse 12px 3px at 44% 20% in srgb, color-mix(in srgb, var(--send-glyph) 6%, transparent), transparent 76%);
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  flex: 0 0 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--send-core);
+  color: var(--send-glyph);
+  box-shadow: -3px -1px 10px -3px var(--send-glow-a), 3px 3px 11px -3px var(--send-glow-b);
+  filter: none;
+  opacity: 1;
+  cursor: pointer;
+  transition: transform 130ms cubic-bezier(.2,.7,.2,1);
+}
+.composer-shell .composer-input-actions .send-button::before,
+.composer-shell .composer-input-actions .send-button::after {
+  content: "";
+  position: absolute;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.composer-shell .composer-input-actions .send-button::before {
+  z-index: 0;
+  inset: 0;
+  background: var(--send-field);
+  transition: transform 520ms cubic-bezier(.2,.7,.2,1), opacity 260ms ease-out;
+}
+.composer-shell .composer-input-actions .send-button::after {
+  z-index: 1;
+  inset: 0;
+  background: var(--send-optics), radial-gradient(circle 16px at 50% 50% in srgb, transparent 83%, color-mix(in srgb, var(--send-edge-a) 20%, transparent) 92%, color-mix(in srgb, var(--send-edge-b) 32%, transparent) 98%, transparent 100%);
+  box-shadow: inset 0 .65px 0 color-mix(in srgb, var(--send-glyph) 28%, transparent), inset .6px 0 0 color-mix(in srgb, var(--send-edge-a) 34%, transparent), inset -.6px 0 0 color-mix(in srgb, var(--send-edge-b) 30%, transparent), inset 0 -2px 3px rgb(0 0 0 / .3);
+  transition: transform 220ms ease-out, opacity 180ms ease-out;
+}
+.composer-shell .composer-input-actions .send-button > .composer-send-motion-icon,
+.composer-shell .composer-input-actions .send-button > .send-button-label {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 .5px .4px rgb(0 0 0 / .35));
+}
+.composer-shell .composer-input-actions .send-button > .composer-send-motion-icon { width: 16px; height: 16px; }
+.composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"], [aria-busy="true"]):hover { transform: translateY(-1px); }
+.composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"], [aria-busy="true"]):hover::before { transform: rotate(var(--send-turn)); }
+.composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"], [aria-busy="true"]):hover::after { transform: var(--send-refraction); }
+.composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"], [aria-busy="true"]):active { transform: translateY(.5px) scale(.94); }
+.composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"], [aria-busy="true"]):active::before { transform: rotate(8deg); }
+.composer-shell .composer-input-actions .send-button:not(:disabled, [aria-disabled="true"], [aria-busy="true"]):active::after { transform: translateY(.6px) scale(.99); }
+.composer-shell .composer-input-actions .send-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.composer-shell .composer-input-actions .send-button:is(:disabled, [aria-disabled="true"]):not([data-motion-state="sending"]) {
+  color: var(--send-empty-glyph);
+  background: var(--send-empty);
+  box-shadow: inset 0 .65px 0 color-mix(in srgb, var(--text) 12%, transparent);
+  opacity: 1;
+  transform: none;
+  cursor: default;
+}
+.composer-shell .composer-input-actions .send-button:is(:disabled, [aria-disabled="true"]):not([data-motion-state="sending"])::before,
+.composer-shell .composer-input-actions .send-button:is(:disabled, [aria-disabled="true"]):not([data-motion-state="sending"])::after { opacity: 0; transition: none; }
+.composer-shell .composer-input-actions .send-button:is(:disabled, [aria-disabled="true"]) > .composer-send-motion-icon { filter: none; }
+.composer-shell .composer-input-actions .send-button[data-motion-state="sending"] {
+  color: var(--send-glyph);
+  background: var(--send-core);
+  transform: none;
+  cursor: progress;
+}
+.composer-shell .composer-input-actions .send-button[data-motion-state="sending"]::before {
+  background: conic-gradient(from 0deg in srgb, var(--send-deep) 0deg 130deg, var(--send-core) 205deg, var(--send-b) 260deg, var(--send-a) 312deg, var(--send-deep) 360deg);
+  opacity: 1;
+  animation: send-momentum 1600ms linear infinite;
+}
+.composer-shell .composer-input-actions .send-button[data-motion-state="sending"]::after { opacity: 1; }
+.composer-shell .composer-input-actions .send-button[data-motion-state="sending"] .composer-send-motion-icon { animation: none; }
+.composer-shell .composer-input-actions .send-button:is(.stop-button, [data-motion-state="stop"]),
+.composer-shell .composer-input-actions .send-button:is(.stop-button, [data-motion-state="stop"]):is(:disabled, :hover, :active) {
+  color: var(--send-stop-glyph);
+  background: var(--send-stop);
+  border: 1px solid var(--send-stop-line);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / .12);
+  opacity: 1;
+}
+.composer-shell .composer-input-actions .send-button:is(.stop-button, [data-motion-state="stop"])::before,
+.composer-shell .composer-input-actions .send-button:is(.stop-button, [data-motion-state="stop"])::after { display: none; }
+.composer-shell .composer-input-actions .send-button:is(.stop-button, [data-motion-state="stop"]) > .composer-send-motion-icon { filter: none; }
+.composer-shell .composer-input-actions .send-button[aria-busy="true"] { transform: none; }
+.composer-shell .composer-input-actions .send-button[aria-busy="true"]::after { transform: none; }
+.composer-shell .composer-input-actions .send-button.has-label::before { transform: none !important; }
+.composer-shell .composer-input-actions .send-button.has-label::after { background: var(--send-optics); }
+@keyframes send-momentum { to { transform: rotate(360deg); } }
+.app-shell[data-document-visible="false"] .composer-shell .composer-input-actions .send-button::before { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .composer-shell .composer-input-actions .send-button, .composer-shell .composer-input-actions .send-button::before, .composer-shell .composer-input-actions .send-button::after, .composer-shell .composer-input-actions .send-button .composer-send-motion-icon {
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
   }
+}
+@media (forced-colors: active) {
+  .composer-shell .composer-input-actions .send-button, .composer-shell .composer-input-actions .send-button:is(:disabled, :hover, :active, [aria-disabled="true"], [data-motion-state="sending"], .stop-button, [data-motion-state="stop"]) {
+    forced-color-adjust: auto;
+    background: ButtonFace !important;
+    color: ButtonText !important;
+    border: 1px solid ButtonText !important;
+    box-shadow: none !important;
+    filter: none !important;
+  }
+  .composer-shell .composer-input-actions .send-button:is(:disabled, [aria-disabled="true"]):not([data-motion-state="sending"]) { color: GrayText !important; border-color: GrayText !important; }
+  .composer-shell .composer-input-actions .send-button::before, .composer-shell .composer-input-actions .send-button::after { display: none !important; }
+  .composer-shell .composer-input-actions .send-button > .composer-send-motion-icon { filter: none !important; }
+  .composer-shell .composer-input-actions .send-button:focus-visible { outline-color: Highlight; }
 }

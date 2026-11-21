@@ -837,6 +837,30 @@
       "version": 116,
       "name": "PersistAgentSecretRequests",
       "digest": "aa02fbf1bf5b7dd19de856d62b2607adf42815bda71c863e75010816ad479abe"
+    },
+    {
+      "version": 117,
+      "name": "ExtendColorThemeLibrary",
+      "digest": "1158973c0c944c9577a0407c6adc8588a9f5ada100ebc5247397d1817cdbaa1a",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/extend-color-themes.ts",
+          "symbols": [
+            "COLOR_THEME_COLUMNS",
+            "COLOR_THEME_TABLE",
+            "EXTENDED_COLOR_THEMES",
+            "PREVIOUS_COLOR_THEMES",
+            "REBUILT_COLOR_THEME_TABLE",
+            "colorThemeTableRows",
+            "colorThemeTableShape",
+            "colorThemeTableSql",
+            "extendedColorThemeSql",
+            "quotedColorThemeIdentifier",
+            "rebuildColorThemeTable"
+          ],
+          "digest": "83739024e902e8a3f78d66c824686f50e56f6d8f4e4cc8c74d0b75b94aaa89e8"
+        }
+      ]
     }
   ]
 }

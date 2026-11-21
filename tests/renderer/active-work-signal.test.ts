@@ -80,7 +80,7 @@ describe("Minimal Workstream active pixel signal", () => {
       '.agent-pixel-loader[data-animated="true"] > span',
       ".turn-reasoning-step.is-active::before",
       ".loading-mark",
-      '.send-button[data-motion-state="sending"] .composer-send-motion-icon',
+      ".composer-shell .composer-input-actions .send-button::before",
     ]) {
       expect(hiddenRules).toContain(selector);
     }

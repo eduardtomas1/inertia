@@ -12,9 +12,11 @@ const FAMILY_THEMES = "src/renderer/public/color-themes.css";
 const THEME_LIBRARY = "src/renderer/src/components/ThemeLibrary.css";
 
 const UNPAINTED_TOKENS = new Set(["app-bg", "sidebar-bg", "surface-hover"]);
+const LIGHT_ALIASED_TOKENS = new Set(["accent-fill", "accent-fill-hover", "accent-fill-text"]);
 
 export function paintedPaletteTokens(family, appearance) {
-  return buildPaletteTokens(family, appearance).filter(([name]) => !UNPAINTED_TOKENS.has(name));
+  return buildPaletteTokens(family, appearance).filter(([name]) => !UNPAINTED_TOKENS.has(name)
+    && !(appearance === "light" && LIGHT_ALIASED_TOKENS.has(name)));
 }
 
 export function paletteSelector(family, appearance) {

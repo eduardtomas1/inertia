@@ -33,15 +33,13 @@ describe("composer context rows", () => {
     }
   });
 
-  it("keeps LoadingMark's spin as the only composer loader and drops icon tiles", () => {
+  it("keeps the sending loader glyph still under the crown sweep and drops icon tiles", () => {
     expect(source).not.toContain("composer-status-dots");
     expect(declarationsFor(rules, ".composer-compact-notice-icon").has("background")).toBe(false);
-    expect(declarationsFor(rules, '.send-button[data-motion-state="sending"] .composer-send-motion-icon').get("animation"))
-      .toBe(declarationsFor(rules, ".loading-mark").get("animation"));
-    const sending = declarationsFor(rules, ".send-button-loading:disabled");
-    expect(sending.get("border-color")).toBe("var(--line-strong)");
-    expect(sending.get("color")).toBe("var(--accent-strong)");
-    expect(sending.get("background")).toBe("var(--fill)");
+    const sending = '.composer-shell .composer-input-actions .send-button[data-motion-state="sending"]';
+    expect(declarationsFor(rules, `${sending} .composer-send-motion-icon`).get("animation")).toBe("none");
+    expect(declarationsFor(rules, `${sending}::before`).get("animation")).toBe("send-momentum 1600ms linear infinite");
+    expect(source).not.toContain("send-button-loading");
   });
 
   it("leaves the float shadow to the composer surface, not its toolbar rows", () => {

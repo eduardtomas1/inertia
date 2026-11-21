@@ -15,10 +15,8 @@ const tasks = readRendererCss("components/TasksView.css");
 const all = [styles, surface, sendActions, tasks].join("\n");
 const rules = parseCssRules(all);
 const surfaceRules = parseCssRules(surface);
-const STOP = '.composer-shell .composer-input-actions .send-button:is([data-composer-action-state="stop-ready"], [data-composer-action-state="stop-pending"])';
 const CHIP = ".composer-shell .composer-chip";
 const SEND = ".composer-shell .composer-input-actions .send-button";
-const LABELLED_SEND_HOVER = `${SEND}.has-label:not(:disabled, [aria-disabled="true"]):hover`;
 
 function whereList(context: string): string[] {
   const rule = rules.find(({ context: ruleContext, selectors }) =>
@@ -323,54 +321,127 @@ describe("composer control chips", () => {
 });
 
 describe("composer send and stop", () => {
-  it("grows the round send on hover, presses it down, and never scales a disabled or resting one", () => {
-    const send = declarationsFor(surfaceRules, SEND);
-    expect([send.get("width"), send.get("height"), send.get("border-radius")])
-      .toEqual(["var(--composer-send-size)", "var(--composer-send-size)", "50%"]);
-    expect(send.get("transition")).toContain("transform var(--dur) var(--ease)");
-    expect(declarationsFor(surfaceRules, `${SEND}:not(:disabled, [aria-disabled="true"], .has-label):hover`).get("transform"))
-      .toBe("scale(1.05)");
-    expect(declarationsFor(surfaceRules, `${SEND}:not(:disabled, [aria-disabled="true"]):active`).get("transform"))
-      .toBe("scale(0.97)");
-    const scaled = surfaceRules.filter(({ declarations }) => declarations.get("transform")?.startsWith("scale("));
-    expect(scaled.length).toBeGreaterThanOrEqual(3);
-    for (const rule of scaled) {
-      for (const selector of rule.selectors) expect(selector).toContain(':not(:disabled, [aria-disabled="true"]');
+  const sendRules = parseCssRules(sendActions);
+  const FORCED = "@media (forced-colors: active)";
+  const READY = `${SEND}:not(:disabled, [aria-disabled="true"], [aria-busy="true"])`;
+  const EMPTY = `${SEND}:is(:disabled, [aria-disabled="true"]):not([data-motion-state="sending"])`;
+  const SENDING = `${SEND}[data-motion-state="sending"]`;
+  const CROWN_STOP = `${SEND}:is(.stop-button, [data-motion-state="stop"])`;
+
+  it("draws the send as an exactly 32px crown disc of field and optics layers over the send core with the white glyph", () => {
+    const send = declarationsFor(sendRules, SEND);
+    expect([send.get("width"), send.get("height"), send.get("min-width"), send.get("flex"), send.get("border-radius")])
+      .toEqual(["32px", "32px", "32px", "0 0 32px", "50%"]);
+    expect([send.get("background"), send.get("color"), send.get("isolation"), send.get("opacity")])
+      .toEqual(["var(--send-core)", "var(--send-glyph)", "isolate", "1"]);
+    expect(send.get("box-shadow")).toBe("-3px -1px 10px -3px var(--send-glow-a), 3px 3px 11px -3px var(--send-glow-b)");
+    expect(send.get("transition")).toBe("transform 130ms cubic-bezier(.2,.7,.2,1)");
+    expect(send.get("--send-field")).toMatch(/^radial-gradient\(circle 11px at 50% 48% in srgb, var\(--send-core\).*conic-gradient\(from 195deg in srgb, var\(--send-deep\)/u);
+    expect(send.get("--send-optics")).toMatch(/^radial-gradient\(ellipse 2px \.65px at 30% 6% in srgb.*radial-gradient\(ellipse 12px 3px at 44% 20% in srgb, color-mix\(in srgb, var\(--send-glyph\) 6%, transparent\)/u);
+    expect(declarationsFor(sendRules, `${SEND}::before`).get("background")).toBe("var(--send-field)");
+    expect(declarationsFor(sendRules, `${SEND}::after`).get("background")).toMatch(/^var\(--send-optics\), radial-gradient\(circle 16px at 50% 50% in srgb, transparent 83%/u);
+    const glyph = declarationsFor(sendRules, `${SEND} > .composer-send-motion-icon`);
+    expect([glyph.get("width"), glyph.get("height"), glyph.get("z-index"), glyph.get("filter")])
+      .toEqual(["16px", "16px", "2", "drop-shadow(0 .5px .4px rgb(0 0 0 / .35))"]);
+    expect(surface).toContain("--composer-send-size: 32px;");
+    expect(declarationsFor(surfaceRules, SEND).get("margin-left")).toBe("0");
+    expect(styles).not.toMatch(/^\.(?:send|stop)-button/mu);
+  });
+
+  it("lifts the ready disc on hover while the cut turns 14deg and the optics counter-turn, and compresses it on press", () => {
+    const send = declarationsFor(sendRules, SEND);
+    expect([send.get("--send-turn"), send.get("--send-refraction")]).toEqual(["14deg", "rotate(-4deg)"]);
+    expect(declarationsFor(sendRules, `${READY}:hover`).get("transform")).toBe("translateY(-1px)");
+    expect(declarationsFor(sendRules, `${READY}:hover::before`).get("transform")).toBe("rotate(var(--send-turn))");
+    expect(declarationsFor(sendRules, `${READY}:hover::after`).get("transform")).toBe("var(--send-refraction)");
+    expect(declarationsFor(sendRules, `${READY}:active`).get("transform")).toBe("translateY(.5px) scale(.94)");
+    expect(declarationsFor(sendRules, `${READY}:active::before`).get("transform")).toBe("rotate(8deg)");
+    expect(declarationsFor(sendRules, `${READY}:active::after`).get("transform")).toBe("translateY(.6px) scale(.99)");
+    const focus = declarationsFor(sendRules, `${SEND}:focus-visible`);
+    expect([focus.get("outline"), focus.get("outline-offset")]).toEqual(["2px solid var(--focus-ring)", "3px"]);
+    for (const rule of surfaceRules.filter(({ declarations }) => declarations.has("transform"))) {
+      expect(rule.selectors.join(), "the surface leaves send motion to the crown").not.toContain(".send-button");
     }
-    expect(surface).toContain("--composer-send-size: max(32px, var(--composer-control-height));");
   });
 
-  it("keeps the resting send on the accent fill with the accent text arrow", () => {
-    const resting = declarationsFor(surfaceRules, `${SEND}[aria-disabled="true"]`);
-    expect([resting.get("background"), resting.get("color"), resting.get("border-color"), resting.get("opacity")])
-      .toEqual(["var(--accent)", "var(--accent-text)", "transparent", "1"]);
-    expect(declarationsFor(rules, '.send-button:not(:disabled, [aria-disabled="true"]):hover').get("background")).toBe("var(--accent-hover)");
+  it("keeps the empty send on quiet opaque glass with the muted arrow, then ignites the field over a safe disc", () => {
+    const empty = declarationsFor(sendRules, EMPTY);
+    expect([empty.get("background"), empty.get("color"), empty.get("opacity"), empty.get("transform")])
+      .toEqual(["var(--send-empty)", "var(--send-empty-glyph)", "1", "none"]);
+    const field = declarationsFor(sendRules, `${EMPTY}::before`);
+    expect([field.get("opacity"), field.get("transition")]).toEqual(["0", "none"]);
+    expect(declarationsFor(sendRules, `${EMPTY}::after`).get("opacity")).toBe("0");
+    expect(declarationsFor(sendRules, `${SEND}::before`).get("transition")).toContain("opacity 260ms ease-out");
+    expect(declarationsFor(sendRules, `${SEND}::after`).get("transition")).toContain("opacity 180ms ease-out");
+    expect(surface).not.toMatch(/send-button\[aria-disabled="true"\]\s*\{/u);
   });
 
-  it("grows a labelled send on hover once the narrow composer folds it into the round disc", () => {
-    expect(declarationsFor(surfaceRules, LABELLED_SEND_HOVER).has("transform")).toBe(false);
-    expect(declarationsFor(surfaceRules, LABELLED_SEND_HOVER, NARROW_SEND).get("transform")).toBe("scale(1.05)");
-    const disc = declarationsFor(parseCssRules(sendActions), `${SEND}.has-label`, NARROW_SEND);
+  it("sweeps a conic light through the sending disc while the loader glyph stays still, and pauses it while hidden", () => {
+    const sending = declarationsFor(sendRules, SENDING);
+    expect([sending.get("background"), sending.get("color"), sending.get("cursor")]).toEqual(["var(--send-core)", "var(--send-glyph)", "progress"]);
+    const sweep = declarationsFor(sendRules, `${SENDING}::before`);
+    expect(sweep.get("background")).toMatch(/^conic-gradient\(from 0deg in srgb, var\(--send-deep\) 0deg 130deg/u);
+    expect(sweep.get("animation")).toBe("send-momentum 1600ms linear infinite");
+    expect(declarationsFor(sendRules, `${SENDING} .composer-send-motion-icon`).get("animation")).toBe("none");
+    expect(sendActions).toContain("@keyframes send-momentum { to { transform: rotate(360deg); } }");
+    expect(declarationsFor(sendRules, `.app-shell[data-document-visible="false"] ${SEND}::before`).get("animation-play-state")).toBe("paused");
+  });
+
+  it("draws Stop as a neutral recessed disc with a structural edge, never the coloured send field", () => {
+    for (const selector of [CROWN_STOP, `${CROWN_STOP}:is(:disabled, :hover, :active)`]) {
+      const stop = declarationsFor(sendRules, selector);
+      expect([stop.get("background"), stop.get("color"), stop.get("border"), stop.get("opacity")], selector)
+        .toEqual(["var(--send-stop)", "var(--send-stop-glyph)", "1px solid var(--send-stop-line)", "1"]);
+    }
+    expect(declarationsFor(sendRules, `${CROWN_STOP}::before`).get("display")).toBe("none");
+    expect(declarationsFor(sendRules, `${CROWN_STOP}::after`).get("display")).toBe("none");
+    expect(surface, "Stop keeps the outlined square").not.toMatch(/composer-send-motion-icon path\s*\{[^}]*fill:/u);
+    expect(all).not.toContain("--danger-fill");
+  });
+
+  it("paints the eager composer stylesheet's send fallback with the crown's solid core, empty and stop colours", () => {
+    const fallback = ".composer-shell .composer-input-actions :where(.send-button)";
+    expect([...declarationsFor(surfaceRules, fallback)]).toEqual([
+      ["border", "1px solid transparent"], ["color", "var(--send-glyph)"], ["background", "var(--send-core)"],
+    ]);
+    expect(declarationsFor(surfaceRules, `.composer-shell .composer-input-actions :where(.send-button:is(:disabled, [aria-disabled="true"]))`).get("background"))
+      .toBe("var(--send-empty)");
+    expect(declarationsFor(surfaceRules, ".composer-shell .composer-input-actions :where(.send-button.stop-button)").get("background"))
+      .toBe("var(--send-stop)");
+    expect(styles).toContain("--send-core:");
+  });
+
+  it("keeps the labelled send a pill without the field turn and folds it into the round disc in a narrow composer", () => {
+    expect(declarationsFor(sendRules, `${SEND}.has-label::before`).get("transform")).toBe("none !important");
+    expect(declarationsFor(sendRules, `${SEND}.has-label::after`).get("background")).toBe("var(--send-optics)");
+    const pill = declarationsFor(sendRules, `${SEND}.has-label`);
+    expect([pill.get("width"), pill.get("border-radius")]).toEqual(["auto", "999px"]);
+    const disc = declarationsFor(sendRules, `${SEND}.has-label`, NARROW_SEND);
     expect([disc.get("width"), disc.get("border-radius")]).toEqual(["var(--composer-send-size)", "50%"]);
-    expect(declarationsFor(surfaceRules, LABELLED_SEND_HOVER, REDUCED).get("transform")).toBe("none");
   });
 
-  it("draws Stop agent as a status-failed disc with a filled square in the raised surface colour", () => {
-    const stop = declarationsFor(surfaceRules, STOP);
-    expect([stop.get("background"), stop.get("color"), stop.get("border-color")])
-      .toEqual(["var(--status-failed)", "var(--surface-raised)", "transparent"]);
-    expect(declarationsFor(surfaceRules, `${STOP} .composer-send-motion-icon path`).get("fill")).toBe("currentColor");
-    expect(declarationsFor(surfaceRules, `${SEND} .composer-send-motion-icon path`).get("fill"))
-      .toBe("transparent");
-  });
-
-  it("drops every composer scale and transition for reduced motion", () => {
-    expect(declarationsFor(surfaceRules, `${SEND}:not(:disabled, [aria-disabled="true"]):is(:hover, :active)`, REDUCED).get("transform"))
-      .toBe("none");
+  it("stills every send transform, transition and animation for reduced motion", () => {
+    for (const selector of [SEND, `${SEND}::before`, `${SEND}::after`, `${SEND} .composer-send-motion-icon`]) {
+      const reduced = declarationsFor(sendRules, selector, REDUCED);
+      expect([reduced.get("transition"), reduced.get("animation"), reduced.get("transform")], selector)
+        .toEqual(["none !important", "none !important", "none !important"]);
+    }
     for (const rule of surfaceRules.filter(({ context, declarations }) => context === "" && declarations.has("transition"))) {
       for (const selector of rule.selectors) {
         expect(declarationsFor(surfaceRules, selector, REDUCED).get("transition"), selector).toBe("none");
       }
     }
+  });
+
+  it("returns every send state to system button colours and drops the optical layers in forced colours", () => {
+    const forced = declarationsFor(sendRules, `${SEND}:is(:disabled, :hover, :active, [aria-disabled="true"], [data-motion-state="sending"], .stop-button, [data-motion-state="stop"])`, FORCED);
+    expect([forced.get("forced-color-adjust"), forced.get("background"), forced.get("color"), forced.get("border"), forced.get("box-shadow")])
+      .toEqual(["auto", "ButtonFace !important", "ButtonText !important", "1px solid ButtonText !important", "none !important"]);
+    expect(declarationsFor(sendRules, SEND, FORCED).get("background")).toBe("ButtonFace !important");
+    const empty = declarationsFor(sendRules, EMPTY, FORCED);
+    expect([empty.get("color"), empty.get("border-color")]).toEqual(["GrayText !important", "GrayText !important"]);
+    expect(declarationsFor(sendRules, `${SEND}::before`, FORCED).get("display")).toBe("none !important");
+    expect(declarationsFor(sendRules, `${SEND}::after`, FORCED).get("display")).toBe("none !important");
+    expect(declarationsFor(sendRules, `${SEND}:focus-visible`, FORCED).get("outline-color")).toBe("Highlight");
   });
 });

@@ -234,7 +234,7 @@ describe("goal control in the composer", () => {
     expect(block(".chat-goal-notes")).not.toContain("border");
     expect(block(".chat-goal-actions button:disabled,\n.chat-goal-form > button:disabled,\n.chat-goal-unavailable button:disabled")).toContain("opacity: var(--disabled-opacity);");
     expect(block(".chat-goal-form > button")).toContain("font-weight: 500;");
-    expect(block(".chat-goal-form > button:not(:disabled):hover")).toContain("background: var(--accent-hover);");
+    expect(block(".chat-goal-form > button:not(:disabled):hover")).toContain("background: var(--accent-fill-hover);");
   });
 });
 

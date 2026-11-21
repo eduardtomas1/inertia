@@ -131,7 +131,7 @@
 .private-connect-projects input {
   flex: 0 0 auto;
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--accent-fill);
 }
 
 .private-connect-disclosure {

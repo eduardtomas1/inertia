@@ -52,9 +52,13 @@ const trace: SubagentTrace = {
 function Motion(): React.JSX.Element {
   useDocumentPresence();
   return <>
-    <button className="send-button" data-motion-state="sending">
-      <span className="composer-send-motion-icon" style={{ display: "inline-block" }}>Progress</span>
-    </button>
+    <div className="composer-shell">
+      <div className="composer-input-actions">
+        <button className="send-button" data-motion-state="sending">
+          <span className="composer-send-motion-icon" style={{ display: "inline-block" }}>Progress</span>
+        </button>
+      </div>
+    </div>
     <output><SubagentElapsed trace={trace} /></output>
   </>;
 }

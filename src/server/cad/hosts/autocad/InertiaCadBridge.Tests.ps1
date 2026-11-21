@@ -24,6 +24,19 @@ class FakeCollection : System.Collections.IEnumerable {
   [System.Collections.IEnumerator] GetEnumerator() { return $this.Items.GetEnumerator() }
 }
 
+# Enumerable like the real AcadSelectionSet, so PowerShell unrolls it the same way when it is returned.
+class FakeSelectionSet : System.Collections.IEnumerable {
+  [object]$Doc
+  [string]$Name
+  [object[]]$Entities = @()
+  [int]$Count = 0
+  [scriptblock]$Filter
+  [object] Item([int]$Index) { return $this.Entities[$Index] }
+  [void] Select($Mode, $P1, $P2, $Codes, $Values) { $this.Entities = @(& $this.Filter $this.Doc $Codes $Values); $this.Count = $this.Entities.Count }
+  [void] Delete() { $this.Doc.DeletedSets++ }
+  [System.Collections.IEnumerator] GetEnumerator() { return $this.Entities.GetEnumerator() }
+}
+
 function New-FakeEntity([string]$Handle, [string]$ObjectName, [string]$Layer, [string]$Owner, [hashtable]$Properties = @{}) {
   $entity = [pscustomobject]@{ Handle = $Handle; ObjectName = $ObjectName; Layer = $Layer; Color = 256; OwnerID = $Owner; Deleted = $false }
   foreach ($key in $Properties.Keys) { Add-Member -InputObject $entity -NotePropertyName $key -NotePropertyValue $Properties[$key] }
@@ -48,7 +61,7 @@ function New-FakeAutoCAD {
   $doc = [pscustomobject]@{
     Name = 'Plan.dwg'; FullName = ''; Saved = $true; ReadOnly = $false; Layers = $layers
     Layouts = @([pscustomobject]@{ Name = 'Model'; Block = [pscustomobject]@{ ObjectID = 1 } }, [pscustomobject]@{ Name = 'A1'; Block = [pscustomobject]@{ ObjectID = 2 } })
-    Undo = (New-Object System.Collections.ArrayList); Registry = $registry; NextHandle = 500; Pickfirst = @()
+    Undo = (New-Object System.Collections.ArrayList); Registry = $registry; NextHandle = 500; Pickfirst = @(); DeletedSets = 0
     ActiveLayout = [pscustomobject]@{ Name = 'Model' }
   }
   Add-Member -InputObject $doc -MemberType ScriptMethod -Name GetVariable -Value { param($Name) switch ($Name) { 'INSUNITS' { 4 } 'DWGTITLED' { $(if ($this.FullName) { 1 } else { 0 }) } } }
@@ -69,10 +82,12 @@ function New-FakeAutoCAD {
   $selectionSets = [pscustomobject]@{ Doc = $doc }
   Add-Member -InputObject $selectionSets -MemberType ScriptMethod -Name Add -Value {
     param($Name)
-    $set = [pscustomobject]@{ Doc = $this.Doc; Entities = @(); Count = 0 }
-    Add-Member -InputObject $set -MemberType ScriptMethod -Name Select -Value {
-      param($Mode, $P1, $P2, $Codes, $Values)
-      $all = @($this.Doc.Registry.Values | Where-Object { -not $_.Deleted -and $_.OwnerID -eq 1 } | Sort-Object Handle)
+    $set = [FakeSelectionSet]::new()
+    $set.Doc = $this.Doc
+    $set.Name = $Name
+    $set.Filter = {
+      param($Doc, $Codes, $Values)
+      $all = @($Doc.Registry.Values | Where-Object { -not $_.Deleted -and $_.OwnerID -eq 1 } | Sort-Object Handle)
       for ($i = 0; $i -lt @($Codes).Count; $i++) {
         $value = $Values[$i]
         switch ($Codes[$i]) {
@@ -80,12 +95,9 @@ function New-FakeAutoCAD {
           8 { $all = @($all | Where-Object { $_.Layer -like $value }) }
         }
       }
-      $this.Entities = $all
-      $this.Count = $all.Count
+      return $all
     }
-    Add-Member -InputObject $set -MemberType ScriptMethod -Name Item -Value { param($Index) $this.Entities[$Index] }
-    Add-Member -InputObject $set -MemberType ScriptMethod -Name Delete -Value { }
-    return $set
+    return , $set
   }
   Add-Member -InputObject $doc -MemberType NoteProperty -Name SelectionSets -Value $selectionSets
   $space = [pscustomobject]@{ Doc = $doc }
@@ -145,6 +157,12 @@ Assert-Equal 3 $query.total 'query filters by DXF type'
 Assert-Equal '1' $query.nextCursor 'query pages with a cursor'
 $texts = (Invoke-Fake $acad 'query' @{ documentId = $documentId; textContains = 'kitch' }).result
 Assert-Equal @('2C') @($texts.items | ForEach-Object handle) 'query searches text'
+$single = (Invoke-Fake $acad 'query' @{ documentId = $documentId; types = @('TEXT') }).result
+Assert-Equal @('2C') @($single.items | ForEach-Object handle) 'a query matching one object returns it'
+$everything = (Invoke-Fake $acad 'query' @{ documentId = $documentId }).result
+Assert-Equal 4 $everything.total 'an unfiltered query reads model space'
+Assert-Equal @() @($doc.Registry.Values | Where-Object Deleted | ForEach-Object Handle) 'queries never erase what they match'
+Assert-Equal 4 $doc.DeletedSets 'each query deletes its own selection set'
 
 Assert-Equal 'UNSUPPORTED_OPERATION' (Invoke-Fake $acad 'send_command' @{ command = 'ERASE ALL' }).error.code 'arbitrary commands are refused'
 Assert-Equal 'NESTED_TARGET' (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = @(@{ op = 'acad.set_layer'; handles = @('3D'); layer = 'A-ANNO' }) }).error.code 'block-definition contents are refused'

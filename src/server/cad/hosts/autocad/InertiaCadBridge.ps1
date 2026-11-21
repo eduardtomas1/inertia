@@ -370,7 +370,16 @@ function Select-Entities($Doc, [string[]]$Types, [string]$Layer, [string]$Layout
   } else {
     $set.Select(5, $missing, $missing, $missing, $missing)
   }
-  return $set
+  # The comma keeps PowerShell from unrolling the set into its entities; Delete() on those erases them.
+  return , $set
+}
+
+function Remove-SelectionSet($Set) {
+  # Delete() on anything but our own selection set erases drawing objects.
+  if ($null -eq $Set -or $Set -is [System.Array]) { return }
+  $name = $null
+  try { $name = [string]$Set.Name } catch { }
+  if ($name -like 'INERTIACAD*') { try { $Set.Delete() } catch { } }
 }
 
 function Find-Entities($Acad, $Params) {
@@ -418,7 +427,7 @@ function Find-Entities($Acad, $Params) {
     if ($capped) { $result.scanCapped = $true }
     return $result
   } finally {
-    try { $set.Delete() } catch { }
+    Remove-SelectionSet $set
   }
 }
 

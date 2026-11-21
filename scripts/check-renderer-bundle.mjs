@@ -121,17 +121,17 @@ const budgets = {
   // Custom agents: the composer chip and called-agent row styles add 201
   // bytes over main's cap (254,845 measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351 + 190 + 11_205 + 28 + 201 + 4_383 + 15 - 848,
+  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155 + 24 + 324 + 351 + 190 + 11_205 + 28 + 201 + 4_383 + 15 - 848 + 1_154 + 256,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
-  colorThemesCss: 8 * kibibyte + 120 + 552,
+  colorThemesCss: 8 * kibibyte + 120 + 552 + 8_975 + 256,
   detachedChatCss: 1.5 * kibibyte + 55 + 21,
   // The Add provider menu and Grok sign-in state add 18,425 bytes (99,936 measured). Keep 256 bytes.
   // Custom agents: the settings section entry and its search rows add 843
   // bytes over main's cap (102,199 measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114 + 18_425 + 256 + 659 + 505 + 843 + 3_672,
+  settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114 + 18_425 + 256 + 659 + 505 + 843 + 3_672 + 124 + 256,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6 + 1 + 242 + 2 + 1_623,
@@ -289,7 +289,7 @@ const budgets = {
   // called-agent renderer wiring add 31,710 bytes over main's cap (2,600,295
   // measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 1_855 + 38 + 824 + 466 + 31_710 + 29_167 + 16_704 + 407 + 204 + 293 + 26_069 + 194 + 371 + 2_549,
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 1_855 + 38 + 824 + 466 + 31_710 + 29_167 + 16_704 + 407 + 204 + 293 + 26_069 + 194 + 371 + 2_549 + 712 + 256,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

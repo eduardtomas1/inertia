@@ -55,6 +55,17 @@ The useful changes in each Inertia release, in plain language.
   prepares many of Inertia's queries again on every call, which made loading
   a chat's history about a third slower.
 
+### Look
+
+- Four new colour themes: Graphite, Blossom, Lagoon and Saffron, in
+  Settings → Appearance next to Inertia, Grove, Ocean, Ember and Iris.
+- Dark mode has depth again. The sidebar, the chat and raised cards each sit
+  on their own step, borders and muted text are easier to read, and primary
+  buttons use a saturated fill with white text instead of a pale wash.
+- The send button glows with the theme colour once there is something to
+  send, turns slowly while a message is sending, and becomes a plain outlined
+  Stop during a run. With reduced motion it stays still, and Windows high
+  contrast shows a plain system button.
 ## 0.0.83 — 2026-11-11
 
 Calmer chats, Grok, custom agents you call by name, secrets that never enter

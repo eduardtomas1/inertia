@@ -146,13 +146,15 @@ describe("cad export scripts", () => {
     [
       "a layout by index, whose offset prompt has no Center option",
       plan({ layout: 1, area: "layout", plotStyle: "" }),
-      ['(setvar "CTAB" (inrlay 1))', "_.-PLOT", "_Y", "", "PublishToWeb PNG.pc3", "", "_L", "_N", "_L", "_F", "", "_Y", "", "_Y", "_N", "_N", "_N", "out.png"],
+      ['(setvar "CTAB" (inrlay 1))', '(setvar "PLOTTRANSPARENCYOVERRIDE" 2)', "_.-PLOT", "_Y", "", "PublishToWeb PNG.pc3", "", "_L", "_N", "_L", "_F", "", "_Y", "", "_Y", "_N", "_N", "_N", "out.png"],
     ],
   ] as const)("plots %s", (_name, input, expected) => {
     const script = lines(plotScript(input));
     const start = script.indexOf(expected[0]);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(script.slice(start, start + expected.length)).toEqual(expected);
+    // Translucent fills plot solid black unless transparency is forced on.
+    expect(script[script.indexOf("_.-PLOT") - 1]).toBe(String.raw`(setvar "PLOTTRANSPARENCYOVERRIDE" 2)`);
   });
 
   it("dxf, dwg and template scripts write fixed names beside the copy", () => {

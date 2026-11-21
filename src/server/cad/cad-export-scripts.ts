@@ -266,6 +266,9 @@ export function plotScript(plan: PlotPlan): string {
         `(setvar "CTAB" (inrlay ${plan.layout}))`,
       ]
       : [String.raw`(setvar "TILEMODE" 1)`]),
+    // Transparency is off in plots by default, which turns translucent fills solid black. The
+    // console runs in Inertia's isolated profile, so the user's own setting is untouched.
+    String.raw`(setvar "PLOTTRANSPARENCYOVERRIDE" 2)`,
     "_.-PLOT",
     "_Y",
     "",

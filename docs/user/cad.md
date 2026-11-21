@@ -104,6 +104,8 @@ projects when their terms require it.
   dialog in AutoCAD.
 - **AutoCAD is not found.** Make sure full AutoCAD for Windows is open with a
   drawing.
+- **The agent doesn't see new CAD options after an update.** Agents keep the tool
+  list from when their chat started. Start a new chat after updating Inertia.
 - **Remove the SketchUp extension.** Quit SketchUp, then delete
   `inertia_cad_bridge.rb` and the `inertia_cad_bridge` folder from SketchUp's
   Plugins folder: `%APPDATA%\SketchUp\SketchUp 20XX\SketchUp\Plugins` on

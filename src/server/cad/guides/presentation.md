@@ -33,7 +33,7 @@ SketchUp sheets come from the designer's own scene or LayOut export; advise from
 
 - **Fill.** The drawing takes 60–75% of the sheet, with even margins of at least 15 mm.
 - **Lineweights**, by layer, in three visible steps: 0.50 mm for cut, outline and ground line; 0.25–0.35 mm for openings and edges beyond; 0.13 mm for glazing, joints and hatch.
-- **Tone.** Solid dark grey (near #404040) for cut walls and ground; light grey fills (near #D0D0D0) behind the lines. Use true-colour greys: `monochrome.ctb` plots indexed colours black.
+- **Tone.** Solid dark grey (near #404040) for cut walls and ground; light grey fills (near #D0D0D0) behind the lines. Use opaque true-colour greys, not transparency: `monochrome.ctb` plots indexed colours black, and other plotters and viewers may print transparent fills black.
 - **Shadows and people** only if their sheets have them: one shadow grey and direction, and the designer's own people blocks.
 - **Type.** Their text styles and fonts, never `Standard` or stock SHX, in at most three sizes.
 

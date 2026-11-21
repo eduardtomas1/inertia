@@ -78,7 +78,11 @@ export function x11CaptureBounds(logical: SnapshotRect | null, native: Pick<X11F
   const matched = [native.bounds, native.frameBounds].find((pixels) => matchesX11Bounds(logical, pixels));
   if (!matched || !logical) return null;
   const scale = matched.width / logical.width;
-  return { x: native.bounds.x / scale, y: native.bounds.y / scale, width: native.bounds.width / scale, height: native.bounds.height / scale };
+  const inward = (pixels: number, round: (value: number) => number, slack: number): number => round(pixels / scale + slack);
+  const left = inward(native.bounds.x, Math.ceil, -1e-6), top = inward(native.bounds.y, Math.ceil, -1e-6);
+  const right = inward(native.bounds.x + native.bounds.width, Math.floor, 1e-6);
+  const bottom = inward(native.bounds.y + native.bounds.height, Math.floor, 1e-6);
+  return right > left && bottom > top ? { x: left, y: top, width: right - left, height: bottom - top } : null;
 }
 
 /** AT-SPI uses logical coordinates; X11 uses pixels. Require one uniform scale. */

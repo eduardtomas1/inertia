@@ -18,12 +18,32 @@ it("refuses a differently positioned or shaped same-title window and invalid geo
 it("matches the decorated frame while keeping captured pixels within the native client", () => {
   const bounds = { x: 320, y: 272, width: 640, height: 480 };
   const frameBounds = { x: 319, y: 252, width: 642, height: 505 };
-  for (const scale of [1, 1.25, 2]) {
+  for (const [scale, expected] of [
+    [1, bounds],
+    [1.25, { x: 256, y: 218, width: 512, height: 383 }],
+    [2, { x: 160, y: 136, width: 320, height: 240 }],
+  ] as const) {
     const scaled = (rect: typeof bounds) => ({ x: rect.x / scale, y: rect.y / scale, width: rect.width / scale, height: rect.height / scale });
-    expect(x11CaptureBounds(scaled(frameBounds), { bounds, frameBounds })).toEqual(scaled(bounds));
-    expect(x11CaptureBounds(scaled(bounds), { bounds, frameBounds })).toEqual(scaled(bounds));
+    expect(x11CaptureBounds(scaled(frameBounds), { bounds, frameBounds })).toEqual(expected);
+    expect(x11CaptureBounds(scaled(bounds), { bounds, frameBounds })).toEqual(expected);
   }
   expect(x11CaptureBounds({ ...frameBounds, x: frameBounds.x + 2 }, { bounds, frameBounds })).toBeNull();
   expect(x11CaptureBounds({ ...frameBounds, height: frameBounds.height + 2 }, { bounds, frameBounds })).toBeNull();
   expect(x11CaptureBounds(null, { bounds, frameBounds })).toBeNull();
+});
+
+it("rounds odd scaled X11 geometry inward to whole logical pixels", () => {
+  const bounds = { x: 321, y: 273, width: 641, height: 481 };
+  for (const scale of [1.25, 1.5, 2, 3]) {
+    const logical = { x: bounds.x / scale, y: bounds.y / scale, width: bounds.width / scale, height: bounds.height / scale };
+    const region = x11CaptureBounds(logical, { bounds, frameBounds: bounds })!;
+    expect(Object.values(region).every(Number.isSafeInteger)).toBe(true);
+    expect(region.x * scale).toBeGreaterThanOrEqual(bounds.x);
+    expect(region.y * scale).toBeGreaterThanOrEqual(bounds.y);
+    expect((region.x + region.width) * scale).toBeLessThanOrEqual(bounds.x + bounds.width);
+    expect((region.y + region.height) * scale).toBeLessThanOrEqual(bounds.y + bounds.height);
+    expect(logical.width - region.width).toBeLessThan(2);
+    expect(logical.height - region.height).toBeLessThan(2);
+  }
+  expect(x11CaptureBounds({ x: 160.5, y: 136.5, width: 0.5, height: 0.5 }, { bounds: { x: 321, y: 273, width: 1, height: 1 }, frameBounds: { x: 321, y: 273, width: 1, height: 1 } })).toBeNull();
 });

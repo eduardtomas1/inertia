@@ -7,6 +7,7 @@ const native = vi.hoisted(() => {
   return { x11: vi.fn(), foreground: vi.fn(), screenshot: vi.fn(), errors: {
     AccessibilityNotEnabledError: class extends XA11yError {}, PermissionDeniedError: class extends XA11yError {},
     SelectorNotMatchedError: class extends XA11yError {}, PlatformError: class extends XA11yError {},
+    InvalidActionDataError: class extends XA11yError {},
   } };
 });
 vi.mock("@crowecawcaw/xa11y", () => ({ default: { App: { foreground: native.foreground, byPid: native.foreground }, screenshot: native.screenshot, ...native.errors } }));
@@ -30,11 +31,17 @@ function foreground(name = "Review window", fields: SnapshotElement[] = [field()
   return { pid: 123, name: "Fixture", asElement: () => window, children: async () => [window] };
 }
 const nativeBounds = { x: 50, y: 50, width: 100, height: 100 };
+function wholePixelScreenshot(width: number, height: number) {
+  return async (options: { region?: Record<string, number> }) => {
+    if (options.region && !Object.values(options.region).every(Number.isSafeInteger)) throw new native.errors.InvalidActionDataError("region must be whole numbers");
+    return { width, height, pixels: Buffer.alloc(width * height * 4, 255) };
+  };
+}
 beforeEach(() => {
   vi.resetAllMocks();
   native.x11.mockReturnValue({ id: 100, pid: 123, name: "Review window", bounds: nativeBounds, frameBounds: nativeBounds });
   native.foreground.mockResolvedValue(foreground());
-  native.screenshot.mockResolvedValue({ width: 100, height: 100, pixels: Buffer.alloc(100 * 100 * 4, 255) });
+  native.screenshot.mockImplementation(wholePixelScreenshot(100, 100));
 });
 describe("foreground snapshot pixels and context", () => {
   it("masks editable pixels and accessibility text before returning the PNG", async () => {
@@ -263,6 +270,20 @@ describe.runIf(process.platform === "linux")("X11 foreground identity", () => {
     const canvas = createCanvas(100, 100), ctx = canvas.getContext("2d");
     ctx.drawImage(await loadImage(result.png), 0, 0);
     expect([...ctx.getImageData(15, 15, 1, 1).data]).toEqual([36, 36, 36, 255]);
+  });
+  it("captures a whole-pixel client region on a 200% X11 display with odd window geometry", async () => {
+    const oddBounds = { x: 101, y: 101, width: 201, height: 201 };
+    const app = foreground();
+    native.x11.mockReturnValue({ id: 100, pid: 123, name: "Review window", bounds: oddBounds, frameBounds: oddBounds });
+    native.foreground.mockResolvedValue({ ...app, children: async () => [{ ...app.asElement(), bounds: { x: 50.5, y: 50.5, width: 100.5, height: 100.5 } }] });
+    native.screenshot.mockImplementation(wholePixelScreenshot(200, 200));
+    const result = await captureForegroundSnapshot();
+    expect(native.screenshot).toHaveBeenCalledExactlyOnceWith({ region: { x: 51, y: 51, width: 100, height: 100 } });
+    expect(result.source.accessibility.nodes[1]).toMatchObject({ redacted: true, bounds: { x: 18, y: 18, width: 40, height: 40 } });
+    const canvas = createCanvas(200, 200), ctx = canvas.getContext("2d");
+    ctx.drawImage(await loadImage(result.png), 0, 0);
+    expect([...ctx.getImageData(25, 25, 1, 1).data]).toEqual([36, 36, 36, 255]);
+    expect([...ctx.getImageData(180, 180, 1, 1).data]).toEqual([255, 255, 255, 255]);
   });
   it("reports missing AT-SPI access when X11 proves a foreground process exists", async () => {
     native.foreground.mockRejectedValue(new SelectorNotMatchedError("unregistered app"));

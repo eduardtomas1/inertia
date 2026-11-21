@@ -108,6 +108,19 @@ function New-FakeEntity([string]$Handle, [string]$ObjectName, [string]$Layer, [s
       if ($null -ne $this.$name) { $point = $this.$name; $this.$name = @(($point[0] + $To[0] - $From[0]), ($point[1] + $To[1] - $From[1]), ($point[2] + $To[2] - $From[2])) }
     }
   }
+  # Like AcadEntity.Rotate: radians about a base point given as a three-element double array; Rotation reads back in [0, 2pi).
+  Add-Member -InputObject $entity -MemberType ScriptMethod -Name Rotate -Value {
+    param($Base, $Angle)
+    if (-not ($Base -is [double[]] -and $Base.Length -eq 3)) { throw 'Invalid argument BasePoint in Rotate' }
+    $cos = [Math]::Cos($Angle); $sin = [Math]::Sin($Angle)
+    foreach ($name in 'StartPoint', 'EndPoint', 'InsertionPoint', 'Center') {
+      if ($null -ne $this.$name) {
+        $point = $this.$name; $dx = $point[0] - $Base[0]; $dy = $point[1] - $Base[1]
+        $this.$name = @(($Base[0] + $dx * $cos - $dy * $sin), ($Base[1] + $dx * $sin + $dy * $cos), $point[2])
+      }
+    }
+    if ($null -ne $this.PSObject.Properties['Rotation']) { $this.Rotation = (($this.Rotation + $Angle) % (2 * [Math]::PI) + 2 * [Math]::PI) % (2 * [Math]::PI) }
+  }
   Add-Member -InputObject $entity -MemberType ScriptMethod -Name Delete -Value { $this.Deleted = $true; if ($null -ne $this.Doc) { $this.Doc.Dbmod = $this.Doc.Dbmod -bor 1 } }
   Add-Member -InputObject $entity -MemberType ScriptMethod -Name GetBoundingBox -Value {
     param([ref]$Min, [ref]$Max)
@@ -186,7 +199,7 @@ function New-FakeAutoCAD([string]$Name = 'Plan.dwg', [switch]$Empty) {
     Undo = (New-Object System.Collections.ArrayList); Registry = $registry; NextHandle = 500; Pickfirst = @(); DeletedSets = 0
     ActiveLayout = [pscustomobject]@{ Name = 'Model' }; Dbmod = 0; PickfirstVar = 1; FailSelect = $false; CmdActive = 0; UndoCtl = 5; FailEndUndo = $false
     ExtMin = @(0.0, 0.0, 0.0); ExtMax = @(1000.0, 500.0, 0.0); SetNames = (New-Object System.Collections.ArrayList); SelectFilter = $null
-    ViewCtr = @(5.0, 5.0, 0.0); ViewSize = 20.0; Views = (New-Object System.Collections.ArrayList)
+    ViewCtr = @(5.0, 5.0, 0.0); ViewSize = 20.0; Views = (New-Object System.Collections.ArrayList); Regens = 0
   }
   Add-Member -InputObject $doc -MemberType ScriptMethod -Name GetVariable -Value {
     param($Name)
@@ -201,6 +214,7 @@ function New-FakeAutoCAD([string]$Name = 'Plan.dwg', [switch]$Empty) {
     }
   }
   Add-Member -InputObject $doc -MemberType ScriptMethod -Name StartUndoMark -Value { [void]$this.Undo.Add('start') }
+  Add-Member -InputObject $doc -MemberType ScriptMethod -Name Regen -Value { param($Which) if ($Which -ne 0) { throw 'expected acActiveViewport' }; $this.Regens++ }
   Add-Member -InputObject $doc -MemberType ScriptMethod -Name EndUndoMark -Value { [void]$this.Undo.Add('end'); if ($this.FailEndUndo) { throw 'eNotInGroup' } }
   Add-Member -InputObject $doc -MemberType ScriptMethod -Name HandleToObject -Value {
     param($Handle)
@@ -369,15 +383,6 @@ function Invoke-FakeRead($Acad, [string]$Method, $Params) {
   return $response
 }
 
-$script:Approvals = New-Object System.Collections.ArrayList
-$script:Answer = $true
-$script:OnApproval = $null
-function Request-Approval([string]$Message, $CloseAtMs, $Parent) {
-  [void]$script:Approvals.Add($Message)
-  if ($null -ne $script:OnApproval) { & $script:OnApproval }
-  if ($script:Answer) { return 'yes' }
-  return 'no'
-}
 # The real name is shared by every Inertia server on this machine.
 $ApplyMutexName = 'Local\InertiaCadTest-' + [guid]::NewGuid().ToString('N')
 
@@ -508,10 +513,9 @@ foreach ($entity in $doc.Registry.Values) { $entity.Deleted = $false }
 $doc.Dbmod = 0
 $holder = Start-LockHolder
 try {
-  Assert-Equal $true (Invoke-Fake $acad 'query' @{ documentId = $documentId; types = @('TEXT') }).result.concurrentEdit 'a change while an approved edit runs is reported as concurrent, not as a read fault'
-  $approvalsBefore = $script:Approvals.Count
-  Assert-Equal 'HOST_BUSY' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = @(@{ op = 'acad.erase'; handles = @('1A') }); approvalMessage = 'Again?' }).error.code 'a second edit waits for the first instead of showing another dialog'
-  Assert-Equal $approvalsBefore $script:Approvals.Count 'a busy edit never reaches the dialog'
+  Assert-Equal $true (Invoke-Fake $acad 'query' @{ documentId = $documentId; types = @('TEXT') }).result.concurrentEdit 'a change while an edit runs is reported as concurrent, not as a read fault'
+  Assert-Equal 'HOST_BUSY' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = @(@{ op = 'acad.erase'; handles = @('1A') }) }).error.code 'a second edit waits for the first instead of running alongside it'
+  Assert-Equal 0 $doc.Undo.Count 'a busy edit never reaches the drawing'
 } finally {
   Stop-LockHolder $holder
 }
@@ -535,46 +539,40 @@ Assert-Equal 3 @($preview.changes).Count 'preview lists every change'
 Assert-Equal 'A-WALL' $doc.Registry['1A'].Layer 'preview does not change the drawing'
 Assert-Equal 0 $doc.Layers.Enumerations 'layers are looked up by name, not by walking the table'
 
-$script:Answer = $false
-$rejected = (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $operations; expectedFingerprints = $preview.fingerprints; approvalMessage = 'Apply?' }).result
-Assert-Equal 'rejected' $rejected.status 'a declined dialog applies nothing'
-Assert-Equal 0 $doc.Undo.Count 'a declined dialog opens no undo group'
-
-$script:Answer = $true
-$applied = (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $operations; expectedFingerprints = $preview.fingerprints; approvalMessage = 'Apply?' }).result
-Assert-Equal 'applied' $applied.status 'an approved change applies'
+$applied = (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $operations; expectedFingerprints = $preview.fingerprints }).result
+Assert-Equal 'applied' $applied.status 'a previewed change applies'
 Assert-Equal @('A-DEMO', 'A-DEMO') @($doc.Registry['1A'].Layer, $doc.Registry['1B'].Layer) 'both lines moved to the new layer'
 Assert-Equal @('start', 'end') @($doc.Undo) 'the change is one undo group'
-Assert-Equal @('Apply?', 'Apply?') @($script:Approvals) 'the dialog shows the server message'
+Assert-Equal 1 $doc.Regens 'a finished edit regenerates the view'
 
 $moveOps = @(@{ op = 'acad.move'; handles = @('2C'); vector = @(5, 0) })
 $movePreview = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $moveOps }).result
+Assert-Equal ([ordered]@{ op = 'acad.move'; target = 'TEXT 2C'; field = 'position'; before = [ordered]@{ position = @(10, 10, 0) }; after = [ordered]@{ position = @(15, 10, 0) } }) $movePreview.changes[0] 'a move previews the position before and after'
 $doc.Registry['2C'].TextString = 'PANTRY'
-$approvalsBefore = $script:Approvals.Count
-Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $moveOps; expectedFingerprints = $movePreview.fingerprints; approvalMessage = 'Move?' }).error.code 'a target edited after preview is refused'
-Assert-Equal $approvalsBefore $script:Approvals.Count 'a stale change never reaches the dialog'
+Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $moveOps; expectedFingerprints = $movePreview.fingerprints }).error.code 'a target edited after preview is refused'
+Assert-Equal @(2, 1, @(10, 10, 0)) @($doc.Undo.Count, $doc.Regens, @($doc.Registry['2C'].InsertionPoint)) 'a stale change is refused before any step'
 
 $attributeOps = @(@{ op = 'acad.set_attribute'; handles = @('5F'); tag = 'rev'; value = 'B' })
 $attributePreview = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $attributeOps }).result
-[void](Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $attributeOps; expectedFingerprints = $attributePreview.fingerprints; approvalMessage = 'Rev?' })
+[void](Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $attributeOps; expectedFingerprints = $attributePreview.fingerprints })
 Assert-Equal 'B' $doc.Registry['5F'].Attribute.TextString 'attribute values update by tag'
 
 $blockEraseOps = @(@{ op = 'acad.erase'; handles = @('5F') })
 $blockErase = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $blockEraseOps }).result
 Assert-Equal $true ($null -ne $blockErase.fingerprints.'block:5F') 'erasing a block insert fingerprints its definition'
 $doc.Registry['5F'].XScaleFactor = 2.0
-$approvalsBefore = $script:Approvals.Count
-Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $blockEraseOps; expectedFingerprints = $blockErase.fingerprints; approvalMessage = 'Erase?' }).error.code 'a block insert rescaled after the preview is not erased'
+$undoBefore = $doc.Undo.Count
+Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $blockEraseOps; expectedFingerprints = $blockErase.fingerprints }).error.code 'a block insert rescaled after the preview is not erased'
 $blockErase = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $blockEraseOps }).result
 $doc.Blocks.Item('TITLE').Items[0].EndPoint = @(594.0, 0.0, 0.0)
-Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $blockEraseOps; expectedFingerprints = $blockErase.fingerprints; approvalMessage = 'Erase?' }).error.code 'a block whose definition changed after the preview is not erased'
-Assert-Equal $approvalsBefore $script:Approvals.Count 'a stale erase never reaches the dialog'
+Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $blockEraseOps; expectedFingerprints = $blockErase.fingerprints }).error.code 'a block whose definition changed after the preview is not erased'
+Assert-Equal $undoBefore $doc.Undo.Count 'a stale erase never reaches the drawing'
 Assert-Equal $false $doc.Registry['5F'].Deleted 'the changed insert is still there'
 $doc.Registry['5F'].XScaleFactor = 1.0
 
 $lineOps = @(@{ op = 'acad.add_line'; start = @(0, 0); end = @(100, 0, 0); layer = 'A-DEMO' })
 $linePreview = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $lineOps }).result
-$created = (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $lineOps; expectedFingerprints = $linePreview.fingerprints; approvalMessage = 'Line?' }).result.created
+$created = (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $lineOps; expectedFingerprints = $linePreview.fingerprints }).result.created
 Assert-Equal 'LINE' $created[0].type 'new lines report their handle and type'
 Assert-Equal 'A-DEMO' $doc.Registry[$created[0].handle].Layer 'new lines land on the requested layer'
 
@@ -582,7 +580,7 @@ $eraseOps = @(@{ op = 'acad.erase'; handles = @('1B') }, @{ op = 'acad.set_color
 $erasePreview = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $eraseOps }).result
 Add-Member -InputObject $doc.Registry['1A'] -MemberType ScriptProperty -Name Color -Value { 256 } -SecondValue { throw 'eDuplicateRecordName' } -Force
 $doc.Undo.Clear()
-$partial = Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $eraseOps; expectedFingerprints = $erasePreview.fingerprints; approvalMessage = 'Erase?' }
+$partial = Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $eraseOps; expectedFingerprints = $erasePreview.fingerprints }
 Assert-Equal 'PARTIALLY_APPLIED' $partial.error.code 'a failure after the first step is reported honestly'
 Assert-Equal @('start', 'end') @($doc.Undo) 'a failed apply still closes its undo group'
 
@@ -590,7 +588,7 @@ $doc.Registry['1A'] = Add-FakeEntity $doc (New-FakeEntity '1A' 'AcDbLine' 'A-WAL
 $roundTrip = @(@{ op = 'acad.set_layer'; handles = @('1A'); layer = 'A-ANNO' }, @{ op = 'acad.set_layer'; handles = @('1A'); layer = 'A-WALL' })
 $roundTripPreview = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $roundTrip }).result
 Assert-Equal @('A-WALL', 'A-ANNO') @($roundTripPreview.changes | ForEach-Object before) 'a later layer change sees the earlier one'
-[void](Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $roundTrip; expectedFingerprints = $roundTripPreview.fingerprints; approvalMessage = 'Round trip?' })
+[void](Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $roundTrip; expectedFingerprints = $roundTripPreview.fingerprints })
 Assert-Equal 'A-WALL' $doc.Registry['1A'].Layer 'the last layer change in a batch wins'
 
 $doc.Layers.Factory = {
@@ -602,36 +600,63 @@ $doc.Layers.Factory = {
 }
 $colorOps = @(@{ op = 'acad.create_layer'; name = 'A-BROKEN'; color = 3 })
 $colorPreview = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $colorOps }).result
-$failed = Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $colorOps; expectedFingerprints = $colorPreview.fingerprints; approvalMessage = 'Layer?' }
+$failed = Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $colorOps; expectedFingerprints = $colorPreview.fingerprints }
 Assert-Equal 'APPLY_FAILED' $failed.error.code 'a step that fails after creating something removes it and reports nothing changed'
 Assert-Equal $null (Get-Layer $doc 'A-BROKEN') 'the half-made layer is gone'
 
-# Guards around the approval dialog.
+# Rotations.
+$rot = New-FakeAutoCAD
+$rotDoc = $rot.ActiveDocument
+$chair = Add-FakeEntity $rotDoc (New-FakeEntity '60' 'AcDbBlockReference' '0' 1 @{ Name = 'CHAIR'; EffectiveName = 'CHAIR'; HasAttributes = $false; InsertionPoint = @(10.0, 0.0, 0.0); Rotation = [Math]::PI / 12; XScaleFactor = 1.0; YScaleFactor = 1.0; ZScaleFactor = 1.0 })
+$label = Add-FakeEntity $rotDoc (New-FakeEntity '61' 'AcDbMText' 'A-ANNO' 1 @{ TextString = 'ROOM'; InsertionPoint = @(0.0, 10.0, 0.0); Height = 2.5; Rotation = 0.0 })
+[void](Add-FakeEntity $rotDoc (New-FakeEntity '62' 'AcDbBlockReference' '0' 99 @{ Name = 'CHAIR'; InsertionPoint = @(0.0, 0.0, 0.0); Rotation = 0.0 }))
+[void](Add-FakeEntity $rotDoc (New-FakeEntity '63' 'AcDbPolyline' '0' 1 @{ Coordinates = [double[]]@(0, 0, 5, 0); Closed = $false; Length = 5.0 }))
+function Get-Near($Point) { return , @($Point | ForEach-Object { [Math]::Round($_, 6) + 0.0 }) }
+function Invoke-RotApply($Ops) {
+  $preview = (Invoke-FakeRead $rot 'preview' @{ documentId = $documentId; operations = $Ops }).result
+  $rotDoc.Undo.Clear()
+  return Invoke-Fake $rot 'apply' @{ documentId = $documentId; operations = $Ops; expectedFingerprints = $preview.fingerprints }
+}
+$straighten = @(@{ op = 'acad.set_rotation'; handles = @('60'); rotationDeg = 0 })
+$straightenPreview = (Invoke-FakeRead $rot 'preview' @{ documentId = $documentId; operations = $straighten }).result
+Assert-Equal @([ordered]@{ op = 'acad.set_rotation'; target = 'INSERT 60'; field = 'rotationDeg'; before = 15; after = 0 }) @($straightenPreview.changes) 'a set_rotation preview lists the rotation before and after without changing the drawing'
+Assert-Equal 270 (Invoke-FakeRead $rot 'preview' @{ documentId = $documentId; operations = @(@{ op = 'acad.set_rotation'; handles = @('61'); rotationDeg = -90 }) }).result.changes[0].after 'rotations preview as AutoCAD reads them back, in [0, 360)'
+Assert-Equal 'applied' (Invoke-RotApply $straighten).result.status 'set_rotation applies'
+Assert-Equal @(0, @('start', 'end')) @($chair.Rotation, @($rotDoc.Undo)) 'set_rotation sets the absolute rotation in one undo group'
+Assert-Equal 'NESTED_TARGET' (Invoke-FakeRead $rot 'preview' @{ documentId = $documentId; operations = @(@{ op = 'acad.set_rotation'; handles = @('62'); rotationDeg = 0 }) }).error.code 'set_rotation refuses an insert inside a block definition'
+Assert-Equal 'UNSUPPORTED_TARGET' (Invoke-FakeRead $rot 'preview' @{ documentId = $documentId; operations = @(@{ op = 'acad.set_rotation'; handles = @('1A'); rotationDeg = 0 }) }).error.code 'set_rotation refuses objects without a rotation'
+Assert-Equal 'INVALID_REQUEST' (Invoke-FakeRead $rot 'preview' @{ documentId = $documentId; operations = @(@{ op = 'acad.rotate'; handles = @('60'); basePoint = @(0, 0); angleDeg = 'Infinity' }) }).error.code 'rotate refuses an infinite angle'
+Assert-Equal 'INVALID_REQUEST' (Invoke-FakeRead $rot 'preview' @{ documentId = $documentId; operations = @(@{ op = 'acad.rotate'; handles = @('60'); angleDeg = 90 }) }).error.code 'rotate needs a basePoint'
+$chained = (Invoke-FakeRead $rot 'preview' @{ documentId = $documentId; operations = @(@{ op = 'acad.set_rotation'; handles = @('60'); rotationDeg = 30 }, @{ op = 'acad.rotate'; handles = @('60'); basePoint = @(10, 0); angleDeg = 90 }) }).result
+Assert-Equal @(30, 120) @($chained.changes[1].before.rotationDeg, $chained.changes[1].after.rotationDeg) 'a rotate sees a set_rotation earlier in the batch'
+$shift = (Invoke-FakeRead $rot 'preview' @{ documentId = $documentId; operations = @(@{ op = 'acad.move'; handles = @('1A', '63'); vector = @(5, 0) }) }).result
+Assert-Equal @([ordered]@{ start = @(0, 0, 0); end = @(1000, 0, 0) }, [ordered]@{ start = @(5, 0, 0); end = @(1005, 0, 0) }, $null, 'moved by [5, 0]') @($shift.changes[0].before, $shift.changes[0].after, $shift.changes[1].before, $shift.changes[1].after) 'a move shows line ends before and after, and describes other objects'
+$turn = @(@{ op = 'acad.rotate'; handles = @('60', '61', '1A', '63'); basePoint = @(0, 0); angleDeg = 90 }, @{ op = 'acad.rotate'; handles = @('60', '61', '1A', '63'); basePoint = @(0, 0); angleDeg = -90 })
+$turnPreview = (Invoke-FakeRead $rot 'preview' @{ documentId = $documentId; operations = $turn }).result
+Assert-Equal ([ordered]@{ op = 'acad.rotate'; target = 'INSERT 60'; field = 'placement'; before = [ordered]@{ position = @(10, 0, 0); rotationDeg = 0 }; after = [ordered]@{ position = @(0, 10, 0); rotationDeg = 90 } }) $turnPreview.changes[0] 'rotate previews an insert''s position and rotation'
+Assert-Equal @([ordered]@{ start = @(0, 0, 0); end = @(0, 1000, 0) }, $null, "rotated 90$([char]0xB0) about [0, 0]") @($turnPreview.changes[2].after, $turnPreview.changes[3].before, $turnPreview.changes[3].after) 'rotate shows line ends and describes other objects'
+Assert-Equal @([ordered]@{ position = @(0, 10, 0); rotationDeg = 90 }, [ordered]@{ position = @(-10, 0, 0); rotationDeg = 90 }) @($turnPreview.changes[4].before, $turnPreview.changes[5].before) 'the second rotate sees the first'
+Assert-Equal 'applied' (Invoke-RotApply $turn).result.status 'rotate applies'
+Assert-Equal @(@(10, 0, 0), 0, @(0, 10, 0), 0, @(1000, 0, 0), @('start', 'end')) @((Get-Near $chair.InsertionPoint), [Math]::Round($chair.Rotation, 9), (Get-Near $label.InsertionPoint), [Math]::Round($label.Rotation, 9), (Get-Near $rotDoc.Registry['1A'].EndPoint), @($rotDoc.Undo)) 'rotating there and back in one batch round-trips in one undo group'
+[void](Invoke-RotApply @(@{ op = 'acad.rotate'; handles = @('60'); basePoint = @(0, 0); angleDeg = 90 }))
+Assert-Equal @(@(0, 10, 0), 90) @((Get-Near $chair.InsertionPoint), (Get-RotationDeg $chair.Rotation)) 'rotate turns an insert about the base point'
+
+# Guards around the apply.
 $guard = New-FakeAutoCAD
 $guardDoc = $guard.ActiveDocument
 $guardOps = @(@{ op = 'acad.set_color'; handles = @('1A'); color = 1 })
 $guardPreview = (Invoke-Fake $guard 'preview' @{ documentId = $documentId; operations = $guardOps }).result
 function Invoke-GuardApply([hashtable]$Extra = @{}) {
-  $params = @{ documentId = $documentId; operations = $guardOps; expectedFingerprints = $guardPreview.fingerprints; approvalMessage = 'Guard?' }
+  $params = @{ documentId = $documentId; operations = $guardOps; expectedFingerprints = $guardPreview.fingerprints }
   foreach ($key in $Extra.Keys) { $params[$key] = $Extra[$key] }
   return Invoke-Fake $guard 'apply' $params
 }
-$approvalsBefore = $script:Approvals.Count
 $guardDoc.CmdActive = 1
 Assert-Equal 'HOST_BUSY' (Invoke-GuardApply).error.code 'an edit waits while AutoCAD runs a command'
 $guardDoc.CmdActive = 0; $guardDoc.UndoCtl = 0
 Assert-Equal 'UNDO_DISABLED' (Invoke-GuardApply).error.code 'an edit is refused when one Undo could not revert it'
 $guardDoc.UndoCtl = 5
-Assert-Equal 'expired' (Invoke-GuardApply @{ deadlineAt = [DateTime]::UtcNow.AddSeconds(20).ToString('o') }).result.status 'an approval that cannot be answered in time expires'
-Assert-Equal 'expired' (Invoke-GuardApply @{ deadlineAt = [DateTimeOffset]::UtcNow.AddSeconds(20).ToUnixTimeMilliseconds() }).result.status 'deadlines also come as epoch milliseconds'
-$gone = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'exit' -PassThru -WindowStyle Hidden
-$gone.WaitForExit()
-Assert-Equal 'expired' (Invoke-GuardApply @{ parentPid = $gone.Id }).result.status 'an approval whose server is gone expires'
-Assert-Equal @($approvalsBefore, 0) @($script:Approvals.Count, $guardDoc.Undo.Count) 'refused and expired edits never reach the dialog or the drawing'
-$script:OnApproval = { $guard.ActiveDocument = $null }
-Assert-Equal 'APPLY_FAILED' (Invoke-GuardApply @{ parentPid = $PID; deadlineMs = 120000 }).error.code 'a drawing switched away during the dialog is reported as failed, never as not sent'
-$script:OnApproval = $null
-$guard.ActiveDocument = $guardDoc
+Assert-Equal @(256, 0, 0) @($guardDoc.Registry['1A'].Color, $guardDoc.Undo.Count, $guardDoc.Regens) 'refused edits never reach the drawing'
 Add-Member -InputObject $guardDoc.Registry['1A'] -MemberType ScriptProperty -Name Color -Value { 256 } -SecondValue { throw (New-Object System.Runtime.InteropServices.COMException 'Call was rejected by callee.', -2147418111) } -Force
 Assert-Equal 'APPLY_UNCONFIRMED' (Invoke-GuardApply).error.code 'AutoCAD going silent mid-edit is unconfirmed, never busy'
 Assert-Equal @('start', 'end') @($guardDoc.Undo) 'the undo group still closes'
@@ -639,11 +664,10 @@ Add-Member -InputObject $guardDoc.Registry['1A'] -MemberType ScriptProperty -Nam
 Assert-Equal 'APPLY_UNCONFIRMED' (Invoke-GuardApply).error.code 'AutoCAD dropping the connection mid-edit is unconfirmed'
 Add-Member -InputObject $guardDoc.Registry['1A'] -MemberType ScriptProperty -Name Color -Value { 256 } -SecondValue { throw (New-Object System.Runtime.InteropServices.COMException 'eLockViolation', -2145386390) } -Force
 Assert-Equal 'APPLY_FAILED' (Invoke-GuardApply).error.code 'an edit AutoCAD itself refuses is reported as nothing changed'
+Assert-Equal 0 $guardDoc.Regens 'an edit that changed nothing does not regenerate the view'
 [void](Add-FakeEntity $guardDoc (New-FakeEntity '1A' 'AcDbLine' 'A-WALL' 1 @{ StartPoint = @(0.0, 0.0, 0.0); EndPoint = @(1000.0, 0.0, 0.0); Length = 1000.0 }))
 $guardDoc.FailEndUndo = $true
-$script:OnApproval = { $script:WorkUntilMs = -1 }
-Assert-Equal 'applied' (Invoke-GuardApply).result.status 'a slow Yes and a failing EndUndoMark do not turn a finished edit into an error'
-$script:OnApproval = $null
+Assert-Equal 'applied' (Invoke-GuardApply).result.status 'a failing EndUndoMark does not turn a finished edit into an error'
 Assert-Equal 1 $guardDoc.Registry['1A'].Color 'the guarded edit ran'
 
 # Two drawings with the same file name from different folders.
@@ -656,7 +680,7 @@ $twin.Documents = @($twinA, $twinB); $twin.ActiveDocument = $twinB
 Assert-Equal @($false, $true) @((Invoke-FakeRead $twin 'documents' @{}).result.documents | ForEach-Object active) 'only the active drawing is active, not its namesake'
 $twinOps = @(@{ op = 'acad.set_color'; handles = @('1A'); color = 1 })
 $twinPreview = (Invoke-Fake $twin 'preview' @{ documentId = 'acad:C:\Jobs\A\Planta.dwg'; operations = $twinOps }).result
-Assert-Equal 'INACTIVE_DOCUMENT' (Invoke-Fake $twin 'apply' @{ documentId = 'acad:C:\Jobs\A\Planta.dwg'; operations = $twinOps; expectedFingerprints = $twinPreview.fingerprints; approvalMessage = 'Color?' }).error.code 'edits refuse an inactive namesake drawing'
+Assert-Equal 'INACTIVE_DOCUMENT' (Invoke-Fake $twin 'apply' @{ documentId = 'acad:C:\Jobs\A\Planta.dwg'; operations = $twinOps; expectedFingerprints = $twinPreview.fingerprints }).error.code 'edits refuse an inactive namesake drawing'
 $twinA.Pickfirst = @()
 Assert-Equal $true ((Invoke-FakeRead $twin 'selection' @{ documentId = 'acad:C:\Jobs\A\Planta.dwg' }).result.hint -like '*not the active tab*') 'an empty selection in an inactive drawing explains why'
 $twinB.Pickfirst = @(); $twinB.PickfirstVar = 0

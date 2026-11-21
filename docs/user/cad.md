@@ -3,8 +3,8 @@
 Agents can read and edit the drawing or model you have open in AutoCAD or
 SketchUp on the same computer as Inertia. Ask what is selected, find objects by
 layer or type, capture the current view as an image, or have the agent draw,
-move, recolor, or retag objects. Nothing in a drawing changes until you approve
-it inside the CAD app, and one Undo reverts each approved change.
+move, rotate, recolor, or retag objects. Nothing in a drawing changes until you
+ask for a change, and one Undo reverts each change the agent applies.
 
 ## Requirements
 
@@ -33,13 +33,10 @@ it inside the CAD app, and one Undo reverts each approved change.
 1. The agent prepares a change and gets a preview of every object before and
    after. A preview never changes the drawing.
 2. The agent explains the change in the chat.
-3. When the agent applies it, AutoCAD or SketchUp shows a Yes/No dialog that
-   starts with a count of each kind of change, erases and moves first, then
-   lists them. Choose **Yes** to apply it or **No** to cancel. If the agent
-   seems to be waiting, switch to the CAD app to answer the dialog. Stopping the
-   chat doesn't cancel a dialog that is open; it closes on its own if nobody
-   answers in time, and nothing changes.
-4. Each approved change is one Undo step in the CAD app.
+3. The agent applies it right away, with no confirmation dialog in the CAD app
+   or in Inertia: asking in the chat is your approval. It can land while you
+   keep working, and the agent checks the result afterwards.
+4. Each applied change is one Undo step in the CAD app.
 
 A preview can be applied once, within 30 minutes. If the objects it changes
 were edited since the preview, nothing is applied and the agent prepares a new
@@ -76,8 +73,9 @@ built-in guides on the CAD workflow and on presenting drawings before they draw.
 ## What agents can edit
 
 - **AutoCAD**, in drawing units: add lines, polylines, circles, and text;
-  create layers; move and erase objects; change an object's layer or color;
-  change text and block attribute values.
+  create layers; move, rotate, and erase objects; set the rotation of blocks
+  and text; change an object's layer or color; change text and block attribute
+  values.
 - **SketchUp**, in millimeters: add boxes; create tags and materials; move,
   erase, hide, or show objects; rename them; change an object's tag or
   material.

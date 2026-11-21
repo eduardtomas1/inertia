@@ -4,9 +4,8 @@
 # JSON request on stdin, one JSON response on stdout. It attaches to the running
 # AutoCAD over COM, so nothing has to be installed or trusted inside AutoCAD.
 # Reads never change the drawing. Edits are re-validated against the preview's
-# fingerprints, shown to the designer in a native Yes/No dialog, and grouped in
-# one Undo mark. There is deliberately no way to send AutoCAD commands, LISP or
-# scripts through this bridge.
+# fingerprints and grouped in one Undo mark. There is deliberately no way to
+# send AutoCAD commands, LISP or scripts through this bridge.
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
@@ -29,15 +28,12 @@ $MaxLayouts = 100
 # The server kills the bridge at its deadline (60 s for reads), so work stops well before it.
 $DefaultWorkMs = 35000
 $DeadlineMarginMs = 15000
-$DialogMarginMs = 30000
 $StaleSetSeconds = 600
 $ApplyMutexName = 'Local\InertiaCadApply'
 $ReadMethods = @('selection', 'query', 'capture', 'info')
 $Clock = [System.Diagnostics.Stopwatch]::StartNew()
 $StartedUtc = [DateTime]::UtcNow
-$DeadlineMs = $null
 $WorkUntilMs = $DefaultWorkMs
-$ParentPid = $null
 
 $InsUnits = @{
   0 = 'unitless'; 1 = 'in'; 2 = 'ft'; 3 = 'mi'; 4 = 'mm'; 5 = 'cm'; 6 = 'm'; 7 = 'km'; 8 = 'microinch'; 9 = 'mil'; 10 = 'yd'; 11 = 'angstrom'; 12 = 'nm'
@@ -166,76 +162,13 @@ function Connect-AutoCAD {
   return [System.Runtime.InteropServices.Marshal]::GetActiveObject('AutoCAD.Application')
 }
 
-# Returns yes, no, or expired when the deadline nears or the Inertia server that asked is gone.
-function Request-Approval([string]$Message, $CloseAtMs, $Parent) {
-  Add-Type -AssemblyName System.Windows.Forms
-  # Inertia starts this process hidden, and Windows applies that to the first window
-  # a process shows. Spend it on a throwaway form so the dialog is visible.
-  $spent = New-Object System.Windows.Forms.Form
-  $spent.ShowInTaskbar = $false
-  $spent.Opacity = 0
-  $spent.Show()
-  $spent.Close()
-  $form = New-Object System.Windows.Forms.Form
-  $form.Text = 'Inertia - approve AutoCAD edit'
-  $form.TopMost = $true
-  $form.StartPosition = 'CenterScreen'
-  $form.FormBorderStyle = 'FixedDialog'
-  $form.MinimizeBox = $false
-  $form.MaximizeBox = $false
-  $form.AutoSize = $true
-  $form.AutoSizeMode = 'GrowAndShrink'
-  $form.Padding = New-Object System.Windows.Forms.Padding 12
-  $layout = New-Object System.Windows.Forms.FlowLayoutPanel
-  $layout.FlowDirection = 'TopDown'
-  $layout.AutoSize = $true
-  $label = New-Object System.Windows.Forms.Label
-  $label.Text = $Message
-  $label.AutoSize = $true
-  $label.MaximumSize = New-Object System.Drawing.Size 560, 0
-  $buttons = New-Object System.Windows.Forms.FlowLayoutPanel
-  $buttons.AutoSize = $true
-  $buttons.Anchor = 'Right'
-  $yes = New-Object System.Windows.Forms.Button
-  $yes.Text = 'Yes'
-  $yes.DialogResult = 'Yes'
-  $no = New-Object System.Windows.Forms.Button
-  $no.Text = 'No'
-  $no.DialogResult = 'No'
-  $buttons.Controls.AddRange(@($yes, $no))
-  $layout.Controls.AddRange(@($label, $buttons))
-  $form.Controls.Add($layout)
-  $form.AcceptButton = $no
-  $form.CancelButton = $no
-  $form.ActiveControl = $no
-  $state = @{ expired = $false }
-  $timer = New-Object System.Windows.Forms.Timer
-  $timer.Interval = 500
-  $timer.Add_Tick({
-      if (($null -ne $CloseAtMs -and $script:Clock.ElapsedMilliseconds -ge $CloseAtMs) -or ($null -ne $Parent -and $Parent.HasExited)) {
-        $state.expired = $true
-        $form.Close()
-      }
-    })
-  $form.Add_Shown({ $form.Activate(); $timer.Start() })
-  try {
-    $answer = $form.ShowDialog()
-  } finally {
-    $timer.Dispose()
-    $form.Dispose()
-  }
-  if ($state.expired) { return 'expired' }
-  if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) { return 'yes' }
-  return 'no'
-}
-
 function Enter-ApplyLock {
   $mutex = New-Object System.Threading.Mutex($false, $ApplyMutexName)
   $owned = $false
   try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
   if (-not $owned) {
     $mutex.Dispose()
-    Fail 'HOST_BUSY' 'Another Inertia edit is waiting for approval or running in AutoCAD. Try again when it is done.'
+    Fail 'HOST_BUSY' 'Another Inertia edit is running in AutoCAD. Try again when it is done.'
   }
   return $mutex
 }
@@ -267,19 +200,17 @@ function ConvertTo-UtcTime($Value) {
   Fail 'INVALID_REQUEST' 'deadlineAt must be an ISO time or epoch milliseconds.'
 }
 
-# Deadlines count from when this process started; without one, reads keep the default budget and dialogs never expire.
+# Deadlines count from when this process started; without one, work keeps the default budget.
 function Set-Deadline($Request, $Params, [System.Diagnostics.Stopwatch]$Clock, [DateTime]$StartedUtc) {
   $script:Clock = $Clock
-  $script:DeadlineMs = $null
+  $deadlineMs = $null
   $at = $Request.deadlineAt
   if ($null -eq $at) { $at = $Params.deadlineAt }
   $ms = $Request.deadlineMs
   if ($null -eq $ms) { $ms = $Params.deadlineMs }
-  if ($null -ne $at) { $script:DeadlineMs = ((ConvertTo-UtcTime $at) - $StartedUtc).TotalMilliseconds }
-  elseif ($null -ne $ms) { $script:DeadlineMs = [double]$ms }
-  $script:WorkUntilMs = $(if ($null -ne $script:DeadlineMs) { $script:DeadlineMs - $DeadlineMarginMs } else { $DefaultWorkMs })
-  $script:ParentPid = $Request.parentPid
-  if ($null -eq $script:ParentPid) { $script:ParentPid = $Params.parentPid }
+  if ($null -ne $at) { $deadlineMs = ((ConvertTo-UtcTime $at) - $StartedUtc).TotalMilliseconds }
+  elseif ($null -ne $ms) { $deadlineMs = [double]$ms }
+  $script:WorkUntilMs = $(if ($null -ne $deadlineMs) { $deadlineMs - $DeadlineMarginMs } else { $DefaultWorkMs })
 }
 
 function Test-OutOfTime { return $script:Clock.ElapsedMilliseconds -ge $script:WorkUntilMs }
@@ -288,12 +219,20 @@ function Test-OutOfTime { return $script:Clock.ElapsedMilliseconds -ge $script:W
 
 function Get-Rounded($Value, [int]$Digits = 4) {
   if ($null -eq $Value) { return $null }
-  return [Math]::Round([double]$Value, $Digits)
+  # Adding zero turns -0 into 0, which PowerShell 7 would print as -0.
+  return [Math]::Round([double]$Value, $Digits) + 0.0
 }
 
 function Get-Degrees($Radians) {
   if ($null -eq $Radians) { return $null }
   return Get-Rounded ([double]$Radians * 180 / [Math]::PI) 3
+}
+
+# AutoCAD keeps rotations in [0, 2pi), so previews show what the drawing will read back.
+function Get-RotationDeg([double]$Radians) {
+  $degrees = Get-Degrees ((($Radians % (2 * [Math]::PI)) + 2 * [Math]::PI) % (2 * [Math]::PI))
+  if ($degrees -ge 360) { return 0.0 }
+  return $degrees
 }
 
 function Get-Point($Point) {
@@ -342,6 +281,15 @@ function Get-Coordinate($Value, [string]$Name) {
     $result[$i] = $number
   }
   return , $result
+}
+
+function Get-Radians($Value, [string]$Name) {
+  $number = 0.0
+  if ($null -eq $Value -or -not [double]::TryParse([string]$Value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number) -or
+    [double]::IsNaN($number) -or [double]::IsInfinity($number)) {
+    Fail 'INVALID_REQUEST' "$Name must be a finite number of degrees."
+  }
+  return $number * [Math]::PI / 180
 }
 
 $MTextCodes = [regex]'\\(?:U\+([0-9A-Fa-f]{4})|S([^;]*);|([\\{}])|[PN~]|[fFHCcATQWp][^;]*;|[LlOoKk])|[{}]'
@@ -991,6 +939,41 @@ function Add-Change($Plan, [string]$Op, [string]$Target, [string]$Field, $Before
   [void]$Plan.changes.Add([ordered]@{ op = $Op; target = $Target; field = $Field; before = $Before; after = $After })
 }
 
+$RotatableTypes = @('AcDbBlockReference', 'AcDbMInsertBlock', 'AcDbText', 'AcDbMText')
+# The points a move or rotate row shows, named as query rows name them.
+$ShapePoints = @{
+  AcDbBlockReference = @('InsertionPoint'); AcDbMInsertBlock = @('InsertionPoint'); AcDbText = @('InsertionPoint'); AcDbMText = @('InsertionPoint')
+  AcDbCircle = @('Center'); AcDbLine = @('StartPoint', 'EndPoint')
+}
+$PointFields = @{ InsertionPoint = 'position'; Center = 'center'; StartPoint = 'start'; EndPoint = 'end' }
+
+# Key points and rotation as earlier operations in this batch leave them; $null for other types.
+function Get-Shape($Entity, [string]$Handle, $Shapes) {
+  $names = $ShapePoints[[string]$Entity.ObjectName]
+  if ($null -eq $names) { return $null }
+  if (-not $Shapes.ContainsKey($Handle)) {
+    $points = [ordered]@{}
+    foreach ($name in $names) { $points[$name] = [double[]]@($Entity.$name) }
+    $rotation = $null
+    if ($RotatableTypes -contains [string]$Entity.ObjectName) { $rotation = [double]$Entity.Rotation }
+    $Shapes[$Handle] = @{ points = $points; rotation = $rotation }
+  }
+  return $Shapes[$Handle]
+}
+
+function Get-ShapeRow($Shape, [switch]$Rotation) {
+  $row = [ordered]@{}
+  foreach ($name in $Shape.points.Keys) { $row[$PointFields[$name]] = Get-Point $Shape.points[$name] }
+  if ($Rotation -and $null -ne $Shape.rotation) { $row.rotationDeg = Get-RotationDeg $Shape.rotation }
+  return $row
+}
+
+function Format-Vector($Vector) {
+  $parts = @((Get-Rounded $Vector[0]), (Get-Rounded $Vector[1]))
+  if ($Vector[2] -ne 0) { $parts += Get-Rounded $Vector[2] }
+  return "[$($parts -join ', ')]"
+}
+
 function New-Plan($Acad, $Doc, $Operations) {
   $operations = @($Operations)
   if ($operations.Count -eq 0) { Fail 'INVALID_REQUEST' 'Give at least one operation.' }
@@ -1008,6 +991,8 @@ function New-Plan($Acad, $Doc, $Operations) {
   $newLayers = @{}
   # Layers as earlier operations in this batch leave them, so a later one is never skipped as a no-op.
   $projectedLayers = @{}
+  # Key points and rotations as earlier operations in this batch leave them.
+  $shapes = @{}
   foreach ($op in $operations) {
     Assert-InTime
     $kind = [string]$op.op
@@ -1070,8 +1055,53 @@ function New-Plan($Acad, $Doc, $Operations) {
         $vector = Get-Coordinate $op.vector 'vector'
         foreach ($handle in (Get-Targets $op)) {
           $entity = Get-WritableEntity $Doc $handle $layoutMap $plan
-          Add-Change $plan $kind (Get-Label $entity) 'position' $null ("moved by " + (($vector | ForEach-Object { Get-Rounded $_ }) -join ', '))
+          $shape = Get-Shape $entity $handle $shapes
+          if ($null -eq $shape) {
+            Add-Change $plan $kind (Get-Label $entity) 'position' $null "moved by $(Format-Vector $vector)"
+          } else {
+            $before = Get-ShapeRow $shape
+            foreach ($point in $shape.points.Values) { for ($i = 0; $i -lt 3; $i++) { $point[$i] += $vector[$i] } }
+            Add-Change $plan $kind (Get-Label $entity) 'position' $before (Get-ShapeRow $shape)
+          }
           [void]$plan.steps.Add(@{ kind = $kind; entity = $entity; vector = $vector })
+        }
+      }
+      'acad.set_rotation' {
+        $rotation = Get-Radians $op.rotationDeg 'rotationDeg'
+        foreach ($handle in (Get-Targets $op)) {
+          $entity = Get-WritableEntity $Doc $handle $layoutMap $plan
+          if ($RotatableTypes -notcontains [string]$entity.ObjectName) { Fail 'UNSUPPORTED_TARGET' "$(Get-Label $entity) is not an INSERT, TEXT or MTEXT; use acad.rotate with a basePoint." }
+          $shape = Get-Shape $entity $handle $shapes
+          $current = Get-RotationDeg $shape.rotation
+          $target = Get-RotationDeg $rotation
+          if ($current -eq $target) { [void]$plan.warnings.Add("$(Get-Label $entity) is already at $target degrees."); continue }
+          $shape.rotation = $rotation
+          Add-Change $plan $kind (Get-Label $entity) 'rotationDeg' $current $target
+          [void]$plan.steps.Add(@{ kind = $kind; entity = $entity; value = $rotation })
+        }
+      }
+      'acad.rotate' {
+        $base = Get-Coordinate $op.basePoint 'basePoint'
+        $angle = Get-Radians $op.angleDeg 'angleDeg'
+        $cos = [Math]::Cos($angle)
+        $sin = [Math]::Sin($angle)
+        foreach ($handle in (Get-Targets $op)) {
+          $entity = Get-WritableEntity $Doc $handle $layoutMap $plan
+          $shape = Get-Shape $entity $handle $shapes
+          if ($null -eq $shape) {
+            Add-Change $plan $kind (Get-Label $entity) 'placement' $null "rotated $(Get-Degrees $angle)$([char]0xB0) about $(Format-Vector $base)"
+          } else {
+            $before = Get-ShapeRow $shape -Rotation
+            foreach ($point in $shape.points.Values) {
+              $dx = $point[0] - $base[0]
+              $dy = $point[1] - $base[1]
+              $point[0] = $base[0] + $dx * $cos - $dy * $sin
+              $point[1] = $base[1] + $dx * $sin + $dy * $cos
+            }
+            if ($null -ne $shape.rotation) { $shape.rotation += $angle }
+            Add-Change $plan $kind (Get-Label $entity) 'placement' $before (Get-ShapeRow $shape -Rotation)
+          }
+          [void]$plan.steps.Add(@{ kind = $kind; entity = $entity; base = $base; angle = $angle })
         }
       }
       'acad.erase' {
@@ -1149,6 +1179,8 @@ function Invoke-Step($Doc, $Step, $Created) {
       $origin = New-Object 'double[]' 3
       $Step.entity.Move($origin, $Step.vector)
     }
+    'acad.set_rotation' { $Step.entity.Rotation = $Step.value }
+    'acad.rotate' { $Step.entity.Rotate($Step.base, $Step.angle) }
     'acad.erase' { $Step.entity.Delete() }
     default {
       $space = $Doc.ModelSpace
@@ -1183,7 +1215,6 @@ function Get-Preview($Acad, $Params) {
   $plan = New-Plan $Acad $doc $Params.operations
   return [ordered]@{
     documentId   = Get-DocumentId $doc
-    documentName = [string]$doc.Name
     changes      = $plan.changes.ToArray()
     fingerprints = $plan.fingerprints
     warnings     = @($plan.warnings | Select-Object -Unique)
@@ -1195,24 +1226,14 @@ function Invoke-Apply($Acad, $Params) {
   $doc = Resolve-Document $Acad $documentId -RequireActive
   $lock = Enter-ApplyLock
   try {
-    $stale = Get-StaleKeys $Params.expectedFingerprints (New-Plan $Acad $doc $Params.operations).fingerprints
+    $plan = New-Plan $Acad $doc $Params.operations
+    $stale = Get-StaleKeys $Params.expectedFingerprints $plan.fingerprints
     if ($stale.Count -gt 0) { Fail 'TARGET_CHANGED' "The drawing changed since the preview ($((@($stale) | Select-Object -First 5) -join ', ')). Preview the change again." }
     if ([int]$doc.GetVariable('CMDACTIVE') -ne 0) { Fail 'HOST_BUSY' 'AutoCAD has a command or dialog open. Finish it and try again.' }
     if (-not ([int]$doc.GetVariable('UNDOCTL') -band 1)) {
       Fail 'UNDO_DISABLED' 'Undo is turned off in this drawing, so the edit could not be reverted. Turn it back on in AutoCAD (UNDO, then Control, All) and try again.'
     }
-    $closeAtMs = $null
-    if ($null -ne $script:DeadlineMs) { $closeAtMs = $script:DeadlineMs - $DialogMarginMs }
-    $answer = 'expired'
-    if ($null -eq $closeAtMs -or $script:Clock.ElapsedMilliseconds -lt $closeAtMs) {
-      $parent = $null
-      if ($null -ne $script:ParentPid) { try { $parent = [System.Diagnostics.Process]::GetProcessById([int]$script:ParentPid) } catch { } }
-      if ($null -eq $script:ParentPid -or ($null -ne $parent -and -not $parent.HasExited)) {
-        $answer = Request-Approval ([string]$Params.approvalMessage) $closeAtMs $parent
-      }
-    }
-    if ($answer -ne 'yes') { return [ordered]@{ documentId = $documentId; status = $(if ($answer -eq 'no') { 'rejected' } else { 'expired' }) } }
-    return Invoke-ApprovedSteps $Acad $Params
+    return Invoke-Steps $Acad $doc $plan
   } finally {
     Exit-ApplyLock $lock
   }
@@ -1229,37 +1250,30 @@ function Test-RpcFailure($ErrorRecord) {
   return $false
 }
 
-# After the Yes the edit may have reached AutoCAD, so no failure here may read as "not sent": the server would retry and duplicate it.
-function Invoke-ApprovedSteps($Acad, $Params) {
-  $documentId = [string]$Params.documentId
-  # Without a deadline the designer may take as long as they like; the read budget must not fail the edit they approved.
-  if ($null -eq $script:DeadlineMs) { $script:WorkUntilMs = [double]::PositiveInfinity }
+# From the undo mark on the edit may have reached AutoCAD, so no failure here may read as "not sent": the server would retry and duplicate it.
+function Invoke-Steps($Acad, $Doc, $Plan) {
   $created = New-Object System.Collections.ArrayList
   $done = 0
-  $total = 0
+  $total = $Plan.steps.Count
   $started = $false
   $script:StepLeftChanges = $false
   try {
-    $doc = Resolve-Document $Acad $documentId -RequireActive
-    $plan = New-Plan $Acad $doc $Params.operations
-    $stale = Get-StaleKeys $Params.expectedFingerprints $plan.fingerprints
-    if ($stale.Count -gt 0) { Fail 'TARGET_CHANGED' 'The drawing changed while the approval dialog was open. Preview again.' }
-    $total = $plan.steps.Count
-    $doc.StartUndoMark()
+    $Doc.StartUndoMark()
     $started = $true
-    foreach ($step in $plan.steps) { Invoke-Step $doc $step $created; $done++ }
+    foreach ($step in $Plan.steps) { Invoke-Step $Doc $step $created; $done++ }
   } catch {
     $shape = Get-ErrorShape $_
     if ($done -gt 0 -or $script:StepLeftChanges) { Fail 'PARTIALLY_APPLIED' "AutoCAD stopped after $done of $total steps: $($shape.message). One Undo in AutoCAD reverts the steps that ran." }
-    if (-not $started -and $shape.code -eq 'TARGET_CHANGED') { throw }
     if ($started -and (Test-RpcFailure $_)) {
       Fail 'APPLY_UNCONFIRMED' 'AutoCAD stopped answering during the edit, so it is unknown whether it ran. Check the drawing before trying again; if it ran, one Undo reverts it.'
     }
     Fail 'APPLY_FAILED' "AutoCAD refused the edit, so nothing was changed: $($shape.message)"
   } finally {
-    if ($started) { try { $doc.EndUndoMark() } catch { } }
+    if ($started) { try { $Doc.EndUndoMark() } catch { } }
+    # COM edits can leave stale graphics; Regen(0) (acActiveViewport) redraws without touching the database.
+    if ($done -gt 0) { try { $Doc.Regen(0) } catch { try { $Acad.Update() } catch { } } }
   }
-  return [ordered]@{ documentId = $documentId; status = 'applied'; changes = $plan.changes.ToArray(); created = $created.ToArray() }
+  return [ordered]@{ documentId = Get-DocumentId $Doc; status = 'applied'; changes = $Plan.changes.ToArray(); created = $created.ToArray() }
 }
 
 function Get-CopyPath([string]$Path) {

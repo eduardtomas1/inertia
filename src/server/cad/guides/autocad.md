@@ -36,6 +36,7 @@ Read before reading, drawing or editing a designer's AutoCAD work. For anything 
 
 ## Editing the open drawing
 
+- There is no dialog: the user's request is the approval, and a change may land while the designer works. Apply only what they asked for: preview, tell the user what will change, apply, then `inertia_cad_capture_view {bbox}` to verify.
 - Pass `layer` on every `add_*`; otherwise objects land on the current layer. `add_text` takes `current.textStyle`.
 - Prefer existing layers. `acad.create_layer` sets only a colour index, so ask before adding one.
 - `NESTED_TARGET` and `LOCKED` are the designer's decisions: report them, and don't press for exploding or unlocking.

@@ -329,8 +329,8 @@ Adding the pack changes the registry's definition digest.
 ### inertia.cad
 
 `inertia.cad` (revision 1) lets an agent read the AutoCAD drawings and
-SketchUp models open on the user's computer and apply previewed edits that the
-user approves in a dialog inside the CAD app. It is off unless the project's
+SketchUp models open on the user's computer and apply previewed edits the user
+asked for in the chat, with no confirmation dialog. It is off unless the project's
 **Agent CAD tools** setting is on (`cadAccess: true`). While it is off the pack
 is withheld from every transport, and unlike other withheld packs a Codex
 thread does not register its tools at `thread/start`
@@ -345,7 +345,7 @@ turned off answers `cad_disabled`.
 | `inertia_cad_status`, `inertia_cad_guide`, `inertia_cad_get_selection`, `inertia_cad_query_objects`, `inertia_cad_document_info`, `inertia_cad_capture_view`, `inertia_cad_preview_changes` | Read-only; none. |
 | `inertia_cad_export` | None to its own folder, since it works on a copy; an Inertia approval card for any other destination. |
 | `inertia_cad_setup` | An Inertia approval card listing the SketchUp Plugins files it writes. |
-| `inertia_cad_apply_changes` | The Yes/No dialog inside AutoCAD or SketchUp, which shows the change. |
+| `inertia_cad_apply_changes` | None: the user's request in the chat is the approval. It applies a previewed, fingerprint-checked proposal once, as one undo step. |
 | `inertia_cad_save_copy` | An Inertia approval card naming the new file. |
 
 The private instruction (`inertia-cad`) says the tools reach the CAD apps on

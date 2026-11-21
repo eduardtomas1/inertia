@@ -7,8 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CadError, HOST_UNREADABLE } from "../../src/server/cad/cad-hosts";
 import {
-  approvalMessage,
-  type CadApplyResult,
   type CadChange,
   type CadServiceOptions,
   checkDestination,
@@ -251,19 +249,18 @@ describe("CadService preview", () => {
 });
 
 describe("CadService apply", () => {
-  it("sends the proposal with its fingerprints, approval text and title", async () => {
+  it("sends the proposal with its fingerprints and title, and applies at once with no dialog", async () => {
     const { cad, host } = await service();
     const proposalId = await propose(cad, [SET_TAG, { ...SET_TAG, ids: ["12"] }, { op: "skp.add_box" }]);
     const receipt = await cad.apply({ proposalId });
     const apply = host.calls.find(({ method }) => method === "apply")!;
-    expect(apply.options).toMatchObject({ documentId: SKP_DOCUMENT_ID, timeoutMs: 10 * 60 * 1000 });
-    // A cancelled tool call must never cancel an edit the user can still approve.
+    expect(apply.options).toMatchObject({ documentId: SKP_DOCUMENT_ID, timeoutMs: 28_000 });
+    // A cancelled tool call must never cancel an edit the host may already be running.
     expect(apply.options.signal).toBeUndefined();
     expect(apply.params).toEqual({
       documentId: SKP_DOCUMENT_ID,
       operations: [SET_TAG, { ...SET_TAG, ids: ["12"] }, { op: "skp.add_box" }],
       expectedFingerprints: { [SKP_DOCUMENT_ID]: "fp-1" },
-      approvalMessage: approvalMessage(SKP_DOCUMENT_ID, [CHANGE]),
       title: "set tag, add box",
     });
     expect(receipt).toEqual({
@@ -285,28 +282,6 @@ describe("CadService apply", () => {
     const receipt = await cad.apply({ proposalId: await propose(cad) });
     expect(receipt.changes).toEqual([applied]);
     expect(receipt.created).toEqual([]);
-  });
-
-  it("labels the approval with the document name the host reports", async () => {
-    const host = fakeCadHost("autocad", {
-      preview: () => ({ ...previewAnswer(ACAD_DOCUMENT_ID, [CHANGE]), documentName: "Site plan.dwg" }),
-      apply: () => ({ status: "applied" }),
-    });
-    const { cad } = await service([host]);
-    const preview = await cad.preview({ documentId: ACAD_DOCUMENT_ID, operations: [{ op: "acad.erase" }] });
-    await cad.apply({ proposalId: preview.proposalId! });
-    expect(host.calls[1]!.params.approvalMessage).toContain("wants to change Site plan.dwg:");
-  });
-
-  it("falls back to the drawing's file name in the approval text", async () => {
-    const host = fakeCadHost("autocad", {
-      preview: () => previewAnswer(ACAD_DOCUMENT_ID, [CHANGE]),
-      apply: () => ({ status: "applied" }),
-    });
-    const { cad } = await service([host]);
-    const preview = await cad.preview({ documentId: ACAD_DOCUMENT_ID, operations: [{ op: "acad.erase" }] });
-    await cad.apply({ proposalId: preview.proposalId! });
-    expect(host.calls[1]!.params.approvalMessage).toContain("wants to change Plan.dwg:");
   });
 
   it("replays the first receipt instead of applying twice", async () => {
@@ -375,8 +350,8 @@ describe("CadService apply", () => {
     answers[0]!.resolve({ status: "applied" });
     expect((await first).status).toBe("applied");
     await vi.waitFor(() => expect(started).toBe(2));
-    answers[1]!.resolve({ status: "rejected" });
-    expect((await second).status).toBe("rejected");
+    answers[1]!.resolve({ status: "applied" });
+    expect((await second).status).toBe("applied");
   });
 
   it("starts a save copy only after a running apply finishes", async () => {
@@ -432,12 +407,12 @@ describe("CadService apply", () => {
     expect(await cad.apply({ proposalId })).toEqual({ ...receipt, replayed: true });
   });
 
-  it("records a declined dialog as rejected", async () => {
+  it("records a dialog declined in an older SketchUp extension as rejected", async () => {
     const host = sketchUpHost();
     host.handlers.apply = () => ({ status: "rejected" });
     const { cad } = await service([host]);
     const receipt = await cad.apply({ proposalId: await propose(cad) });
-    expect(receipt).toMatchObject({ status: "rejected", message: expect.stringContaining("declined"), created: [] });
+    expect(receipt).toMatchObject({ status: "rejected", message: expect.stringContaining("inertia_cad_setup"), created: [] });
   });
 
   it.each([
@@ -467,13 +442,13 @@ describe("CadService apply", () => {
     expect(await cad.apply({ proposalId })).toEqual({ ...receipt, replayed: true });
   });
 
-  it("records a dialog the user let time out as expired", async () => {
+  it("records an older SketchUp extension's unanswered dialog as expired", async () => {
     const host = sketchUpHost();
     host.handlers.apply = () => ({ status: "expired" });
     const { cad, directory } = await service([host]);
     const proposalId = await propose(cad);
     const receipt = await cad.apply({ proposalId });
-    expect(receipt).toMatchObject({ proposalId, status: "expired", message: expect.stringContaining("nothing was modified"), created: [] });
+    expect(receipt).toMatchObject({ proposalId, status: "expired", message: expect.stringContaining("Nothing was modified"), created: [] });
     const lines = (await readFile(join(directory, "receipts.jsonl"), "utf8")).trim().split("\n");
     expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([receipt]);
     expect(await cad.apply({ proposalId })).toEqual({ ...receipt, replayed: true });
@@ -495,7 +470,7 @@ const NOT_SENT_CODES = [
   "CANCELLED",
 ];
 
-describe("CadService apply that never reached the dialog", () => {
+describe("CadService apply refused before any step", () => {
   it.each(NOT_SENT_CODES)("rejects %s, writes no receipt, and lets the same proposal be applied again", async (code) => {
     const host = sketchUpHost();
     let attempts = 0;
@@ -545,88 +520,6 @@ describe("CadService apply that never reached the dialog", () => {
     expect((await rejection(cad.apply({ proposalId }))).code).toBe("HOST_BUSY");
     expect((await rejection(cad.apply({ proposalId }))).code).toBe("PROPOSAL_EXPIRED");
     expect(host.calls.filter(({ method }) => method === "apply")).toHaveLength(1);
-  });
-});
-
-describe("CadService pending apply", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  /** A SketchUp host whose apply waits for the test; `started` resolves once the host call begins. */
-  function waitingHost() {
-    const host = sketchUpHost();
-    const started = deferred<void>();
-    const answer = deferred<unknown>();
-    host.handlers.apply = () => {
-      started.resolve();
-      return answer.promise;
-    };
-    return { host, started, answer };
-  }
-
-  const applyCalls = (host: FakeCadHost): number => host.calls.filter(({ method }) => method === "apply").length;
-
-  it("answers pending after 25 seconds, and a second call waits on the same host call for the receipt", async () => {
-    const { host, started, answer } = waitingHost();
-    const { cad, directory } = await service([host]);
-    const proposalId = await propose(cad);
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    let firstResult: CadApplyResult | undefined;
-    const first = cad.apply({ proposalId }).then((result) => {
-      firstResult = result;
-      return result;
-    });
-    await started.promise;
-    await vi.advanceTimersByTimeAsync(24_999);
-    expect(firstResult).toBeUndefined();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(await first).toEqual({
-      proposalId,
-      documentId: SKP_DOCUMENT_ID,
-      changes: [CHANGE],
-      created: [],
-      at: new Date(START).toISOString(),
-      status: "pending",
-      message: expect.stringContaining("same proposalId"),
-    });
-    // Fake timers keep the second call waiting however slow the receipt write is.
-    const second = cad.apply({ proposalId });
-    answer.resolve({ status: "applied", created: [{ id: "99" }] });
-    const receipt = await second;
-    expect(receipt).toMatchObject({ proposalId, status: "applied", created: [{ id: "99" }] });
-    expect(receipt).not.toHaveProperty("replayed");
-    expect(applyCalls(host)).toBe(1);
-    const lines = (await readFile(join(directory, "receipts.jsonl"), "utf8")).trim().split("\n");
-    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([receipt]);
-  });
-
-  it("waits only applyWaitMs before answering pending, without a second host call", async () => {
-    const { host, started, answer } = waitingHost();
-    const { cad } = await service([host], { now: START }, { applyWaitMs: 20 });
-    const proposalId = await propose(cad);
-    const first = await cad.apply({ proposalId });
-    await started.promise;
-    expect(first.status).toBe("pending");
-    expect((await cad.apply({ proposalId })).status).toBe("pending");
-    answer.resolve({ status: "rejected" });
-    await vi.waitFor(async () => expect((await cad.apply({ proposalId })).status).toBe("rejected"));
-    expect(applyCalls(host)).toBe(1);
-  });
-
-  it("keeps a pending edit alive for a later NOT_SENT failure to put the proposal back", async () => {
-    const { host, started, answer } = waitingHost();
-    const { cad } = await service([host], { now: START }, { applyWaitMs: 20 });
-    const proposalId = await propose(cad);
-    expect((await cad.apply({ proposalId })).status).toBe("pending");
-    await started.promise;
-    answer.reject(new CadError("HOST_BUSY", "Close the dialog."));
-    host.handlers.apply = () => ({ status: "applied" });
-    await vi.waitFor(async () => {
-      const result = await cad.apply({ proposalId }).catch((error: unknown) => error);
-      expect(result).toMatchObject({ status: "applied" });
-    });
-    expect(applyCalls(host)).toBe(2);
   });
 });
 
@@ -852,94 +745,6 @@ describe("checkDestination", () => {
       expect(error.code).toBe("INVALID_REQUEST");
       expect(error.message).toContain("absolute path ending in .skp");
     }
-  });
-});
-
-describe("approvalMessage", () => {
-  it("shows a summary line, then each change as before → after", () => {
-    expect(approvalMessage("House.skp", [CHANGE])).toBe(
-      "An agent in Inertia wants to change House.skp:\n"
-      + "Set tag (1)\n\n"
-      + "• Group 11: tag Untagged → Walls"
-      + "\n\nApply these changes? You can undo them in one step.",
-    );
-  });
-
-  it("lists erasures first and moves second, under per-operation counts", () => {
-    const change = (op: string, target: string): CadChange => ({ op, target, field: "layer", before: "0", after: "Walls" });
-    const message = approvalMessage("Plan.dwg", [
-      change("acad.set_layer", "Line 2A"),
-      change("acad.move", "Line 2B"),
-      change("acad.erase", "Line 2C"),
-      change("acad.set_layer", "Line 2D"),
-      change("acad.erase", "Line 2E"),
-      change("acad.set_layer", "Line 2F"),
-    ]);
-    const lines = message.split("\n");
-    expect(lines[1]).toBe("Erase 2 objects, Move 1 object, Set layer (3)");
-    expect(lines.filter((line) => line.startsWith("• ")).map((line) => line.slice(2, 9)))
-      .toEqual(["Line 2C", "Line 2E", "Line 2B", "Line 2A", "Line 2D", "Line 2F"]);
-  });
-
-  it("never lets the line cap hide an erasure", () => {
-    const changes: CadChange[] = Array.from({ length: 20 }, (_, index) => ({ ...CHANGE, target: `Group ${index}` }));
-    changes.push({ op: "skp.erase", target: "Group 99", field: "entity", before: "group", after: null });
-    const message = approvalMessage("House.skp", changes);
-    expect(message.split("\n")[1]).toBe("Erase 1 object, Set tag (20)");
-    expect(message.split("\n").find((line) => line.startsWith("• "))).toBe("• Group 99: entity group → none");
-    expect(message).toContain("\n…and 3 more change(s).\n");
-  });
-
-  it("puts drawing names with line breaks, controls or bidi marks on one line", () => {
-    const message = approvalMessage("Site\u2029plan.dwg", [
-      { op: "acad.set_text", target: "Text\n• Fake line\u202e", field: "te\u2028xt", before: "a\u0000b", after: "c\td" },
-    ]);
-    expect(message).toBe(
-      "An agent in Inertia wants to change Site plan.dwg:\n"
-      + "Set text (1)\n\n"
-      + "• Text • Fake line: te xt a b → c d"
-      + "\n\nApply these changes? You can undo them in one step.",
-    );
-    expect(message).not.toMatch(/[\u0000\u202e\u2028\u2029\t]/u);
-  });
-
-  it("shows only the new value for a created object", () => {
-    const message = approvalMessage("Plan.dwg", [
-      { op: "acad.add_line", target: "New line", field: "geometry", after: { start: [0, 0], end: [1, 1] } },
-      { op: "acad.create_layer", target: "Layer Doors", field: "name", before: null, after: "Doors" },
-    ]);
-    expect(message).toContain("• New line: {\"start\":[0,0],\"end\":[1,1]}\n");
-    expect(message).toContain("• Layer Doors: Doors\n");
-  });
-
-  it("writes none for an empty value and shortens long values", () => {
-    const message = approvalMessage("Plan.dwg", [
-      { op: "acad.set_text", target: "Text 2A", field: "text", before: "Old", after: "" },
-      { op: "acad.set_text", target: "Text 2B", field: "text", before: "x".repeat(100), after: "y" },
-    ]);
-    expect(message).toContain("• Text 2A: text Old → none");
-    expect(message).toContain(`• Text 2B: text ${"x".repeat(57)}... → y`);
-  });
-
-  it("caps a line at 160 characters", () => {
-    const message = approvalMessage("Plan.dwg", [{ op: "acad.set_text", target: "T".repeat(200), field: "text", after: "a" }]);
-    const line = message.split("\n").find((candidate) => candidate.startsWith("• "))!;
-    expect(line).toHaveLength(160);
-    expect(line.endsWith("...")).toBe(true);
-  });
-
-  it("lists 18 changes and counts the rest", () => {
-    const changes = Array.from({ length: 21 }, (_, index) => ({ ...CHANGE, target: `Group ${index}` }));
-    const message = approvalMessage("House.skp", changes);
-    expect(message.split("\n").filter((line) => line.startsWith("• "))).toHaveLength(18);
-    expect(message).toContain("• Group 17:");
-    expect(message).not.toContain("• Group 18:");
-    expect(message).toContain("\n…and 3 more change(s).\n");
-  });
-
-  it("does not count extra changes at exactly 18", () => {
-    const changes = Array.from({ length: 18 }, (_, index) => ({ ...CHANGE, target: `Group ${index}` }));
-    expect(approvalMessage("House.skp", changes)).not.toContain("more change");
   });
 });
 

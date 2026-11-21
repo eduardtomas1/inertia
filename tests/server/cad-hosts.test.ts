@@ -144,17 +144,18 @@ describe("SketchUp host requests", () => {
       id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
       token: TOKEN,
       method: "query",
-      params: { documentId, tag: "Walls", deadlineAt: expect.any(Number), parentPid: process.pid },
+      params: { documentId, tag: "Walls", deadlineAt: expect.any(Number) },
     }]);
   });
 
-  it("tells the bridge when Inertia stops waiting and which process waits", async () => {
+  it("tells the bridge when Inertia stops waiting, and nothing about a dialog", async () => {
     const { bridge, host } = await sketchUp((request, socket) => answer(socket, request, { ok: true, result: {} }));
     const before = Date.now();
     await host.call("apply", { documentId }, { documentId, timeoutMs: 600_000 });
     const after = Date.now();
     const params = bridge.connections[0]!.lines[0]!.params as Record<string, unknown>;
-    expect(params.parentPid).toBe(process.pid);
+    // With no approval dialog there is no waiting process to watch.
+    expect(params).not.toHaveProperty("parentPid");
     expect(params.deadlineAt).toBeGreaterThanOrEqual(before + 600_000);
     expect(params.deadlineAt).toBeLessThanOrEqual(after + 600_000);
   });
@@ -564,17 +565,18 @@ describe("AutoCAD host", () => {
       v: 1,
       id: expect.any(String),
       method: "query",
-      params: { ...params, deadlineAt: expect.any(Number), parentPid: process.pid },
+      params: { ...params, deadlineAt: expect.any(Number) },
     });
   });
 
-  it("tells the bridge when Inertia stops waiting and which process waits", async () => {
+  it("tells the bridge when Inertia stops waiting, and nothing about a dialog", async () => {
     const { host, runner } = await autoCad(stdout({ ok: true, result: { status: "applied" } }));
     const before = Date.now();
     await host.call("apply", { documentId: "acad:x" }, { documentId: "acad:x", timeoutMs: 600_000 });
     const after = Date.now();
     const { params } = JSON.parse(runner.mock.calls[0]![2].input) as { params: Record<string, unknown> };
-    expect(params.parentPid).toBe(process.pid);
+    // With no approval dialog there is no waiting process to watch.
+    expect(params).not.toHaveProperty("parentPid");
     expect(params.deadlineAt).toBeGreaterThanOrEqual(before + 600_000);
     expect(params.deadlineAt).toBeLessThanOrEqual(after + 600_000);
     expect(params.documentId).toBe("acad:x");

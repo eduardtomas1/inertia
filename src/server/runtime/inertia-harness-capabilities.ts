@@ -9,6 +9,7 @@ import { HTML_RENDER_TOOL_DEFINITION } from "./html-render-host-tool";
 import { WORKSPACE_TOOL_DEFINITIONS } from "./workspace-host-tools";
 import type { ProjectPreferences } from "../../shared/project-preferences";
 import { SECRET_REQUEST_TOOL_DEFINITION } from "./agent-secrets/secret-request-host-tool";
+import { CAD_INSTRUCTION, CAD_TOOL_DEFINITIONS } from "./cad-host-tools";
 import {
   FULL_HARNESS_CAPABILITY_OFFER,
   HarnessCapabilityRegistry,
@@ -21,15 +22,19 @@ import type { HiddenProviderInstruction } from "./turns/request-context";
 import type { ThreadToolRegistrations } from "./thread-tool-registrations";
 
 export const INERTIA_FRONTEND_WORKBENCH_PACK_ID = "inertia.frontend-workbench";
+export const INERTIA_CAD_PACK_ID = "inertia.cad";
 
 export const BROWSER_ACCESS_DISABLED: HarnessCapabilityWithholding = Object.freeze({
   code: "browser_disabled",
   message: "Agent browser access is disabled in this project's settings.",
 });
 
-const BROWSER_DISABLED_OFFER: HarnessCapabilityTurnOffer = Object.freeze({
-  withheldPacks: new Map([[INERTIA_FRONTEND_WORKBENCH_PACK_ID, BROWSER_ACCESS_DISABLED]]),
+export const CAD_ACCESS_DISABLED: HarnessCapabilityWithholding = Object.freeze({
+  code: "cad_disabled",
+  message: "CAD tools are off in this project's settings. The user can turn on Agent CAD tools in the project settings, then start a new chat.",
 });
+
+const OFFERS = new Map<string, HarnessCapabilityTurnOffer>();
 
 /**
  * The packs one turn is offered under its project's preferences. Turning
@@ -37,13 +42,26 @@ const BROWSER_DISABLED_OFFER: HarnessCapabilityTurnOffer = Object.freeze({
  * injected, and its tools are not advertised to a per-turn transport. A Codex
  * thread registers them when it starts, and their calls answer
  * `browser_disabled` while access is off.
+ *
+ * CAD tools are off unless the project turns them on. While off, no transport
+ * carries them: a Codex thread registers them only if it starts with them on.
  */
 export function inertiaCapabilityOfferForProject(
-  preferences: Pick<ProjectPreferences, "browserAccess"> | null | undefined,
+  preferences: Partial<Pick<ProjectPreferences, "browserAccess" | "cadAccess">> | null | undefined,
 ): HarnessCapabilityTurnOffer {
-  return preferences?.browserAccess === false
-    ? BROWSER_DISABLED_OFFER
-    : FULL_HARNESS_CAPABILITY_OFFER;
+  const browserOff = preferences?.browserAccess === false;
+  const cadOff = preferences?.cadAccess !== true;
+  if (!browserOff && !cadOff) return FULL_HARNESS_CAPABILITY_OFFER;
+  const key = `${String(browserOff)}:${String(cadOff)}`;
+  let offer = OFFERS.get(key);
+  if (!offer) {
+    const withheld = new Map<string, HarnessCapabilityWithholding>();
+    if (browserOff) withheld.set(INERTIA_FRONTEND_WORKBENCH_PACK_ID, BROWSER_ACCESS_DISABLED);
+    if (cadOff) withheld.set(INERTIA_CAD_PACK_ID, CAD_ACCESS_DISABLED);
+    offer = Object.freeze({ withheldPacks: withheld });
+    OFFERS.set(key, offer);
+  }
+  return offer;
 }
 
 const ORCHESTRATION_INSTRUCTION: HiddenProviderInstruction = {
@@ -80,6 +98,7 @@ interface InertiaHarnessCapabilityInput {
   orchestrationTools: readonly ProviderHostToolDefinition[];
   browserEnabled: boolean;
   secretsEnabled?: boolean;
+  cadEnabled?: boolean;
   invoke: HarnessCapabilityTool["invoke"];
   /** Durable record of what each Codex thread registered when it started. */
   threadRegistrations?: ThreadToolRegistrations;
@@ -170,6 +189,20 @@ export function createInertiaHarnessCapabilities(
       tags: ["permissions", "secrets"],
       evidenceKinds: ["host-tool-result"],
       scenarioIds: ["private-secret-card", "exact-turn-secret-wait"],
+    },
+  });
+  if (input.cadEnabled) packs.push({
+    id: INERTIA_CAD_PACK_ID,
+    revision: 1,
+    title: "Inertia CAD",
+    summary: "Reads the open AutoCAD drawings and SketchUp models, and applies previewed edits the user approves inside the CAD app.",
+    instructions: [CAD_INSTRUCTION],
+    tools: CAD_TOOL_DEFINITIONS.map((definition) => ({ definition, invoke: input.invoke })),
+    registeredOnlyWhenOffered: true,
+    evaluation: {
+      tags: ["cad", "permissions"],
+      evidenceKinds: ["host-tool-result"],
+      scenarioIds: ["cad-preview-then-apply", "single-use-proposal", "in-app-approval"],
     },
   });
   return new HarnessCapabilityRegistry(packs, { threadRegistrations: input.threadRegistrations });

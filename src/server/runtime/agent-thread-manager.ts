@@ -47,6 +47,7 @@ import {
   AGENT_BROWSER_TOOL_NAMES,
   AgentBrowserHostTools,
 } from "./agent-browser-host-tools";
+import { CAD_TOOL_NAMES, type CadHostTools } from "./cad-host-tools";
 import type {
   RuntimeAgentBrowserBroker,
 } from "./agent-browser-broker-client";
@@ -57,6 +58,7 @@ import {
 } from "./harness-capabilities";
 import {
   BROWSER_ACCESS_DISABLED,
+  CAD_ACCESS_DISABLED,
   createInertiaHarnessCapabilities,
   inertiaCapabilityOfferForProject,
 } from "./inertia-harness-capabilities";
@@ -299,6 +301,7 @@ export interface AgentThreadManagerDependencies {
   agentBrowser?: RuntimeAgentBrowserBroker;
   turnGitArtifacts?: WorkspaceHostToolDependencies["turnGitArtifacts"];
   workspaceRuns?: WorkspaceHostToolDependencies["workspaceRuns"];
+  cadTools?: CadHostTools;
   agentSecrets?: {
     containsSecret(value: unknown): boolean;
     invoke(source: AgentSecretHostToolSource, call: ProviderHostToolCall): Promise<ProviderHostToolResult>;
@@ -375,6 +378,7 @@ export class AgentThreadManager {
       orchestrationTools: TOOL_DEFINITIONS,
       browserEnabled: this.agentBrowser !== undefined,
       secretsEnabled: dependencies.agentSecrets !== undefined,
+      cadEnabled: dependencies.cadTools !== undefined,
       invoke: async (context, call) => await this.invoke(context, call),
       threadRegistrations: new CachedThreadToolRegistrations(dependencies.store.codexThreadToolPacks),
     });
@@ -466,6 +470,13 @@ export class AgentThreadManager {
       if (WORKSPACE_TOOL_NAMES.has(call.tool)) return await this.workspaceTools.invoke({ conversation: current, turn: source.turn }, call);
       if (call.tool === SECRET_REQUEST_TOOL_NAME && this.dependencies.agentSecrets) {
         return await this.dependencies.agentSecrets.invoke({ conversation: current, turn: source.turn }, call);
+      }
+      if (this.dependencies.cadTools && CAD_TOOL_NAMES.has(call.tool)) {
+        // As with Browser access, this covers the setting turned off mid-turn.
+        if (this.dependencies.store.project(current.projectId).preferences?.cadAccess !== true) {
+          return failure(CAD_ACCESS_DISABLED.code, CAD_ACCESS_DISABLED.message);
+        }
+        return await this.dependencies.cadTools.invoke(call, imagesAccepted(source.turn, this.dependencies.providerInfo()));
       }
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
         // The turn's offer already withholds these tools when Browser access

@@ -17,7 +17,7 @@ const REBASELINE = `${UPDATE_FLAG}=1 npm test -- tests/server/agent-surface-budg
 const PROVIDERS = ["claude", "codex", "cursorKimi", "opencode"] as const;
 
 type Provider = (typeof PROVIDERS)[number];
-type Variant = "withBrowser" | "withoutBrowser";
+type Variant = "withBrowser" | "withoutBrowser" | "withCad";
 
 interface SurfaceBudget {
   rebaseline: string;
@@ -29,10 +29,11 @@ interface SurfaceBudget {
 
 const bytes = (value: string): number => Buffer.byteLength(value, "utf8");
 
-async function measureVariant(browser: boolean) {
-  const runtime = await createSurfaceRuntime(browser
-    ? { browser: { perform: async () => ({ ok: false, code: "unavailable", message: "Not used." }) } }
-    : {});
+async function measureVariant(browser: boolean, cadAccess = false) {
+  const runtime = await createSurfaceRuntime({
+    ...(browser ? { browser: { perform: async () => ({ ok: false, code: "unavailable", message: "Not used." }) } } : {}),
+    cadAccess,
+  });
   try {
     const surfaces: Record<Provider, AdvertisedSurface> = {
       claude: await claudeAdvertisedSurface(runtime.bridge),
@@ -50,15 +51,16 @@ async function measure(): Promise<SurfaceBudget> {
   const variants = {
     withBrowser: await measureVariant(true),
     withoutBrowser: await measureVariant(false),
+    withCad: await measureVariant(true, true),
   };
   const tools: SurfaceBudget["tools"] = {};
   for (const provider of PROVIDERS) {
-    for (const tool of variants.withBrowser.surfaces[provider].tools) {
+    for (const tool of variants.withCad.surfaces[provider].tools) {
       tools[tool.name] = { ...tools[tool.name], [provider]: bytes(JSON.stringify(tool)) } as Record<Provider, number>;
     }
   }
   const instructions: SurfaceBudget["instructions"] = {};
-  for (const instruction of variants.withBrowser.hidden) instructions[instruction.label] = bytes(instruction.text);
+  for (const instruction of variants.withCad.hidden) instructions[instruction.label] = bytes(instruction.text);
   instructions["mcp-initialize:claude"] = bytes(variants.withBrowser.surfaces.claude.instructions ?? "");
   instructions["mcp-initialize:http"] = bytes(variants.withBrowser.surfaces.cursorKimi.instructions ?? "");
   const totals = {} as SurfaceBudget["totals"];
@@ -69,7 +71,11 @@ async function measure(): Promise<SurfaceBudget> {
         + bytes(surfaces[provider].instructions ?? "")
         + hidden.reduce((sum, instruction) => sum + bytes(instruction.text), 0);
     };
-    totals[provider] = { withBrowser: total("withBrowser"), withoutBrowser: total("withoutBrowser") };
+    totals[provider] = {
+      withBrowser: total("withBrowser"),
+      withoutBrowser: total("withoutBrowser"),
+      withCad: total("withCad"),
+    };
   }
   return { rebaseline: REBASELINE, unit: "UTF-8 bytes", tools, instructions, totals };
 }
@@ -107,7 +113,7 @@ describe(
     it(
       "measures Claude (in-process MCP tools/list plus its initialize instructions), Codex (thread/start dynamicTools), "
         + "Cursor and Kimi (HTTP MCP tools/list plus initialize instructions), and OpenCode (the same HTTP MCP with destructive hints); "
-        + "totals add the hidden capability instructions and are taken with the Browser broker wired (withBrowser, frontend workbench advertised) and without it",
+        + "totals add the hidden capability instructions and are taken with the Browser broker wired (withBrowser, frontend workbench advertised), without it, and with the project's Agent CAD tools also on (withCad)",
       async () => {
         const budget = await measure();
         const measured = flatten(budget);

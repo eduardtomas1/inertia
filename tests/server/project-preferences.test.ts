@@ -165,7 +165,7 @@ describe("durable project and thread organization", () => {
     // Exact shape written by builds that predate claudeMaxBudgetUsd.
     const legacy = { workspace: "worktree", autoPull: true, browserAccess: false, icon: { kind: "symbol", name: "code" },
       actions: [{ id: "11111111-1111-4111-8111-111111111111", name: "Check", executable: "node", args: ["--version"] }] };
-    const laterDefaults = { defaultAccessMode: null, color: null, colorEmphasis: "icon", pinned: false };
+    const laterDefaults = { defaultAccessMode: null, cadAccess: null, color: null, colorEmphasis: "icon", pinned: false };
     expect(parseProjectPreferences(JSON.stringify(legacy))).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...laterDefaults });
     store.close(); stores.splice(stores.indexOf(store), 1);
     const database = new Database(path);

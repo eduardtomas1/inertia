@@ -51,6 +51,19 @@ describe("CI change classifier", () => {
     }
   });
 
+  it("routes the CAD host tools to agent management and process containment, with full certification", () => {
+    for (const path of [
+      "src/server/cad/cad-hosts.ts",
+      "src/server/cad/hosts/autocad/InertiaCadBridge.ps1",
+      "scripts/sync-cad-host-sources.mjs",
+    ]) {
+      const result = classifyChangedPaths([path]);
+      // Process containment always earns full certification; it is still not a fail-open.
+      expect(result, path).toMatchObject({ allEvidence: false, fullCertification: true });
+      expect(result.domains, path).toEqual(["quality_shared", "process_containment", "agent_management"]);
+    }
+  });
+
   it("routes the renderer bundle budgets and the migration lineage manifest to their owners", () => {
     const bundle = classifyChangedPaths(["scripts/check-renderer-bundle.mjs"]);
     expect(bundle).toMatchObject({ allEvidence: false, fullCertification: false, nativeArchitecture: false });

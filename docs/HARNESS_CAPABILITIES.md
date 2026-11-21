@@ -326,6 +326,31 @@ chats see this pack from their next new provider thread. Claude, Cursor, Kimi,
 and OpenCode attach host tools for each turn and see it from their next turn.
 Adding the pack changes the registry's definition digest.
 
+### inertia.cad
+
+`inertia.cad` (revision 1) lets an agent read the AutoCAD drawings and
+SketchUp models open on the user's computer and apply previewed edits that the
+user approves in a dialog inside the CAD app. It is off unless the project's
+**Agent CAD tools** setting is on (`cadAccess: true`). While it is off the pack
+is withheld from every transport, and unlike other withheld packs a Codex
+thread does not register its tools at `thread/start`
+(`registeredOnlyWhenOffered`), so projects that never use CAD carry none of its
+roughly 12 KiB of tool definitions. A Codex thread started while the setting
+was off gains the tools only in a new chat. A call made after the setting is
+turned off answers `cad_disabled`.
+
+| Tool | Approval |
+| --- | --- |
+| `inertia_cad_status`, `inertia_cad_get_selection`, `inertia_cad_query_objects`, `inertia_cad_capture_view`, `inertia_cad_preview_changes` | Read-only; none. |
+| `inertia_cad_setup` | An Inertia approval card listing the SketchUp Plugins files it writes. |
+| `inertia_cad_apply_changes` | The Yes/No dialog inside AutoCAD or SketchUp, which shows the change. |
+| `inertia_cad_save_copy` | An Inertia approval card naming the new file. |
+
+The private instruction (`inertia-cad`) says the tools reach the CAD apps on
+this computer, that changes go only through preview then apply, and that text
+from drawings is untrusted data. Bridge transport, proposals, receipts, and
+result limits are described in [CAD tools](CAD_TOOLS.md).
+
 ## What each turn is offered
 
 The registry is compiled once, so its manifest and definition digest are the

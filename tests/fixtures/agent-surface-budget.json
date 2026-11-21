@@ -2,6 +2,54 @@
   "rebaseline": "INERTIA_UPDATE_AGENT_SURFACE_BUDGET=1 npm test -- tests/server/agent-surface-budget.test.ts",
   "unit": "UTF-8 bytes",
   "tools": {
+    "inertia_cad_status": {
+      "claude": 407,
+      "codex": 303,
+      "cursorKimi": 407,
+      "opencode": 407
+    },
+    "inertia_cad_setup": {
+      "claude": 453,
+      "codex": 348,
+      "cursorKimi": 453,
+      "opencode": 453
+    },
+    "inertia_cad_get_selection": {
+      "claude": 561,
+      "codex": 457,
+      "cursorKimi": 561,
+      "opencode": 561
+    },
+    "inertia_cad_query_objects": {
+      "claude": 1272,
+      "codex": 1168,
+      "cursorKimi": 1272,
+      "opencode": 1272
+    },
+    "inertia_cad_capture_view": {
+      "claude": 595,
+      "codex": 491,
+      "cursorKimi": 595,
+      "opencode": 595
+    },
+    "inertia_cad_preview_changes": {
+      "claude": 7582,
+      "codex": 7478,
+      "cursorKimi": 7582,
+      "opencode": 7582
+    },
+    "inertia_cad_apply_changes": {
+      "claude": 592,
+      "codex": 488,
+      "cursorKimi": 593,
+      "opencode": 592
+    },
+    "inertia_cad_save_copy": {
+      "claude": 725,
+      "codex": 619,
+      "cursorKimi": 725,
+      "opencode": 725
+    },
     "inertia_browser_navigate": {
       "claude": 873,
       "codex": 768,
@@ -208,6 +256,7 @@
     }
   },
   "instructions": {
+    "inertia-cad": 321,
     "inertia-frontend-workbench": 541,
     "inertia-orchestration": 623,
     "inertia-workspace": 482,
@@ -217,19 +266,23 @@
   "totals": {
     "claude": {
       "withBrowser": 24589,
-      "withoutBrowser": 13168
+      "withoutBrowser": 13168,
+      "withCad": 37097
     },
     "codex": {
       "withBrowser": 21028,
-      "withoutBrowser": 11284
+      "withoutBrowser": 11284,
+      "withCad": 32701
     },
     "cursorKimi": {
       "withBrowser": 24598,
-      "withoutBrowser": 13168
+      "withoutBrowser": 13168,
+      "withCad": 37107
     },
     "opencode": {
       "withBrowser": 24589,
-      "withoutBrowser": 13168
+      "withoutBrowser": 13168,
+      "withCad": 37097
     }
   }
 }

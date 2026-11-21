@@ -383,7 +383,24 @@ $doc.SelectionSets.Items.Clear()
 $slow = (Invoke-FakeRead $acad 'query' @{ documentId = $documentId; types = @('LINE'); limit = 10; deadlineMs = 0 }).result
 Assert-Equal @(1, '1', $true, $true) @(@($slow.items).Count, $slow.nextCursor, $slow.partial, $slow.timeBudgetHit) 'a query out of time returns what it has and a cursor'
 $slowScan = (Invoke-FakeRead $acad 'query' @{ documentId = $documentId; textContains = 'kitchen'; deadlineMs = 0 }).result
-Assert-Equal @(0, $null, $true) @(@($slowScan.items).Count, $slowScan.nextCursor, $slowScan.timeBudgetHit) 'the text scan stops when out of time'
+Assert-Equal @(0, '1', $true) @(@($slowScan.items).Count, $slowScan.nextCursor, $slowScan.timeBudgetHit) 'an out-of-time text scan still scans one object and resumes after it'
+# Each call here has no time left, so it scans one object; following the cursor must still reach every match.
+$found = New-Object System.Collections.ArrayList
+$cursor = $null
+for ($call = 0; $call -lt 10; $call++) {
+  $page = @{ documentId = $documentId; textContains = 'kitchen'; deadlineMs = 0 }
+  if ($null -ne $cursor) { $page.cursor = $cursor }
+  $answer = (Invoke-FakeRead $acad 'query' $page).result
+  foreach ($row in @($answer.items)) { [void]$found.Add($row.handle) }
+  $cursor = $answer.nextCursor
+  if ($null -eq $cursor) { break }
+}
+Assert-Equal @('2C') @($found) 'a filtered scan that outlasts each call still reaches every match by its cursor'
+Assert-Equal $null $cursor 'the filtered scan ends without a cursor'
+$paged = (Invoke-FakeRead $acad 'query' @{ documentId = $documentId; within = @{ min = @(5, 5); max = @(-1, -1) }; limit = 2 }).result
+Assert-Equal @(@('1A', '1B'), '2', @(0, 1)) @(@($paged.items | ForEach-Object handle), $paged.nextCursor, @($paged.scanPositions)) 'a full filtered page resumes at the next match and reports each row''s scan position'
+$rest = (Invoke-FakeRead $acad 'query' @{ documentId = $documentId; within = @{ min = @(5, 5); max = @(-1, -1) }; limit = 2; cursor = $paged.nextCursor }).result
+Assert-Equal @(@('4E'), $null) @(@($rest.items | ForEach-Object handle), $rest.nextCursor) 'the next filtered page continues from the scan position'
 $slowSelection = (Invoke-FakeRead $acad 'selection' @{ documentId = $documentId; deadlineAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }).result
 Assert-Equal @(1, $true, $true) @(@($slowSelection.items).Count, $slowSelection.truncated, $slowSelection.timeBudgetHit) 'a selection out of time returns what it has'
 $slowInfo = (Invoke-FakeRead $acad 'info' @{ documentId = $documentId; deadlineAt = [DateTime]::UtcNow.ToString('o') }).result

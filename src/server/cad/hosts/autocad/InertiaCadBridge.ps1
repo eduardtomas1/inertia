@@ -790,39 +790,60 @@ function Find-Entities($Acad, $Params) {
     $total = $count
     $capped = $false
     $outOfTime = $false
+    $filtered = $false
     if ($null -eq $needle -and $null -eq $region) {
       for ($i = $offset; $i -lt [Math]::Min($count, $offset + $limit); $i++) {
         if ($items.Count -gt 0 -and (Test-OutOfTime)) { $outOfTime = $true; break }
         [void]$items.Add((Get-EntityRow $set.Item($i) $layoutMap $options))
       }
     } else {
-      $total = 0
-      for ($i = 0; $i -lt $count; $i++) {
-        if ($i -ge $MaxScan) { $capped = $true; break }
-        if (Test-OutOfTime) { $outOfTime = $true; break }
+      # A text or region filter runs here, so the cursor is a scan position, not a match count:
+      # each call resumes where the last stopped and scans at least one object, so paging always
+      # progresses and a scan longer than one call's budget still reaches every match.
+      $filtered = $true
+      $positions = New-Object System.Collections.ArrayList
+      $resume = $null
+      $scanned = 0
+      $i = $offset
+      while ($i -lt $count) {
+        if ($scanned -ge $MaxScan) { $capped = $true; $resume = $i; break }
+        if ($scanned -gt 0 -and (Test-OutOfTime)) { $outOfTime = $true; $resume = $i; break }
         $entity = $set.Item($i)
+        $i++
+        $scanned++
         if ($null -ne $needle -and -not (Get-SearchText $entity).Contains($needle)) { continue }
         $extent = $null
         if ($null -ne $region) {
           $extent = Get-Extent $entity
           if (-not (Test-Region $extent $region)) { continue }
         }
-        if ($total -ge $offset -and $items.Count -lt $limit) { [void]$items.Add((Get-EntityRow $entity $layoutMap $options $extent)) }
-        $total++
+        # A full page stops at the next match, which starts the next page.
+        if ($items.Count -ge $limit) { $resume = $i - 1; break }
+        [void]$items.Add((Get-EntityRow $entity $layoutMap $options $extent))
+        [void]$positions.Add($i - 1)
       }
     }
     $result = [ordered]@{
       documentId = Get-DocumentId $doc
       units      = Get-UnitsName $doc
       layout     = $layout
-      total      = $total
       items      = $items.ToArray()
     }
-    if ($outOfTime) {
-      $result.partial = $true
-      $result.timeBudgetHit = $true
-      if ($items.Count -gt 0) { $result.nextCursor = [string]($offset + $items.Count) }
-    } elseif ($offset + $limit -lt $total) { $result.nextCursor = [string]($offset + $limit) }
+    if ($filtered) {
+      # Objects of the requested types and layer, before the text or region filter.
+      $result.candidates = $count
+      if ($null -ne $resume -and $resume -lt $count) { $result.nextCursor = [string]$resume }
+      # Each row's scan position, so a caller that returns fewer rows can resume after the last one.
+      $result.scanPositions = $positions.ToArray()
+      if ($outOfTime) { $result.partial = $true; $result.timeBudgetHit = $true }
+    } else {
+      $result.total = $total
+      if ($outOfTime) {
+        $result.partial = $true
+        $result.timeBudgetHit = $true
+        if ($items.Count -gt 0) { $result.nextCursor = [string]($offset + $items.Count) }
+      } elseif ($offset + $limit -lt $total) { $result.nextCursor = [string]($offset + $limit) }
+    }
     if ($capped) { $result.scanCapped = $true }
     return $result
   } finally {

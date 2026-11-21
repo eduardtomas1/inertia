@@ -226,8 +226,8 @@ const bytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value
  */
 export function fitRows(
   result: Record<string, unknown>,
-  key: "items" | "changes" | "layers",
-  cursor: number | undefined,
+  key: "items" | "changes",
+  cursor: number | ((kept: number) => string | undefined) | undefined,
   maximum = MAX_CAD_RESULT_BYTES,
 ): Record<string, unknown> | undefined {
   if (bytes(result) <= maximum) return result;
@@ -240,8 +240,10 @@ export function fitRows(
     if (key === "changes") {
       fitted.changesShown = count;
       fitted.changesTotal = rows.length;
-    } else if (key === "layers") {
-      fitted.layersTruncated = true;
+    } else if (typeof cursor === "function") {
+      const next = cursor(count);
+      if (next === undefined) delete fitted.nextCursor;
+      else fitted.nextCursor = next;
     } else if (cursor !== undefined) {
       fitted.nextCursor = String(cursor + count);
     } else {
@@ -258,7 +260,49 @@ export function fitRows(
   return bytes(fitted) <= maximum ? fitted : undefined;
 }
 
-function bounded(result: Record<string, unknown>, key: "items" | "changes" | "layers", cursor?: number): ProviderHostToolResult {
+const SUMMARY_LISTS = ["layers", "blocks", "layouts", "tags", "materials", "scenes", "componentDefinitions"] as const;
+
+/**
+ * Keeps a document summary under the result limit by halving its longest list, by bytes, until it
+ * fits, and marking each shortened list with `<list>Truncated`.
+ */
+export function fitSummary(
+  result: Record<string, unknown>,
+  maximum = MAX_CAD_RESULT_BYTES,
+): Record<string, unknown> | undefined {
+  const fitted: Record<string, unknown> = { ...result };
+  while (bytes(fitted) > maximum) {
+    const longest = SUMMARY_LISTS
+      .filter((key) => Array.isArray(fitted[key]) && (fitted[key] as unknown[]).length > 0)
+      .sort((a, b) => bytes(fitted[b]) - bytes(fitted[a]))[0];
+    if (longest === undefined) return undefined;
+    const list = fitted[longest] as unknown[];
+    fitted[longest] = list.slice(0, Math.floor(list.length / 2));
+    fitted[`${longest}Truncated`] = true;
+  }
+  return fitted;
+}
+
+/**
+ * A filtered AutoCAD query pages by scan position: resume after the last row kept. Its row
+ * positions are only for this, so they never reach the model.
+ */
+export function boundedQuery(result: Record<string, unknown>, cursor: number): ProviderHostToolResult {
+  const { scanPositions, ...visible } = result;
+  if (!Array.isArray(scanPositions)) return bounded(visible, "items", cursor);
+  const positions = scanPositions as unknown[];
+  const fitted = fitRows(visible, "items", (kept) => {
+    const last = positions[kept - 1];
+    return typeof last === "number" ? String(last + 1) : undefined;
+  });
+  // Not even one row fits: a cursor would only repeat this page.
+  if (fitted === undefined || (Array.isArray(fitted.items) && fitted.items.length === 0 && Array.isArray(visible.items) && visible.items.length > 0)) {
+    return failure("RESULT_TOO_LARGE", "The answer is too large for one call. Ask for fewer objects with limit, or use fields: compact.");
+  }
+  return json(fitted);
+}
+
+function bounded(result: Record<string, unknown>, key: "items" | "changes", cursor?: number): ProviderHostToolResult {
   const fitted = fitRows(result, key, cursor);
   return fitted === undefined
     ? failure("RESULT_TOO_LARGE", "The answer is too large for one call. Ask for fewer objects with limit.")
@@ -303,10 +347,14 @@ export class CadHostTools {
         return bounded(await this.cad.selection(selectionSchema.parse(call.arguments), signal), "items");
       case CAD_QUERY_TOOL_NAME: {
         const input = querySchema.parse(call.arguments);
-        return bounded(await this.cad.query(input, signal), "items", Number(input.cursor ?? 0));
+        return boundedQuery(await this.cad.query(input, signal), Number(input.cursor ?? 0));
       }
-      case CAD_DOCUMENT_INFO_TOOL_NAME:
-        return bounded(await this.cad.info(documentInfoSchema.parse(call.arguments), signal), "layers");
+      case CAD_DOCUMENT_INFO_TOOL_NAME: {
+        const summary = fitSummary(await this.cad.info(documentInfoSchema.parse(call.arguments), signal));
+        return summary === undefined
+          ? failure("RESULT_TOO_LARGE", "The document summary is too large for one call.")
+          : json(summary);
+      }
       case CAD_CAPTURE_TOOL_NAME:
         return await this.capture(call, imagesAccepted);
       case CAD_PREVIEW_TOOL_NAME: {

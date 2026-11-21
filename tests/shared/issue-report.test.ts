@@ -101,12 +101,15 @@ it.each([
   ["key AIzaSyA1234567890abcdefghijklmnopqrstu", "key [redacted token]"],
   ["key npm_abcdefghijklmnopqrstuvwxyz0123456789", "key [redacted token]"],
   ["key hf_abcdefghijklmnopqrstuvwxyz01234", "key [redacted token]"],
+  ["key xai-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789", "key [redacted token]"],
+  ["key gsk_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789", "key [redacted token]"],
 ])("removes an SSH remote or a known token format: %s", (text, expected) => {
   expect(scrubReportText(text)).toBe(expected);
 });
 
 it("keeps an email before a colon and words that only resemble token prefixes", () => {
   expect(scrubReportText("Ask bob@example.com: he saw it. Run npm-run-all, npm_config_cache and hf_hub.")).toBe("Ask [redacted email]: he saw it. Run npm-run-all, npm_config_cache and hf_hub.");
+  expect(scrubReportText("Install xai-sdk and gsk_tools, then open the xai-extension.")).toBe("Install xai-sdk and gsk_tools, then open the xai-extension.");
 });
 
 it("is idempotent", () => {

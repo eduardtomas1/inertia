@@ -26,6 +26,15 @@ const MAX_HTTP_CONNECTIONS = 128;
 const MAX_PAIRING_BODY_BYTES = 4 * 1024;
 const REQUEST_TIMEOUT_MS = 15_000;
 const RATE_WINDOW_MS = 60_000;
+const SERVICE_WORKER_PATH = "/service-worker.js";
+const RETIRING_SERVICE_WORKER = `"use strict";
+self.addEventListener("install", () => { self.skipWaiting(); });
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.registration.unregister()
+    .then(() => self.clients.matchAll({ type: "window" }))
+    .then((clients) => Promise.all(clients.map((client) => client.navigate(client.url).catch(() => undefined)))));
+});
+`;
 
 export interface PrivateConnectSession {
   id: string;
@@ -83,6 +92,7 @@ export class PrivateConnectGatewayServer {
   private readonly now: () => Date;
   private addressValue: { port: number; host: string } | null = null;
   private stopped = false;
+  private quarantined = false;
   private listenRequested = false;
   private readonly socketSessions = new Map<WebSocket, PrivateConnectSession>();
   private readonly admissions = new Map<string, number[]>();
@@ -124,8 +134,9 @@ export class PrivateConnectGatewayServer {
     });
   }
 
-  async start(): Promise<{ port: number; host: string }> {
+  async start(port = 0): Promise<{ port: number; host: string }> {
     if (this.addressValue) return this.addressValue;
+    if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error("The Private Connect gateway port is invalid.");
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => {
         this.server.off("listening", onListening);
@@ -152,7 +163,7 @@ export class PrivateConnectGatewayServer {
       this.server.once("listening", onListening);
       this.server.once("close", onClose);
       this.listenRequested = true;
-      this.server.listen({ host: "127.0.0.1", port: 0 });
+      this.server.listen({ host: "127.0.0.1", port });
     });
     if (!this.addressValue) throw new Error("The Private Connect gateway did not start.");
     return this.addressValue;
@@ -160,6 +171,11 @@ export class PrivateConnectGatewayServer {
 
   address(): { port: number; host: string } | null {
     return this.addressValue;
+  }
+
+  quarantine(): void {
+    this.quarantined = true;
+    this.closeAllSessions(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable, "Private Connect is unavailable");
   }
 
   async stop(): Promise<void> {
@@ -207,12 +223,13 @@ export class PrivateConnectGatewayServer {
     const hostAllowed = this.validHost(requestHost);
     const headers = securityHeaders(
       parsedRequestUrl?.pathname === "/" || parsedRequestUrl?.pathname.endsWith(".html") === true,
-      parsedRequestUrl?.pathname === "/service-worker.js",
+      parsedRequestUrl?.pathname === SERVICE_WORKER_PATH,
       hostAllowed ? requestHost!.toLowerCase() : null,
     );
     for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
-    if (this.stopped) {
-      writeJson(response, 503, { error: "unavailable", message: "Private Connect is shutting down." });
+    if (this.stopped || this.quarantined) {
+      response.setHeader("Connection", "close");
+      writeJson(response, 503, { error: "unavailable", message: this.stopped ? "Private Connect is shutting down." : "Private Connect is unavailable." });
       return;
     }
     const url = parsedRequestUrl;
@@ -226,6 +243,13 @@ export class PrivateConnectGatewayServer {
         protocol: { minimum: 1, maximum: 1 },
         endpointId: this.endpointId,
       });
+      return;
+    }
+    if (request.method === "GET" && request.headers["service-worker"] === "script" && url.pathname !== SERVICE_WORKER_PATH) {
+      response.setHeader("Content-Type", "text/javascript; charset=utf-8");
+      response.setHeader("Service-Worker-Allowed", "/");
+      response.statusCode = 200;
+      response.end(RETIRING_SERVICE_WORKER);
       return;
     }
     if (request.method === "GET" && (url.pathname === "/" || !url.pathname.startsWith("/api/"))) {
@@ -398,7 +422,7 @@ export class PrivateConnectGatewayServer {
 
   private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const url = parseUrl(request);
-    if (!url || url.pathname !== "/api/ws" || !this.validHost(request.headers.host) || !this.validOrigin(request.headers.origin, request.headers.host)) {
+    if (this.stopped || this.quarantined || !url || url.pathname !== "/api/ws" || !this.validHost(request.headers.host) || !this.validOrigin(request.headers.origin, request.headers.host)) {
       socket.destroy();
       return;
     }

@@ -56,6 +56,23 @@ describe("scrubCommandSecrets", () => {
   });
 
   it.each([
+    ["echo xai-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 | grok", "echo [redacted] | grok"],
+    ["echo AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI > key.txt", "echo [redacted] > key.txt"],
+    ["echo gsk_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 | groq", "echo [redacted] | groq"],
+  ])("redacts a provider key format in %j", (command, scrubbed) => {
+    expect(scrubCommandSecrets(command)).toBe(scrubbed);
+    expect(scrubCommandSecrets(scrubbed)).toBe(scrubbed);
+  });
+
+  it("scrubs long runs of provider key prefixes in linear time", () => {
+    const startedAt = performance.now();
+    scrubCommandSecrets("xai-".repeat(25_000));
+    scrubCommandSecrets("AIza".repeat(25_000));
+    scrubCommandSecrets(`gsk_${"a".repeat(100_000)}-`);
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  it.each([
     "npm test -- --grep \"retry policy\"",
     "NODE_ENV=test npm run build",
     "git commit -m \"Fix the token parser\"",
@@ -66,6 +83,7 @@ describe("scrubCommandSecrets", () => {
     "docker login --password-stdin registry",
     "mysql -u root -P 3306 -p",
     "gh pr create --title Fix --body \"Ready for review\"",
+    "pip install xai-sdk gsk_tools",
   ])("leaves the ordinary command %j intact", (command) => {
     expect(scrubCommandSecrets(command)).toBe(command);
   });

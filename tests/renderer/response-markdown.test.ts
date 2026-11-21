@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ResponseMarkdown,
@@ -291,6 +291,92 @@ describe("response Markdown", () => {
       kind: "project",
       relativePath: "Name:Part.java",
       action: "reveal",
+    });
+  });
+});
+
+describe("resolveResponseLink Windows and case aliases", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const windowsRoot = "C:\\Users\\me\\coolrepo";
+  const unsafe = { kind: "unsafe" };
+
+  it.each([
+    "../coolrepo::$INDEX_ALLOCATION/x.pyw",
+    "..\\coolrepo::$INDEX_ALLOCATION\\x.pyw",
+    "../coolrepo::%24INDEX_ALLOCATION/x.pyw",
+    "../coolrepo%3A%3A%24INDEX_ALLOCATION/x.pyw",
+    "file:///C:/Users/me/coolrepo::$INDEX_ALLOCATION/x.pyw",
+    "C:/Users/me/coolrepo::$INDEX_ALLOCATION/x.pyw",
+    "../COOLRE~1/x.rdp",
+    "..\\COOLRE~1\\x.library-ms",
+    "file:///C:/Users/me/COOLRE~1/x.theme",
+    "C:/Users/ME~1/coolrepo/x.pyw",
+    "../coolrepo./x.pyw",
+    "../coolrepo /x.pyw",
+    "../x.pyw.",
+    "../x.pyw%20",
+    "../notes.txt:hidden",
+    "../notes.txt::$DATA",
+  ])("blocks the Windows alias %s from a Windows project", (href) => {
+    vi.stubGlobal("navigator", { platform: "Win32" });
+    expect(resolveResponseLink(windowsRoot, href)).toEqual(unsafe);
+  });
+
+  it.each([
+    "../coolrepo::$INDEX_ALLOCATION/x.pyw",
+    "../COOLRE~1/x.rdp",
+    "../coolrepo./x.pyw",
+  ])("blocks the code-fence file header %s", (header) => {
+    vi.stubGlobal("navigator", { platform: "Win32" });
+    expect(resolveResponseLink(windowsRoot, header, "file")).toEqual(unsafe);
+    const html = renderToStaticMarkup(createElement(ResponseMarkdown, {
+      content: `\`\`\`py file=${header}\nprint(1)\n\`\`\``,
+      projectRoot: windowsRoot,
+      projectId: "11111111-1111-4111-8111-111111111111",
+      defaultCodeWrap: false,
+      onOpenProjectFile: () => undefined,
+    }));
+    expect(html).not.toContain("response-code-file-link");
+    expect(html).not.toContain("file:");
+  });
+
+  it("blocks stream syntax even from a POSIX root", () => {
+    vi.stubGlobal("navigator", { platform: "Linux x86_64" });
+    expect(resolveResponseLink("/work/project", "../project::$INDEX_ALLOCATION/x.pyw")).toEqual(unsafe);
+    expect(resolveResponseLink("/work/project", "C:/work/project::$INDEX_ALLOCATION/x.pyw")).toEqual(unsafe);
+    expect(resolveResponseLink("/work/project", "C:/work/PROJEC~1/x.pyw")).toEqual(unsafe);
+  });
+
+  it("treats a case-only alias of a Windows drive or UNC root as a project file", () => {
+    expect(resolveResponseLink(windowsRoot, "../CoolRepo/x.pyw")).toEqual({ kind: "project", relativePath: "x.pyw", action: "reveal" });
+    expect(resolveResponseLink(windowsRoot, "C:/USERS/ME/COOLREPO")).toEqual({ kind: "project", relativePath: ".", action: "reveal" });
+    expect(resolveResponseLink("\\\\Server\\Share\\coolrepo", "//server/share/CoolRepo/x.pyw")).toEqual({ kind: "project", relativePath: "x.pyw", action: "reveal" });
+  });
+
+  it.each([
+    ["/home/me/coolrepo", "../CoolRepo/x.txt", "/home/me/CoolRepo/x.txt"],
+    ["/Volumes/work/repo", "../Repo/notes.md", "/Volumes/work/Repo/notes.md"],
+    ["/Users/me/coolrepo", "../CoolRepo/x.txt", "/Users/me/CoolRepo/x.txt"],
+  ])("keeps the POSIX root %s case-sensitive so %s names its own target", (root, href, path) => {
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    expect(resolveResponseLink(root, href)).toEqual({ kind: "local", path, url: `file://${path}` });
+  });
+
+  it("keeps ordinary project, absolute, outside-project and web links working", () => {
+    vi.stubGlobal("navigator", { platform: "Win32" });
+    expect(resolveResponseLink(windowsRoot, "src/app.ts:42")).toEqual({ kind: "project", relativePath: "src/app.ts:42", action: "reveal" });
+    expect(resolveResponseLink(windowsRoot, "./docs/guide.md#L3")).toEqual({ kind: "project", relativePath: "docs/guide.md", action: "reveal", location: { startLine: 3, endLine: 3 } });
+    expect(resolveResponseLink(windowsRoot, "C:\\Users\\me\\coolrepo\\README.md")).toEqual({ kind: "project", relativePath: "README.md", action: "reveal" });
+    expect(resolveResponseLink(windowsRoot, "file:///C:/Users/me/coolrepo/src/a.ts#L1")).toEqual({ kind: "project", relativePath: "src/a.ts", action: "reveal", location: { startLine: 1, endLine: 1 } });
+    expect(resolveResponseLink(windowsRoot, "../other/notes.md")).toEqual({ kind: "local", path: "C:/Users/me/other/notes.md", url: "file:///C:/Users/me/other/notes.md" });
+    expect(resolveResponseLink(windowsRoot, "../other/source.ts:42:7")).toEqual({ kind: "local", path: "C:/Users/me/other/source.ts:42:7", url: "file:///C:/Users/me/other/source.ts:42:7" });
+    expect(resolveResponseLink(windowsRoot, "https://example.com/docs")).toEqual({ kind: "external", url: "https://example.com/docs" });
+    vi.stubGlobal("navigator", { platform: "Linux x86_64" });
+    expect(resolveResponseLink("/work/project", "/elsewhere/name%3A42.json")).toEqual({
+      kind: "local", path: "/elsewhere/name:42.json", url: "file:///elsewhere/name%3A42.json",
+    });
+    expect(resolveResponseLink("/work/project", "/elsewhere/backup~1.txt")).toEqual({
+      kind: "local", path: "/elsewhere/backup~1.txt", url: "file:///elsewhere/backup~1.txt",
     });
   });
 });

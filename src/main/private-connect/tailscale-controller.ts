@@ -59,6 +59,8 @@ export interface PrivateConnectServeProof {
   target: string;
 }
 
+export type PrivateConnectServeRemoval = "removed" | "absent";
+
 export interface PrivateConnectEndpointIdentity {
   endpointId: string;
 }
@@ -111,8 +113,8 @@ export class PrivateConnectTailscaleController {
   async ensurePrivateServe(
     gatewayPort: number,
     preferredPort: number | null = this.owned?.port ?? null,
-    previousTarget: string | null = null,
     identity?: PrivateConnectEndpointIdentity,
+    beforeServe?: (ownership: PrivateConnectServeOwnership) => Promise<void>,
   ): Promise<PrivateConnectTailscaleReady> {
     const status = await this.readStatus();
     if (status.backendState !== "Running" || !status.connected) {
@@ -129,9 +131,7 @@ export class PrivateConnectTailscaleController {
       throw new PrivateConnectTailscaleError("serve-conflict", "The selected Tailscale Serve port is configured for Funnel.");
     }
     const currentTarget = privateConnectServeTarget(gatewayPort);
-    const previousMapping = existing && previousTarget !== null && existing.target === previousTarget && !existing.funnel;
-    const currentMapping = existing && !existing.funnel && existing.target === currentTarget;
-    let servePort = existing && (previousMapping || currentMapping)
+    const servePort = existing && !existing.funnel && existing.target === currentTarget
       ? existing.port
       : choosePrivateConnectServePort(mappings, preferredPort);
     if (servePort === null) {
@@ -143,6 +143,7 @@ export class PrivateConnectTailscaleController {
       target: currentTarget,
     };
     this.owned = ownership;
+    await beforeServe?.(ownership);
     if (!mappingMatchesPrivateConnect(
       mappings.find((mapping) => mapping.port === servePort) ?? { port: -1, host: null, target: null, funnel: false },
       ownership,
@@ -167,13 +168,17 @@ export class PrivateConnectTailscaleController {
     return { status, servePort, gatewayPort, externalUrl, ownership };
   }
 
-  async disableOwnedServe(gatewayPort: number | null, persisted?: PrivateConnectServeProof | null): Promise<void> {
+  async disableOwnedServe(gatewayPort: number | null, persisted?: PrivateConnectServeProof | null): Promise<PrivateConnectServeRemoval> {
     const currentOwnership = this.owned && (gatewayPort === null || this.owned.gatewayPort === gatewayPort) ? this.owned : null;
     const proof = currentOwnership ?? persisted;
-    if (!proof) return;
+    if (!proof) return "absent";
     const mappings = await this.readServeStatus();
     const current = mappings.find((mapping) => mapping.port === proof.port);
-    if (!current || current.funnel || current.port !== proof.port || current.target !== proof.target) {
+    if (!current) {
+      this.owned = null;
+      return "absent";
+    }
+    if (current.funnel || current.port !== proof.port || current.target !== proof.target) {
       this.owned = null;
       throw new PrivateConnectTailscaleError("mapping-ownership-lost", "The Tailscale Serve mapping changed, so Inertia left it untouched.");
     }
@@ -181,6 +186,7 @@ export class PrivateConnectTailscaleController {
     try {
       await this.command(executable, ["serve", `--https=${proof.port}`, "off"]);
       this.owned = null;
+      return "removed";
     } catch (error) {
       throw classifyControllerError(error, "Inertia could not disable its Tailscale Serve mapping.");
     }

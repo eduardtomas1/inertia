@@ -650,4 +650,25 @@ describe("supervised runtime process environment", () => {
       }, "linux")).toEqual({ NODE_ENV: "test" });
     }
   });
+
+  it("passes the user's own Windows executable lookup setting through unchanged", () => {
+    expect(runtimeProcessEnvironment({ PATH: "C:\\Windows\\System32" }, "win32"))
+      .toEqual({ PATH: "C:\\Windows\\System32" });
+    for (const [parent, value] of [
+      [{ NoDefaultCurrentDirectoryInExePath: "" }, ""],
+      [{ NODEFAULTCURRENTDIRECTORYINEXEPATH: "0" }, "0"],
+      [{ nodefaultcurrentdirectoryinexepath: "1" }, "1"],
+    ] as const) {
+      const environment = runtimeProcessEnvironment({ PATH: "C:\\Windows\\System32", ...parent }, "win32");
+      expect(environment).toEqual({ PATH: "C:\\Windows\\System32", NoDefaultCurrentDirectoryInExePath: value });
+    }
+  });
+
+  it.each(["linux", "darwin"] as const)("does not add or forward the Windows lookup setting on %s", (platform) => {
+    expect(runtimeProcessEnvironment({ PATH: "/usr/bin" }, platform)).toEqual({ PATH: "/usr/bin" });
+    expect(runtimeProcessEnvironment({
+      PATH: "/usr/bin",
+      NoDefaultCurrentDirectoryInExePath: "1",
+    }, platform)).toEqual({ PATH: "/usr/bin" });
+  });
 });

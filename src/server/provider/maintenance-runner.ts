@@ -9,7 +9,7 @@ import {
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
 
-import { environmentValue } from "../environment";
+import { environmentValue, withoutWindowsCurrentDirectorySearch } from "../environment";
 import {
   createOwnedProcessTreeTermination,
   terminateProcessTreeAndWait,
@@ -101,7 +101,7 @@ export function providerMaintenanceEnvironment(
     const value = environmentValue(source, key, platform);
     if (value !== undefined) environment[key] = value;
   }
-  return environment;
+  return withoutWindowsCurrentDirectorySearch(environment, platform);
 }
 
 function publicOutput(raw: string): string | null {

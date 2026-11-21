@@ -53,6 +53,7 @@ import {
   PrivateConnectTailscaleController,
   PrivateConnectTailscaleError,
 } from "./tailscale-controller";
+import { PrivateConnectServeRemoval, persistedServeProof } from "./serve-removal";
 import type { PrivateConnectStore, PersistedPrivateConnect, PrivateConnectDevice, PrivateConnectAuditEvent, PrivateConnectSessionRecord, PrivateConnectDeliveryReceipt, PrivateConnectAcceptedDeliveryReceipt } from "./store";
 
 export interface PrivateConnectServiceOptions {
@@ -63,6 +64,7 @@ export interface PrivateConnectServiceOptions {
   tailscale?: PrivateConnectTailscaleController;
   onStateChange?: (state: PrivateConnectStateView) => void;
   now?: () => Date;
+  serveRemovalRetryMs?: number;
 }
 
 interface PendingPairing {
@@ -144,12 +146,31 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   private updatePreparation = false;
   private shutdownOperation: Promise<void> | null = null;
   private shutdownProgress: PrivateConnectShutdownStep = "not-started";
+  private readonly serveRemoval: PrivateConnectServeRemoval;
 
   private constructor(private readonly options: PrivateConnectServiceOptions, data: PersistedPrivateConnect | null) {
     this.data = data;
     this.now = options.now ?? (() => new Date());
     this.tailscale = options.tailscale ?? new PrivateConnectTailscaleController();
     this.gateway = this.createGateway();
+    this.serveRemoval = new PrivateConnectServeRemoval({
+      tailscale: this.tailscale,
+      retryMs: options.serveRemovalRetryMs,
+      data: () => this.data,
+      gateway: () => this.gateway,
+      replaceGateway: () => (this.gateway = this.createGateway()),
+      sessions: this.sessions,
+      tickets: this.tickets,
+      warn: (detail) => this.audit("serve.ownership-warning", null, detail),
+      notice: () => this.notice,
+      setNotice: (notice) => { this.notice = notice; },
+      setMappingOwnership: (mappingOwnership) => { this.diagnostics = { ...this.diagnostics, mappingOwnership }; },
+      stopped: () => this.stopped,
+      resume: () => { void this.startIfEnabled().catch(() => undefined); },
+      enqueue: (operation) => { void this.enqueueLifecycle(operation); },
+      persist: () => this.persist(),
+      emit: () => this.emit(),
+    });
     for (const session of data?.sessions ?? []) this.restoreSession(session);
     for (const receipt of data?.deliveryReceipts ?? []) this.deliveries.set(receipt.deliveryId, receipt);
   }
@@ -158,6 +179,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const data = await options.store.load();
     const service = new PrivateConnectService(options, data);
     await service.recoverInterruptedAuthorityReduction();
+    await service.serveRemoval.fromPreviousRun();
     return service;
   }
 
@@ -711,14 +733,14 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
         await this.enqueueLifecycle(async () => {
           this.pending.clear();
           this.tickets.clear();
+          const pendingRemoval = this.serveRemoval.cancel();
           const port = this.diagnostics.gatewayPort;
-          const proof = this.data?.servePort && this.data.serveTarget
-            ? { port: this.data.servePort, target: this.data.serveTarget }
-            : null;
+          const proof = persistedServeProof(this.data);
           try {
-            if (port !== null || proof) {
+            if (port !== null || proof || pendingRemoval) {
               this.shutdownProgress = "disabling-serve";
               await withDeadline(this.tailscale.disableOwnedServe(port, proof), AUTHORITY_REDUCTION_DRAIN_TIMEOUT_MS);
+              if (this.data?.serveTarget) { this.data.serveTarget = null; await this.persist().catch(() => undefined); }
             }
           } finally {
             this.externalUrl = null;
@@ -790,6 +812,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     let gateway: PrivateConnectGatewayServer | null = null;
     let gatewayPort: number | null = null;
     try {
+      await this.serveRemoval.beforeEnable();
       if (this.gateway.address()) await this.gateway.stop();
       gateway = this.createGateway();
       this.gateway = gateway;
@@ -801,10 +824,15 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
         await gateway.stop().catch(() => undefined);
         return;
       }
-      const ready = await this.tailscale.ensurePrivateServe(address.port, this.data.servePort, this.data.serveTarget, { endpointId: gateway.endpointId });
+      const data = this.data;
+      const ready = await this.tailscale.ensurePrivateServe(address.port, data.servePort, { endpointId: gateway.endpointId }, async (ownership) => {
+        data.servePort = ownership.port;
+        data.serveTarget = ownership.target;
+        await this.persist();
+      });
       if (operation !== this.enableOperation || this.privacyLocked || this.stopped) {
-        await this.tailscale.disableOwnedServe(address.port).catch(() => undefined);
-        await gateway.stop().catch(() => undefined);
+        await this.serveRemoval.release(address.port, false, false);
+        await this.persist().catch(() => undefined);
         return;
       }
       this.data.enabled = true;
@@ -817,20 +845,15 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       this.audit("enabled", null, "Private Connect enabled through private Tailscale HTTPS.");
       await this.persist();
     } catch (error) {
-      const cleanupFailure = gatewayPort === null ? null : await this.tailscale
-        .disableOwnedServe(gatewayPort)
-        .then(() => null, (failure: unknown) => failure);
-      if (gateway) await gateway.stop().catch(() => undefined);
+      if (gatewayPort !== null) {
+        await this.serveRemoval.release(gatewayPort, false, false);
+        await this.persist().catch(() => undefined);
+      } else if (gateway) {
+        await gateway.stop().catch(() => undefined);
+      }
       if (operation !== this.enableOperation || this.privacyLocked || this.stopped) return;
       this.externalUrl = null;
       this.diagnostics = { ...this.diagnostics, gatewayPort: null, externalUrl: null };
-      if (
-        cleanupFailure instanceof PrivateConnectTailscaleError
-        && cleanupFailure.classification === "mapping-ownership-lost"
-      ) {
-        this.diagnostics.mappingOwnership = "unknown";
-        this.audit("serve.ownership-warning", null, "Inertia left an unrecognized Tailscale Serve mapping untouched.");
-      }
       this.status = "error";
       this.statusMessage = error instanceof PrivateConnectTailscaleError ? error.message : "Private Connect could not be established safely.";
       this.diagnostics.errorClass = error instanceof PrivateConnectTailscaleError ? error.classification : "unknown";
@@ -863,27 +886,11 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   private async stopOwnedServeAndGateway(clearPersistedProof = false): Promise<void> {
-    const gateway = this.gateway;
     const gatewayPort = this.diagnostics.gatewayPort;
-    const persistedProof = this.data?.servePort && this.data.serveTarget ? { port: this.data.servePort, target: this.data.serveTarget } : null;
     this.externalUrl = null;
     this.diagnostics = { ...this.diagnostics, gatewayPort: null, servePort: null, externalUrl: null, mappingOwnership: "missing" };
-    let removed = false;
-    try {
-      await this.tailscale.disableOwnedServe(gatewayPort, persistedProof);
-      removed = true;
-    } catch (error) {
-      this.notice = error instanceof PrivateConnectTailscaleError && error.classification === "mapping-ownership-lost"
-        ? "Private Connect is off, but the Tailscale Serve mapping changed outside Inertia and was left untouched. Review it in Tailscale before re-enabling."
-        : "Private Connect is off, but Inertia could not confirm removal of its Tailscale Serve mapping. Review Tailscale Serve before re-enabling.";
-      this.diagnostics = { ...this.diagnostics, mappingOwnership: "unrelated" };
-    }
-    if (clearPersistedProof && removed && this.data) {
-      this.data.servePort = null;
-      this.data.serveTarget = null;
-    }
     this.gateway.closeAllSessions();
-    await gateway.stop().catch(() => undefined);
+    await this.serveRemoval.release(gatewayPort, clearPersistedProof, false);
   }
 
   private prunePendingPairings(): void {
@@ -1165,9 +1172,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     );
     await this.persist();
 
-    const proof = data.servePort && data.serveTarget
-      ? { port: data.servePort, target: data.serveTarget }
-      : null;
+    const proof = persistedServeProof(data);
     try {
       await this.tailscale.disableOwnedServe(null, proof);
       data.servePort = null;

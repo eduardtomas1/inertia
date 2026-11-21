@@ -48,6 +48,7 @@ function scrubOnce(text: string, limit: number): string {
     .replace(/\b(?:sk|ghp|gho|ghu|ghs|ghr|github_pat|glpat|xox[baprs])(?:[-_]|- )[A-Za-z0-9_-]+/giu, "[redacted token]")
     .replace(/\bAKIA[0-9A-Z]{16}\b/gu, "[redacted token]")
     .replace(/\bAIza[0-9A-Za-z_-]{30,}/gu, "[redacted token]")
+    .replace(/\b(?:xai-|gsk_)[A-Za-z0-9]{20,}/gu, "[redacted token]")
     .replace(/\b(?:npm|hf)_[A-Za-z0-9]{30,}/gu, "[redacted token]")
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/gu, "[redacted token]")
     .replace(/\b(?:Bearer|Basic)\s+[^\s]+/giu, "[redacted authorization]"))

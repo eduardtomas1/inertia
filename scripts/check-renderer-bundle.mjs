@@ -168,8 +168,9 @@ const budgets = {
   // Subagent task visibility moves 5 bytes of a shared chunk into this closure
   // (24,050 measured on Windows x64). See
   // docs/pr-evidence/subagent-task-visibility/renderer-bundle.json.
-  // Grok in the shared provider lists adds 83 bytes (24,133 measured). Keep 256 bytes.
-  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 6_387 + 5 + 83 + 256,
+  // Grok in the shared provider lists adds 83 bytes (24,133 measured).
+  // The Agent CAD tools row adds 465 bytes (24,598 measured on Linux and macOS). Keep 256 bytes.
+  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 6_387 + 5 + 83 + 465 + 256,
   // Role labels for the themed marks: 40,166 deferred bytes (+5).
   // Larger unframed gallery labels and preview sizes: 40,313 bytes (+147).
   deferredCustomAgentsSettingsJavaScript: 29_962 + 8_423 + 1_353 + 423 + 5 + 147,

@@ -231,6 +231,10 @@ module Inertia
       }
     end
 
+    def self.edge_length(edge, transform)
+      edge.start.position.transform(transform).distance(edge.end.position.transform(transform))
+    end
+
     def self.summarize(entity, transform, depth = nil)
       row = { 'id' => entity.persistent_id.to_s, 'type' => type_name(entity) }
       if container?(entity)
@@ -242,8 +246,9 @@ module Inertia
       material = entity.respond_to?(:material) ? entity.material : nil
       row['material'] = material_label(material) if material
       row['text'] = entity.text.to_s[0, 500] if entity.is_a?(Sketchup::Text)
-      row['areaMm2'] = (entity.area * MM_PER_INCH * MM_PER_INCH).round(1) if entity.is_a?(Sketchup::Face)
-      row['lengthMm'] = mm(entity.length) if entity.is_a?(Sketchup::Edge)
+      # Measured in world space, like boundsMm, so scaled groups and components report their real size.
+      row['areaMm2'] = (entity.area(transform) * MM_PER_INCH * MM_PER_INCH).round(1) if entity.is_a?(Sketchup::Face)
+      row['lengthMm'] = mm(edge_length(entity, transform)) if entity.is_a?(Sketchup::Edge)
       row['hidden'] = true if entity.respond_to?(:hidden?) && entity.hidden?
       row['locked'] = true if entity.respond_to?(:locked?) && entity.locked?
       row['shared'] = true unless unshared?(entity)

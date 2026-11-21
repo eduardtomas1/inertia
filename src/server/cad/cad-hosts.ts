@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -237,6 +238,35 @@ function sketchUpRequest(
   }).then((raw) => unwrapResponse(raw, "sketchup"));
 }
 
+/** Refuses a link at one of the extension's own paths, so setup never writes outside the Plugins folder. */
+async function refuseLink(path: string): Promise<void> {
+  const info = await lstat(path).catch(() => undefined);
+  if (info?.isSymbolicLink()) {
+    throw new CadError("SETUP_FAILED", `${path} is a link. Inertia does not write through links; remove it, then run setup again.`);
+  }
+}
+
+async function writeExtensionFile(path: string, content: string): Promise<void> {
+  await refuseLink(path);
+  // O_NOFOLLOW also refuses a link that appears after the check, where the platform has it.
+  const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0), 0o644);
+  try {
+    await handle.writeFile(content);
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Installs the extension into one Plugins folder, whose own path the user approved. */
+async function installExtension(plugins: string): Promise<void> {
+  await mkdir(plugins, { recursive: true });
+  const folder = join(plugins, "inertia_cad_bridge");
+  await refuseLink(folder);
+  await mkdir(folder, { recursive: true });
+  await writeExtensionFile(join(plugins, "inertia_cad_bridge.rb"), SKETCHUP_LOADER_RB);
+  await writeExtensionFile(join(folder, "main.rb"), SKETCHUP_MAIN_RB);
+}
+
 /** Exported so tests can point it at a temporary home and settings folder. */
 export function createSketchUpHost(home: string, settingsBase: string | undefined): CadHost {
   const discoveryFolder = join(home, ".inertia-cad", "hosts");
@@ -363,12 +393,9 @@ export function createSketchUpHost(home: string, settingsBase: string | undefine
         );
       }
       try {
-        for (const folder of folders) {
-          await mkdir(join(folder.plugins, "inertia_cad_bridge"), { recursive: true });
-          await writeFile(join(folder.plugins, "inertia_cad_bridge.rb"), SKETCHUP_LOADER_RB);
-          await writeFile(join(folder.plugins, "inertia_cad_bridge", "main.rb"), SKETCHUP_MAIN_RB);
-        }
-      } catch {
+        for (const folder of folders) await installExtension(folder.plugins);
+      } catch (error) {
+        if (error instanceof CadError) throw error;
         throw new CadError("SETUP_FAILED", "Could not write to SketchUp's Plugins folder. Check its permissions.");
       }
       const running = (await endpoints()).length > 0;

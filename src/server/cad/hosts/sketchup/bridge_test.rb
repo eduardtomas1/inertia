@@ -35,6 +35,10 @@ module Geom
     def transform(transformation)
       transformation.apply_point(self)
     end
+
+    def distance(other)
+      Math.sqrt(to_a.zip(other.to_a).sum { |a, b| (a - b)**2 })
+    end
   end
 
   # Translation plus uniform scale is enough for these tests.
@@ -235,8 +239,9 @@ module Sketchup
       @pushed = distance
     end
 
-    def area
-      1.0
+    # One square inch in its own space; SketchUp's Face#area scales by a transformation.
+    def area(transformation = nil)
+      transformation.nil? ? 1.0 : transformation.scale**2
     end
 
     def bounds
@@ -244,7 +249,23 @@ module Sketchup
     end
   end
 
-  class Edge < Drawingelement; end
+  Vertex = Struct.new(:position)
+
+  class Edge < Drawingelement
+    attr_reader :start, :end
+
+    # One inch long in its own space.
+    def initialize(model)
+      super(model)
+      @start = Vertex.new(Geom::Point3d.new(0, 0, 0))
+      @end = Vertex.new(Geom::Point3d.new(1, 0, 0))
+    end
+
+    # Like SketchUp's Edge#length: in the edge's own space, never scaled.
+    def length
+      1.0
+    end
+  end
   class Text < Drawingelement; end
   class Dimension < Drawingelement; end
   class Image < Drawingelement; end
@@ -463,6 +484,20 @@ class BridgeTest < Minitest::Test
     assert(nested.any? { |row| row['shared'] && row['depth'] == 1 })
     loose = nested.find { |row| row['name'] == 'Loose chair' }
     assert_equal [1270.0, 1270.0, 0.0], loose['boundsMm']['min']
+  end
+
+  def test_measures_faces_and_edges_in_world_space_inside_a_scaled_group
+    group = @model.entities.add_group
+    group.entities.add_face
+    edge = Sketchup::Edge.new(@model)
+    edge.parent = group.definition
+    group.entities << edge
+    group.transform!(Geom::Transformation.new([0, 0, 0], 2.0))
+    rows = call('query', 'documentId' => @document_id, 'types' => %w[face edge])['result']['items']
+    face = rows.find { |row| row['type'] == 'face' }
+    line = rows.find { |row| row['type'] == 'edge' }
+    assert_equal (4 * 25.4 * 25.4).round(1), face['areaMm2'], 'a square inch scaled 2x is four square inches'
+    assert_equal 50.8, line['lengthMm'], 'an inch scaled 2x is two inches'
   end
 
   def test_query_rejects_unknown_types

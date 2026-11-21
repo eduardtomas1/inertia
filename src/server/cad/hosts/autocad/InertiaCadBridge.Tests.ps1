@@ -123,6 +123,11 @@ function New-FakeAutoCAD {
   $title = New-FakeEntity '5F' 'AcDbBlockReference' '0' 2 @{ Name = 'TITLE'; EffectiveName = 'TITLE'; HasAttributes = $true; InsertionPoint = @(0.0, 0.0, 0.0); Rotation = 0.0; XScaleFactor = 1.0; YScaleFactor = 1.0; ZScaleFactor = 1.0; Attribute = $attribute }
   Add-Member -InputObject $title -MemberType ScriptMethod -Name GetAttributes -Value { , @($this.Attribute) }
   $registry['5F'] = $title
+  $frame = [FakeCollection]::new()
+  [void]$frame.Items.Add((New-FakeEntity '6A' 'AcDbLine' '0' 77 @{ StartPoint = @(0.0, 0.0, 0.0); EndPoint = @(420.0, 0.0, 0.0) }))
+  $blocks = [pscustomobject]@{ Definitions = @{ TITLE = $frame } }
+  Add-Member -InputObject $blocks -MemberType ScriptMethod -Name Item -Value { param($Name) $definition = $this.Definitions[[string]$Name]; if ($null -eq $definition) { throw 'Unknown block' }; return , $definition }
+  Add-Member -InputObject $doc -MemberType NoteProperty -Name Blocks -Value $blocks
   $doc.Pickfirst = @('1A', '2C', '5F')
 
   $acad = [pscustomobject]@{ Version = '25.0s (LMS Tech)'; Name = 'AutoCAD'; Documents = @($doc); ActiveDocument = $doc }
@@ -197,6 +202,19 @@ $attributeOps = @(@{ op = 'acad.set_attribute'; handles = @('5F'); tag = 'rev'; 
 $attributePreview = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $attributeOps }).result
 [void](Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $attributeOps; expectedFingerprints = $attributePreview.fingerprints; approvalMessage = 'Rev?' })
 Assert-Equal 'B' $doc.Registry['5F'].Attribute.TextString 'attribute values update by tag'
+
+$blockEraseOps = @(@{ op = 'acad.erase'; handles = @('5F') })
+$blockErase = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $blockEraseOps }).result
+Assert-Equal $true ($null -ne $blockErase.fingerprints.'block:5F') 'erasing a block insert fingerprints its definition'
+$doc.Registry['5F'].XScaleFactor = 2.0
+$approvalsBefore = $script:Approvals.Count
+Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $blockEraseOps; expectedFingerprints = $blockErase.fingerprints; approvalMessage = 'Erase?' }).error.code 'a block insert rescaled after the preview is not erased'
+$blockErase = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $blockEraseOps }).result
+$doc.Blocks.Definitions['TITLE'].Items[0].EndPoint = @(594.0, 0.0, 0.0)
+Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $blockEraseOps; expectedFingerprints = $blockErase.fingerprints; approvalMessage = 'Erase?' }).error.code 'a block whose definition changed after the preview is not erased'
+Assert-Equal $approvalsBefore $script:Approvals.Count 'a stale erase never reaches the dialog'
+Assert-Equal $false $doc.Registry['5F'].Deleted 'the changed insert is still there'
+$doc.Registry['5F'].XScaleFactor = 1.0
 
 $lineOps = @(@{ op = 'acad.add_line'; start = @(0, 0); end = @(100, 0, 0); layer = 'A-DEMO' })
 $linePreview = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $lineOps }).result

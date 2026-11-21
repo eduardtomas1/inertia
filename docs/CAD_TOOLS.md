@@ -21,9 +21,13 @@ The `inertia.cad` capability pack
   random port and a random token, which it writes to
   `~/.inertia-cad/hosts/sketchup-<pid>.json`. Inertia opens one connection per
   request. Work runs on SketchUp's main thread inside one undoable operation.
+  Setup writes only the extension's own files and refuses to write through a
+  link at any of their paths.
 - **Proposals.** A preview records the target fingerprints and the exact text
   of the approval dialog. Apply sends both; the bridge refuses the change when
-  a fingerprint no longer matches. A proposal is sent to the CAD app at most
+  a fingerprint no longer matches. Erasing an AutoCAD block insert also
+  fingerprints its block definition's objects, so a rescaled insert or an edited
+  definition is refused too. A proposal is sent to the CAD app at most
   once: a retried apply returns the first outcome, and outcomes are kept in
   `<data>/cad/receipts.jsonl` so a retry after a restart still finds them.
   Writes run one at a time.

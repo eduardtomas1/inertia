@@ -17,6 +17,8 @@ $MaxLimit = 500
 $MaxScan = 5000
 $MaxOperations = 50
 $MaxTargets = 500
+# Objects of a block definition read into an erase fingerprint; each costs a few COM calls.
+$MaxBlockDigestObjects = 500
 $MaxCoordinate = 1e9
 $InteropVersion = 1
 
@@ -327,7 +329,7 @@ function Get-EntityRow($Entity, $LayoutMap) {
 
 function Get-Fingerprint($Entity) {
   $parts = New-Object System.Collections.ArrayList
-  foreach ($name in 'ObjectName', 'Handle', 'OwnerID', 'Layer', 'Color', 'StartPoint', 'EndPoint', 'Center', 'Radius', 'InsertionPoint', 'Rotation', 'TextString', 'Coordinates', 'Closed') {
+  foreach ($name in 'ObjectName', 'Handle', 'OwnerID', 'Layer', 'Color', 'StartPoint', 'EndPoint', 'Center', 'Radius', 'InsertionPoint', 'Rotation', 'XScaleFactor', 'YScaleFactor', 'ZScaleFactor', 'Normal', 'TextString', 'Coordinates', 'Closed') {
     $value = $null
     try { $value = $Entity.$name } catch { }
     if ($null -eq $value) { [void]$parts.Add('') } elseif ($value -is [System.Array]) { [void]$parts.Add((@($value) | ForEach-Object { Get-Rounded $_ 6 }) -join ',') } else { [void]$parts.Add([string]$value) }
@@ -338,6 +340,23 @@ function Get-Fingerprint($Entity) {
     }
   } catch { }
   return Get-Hash ($parts -join '|')
+}
+
+# What erasing a block insert removes from view: its definition's own objects.
+# An edit to the definition after the preview makes an erase proposal stale.
+# Nested blocks count by their own insert properties, not their contents.
+function Get-BlockDefinitionDigest($Doc, $Entity) {
+  if ([string]$Entity.ObjectName -ne 'AcDbBlockReference') { return $null }
+  try {
+    $block = $Doc.Blocks.Item([string]$Entity.Name)
+    $count = [int]$block.Count
+    $parts = New-Object System.Collections.ArrayList
+    [void]$parts.Add([string]$count)
+    for ($i = 0; $i -lt [Math]::Min($count, $MaxBlockDigestObjects); $i++) { [void]$parts.Add((Get-Fingerprint $block.Item($i))) }
+    return Get-Hash ($parts -join ';')
+  } catch {
+    return 'unreadable'
+  }
 }
 
 function Get-Selection($Acad, $Params) {
@@ -582,6 +601,8 @@ function New-Plan($Acad, $Doc, $Operations) {
       'acad.erase' {
         foreach ($handle in (Get-Targets $op)) {
           $entity = Get-WritableEntity $Doc $handle $layoutMap $plan
+          $definition = Get-BlockDefinitionDigest $Doc $entity
+          if ($null -ne $definition) { $plan.fingerprints['block:' + $handle] = $definition }
           Add-Change $plan $kind (Get-Label $entity) 'entity' 'present' 'erased'
           [void]$plan.steps.Add(@{ kind = $kind; entity = $entity })
         }

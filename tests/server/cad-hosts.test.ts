@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -277,6 +277,29 @@ describe("SketchUp setup and status", () => {
       join(plugins(base), "inertia_cad_bridge.rb"),
       join(plugins(base), "inertia_cad_bridge", "main.rb"),
     ]);
+  });
+
+  it("refuses to install through a linked extension folder that points outside Plugins", async () => {
+    const { base, host } = await settings();
+    const outside = await temporary("inertia-cad-outside-");
+    await writeFile(join(outside, "main.rb"), "not ours");
+    await mkdir(plugins(base), { recursive: true });
+    await symlink(outside, join(plugins(base), "inertia_cad_bridge"), process.platform === "win32" ? "junction" : "dir");
+    const error = await rejection(host.setup());
+    expect(error).toMatchObject({ code: "SETUP_FAILED", message: expect.stringContaining("is a link") });
+    expect(await readFile(join(outside, "main.rb"), "utf8")).toBe("not ours");
+  });
+
+  // Windows needs a privilege to create file links; the folder case covers junctions there.
+  it.skipIf(process.platform === "win32")("refuses to install through a linked loader file", async () => {
+    const { base, host } = await settings();
+    const outside = join(await temporary("inertia-cad-outside-"), "victim.rb");
+    await writeFile(outside, "not ours");
+    await mkdir(plugins(base), { recursive: true });
+    await symlink(outside, join(plugins(base), "inertia_cad_bridge.rb"), "file");
+    const error = await rejection(host.setup());
+    expect(error).toMatchObject({ code: "SETUP_FAILED", message: expect.stringContaining("is a link") });
+    expect(await readFile(outside, "utf8")).toBe("not ours");
   });
 
   it("installs the loader and main file into every SketchUp version folder", async () => {

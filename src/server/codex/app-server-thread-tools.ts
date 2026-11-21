@@ -5,6 +5,7 @@ import type {
 import {
   harnessCapabilityPacksOf,
   harnessCapabilityThreadRegistrationsOf,
+  registeredOnThreadStart,
 } from "../runtime/harness-capabilities";
 import {
   CachedThreadToolRegistrations,
@@ -27,13 +28,16 @@ function registrationsOf(bridge: ProviderHostToolBridge | undefined): ThreadTool
  * The dynamic tools a new Codex thread registers: every capability pack,
  * offered or withheld, so that turning a project setting back on later does not
  * leave the thread without tools its instructions describe. A withheld pack's
- * calls answer its withholding reason.
+ * calls answer its withholding reason. A pack registered only when offered is
+ * left out while withheld.
  */
 export function codexThreadStartTools(
   bridge: ProviderHostToolBridge,
 ): readonly ProviderHostToolDefinition[] {
   const packs = harnessCapabilityPacksOf(bridge);
-  return packs ? packs.flatMap(({ definitions }) => definitions) : bridge.definitions;
+  return packs
+    ? packs.filter(registeredOnThreadStart).flatMap(({ definitions }) => definitions)
+    : bridge.definitions;
 }
 
 /**
@@ -47,7 +51,7 @@ export function recordCodexThreadRegistration(
   threadId: string,
   bridge: ProviderHostToolBridge | undefined,
 ): void {
-  const packs = bridge ? harnessCapabilityPacksOf(bridge) ?? [] : [];
+  const packs = (bridge ? harnessCapabilityPacksOf(bridge) ?? [] : []).filter(registeredOnThreadStart);
   registrationsOf(bridge).record(threadId, new Map(packs.map(({ id, digest }) => [id, digest])));
 }
 

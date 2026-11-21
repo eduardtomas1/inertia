@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import type {
   AgentInputRequest,
   ProviderInfo,
@@ -7,6 +9,8 @@ import type { ConversationAttachmentStore } from "../../node/conversation-attach
 import type { RuntimeStore } from "../database";
 import type { ProviderManager } from "../providers";
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
+import { createCadHosts } from "../cad/cad-hosts";
+import { CadService } from "../cad/cad-service";
 import { AgentThreadManager } from "./agent-thread-manager";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
 import {
@@ -23,6 +27,7 @@ import type {
 } from "./agent-browser-broker-client";
 import type { AgentContextWatcherPolicy } from "./agent-context-tool";
 import { AgentSecretService } from "./agent-secrets/agent-secret-service";
+import { CadHostTools } from "./cad-host-tools";
 import type { RuntimeBackendCredentialBroker } from "../runtime-types";
 
 interface AgentThreadRuntimeDependencies {
@@ -75,6 +80,11 @@ export function createAgentThreadRuntime(
   });
   secrets.start();
   void secrets.restore();
+  const cadDirectory = join(dependencies.dataDirectory, "cad");
+  const cadTools = new CadHostTools(new CadService({
+    hosts: createCadHosts(cadDirectory),
+    stateDirectory: cadDirectory,
+  }));
   return {
     creation,
     contextRequests,
@@ -84,6 +94,7 @@ export function createAgentThreadRuntime(
       contextRequests,
       creation,
       agentSecrets: secrets,
+      cadTools,
     }),
   };
 }

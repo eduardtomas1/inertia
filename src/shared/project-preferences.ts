@@ -50,6 +50,10 @@ export const projectPreferencesSchema = z.strictObject({
   defaultAccessMode: recoverableFields.defaultAccessMode,
   autoPull: z.boolean(),
   browserAccess: z.boolean().nullable(),
+  // Agent tools for the AutoCAD and SketchUp apps open on this computer. Off
+  // unless turned on, so other projects never carry them; preferences saved
+  // before this key existed omit it.
+  cadAccess: z.boolean().nullable().default(null),
   icon: projectIconSchema.nullable(),
   actions: z.array(z.strictObject({
     id: z.string().uuid(),
@@ -69,7 +73,7 @@ export const projectPreferencesSchema = z.strictObject({
 export type ProjectPreferences = z.infer<typeof projectPreferencesSchema>;
 
 export function defaultProjectPreferences(): ProjectPreferences {
-  return { workspace: null, defaultAccessMode: null, autoPull: false, browserAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
+  return { workspace: null, defaultAccessMode: null, autoPull: false, browserAccess: null, cadAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
 }
 
 export function applyProjectAppearance(preferences: ProjectPreferences | undefined, appearance: ProjectAppearancePatch): ProjectPreferences {

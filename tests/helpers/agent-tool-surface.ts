@@ -27,6 +27,9 @@ import type {
 } from "../../src/server/provider/interactions";
 import type { RuntimeAgentBrowserBroker } from "../../src/server/runtime/agent-browser-broker-client";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
+import { CadService } from "../../src/server/cad/cad-service";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
+import { CadHostTools } from "../../src/server/runtime/cad-host-tools";
 import { AgentSecretService } from "../../src/server/runtime/agent-secrets/agent-secret-service";
 import type { RuntimeMutationEvent } from "../../src/shared/contracts";
 import { ConversationContextRequestCoordinator } from "../../src/server/runtime/conversation-context-request-coordinator";
@@ -37,6 +40,8 @@ export interface SurfaceRuntimeOptions {
   browser?: RuntimeAgentBrowserBroker;
   accessMode?: AccessMode;
   secretAnswer?: "deliver" | "none";
+  /** Turns the project's Agent CAD tools on, which production leaves off. */
+  cadAccess?: boolean;
 }
 
 export const SURFACE_SECRET_VALUE = "surface-secret-value-1234";
@@ -50,6 +55,9 @@ export async function createSurfaceRuntime(options: SurfaceRuntimeOptions = {}) 
   const store = new RuntimeStore(join(root, "inertia.sqlite"), workspace);
   const accessMode = options.accessMode ?? "supervised";
   const project = store.createProject("Surface project", workspace);
+  if (options.cadAccess) {
+    store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), cadAccess: true } });
+  }
   const source = store.createConversation(project.id, "Parent chat", { accessMode });
   const sourceTurn = store.beginAgentTurn({
     id: randomUUID(),
@@ -161,6 +169,8 @@ export async function createSurfaceRuntime(options: SurfaceRuntimeOptions = {}) 
     contextRequests,
     ...(options.browser ? { agentBrowser: options.browser } : {}),
     agentSecrets: secrets,
+    // Production always wires the CAD pack; no CAD app is reachable from tests.
+    cadTools: new CadHostTools(new CadService({ hosts: [], stateDirectory: join(root, "cad") })),
     providerInfo: () => [{ id: "codex", canRun: true, statusMessage: null, models: [] }] as never,
     broadcastSnapshot: vi.fn(),
     broadcastConversationShell: vi.fn(),

@@ -1,0 +1,112 @@
+name: CAD bridges
+
+# The SketchUp and AutoCAD bridges run inside the CAD apps, so their tests use
+# fakes of each app's API and need only Ruby or PowerShell. The runtime embeds
+# both bridges through a generated module, which must match the sources.
+
+on:
+  pull_request:
+    paths:
+      - src/server/cad/hosts/**
+      - src/server/cad/bridge-sources.ts
+      - scripts/sync-cad-host-sources.mjs
+      - .github/workflows/cad-bridges.yml
+  push:
+    branches:
+      - main
+    paths:
+      - src/server/cad/hosts/**
+      - src/server/cad/bridge-sources.ts
+      - scripts/sync-cad-host-sources.mjs
+      - .github/workflows/cad-bridges.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cad-bridges-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  embedded-sources:
+    name: Embedded CAD host sources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            src/server/cad
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.23.4
+          package-manager-cache: false
+
+      # The generator uses only Node built-ins, so no dependency install.
+      - name: Reject a stale generated module
+        run: node scripts/sync-cad-host-sources.mjs --check
+
+  sketchup:
+    name: SketchUp bridge (Ruby)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: src/server/cad/hosts
+
+      - name: Test
+        run: |
+          ruby --version
+          ruby src/server/cad/hosts/sketchup/bridge_test.rb
+
+  autocad:
+    name: AutoCAD bridge (PowerShell)
+    runs-on: windows-2025
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: src/server/cad/hosts
+
+      # AutoCAD loads the bridge through Windows PowerShell 5.1.
+      - name: Test on Windows PowerShell 5.1
+        shell: powershell
+        run: powershell -NoProfile -File src/server/cad/hosts/autocad/InertiaCadBridge.Tests.ps1; exit $LASTEXITCODE
+
+      # The COM message filter and window capture compile at runtime with the
+      # .NET Framework C# 5 compiler; prove they still do, and that the entry
+      # point answers a missing AutoCAD with a JSON error instead of crashing.
+      - name: Compile interop and answer without AutoCAD
+        shell: powershell
+        run: |
+          $env:INERTIA_CAD_BRIDGE_TEST = '1'
+          . ./src/server/cad/hosts/autocad/InertiaCadBridge.ps1
+          Initialize-Interop
+          if ($null -eq ('InertiaCad.Window' -as [type])) { throw 'interop did not load' }
+          Remove-Item Env:INERTIA_CAD_BRIDGE_TEST
+          $answer = '{"v":1,"id":"ci","method":"documents","params":{}}' | powershell -NoProfile -NonInteractive -File src/server/cad/hosts/autocad/InertiaCadBridge.ps1 | ConvertFrom-Json
+          if ($answer.ok -or $answer.error.code -notin @('HOST_OFFLINE', 'NOT_INSTALLED')) { throw "unexpected answer: $($answer | ConvertTo-Json -Compress)" }
+          "interop ok; without AutoCAD the bridge answers $($answer.error.code)"
+
+      - name: Test on PowerShell 7
+        shell: pwsh
+        run: pwsh -NoProfile -File src/server/cad/hosts/autocad/InertiaCadBridge.Tests.ps1; exit $LASTEXITCODE

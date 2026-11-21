@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   attachmentsSchema,
+  providerIdSchema,
   requestBase,
   turnRequestContextSchema,
 } from "./common";
@@ -119,6 +120,20 @@ export const agentCommandSchemas = [
         harnessId: z.enum(["codex-app-server", "claude-agent-sdk"]),
         forceReload: z.boolean().optional(),
       }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("agent.commands.list"),
+      payload: z.union([
+        z.strictObject({ conversationId: z.uuid() }),
+        z.strictObject({
+          draftConversationId: z.uuid(),
+          projectId: z.uuid(),
+          providerId: providerIdSchema,
+        }),
+      ]),
     })
     .strict(),
   z

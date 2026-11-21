@@ -7,10 +7,13 @@ import type {
   AgentGoalStatus,
   AgentSkillScope,
   AgentSkillSummary,
+  ProviderSlashCommand,
   AgentWorkflowState,
   Conversation,
+  ProviderId,
   ProviderSkillInput,
 } from "../../shared/contracts";
+import { providerNativeHarnessId } from "../../shared/model-routing";
 import { agentSkillsCapability } from "../../shared/agent-skills-capability";
 import { withCodexControlClient } from "../codex/control-client";
 import { objectValue, type JsonObject } from "../codex/protocol";
@@ -860,6 +863,22 @@ export class AgentWorkflowController {
       (raw) => this.codexSkillCandidate(conversationId, routeKey, raw),
       routeKey,
     );
+  }
+
+  async listProviderCommands(
+    target: { conversationId: string } | { draftConversationId: string; projectId: string; providerId: ProviderId },
+  ): Promise<{ conversationId: string; providerId: ProviderId; commands: ProviderSlashCommand[] }> {
+    if (!("conversationId" in target)) {
+      const cwd = this.store.projectPath(target.projectId);
+      const commands = await this.contact.providerCommands({ providerId: target.providerId, cwd, conversationId: null });
+      return { conversationId: target.draftConversationId, providerId: target.providerId, commands };
+    }
+    const conversation = this.store.conversation(target.conversationId);
+    const cwd = this.store.conversationPath(conversation.id);
+    const commands = conversation.modelSelection.harnessId === providerNativeHarnessId(conversation.providerId)
+      ? await this.contact.providerCommands({ providerId: conversation.providerId, cwd, conversationId: conversation.id })
+      : [];
+    return { conversationId: conversation.id, providerId: conversation.providerId, commands };
   }
 
   async previewSkills(input: {

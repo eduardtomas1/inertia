@@ -12,6 +12,7 @@ import type {
   AgentWorkflowState,
   Conversation,
   Project,
+  ProviderSlashCommand,
   ServerEvent,
 } from "@shared/contracts";
 import { resultEvent, type CommandWithoutId } from "../lib/runtimeCommands";
@@ -31,7 +32,15 @@ export interface AgentWorkflowProjection {
   }) => Promise<void>;
   clearGoal: (source: AgentGoalSource) => Promise<void>;
   listSkills: (forceReload?: boolean) => Promise<void>;
+  listProviderCommands: ProviderCommandsLoader;
+  previewProviderCommands: ProviderCommandsLoader;
 }
+
+export type ProviderCommandsTarget = Pick<Conversation, "id" | "projectId" | "providerId">;
+
+export type ProviderCommandsLoader = (
+  target: ProviderCommandsTarget,
+) => Promise<readonly ProviderSlashCommand[]>;
 
 export interface UseAgentWorkflowsOptions {
   conversationId: string | null;
@@ -317,6 +326,34 @@ export function useAgentWorkflows({
     }
   }, [activeConversationId, request]);
 
+  const requestProviderCommands = useCallback(async (
+    target: ProviderCommandsTarget,
+    draft: boolean,
+  ): Promise<readonly ProviderSlashCommand[]> => {
+    const event = resultEvent(await request({
+      type: "agent.commands.list",
+      payload: draft
+        ? { draftConversationId: target.id, projectId: target.projectId, providerId: target.providerId }
+        : { conversationId: target.id },
+    }));
+    if (
+      event.result.kind !== "agent.commands"
+      || event.result.conversationId !== target.id
+      || event.result.providerId !== target.providerId
+    ) {
+      throw new Error("The local service returned an unexpected commands response.");
+    }
+    return event.result.commands;
+  }, [request]);
+  const listProviderCommands = useCallback<ProviderCommandsLoader>(
+    async (target) => await requestProviderCommands(target, false),
+    [requestProviderCommands],
+  );
+  const previewProviderCommands = useCallback<ProviderCommandsLoader>(
+    async (target) => await requestProviderCommands(target, true),
+    [requestProviderCommands],
+  );
+
   return useMemo(() => ({
     state: activeConversationId ? state : null,
     loading: activeConversationId
@@ -328,12 +365,16 @@ export function useAgentWorkflows({
     setGoal,
     clearGoal,
     listSkills,
+    listProviderCommands,
+    previewProviderCommands,
   }), [
     activeConversationId,
     clearGoal,
     error,
+    listProviderCommands,
     listSkills,
     load,
+    previewProviderCommands,
     skillsLoading,
     mutating,
     setGoal,

@@ -1,7 +1,8 @@
 import { Transform, type TransformCallback } from "node:stream";
 
 import type { ProviderRunEventBudget } from "./io";
-import { parseAcpSessionNotification, validAcpJsonRpcEnvelope } from "./acp-json-rpc";
+import { parseAcpSessionNotificationOrIgnoredCommands } from "./acp-command-advertisement";
+import { validAcpJsonRpcEnvelope } from "./acp-json-rpc";
 import {
   parseCursorGenerateImageNotification,
   parseCursorTaskNotification,
@@ -104,7 +105,7 @@ export class BoundedJsonLineTransform extends Transform {
       throw new Error("Cursor ACP sent a malformed JSON-RPC frame.");
     }
     if ((parsed as { method?: unknown }).method === "session/update") {
-      parseAcpSessionNotification((parsed as { params?: unknown }).params);
+      parseAcpSessionNotificationOrIgnoredCommands((parsed as { params?: unknown }).params);
     }
     this.validateFrame?.(parsed);
     this.push(`${line}\n`);

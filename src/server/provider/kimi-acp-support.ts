@@ -1,6 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { acpStopReasonMessage } from "./acp-stop-reasons";
-import { parseAcpSessionNotification, validAcpJsonRpcEnvelope } from "./acp-json-rpc";
+import { parseAcpSessionNotificationOrIgnoredCommands } from "./acp-command-advertisement";
+import { validAcpJsonRpcEnvelope } from "./acp-json-rpc";
 import { Transform, type TransformCallback } from "node:stream";
 
 import {
@@ -82,7 +83,7 @@ export class BoundedKimiJsonLineTransform extends Transform {
       throw new Error("Kimi ACP sent a malformed JSON-RPC frame.");
     }
     if ((parsed as { method?: unknown }).method === "session/update") {
-      parseAcpSessionNotification((parsed as { params?: unknown }).params);
+      parseAcpSessionNotificationOrIgnoredCommands((parsed as { params?: unknown }).params);
     }
     this.push(`${line}\n`);
   }

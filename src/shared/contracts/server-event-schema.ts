@@ -14,7 +14,7 @@ import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../mo
 import { isContinuationReasonCode, isTurnSessionRecovery } from "../continuation-policy";
 import { backendDefault, backendProfile, backendProfileResultValidators, optionalProviderAccountKind, optionalTurnFailureKind } from "./backend-profile-result-schema";
 import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
-import { AGENT_GOAL_STATUSES } from "./agent-workflows";
+import { AGENT_GOAL_STATUSES, PROVIDER_SLASH_COMMAND_LIMITS, PROVIDER_SLASH_COMMAND_NAME } from "./agent-workflows";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 import { validatePreMergeConfidence } from "./pre-merge-confidence-schema";
@@ -494,6 +494,18 @@ function agentSkill(value: unknown): boolean {
     && booleanField(value, "enabled")
     && oneOf(value, "scope", ["user", "repo", "system", "admin", "provider"])
     && oneOf(value, "source", ["codex-native", "claude-native"]);
+}
+
+function codePointsAtMost(value: unknown, limit: number): boolean {
+  return typeof value === "string" && value.length <= limit * 2 && [...value].length <= limit;
+}
+
+function providerSlashCommand(value: unknown): boolean {
+  return recordWithStrings(value, "name", "description")
+    && nullableStringField(value, "argumentHint")
+    && PROVIDER_SLASH_COMMAND_NAME.test(value.name as string)
+    && codePointsAtMost(value.description, PROVIDER_SLASH_COMMAND_LIMITS.description)
+    && (value.argumentHint === null || codePointsAtMost(value.argumentHint, PROVIDER_SLASH_COMMAND_LIMITS.argumentHint));
 }
 
 function workflowGoalCapability(value: unknown): boolean {
@@ -1031,6 +1043,12 @@ const REQUEST_RESULT_VALIDATORS = {
       && entry.conversationId === value.conversationId)
     && uniqueRecordField(value.skills as unknown[], "id")
     && skillDiscovery(value.skillDiscovery),
+  "agent.commands": (value) => stringField(value, "conversationId")
+    && providerId(value, "providerId")
+    && Array.isArray(value.commands)
+    && value.commands.length <= PROVIDER_SLASH_COMMAND_LIMITS.commands
+    && arrayOf(value.commands, providerSlashCommand)
+    && uniqueRecordField(value.commands as unknown[], "name"),
   "conversation.detail": (value) => stringField(value, "conversationId")
     && oneOf(value, "state", ["ready", "missing", "deleted", "failed"])
     && (value.sync === undefined || syncCursor(value.sync))

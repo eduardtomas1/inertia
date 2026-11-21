@@ -365,6 +365,7 @@ export function useSplitWorkspaceScene({
       );
     },
     listSkills: workflow.listSkills,
+    listProviderCommands: workflow.listProviderCommands,
     setGoal: workflow.setGoal,
     clearGoal: workflow.clearGoal,
     updateConversation: async (

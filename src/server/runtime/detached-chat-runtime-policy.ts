@@ -86,6 +86,11 @@ export function detachedChatCommandRejection(
         : REJECTION;
     case "conversation.detail.load":
       return owns(command.payload.conversationId) ? null : REJECTION;
+    case "agent.commands.list":
+      return "conversationId" in command.payload
+        && ownsExistingConversation(command.payload.conversationId)
+        ? null
+        : REJECTION;
     case "agent.workflow.load":
     case "agent.workflow.saved.load":
     case "agent.skills.list":

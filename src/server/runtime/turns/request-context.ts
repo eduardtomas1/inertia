@@ -15,6 +15,7 @@ import type {
   TurnRequestContext,
   TurnSessionRecovery,
 } from "../../../shared/contracts";
+import { PROVIDER_SLASH_COMMAND_NAME } from "../../../shared/contracts/agent-workflows";
 import { MAX_ATTACHMENT_COUNT, MAX_IMAGE_ATTACHMENT_BYTES, MAX_IMAGE_ATTACHMENT_TOTAL_BYTES, chatAttachmentKind } from "../../../shared/attachments";
 import { readContainedFileSync } from "../../contained-file-read";
 import { INTERNAL_PROVIDER_INSTRUCTIONS_HEADER } from "../../internal-provider-instructions";
@@ -75,6 +76,13 @@ export interface HiddenProviderInstruction {
 /** The line that tells the agent its chat's id, sent with the capability instructions. */
 export function chatInstruction(conversationId: string): HiddenProviderInstruction {
   return { label: "inertia-chat", text: `This chat's id is ${conversationId}.` };
+}
+
+export function isProviderCommandText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("/")) return false;
+  const [name = ""] = trimmed.slice(1).split(/\s/u, 1);
+  return PROVIDER_SLASH_COMMAND_NAME.test(name);
 }
 
 export interface TurnExecutionContextBlob {
@@ -157,6 +165,7 @@ export interface AssembleTurnRequestInput {
   internalInstructions?: readonly HiddenProviderInstruction[];
   sessionInstructionDigest?: string;
   promptWithheld?: true;
+  providerCommand?: true;
   restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
   /**
    * The chat's tracked Inertia-local goal as one bounded, neutralized line
@@ -708,6 +717,10 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     input.attachments ?? [],
     input.imagePaths,
   );
+  const providerCommand = input.providerCommand === true;
+  if (providerCommand && !isProviderCommandText(visibleContent)) {
+    throw new Error("The provider command is invalid.");
+  }
   const modeInstructions: readonly HiddenProviderInstruction[] =
     input.interactionMode === "build"
       ? [{
@@ -733,6 +746,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   if (internalInstructionBytes > MAX_INTERNAL_INSTRUCTION_BYTES) {
     throw new Error("Internal provider instructions exceed the turn limit.");
   }
+  const promptInstructions = providerCommand ? [] : internalInstructions;
 
   const providerContext = (context: MaterializedContext) => ({
     kind: context.kind,
@@ -751,6 +765,15 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     "Attached files are saved on disk. Read or search them with your file tools as needed; their contents are not included here.",
     JSON.stringify(files.map(({ name, path, size }) => ({ name, path: boundedText(path, "Attachment path", 4096), size }))),
   ].join("\n");
+  if (providerCommand && (
+    contexts.length > 0
+    || fileReferences !== ""
+    || input.conversationContexts !== undefined
+    || (input.carriedConversationContexts?.length ?? 0) > 0
+    || input.restoredHistory !== undefined
+  )) {
+    throw new Error("A provider command is sent on its own, without attachments, context, or restored history.");
+  }
   const buildPrompt = (selectedContexts: typeof providerContexts): string => {
     const sections = [visibleContent];
     if (fileReferences) sections.push(fileReferences);
@@ -760,10 +783,10 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
         JSON.stringify({ version: 1, attachments: selectedContexts.map(promptContext) }),
       ].join("\n"));
     }
-    if (internalInstructions.length > 0) {
+    if (promptInstructions.length > 0) {
       sections.push([
         INTERNAL_PROVIDER_INSTRUCTIONS_HEADER,
-        ...internalInstructions.map(({ label, text }) => `[${label}]\n${text}`),
+        ...promptInstructions.map(({ label, text }) => `[${label}]\n${text}`),
       ].join("\n"));
     }
     return sections.join("\n\n");
@@ -805,7 +828,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   }
   let executionPrompt = buildPrompt(providerContexts);
   let assembledPayloadBytes = byteLength(executionPrompt) + imageReferenceBytes;
-  let executionSegmentCount = 1 + providerContexts.length + internalInstructions.length;
+  let executionSegmentCount = 1 + providerContexts.length + promptInstructions.length;
   if (executionSegmentCount > MAX_EXECUTION_MESSAGE_SEGMENTS) {
     throw new Error(
       `Execution payload exceeds the ${MAX_EXECUTION_MESSAGE_SEGMENTS} segment limit.`,
@@ -836,7 +859,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     executionSegmentCount += appended.length;
   };
 
-  if (input.trackedGoalLine) {
+  if (input.trackedGoalLine && !providerCommand) {
     const goal = [providerContext({
       kind: "attachment",
       label: TRACKED_GOAL_CONTEXT_LABEL,
@@ -944,12 +967,14 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
         contextReferenceCount: references.length,
         uniqueContextBlobCount: blobsByDigest.size,
         contextBytes: references.reduce((total, reference) => total + reference.byteSize, 0),
-        internalInstructionCount: internalInstructions.length,
-        internalInstructionBytes,
+        internalInstructionCount: promptInstructions.length,
+        internalInstructionBytes: providerCommand ? 0 : internalInstructionBytes,
         ...(input.sessionInstructionDigest === undefined
           ? {}
           : { sessionInstructionDigest: requiredSessionInstructionDigest(input.sessionInstructionDigest) }),
-        ...(input.promptWithheld ? { promptWithheld: true as const } : {}),
+        ...(input.promptWithheld || promptInstructions.length < internalInstructions.length
+          ? { promptWithheld: true as const }
+          : {}),
         executionSegmentCount,
         assembledPayloadBytes,
         references,

@@ -26,6 +26,7 @@ import type {
 import { AuthoritativeRunStateEngine } from "../run-state-engine";
 import {
   assembleTurnRequest,
+  isProviderCommandText,
   type AssembleTurnRequestInput,
   type ConversationContextMaterialization,
   type HiddenProviderInstruction,
@@ -33,6 +34,8 @@ import {
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import { trackedGoalContextLine, trackedLocalGoal } from "./turn-goal-context";
 import { PROVIDER_INFO } from "../../provider/catalog";
+import { SLASH_COMMAND_PROVIDERS } from "../../provider/provider-slash-commands";
+import { chatAttachmentKind } from "../../../shared/attachments";
 import { RuntimeRequestError } from "../../runtime-errors";
 import {
   runtimeInterruptionInstruction,
@@ -157,6 +160,24 @@ function watcherTurnPolicy(
       editsGatedBeforeStart: watcherHarnessProfile(harnessId).editsGatedBeforeStart,
     },
   };
+}
+
+function providerCommandCarriesContext(
+  request: QueueTurnRequest,
+  attachments: readonly NonNullable<QueueTurnRequest["attachments"]>[number][],
+): boolean {
+  const context = request.context;
+  return attachments.some((attachment) =>
+    attachment.snapshot !== undefined || chatAttachmentKind(attachment.mimeType) !== "image")
+    || (request.documentContexts?.length ?? 0) > 0
+    || [
+      context?.fileReferences,
+      context?.diffSelections,
+      context?.terminalContexts,
+      context?.previewContexts,
+      context?.reviewNotes,
+      context?.conversationContextPacketIds,
+    ].some((references) => (references?.length ?? 0) > 0);
 }
 
 function retireUsageLimitSnooze(
@@ -292,6 +313,20 @@ export function resolveTurnRequest(
   const customAgentCall = calledAgent
     ? resolveCustomAgentCall({ calledAgent, store: dependencies.store, providerId: route.providerId })
     : null;
+  const providerCommand = request.goalStart === undefined
+    && watcherTurn === undefined
+    && customAgentCall === null
+    && request.watcherNote === undefined
+    && request.systemInstructions === undefined
+    && (request.internalInstructions?.length ?? 0) === 0
+    && SLASH_COMMAND_PROVIDERS.includes(route.providerId)
+    && isProviderCommandText(request.content);
+  const providerName = PROVIDER_INFO[route.providerId].name;
+  if (providerCommand && providerCommandCarriesContext(request, attachments)) {
+    throw new RuntimeRequestError(
+      `${providerName} runs ${request.content.trim().split(/\s/u, 1)[0]} on its own. Remove the attached files and context, then send it again.`,
+    );
+  }
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const hostToolBridgeAttested = routeHostBridgeAttested(providerInfo, route);
   // Read once: the prompt's instructions and the tools attached at provider
@@ -400,11 +435,16 @@ export function resolveTurnRequest(
     pack: resumesImportedCodex ? [] : hostToolBridgeAttested ? instructionPack(conversation.id, capabilityInstructions) : capabilityInstructions,
     resumedSessionId: canResume ? conversation.providerSessionId : null,
     latestTurn,
-    promptWithheld: request.goalStart !== undefined,
+    promptWithheld: request.goalStart !== undefined || providerCommand,
   });
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
   const interruptedTurnId = dependencies.store.turnLedgerRepository
     .runtimeInterruptionSource(conversation.id);
+  if (providerCommand && interruptedTurnId !== null) {
+    throw new RuntimeRequestError(
+      `Send a message first so ${providerName} learns that its previous turn was interrupted.`,
+    );
+  }
   const requestedAt = dependencies.now();
   let conversationContexts: ConversationContextMaterialization | undefined;
   const turnInstructions = [
@@ -443,7 +483,8 @@ export function resolveTurnRequest(
       ? {}
       : { sessionInstructionDigest: instructionDelivery.sessionInstructionDigest }),
     ...(request.goalStart === undefined ? {} : { promptWithheld: true as const }),
-    ...(localGoal ? { trackedGoalLine: trackedGoalContextLine(localGoal) } : {}),
+    ...(providerCommand ? { providerCommand: true as const } : {}),
+    ...(localGoal && !providerCommand ? { trackedGoalLine: trackedGoalContextLine(localGoal) } : {}),
   } satisfies AssembleTurnRequestInput;
   const ownChatPacketId = dependencies.store.contextPackets
     .ownConversationPacketId(conversation.id, contextPacketIds);
@@ -526,13 +567,26 @@ export function resolveTurnRequest(
   const startsFreshInEstablishedChat = !canResume
     && continuation.reasonCode !== "first-turn"
     && request.goalStart === undefined;
+  if (providerCommand && startsFreshInEstablishedChat) {
+    throw new RuntimeRequestError(
+      `Send a message first so ${providerName} receives this chat's earlier messages.`,
+    );
+  }
+  const carriedConversationContexts = startsFreshInEstablishedChat
+    ? []
+    : dependencies.store.contextPackets
+      .unreachedReferences(conversation.id)
+      .flatMap((reference) => reference.sentBlocks() ?? []);
+  if (providerCommand && carriedConversationContexts.length > 0) {
+    throw new RuntimeRequestError(
+      `Send a message first so ${providerName} receives the chats you referenced.`,
+    );
+  }
   const assembled = startsFreshInEstablishedChat
     ? assembleOnFreshSession()
     : assembleTurnRequest({
         ...assemblyInput,
-        carriedConversationContexts: dependencies.store.contextPackets
-          .unreachedReferences(conversation.id)
-          .flatMap((reference) => reference.sentBlocks() ?? []),
+        carriedConversationContexts,
       });
   const providerSessionInvalidation = !canResume && conversation.providerSessionId
     ? { expectedSessionId: conversation.providerSessionId }
@@ -717,7 +771,7 @@ export function resolveTurnRequest(
           deferredSettlement: null,
           providerStopStarted: false,
           sessionAfter: canResume ? conversation.providerSessionId : null,
-          freshSessionRequest: canResume && request.goalStart === undefined
+          freshSessionRequest: canResume && request.goalStart === undefined && !providerCommand
             ? assembleOnFreshSession
             : null,
           lastUsage: null,

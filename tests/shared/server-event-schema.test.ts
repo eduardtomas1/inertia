@@ -1701,6 +1701,40 @@ describe("server event remaining discriminant and identity boundary", () => {
       skills: workflow.skills,
       skillDiscovery: workflow.skillDiscovery,
     }))).toBeTruthy();
+    const commandsResult = (commands: unknown, providerId: unknown = "claude"): unknown => event({
+      kind: "agent.commands",
+      conversationId: "11111111-1111-4111-8111-111111111111",
+      providerId,
+      commands,
+    });
+    const advisor = { name: "advisor", description: "Set the advisor model", argumentHint: "<fable|opus|off>" };
+    expect(parseServerEvent(commandsResult([advisor, { name: "code-review", description: "", argumentHint: null }]))).toBeTruthy();
+    expect(parseServerEvent(commandsResult([]))).toBeTruthy();
+    expect(parseServerEvent(commandsResult([{
+      name: "a".repeat(64),
+      description: "\u{1F600}".repeat(300),
+      argumentHint: "h".repeat(120),
+    }]))).toBeTruthy();
+    const maximal = Array.from({ length: 128 }, (_, index) => ({ name: `cmd-${index}`, description: "", argumentHint: null }));
+    expect(parseServerEvent(commandsResult(maximal))).toBeTruthy();
+    for (const providerId of ["gemini", "", null, 3]) {
+      expect(() => parseServerEvent(commandsResult([advisor], providerId))).toThrow("Malformed server event");
+    }
+    for (const malformed of [
+      [advisor, { ...advisor }],
+      [{ ...advisor, name: "/advisor" }],
+      [{ ...advisor, name: "two words" }],
+      [{ ...advisor, name: "a".repeat(65) }],
+      [{ ...advisor, description: "d".repeat(301) }],
+      [{ ...advisor, description: "\u{1F600}".repeat(301) }],
+      [{ ...advisor, argumentHint: "h".repeat(121) }],
+      [{ ...advisor, argumentHint: 3 }],
+      [{ name: "advisor", argumentHint: null }],
+      [...maximal, { name: "one-more", description: "", argumentHint: null }],
+      { length: 0 },
+    ]) {
+      expect(() => parseServerEvent(commandsResult(malformed))).toThrow("Malformed server event");
+    }
   });
   it.each([
     ["maintenance provider", { providers: [{ ...provider, maintenance: {

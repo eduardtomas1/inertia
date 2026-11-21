@@ -770,7 +770,9 @@ describe("restrictedExportRunner", () => {
     expect(missing).toBeInstanceOf(RestrictedCliError);
     expect(missing).toMatchObject({ code: "unavailable" });
 
-    const flood = await restrictedExportRunner()(process.execPath, ["-e", "process.stdout.write(Buffer.alloc(8192, 65))"], {
+    // The flooding program stays alive, like a console still printing, so the runner stops a live
+    // process tree; one that already exited races the stop on Windows and reports cleanup instead.
+    const flood = await restrictedExportRunner()(process.execPath, ["-e", "process.stdout.write(Buffer.alloc(8192, 65)); setInterval(() => {}, 1000)"], {
       cwd: process.cwd(),
       timeoutMs: 30_000,
       maxOutputBytes: 2048,

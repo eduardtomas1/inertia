@@ -130,7 +130,6 @@
   --composer-toolbar-padding-bottom: 12px;
   --composer-icon-button-size: 28px;
   --usage-ring-size: 28px;
-  --active-work-text-rest: #585880;
   --active-work-text-highlight: #2a294c;
   --answer-font-size: var(--text-base);
   --transcript-section-spacing: 18px;
@@ -288,7 +287,6 @@
   --glass-saturate: 1.08;
   --diff-addition-surface: color-mix(in srgb, var(--status-completed) 15%, transparent);
   --diff-deletion-surface: color-mix(in srgb, var(--status-failed) 13%, transparent);
-  --active-work-text-rest: #9091ba;
   --active-work-text-highlight: #e4e6fe;
   --syntax-keyword: #a1a1fa;
   --syntax-string: #70c18e;

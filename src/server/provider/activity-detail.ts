@@ -176,6 +176,10 @@ export function sanitizeProviderActivityDetail(
       /(?:^|\n)[ \t]*(?:-{2,}[ \t]*)?(?:developer|generated|internal|system)[_ -]?prompt(?:[ \t]*-{2,})?[ \t]*[:=][ \t]*(?:"[\s\S]*?"|'[\s\S]*?'|[^\n]*)/giu,
       (match) => `${match.startsWith("\n") ? "\n" : ""}system_prompt=[redacted]`,
     )
+    .replace(
+      /((?:[?&#;]|%(?:3F|26|23|3B))(?:[A-Za-z0-9_.~-]|%[0-9A-F]{2}){0,64}?(?:key|token|secret|password|passwd|signature|sig|credentials?|auth|jwt|session(?:[_-]?id)?|(?<=[?&#;_.~-]|%[0-9A-F]{2})code)(?:=|%3D))(?:(?!%2[36])[^&#\s'"<>])+/giu,
+      "$1[redacted]",
+    )
     .replace(/\b(?:ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/giu, "[redacted]")
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, "[redacted]")
     .replace(/\bsk-[A-Za-z0-9_-]{20,}/gu, "[redacted]")

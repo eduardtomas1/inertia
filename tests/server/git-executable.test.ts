@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GitExecutableSelection } from "../../src/server/git/executable";
 
@@ -33,8 +36,8 @@ describe("Apple Git executable selection", () => {
     expect(selection.command(applePath)).toBe("git");
   });
 
-  it.each(["linux", "win32"] as const)("leaves %s executable selection unchanged", async platform => {
-    const { selection, readExecutable } = resolver(platform);
+  it("leaves linux executable selection unchanged", async () => {
+    const { selection, readExecutable } = resolver("linux");
     const locate = vi.fn(async () => selectedGit);
     await selection.prepare(applePath, locate);
     expect(selection.command(applePath)).toBe("git");
@@ -135,5 +138,114 @@ describe("Apple Git executable selection", () => {
     expect(finished).toBe(false);
     rejectHelper(cleanupFailure);
     await expect(preparing).resolves.toBe(cleanupFailure);
+  });
+});
+
+describe("Windows Git executable selection", () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+  const installed = "C:\\Program Files\\Git\\cmd\\git.exe";
+
+  it("selects Git from fully qualified PATH entries only, in libuv extension order", async () => {
+    const Path = ";.;bin;\\rooted;\"C:\\Program Files\\Git\\cmd\";C:\\Tools;\\\\server\\share\\bin";
+    const { selection, readExecutable } = resolver("win32", { [installed]: installed });
+    const locate = vi.fn(async () => selectedGit);
+    await selection.prepare({ Path }, locate);
+    expect(readExecutable.mock.calls.map(([path]) => path)).toEqual([
+      "C:\\Program Files\\Git\\cmd\\git.com",
+      installed,
+    ]);
+    expect(locate).not.toHaveBeenCalled();
+    expect(selection.command({ PATH: Path })).toBe(installed);
+    expect(selection.command({ Path })).toBe(installed);
+    expect(selection.command({ PATH: "C:\\Other" })).toBe("git");
+    expect(selection.command({})).toBe("git");
+  });
+
+  it("checks later fully qualified entries, including UNC directories, when earlier ones lack Git", async () => {
+    const unc = "\\\\server\\share\\bin\\git.exe";
+    const PATH = "C:\\Tools;\\\\server\\share\\bin";
+    const { selection, readExecutable } = resolver("win32", { [unc]: unc });
+    await selection.prepare({ PATH }, async () => selectedGit);
+    expect(readExecutable).toHaveBeenCalledTimes(4);
+    expect(selection.command({ PATH })).toBe(unc);
+  });
+
+  it.each(["", ";.;bin;\\rooted", "C:\\Tools", Array(129).fill("C:\\Tools").join(";"), "C:\\" + "x".repeat(16_384)])(
+    "keeps the guarded bare command when no fully qualified Git is selected", async PATH => {
+      const { selection } = resolver("win32");
+      await selection.prepare({ PATH }, async () => selectedGit);
+      expect(selection.command({ PATH })).toBe("git");
+    },
+  );
+
+  it("keeps the PATH-entry Git path instead of a resolved link target", async () => {
+    const links = "C:\\Users\\Dev\\AppData\\Local\\Microsoft\\WinGet\\Links";
+    const PATH = `${links};C:\\Tools`;
+    const { selection } = resolver("win32", {
+      [`${links}\\git.exe`]: "C:\\Users\\Dev\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Git.Git_2.47\\cmd\\git.exe",
+    });
+    await selection.prepare({ PATH }, async () => selectedGit);
+    expect(selection.command({ PATH })).toBe(`${links}\\git.exe`);
+  });
+
+  it("ends a stalled Windows PATH scan within the shared filesystem budget", async () => {
+    vi.useFakeTimers();
+    const selection = new GitExecutableSelection("win32", () => new Promise(() => {}));
+    const PATH = "C:\\Tools";
+    const preparing = selection.prepare({ PATH }, async () => selectedGit);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(preparing).resolves.toBeUndefined();
+    expect(selection.command({ PATH })).toBe("git");
+  });
+});
+
+describe.runIf(process.platform === "win32")("Windows Git executable selection on the filesystem", () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  function installation(root: string, version: string): string {
+    const directory = join(root, "apps", "git", version, "cmd");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "git.exe"), "");
+    return join(root, "apps", "git", version);
+  }
+
+  it("keeps a junctioned installation path working after the versioned folder is replaced", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-git-junction-"));
+    roots.push(root);
+    const current = join(root, "apps", "git", "current");
+    symlinkSync(installation(root, "2.46.0"), current, "junction");
+    const PATH = join(current, "cmd");
+    const selection = new GitExecutableSelection("win32");
+    await selection.prepare({ PATH }, async () => "");
+    expect(selection.command({ PATH })).toBe(join(current, "cmd", "git.exe"));
+
+    rmSync(current);
+    rmSync(join(root, "apps", "git", "2.46.0"), { recursive: true });
+    symlinkSync(installation(root, "2.47.0"), current, "junction");
+    expect(selection.command({ PATH })).toBe(join(current, "cmd", "git.exe"));
+    expect(statSync(selection.command({ PATH })).isFile()).toBe(true);
+  });
+
+  it("keeps a symlinked Git path and skips a link to a directory", async (context) => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-git-symlink-"));
+    roots.push(root);
+    const links = join(root, "Links");
+    const directoryLinks = join(root, "DirectoryLinks");
+    mkdirSync(links);
+    mkdirSync(directoryLinks);
+    const target = join(installation(root, "2.47.0"), "cmd");
+    try {
+      symlinkSync(join(target, "git.exe"), join(links, "git.exe"), "file");
+      symlinkSync(target, join(directoryLinks, "git.exe"), "dir");
+    } catch {
+      context.skip();
+    }
+    const PATH = `${directoryLinks};${links}`;
+    const selection = new GitExecutableSelection("win32");
+    await selection.prepare({ PATH }, async () => "");
+    expect(selection.command({ PATH })).toBe(join(links, "git.exe"));
   });
 });

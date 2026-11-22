@@ -306,9 +306,9 @@ describe("finished-turn fold", () => {
     expect(document.querySelector(".turn-fold-body .subagent-group")).toBeNull();
   });
 
-  it("moves a settled subagent group into the fold body, after the turn's work", async () => {
+  it("moves a settled subagent group into the fold body, where the agent started in the turn's work", async () => {
     const user = userEvent.setup();
-    const trace = { id: "trace-done", turnId: working.id, isLive: false, status: "completed" } as SubagentTrace;
+    const trace = { id: "trace-done", turnId: working.id, isLive: false, status: "completed", createdAt: at(7), updatedAt: at(40) } as SubagentTrace;
     render(<ResponseTimeline {...props([working], { subagents: [trace] })} />);
 
     expect(document.querySelector(".subagent-group")).toBeNull();
@@ -316,8 +316,10 @@ describe("finished-turn fold", () => {
     const body = document.getElementById(foldToggle(working.id).getAttribute("aria-controls")!)!;
     const group = within(body).getByRole("button", { name: "1 subagent, 1 done" });
     expect(document.querySelectorAll(".subagent-group")).toHaveLength(1);
-    const stream = body.querySelector(".turn-execution-stream")!;
-    expect(stream.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const before = within(body).getByText("Reading the parser before editing it.");
+    const after = body.querySelector("[data-activity-group]")!;
+    expect(before.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(group.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(group.closest(".subagent-group")).toHaveClass("is-idle");
 
     await user.click(foldToggle(working.id));

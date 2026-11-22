@@ -44,6 +44,8 @@ import {
 } from "./config";
 import type { ComposerCommandMenuItem } from "./ComposerCommandMenu";
 import type { ComposerAgentCall } from "./useComposerAgentCall";
+import { useProviderSlashCommands, type ProviderCommandsConversation } from "./useProviderSlashCommands";
+import type { ProviderCommandsLoader } from "../../hooks/useAgentWorkflows";
 
 type RouteReadiness = ReturnType<typeof composerRouteReadiness>;
 
@@ -60,6 +62,7 @@ const ComposerCalledAgentChip = lazy(async () => ({
 interface ComposerSlashCommand extends ComposerCommandMenuItem {
   action?: () => void;
   mode?: InteractionMode;
+  providerCommand?: true;
 }
 
 export interface ComposerInputZoneProps {
@@ -110,6 +113,10 @@ export interface ComposerInputZoneProps {
   acceptSkill: (skill: AgentSkillSummary) => void;
   dismissSkills: () => void;
   slashMatch: RegExpExecArray | null;
+  providerCommandSource?: {
+    load: ProviderCommandsLoader | undefined;
+    conversation: ProviderCommandsConversation;
+  };
   agentCall?: ComposerAgentCall;
   onCompactCommand: () => void;
   compactUnavailableReason: string | null;
@@ -173,6 +180,7 @@ export function ComposerInputZone({
   acceptSkill,
   dismissSkills,
   slashMatch,
+  providerCommandSource,
   agentCall,
   onCompactCommand,
   compactUnavailableReason,
@@ -194,6 +202,11 @@ export function ComposerInputZone({
   const runLocked = useWatcherRunLock(conversationId);
   const modeChangesDisabled = disabled || running || runLocked;
   const slashQuery = slashMatch?.[1].toLowerCase();
+  const providerCommands = useProviderSlashCommands({
+    load: providerCommandSource?.load,
+    conversation: providerCommandSource?.conversation ?? null,
+    menuOpen: slashMatch !== null,
+  });
   const slashCommands: ComposerSlashCommand[] = slashMatch ? [
     { id: "goal", description: "View or set this chat's goal", section: "built-in", action: onOpenGoal, disabled: disabled || !goalAvailable },
     { id: "plan", description: "Switch this chat into plan mode", section: "built-in", mode: "plan", disabled: modeChangesDisabled },
@@ -210,9 +223,23 @@ export function ComposerInputZone({
       disabled: disabled || running || compactUnavailableReason !== null,
     },
   ] : [];
+  if (slashMatch) {
+    const inertiaCommandIds = new Set(slashCommands.map(({ id }) => id));
+    for (const command of providerCommands) {
+      if (inertiaCommandIds.has(command.name.toLowerCase())) continue;
+      slashCommands.push({
+        id: command.name,
+        description: command.description,
+        argumentHint: command.argumentHint,
+        section: "provider",
+        providerCommand: true,
+        disabled,
+      });
+    }
+  }
   const matchingSlashCommands = slashMatch
     ? slashCommands.filter(({ id }) =>
-        id.startsWith(slashQuery!))
+        id.toLowerCase().startsWith(slashQuery!))
     : [];
   const selectableSlashCommands = matchingSlashCommands.filter(({ disabled }) => !disabled);
   const [highlightedSlashCommandId, setHighlightedSlashCommandId] = useState<string | null>(null);
@@ -321,6 +348,13 @@ export function ComposerInputZone({
   };
   const activateSlashCommand = (item: ComposerSlashCommand): void => {
     if (item.disabled) return;
+    if (item.providerCommand) {
+      const completed = `/${item.id} `;
+      setDismissedSuggestionValue(completed);
+      onMessageChange(completed);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+      return;
+    }
     dismissSuggestions();
     if (item.action) {
       item.action();
@@ -607,7 +641,13 @@ export function ComposerInputZone({
               && shouldSubmitComposerKey(event)
             ) {
               event.preventDefault();
-              if (activeSlashCommand) {
+              if (
+                activeSlashCommand?.providerCommand
+                && activeSlashCommand.id.toLowerCase() === slashQuery
+              ) {
+                dismissSuggestions();
+                void onSubmit();
+              } else if (activeSlashCommand) {
                 activateSlashCommand(activeSlashCommand);
               } else if (
                 slashQuery === "compact"

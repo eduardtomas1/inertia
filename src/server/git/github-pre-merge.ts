@@ -173,7 +173,7 @@ function checkState(value: UnknownRecord): GitPreMergeEvidenceState | null {
   if (lifecycle === "NEUTRAL") return "neutral";
   return !status && ["EXPECTED", "PENDING"].includes(lifecycle) ? "pending" : null;
 }
-function parseCheck(value: unknown, repositoryBaseUrl: string): GitPreMergeCheck | null {
+export function parseGitHubCheck(value: unknown, repositoryBaseUrl: string): GitPreMergeCheck | null {
   if (!record(value)) return null;
   const name = text(value.name || value.context).trim();
   if (!name) return null;
@@ -246,7 +246,7 @@ function parsePullRequest(
     ? value.statusCheckRollup
     : [];
   const checks = rawChecks
-      .map((entry) => parseCheck(entry, repositoryBaseUrl))
+      .map((entry) => parseGitHubCheck(entry, repositoryBaseUrl))
       .filter((entry): entry is GitPreMergeCheck => entry !== null)
       .slice(0, MAX_CHECKS);
   const rawFiles = value.files;

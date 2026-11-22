@@ -34,7 +34,6 @@ import type { RuntimeStartupBlockerCode } from
   "./runtime-startup-diagnostics";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
 export {
-  MAX_PERSISTED_TERMINAL_TABS,
   parseDetachedChatTerminalHandoff,
   parseTerminalHandoffIds,
   type DetachedChatTerminalHandoff,

@@ -14,6 +14,7 @@ import {
   TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY,
 } from "../node/test-provider-bin-directory";
 import type { ProviderId } from "./provider/contracts";
+import { withoutWindowsCurrentDirectorySearch } from "../node/windows-current-directory-search";
 
 export interface ProviderEnvironment {
   env: NodeJS.ProcessEnv;
@@ -135,9 +136,12 @@ const CLAUDE_CHILD_DENIED_ENVIRONMENT_KEYS = new Set([
   "CLAUDE_CODE_API_BASE_URL",
 ]);
 
+export { withoutWindowsCurrentDirectorySearch };
+
 export function providerChildEnvironment(
   providerId: ProviderId,
   source: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(source)) {
@@ -195,11 +199,12 @@ export function providerChildEnvironment(
       /^(?:CLOUD_ML|GOOGLE|GCLOUD)_[A-Z0-9_]+$/u,
     );
   }
-  return result;
+  return withoutWindowsCurrentDirectorySearch(result, platform);
 }
 
 export function credentialFreeProviderEnvironment(
   source: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const safeKeys = new Set([
     "COMSPEC",
@@ -224,7 +229,7 @@ export function credentialFreeProviderEnvironment(
       || normalized.startsWith("LC_")
     ) result[key] = value;
   }
-  return result;
+  return withoutWindowsCurrentDirectorySearch(result, platform);
 }
 
 function copyMatchingEnvironment(
@@ -449,7 +454,7 @@ async function loadProviderEnvironment(): Promise<ProviderEnvironment> {
   env.PATH = (fixtureDirectory
     ? unique([fixtureDirectory, ...inheritedPath])
     : pathEntries).join(delimiter);
-  return { env, pathEntries };
+  return { env: withoutWindowsCurrentDirectorySearch(env), pathEntries };
 }
 
 export function providerEnvironment(refresh = false): Promise<ProviderEnvironment> {

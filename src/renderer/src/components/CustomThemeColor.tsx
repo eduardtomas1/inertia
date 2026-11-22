@@ -13,7 +13,7 @@ export function CustomThemeColor({ mode, value, muted = false, disabled, onChang
   const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
   const [rejected, setRejected] = useState(false);
-  const color = value ?? (mode === "light" ? "#4e30c5" : "#a3a3fa");
+  const color = value ?? (mode === "light" ? "#4e30c5" : "#9693fa");
   const label = mode === "light" ? "Light" : "Dark";
   const colorInput = useRef<HTMLInputElement>(null);
   const onChangeRef = useRef(onChange);
@@ -36,7 +36,6 @@ export function CustomThemeColor({ mode, value, muted = false, disabled, onChang
     const tokens = Object.fromEntries(buildCustomPaletteTokens(color, mode, muted));
     return {
       "--theme-preview-canvas": tokens["surface-strong"],
-      "--theme-preview-sidebar": tokens.surface,
       "--theme-preview-surface": tokens["surface-strong"],
       "--theme-preview-accent": tokens.accent,
       "--theme-preview-accent-soft": tokens["accent-soft"],

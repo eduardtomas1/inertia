@@ -6,6 +6,7 @@ import "./ComposerCommandMenu.css";
 export interface ComposerCommandMenuItem {
   id: string;
   description: string;
+  argumentHint?: string | null;
   section: "built-in" | "provider";
   disabled: boolean;
 }
@@ -64,6 +65,9 @@ export function ComposerCommandMenu({
         <Icon size={14} aria-hidden="true" />
         <span className="composer-command-copy">
           <strong>{`/${item.id}`}</strong>
+          {item.argumentHint && (
+            <span className="composer-command-hint">{item.argumentHint}</span>
+          )}
           <small>{item.description}</small>
         </span>
       </button>

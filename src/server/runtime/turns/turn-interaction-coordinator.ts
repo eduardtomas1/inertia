@@ -346,6 +346,7 @@ export class TurnInteractionCoordinator {
       turnId: active.turn.id,
       questions: request.questions,
       autoResolutionMs: request.autoResolutionMs,
+      ...(request.grantsPermission === true ? { grantsPermission: true as const } : {}),
     };
     if (!registerPendingInteraction(this.options.pendingInputs, pending)) {
       throw new Error(

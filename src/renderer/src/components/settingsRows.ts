@@ -132,6 +132,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["project-workspace", "Where new chats run", ["worktree", "checkout", "branch", "workspace"]],
       ["project-default-access", "Default access", ["access", "full access", "supervised", "auto-accept edits", "permissions"]],
       ["project-browser-access", "Agent browser access", ["preview browser", "browser"]],
+      ["project-cad-access", "Agent CAD tools", ["autocad", "sketchup", "cad", "drawing", "model"]],
       ["project-spend-limit", "Claude spend limit per turn", ["budget", "cost", "usd", "limit", "token"]],
     ],
     Checkout: [

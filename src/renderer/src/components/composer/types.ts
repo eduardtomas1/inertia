@@ -90,6 +90,7 @@ export interface ComposerProps {
     context?: TurnRequestContext,
   ) => Promise<ConversationCompactAndSendResult>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
+  onListProviderCommands?: import("../../hooks/useAgentWorkflows").ProviderCommandsLoader;
   promptPresets?: readonly PromptPreset[];
   onPromptPresetCommand?: PromptPresetCommandRunner;
   customAgents?: readonly CustomAgent[];

@@ -114,6 +114,7 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutDelivery: "ambiguous",
   },
   "agent.input.respond": shortMutation,
+  "agent.commands.list": agentWorkflowRead,
   "agent.skills.list": agentWorkflowRead,
   "agent.skills.preview": agentWorkflowRead,
   "agent.stop": shortMutation,

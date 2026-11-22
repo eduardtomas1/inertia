@@ -164,6 +164,11 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
           options={{ inherit: "Default (On)", true: "On", false: "Off" }}
           onChange={(value) => void setPreference("project-browser-access", "browserAccess", value === "inherit" ? null : value === "true")} />
       </SettingRow>
+      <SettingRow id="project-cad-access" title="Agent CAD tools" description="Lets agents read the AutoCAD drawings and SketchUp models open on this computer and edit them when you ask. New chats pick up a change." notice={notice("project-cad-access")}>
+        <ProjectSelect label="Agent CAD tools" value={preferences.cadAccess === true ? "true" : "false"} disabled={unavailable} inactive={saving}
+          options={{ false: "Off", true: "On" }}
+          onChange={(value) => void setPreference("project-cad-access", "cadAccess", value === "true" ? true : null)} />
+      </SettingRow>
       <SettingTextField id="project-spend-limit" title="Claude spend limit per turn" label="Claude spend limit per turn (USD)"
         description="Caps estimated API cost for Claude on Anthropic; subagents count toward it."
         value={preferences.claudeMaxBudgetUsd === null ? "" : String(preferences.claudeMaxBudgetUsd)}

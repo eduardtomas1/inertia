@@ -11,6 +11,7 @@ Inertia is a calm desktop workspace for building with coding agents. It keeps ag
 | **[Working side by side](working-side-by-side.md)** | Split view and separate chat windows. |
 | **[Duo](duo.md)** | One brief for two agents, with an optional third-model comparison. |
 | **[Watcher](watcher.md)** | A second agent, read-only by default, that follows a chat and keeps its findings in a side dock. |
+| **[AutoCAD and SketchUp](cad.md)** | Let agents read your open drawings and models and apply edits you approve in the CAD app. |
 | **[Files](files.md)** | Browse, preview and edit project files, search names and contents, and send selected lines to a chat. |
 | **[Review and ship](review-and-ship.md)** | Diffs, hunk review, commits, branches and pull requests. |
 | **[Tasks](tasks.md)** | A local to-do list with due dates and priorities that you can hand to an agent. |

@@ -224,6 +224,20 @@ const IMPLEMENTATION_SOURCES = new Map<
     "src/server/persistence/migrations/turn-continuation-evidence.ts",
     "persistTurnContinuationEvidence",
   )]],
+  [117, [implementation(
+    "src/server/persistence/migrations/extend-color-themes.ts",
+    "COLOR_THEME_COLUMNS",
+    "COLOR_THEME_TABLE",
+    "EXTENDED_COLOR_THEMES",
+    "PREVIOUS_COLOR_THEMES",
+    "REBUILT_COLOR_THEME_TABLE",
+    "colorThemeTableRows",
+    "colorThemeTableShape",
+    "colorThemeTableSql",
+    "extendedColorThemeSql",
+    "quotedColorThemeIdentifier",
+    "rebuildColorThemeTable",
+  )]],
 ]);
 
 function sha256(source: string): string {

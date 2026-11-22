@@ -177,7 +177,7 @@ function errorCode(value: Json): string {
 }
 
 describe("inertia.workspace definitions", () => {
-  it("advertises six flat, read-only, non-destructive tools with exact arguments", () => {
+  it("advertises seven flat, read-only, non-destructive tools with exact arguments", () => {
     expect(WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([
       "inertia_git_status",
       "inertia_turn_diff",
@@ -185,6 +185,7 @@ describe("inertia.workspace definitions", () => {
       "inertia_read_goal",
       "inertia_list_tasks",
       "inertia_project_actions",
+      "inertia_pull_request_status",
     ]);
     for (const definition of WORKSPACE_TOOL_DEFINITIONS) {
       expect(definition.name).toMatch(/^inertia_[a-z0-9_]{1,119}$/u);
@@ -203,7 +204,7 @@ describe("inertia.workspace definitions", () => {
     expect(Object.keys(WORKSPACE_TOOL_DEFINITIONS[4]!.inputSchema.properties as object)).toEqual(["includeDone"]);
   });
 
-  it("composes inertia.workspace revision 2 with a bounded private instruction, whether or not Browser is on", () => {
+  it("composes inertia.workspace revision 3 with a bounded private instruction, whether or not Browser is on", () => {
     expect(WORKSPACE_INSTRUCTION.label).toBe("inertia-workspace");
     expect(Buffer.byteLength(WORKSPACE_INSTRUCTION.text, "utf8")).toBeLessThan(1_024);
     expect(WORKSPACE_INSTRUCTION.text).toContain("read-only snapshots");
@@ -218,7 +219,7 @@ describe("inertia.workspace definitions", () => {
         invoke: async () => ({ success: true, text: "{}" }),
       });
       const pack = registry.manifest().packs.find(({ id }) => id === "inertia.workspace");
-      expect(pack).toMatchObject({ revision: 2, toolNames: WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name) });
+      expect(pack).toMatchObject({ revision: 3, toolNames: WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name) });
       expect(registry.instructions().map(({ label }) => label)).toContain("inertia-workspace");
       digests.add(registry.manifest().definitionDigest);
     }
@@ -881,6 +882,7 @@ describe("inertia.workspace call authority", () => {
     ["inertia_read_goal", {}],
     ["inertia_list_tasks", {}],
     ["inertia_project_actions", {}],
+    ["inertia_pull_request_status", {}],
   ] as const;
 
   it("rejects unexpected arguments for every tool", async () => {

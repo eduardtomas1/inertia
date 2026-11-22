@@ -48,10 +48,3 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
-export type {
-  SecretRequestCommandResult,
-  SecretRequestDeclineResult,
-  SecretRequestListEntry,
-  SecretRequestListResult,
-  SecretRequestRevokeResult,
-} from "../secret-request-results";

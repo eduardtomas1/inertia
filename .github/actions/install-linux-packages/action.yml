@@ -1,10 +1,18 @@
 name: Install Linux packages
-description: Install pinned apt packages from a per-image cache, downloading them only when the runner image changes.
+description: >-
+  Install pinned apt packages after a signed package index refresh, reusing a
+  cached package archive only when its size and digest match that signed index.
 
 inputs:
   packages:
     description: Space-separated apt packages, optionally pinned with =version.
     required: true
+  cache:
+    description: >-
+      Restore and save downloaded package archives. Release jobs set this to
+      false so they never consume a cache entry another workflow could write.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -17,22 +25,19 @@ runs:
       run: |
         set -euo pipefail
         digest="$(printf '%s' "$PACKAGES" | tr -s ' ' '\n' | sort | sha256sum | cut -c1-16)"
-        printf 'key=linux-packages-v2-%s-%s-%s-%s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}" "$RUNNER_ARCH" "$digest" >> "$GITHUB_OUTPUT"
+        printf 'key=linux-packages-v3-%s-%s-%s-%s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}" "$RUNNER_ARCH" "$digest" >> "$GITHUB_OUTPUT"
         printf 'dir=%s\n' "$RUNNER_TEMP/linux-packages" >> "$GITHUB_OUTPUT"
 
-    - name: Restore cached packages
+    - name: Restore cached package archives
       id: restore
+      if: inputs.cache == 'true'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.key.outputs.dir }}
         key: ${{ steps.key.outputs.key }}
 
-    - name: Download packages
-      if: steps.restore.outputs.cache-hit != 'true'
+    - name: Refresh the signed package index
       shell: bash
-      env:
-        PACKAGES: ${{ inputs.packages }}
-        PACKAGE_DIR: ${{ steps.key.outputs.dir }}
       run: |
         set -euo pipefail
         codename="$(. /etc/os-release && printf '%s' "$VERSION_CODENAME")"
@@ -49,23 +54,71 @@ runs:
           fi
         done
         [ "${#reachable[@]}" -gt 0 ] || { echo "No Ubuntu mirror is reachable." >&2; exit 1; }
-        mkdir -p "$PACKAGE_DIR/apt" "$PACKAGE_DIR/lists" "$PACKAGE_DIR/archives"
-        printf '%s\n' "${reachable[@]}" > "$PACKAGE_DIR/apt/inertia-mirrors.txt"
-        printf 'Types: deb\nURIs: mirror+file:/etc/apt/inertia-mirrors.txt\nSuites: %s %s-updates %s-security\nComponents: main universe\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n' "$codename" "$codename" "$codename" > "$PACKAGE_DIR/apt/ubuntu.sources"
-        sudo cp "$PACKAGE_DIR/apt/inertia-mirrors.txt" /etc/apt/inertia-mirrors.txt
-        sudo cp "$PACKAGE_DIR/apt/ubuntu.sources" /etc/apt/sources.list.d/ubuntu.sources
+        printf '%s\n' "${reachable[@]}" | sudo tee /etc/apt/inertia-mirrors.txt > /dev/null
+        printf 'Types: deb\nURIs: mirror+file:/etc/apt/inertia-mirrors.txt\nSuites: %s %s-updates %s-security\nComponents: main universe\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n' "$codename" "$codename" "$codename" | sudo tee /etc/apt/sources.list.d/ubuntu.sources > /dev/null
         if [ -f /etc/apt/sources.list ]; then sudo sed -i -E '/^deb .*ubuntu(-ports)?\/? /s/^/# /' /etc/apt/sources.list; fi
         sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Languages=none update
         sudo apt-get clean
+
+    - name: Reuse cached archives that match the signed index
+      if: steps.restore.outputs.cache-hit == 'true'
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        PACKAGE_DIR: ${{ steps.key.outputs.dir }}
+      run: |
+        set -euo pipefail
+        read -r -a packages <<< "$PACKAGES"
+        archives=/var/cache/apt/archives
+        reused=0
+        rejected=0
+        while read -r uri file size hash; do
+          case "$file" in
+            ''|.*|*/*) continue ;;
+          esac
+          cached="$PACKAGE_DIR/$file"
+          [ -f "$cached" ] && [ ! -L "$cached" ] || continue
+          case "$hash" in
+            SHA512:*) tool=sha512sum ;;
+            SHA256:*) tool=sha256sum ;;
+            *) continue ;;
+          esac
+          expected="${hash#*:}"
+          sudo cp --no-dereference --no-preserve=all -- "$cached" "$archives/$file"
+          actual_size="$(sudo stat --format=%s -- "$archives/$file")"
+          actual_hash="$(sudo "$tool" -- "$archives/$file" | cut -d' ' -f1)"
+          if [ "$actual_size" = "$size" ] && [ "${actual_hash,,}" = "${expected,,}" ]; then
+            reused=$((reused + 1))
+          else
+            sudo rm -f -- "$archives/$file"
+            rejected=$((rejected + 1))
+          fi
+        done < <(sudo apt-get -qq --print-uris --no-install-recommends --yes install "${packages[@]}")
+        echo "Reused $reused cached package archives; rejected $rejected that did not match the signed index."
+
+    - name: Download packages verified by the signed index
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -euo pipefail
         read -r -a packages <<< "$PACKAGES"
         sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=300 install --download-only --no-install-recommends --yes "${packages[@]}"
-        sudo find /var/lib/apt/lists -maxdepth 1 -type f ! -name lock -exec cp {} "$PACKAGE_DIR/lists/" \;
-        sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec cp {} "$PACKAGE_DIR/archives/" \;
-        sudo chown -R "$(id -u):$(id -g)" "$PACKAGE_DIR"
-        touch "$PACKAGE_DIR/.complete"
 
-    - name: Save downloaded packages
-      if: steps.restore.outputs.cache-hit != 'true'
+    - name: Stage downloaded archives for the cache
+      if: inputs.cache == 'true' && steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        PACKAGE_DIR: ${{ steps.key.outputs.dir }}
+      run: |
+        set -euo pipefail
+        rm -rf "$PACKAGE_DIR"
+        mkdir -p "$PACKAGE_DIR"
+        sudo find /var/cache/apt/archives -maxdepth 1 -type f -name '*.deb' -exec cp {} "$PACKAGE_DIR/" \;
+        sudo chown -R "$(id -u):$(id -g)" "$PACKAGE_DIR"
+
+    - name: Save downloaded package archives
+      if: inputs.cache == 'true' && steps.restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.key.outputs.dir }}
@@ -75,14 +128,7 @@ runs:
       shell: bash
       env:
         PACKAGES: ${{ inputs.packages }}
-        PACKAGE_DIR: ${{ steps.key.outputs.dir }}
       run: |
         set -euo pipefail
-        [ -f "$PACKAGE_DIR/.complete" ] || { echo "The package cache is incomplete." >&2; exit 1; }
-        sudo cp "$PACKAGE_DIR/apt/inertia-mirrors.txt" /etc/apt/inertia-mirrors.txt
-        sudo cp "$PACKAGE_DIR/apt/ubuntu.sources" /etc/apt/sources.list.d/ubuntu.sources
-        if [ -f /etc/apt/sources.list ]; then sudo sed -i -E '/^deb .*ubuntu(-ports)?\/? /s/^/# /' /etc/apt/sources.list; fi
-        sudo find "$PACKAGE_DIR/lists" -maxdepth 1 -type f -exec cp {} /var/lib/apt/lists/ \;
-        sudo find "$PACKAGE_DIR/archives" -maxdepth 1 -name '*.deb' -exec cp {} /var/cache/apt/archives/ \;
         read -r -a packages <<< "$PACKAGES"
         sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install --no-download --no-install-recommends --yes "${packages[@]}"

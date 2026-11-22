@@ -1,4 +1,7 @@
+import { join } from "node:path";
+
 import type {
+  AgentApprovalRequest,
   AgentInputRequest,
   ProviderInfo,
   RuntimeMutationEvent,
@@ -7,7 +10,11 @@ import type { ConversationAttachmentStore } from "../../node/conversation-attach
 import type { RuntimeStore } from "../database";
 import type { ProviderManager } from "../providers";
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
+import { createCadHosts } from "../cad/cad-hosts";
+import { environmentValue } from "../environment";
+import { CadService } from "../cad/cad-service";
 import { AgentThreadManager } from "./agent-thread-manager";
+import type { ManagedMessageQueue } from "./managed-send-modes";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
 import {
   ConversationCreationService,
@@ -23,6 +30,7 @@ import type {
 } from "./agent-browser-broker-client";
 import type { AgentContextWatcherPolicy } from "./agent-context-tool";
 import { AgentSecretService } from "./agent-secrets/agent-secret-service";
+import { CadHostTools } from "./cad-host-tools";
 import type { RuntimeBackendCredentialBroker } from "../runtime-types";
 
 interface AgentThreadRuntimeDependencies {
@@ -36,6 +44,9 @@ interface AgentThreadRuntimeDependencies {
   turns: TurnController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   pendingInputs: Map<string, AgentInputRequest>;
+  pendingApprovals: ReadonlyMap<string, AgentApprovalRequest>;
+  /** The queue runtime, which starts after the manager. */
+  messageQueue(): ManagedMessageQueue | undefined;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   agentBrowser?: RuntimeAgentBrowserBroker;
   watcherPolicy?: AgentContextWatcherPolicy;
@@ -76,6 +87,18 @@ export function createAgentThreadRuntime(
   });
   secrets.start();
   void secrets.restore();
+  const cadDirectory = join(dependencies.dataDirectory, "cad");
+  // AutoCAD and SketchUp desktop run only on Windows and macOS; elsewhere the pack is never offered.
+  const cadTools = process.platform === "win32" || process.platform === "darwin"
+    ? new CadHostTools(new CadService({
+      hosts: createCadHosts(cadDirectory),
+      stateDirectory: cadDirectory,
+      exports: {
+        programFiles: environmentValue(process.env, "ProgramFiles"),
+        systemRoot: environmentValue(process.env, "SystemRoot"),
+      },
+    }))
+    : undefined;
   return {
     creation,
     contextRequests,
@@ -85,6 +108,7 @@ export function createAgentThreadRuntime(
       contextRequests,
       creation,
       agentSecrets: secrets,
+      ...(cadTools ? { cadTools } : {}),
     }),
   };
 }

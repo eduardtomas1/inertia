@@ -186,7 +186,7 @@ describe("Git runner locale", () => {
       GIT_CONFIG_VALUE_0: "Authorization: secret",
       GITHUB_TOKEN: "github-secret",
       OPENAI_API_KEY: "provider-secret",
-    });
+    }, {}, "linux");
 
     expect(environment).toEqual({
       PATH: "/usr/bin:/bin",
@@ -637,7 +637,7 @@ process.stdin.on("data", (chunk) => {
       LANG: "es_ES.UTF-8",
       LC_ALL: "es_ES.UTF-8",
     };
-    expect(gitProcessEnvironment(inherited)).toEqual({
+    expect(gitProcessEnvironment(inherited, {}, "linux")).toEqual({
       PATH: "/usr/bin:/bin",
       HOME: "/tmp/home",
       DBUS_SESSION_BUS_ADDRESS: "unix:path=/tmp/dbus",
@@ -665,6 +665,26 @@ process.stdin.on("data", (chunk) => {
       GIT_INDEX_FILE: "/tmp/checkpoint.index",
       GIT_WORK_TREE: "/tmp/checkpoint-worktree",
     });
+  });
+
+  it("forbids Windows workspace name resolution in Git and project-action children", () => {
+    const environment = gitProcessEnvironment({
+      Path: "C:\\Program Files\\Git\\cmd",
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      nodefaultcurrentdirectoryinexepath: "",
+    }, { NoDefaultCurrentDirectoryInExePath: "" }, "win32");
+
+    expect(environment).toEqual({
+      Path: "C:\\Program Files\\Git\\cmd",
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_ASKPASS: "",
+      LANG: "C",
+      LC_ALL: "C",
+      NoDefaultCurrentDirectoryInExePath: "1",
+    });
+    expect(gitProcessEnvironment({ PATH: "/usr/bin" }, {}, "darwin"))
+      .not.toHaveProperty("NoDefaultCurrentDirectoryInExePath");
   });
 
   it("classifies Git failures in a stable C locale", async () => {

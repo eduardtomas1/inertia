@@ -1,6 +1,6 @@
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
 import {
-  sanitizeProviderActivityDetail,
+  sanitizeProviderFailureDetail,
   sanitizeProviderFailureSummary,
 } from "./activity-detail";
 import type {
@@ -218,6 +218,7 @@ export function antigravityFailure(
   detail: string,
   workspaceRoot: string,
   message?: string,
+  launchCredentials: readonly string[] = [],
 ): ProviderRunFailure {
   const reason: ProviderRunFailure["reason"] = kind === "malformed"
     ? "malformed-protocol"
@@ -226,15 +227,15 @@ export function antigravityFailure(
       : kind === "signal"
         ? "process-signal"
         : "provider-error";
-  const summary = message ?? (
-    kind === "error" || kind === "unsupported"
-      ? sanitizeProviderFailureSummary(detail, "Antigravity reported an error.", { workspaceRoot })
-      : FAILURE_MESSAGES[kind]
-  );
-  const technicalDetail = sanitizeProviderActivityDetail(detail, {
+  const technicalDetail = sanitizeProviderFailureDetail(detail, launchCredentials, {
     workspaceRoot,
     maxChars: MAX_TECHNICAL_DETAIL_CHARS,
   }) ?? undefined;
+  const summary = message ?? (
+    kind === "error" || kind === "unsupported"
+      ? sanitizeProviderFailureSummary(technicalDetail, "Antigravity reported an error.", { workspaceRoot })
+      : FAILURE_MESSAGES[kind]
+  );
   return {
     reason,
     message: summary,
@@ -247,6 +248,7 @@ export function antigravityFailure(
 export function antigravityResultFailure(
   result: AntigravityResult,
   workspaceRoot: string,
+  launchCredentials: readonly string[] = [],
 ): ProviderRunFailure | null {
   const detail = result.error ?? "";
   switch (result.status) {
@@ -257,12 +259,14 @@ export function antigravityResultFailure(
         antigravityAuthRequired(detail) ? "auth" : "error",
         detail,
         workspaceRoot,
+        undefined,
+        launchCredentials,
       );
     case "WAITING":
-      return antigravityFailure("waiting", detail, workspaceRoot);
+      return antigravityFailure("waiting", detail, workspaceRoot, undefined, launchCredentials);
     case "INVALID":
-      return antigravityFailure("invalid", detail, workspaceRoot);
+      return antigravityFailure("invalid", detail, workspaceRoot, undefined, launchCredentials);
     default:
-      return antigravityFailure("stopped", detail || result.status, workspaceRoot);
+      return antigravityFailure("stopped", detail || result.status, workspaceRoot, undefined, launchCredentials);
   }
 }

@@ -22,8 +22,6 @@ import type { AgentConversationContextRequest } from "../conversation-context";
 
 export {
   AGENT_TURN_STATUSES,
-  agentTurnAssociationSchema,
-  agentTurnStatusSchema,
   canTransitionAgentTurnStatus,
   isAgentTurnTerminalStatus,
   type AgentTurnAssociation,
@@ -248,6 +246,8 @@ export interface ChatMessage {
   /** A visual reply the agent published in this turn; system role, always turn-scoped. */
   htmlRender?: import("../html-render").HtmlRenderReference;
   secretRequest?: import("../agent-secrets").SecretRequestReference;
+  /** Markdown the agent showed the user mid-turn with `inertia_send_to_user`; system role, always turn-scoped, never the final reply. */
+  sentToUser?: true;
   customAgentCall?: import("../custom-agents").CustomAgentCallAttribution;
   id: string;
   conversationId: string;
@@ -424,6 +424,11 @@ export interface AgentInputRequest {
   turnId: string;
   questions: AgentInputQuestion[];
   autoResolutionMs: number | null;
+  /**
+   * Answering grants the provider a permission rather than information, as a
+   * Kimi plan approval does. Only the user may answer such a request.
+   */
+  grantsPermission?: true;
   /** Host-owned chooser; mutually exclusive with provider-authored questions. */
   conversationContextRequest?: AgentConversationContextRequest;
 }

@@ -267,6 +267,12 @@ function domainsForKnownPath(path) {
     return { domains: new Set(PROVIDER_DOMAINS), full: true };
   }
 
+  // The CAD host tools: agent-facing tools that run the AutoCAD bridge as a
+  // bounded child process and talk to SketchUp over loopback.
+  if (path.startsWith("src/server/cad/") || path === "scripts/sync-cad-host-sources.mjs") {
+    return { domains: new Set(["agent_management", "process_containment"]) };
+  }
+
   if (
     path.startsWith("src/server/conversation")
     || path.startsWith("src/server/agent")

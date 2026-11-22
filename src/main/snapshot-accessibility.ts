@@ -33,7 +33,6 @@ export async function readSnapshotAccessibility(root: SnapshotElement, shouldCon
       throw new SnapshotGeometryError("A field could not be located safely.");
     }
     const role = element.role.slice(0, 80);
-    // UIA does not expose IsPassword through xa11y's public snapshot API.
     // Mask all editable controls on every platform, including their descendants.
     const protectedField = /text_field|text_area|password|secure|entry|editable/iu.test(role)
       || /password|secure/iu.test(String(element.raw.ax_subrole ?? element.raw.atspi_role ?? ""))

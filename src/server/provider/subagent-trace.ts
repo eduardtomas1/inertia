@@ -46,6 +46,8 @@ const SECRET_PATTERNS: readonly (readonly [RegExp, string])[] = [
   [/\b(?:sk|rk|pk|api|key|token)[-_][A-Za-z0-9_-]{12,}\b/giu, "[redacted]"],
   [/\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})\b/gu, "[redacted]"],
   [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/gu, "[redacted]"],
+  [/\bAIza[0-9A-Za-z_-]{30,}/gu, "[redacted]"],
+  [/\b(?:xai-|gsk_)[A-Za-z0-9]{20,}/gu, "[redacted]"],
   [/\bxox[abeoprs]-[A-Za-z0-9-]{10,255}/gu, "[redacted]"],
   [/\b(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|API_KEY|ACCESS_TOKEN|AUTH_TOKEN|aws_secret_access_key|aws_session_token)\s*[:=]\s*[^\s,;]+/giu, "[redacted]"],
   [/("(?:[A-Za-z0-9_-]{0,40}[_-])?(?:api[_-]?key|token|secret|password|passwd)"\s{0,8}:\s{0,8})"[^"\n]{0,4096}"/giu, "$1\"[redacted]\""],

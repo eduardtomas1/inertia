@@ -210,6 +210,7 @@ export interface MessageRow {
   compaction_json?: string | null;
   html_render_json?: string | null;
   secret_request_json?: string | null;
+  sent_to_user?: number | null;
   id: string;
   conversation_id: string;
   turn_id: string | null;

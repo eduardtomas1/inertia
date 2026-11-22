@@ -8,7 +8,7 @@ import {
   solveLightness,
 } from "./color-palette.ts";
 
-export const PALETTE_FAMILIES = ["inertia", "grove", "ocean", "ember", "iris"] as const;
+export const PALETTE_FAMILIES = ["inertia", "grove", "ocean", "ember", "iris", "graphite", "blossom", "lagoon", "saffron"] as const;
 export type PaletteFamily = typeof PALETTE_FAMILIES[number];
 export type PaletteAppearance = "light" | "dark";
 interface FamilySpec {
@@ -18,10 +18,28 @@ interface FamilySpec {
   auroraHues: readonly number[];
   chromaScale?: number;
   mute?: number;
-  seed?: { l: number; c: number };
+  seed?: AccentSeed | Partial<Record<PaletteAppearance, AccentSeed>>;
 }
 
+interface AccentSeed { l: number; c: number }
+
 interface AccentRoles { accent: string; accentHover: string; accentStrong: string; accentText: string }
+
+interface AccentFillSpec { textL: number; textChroma: number; chroma: number; target: number; hoverShift: number }
+
+interface AccentFillRoles { fill: string; fillHover: string; fillText: string }
+
+function solvedAccentFill(fill: AccentFillSpec, hue: number, chromaCap: number, text: string): AccentFillRoles {
+  const build = (l: number) => oklchToHex({ l, c: maxChromaAt(l, hue, chromaCap), h: hue });
+  let low = 0.2;
+  let high = 0.8;
+  for (let step = 0; step < 24; step += 1) {
+    const mid = (low + high) / 2;
+    if (contrastRatio(text, build(mid)) >= fill.target) low = mid;
+    else high = mid;
+  }
+  return { fill: build(low), fillHover: build(low - fill.hoverShift), fillText: text };
+}
 
 function seededAccents(
   seed: { l: number; c: number },
@@ -83,6 +101,7 @@ export const ARCHITECTURE = {
     },
     direction: "darker" as const,
     textL: 0.250,
+    textChromaCap: 0.032,
     textTarget: 7.0,
     mutedTarget: 4.6,
     statusTarget: 4.6,
@@ -96,6 +115,7 @@ export const ARCHITECTURE = {
     accentSoftChroma: 0.038,
     accentTextL: 0.995,
     accentTextChroma: 0.004,
+    accentFill: null as AccentFillSpec | null,
     softTintL: 0.910,
     softTintChroma: 0.030,
     terminalBgL: 0.992,
@@ -104,7 +124,6 @@ export const ARCHITECTURE = {
     terminalSelectionChroma: 0.042,
     syntaxChroma: 0.115,
     syntaxNeutralChroma: 0.012,
-    activeRestL: 0.500,
     activeHighlightL: 0.300,
     activeChromaScale: 0.55,
     ultraSweepL: 0.560,
@@ -114,37 +133,38 @@ export const ARCHITECTURE = {
   },
   dark: {
     ladder: {
-      "app-bg": 0.118,
-      "sidebar-bg": 0.149,
-      surface: 0.180,
+      "app-bg": 0.185,
+      "sidebar-bg": 0.237,
+      surface: 0.159,
       "surface-strong": 0.211,
-      "surface-muted": 0.242,
-      "surface-hover": 0.273,
+      "surface-muted": 0.263,
+      "surface-hover": 0.295,
     },
     direction: "lighter" as const,
     textL: 0.950,
+    textChromaCap: 0.014,
     textTarget: 7.0,
     mutedTarget: 4.6,
     statusTarget: 4.6,
     statusStartL: 0.745,
     statusChroma: 0.110,
-    accentL: 0.750,
-    accentChroma: 0.140,
-    accentHoverL: 0.800,
+    accentL: 0.710,
+    accentChroma: 0.170,
+    accentHoverL: 0.760,
     accentStrongL: 0.830,
-    accentSoftL: 0.255,
-    accentSoftChroma: 0.040,
+    accentSoftL: 0.300,
+    accentSoftChroma: 0.050,
     accentTextL: 0.145,
     accentTextChroma: 0.020,
-    softTintL: 0.245,
-    softTintChroma: 0.034,
+    accentFill: { textL: 0.985, textChroma: 0.008, chroma: 0.200, target: 4.6, hoverShift: 0.040 } as AccentFillSpec | null,
+    softTintL: 0.290,
+    softTintChroma: 0.040,
     terminalBgL: 0.132,
     terminalFgL: 0.920,
     terminalSelectionL: 0.400,
     terminalSelectionChroma: 0.064,
     syntaxChroma: 0.110,
     syntaxNeutralChroma: 0.014,
-    activeRestL: 0.620,
     activeHighlightL: 0.930,
     activeChromaScale: 0.55,
     ultraSweepL: 0.800,
@@ -160,6 +180,10 @@ export const FAMILY_SPECS = {
   ocean: { neutralHue: 232, accentHue: 235, neutralTint: 3.2, auroraHues: [235, 266, 198] },
   ember: { neutralHue: 44, accentHue: 32, neutralTint: 3.2, auroraHues: [32, 58, 356] },
   iris: { neutralHue: 294, accentHue: 292, neutralTint: 3.2, auroraHues: [292, 262, 332] },
+  graphite: { neutralHue: 250, accentHue: 263, neutralTint: 0.7, auroraHues: [263, 236, 292] },
+  blossom: { neutralHue: 320, accentHue: 356, neutralTint: 3.0, auroraHues: [356, 322, 28], seed: { light: { l: 0.54, c: 0.2 } } },
+  lagoon: { neutralHue: 200, accentHue: 192, neutralTint: 2.8, auroraHues: [192, 162, 226], seed: { light: { l: 0.5, c: 0.1 } } },
+  saffron: { neutralHue: 80, accentHue: 80, neutralTint: 2.4, auroraHues: [80, 50, 24], seed: { light: { l: 0.58, c: 0.13 } } },
 };
 
 export const BASE_NEUTRAL_CHROMA = { light: 0.004, dark: 0.005 };
@@ -196,14 +220,14 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     ? surfaces["surface-hover"]
     : surfaces["surface-hover"];
 
-  const text = neutral(arch.textL, neutralChroma * 2.5);
+  const text = neutral(arch.textL, Math.min(neutralChroma * 2.5, arch.textChromaCap));
   const textMuted = solveLightness({
     hue,
     chromaCap: arch.syntaxNeutralChroma,
     backgrounds: [worstSurface],
     target: arch.mutedTarget,
     direction: arch.direction,
-    startL: appearance === "light" ? 0.50 : 0.70,
+    startL: appearance === "light" ? 0.50 : 0.72,
   });
 
   const status = (statusHue: number, chromaCap = arch.statusChroma) => solveLightness({
@@ -240,8 +264,9 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     h: spec.accentHue,
   });
   const opposite = ARCHITECTURE[appearance === "light" ? "dark" : "light"];
-  const accents: AccentRoles = spec.seed
-    ? seededAccents({ l: spec.seed.l, c: spec.seed.c * mute }, spec.accentHue, appearance,
+  const seed = spec.seed && ("l" in spec.seed ? spec.seed : spec.seed[appearance]);
+  const accents: AccentRoles = seed
+    ? seededAccents({ l: seed.l, c: seed.c * mute }, spec.accentHue, appearance,
       [surfaces["app-bg"], surfaces["sidebar-bg"], surfaces.surface, surfaces["surface-strong"], terminalBg],
       [accentTextCandidate, oklchToHex({
         l: opposite.accentTextL,
@@ -249,6 +274,13 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
         h: spec.accentHue,
       })])
     : { accent, accentHover, accentStrong, accentText };
+  const fills: AccentFillRoles = arch.accentFill
+    ? solvedAccentFill(arch.accentFill, spec.accentHue, seed ? seed.c * mute : arch.accentFill.chroma * tint, oklchToHex({
+      l: arch.accentFill.textL,
+      c: muted(arch.accentFill.textL, arch.accentFill.textChroma * chromaScale, spec.accentHue),
+      h: spec.accentHue,
+    }))
+    : { fill: accents.accent, fillHover: accents.accentHover, fillText: accents.accentText };
 
   const raised = appearance === "light" ? "#ffffff" : surfaces["surface-muted"];
   const codeBackgrounds = [surfaces.surface, surfaces["surface-strong"], raised]
@@ -262,14 +294,6 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     startL: arch.statusStartL,
   }).hex;
 
-  const activeRest = solveLightness({
-    hue: spec.accentHue,
-    chromaCap: arch.statusChroma * arch.activeChromaScale * tint,
-    backgrounds: surfaceList,
-    target: arch.statusTarget,
-    direction: arch.direction,
-    startL: arch.activeRestL,
-  }).hex;
   const activeHighlight = solveLightness({
     hue: spec.accentHue,
     chromaCap: arch.statusChroma * arch.activeChromaScale * tint,
@@ -297,14 +321,16 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     })],
     ["accent-text", accents.accentText],
     ["accent-strong", accents.accentStrong],
+    ["accent-fill", fills.fill],
+    ["accent-fill-hover", fills.fillHover],
+    ["accent-fill-text", fills.fillText],
     ["terminal-bg", terminalBg],
-    ["terminal-fg", neutral(arch.terminalFgL, neutralChroma * 2)],
+    ["terminal-fg", neutral(arch.terminalFgL, Math.min(neutralChroma * 2, arch.textChromaCap))],
     ["terminal-selection", oklchToHex({
       l: arch.terminalSelectionL,
       c: muted(arch.terminalSelectionL, arch.terminalSelectionChroma * chromaScale, spec.accentHue),
       h: spec.accentHue,
     })],
-    ["active-work-text-rest", activeRest],
     ["active-work-text-highlight", activeHighlight],
     ["syntax-keyword", syntaxOn(spec.accentHue, arch.syntaxChroma * 1.25 * tint)],
     ["syntax-string", syntaxOn(SEMANTIC_HUES.success)],

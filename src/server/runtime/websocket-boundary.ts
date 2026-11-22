@@ -1,4 +1,4 @@
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
 
 import WebSocket, { WebSocketServer } from "ws";
 
@@ -31,6 +31,37 @@ export const RUNTIME_WEBSOCKET_LIMITS = {
   maxClients: 16,
   maxInFlightCommands: 32,
 } as const;
+
+export const RUNTIME_HTTP_SERVER_LIMITS = {
+  maxConnections: RUNTIME_WEBSOCKET_LIMITS.maxClients * 4,
+  connectionsCheckingIntervalMs: 1_000,
+  headersTimeoutMs: 5_000,
+  requestTimeoutMs: 10_000,
+  keepAliveTimeoutMs: 1_000,
+  maxHeadersCount: 32,
+} as const;
+
+export type RuntimeHttpServerLimits = { readonly [Key in keyof typeof RUNTIME_HTTP_SERVER_LIMITS]: number };
+
+export function createRuntimeHttpServer(limits: RuntimeHttpServerLimits = RUNTIME_HTTP_SERVER_LIMITS): Server {
+  const server = createServer({
+    connectionsCheckingInterval: limits.connectionsCheckingIntervalMs,
+  }, (_request, response) => {
+    response.writeHead(404, {
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src 'none'",
+      "Content-Type": "text/plain; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+    });
+    response.end("Not found");
+  });
+  server.maxConnections = limits.maxConnections;
+  server.headersTimeout = limits.headersTimeoutMs;
+  server.requestTimeout = limits.requestTimeoutMs;
+  server.keepAliveTimeout = limits.keepAliveTimeoutMs;
+  server.maxHeadersCount = limits.maxHeadersCount;
+  return server;
+}
 
 export interface RuntimeWebSocketBoundaryOptions {
   server: Server;
@@ -83,6 +114,10 @@ export function attachRuntimeWebSocketBoundary(
   const detachedSockets = new Map<string, WebSocket>();
 
   options.server.on("upgrade", (request, socket, head) => {
+    const destroyUpgradeSocket = (): void => {
+      socket.destroy();
+    };
+    socket.on("error", destroyUpgradeSocket);
     if (!isAllowedRuntimeOrigin(request.headers.origin)) {
       return rejectRuntimeUpgrade(socket, 403);
     }
@@ -119,6 +154,7 @@ export function attachRuntimeWebSocketBoundary(
       socket,
       head,
       (webSocket) => {
+        socket.off("error", destroyUpgradeSocket);
         admissions.set(webSocket, { authority, resumeRequest });
         if (authority.kind === "detached-chat") {
           const previous = detachedSockets.get(authority.clientId);

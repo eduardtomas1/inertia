@@ -63,6 +63,7 @@ export function createAgentWorkflowCommandHandler(
     "agent.goal.clear",
     "agent.skills.list",
     "agent.skills.preview",
+    "agent.commands.list",
   ], async (socket, command) => {
     switch (command.type) {
       case "agent.workflow.load": {
@@ -142,6 +143,15 @@ export function createAgentWorkflowCommandHandler(
             conversationId: command.payload.draftConversationId,
             ...preview,
           },
+        });
+        return "handled";
+      }
+      case "agent.commands.list": {
+        const listing = await dependencies.workflows.listProviderCommands(command.payload);
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: { kind: "agent.commands", ...listing },
         });
         return "handled";
       }

@@ -118,7 +118,7 @@ async function main() {
   await check("product SDK manifests are exact and match the locked install", async () => {
     const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
     for (const name of productSdks) {
-      const requested = packageJson.dependencies?.[name];
+      const requested = packageJson.dependencies?.[name] ?? packageJson.devDependencies?.[name];
       const installed = await packageVersion(repositoryRoot, name);
       report.productPackages[name] = installed;
       if (!isExactVersion(requested)) {

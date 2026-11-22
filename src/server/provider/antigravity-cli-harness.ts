@@ -10,6 +10,8 @@ import {
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import { providerUnconfirmedCleanup } from "./provider-unconfirmed-cleanup";
+import { AcpSecretRedactor, acpEnvironmentSecretValues } from "./acp-redaction";
+import { credentialEncodings, redactExactCredentials, sanitizeProviderFailureDetail } from "./activity-detail";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -28,6 +30,7 @@ import {
   antigravitySessionId,
   antigravityUserLine,
   parseAntigravityLine,
+  type AntigravityFailureKind,
   type AntigravityResult,
   type AntigravityStreamEvent,
 } from "./antigravity-stream";
@@ -133,13 +136,21 @@ function startAntigravityRun(
     input.cwd,
   );
   emitter.status("starting");
+  const launchSecrets = acpEnvironmentSecretValues(options.environment);
+  const launchEncodings = credentialEncodings(launchSecrets);
+  const secretRedactor = new AcpSecretRedactor(options.environment);
+  const failureFor = (
+    kind: AntigravityFailureKind,
+    detail: string,
+    message?: string,
+  ): ProviderRunFailure => antigravityFailure(kind, detail, input.cwd, message, launchSecrets);
   const unsupported = input.operation
     ? "Antigravity does not expose explicit context compaction."
     : (input.imagePaths?.length ?? 0) > 0
       ? "Image input is unavailable for Antigravity in Inertia."
       : null;
   if (unsupported) {
-    const failure = antigravityFailure("unsupported", "", input.cwd, unsupported);
+    const failure = failureFor("unsupported", "", unsupported);
     emitter.status("failed", failure.message);
     return settledRun(input, failure);
   }
@@ -169,11 +180,14 @@ function startAntigravityRun(
   let settleDeadline: NodeJS.Timeout | undefined;
   let stopLiveProcess = (_force: boolean): void => {};
 
-  const stderrDetail = (): string => stderr.toString()
-    .split(/\r?\n/u)
-    .filter((line) => line.trim().length > 0)
-    .slice(-MAX_STDERR_DETAIL_LINES)
-    .join("\n");
+  const stderrDetail = (): string => {
+    stderr.append(secretRedactor.finishStderr());
+    return stderr.toString()
+      .split(/\r?\n/u)
+      .filter((line) => line.trim().length > 0)
+      .slice(-MAX_STDERR_DETAIL_LINES)
+      .join("\n");
+  };
   const requestProcessTermination = (force: boolean): void => {
     if (!exit) stopLiveProcess(force);
   };
@@ -185,8 +199,8 @@ function startAntigravityRun(
     if (!conversationId || conversationId === sessionId) return true;
     if (sessionId) {
       fail({
-        ...antigravityFailure(
-          "malformed", "", input.cwd,
+        ...failureFor(
+          "malformed", "",
           "Antigravity returned an update for a different conversation.",
         ),
         ...(sessionId === antigravitySessionId(input.sessionId)
@@ -205,23 +219,31 @@ function startAntigravityRun(
       adoptSession(event.conversationId);
     } else if (event.kind === "text") {
       sawText = true;
-      resultText.append(event.text);
-      emitter.text(event.text);
+      const value = secretRedactor.assistantChunk(event.text);
+      if (value) {
+        resultText.append(value);
+        emitter.text(value);
+      }
     } else if (event.kind === "tool") {
       const finished = tools.get(event.id);
       if (finished === undefined && tools.size >= MAX_TRACKED_TOOLS) return;
       if (finished && event.phase !== "started") return;
       tools.set(event.id, event.phase !== "started");
-      emitter.activity("tool", event.phase, event.label, {
+      const detail = event.detail
+        ? sanitizeProviderFailureDetail(event.detail, launchSecrets, { workspaceRoot: input.cwd })
+        : null;
+      emitter.activity("tool", event.phase, secretRedactor.payload(event.label), {
         activityId: `antigravity:${input.runId}:${event.id}`,
-        ...(event.detail ? { detail: event.detail } : {}),
+        ...(detail ? { detail } : {}),
         ...(antigravityFileMutationTool(event.label) ? { fileMutation: true as const } : {}),
       });
     } else {
       if (!adoptSession(event.result.conversationId)) return;
       result = event.result;
-      const response = event.result.status === "SUCCESS" ? event.result.response : "";
+      const success = event.result.status === "SUCCESS";
+      const response = success ? secretRedactor.payload(event.result.response) : "";
       if (response && sawText && skippedFrame) {
+        secretRedactor.discardStreams();
         resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
         resultText.append(response);
         emitter.textSnapshot(`antigravity:${input.runId}:response`, response);
@@ -230,6 +252,14 @@ function startAntigravityRun(
         resultText.append(response);
         emitter.text(response);
         skippedFrame = false;
+      } else if (success) {
+        const tail = secretRedactor.finishAssistant();
+        if (tail) {
+          resultText.append(tail);
+          emitter.text(tail);
+        }
+      } else {
+        secretRedactor.discardStreams();
       }
       if (event.result.usage) emitter.rich({ type: "usage", usage: event.result.usage });
       resultTimer = setTimeout(
@@ -251,7 +281,7 @@ function startAntigravityRun(
       eventBudget.observeBytes(byteLength);
       return true;
     } catch (error) {
-      fail(antigravityFailure("malformed", "", input.cwd, error instanceof Error ? error.message : undefined));
+      fail(failureFor("malformed", "", error instanceof Error ? error.message : undefined));
       return false;
     }
   };
@@ -261,7 +291,7 @@ function startAntigravityRun(
       if (!admit(Buffer.byteLength(line, "utf8"))) return;
       const events = parseAntigravityLine(line);
       if (!events) {
-        fail(antigravityFailure("malformed", line.slice(0, 2_000), input.cwd));
+        fail(failureFor("malformed", redactExactCredentials(line, launchEncodings).slice(0, 2_000)));
         return;
       }
       for (const event of events) {
@@ -278,12 +308,12 @@ function startAntigravityRun(
   );
   const onStderr = (chunk: Buffer): void => {
     const text = chunk.toString("utf8");
-    stderr.append(text);
+    stderr.append(secretRedactor.stderrChunk(text));
     const lines = `${stderrTail}${text}`.split(/\r?\n/u);
     stderrTail = (lines.pop() ?? "").slice(-MAX_STDERR_TAIL_CHARS);
     for (const line of [...lines, stderrTail]) {
       if (antigravityAuthRequired(line)) {
-        fail(antigravityFailure("auth", line, input.cwd));
+        fail(failureFor("auth", line));
         return;
       }
     }
@@ -312,10 +342,9 @@ function startAntigravityRun(
       stdio: ["pipe", "pipe", "pipe"],
     }));
   } catch (error) {
-    const startFailure = antigravityFailure(
+    const startFailure = failureFor(
       "exit",
       error instanceof Error ? error.message : "",
-      input.cwd,
       "Antigravity could not be started.",
     );
     emitter.status("failed", startFailure.message);
@@ -331,10 +360,9 @@ function startAntigravityRun(
     "Antigravity CLI process tree",
     harnessOptions.terminateProcessTree,
   );
-  const cleanupUnconfirmed = (): ProviderRunFailure => antigravityFailure(
+  const cleanupUnconfirmed = (): ProviderRunFailure => failureFor(
     "exit",
     stderrDetail(),
-    input.cwd,
     "Antigravity's process tree could not be confirmed stopped.",
   );
   const settle = (
@@ -363,10 +391,9 @@ function startAntigravityRun(
   const exitedWithoutResult = (): ProviderRunFailure => {
     const signal = exit?.signal ?? child.signalCode;
     const code = exit?.code ?? child.exitCode;
-    return antigravityFailure(
+    return failureFor(
       signal ? "signal" : "exit",
       stderrDetail(),
-      input.cwd,
       `Antigravity exited without a result (${signal ? `signal ${signal}` : `code ${code ?? "unknown"}`}).`,
     );
   };
@@ -376,16 +403,15 @@ function startAntigravityRun(
     } else if (failure) {
       settle("failed", cleanupConfirmed, failure);
     } else if (result) {
-      const resultFailure = antigravityResultFailure(result, input.cwd);
+      const resultFailure = antigravityResultFailure(result, input.cwd, launchSecrets);
       if (resultFailure) settle("failed", cleanupConfirmed, resultFailure);
       else settle("completed", cleanupConfirmed);
     } else if (!cleanupConfirmed) {
       settle("failed", false, cleanupUnconfirmed());
     } else if (spawnError && child.pid === undefined) {
-      settle("failed", true, antigravityFailure(
+      settle("failed", true, failureFor(
         "exit",
         spawnError.message,
-        input.cwd,
         "Antigravity could not be started.",
       ));
     } else {
@@ -417,10 +443,9 @@ function startAntigravityRun(
     if (!result && !exit && !cancelRequested) {
       closedOutputTimer = setTimeout(() => {
         if (result || exit || cancelRequested) return;
-        fail(antigravityFailure(
+        fail(failureFor(
           "exit",
           stderrDetail(),
-          input.cwd,
           "Antigravity closed its output without a result.",
         ));
       }, outputDrainGraceMs);

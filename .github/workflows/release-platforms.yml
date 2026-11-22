@@ -92,6 +92,8 @@ jobs:
           node scripts/verify-database-lineage.mjs --base-ref "refs/tags/$previous_tag"
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
+        with:
+          cache: "false"
       - name: Verify shared release quality once
         run: npm run check:quality
 
@@ -212,6 +214,7 @@ jobs:
         uses: ./.github/actions/install-linux-packages
         with:
           packages: binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+          cache: "false"
 
       - name: Install locked dependencies
         run: npm ci
@@ -243,11 +246,11 @@ jobs:
 
       - name: Audit production dependencies
         if: runner.os == 'Linux'
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=moderate
 
       - name: Audit all dependencies, including the shipped Electron runtime
         if: runner.os == 'Linux'
-        run: npm audit --audit-level=high
+        run: npm run check:dependency-audit
 
       # Package and every subsequent smoke consume this exact bundle. The
       # package commands below deliberately do not rebuild it.
@@ -608,14 +611,14 @@ jobs:
             arch: x64
             evidence: macos-x64-1-of-2
             unit_command: "npm test -- --maxWorkers=2 --shard=1/2"
-            timeout_minutes: 40
+            timeout_minutes: 60
           - label: macOS x64 (2/2)
             runner: macos-15-intel
             platform: macos-x64
             arch: x64
             evidence: macos-x64-2-of-2
             unit_command: "npm test -- --maxWorkers=2 --shard=2/2"
-            timeout_minutes: 40
+            timeout_minutes: 60
           - label: macOS arm64
             runner: macos-15
             platform: macos-arm64
@@ -677,6 +680,7 @@ jobs:
         uses: ./.github/actions/install-linux-packages
         with:
           packages: binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+          cache: "false"
 
       - name: Install locked dependencies
         run: npm ci
@@ -871,6 +875,7 @@ jobs:
         uses: ./.github/actions/install-linux-packages
         with:
           packages: binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+          cache: "false"
 
       - name: Install locked dependencies
         run: npm ci

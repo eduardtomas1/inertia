@@ -1,3 +1,4 @@
+import "../node/windows-current-directory-search-bootstrap.js";
 import type { RuntimeOwnedProcessDiagnostic } from "../node/runtime-owned-process-diagnostic.js";
 import {
   parseRuntimeWorkerCommand,

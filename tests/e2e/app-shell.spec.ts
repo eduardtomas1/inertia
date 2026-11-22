@@ -283,14 +283,14 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     );
     await expect(disabledSend).toHaveAttribute("data-motion-state", "send");
     await expect(disabledSend).toHaveAttribute("aria-disabled", "true");
-    const accentFill = await composer.evaluate((element) => {
+    const crownPaint = async (token: string): Promise<string> => await composer.evaluate((element, name) => {
       const probe = document.createElement("span");
-      probe.style.backgroundColor = "var(--accent)";
+      probe.style.backgroundColor = `var(${name})`;
       element.append(probe);
       const color = getComputedStyle(probe).backgroundColor;
       probe.remove();
       return color;
-    });
+    }, token);
     const disabledStyle = await disabledSend.evaluate((button) => {
       const style = getComputedStyle(button);
       return {
@@ -298,12 +298,14 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
         boxShadow: style.boxShadow,
         filter: style.filter,
         opacity: style.opacity,
+        fieldOpacity: getComputedStyle(button, "::before").opacity,
       };
     });
-    expect(disabledStyle.background).toBe(accentFill);
-    expect(disabledStyle.boxShadow).toBe("none");
+    expect(disabledStyle.background).toBe(await crownPaint("--send-empty"));
+    expect(disabledStyle.boxShadow).toContain("inset");
     expect(disabledStyle.filter).toBe("none");
     expect(disabledStyle.opacity).toBe("1");
+    expect(disabledStyle.fieldOpacity).toBe("0");
 
     await textbox.fill("First line");
     await textbox.press("Shift+Enter");
@@ -323,16 +325,16 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
         height: bounds.height,
         borderRadius: style.borderRadius,
         background: style.backgroundColor,
-        boxShadow: style.boxShadow,
         filter: style.filter,
+        field: getComputedStyle(button, "::before").backgroundImage,
       };
     });
-    expect(readyGeometry.width).toBeCloseTo(readyGeometry.height, 3);
-    expect(readyGeometry.width).toBeGreaterThanOrEqual(28);
+    expect(readyGeometry.width).toBeCloseTo(32, 3);
+    expect(readyGeometry.height).toBeCloseTo(32, 3);
     expect(readyGeometry.borderRadius).toBe("50%");
     await expect(readySend).not.toHaveAttribute("aria-disabled", "true");
-    expect(readyGeometry.background).toBe(accentFill);
-    expect(readyGeometry.boxShadow).toBe("none");
+    expect(readyGeometry.background).toBe(await crownPaint("--send-core"));
+    expect(readyGeometry.field).toContain("conic-gradient");
     expect(readyGeometry.filter).toBe("none");
     await expect(textbox).toBeFocused();
     await capture("composer-send-ready-light-compact-1440x920");
@@ -437,15 +439,28 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
         color: style.color,
         background: style.backgroundColor,
         boxShadow: style.boxShadow,
+        field: getComputedStyle(button, "::before").display,
       };
+    });
+    const stopPaint = await runningComposer.evaluate((element) => {
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = "var(--send-stop)";
+      probe.style.color = "var(--send-stop-glyph)";
+      element.append(probe);
+      const style = getComputedStyle(probe);
+      const paint = { background: style.backgroundColor, color: style.color };
+      probe.remove();
+      return paint;
     });
     // Fractional layout coordinates can differ by floating-point roundoff.
     expect(stopGeometry.width).toBeCloseTo(darkSendGeometry.width, 3);
     expect(stopGeometry.height).toBeCloseTo(darkSendGeometry.height, 3);
     expect(stopGeometry.width).toBeCloseTo(stopGeometry.height, 3);
-    expect(stopGeometry.width).toBeGreaterThanOrEqual(36);
+    expect(stopGeometry.width).toBeCloseTo(32, 3);
     expect(stopGeometry.borderRadius).toBe("50%");
-    expect(stopGeometry.boxShadow).toBe("none");
+    expect([stopGeometry.background, stopGeometry.color]).toEqual([stopPaint.background, stopPaint.color]);
+    expect(stopGeometry.boxShadow).toContain("inset");
+    expect(stopGeometry.field).toBe("none");
     await expectNoViewportOverflow();
     await capture("composer-stop-dark-large-split-1180x720");
 

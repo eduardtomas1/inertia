@@ -28,7 +28,6 @@ import {
   inspectRegisteredWorktreeOwnership,
   inspectUnacknowledgedWorktreeCreation,
   parseWorktreeFilesystemReceipt,
-  removeWorktree,
   removeOwnedWorktree,
   serializeWorktreeFilesystemReceipt,
   type RegisteredWorktreeIdentity,
@@ -881,7 +880,7 @@ describe("launch-owned Git cleanup", () => {
     });
     const receipt = receipts[0];
     if (!receipt) throw new Error("The owned worktree receipt was not recorded.");
-    await removeWorktree(root, path, false);
+    git(root, "worktree", "remove", "--", path);
     const replacementBranch = "user/replacement";
     await createWorktree(root, path, {
       branch: replacementBranch,
@@ -993,7 +992,7 @@ describe("launch-owned Git cleanup", () => {
     expect(existsSync(join(adminDirectory(path), "inertia-duo-owner"))).toBe(false);
 
     git(root, "worktree", "move", path, movedPath);
-    await removeWorktree(root, movedPath, false);
+    git(root, "worktree", "remove", "--", movedPath);
     git(root, "branch", "-D", branch);
     git(root, "worktree", "prune");
 
@@ -1067,7 +1066,7 @@ describe("launch-owned Git cleanup", () => {
     const path = ownedPath(root, "reattached launch path");
     const branch = "inertia/reattached-owned";
     const ownership = await createOwnedWorktree(root, path, branch);
-    await removeWorktree(root, path, false);
+    git(root, "worktree", "remove", "--", path);
     git(root, "worktree", "add", "--", path, branch);
     expect(basename(git(
       path,
@@ -1257,7 +1256,7 @@ describe("launch-owned Git cleanup", () => {
     );
     const worktreesDirectory = dirname(adminDirectory(path));
     mkdirSync(join(worktreesDirectory, "slow-admin-keeper"));
-    await removeWorktree(root, path, true);
+    git(root, "worktree", "remove", "--force", "--", path);
     for (let index = 0; index < 5; index += 1) {
       mkdirSync(join(worktreesDirectory, `slow-admin-${index}`));
     }
@@ -1312,7 +1311,7 @@ describe("launch-owned Git cleanup", () => {
     );
     const worktreesDirectory = dirname(adminDirectory(path));
     writeFileSync(join(worktreesDirectory, "scan-keeper"), "", "utf8");
-    await removeWorktree(root, path, true);
+    git(root, "worktree", "remove", "--force", "--", path);
     let parentProbeCount = 0;
     let parentProbeSpawnCount = 0;
     let deadlineExpiredAt = 0;
@@ -1606,7 +1605,7 @@ describe("launch-owned Git cleanup", () => {
       path,
       branch,
     );
-    await removeWorktree(root, path, false);
+    git(root, "worktree", "remove", "--", path);
     git(root, "commit", "--allow-empty", "-q", "-m", "Move protected ref");
     const movedHead = git(root, "rev-parse", "HEAD");
     git(root, "branch", "-f", branch, movedHead);

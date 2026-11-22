@@ -25,7 +25,10 @@ function fixture(windows: unknown[], writeFails = false) {
   const current = {
     evaluate: async (operation: (electron: unknown, mode: unknown) => unknown, mode: unknown) =>
       operation({ app, BrowserWindow: { getAllWindows: () => windows },
-        webContents: { getAllWebContents: () => [{}, {}] } }, mode),
+        webContents: { getAllWebContents: () => [
+          { getType: () => "window", isDestroyed: () => true },
+          { getType: () => "backgroundPage", isDestroyed: () => false },
+        ] } }, mode),
   } as unknown as ElectronApplication;
   return { write, closeInspector, exit, exitFailure, finish, quit, current, app };
 }
@@ -70,7 +73,7 @@ it.each([false, true])("forwards prepared exit and sole-window destruction uncha
   expect(f.write.mock.calls).toEqual([
     [2, "[Inertia test exit: window-destroy-entered]\n"],
     [2, "[Inertia test exit: window-destroy-returned]\n"],
-    [2, "[Inertia test exit: exit-inventory windows=1 webContents=2 resources=FSReqCallback:1,Timeout:2]\n"],
+    [2, "[Inertia test exit: exit-inventory windows=1 webContents=2 webContentsTypes=window-destroyed,backgroundPage resources=FSReqCallback:1,Timeout:2]\n"],
     [2, "[Inertia test exit: process-exit-called]\n"],
   ]);
 });
@@ -106,7 +109,7 @@ it("reports an unavailable exit inventory without preventing the exit", async ()
   expect(f.exit).toHaveBeenCalledExactlyOnceWith(0);
   expect(f.write.mock.calls.map((call) => call[1])).toEqual([
     "[Inertia test exit: window-observer-unavailable]\n",
-    "[Inertia test exit: exit-inventory windows=unavailable webContents=unavailable resources=unavailable]\n",
+    "[Inertia test exit: exit-inventory windows=unavailable webContents=unavailable webContentsTypes=unavailable resources=unavailable]\n",
     "[Inertia test exit: process-exit-called]\n",
   ]);
 });
@@ -119,7 +122,40 @@ it("bounds the exit inventory to well-formed resource names", async () => {
   await finishElectronPreparedQuit(f.current);
   expect(() => process.exit(0)).toThrow(f.exitFailure);
   expect(f.write.mock.calls.map((call) => call[1])).toContain(
-    "[Inertia test exit: exit-inventory windows=0 webContents=2 resources=A:1,B:1,C:1,D:1,E:1,F:1]\n");
+    "[Inertia test exit: exit-inventory windows=0 webContents=2 webContentsTypes=window-destroyed,backgroundPage resources=A:1,B:1,C:1,D:1,E:1,F:1]\n");
+});
+
+it("bounds the exit inventory to well-formed web contents types", async () => {
+  const f = fixture([]);
+  const contents = (type: string) => ({ getType: () => type, isDestroyed: () => false });
+  const current = {
+    evaluate: async (operation: (electron: unknown, mode: unknown) => unknown, mode: unknown) =>
+      operation({ app: f.app, BrowserWindow: { getAllWindows: () => [] }, webContents: { getAllWebContents: () => [
+        contents("webview"), contents("/Users/secret"), contents("offscreen"), contents("remote"),
+        { getType: () => "window", isDestroyed: () => true },
+      ] } }, mode),
+  } as unknown as ElectronApplication;
+  await finishElectronPreparedQuit(current);
+  expect(() => process.exit(0)).toThrow(f.exitFailure);
+  expect(f.write.mock.calls.map((call) => call[1])).toContain(
+    "[Inertia test exit: exit-inventory windows=0 webContents=5 webContentsTypes=window-destroyed,offscreen,other,remote "
+    + "resources=FSReqCallback:1,Timeout:2]\n");
+});
+
+it("keeps the other web contents types when one cannot be read", async () => {
+  const f = fixture([]);
+  const current = {
+    evaluate: async (operation: (electron: unknown, mode: unknown) => unknown, mode: unknown) =>
+      operation({ app: f.app, BrowserWindow: { getAllWindows: () => [] }, webContents: { getAllWebContents: () => [
+        { getType: () => "window", isDestroyed: () => false },
+        { getType: () => { throw new Error("released"); }, isDestroyed: () => { throw new Error("released"); } },
+      ] } }, mode),
+  } as unknown as ElectronApplication;
+  await finishElectronPreparedQuit(current);
+  expect(() => process.exit(0)).toThrow(f.exitFailure);
+  expect(f.write.mock.calls.map((call) => call[1])).toContain(
+    "[Inertia test exit: exit-inventory windows=0 webContents=2 webContentsTypes=other-destroyed,window "
+    + "resources=FSReqCallback:1,Timeout:2]\n");
 });
 
 it("does not report a completed process exit if closing the inspector fails", async () => {
@@ -158,7 +194,8 @@ it("distinguishes synchronous quit listeners from a returning Electron exit call
   process.exit(0);
   expect(f.write.mock.calls.map((call) => call[1])).toEqual([
     "[Inertia test exit: window-identity-unavailable]\n",
-    "[Inertia test exit: exit-inventory windows=0 webContents=2 resources=FSReqCallback:1,Timeout:2]\n",
+    "[Inertia test exit: exit-inventory windows=0 webContents=2 webContentsTypes=window-destroyed,backgroundPage "
+    + "resources=FSReqCallback:1,Timeout:2]\n",
     "[Inertia test exit: process-exit-called]\n",
     "[Inertia test exit: app-quit-entered]\n",
     "existing listener",

@@ -115,13 +115,12 @@ describe("generated color palettes", () => {
     }
   });
 
-  it.each(cases)("previews the %s %s canvas and sidebar the stylesheet paints", (family, appearance) => {
+  it.each(cases)("previews the %s %s canvas the stylesheet paints", (family, appearance) => {
     const tokens = palette(family, appearance);
     const styles = repoFile("src/renderer/src/styles.css");
     expect(styles).toMatch(/\n  --bg: var\(--surface-strong\);/u);
     const preview = Object.fromEntries(buildSwatchTokens(family, appearance));
     expect(preview["theme-preview-canvas"]).toBe(tokens["surface-strong"]);
-    expect(preview["theme-preview-sidebar"]).toBe(tokens.surface);
   });
 
   it("maps every family onto the five painted neutrals without the unpainted ladder steps", () => {
@@ -133,6 +132,17 @@ describe("generated color palettes", () => {
     expect(styles).toMatch(/\n  --bg: var\(--surface-strong\);\n  --surface-raised: var\(--paper\);/u);
     expect(styles).toMatch(/:root\[data-theme="dark"\] \{[^}]*--surface-raised: var\(--surface-muted\);[^}]*--scrollbar-thumb:[^}]*--shadow-float-alpha: 0\.56;[^}]*--raised-edge:/u);
     expect(families).not.toMatch(/--(?:bg|surface-raised|fill|fill-strong|line|scrollbar-thumb|shadow-float-alpha|raised-edge):/u);
+  });
+
+  it.each(PALETTE_FAMILIES)("keeps the %s light accent fill on the light accent and solves a separate dark fill", (family) => {
+    const light = palette(family, "light");
+    expect([light["accent-fill"], light["accent-fill-hover"], light["accent-fill-text"]])
+      .toEqual([light.accent, light["accent-hover"], light["accent-text"]]);
+    const dark = palette(family, "dark");
+    expect(dark["accent-fill"]).not.toBe(dark.accent);
+    expect(oklchOf(dark["accent-fill-text"]!).l).toBeGreaterThan(0.95);
+    expect(repoFile("src/renderer/src/styles.css"))
+      .toMatch(/\n  --accent-fill: var\(--accent\);\n  --accent-fill-hover: var\(--accent-hover\);\n  --accent-fill-text: var\(--accent-text\);/u);
   });
 
   it("covers exactly the shipped color theme identities", () => {

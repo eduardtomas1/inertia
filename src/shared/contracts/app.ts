@@ -45,7 +45,7 @@ import type { WatcherLinkView } from "../watcher";
 export type { ProviderId } from "../provider";
 
 export type ThemePreference = "system" | "light" | "dark";
-export const COLOR_THEME_IDS = ["inertia", "grove", "ocean", "ember", "iris"] as const;
+export const COLOR_THEME_IDS = ["inertia", "grove", "ocean", "ember", "iris", "graphite", "blossom", "lagoon", "saffron"] as const;
 export type ColorThemeId = (typeof COLOR_THEME_IDS)[number];
 export type ProjectStatus = "ready" | "working" | "attention";
 export type MessageRole = "user" | "assistant" | "system";

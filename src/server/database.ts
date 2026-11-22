@@ -3,7 +3,7 @@ import type { AttemptObserver } from "./orchestration-v2/attempt-fence";
 import { OrchestratedTurnRepository } from "./orchestration-v2/turn-repository";
 import type { CommandSource } from "./orchestration-v2/types";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository"; import { WorkspaceToolReads } from "./persistence/workspace-tool-reads";
-import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository"; import { CodexThreadToolPackRepository } from "./persistence/codex-thread-tool-pack-repository"; import { IdleCompactionCandidateRepository } from "./persistence/idle-compaction-candidate-repository";
+import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { SentToUserRepository } from "./persistence/sent-to-user-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository"; import { CodexThreadToolPackRepository } from "./persistence/codex-thread-tool-pack-repository"; import { IdleCompactionCandidateRepository } from "./persistence/idle-compaction-candidate-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import { PROVIDER_STOP_NOTICE_TITLE } from "../shared/activity-display";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
@@ -148,6 +148,7 @@ export class RuntimeStore {
   readonly limitResets: LimitResetRepository;
   readonly queuedMessages: QueuedMessageRepository;
   readonly htmlRenders: HtmlRenderRepository;
+  readonly sentToUser: SentToUserRepository;
   readonly codexThreadToolPacks = new CodexThreadToolPackRepository(() => this.database); readonly idleCompactionCandidates = new IdleCompactionCandidateRepository(() => this.database);
   readonly watcherLinks: WatcherLinkRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
@@ -206,6 +207,7 @@ export class RuntimeStore {
     this.limitResets = new LimitResetRepository(this.database);
     this.queuedMessages = new QueuedMessageRepository(this.database);
     this.htmlRenders = new HtmlRenderRepository(this.database, this);
+    this.sentToUser = new SentToUserRepository(this.database, this);
     this.projectRepository = new ProjectRepository({
       database: this.database,
       requireProject: (projectId) => this.requireProject(projectId),

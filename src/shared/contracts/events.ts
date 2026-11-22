@@ -15,6 +15,7 @@ import type {
   AgentGoal,
   AgentWorkflowState,
   AgentSkillSummary,
+  ProviderSlashCommand,
 } from "./agent-workflows";
 import type {
   BackendProfileModelsResult,
@@ -303,6 +304,12 @@ export type ServerEvent =
             conversationId: string;
             skills: AgentSkillSummary[];
             skillDiscovery: AgentWorkflowState["skillDiscovery"];
+          }
+        | {
+            kind: "agent.commands";
+            conversationId: string;
+            providerId: import("../provider").ProviderId;
+            commands: ProviderSlashCommand[];
           }
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }

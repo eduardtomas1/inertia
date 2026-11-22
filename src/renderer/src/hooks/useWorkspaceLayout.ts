@@ -418,7 +418,6 @@ export function useWorkspaceLayout(
     } as CSSProperties,
     workspaceBodyStyle: {
       "--workspace-tools-width": `${effectiveToolsWidth}px`,
-      "--workspace-tools-height": `${effectiveToolsHeight}px`,
     } as CSSProperties,
     sidebar: {
       value: effectiveSidebarWidth,

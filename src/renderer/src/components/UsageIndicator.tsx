@@ -255,12 +255,17 @@ export function UsageIndicator({
     return remaining !== null && (lowest === null || remaining < lowest) ? remaining : lowest;
   }, null);
 
-  const closePopover = useCallback((restoreFocus: boolean): void => {
+  const closePopover = useCallback((restoreFocus: boolean, unlessFocusMoved = false): void => {
     setOpen(false);
     if (restoreFocus && typeof window !== "undefined") {
-      window.requestAnimationFrame(() => triggerRef.current?.focus());
+      window.requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if (unlessFocusMoved && active && active !== document.body
+          && !document.getElementById(detailsId)?.contains(active)) return;
+        triggerRef.current?.focus();
+      });
     }
-  }, []);
+  }, [detailsId]);
 
   useEffect(() => {
     setOpen(false);
@@ -292,7 +297,7 @@ export function UsageIndicator({
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
-      closePopover(true);
+      closePopover(true, true);
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown, true);

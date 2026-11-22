@@ -26,8 +26,8 @@ export const PROJECT_COLOR_EMPHASIS_LABELS: Readonly<Record<ProjectColorEmphasis
 };
 
 export const PROJECT_COLOR_BACKDROPS: Readonly<Record<ProjectColorAppearance, readonly string[]>> = {
-  light: ["#d6d6d9", "#d0d9d2", "#ced8dd", "#ded4cf", "#d6d5de"],
-  dark: ["#27272a", "#222a23", "#1f292e", "#2e2521", "#27262e"],
+  light: ["#d6d6d9", "#d0d9d2", "#ced8dd", "#ded4cf", "#d6d5de", "#d5d6d8", "#dad4db", "#ced8d9", "#d9d6cf"],
+  dark: ["#2c2c2f", "#272f29", "#252e33", "#342a26", "#2d2b34", "#2b2d2e", "#302a31", "#252f2f", "#302c26"],
 };
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/u;

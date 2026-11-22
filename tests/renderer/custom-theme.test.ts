@@ -36,9 +36,9 @@ describe("custom appearance palettes", () => {
   it("keeps the preset palettes byte-identical and pins the vivid custom palettes", () => {
     const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
     expect(digest(PALETTE_FAMILIES.flatMap((family) => modes.map((mode) => [family, mode, buildPaletteTokens(family, mode)]))))
-      .toBe("5addeba282a49649aa72da2985fe62ea48e7d2d9d8bde49bf184e372e9816278");
+      .toBe("4ea80b5880ccd91ccfba1a19ebf65def4522db27f8fc8652dc81b13aa6397994");
     expect(digest([...colors, "#0d9488", "#f97316"].flatMap((color) => modes.map((mode) => [color, mode, buildCustomPaletteTokens(color, mode)]))))
-      .toBe("acece30d462be2130f56a6561f1faf4b86b86fd747306c0c11c55a3377d5af9d");
+      .toBe("00bdfaa2e72d98d3de6d6beceb8091488a8800f98a8c08598016bdaae6ee02ca");
   });
 
   it.each(modes)("uses the picked colour as the %s accent and moves it only as far as contrast requires", (mode) => {
@@ -108,6 +108,12 @@ describe("custom appearance palettes", () => {
           expect(contrastRatio(palette["accent-strong"]!, palette[role]!), `${label} accent-strong on ${role}`).toBeGreaterThanOrEqual(4.5);
         }
         expect(contrastRatio(palette["accent-text"]!, palette.accent!), `${label} accent-text`).toBeGreaterThanOrEqual(4.5);
+        for (const fill of ["accent-fill", "accent-fill-hover"]) {
+          expect(contrastRatio(palette["accent-fill-text"]!, palette[fill]!), `${label} accent-fill-text on ${fill}`).toBeGreaterThanOrEqual(4.5);
+        }
+        for (const role of mode === "light" ? ["surface", "surface-strong"] : ["surface", "surface-strong", "surface-muted"]) {
+          expect(contrastRatio(palette["accent-fill"]!, palette[role]!), `${label} accent-fill against ${role}`).toBeGreaterThanOrEqual(3);
+        }
         expect(contrastRatio(palette.text!, palette["accent-soft"]!), `${label} text on accent-soft`).toBeGreaterThanOrEqual(7);
         expect(contrastRatio(palette["terminal-fg"]!, palette["terminal-bg"]!), `${label} terminal`).toBeGreaterThanOrEqual(7);
         expect(contrastRatio(palette["terminal-fg"]!, palette["terminal-selection"]!), `${label} terminal selection`).toBeGreaterThanOrEqual(4.5);

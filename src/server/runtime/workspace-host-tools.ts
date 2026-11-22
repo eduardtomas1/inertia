@@ -2,9 +2,15 @@ import { realpath } from "node:fs/promises";
 
 import { z } from "zod";
 
-import type { AgentGoal, AgentTurn, Conversation } from "../../shared/contracts";
+import type { AgentGoal, AgentTurn, Conversation, GitPreMergeEvidenceState } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
-import { getRepositoryStatus, GitError } from "../git";
+import {
+  getRepositoryStatus,
+  GitError,
+  GitHubPullRequestStatusError,
+  inspectGitHubPullRequestStatus,
+  type GitHubPullRequestLookup,
+} from "../git";
 import { repositoryMetadataMarkerIdentity, repositoryRoot } from "../git/paths";
 import type {
   ProviderHostToolCall,
@@ -39,6 +45,7 @@ export const WORKSPACE_READ_PLAN_TOOL_NAME = "inertia_read_plan";
 export const WORKSPACE_READ_GOAL_TOOL_NAME = "inertia_read_goal";
 export const WORKSPACE_LIST_TASKS_TOOL_NAME = "inertia_list_tasks";
 export const WORKSPACE_PROJECT_ACTIONS_TOOL_NAME = "inertia_project_actions";
+export const WORKSPACE_PULL_REQUEST_TOOL_NAME = "inertia_pull_request_status";
 
 export const MAX_GIT_STATUS_FILES = 200;
 export const MAX_PLAN_DOCUMENT_BYTES = 16 * 1024;
@@ -51,6 +58,18 @@ const MAX_LABEL_BYTES = 256;
 const MAX_TASK_TITLE_BYTES = 600;
 const MAX_ACTION_COMMAND_BYTES = 1_024;
 const MAX_ACTIONS = 60;
+export const MAX_LISTED_PULL_REQUEST_CHECKS = 50;
+const MAX_PULL_REQUEST_TITLE_BYTES = 600;
+/** Failures first, then what still runs, then the rest. */
+const CHECK_ORDER: readonly GitPreMergeEvidenceState[] = [
+  "failed", "cancelled", "pending", "unknown", "neutral", "skipped", "passed", "missing",
+];
+const PULL_REQUEST_NEXT: Readonly<Record<"not-repository" | Extract<GitHubPullRequestLookup, { kind: "none" }>["reason"], string>> = {
+  "not-repository": "This chat's workspace is not a Git repository, so it has no pull request.",
+  "detached-head": "HEAD is detached; check out a branch to see its pull request.",
+  "no-github-remote": "The branch's push remote is not a GitHub repository; this tool reads pull requests from GitHub only.",
+  "no-pull-request": "GitHub has no pull request for this branch. Push it and open one only if the user asked for a pull request.",
+};
 /** How long a diff read waits for a turn that has just settled to finish its capture. */
 export const SETTLING_TURN_DIFF_WAIT_MS = 5_000;
 
@@ -128,6 +147,12 @@ export const WORKSPACE_TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] =
   definition(
     WORKSPACE_PROJECT_ACTIONS_TOOL_NAME,
     "List the project's Run actions for this chat's workspace (configured actions and package scripts) with their command and whether each is running, with its local preview URL when one was detected. This tool cannot start or stop an action.",
+    EMPTY_SCHEMA,
+    noArguments,
+  ),
+  definition(
+    WORKSPACE_PULL_REQUEST_TOOL_NAME,
+    `Read the GitHub pull request of this chat's branch via GitHub CLI: number, URL, title, state, draft, base and head, mergeability, review decision, up to ${MAX_LISTED_PULL_REQUEST_CHECKS} checks, failures first. pullRequest is null, with a next step, when there is none.`,
     EMPTY_SCHEMA,
     noArguments,
   ),
@@ -230,6 +255,7 @@ export class WorkspaceHostTools {
     } catch (error) {
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
       if (error instanceof WorkspaceToolFailure) return failure(error.code, error.message);
+      if (error instanceof GitHubPullRequestStatusError) return failure(error.code, error.message);
       if (error instanceof TurnDiffCursorError) return failure("invalid_arguments", error.message);
       if (error instanceof TurnGitArtifactError) return failure("host_tool_failed", error.message);
       if (error instanceof GitError) {
@@ -267,6 +293,10 @@ export class WorkspaceHostTools {
       case WORKSPACE_PROJECT_ACTIONS_TOOL_NAME: {
         const parsed = noArguments.safeParse(args);
         return parsed.success ? await this.projectActions(source) : invalidArguments(call.tool, args, parsed.error);
+      }
+      case WORKSPACE_PULL_REQUEST_TOOL_NAME: {
+        const parsed = noArguments.safeParse(args);
+        return parsed.success ? await this.pullRequestStatus(source, call.signal) : invalidArguments(call.tool, args, parsed.error);
       }
       default:
         return failure("unknown_tool", "That Inertia host tool is not available.");
@@ -550,6 +580,63 @@ export class WorkspaceHostTools {
       actions: included,
       totalActions: rows.length,
       truncated: cut,
+    })));
+  }
+
+  private async pullRequestStatus(source: WorkspaceToolSource, callSignal: AbortSignal): Promise<ProviderHostToolResult> {
+    const workspace = await this.workspace(source.conversation);
+    // One deadline for Git and GitHub CLI, under the provider's host-tool timeout.
+    const deadlineAt = Date.now() + HOST_TOOL_GIT_READ_TIMEOUT_MS;
+    const signal = AbortSignal.any([callSignal, AbortSignal.timeout(HOST_TOOL_GIT_READ_TIMEOUT_MS)]);
+    let root: string;
+    try {
+      root = await repositoryRoot(workspace.path, { deadlineAt, signal });
+    } catch (error) {
+      if (error instanceof GitError && error.code === "not-repository") {
+        return json({ repository: false, branch: null, pullRequest: null, next: PULL_REQUEST_NEXT["not-repository"] });
+      }
+      if (error instanceof GitError && error.code === "not-found") throw unavailable("This chat's workspace folder is missing.");
+      throw error;
+    }
+    const lookup = await inspectGitHubPullRequestStatus(root, { deadlineAt, signal });
+    const scope = { roots: [...workspace.scope.roots, root] };
+    const branch = lookup.branch === null ? null : workspaceLabel(lookup.branch, MAX_LABEL_BYTES, scope);
+    if (lookup.kind === "none") {
+      return json({ repository: true, branch, pullRequest: null, next: PULL_REQUEST_NEXT[lookup.reason] });
+    }
+    const pullRequest = lookup.pullRequest;
+    const counts: Partial<Record<GitPreMergeEvidenceState, number>> = {};
+    for (const check of pullRequest.checks) counts[check.state] = (counts[check.state] ?? 0) + 1;
+    const checks = [...pullRequest.checks]
+      .sort((left, right) => CHECK_ORDER.indexOf(left.state) - CHECK_ORDER.indexOf(right.state)
+        || left.name.localeCompare(right.name, "en"))
+      .map((check) => ({
+        name: workspaceLabel(check.name, MAX_LABEL_BYTES, scope),
+        ...(check.workflow ? { workflow: workspaceLabel(check.workflow, MAX_LABEL_BYTES, scope) } : {}),
+        state: check.state,
+        ...((check.state === "failed" || check.state === "cancelled") && check.detailsUrl ? { url: check.detailsUrl } : {}),
+      }));
+    return json(fitted(checks, MAX_LISTED_PULL_REQUEST_CHECKS, (included, cut) => ({
+      repository: true,
+      branch,
+      pullRequest: {
+        number: pullRequest.number,
+        url: pullRequest.url,
+        title: workspaceLabel(pullRequest.title, MAX_PULL_REQUEST_TITLE_BYTES, scope),
+        state: pullRequest.state,
+        draft: pullRequest.draft,
+        baseBranch: workspaceLabel(pullRequest.baseBranch, MAX_LABEL_BYTES, scope),
+        headBranch: workspaceLabel(pullRequest.headBranch, MAX_LABEL_BYTES, scope),
+        headMatchesLocal: lookup.localHead === pullRequest.head,
+        mergeable: pullRequest.mergeable,
+        mergeState: pullRequest.mergeState,
+        reviewDecision: pullRequest.reviewDecision,
+        updatedAt: pullRequest.updatedAt,
+        checkCounts: counts,
+        totalChecks: pullRequest.totalChecks,
+        checks: included,
+        checksTruncated: cut || included.length < pullRequest.totalChecks,
+      },
     })));
   }
 }

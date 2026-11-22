@@ -1,4 +1,5 @@
-import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,7 +9,7 @@ import { openDesktopLink } from "../../src/main/external-link-open";
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture(name = "Workflow with spaces.json") {
-  const root = mkdtempSync(join(tmpdir(), "inertia-file-link-"));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "inertia-file-link-")));
   roots.push(root);
   const path = join(root, name);
   writeFileSync(path, "Inert fixture", { mode: 0o600 });
@@ -24,26 +25,42 @@ it("opens an ordinary file outside any project using the OS document handler", a
   expect(shell.showItemInFolder).not.toHaveBeenCalled();
 });
 
-it("opens source links with line, column, and range suffixes", async () => {
-  const { path, shell } = fixture("source.ts");
+it("opens inert document links with line, column, and range suffixes", async () => {
+  const { path, shell } = fixture("notes.md");
   for (const suffix of [":42", ":42:7", ":42-45", ":42:7-45:8"]) {
     await openDesktopLink(pathToFileURL(path).href + suffix, shell);
   }
   expect(shell.openPath.mock.calls).toEqual([[path], [path], [path], [path]]);
 });
 
-it.runIf(process.platform !== "win32")("prefers literal filenames and never falls back for encoded colons", async () => {
+it("reveals source files from links instead of handing them to an interpreter", async () => {
   const { path, shell } = fixture("source.ts");
+  await openDesktopLink(pathToFileURL(path).href + ":42", shell);
+  expect(shell.showItemInFolder).toHaveBeenCalledWith(path);
+  expect(shell.openPath).not.toHaveBeenCalled();
+});
+
+it.runIf(process.platform !== "win32")("prefers literal filenames and never falls back for encoded colons", async () => {
+  const { path, shell } = fixture("source.txt");
   const literal = `${path}:42`;
   writeFileSync(literal, "Literal filename", { mode: 0o600 });
   await openDesktopLink(pathToFileURL(path).href + ":42", shell);
-  expect(shell.openPath).toHaveBeenLastCalledWith(literal);
+  expect(shell.showItemInFolder).toHaveBeenLastCalledWith(literal);
+  expect(shell.openPath).not.toHaveBeenCalled();
   rmSync(literal);
   await expect(openDesktopLink(pathToFileURL(path).href + "%3A42", shell)).rejects.toThrow("could not be opened");
-  expect(shell.openPath).toHaveBeenCalledTimes(1);
+  expect(shell.showItemInFolder).toHaveBeenCalledTimes(1);
+  expect(shell.openPath).not.toHaveBeenCalled();
 });
 
-it.each(["launcher.desktop", "setup.exe", "script.command"])("reveals %s without launching it", async (name) => {
+it.each([
+  "launcher.desktop", "setup.exe", "script.command", "x.pyw", "x.pyz", "x.pyzw", "x.pyc", "x.pyo", "x.rbw", "x.rb",
+  "x.jnlp", "x.library-ms", "x.searchConnector-ms", "x.search-ms", "x.settingcontent-ms", "x.rdp", "x.theme",
+  "x.themepack", "x.deskthemepack", "x.diagcab", "x.msu", "x.appinstaller", "x.msixbundle", "x.appxbundle",
+  "x.wsc", "x.sct", "x.ps1xml", "x.psc1", "x.inf", "x.ahk", "x.xbap", "x.doc", "x.xls", "x.ppt", "x.pps",
+  "x.dot", "x.xlt", "x.xla", "x.pot", "x.ppa", "x.svg", "x.html", "program", "x.docx", "x.xlsx", "x.pptx",
+  "x.odt", "x.ods", "x.odp", "x.csv", "x.tsv",
+])("reveals %s without launching it", async (name) => {
   const { path, shell } = fixture(name);
   await openDesktopLink(pathToFileURL(path).href, shell);
   expect(shell.showItemInFolder).toHaveBeenCalledWith(path);
@@ -109,4 +126,67 @@ it.each([
   const { shell } = fixture();
   await expect(openDesktopLink(href, shell)).rejects.toThrow();
   expect(shell.openExternal).not.toHaveBeenCalled();
+});
+
+it("reveals non-inert link targets on the host platform and never opens them", async () => {
+  for (const name of ["x.pyw", "x.library-ms", "x.rdp", "x.theme", "x.doc", "x.xls", "x.ppt"]) {
+    const { path, shell } = fixture(name);
+    await openDesktopLink(pathToFileURL(path).href, shell);
+    expect(shell.showItemInFolder).toHaveBeenCalledWith(path);
+    expect(shell.openPath).not.toHaveBeenCalled();
+  }
+});
+
+it("reveals folders reached by a link", async () => {
+  const { root, shell } = fixture();
+  const folder = join(root, "Documents");
+  mkdirSync(folder);
+  await openDesktopLink(pathToFileURL(folder).href, shell);
+  expect(shell.showItemInFolder).toHaveBeenCalledWith(folder);
+  expect(shell.openPath).not.toHaveBeenCalled();
+});
+
+it.each(["notes.txt", "paper.pdf", "photo.png", "data.json", "clip.mp4"])("still opens the inert document %s", async (name) => {
+  const { path, shell } = fixture(name);
+  await openDesktopLink(pathToFileURL(path).href, shell);
+  expect(shell.openPath).toHaveBeenCalledWith(path);
+  expect(shell.showItemInFolder).not.toHaveBeenCalled();
+});
+
+it.each([
+  "file:///C:/Users/me/coolrepo::$INDEX_ALLOCATION/x.pyw",
+  "file:///C:/Users/me/coolrepo::$INDEX_ALLOCATION/notes.txt",
+  "file:///C:/Users/me/coolrepo/notes.txt::$DATA",
+  "file:///C:/Users/me/coolrepo/notes.txt:hidden",
+  "file:///C:/Users/me/coolrepo%3A%3A%24INDEX_ALLOCATION/x.pyw",
+])("rejects the Windows stream link %s before touching the file system", async (href) => {
+  const { shell } = fixture();
+  await expect(openDesktopLink(href, shell, "win32")).rejects.toThrow(/^The local file could not be opened\.$/u);
+  expect(shell.openPath).not.toHaveBeenCalled();
+  expect(shell.showItemInFolder).not.toHaveBeenCalled();
+  expect(shell.openExternal).not.toHaveBeenCalled();
+});
+
+it.runIf(process.platform === "win32")("rejects a real NTFS index-allocation alias", async () => {
+  const { root, shell } = fixture();
+  const repo = join(root, "Coolrepository");
+  mkdirSync(repo);
+  writeFileSync(join(repo, "x.pyw"), "Inert fixture");
+  const alias = join(root, "Coolrepository::$INDEX_ALLOCATION", "x.pyw");
+  await expect(openDesktopLink(pathToFileURL(alias).href, shell, "win32")).rejects.toThrow("could not be opened");
+  expect(shell.openPath).not.toHaveBeenCalled();
+});
+
+it.runIf(process.platform === "win32")("reveals an 8.3 short-name alias", async (ctx) => {
+  const { root, shell } = fixture();
+  const repo = join(root, "Coolrepository");
+  mkdirSync(repo);
+  writeFileSync(join(repo, "remote.library-ms"), "Inert fixture");
+  const short = spawnSync("cmd.exe", ["/d", "/c", `for %I in ("${join(repo, "remote.library-ms")}") do @echo %~sI`], {
+    windowsVerbatimArguments: true, encoding: "utf8",
+  }).stdout.trim();
+  if (!/~\d/u.test(short)) ctx.skip("8.3 short names are disabled on this volume");
+  await openDesktopLink(pathToFileURL(short).href, shell, "win32");
+  expect(shell.showItemInFolder).toHaveBeenCalledWith(short);
+  expect(shell.openPath).not.toHaveBeenCalled();
 });

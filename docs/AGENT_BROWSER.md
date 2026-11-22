@@ -31,9 +31,9 @@ local runtime receives only a narrow command broker.
   to open in the system browser; remote plaintext HTTP is rejected.
 - The Browser chrome shows pages, the active page and a **Viewport** menu. Its
   **Evidence** view keeps a bounded local timeline of navigation, page
-  failures, screenshots, and fixed agent-action labels. Click, type, hover and
-  select actions also render a pointer with a fixed bounded label inside the
-  visible page.
+  failures, screenshots, and fixed agent-action labels. Click, type, hover,
+  select and drag actions also render a pointer with a fixed bounded label
+  inside the visible page.
 - Browser tools are injected automatically into the existing exact-turn host
   bridge for Codex, Claude, Cursor, Kimi Code, and OpenCode. No skill
   install is required. When a project turns Browser access off, its turns are
@@ -61,15 +61,16 @@ advertises the same arguments the runtime validates:
 | --- | --- | --- |
 | `inertia_browser_navigate` | exactly one of `url` or `history` | Open a local development URL, or go `back`, `forward` or `reload`, and wait for the page to load. |
 | `inertia_browser_snapshot` | none | Read the active page and get element refs. |
-| `inertia_browser_click` | `ref`, optional `dialog` | Click one element from the latest snapshot. |
+| `inertia_browser_click` | `ref`, optional `dialog`, `clickCount`, `modifiers` | Click, double-click or triple-click one element from the latest snapshot, optionally holding keys. |
 | `inertia_browser_type` | `ref`, `text`, optional `replace` | Type into one editable element. |
-| `inertia_browser_press` | `key`, optional `dialog` | Send one allowlisted key to the focused element. |
-| `inertia_browser_scroll` | exactly one of `deltaY` or `ref` | Scroll the page vertically, or scroll one element to the centre of the view and return the viewport. |
-| `inertia_browser_wait_for` | optional `text`, `state`, `timeoutMs` | Wait for text to appear or disappear, or for loading to finish. |
+| `inertia_browser_press` | `key`, optional `dialog`, `modifiers` | Send one allowlisted key to the focused element, optionally holding keys. |
+| `inertia_browser_scroll` | `ref` alone, or `deltaY`, `deltaX` or both | Scroll the page by pixels on either axis, or scroll one element to the centre of the view and return the viewport. |
+| `inertia_browser_wait_for` | optional `text`, `path`, `ref`, `state`, `timeoutMs` | Wait for text, the page path or a control to appear or disappear, or for loading to finish. |
 | `inertia_browser_screenshot` | none | Capture the visible part of the active page into the local Evidence timeline, and return the image to a model that accepts images (see [Screenshots](#screenshots)). |
 | `inertia_browser_resize` | `preset`, or `width` and `height`, each with optional `colorScheme`; or `colorScheme` alone | Set the chat's viewport and colour scheme (see [Viewport](#viewport)). |
 | `inertia_browser_hover` | `ref` | Move the pointer over one element from the latest snapshot, for example to open a menu or tooltip. |
 | `inertia_browser_select` | `ref`, `value` | Choose an option of one `<select>` element by its value or label. |
+| `inertia_browser_drag` | `ref`, `targetRef` | Drag one element from the latest snapshot onto another, with the pointer or native drag and drop. |
 | `inertia_browser_logs` | none | Read the chat's recent Browser evidence as text. |
 | `inertia_browser_tabs` | none | List the chat's pages. |
 | `inertia_browser_open_tab` | optional `url` | Open and activate a new page. |
@@ -94,10 +95,74 @@ navigation stay under the existing redirect guard.
 
 `inertia_browser_press` accepts Enter, Tab, Escape, Backspace, Space, the
 arrow keys, Home, End, PageUp, PageDown, Shift+Tab, Shift+Enter, Control+Enter
-and Meta+Enter, sent as trusted input with their modifiers. Every Enter
-variant goes through the same guarded activation path as Enter. Control+Enter
-and Meta+Enter send key down and key up only, which is what shortcut handlers
-listen for, so they never insert a line break.
+and Meta+Enter, sent as trusted input with their modifiers. `modifiers` holds
+any of Shift, Control, Alt and Meta, each listed once, down for the key, so
+Shift with an arrow extends a selection; a key that carries its own modifier,
+such as Shift+Tab, merges it with the held ones, and the result and Evidence
+name the whole chord in the order Control, Alt, Shift, Meta, such as
+"Control+Shift+Tab". Only the allowlisted keys can be pressed, with or without
+modifiers, so letters, digits and function keys stay out of reach: no
+clipboard, select-all, reload or app shortcut can be sent. Every Enter and
+Space variant goes through the same guarded activation path as Enter. A chord
+with Control, Alt or Meta sends key down and key up only, which is what
+shortcut handlers listen for, so it never inserts a line break or a space.
+Electron takes accelerator names for the arrows, so Inertia sends them as
+Left, Right, Up and Down and Chromium reports `ArrowLeft` and the others to
+the page; until this was fixed, an arrow reached the page as an unidentified
+key and Inertia took its own key press for the user's.
+
+`inertia_browser_click` takes `clickCount` 1 (default), 2 or 3 and the same
+`modifiers`. A double or triple click is sent as a real mouse reports it: the
+same press and release repeated at one point with a rising count, so the page
+receives `click` events with `detail` 1, 2 and 3 and a `dblclick`. Every press
+and release, and the `dblclick`, must land on the element of the ref, as for a
+single click; a click count above 1 or a held key is named in the approval,
+such as "Double-click button: Save holding Shift", in the result
+(`clickCount`, `modifiers`) and in the Evidence label ("Agent double-clicked a
+page element"). Held keys change no Inertia guard: the main process already
+denies new windows and downloads, which is what Shift, Control, Meta or Alt
+with a link would otherwise open, and the native context menu that
+Control-click opens on macOS is shown only for the user's own input. Only the
+left button is offered.
+
+`inertia_browser_drag` drags the element of `ref` onto the element of
+`targetRef`, two different refs from the latest snapshot. Both must be visible
+at once: unlike a click, a drag never scrolls, because scrolling to one end
+could carry the other out of view, so a drag with either end outside the
+viewport is refused with `not-found` and a message to scroll or set a larger
+viewport. Both ends are located and hit-tested like a click target; a
+disabled or blocked end, such as a file input or a frame, is refused. Inertia
+moves the pointer onto the dragged element, presses the left button, moves in
+five steps to the centre of the target and releases there, waiting for an
+animation frame after each step so drag libraries see the movement. Only the
+press is matched to the dragged element; the release goes wherever the
+pointer is, often onto the dragged element itself when the page moves it
+under the pointer, and the click the browser then sends to the common
+ancestor is stopped only for a file input or a target Inertia cannot
+inspect. A press that lands on another element fails with `not-found`, and
+the button is released at once.
+
+Pages that use native HTML drag and drop (`draggable`, `dragstart`, `drop`)
+are handled too. Before pressing, Inertia asks Chromium to intercept drags
+(`Input.setInterceptDrags`), so a drag never starts a system drag session that
+would wait for the user's real mouse. When the page's own `dragstart` goes
+through, Inertia finishes the drag with DevTools drag events
+(`Input.dispatchDragEvent`): enter and over along the remaining steps, then
+drop on the target, carrying the page's own string drag data. File entries are
+removed from that data, so a drop never carries a file, and the data never
+reaches the agent. The result's `native` says which kind of drag the page
+took. Interception is switched off again when the drag ends, whether it
+succeeded or not, and an intercepted drag that did not finish is cancelled, so
+real drags work for the user afterwards. The approval names both ends ("Drag
+listitem: Write tests" and "onto list: Done") and binds each to its inspected
+element; the Evidence label is "Agent dragged a page element".
+
+Clicks and drags at a coordinate are not offered. An approval names the
+control a ref inspects and is bound to that element and document until the
+input is delivered, and every press is matched to the element; a coordinate
+has no identity to name, bind or match, so a user would approve a point
+without knowing what it hits, and a page could move a different control, or
+an embedded frame Inertia cannot inspect, under it after the approval.
 
 `inertia_browser_hover` moves the pointer onto one element from the latest
 snapshot without pressing a button, so a menu or tooltip that opens on hover
@@ -167,7 +232,7 @@ that keeps trying to reload cannot reopen the box.
 
 Text limits are counted in Unicode code points, the unit JSON Schema
 `maxLength` uses: `url` holds at most 4,096, `inertia_browser_type` `text` at
-most 4,000, and `inertia_browser_wait_for` `text` and
+most 4,000, and `inertia_browser_wait_for` `text` and `path` and
 `inertia_browser_select` `value` at most 200 each, on one line. The runtime tool
 validator and the main-process parser call the same counting function, and a
 request that reaches main with arguments it does not accept is answered with
@@ -180,8 +245,10 @@ Codex App Server stores a thread's tools when the thread starts, so existing
 Codex threads keep working with the retired tools and new threads receive the
 current ones; no native continuation is cleared. For the same reason, a Codex
 thread that started before `inertia_browser_resize`, `inertia_browser_hover`,
-`inertia_browser_select` and `inertia_browser_logs` were added does not have
-them until a new thread starts.
+`inertia_browser_select`, `inertia_browser_logs` and `inertia_browser_drag`
+were added does not have them until a new thread starts, and one that started
+before `clickCount`, `modifiers`, `deltaX`, `path` and the wait `ref` were
+added keeps the older argument lists; the main process accepts both.
 
 Every successful result is JSON that includes the tab state, and a snapshot
 names the tab it describes. Every failure is
@@ -269,9 +336,29 @@ request itself, so it cannot reveal anything a snapshot would withhold. Its
 polls run the privacy check before and after reading but do not freeze the
 page or block the user's input, and a poll interrupted by the page reloading
 is retried. It returns `matched: true` or `matched: false` rather than
-failing when the condition is not reached. Its text matches visible text and control names,
-case-insensitively. URL paths are not a wait condition because the agent only
-ever sees a page's origin.
+failing when the condition is not reached. Every condition given must hold
+at once; with `state: "absent"`, every condition must stop holding. Its text
+matches visible text and control names, case-insensitively. `ref` holds while
+the element of a ref from the latest snapshot is still connected and rendered
+anywhere in the document, in or out of the viewport; it is checked only after
+a guarded snapshot poll succeeds, and a document whose evidence is withheld
+answers `sensitive` as a snapshot does.
+
+`path` compares the active page's whole URL path with a pattern such as
+`/orders/*/edit`, in which `*` matches exactly one non-empty segment and one
+trailing slash is ignored. The origin, query and fragment are never compared,
+and a pattern that holds `?`, `#`, whitespace or a `*` inside a segment is
+refused as `invalid`. The agent still only ever sees a page's origin: the
+result says only `matched`, and the path is read in the main process from the
+tab's address, not from the page. Contains, prefix and glob matching inside a
+segment are deliberately not offered, because they would let a series of
+waits read back a path the agent is not shown, such as a reset token in it,
+one character at a time; a whole-path comparison can only confirm a path the
+agent already knows. A hash router's route lives in the fragment and is not a
+path condition; wait for its text instead. CSS selectors are not a wait
+condition either: an attribute selector such as `input[value^="a"]` would
+reveal a field's value, password fields included, around the redaction that
+snapshots apply.
 
 Each successful snapshot also includes a bounded `inertiaAudit` object. Version
 1 reports deterministic issue codes and affected refs for controls without
@@ -333,7 +420,12 @@ converts a point to the panel's coordinates once, when it sends input: the
 page position minus the visual viewport's offset, multiplied by the panel
 scale and the page's zoom. A point that falls outside the visible viewport is
 refused with `not-found` and a message to scroll the control into view first.
-A pixel scroll is sent at the centre of the shown page.
+A pixel scroll is sent at the centre of the shown page as one wheel event.
+Positive `deltaY` scrolls down and positive `deltaX` right; Chromium's wheel
+deltas count the other way, so Inertia negates both. Until this was fixed, a
+positive `deltaY` scrolled up. The native drag events of a drag take the
+page's own CSS pixel position, which Chromium maps through the viewport
+emulation itself.
 
 `colorScheme` sets the page's `prefers-color-scheme` to `light` or `dark` with
 `Emulation.setEmulatedMedia`, separately from the size. It may be given alone
@@ -639,7 +731,7 @@ tool call:
 | --- | --- |
 | snapshot, wait, tabs, logs | none |
 | screenshot | only when the image will be sent to the model |
-| navigate, history, click, type, press, scroll, hover, select | one per call |
+| navigate, history, click, type, press, scroll, hover, select, drag | one per call |
 | resize, including a colour scheme alone | one per call |
 | open, select or close a tab | one per call |
 
@@ -653,7 +745,7 @@ approval, and send a screenshot to a model that accepts images without asking.
 They never release Evidence images through the local inspection path.
 
 Tools that change the page, its viewport or its tabs (navigate, click, type,
-press, resize, hover, select, open tab, close tab) carry the MCP
+press, resize, hover, select, drag, open tab, close tab) carry the MCP
 `destructiveHint`; snapshot, screenshot, logs, tabs and wait carry
 `readOnlyHint` and `idempotentHint`; every Browser tool carries
 `openWorldHint: false` because only loopback pages are reachable. Claude and
@@ -749,7 +841,8 @@ exact provider turn
   -> exact conversation-owned WebContentsView
 ```
 
-The agent cannot use this surface to read arbitrary files, upload a file,
+The agent cannot use this surface to read arbitrary files, upload a file
+(a native drag drops only the page's own string data, never a file),
 grant a browser permission, start a download, retain cookies across ownership,
 or control a page belonging to another conversation. File inputs never receive
 semantic refs, focused activation is rejected, and a privileged chooser

@@ -43,7 +43,6 @@ updates:
         exclude-patterns:
           - "@agentclientprotocol/sdk"
           - "@anthropic-ai/claude-agent-sdk"
-          - "@anthropic-ai/sdk"
           - "@modelcontextprotocol/sdk"
           - "@opencode-ai/sdk"
           # Native ABI, extraction and update trust need reviewable own PRs.
@@ -71,6 +70,7 @@ updates:
           - electron-vite
           - "@playwright/test"
           - happy-dom
+          - "@anthropic-ai/sdk"
 
   - package-ecosystem: github-actions
     directory: /

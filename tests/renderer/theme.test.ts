@@ -43,6 +43,10 @@ describe("theme preferences", () => {
     expect(isColorThemeId("ocean")).toBe(true);
     expect(isColorThemeId("ember")).toBe(true);
     expect(isColorThemeId("iris")).toBe(true);
+    expect(isColorThemeId("graphite")).toBe(true);
+    expect(isColorThemeId("blossom")).toBe(true);
+    expect(isColorThemeId("lagoon")).toBe(true);
+    expect(isColorThemeId("saffron")).toBe(true);
     expect(isColorThemeId("green")).toBe(false);
     expect(isColorThemeId(null)).toBe(false);
   });

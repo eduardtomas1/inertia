@@ -54,6 +54,14 @@ describe("durable project and thread organization", () => {
     expect(reopened.shellSnapshot().settings).toMatchObject({ lightColorTheme: "grove", darkColorTheme: "iris" });
     reopened.updateSettings({ colorTheme: "ember" });
     expect(reopened.shellSnapshot().settings).toMatchObject({ lightColorTheme: "ember", darkColorTheme: "ember" });
+    reopened.updateSettings({ lightColorTheme: "graphite", darkColorTheme: "blossom" });
+    reopened.close(); stores.splice(stores.indexOf(reopened), 1);
+    const again = new RuntimeStore(path, root); stores.push(again);
+    expect(again.shellSnapshot().settings).toMatchObject({ lightColorTheme: "graphite", darkColorTheme: "blossom" });
+    again.updateSettings({ colorTheme: "lagoon" });
+    expect(again.shellSnapshot().settings).toMatchObject({ colorTheme: "lagoon", lightColorTheme: "lagoon", darkColorTheme: "lagoon" });
+    again.updateSettings({ darkColorTheme: "saffron" });
+    expect(again.shellSnapshot().settings).toMatchObject({ lightColorTheme: "lagoon", darkColorTheme: "saffron" });
   });
 
   it("persists custom colors independently and resets them when presets are selected", () => {
@@ -157,7 +165,7 @@ describe("durable project and thread organization", () => {
     // Exact shape written by builds that predate claudeMaxBudgetUsd.
     const legacy = { workspace: "worktree", autoPull: true, browserAccess: false, icon: { kind: "symbol", name: "code" },
       actions: [{ id: "11111111-1111-4111-8111-111111111111", name: "Check", executable: "node", args: ["--version"] }] };
-    const laterDefaults = { defaultAccessMode: null, color: null, colorEmphasis: "icon", pinned: false };
+    const laterDefaults = { defaultAccessMode: null, cadAccess: null, color: null, colorEmphasis: "icon", pinned: false };
     expect(parseProjectPreferences(JSON.stringify(legacy))).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...laterDefaults });
     store.close(); stores.splice(stores.indexOf(store), 1);
     const database = new Database(path);

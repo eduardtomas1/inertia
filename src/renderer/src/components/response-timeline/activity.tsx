@@ -60,6 +60,7 @@ import {
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
 import {
+  isSettledExchangeEntry,
   withHtmlRenders,
   withSecretRequests,
   withLiveCommentary,
@@ -87,9 +88,11 @@ import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
 import { SubagentCallBlock } from "./SubagentCallBlock";
 import { SecretRequestCard } from "./SecretRequestCard";
-import { mergeSubagentCalls, type SubagentCallEntry } from "../../utils/response-timeline/subagentCalls";
+import { SentMessageRow } from "./SentMessageRow";
+import { NO_DELEGATED_WORK, withDelegatedWork, type DelegatedWork } from "../../utils/response-timeline/subagentGroups";
 import { StreamingMarkdownText } from "./StreamingMarkdownText";
 import { SubagentActivityRow } from "./SubagentActivityRow";
+import { SubagentGroupBlock } from "./SubagentGroup";
 import { useLinkedActivityStatuses, useLinkedSubagent } from "./subagentActivityContext";
 import {
   ReasoningSummary,
@@ -640,7 +643,8 @@ function ExecutionStream({
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
   if (entries.length === 0) return null;
-  const lastIndex = entries.length - 1;
+  const lastIndex = entries.reduce((last, entry, index) => entry.kind === "subagent-group" ? last : index, -1);
+  const markdown = { projectRoot, projectId, conversationId, defaultCodeWrap, onOpenProjectFile };
   return (
     <div className="turn-execution-stream" role="list" aria-label={label}>
       {entries.map((entry, index) => {
@@ -657,25 +661,22 @@ function ExecutionStream({
         if (entry.kind === "secret-request") {
           return <div role="listitem" key={entry.id}><SecretRequestCard message={entry.message} /></div>;
         }
-        if (entry.kind === "subagent-call") {
+        if (entry.kind === "sent-message") {
+          return <div role="listitem" key={entry.id}><SentMessageRow message={entry.message} {...markdown} showTime={showTimes} /></div>;
+        }
+        if (entry.kind === "subagent-call" || entry.kind === "subagent-group") {
           return (
             <div role="listitem" key={entry.id}>
-              <SubagentCallBlock entry={entry} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />
+              {entry.kind === "subagent-call"
+                ? <SubagentCallBlock entry={entry} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />
+                : <SubagentGroupBlock entry={entry} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />}
             </div>
           );
         }
         if (entry.kind === "commentary") {
           return (
             <div role="listitem" key={entry.id}>
-              <CommentaryRow
-                entry={entry}
-                projectRoot={projectRoot}
-                projectId={projectId}
-                conversationId={conversationId}
-                defaultCodeWrap={defaultCodeWrap}
-                onOpenProjectFile={onOpenProjectFile}
-                showTime={showTimes}
-              />
+              <CommentaryRow entry={entry} {...markdown} showTime={showTimes} />
             </div>
           );
         }
@@ -826,7 +827,6 @@ export function SettledWorkDetails({
 }
 
 const NO_HELD_FOLLOW_UPS: string[] = [];
-const NO_SUBAGENT_CALLS: readonly SubagentCallEntry[] = [];
 
 export function WorkLog({
   turn,
@@ -836,7 +836,7 @@ export function WorkLog({
   liveContent,
   liveContentStreaming,
   heldFollowUpIds = NO_HELD_FOLLOW_UPS,
-  subagentCalls = NO_SUBAGENT_CALLS,
+  delegated = NO_DELEGATED_WORK,
   showThinking,
   projectRoot,
   projectId,
@@ -846,7 +846,6 @@ export function WorkLog({
   onBeforeToggle,
   onAfterToggle,
   fold = null,
-  foldedWork = null,
 }: {
   turn: ResponseTurn;
   autoCollapse: boolean;
@@ -855,7 +854,8 @@ export function WorkLog({
   liveContent: string;
   liveContentStreaming: boolean;
   heldFollowUpIds?: string[];
-  subagentCalls?: readonly SubagentCallEntry[];
+  /** Delegated tasks, each placed where it started. */
+  delegated?: DelegatedWork;
   showThinking: boolean;
   projectRoot: string;
   projectId: string;
@@ -865,7 +865,6 @@ export function WorkLog({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
   fold?: TurnFoldControl | null;
-  foldedWork?: React.ReactNode;
 }): React.JSX.Element | null {
   const [expanded, setExpanded] = useState(!autoCollapse);
   const [failureExpanded, setFailureExpanded] = useState(!autoCollapse);
@@ -895,7 +894,7 @@ export function WorkLog({
     const layered = layeredHtmlRenders(turn);
     return withSecretRequests(withHtmlRenders(next, turn.htmlRenders.filter((message) => !layered.includes(message))), turn.secretRequests);
   }, [turn]);
-  const durableStream = useMemo(() => mergeSubagentCalls(renderedStream, subagentCalls), [renderedStream, subagentCalls]);
+  const durableStream = useMemo(() => withDelegatedWork(renderedStream, delegated), [renderedStream, delegated]);
   // Transient text is the final visible execution entry unless follow-ups
   // were saved while it streamed; then it sits just above them. Inserting that
   // one row keeps settled commentary and activity-group identities stable
@@ -1029,10 +1028,7 @@ export function WorkLog({
     );
   }
 
-  const exchange = stream.filter((entry) =>
-    entry.kind === "follow-up"
-    || entry.kind === "html-render" || entry.kind === "subagent-call" || entry.kind === "secret-request"
-    || (entry.kind === "commentary" && entry.answer));
+  const exchange = stream.filter(isSettledExchangeEntry);
   const workStream = exchange.length > 0
     ? stream.filter((entry) => !exchange.includes(entry))
     : stream;
@@ -1084,7 +1080,6 @@ export function WorkLog({
                   onBeforeToggle={onBeforeToggle}
                   onAfterToggle={onAfterToggle}
                 />
-                {foldedWork}
                 {traceDetails}
               </>
             )}

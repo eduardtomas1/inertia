@@ -17,6 +17,9 @@
   --selection: color-mix(in srgb, var(--accent) 22%, transparent);
   --accent-text: #fdfdff;
   --accent-strong: #380f9d;
+  --accent-fill: var(--accent);
+  --accent-fill-hover: var(--accent-hover);
+  --accent-fill-text: var(--accent-text);
   --danger: #96423c;
   --danger-soft: #f5dad7;
   --warning: #81520f;
@@ -127,7 +130,6 @@
   --composer-toolbar-padding-bottom: 12px;
   --composer-icon-button-size: 28px;
   --usage-ring-size: 28px;
-  --active-work-text-rest: #585880;
   --active-work-text-highlight: #2a294c;
   --answer-font-size: var(--text-base);
   --transcript-section-spacing: 18px;
@@ -141,6 +143,20 @@
   --control-height-small: calc(var(--ui-control-height) - 4px);
   --composer-control-height: calc(var(--ui-control-height) - 2px);
   --model-row-height: calc(var(--ui-control-height) + 4px);
+  --send-core: oklch(from var(--accent) 0.405 clamp(0.10, calc(c * 1.4), 0.18) h);
+  --send-a: oklch(from var(--send-core) calc(l + 0.035) c calc(h - 34));
+  --send-b: oklch(from var(--send-core) calc(l + 0.015) c calc(h + 34));
+  --send-deep: oklch(from var(--send-core) calc(l - 0.12) calc(c * 0.86) calc(h + 8));
+  --send-edge-a: oklch(from var(--send-a) 0.77 calc(c * 0.7) h);
+  --send-edge-b: oklch(from var(--send-b) 0.72 calc(c * 0.7) h);
+  --send-glyph: var(--on-media);
+  --send-glow-a: color-mix(in srgb, var(--send-a) 0%, transparent);
+  --send-glow-b: color-mix(in srgb, var(--send-b) 0%, transparent);
+  --send-empty: color-mix(in srgb, var(--text) 3%, var(--surface-raised));
+  --send-empty-glyph: var(--text-muted);
+  --send-stop: color-mix(in srgb, var(--text) 8%, var(--surface-raised));
+  --send-stop-glyph: var(--text);
+  --send-stop-line: color-mix(in srgb, var(--text) 38%, var(--surface-raised));
 }
 
 :root[data-interface-scale="compact"] {
@@ -234,19 +250,22 @@
 }
 
 :root[data-theme="dark"] {
-  --surface: #111114;
+  --surface: #0d0d0f;
   --surface-strong: #18181b;
-  --surface-muted: #1f1f22;
+  --surface-muted: #242427;
   --text: #ededf7;
-  --text-muted: #9d9da7;
-  --accent: #a3a3fa;
-  --accent-hover: #b4b6fb;
-  --accent-soft: #202036;
+  --text-muted: #a3a3ad;
+  --accent: #9693fa;
+  --accent-hover: #a6a7fa;
+  --accent-soft: #2a2a46;
   --selection: color-mix(in srgb, var(--accent) 40%, transparent);
   --accent-text: #090912;
   --accent-strong: #bfc1fc;
+  --accent-fill: #6d5de7;
+  --accent-fill-hover: #6251d9;
+  --accent-fill-text: #f9faff;
   --danger: #ea9088;
-  --danger-soft: #2f1a18;
+  --danger-soft: #3d2321;
   --warning: #d9a05a;
   --blue: #5eb8e7;
   --status-working: #5eb8e7;
@@ -260,20 +279,21 @@
   --scrollbar-thumb-hover: color-mix(in srgb, var(--text) 14%, transparent);
   --shadow-float-alpha: 0.56;
   --shadow-overlay-alpha: 0.68;
-  --raised-edge: rgb(255 255 255 / 0.06);
+  --raised-edge: rgb(255 255 255 / 0.09);
+  --shadow-float: inset 0 1px 0 var(--raised-edge), 0 0 0 1px rgb(0 0 0 / 0.32), 0 16px 36px -12px rgb(0 0 0 / var(--shadow-float-alpha)), 0 3px 8px -2px rgb(0 0 0 / calc(var(--shadow-float-alpha) / 2));
+  --shadow-overlay: inset 0 1px 0 var(--raised-edge), 0 0 0 1px rgb(0 0 0 / 0.4), 0 32px 80px -16px rgb(0 0 0 / var(--shadow-overlay-alpha)), 0 8px 20px -6px rgb(0 0 0 / calc(var(--shadow-overlay-alpha) / 2));
   --glass-surface: color-mix(in oklab, var(--surface-raised) 92%, transparent);
   --glass-blur: 16px;
   --glass-saturate: 1.08;
   --diff-addition-surface: color-mix(in srgb, var(--status-completed) 15%, transparent);
   --diff-deletion-surface: color-mix(in srgb, var(--status-failed) 13%, transparent);
-  --active-work-text-rest: #8a8cb4;
   --active-work-text-highlight: #e4e6fe;
   --syntax-keyword: #a1a1fa;
   --syntax-string: #70c18e;
   --syntax-number: #de9d5f;
   --syntax-function: #69b5ec;
   --syntax-variable: #ababb5;
-  --syntax-comment: #91919b;
+  --syntax-comment: #93949d;
   --syntax-meta: #d592cc;
   --syntax-deletion: #ea9088;
   --language-java: #e4976c;
@@ -284,6 +304,9 @@
   --aurora-1: #817ce9;
   --aurora-2: #1f97d0;
   --aurora-3: #b867c5;
+  --send-core: oklch(from var(--accent) 0.415 clamp(0.10, calc(c * 1.4), 0.18) h);
+  --send-glow-a: color-mix(in srgb, var(--send-a) 28%, transparent);
+  --send-glow-b: color-mix(in srgb, var(--send-b) 24%, transparent);
 }
 
 * {
@@ -904,12 +927,12 @@ textarea {
 }
 
 .primary-button {
-  color: var(--accent-text);
-  background: var(--accent);
+  color: var(--accent-fill-text);
+  background: var(--accent-fill);
 }
 
 .primary-button:is(:hover, :active):not(:disabled, [aria-disabled="true"]) {
-  background: var(--accent-hover);
+  background: var(--accent-fill-hover);
 }
 
 .secondary-button {
@@ -1103,23 +1126,6 @@ textarea {
 .mobile-close,
 .sidebar-scrim {
   display: none;
-}
-
-.project-icon {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-}
-
-.project-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-name {
-  color: var(--text);
-  font-size: var(--text-sm);
-  font-weight: 500;
 }
 
 .conversation-menu {
@@ -1846,8 +1852,8 @@ button.header-breadcrumb-project:hover {
   min-height: var(--control-height-small);
   padding: 0 12px;
   border-radius: var(--radius-xs);
-  color: var(--accent-text);
-  background: var(--accent);
+  color: var(--accent-fill-text);
+  background: var(--accent-fill);
   font-size: var(--text-sm);
   font-weight: 500;
 }
@@ -2885,14 +2891,14 @@ button.header-breadcrumb-project:hover {
   min-height: var(--control-height);
   justify-self: start;
   padding: 0 12px;
-  color: var(--accent-text);
-  background: var(--accent);
+  color: var(--accent-fill-text);
+  background: var(--accent-fill);
   font-weight: 500;
 }
 
 .chat-goal-form > button:not(:disabled):hover {
-  color: var(--accent-text);
-  background: var(--accent-hover);
+  color: var(--accent-fill-text);
+  background: var(--accent-fill-hover);
 }
 
 .chat-goal-unavailable button {
@@ -3726,19 +3732,6 @@ button.header-breadcrumb-project:hover {
   background: transparent;
 }
 
-.send-button {
-  width: var(--composer-control-height);
-  height: var(--composer-control-height);
-  flex: 0 0 var(--composer-control-height);
-  margin-left: 4px;
-  border: 1px solid transparent;
-  border-radius: 50%;
-  color: var(--accent-text);
-  background: var(--accent);
-  box-shadow: none;
-  filter: none;
-}
-
 .goal-panel-subagent-actions button[aria-expanded] svg {
   transition: transform var(--dur-fast) var(--ease);
 }
@@ -3790,45 +3783,6 @@ button.header-breadcrumb-project:hover {
 .composer-toolbar .usage-popover-trigger {
   height: var(--composer-control-height);
   min-height: var(--composer-control-height);
-}
-
-.send-button:not(:disabled, [aria-disabled="true"]):hover {
-  color: var(--accent-text);
-  border-color: transparent;
-  background: var(--accent-hover);
-  box-shadow: none;
-}
-
-.send-button:disabled {
-  border-color: transparent;
-  color: var(--text-muted);
-  background: var(--fill-strong);
-  box-shadow: none;
-  filter: none;
-  opacity: 1;
-}
-
-.send-button-loading:disabled {
-  border-color: var(--line-strong);
-  color: var(--accent-strong);
-  background: var(--fill);
-  opacity: 1;
-}
-
-.stop-button,
-.stop-button:disabled {
-  border-color: var(--line-strong);
-  color: var(--danger);
-  background: var(--fill);
-  box-shadow: none;
-  filter: none;
-  opacity: 1;
-}
-
-.stop-button:not(:disabled):hover {
-  border-color: var(--line-strong);
-  color: var(--danger);
-  background: var(--fill);
 }
 
 .composer-more-layer {
@@ -6566,7 +6520,7 @@ button.header-breadcrumb-project:hover {
 .pull-request-shell { --dialog-width: 520px; }
 .pull-request-shell .dialog-field textarea { min-height: 130px; }
 .pull-request-draft { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: var(--text-sm); }
-.pull-request-draft > input { width: 14px; height: 14px; flex: 0 0 auto; padding: 0; accent-color: var(--accent); }
+.pull-request-draft > input { width: 14px; height: 14px; flex: 0 0 auto; padding: 0; accent-color: var(--accent-fill); }
 
 .pre-merge-dialog {
   --dialog-width: 880px;
@@ -6936,7 +6890,7 @@ button.header-breadcrumb-project:hover {
 .commit-path-list { max-height: 190px; overflow: auto; margin-top: 4px; }
 .commit-path-list label { display: flex; min-height: 36px; align-items: center; gap: 8px; border-bottom: 1px solid var(--line-soft); font-size: var(--text-sm); }
 .commit-path-list label:last-child { border-bottom: 0; }
-.commit-path-list input { flex: 0 0 auto; accent-color: var(--accent); }
+.commit-path-list input { flex: 0 0 auto; accent-color: var(--accent-fill); }
 .commit-path-name { overflow: hidden; min-width: 0; flex: 1; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
 .commit-path-state { flex: 0 0 auto; color: var(--text-muted); font-size: var(--text-xs); }
 .commit-stage-note, .commit-review-warning { margin: 8px 0 0; color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-chrome); }
@@ -6990,7 +6944,7 @@ button.header-breadcrumb-project:hover {
 .composer-context-confirmation footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .composer-context-confirmation button { margin: 0; }
 .composer-context-confirmation button:first-child { border-color: var(--line); background: var(--surface-raised); color: var(--text); }
-.composer-context-confirmation button:last-child { border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
+.composer-context-confirmation button:last-child { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--accent-fill-text); }
 
 .provider-auth-dialog {
   display: grid;
@@ -7565,8 +7519,8 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .switch-control[data-checked="true"] {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
 }
 
 .switch-control[aria-disabled="true"] {
@@ -7587,7 +7541,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .switch-control[data-checked="true"] .switch-thumb {
-  background: var(--accent-text);
+  background: var(--accent-fill-text);
   transform: translateX(16px);
 }
 
@@ -9040,6 +8994,12 @@ button.sent-attachment-open:hover {
   padding-bottom: 3px;
 }
 
+.turn-sent-message-label {
+  margin: 0 0 2px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .turn-follow-up-row {
   width: fit-content;
   max-width: min(620px, 78%);
@@ -10301,7 +10261,7 @@ button.sent-attachment-open:hover {
   height: 14px;
   margin: 0 0.5em 0 -1.6em;
   vertical-align: -2px;
-  accent-color: var(--accent);
+  accent-color: var(--accent-fill);
 }
 
 .response-markdown blockquote {

@@ -72,6 +72,12 @@ export interface HarnessCapabilityPack {
    * whose registration was not recorded.
    */
   registeredOnEveryResumableThread?: boolean;
+  /**
+   * A thread-scoped transport registers this pack only on threads that start
+   * while it is offered, so a project that leaves it off never carries its
+   * tools. A thread started without it gains it only by starting a new thread.
+   */
+  registeredOnlyWhenOffered?: boolean;
 }
 
 /**
@@ -86,6 +92,12 @@ export interface HarnessCapabilityBridgePack {
   definitions: readonly ProviderHostToolDefinition[];
   instructions: readonly HiddenProviderInstruction[];
   registeredOnEveryResumableThread: boolean;
+  registeredOnlyWhenOffered: boolean;
+}
+
+/** Whether a thread-scoped transport registers this pack on a thread starting now. */
+export function registeredOnThreadStart(pack: HarnessCapabilityBridgePack): boolean {
+  return pack.offered || !pack.registeredOnlyWhenOffered;
 }
 
 const BRIDGE_PACKS = new WeakMap<ProviderHostToolBridge, readonly HarnessCapabilityBridgePack[]>();
@@ -436,6 +448,8 @@ export class HarnessCapabilityRegistry {
         inputSchema: definition.inputSchema,
         readOnly: definition.readOnly,
         destructive: definition.destructive === true,
+        // Only when set, so the digests of every other tool stay unchanged.
+        ...(definition.alwaysLoad === true ? { alwaysLoad: true } : {}),
       })),
       evaluation: pack.evaluation,
     }));
@@ -515,6 +529,7 @@ export class HarnessCapabilityRegistry {
       definitions: Object.freeze(pack.tools.map(({ definition }) => definition)),
       instructions: pack.instructions,
       registeredOnEveryResumableThread: pack.registeredOnEveryResumableThread === true,
+      registeredOnlyWhenOffered: pack.registeredOnlyWhenOffered === true,
     }))));
     if (this.#threadRegistrations) BRIDGE_THREAD_REGISTRATIONS.set(bridge, this.#threadRegistrations);
     return bridge;

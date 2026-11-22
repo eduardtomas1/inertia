@@ -193,6 +193,8 @@ export interface CreateMessageOptions {
   /** Turn-scoped system messages only; written with its html_renders row. */
   htmlRender?: import("../../shared/html-render").HtmlRenderReference;
   secretRequest?: import("../../shared/agent-secrets").SecretRequestReference;
+  /** Turn-scoped system messages only; written by the sent-to-user repository. */
+  sentToUser?: true;
   activateConversation?: boolean;
   touchConversation?: boolean;
 }

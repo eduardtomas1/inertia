@@ -130,6 +130,7 @@ describe("agent browser tool contract", () => {
         .toEqual([
           ...AGENT_BROWSER_TOOL_DEFINITIONS.map(({ name }) => name),
           "inertia_render_html",
+          "inertia_send_to_user",
           ...WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name),
         ].sort());
       for (const definition of AGENT_BROWSER_TOOL_DEFINITIONS) {

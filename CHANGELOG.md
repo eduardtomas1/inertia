@@ -59,6 +59,15 @@ The useful changes in each Inertia release, in plain language.
   prepares many of Inertia's queries again on every call, which made loading
   a chat's history about a third slower.
 
+### Agent tools
+
+- An agent can show you a draft, a code block or the subject of a question in
+  full while it works, instead of a shortened summary. The message appears in
+  the turn where the agent sent it, marked *Sent mid-turn*, stays in view
+  when the turn folds, and survives a restart. It is never taken for the
+  agent's reply. Message search, Private Connect and chats that read this one
+  see its text.
+
 ### Look
 
 - Four new colour themes: Graphite, Blossom, Lagoon and Saffron, in

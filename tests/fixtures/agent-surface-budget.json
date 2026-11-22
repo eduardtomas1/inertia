@@ -242,6 +242,12 @@
       "cursorKimi": 1508,
       "opencode": 1508
     },
+    "inertia_send_to_user": {
+      "claude": 699,
+      "codex": 556,
+      "cursorKimi": 661,
+      "opencode": 661
+    },
     "inertia_git_status": {
       "claude": 491,
       "codex": 387,
@@ -295,24 +301,24 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 25709,
-      "withoutBrowser": 14288,
-      "withCad": 48073
+      "withBrowser": 26408,
+      "withoutBrowser": 14987,
+      "withCad": 48772
     },
     "codex": {
-      "withBrowser": 21902,
-      "withoutBrowser": 12158,
-      "withCad": 43117
+      "withBrowser": 22458,
+      "withoutBrowser": 12714,
+      "withCad": 43673
     },
     "cursorKimi": {
-      "withBrowser": 25680,
-      "withoutBrowser": 14250,
-      "withCad": 48045
+      "withBrowser": 26341,
+      "withoutBrowser": 14911,
+      "withCad": 48706
     },
     "opencode": {
-      "withBrowser": 25671,
-      "withoutBrowser": 14250,
-      "withCad": 48035
+      "withBrowser": 26332,
+      "withoutBrowser": 14911,
+      "withCad": 48696
     }
   }
 }

@@ -301,7 +301,9 @@ export function agentContextTurnPage(
     const text = cleanText(message.content);
     if (offset > text.length) throw new Error(CURSOR_NOT_FROM_TURN);
     const rest = text.slice(offset);
-    const kind = row.role === "assistant"
+    const kind = row.sentToUser
+      ? "sent-to-user"
+      : row.role === "assistant"
       ? "answer"
       : row.watcherNote ? "watcher-note" : row.id === turn.userMessageId ? "request" : "user";
     const base: JsonEntry = {

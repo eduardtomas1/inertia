@@ -828,6 +828,8 @@ export function messageFromRow(row: MessageRow): ChatMessage {
     ...(row.role === "system" && row.turn_id === null && isContextCompaction(compaction) ? { compaction } : {}),
     ...(row.role === "system" && row.turn_id !== null && isHtmlRenderReference(htmlRender) ? { htmlRender } : {}),
     ...(row.role === "system" && row.turn_id !== null && isSecretRequestReference(secretRequest) ? { secretRequest } : {}),
+    ...(row.role === "system" && row.turn_id !== null && row.sent_to_user === 1 && htmlRender === undefined && secretRequest === undefined
+      ? { sentToUser: true as const } : {}),
     id: row.id,
     conversationId: row.conversation_id,
     turnId: row.turn_id,

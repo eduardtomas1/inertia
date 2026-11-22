@@ -861,6 +861,11 @@
           "digest": "83739024e902e8a3f78d66c824686f50e56f6d8f4e4cc8c74d0b75b94aaa89e8"
         }
       ]
+    },
+    {
+      "version": 118,
+      "name": "PersistSentToUserMessages",
+      "digest": "7c8ea8b75b2fec4badca311aea73ca91fc2e9a7de87749ac3446d1c758dc9471"
     }
   ]
 }

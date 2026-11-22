@@ -154,10 +154,10 @@ describe("inertia_render_html definition", () => {
       });
       expect(registry.manifest().packs.find(({ id }) => id === "inertia.visual-replies")).toEqual({
         id: "inertia.visual-replies",
-        revision: 2,
+        revision: 3,
         title: "Inertia visual replies",
         summary: expect.any(String),
-        toolNames: ["inertia_render_html"],
+        toolNames: ["inertia_render_html", "inertia_send_to_user"],
         evaluation: expect.objectContaining({ evidenceKinds: ["host-tool-result"] }),
       });
       expect(registry.instructions().map(({ label }) => label)).not.toContain("inertia-visual-replies");

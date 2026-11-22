@@ -406,7 +406,7 @@ describe("AgentThreadManager", () => {
         packs: [
           expect.objectContaining({ id: "inertia.frontend-workbench" }),
           expect.objectContaining({ id: "inertia.orchestration" }),
-          expect.objectContaining({ id: "inertia.visual-replies", revision: 2, toolNames: ["inertia_render_html"] }),
+          expect.objectContaining({ id: "inertia.visual-replies", revision: 3, toolNames: ["inertia_render_html", "inertia_send_to_user"] }),
           expect.objectContaining({
             id: "inertia.workspace",
             revision: 3,
@@ -1345,6 +1345,47 @@ describe("AgentThreadManager", () => {
         result: null,
         persisted: true,
         next: "The latest turn ended (failed) without a reply; read inertia_get_conversation_status for its terminal reason.",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("never reads a message the managed chat showed mid-turn as its latest result", async () => {
+    const { manager, source, sourceTurn, store, turns } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const childThatShowed = async (title: string) => {
+        const created = await bridge.invoke(call("inertia_create_conversation", { title, prompt: "Work" }));
+        const { conversationId, turnId } = JSON.parse(created.text) as { conversationId: string; turnId: string };
+        const child = store.agentTurn(turnId);
+        store.sentToUser.create({ conversationId, runId: child.runId, turnId, content: "Here is the draft I mean." });
+        turns.cancel(conversationId);
+        const settle = (terminalAssistantMessageId: string | null) => store.updateAgentTurnLifecycle(turnId, {
+          status: "completed",
+          terminalAssistantMessageId,
+          startedAt: child.requestedAt,
+          completedAt: new Date().toISOString(),
+          terminalReason: "provider-completed",
+        });
+        return { conversationId, turnId, settle };
+      };
+      const silent = await childThatShowed("Silent child");
+      silent.settle(null);
+      expect(JSON.parse((await bridge.invoke(call("inertia_get_latest_result", { conversationId: silent.conversationId }))).text)).toEqual({
+        conversationId: silent.conversationId,
+        result: null,
+        persisted: true,
+        next: "The latest turn ended (completed) without a reply; read inertia_get_conversation_status for its terminal reason.",
+      });
+
+      const answered = await childThatShowed("Answered child");
+      const reply = store.createMessage(answered.conversationId, "Published.", "assistant", [], answered.turnId);
+      answered.settle(reply.id);
+      expect(JSON.parse((await bridge.invoke(call("inertia_get_latest_result", { conversationId: answered.conversationId }))).text)).toMatchObject({
+        turnId: answered.turnId,
+        result: "Published.",
+        source: "visible-assistant-message",
       });
     } finally {
       store.close();

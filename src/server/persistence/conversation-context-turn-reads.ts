@@ -60,6 +60,8 @@ export type ConversationContextTurnEntryRow =
       createdAt: string;
       attachments: ChatAttachment[];
       watcherNote: boolean;
+      /** Markdown the agent showed the user mid-turn; never the turn's answer. */
+      sentToUser?: true;
     }
   | { kind: "page"; id: string; title: string | null; createdAt: string }
   | {
@@ -323,7 +325,7 @@ export class ConversationContextTurnReads {
     const messageRows = this.context.database.prepare(`
       SELECT id, role, created_at, attachments_json,
         CASE WHEN role = 'system' THEN json_extract(html_render_json, '$.title') END AS page_title,
-        watcher_note_json IS NOT NULL AS watcher_note
+        watcher_note_json IS NOT NULL AS watcher_note, sent_to_user
       FROM messages
       WHERE conversation_id = ? AND (turn_id = ? OR id = ?)
         AND ${CONVERSATION_CONTEXT_MESSAGE_SQL}
@@ -336,8 +338,10 @@ export class ConversationContextTurnReads {
       attachments_json: string;
       page_title: unknown;
       watcher_note: 0 | 1;
+      sent_to_user: 0 | 1;
     }>;
     const messages = messageRows.slice(0, MAX_TURN_MESSAGES).map((row): ConversationContextTurnEntryRow => row.role === "system"
+      && row.sent_to_user !== 1
       ? {
           kind: "page",
           id: row.id,
@@ -347,10 +351,11 @@ export class ConversationContextTurnReads {
       : {
           kind: "message",
           id: row.id,
-          role: row.role,
+          role: row.role === "system" ? "assistant" : row.role,
           createdAt: row.created_at,
           attachments: parseStoredAttachments(row.attachments_json),
           watcherNote: row.watcher_note === 1,
+          ...(row.role === "system" ? { sentToUser: true as const } : {}),
         });
     const activityRows = this.context.database.prepare(`
       SELECT id, kind, title, status, created_at,

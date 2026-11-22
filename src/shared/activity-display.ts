@@ -10,6 +10,7 @@ const HOST_TOOL_TITLE =
 const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done: string, failed: string]>> = {
   inertia_render_html: ["Rendering a page", "Rendered a page", "Could not render a page"],
   inertia_request_secret: ["Asking for a secret", "Secret saved", "No secret saved"],
+  inertia_send_to_user: ["Showing a message", "Showed a message", "Could not show a message"],
 };
 
 export function unwrapShellCommand(command: string): string {

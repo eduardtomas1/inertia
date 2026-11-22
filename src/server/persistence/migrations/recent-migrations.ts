@@ -41,6 +41,7 @@ import { nativeGrokProviderMigration } from "./native-grok-provider";
 import { customAgentsMigration } from "./custom-agents";
 import { agentSecretRequestsMigration } from "./agent-secret-requests";
 import { extendColorThemesMigration } from "./extend-color-themes";
+import { sentToUserMessagesMigration } from "./sent-to-user-messages";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -85,4 +86,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   customAgentsMigration,
   agentSecretRequestsMigration,
   extendColorThemesMigration,
+  sentToUserMessagesMigration,
 ];

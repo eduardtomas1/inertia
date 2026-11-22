@@ -228,8 +228,9 @@ set a fixed viewport, such as 1280 by 800 for a desktop layout, with
 
 ### Visual replies
 
-`inertia.visual-replies` adds one tool, `inertia_render_html`, for every
-provider that has Inertia host tools. The agent passes one self-contained HTML
+`inertia.visual-replies` (revision 3) adds two tools for every provider that
+has Inertia host tools: `inertia_render_html`, below, and
+`inertia_send_to_user`, described under Messages to the user. The agent passes one self-contained HTML
 document (at most 262,144 UTF-8 bytes, stated in the `html` field description
 rather than as `maxLength`, which JSON Schema counts in characters), a title of at most 120 characters without
 control characters, and an optional initial frame height from 80 to 2000 CSS
@@ -289,6 +290,63 @@ has no capability epoch that would restart an existing thread for a new tool.
 Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
+
+### Messages to the user
+
+Claude 5.1 and later return the text a model writes before a tool call only
+as a short summary, while the tool's input arrives intact. An agent therefore
+cannot show the user a draft, a code block, or what a question it is about to
+ask refers to by writing it before its next tool call. `inertia_send_to_user`
+takes `{ message }`, Markdown of 1 to 4,000 characters, and shows it in the
+agent's own turn exactly as written. The description reads: "Show the user a
+Markdown message in this chat, exactly as written, before your turn ends. Use
+it for content the user must read in full mid-turn, such as a draft, a code
+block, or what a question you are about to ask refers to. Don't repeat it in
+your reply." Characters are counted as Unicode code points, the unit JSON
+Schema's `maxLength` counts and the unit `inertia_render_html` counts its title
+in, so 4,000 emoji are accepted. A message that is empty, only whitespace, or
+contains a NUL character is refused; the advertised `pattern` states the same
+rule, so every schema-valid message is accepted. The text is stored unchanged,
+leading and trailing whitespace included.
+
+The tool is read-only, non-destructive and not idempotent, and needs no
+approval in any access mode or in Plan mode: it writes only the caller's own
+turn. It sets `alwaysLoad`, so Claude Code never defers it behind tool search,
+since a model that cannot see the tool writes the message as pre-tool text,
+which arrives summarized. A call is accepted only from the exact active source
+turn, and a turn shows at most 20 messages. In one database transaction
+Inertia checks that the turn is still active and under the limit, then stores
+a turn-scoped system message with the Markdown as its text and
+`sentToUser: true` (database schema 118 adds the `messages.sent_to_user`
+flag, which only a system message may set). The message reaches clients
+through the ordinary `conversation.message.persisted` event, and the model
+receives `{ sent: true, message: "Shown to the user. Don't repeat it in your
+reply." }`. Arguments that fail validation, a settled turn, a turn at its
+limit, a cancelled call, a message that contains a secret the user gave the
+agent, and a storage failure return `{ error: { code, message } }` with
+`invalid_arguments` (one `<field>: <problem>` line per problem, like the chat
+tools), `turn_not_active` (or the shared `host_tool_failed` when the turn had
+already settled before dispatch), `message_limit_reached`, `call_cancelled`,
+`secret_value_not_allowed`, or `message_not_saved`.
+
+The chat draws the message as the agent's own words, through the same
+sanitizing Markdown renderer as its replies, with a small *Sent mid-turn*
+label, at its place among the turn's prose and tool calls: it ends the group
+of tool rows before it, like prose does. When a settled turn folds its work,
+the message stays in view below the fold row with the turn's other exchanges
+(follow-ups, pages, secret cards), and a turn whose only other content is
+its answer keeps its work log instead of consolidating, so the message is not
+lost. It is never the turn's reply: the final answer, its anchor, the
+latest-result read (`inertia_get_latest_result` still says a turn without a
+reply ended without one), the minimap summary and title generation ignore it.
+Later reads of the chat see it as the agent's words: a turn read
+(`inertia_request_context`) lists it as a `sent-to-user` entry with its text,
+neutralized like other agent text; shared chat context, continuation history
+for another model or a fresh native session, and Private Connect carry its
+text as an assistant message under their usual bounds (an excerpt keeps at
+most 8 KiB of a message that is not the final answer); and message search
+finds it. Pages stay one-line notes there. Watcher digests read only
+assistant messages and leave it out.
 
 ### inertia.workspace
 
@@ -498,8 +556,10 @@ descriptions say what the tools do.
 Claude Code defers MCP tools behind its tool search. A tool definition can set
 `alwaysLoad`, which Claude's tools/list sends as
 `_meta: { "anthropic/alwaysLoad": true }`, so Claude Code always loads that
-tool. Only `inertia_request_secret` sets it: a model that cannot see that tool
-asks for the secret in chat, which the tool exists to prevent. The key is
+tool. Only `inertia_request_secret` and `inertia_send_to_user` set it: a
+model that cannot see the first asks for the secret in chat, which the tool
+exists to prevent, and one that cannot see the second writes the message as
+pre-tool text, which arrives summarized. The key is
 Anthropic's, so the tool lists Codex, Cursor, Kimi and OpenCode receive do not
 carry it.
 `alwaysLoad` enters a pack's definition digest only when it is set, so other

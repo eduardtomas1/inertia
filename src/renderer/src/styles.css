@@ -1130,23 +1130,6 @@ textarea {
   display: none;
 }
 
-.project-icon {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-}
-
-.project-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-name {
-  color: var(--text);
-  font-size: var(--text-sm);
-  font-weight: 500;
-}
-
 .conversation-menu {
   position: absolute;
   z-index: 55;

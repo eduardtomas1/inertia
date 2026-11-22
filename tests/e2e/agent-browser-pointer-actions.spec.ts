@@ -132,6 +132,15 @@ test("an agent drags precisely on a desktop viewport scaled into a narrower pane
     await selectWorkspaceTool(panel, "Browser");
     await open();
     await expect.poll(() => app.nativePreviewIsVisible(`${app.previewUrl}${PATH}`)).toBe(true);
+    // Let the opening panel settle first: a drag refuses if the page's bounds change while it runs.
+    const stage = panel.locator(".preview-safe-stage");
+    await expect.poll(async () => {
+      const box = await stage.boundingBox();
+      const view = (await app.nativePreviewSnapshot(`${app.previewUrl}${PATH}`)).bounds;
+      return box !== null && view !== null
+        && view.x === Math.round(box.x) && view.y === Math.round(box.y)
+        && view.width === Math.round(box.width) && view.height === Math.round(box.height);
+    }).toBe(true);
     expect(await browser({ action: "resize", preset: "desktop" })).toMatchObject({ ok: true });
     await expect.poll(() => pageValue<number>("innerWidth")).toBe(1_280);
     const ref = await refs();

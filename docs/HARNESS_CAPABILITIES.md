@@ -594,7 +594,7 @@ A Codex-native goal is not repeated there: it reaches Codex through its own
 thread-goal API as before.
 
 When a project turns Browser access off, its turns are not offered
-`inertia.frontend-workbench`: none of the sixteen Browser tools is advertised
+`inertia.frontend-workbench`: none of the seventeen Browser tools is advertised
 and the frontend instructions are left out of the block. The other packs,
 including `inertia.workspace`, are unchanged. The block's digest changes with
 the setting, so the next turn delivers the changed block. Claude, Cursor, Kimi, and OpenCode attach tools for each turn, so

@@ -302,7 +302,11 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
     sendInputEvent(input: Record<string, unknown>): void {
       this.sentInputs.push(input);
       electronState.interactionTimeline.push(String(input.type));
-      this.emit("input-event", {}, typeof input.keyCode === "string" ? { ...input, key: input.keyCode } : input);
+      // Chromium reports the DOM key for Electron's accelerator names.
+      const domKeys: Record<string, string> = { Up: "ArrowUp", Down: "ArrowDown", Left: "ArrowLeft", Right: "ArrowRight" };
+      this.emit("input-event", {}, typeof input.keyCode === "string"
+        ? { ...input, key: domKeys[input.keyCode] ?? input.keyCode }
+        : input);
     }
     async insertText(text: string): Promise<void> { this.insertedText.push(text); }
     readonly throttling: boolean[] = [];
@@ -356,6 +360,7 @@ export function createPreviewBrokerPageTools() {
     agentPageNestedScreenshotEvidence: vi.fn<() => Promise<"clear" | "sensitive" | "unreadable">>(async () => "clear"),
     agentPageInnerSize: vi.fn<() => Promise<{ width: number; height: number }>>(async () => ({ width: 1_280, height: 800 })),
     agentPageInputRefusal: vi.fn<() => Promise<"disabled" | "file" | "nested" | "retargeted" | null>>(async () => null),
+    agentPageDropPoint: vi.fn<(contents: unknown, ref: string) => Promise<{ x: number; y: number } | null>>(async () => null),
     agentPageRefHasFocus: vi.fn(async () => true),
     installAgentPagePrivacyGuard: vi.fn(async () => undefined),
     locateAgentPageRef: vi.fn<() => Promise<PreviewAgentTarget>>(async () => ({

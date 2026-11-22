@@ -14,7 +14,7 @@ import { AGENT_BROWSER_TOOL_DEFINITIONS } from "../../src/server/runtime/agent-b
 const DESTRUCTIVE = new Set([
   "inertia_browser_navigate", "inertia_browser_click", "inertia_browser_type",
   "inertia_browser_press", "inertia_browser_open_tab", "inertia_browser_close_tab",
-  "inertia_browser_resize", "inertia_browser_hover", "inertia_browser_select",
+  "inertia_browser_resize", "inertia_browser_hover", "inertia_browser_select", "inertia_browser_drag",
 ]);
 const READ_ONLY = new Set([
   "inertia_browser_snapshot", "inertia_browser_screenshot", "inertia_browser_tabs", "inertia_browser_wait_for",

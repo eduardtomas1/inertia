@@ -53,7 +53,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 describe("Claude in-process Inertia chat tools", () => {
   it.each([
     { browserAccess: false, browserTools: 0 },
-    { browserAccess: true, browserTools: 16 },
+    { browserAccess: true, browserTools: 17 },
   ])("lists only the turn's offered tools (browserAccess=$browserAccess)", async ({
     browserAccess,
     browserTools,

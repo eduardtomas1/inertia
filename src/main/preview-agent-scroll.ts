@@ -66,6 +66,22 @@ export async function agentPageRefOutsideViewport(contents: WebContents, ref: st
   })()`) === true;
 }
 
+/**
+ * Whether a ref's element is still rendered anywhere in the document, in or
+ * out of the viewport. Callers ask only after a guarded page read, so this
+ * reveals nothing a snapshot would withhold.
+ */
+export async function agentPageRefRendered(contents: WebContents, ref: string): Promise<boolean> {
+  return await execute(contents, `(() => {
+    const element = globalThis.__inertiaAgentBrowser?.refs?.get(${JSON.stringify(ref)});
+    if (!element || !element.isConnected) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const style = getComputedStyle(element);
+    return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity || "1") > 0;
+  })()`) === true;
+}
+
 export async function scrollAgentPageRefIntoView(contents: WebContents, ref: string): Promise<AgentPageScroll> {
   const value = await execute(contents, `(() => {
     const element = globalThis.__inertiaAgentBrowser?.refs?.get(${JSON.stringify(ref)});

@@ -1,6 +1,7 @@
 import type { NativeImage, Rectangle } from "electron";
 
 import {
+  agentBrowserPathMatches,
   type AgentBrowserActivity,
   type AgentBrowserCommand,
   type AgentBrowserResult,
@@ -13,7 +14,7 @@ import type { BrowserEvidenceCapture } from "./browser-evidence-capture.js";
 import { AgentBrowserRefusal, changedGeometry, providerVisiblePageUrl, stopForAbort } from "./preview-agent-action.js";
 import type { BrowserApprovalGuard } from "./preview-agent-approvals.js";
 import {
-  agentPageActivationFailureMessage, agentPageBoundaryGaps, agentPageKeyInput, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, resetAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
+  agentPageActivationFailureMessage, agentPageBoundaryGaps, agentPageKeyInput, agentPageModifiers, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, resetAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import {
   agentPageEvidencePrivacy, agentPageInnerSize, agentPageInputRefusal, agentPageRefHasFocus,
@@ -28,7 +29,7 @@ import { previewAgentPhaseTimeoutMessage, type PreviewAgentOperationFailure, typ
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
 import { agentHistoryNavigation, agentHistoryRefusal, withLoopbackScheme, type AgentHistoryDirection } from "./preview-agent-history.js";
 import { agentPageScreenshotPrivacy, captureAgentPageScreenshot, capturedAgentScreenshotResult, type AgentPageCapture } from "./preview-agent-screenshot.js";
-import { agentPageRefOutsideViewport, describeAgentPageRef, scrollAgentPageRefIntoView } from "./preview-agent-scroll.js";
+import { agentPageRefOutsideViewport, agentPageRefRendered, describeAgentPageRef, scrollAgentPageRefIntoView } from "./preview-agent-scroll.js";
 import { AgentBrowserTimeout, agentOperationDelay, type AgentOperationScope } from "./preview-agent-scope.js";
 import type { PreviewTab } from "./preview-tab.js";
 import {
@@ -55,6 +56,30 @@ type PreviewContents = PreviewTab["view"]["webContents"];
 type PageReading =
   | { ok: true; text: string; state: AgentBrowserState }
   | { ok: false; result: AgentBrowserResult };
+
+type ClickCommand = Extract<AgentBrowserCommand, { action: "click" }>;
+type PressCommand = Extract<AgentBrowserCommand, { action: "press" }>;
+type ScrollTarget = { deltaX?: number; deltaY?: number } | { ref: string };
+
+/** What the input guard matches trusted mouse presses against during one action. */
+export interface AgentInputExpectation {
+  /** The ref every press must land on. */
+  pressRef?: string;
+  /** A drag: the press is matched; a pointer release goes where the page moved the pointer. */
+  drag?: boolean;
+  /** During a drag, the ref a native drop must land on. */
+  dropRef?: string;
+}
+
+const CLICK_VERBS = ["Click", "Double-click", "Triple-click"] as const;
+const CLICK_LABELS = ["clicked", "double-clicked", "triple-clicked"] as const;
+
+function scrollDirections(deltaX: number, deltaY: number): string {
+  return [
+    ...(deltaY === 0 ? [] : [deltaY > 0 ? "down" : "up"]),
+    ...(deltaX === 0 ? [] : [deltaX > 0 ? "right" : "left"]),
+  ].join(" and ");
+}
 
 export interface AgentOperationSession {
   contextId: string;
@@ -99,7 +124,7 @@ export function blankTabRefusal(
   contents: PreviewContents,
   command: AgentBrowserCommand,
 ): AgentBrowserResult | null {
-  return ["click", "type", "press", "scroll", "history", "hover", "select"].includes(command.action) && blankTab(contents)
+  return ["click", "type", "press", "scroll", "history", "hover", "select", "drag"].includes(command.action) && blankTab(contents)
     ? failure("not-found", BLANK_TAB_NEXT_STEP)
     : null;
 }
@@ -278,6 +303,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
   ): Promise<AgentBrowserResult> {
     const startedAt = Date.now();
     const needle = command.text?.replace(/\s+/gu, " ").toLowerCase();
+    const expected = command.state === "present";
     const report = (matched: boolean, nextStep?: string): AgentBrowserResult => successfulAgentBrowserResult(
       boundedAgentStateText(this.host.agentState(session), {
         matched,
@@ -291,12 +317,20 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       const tab = this.host.active(session);
       const contents = tab.view.webContents;
       if (blankTab(contents)) return report(false, BLANK_TAB_NEXT_STEP);
-      if (needle === undefined) {
+      if (needle === undefined && command.path === undefined && command.ref === undefined) {
         if (!contents.isLoading()) return report(true);
       } else {
-        const page = await this.#pollPage(session, tab, scope);
-        if (page && !page.ok) return page.result;
-        if (page && snapshotContains(page.text, needle) === (command.state === "present")) return report(true);
+        // Each condition must reach the requested state; an unreadable poll decides nothing.
+        let reached = command.path === undefined
+          || agentBrowserPathMatches(contents.getURL(), command.path) === expected;
+        if (reached && (needle !== undefined || command.ref !== undefined)) {
+          const page = await this.#pollPage(session, tab, scope);
+          if (page && !page.ok) return page.result;
+          reached = page !== null
+            && (needle === undefined || snapshotContains(page.text, needle) === expected)
+            && (command.ref === undefined || await this.#pollRef(contents, command.ref, scope) === expected);
+        }
+        if (reached) return report(true);
       }
       if (Date.now() - startedAt + WAIT_POLL_MS >= command.timeoutMs) {
         return report(false, "The condition was not reached in time. Take a snapshot to see what the page shows now.");
@@ -474,11 +508,14 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
 
   async click(
     session: Session,
-    ref: string,
+    command: ClickCommand,
     scope: AgentOperationScope,
     validate?: BrowserApprovalGuard,
-    dialog?: PreviewAgentDialogAnswer,
   ): Promise<AgentBrowserResult> {
+    const { ref, dialog } = command;
+    const clicks = command.clickCount ?? 1;
+    const modifiers = agentPageModifiers(command.modifiers);
+    const held = modifiers.length > 0 ? { modifiers } : {};
     const contents = this.host.active(session).view.webContents;
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
@@ -497,7 +534,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     stopForAbort(scope.signal);
     await this.rendererOperation(
       contents,
-      () => showAgentPageCursor(contents, cursorX, cursorY, "Agent click"),
+      () => showAgentPageCursor(contents, cursorX, cursorY, `Agent ${CLICK_VERBS[clicks - 1]!.toLowerCase()}`),
       { scope, phase: "page-cursor" },
     );
     if (session.boundsGeneration !== boundsGeneration) return changedGeometry();
@@ -546,16 +583,25 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       validate?.(finalTarget);
       if (!agentPageViewPoint(map, x, y)) throw new AgentBrowserRefusal(failure("not-found", OUTSIDE_VIEWPORT_MESSAGE));
       if (dialog === "accept") await this.#armDialogs(contents, scope);
-      sendAgentPageInput(contents, { type: "mouseDown", x, y, button: "left", clickCount: 1 }, map);
-      sendAgentPageInput(contents, { type: "mouseUp", x, y, button: "left", clickCount: 1 }, map);
-    }, scope, ref, dialog);
+      // A double or triple click is the same press repeated with a rising
+      // count, as a real mouse reports it; every press is matched to the ref.
+      for (let clickCount = 1; clickCount <= clicks; clickCount += 1) {
+        sendAgentPageInput(contents, { type: "mouseDown", x, y, button: "left", clickCount, ...held }, map);
+        sendAgentPageInput(contents, { type: "mouseUp", x, y, button: "left", clickCount, ...held }, map);
+      }
+    }, scope, { pressRef: ref }, dialog);
     if (deliveryRefusal === "retargeted") return failure("not-found", "That page element changed during the click. Take a new inertia_browser_snapshot for current refs.");
     if (deliveryRefusal) return failure("invalid", deliveryRefusal === "file"
       ? "File inputs cannot be activated by the Browser agent."
       : deliveryRefusal === "disabled" ? "That page element became disabled during the click."
         : "The click could not be delivered because the page reported a target Inertia cannot inspect. Take a new snapshot and click a listed control.");
-    this.host.record(session, "click", "Agent clicked a page element", { x, y });
-    return this.#stateResult(session, { clicked: ref, ...await this.#dialogDetail(contents, scope) });
+    this.host.record(session, "click", `Agent ${CLICK_LABELS[clicks - 1]} a page element`, { x, y });
+    return this.#stateResult(session, {
+      clicked: ref,
+      ...(clicks > 1 ? { clickCount: clicks } : {}),
+      ...(command.modifiers ? { modifiers: command.modifiers } : {}),
+      ...await this.#dialogDetail(contents, scope),
+    });
   }
 
   async type(
@@ -655,17 +701,17 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
 
   async press(
     session: Session,
-    key: string,
+    command: PressCommand,
     scope: AgentOperationScope,
     validate?: BrowserApprovalGuard,
-    dialog?: PreviewAgentDialogAnswer,
   ): Promise<AgentBrowserResult> {
+    const { dialog } = command;
     stopForAbort(scope.signal);
     const contents = this.host.active(session).view.webContents;
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
     let activationBlocked: "disabled" | "file" | "nested" | "retargeted" | null = null;
-    const { keyCode, modifiers } = agentPageKeyInput(key);
+    const { keyCode, modifiers, label } = agentPageKeyInput(command.key, command.modifiers);
     const deliveryRefusal = await this.#sendInputAndWait(contents, async () => {
       scope.inputSent = true;
       if (dialog === "accept") await this.#armDialogs(contents, scope);
@@ -688,16 +734,16 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         sendAgentPageInput(contents, { type: "keyDown", keyCode, ...keyModifiers });
         sendAgentPageInput(contents, { type: "keyUp", keyCode, ...keyModifiers });
       }
-    }, scope, undefined, dialog);
+    }, scope, {}, dialog);
     const refusal = activationBlocked || deliveryRefusal;
     if (refusal) return failure("invalid", agentPageActivationFailureMessage(refusal));
-    this.host.record(session, "press", `Agent pressed ${key}`);
-    return this.#stateResult(session, { pressed: key, ...await this.#dialogDetail(contents, scope) });
+    this.host.record(session, "press", `Agent pressed ${label}`);
+    return this.#stateResult(session, { pressed: label, ...await this.#dialogDetail(contents, scope) });
   }
 
   async scroll(
     session: Session,
-    target: { deltaY: number } | { ref: string },
+    target: ScrollTarget,
     scope: AgentOperationScope,
     validate?: BrowserApprovalGuard,
   ): Promise<AgentBrowserResult> {
@@ -719,21 +765,27 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       this.host.record(session, "scroll", "Agent scrolled to a page element");
       return this.#stateResult(session, { scrolled: target.ref, viewport: scrolled.viewport });
     }
-    const { deltaY } = target;
+    const deltaX = target.deltaX ?? 0;
+    const deltaY = target.deltaY ?? 0;
     const view = agentViewportLayout(session.bounds, session.viewport).bounds;
     await this.#sendInputAndWait(contents, () => {
       validate?.();
       scope.inputSent = true;
+      // Chromium wheel deltas count towards the top and left, the opposite of
+      // the tool's contract and of DOM WheelEvent deltas, so both are negated.
       sendAgentPageInput(contents, {
         type: "mouseWheel",
         x: Math.max(0, Math.floor(view.width / 2)),
         y: Math.max(0, Math.floor(view.height / 2)),
-        deltaX: 0,
-        deltaY,
+        deltaX: deltaX === 0 ? 0 : -deltaX,
+        deltaY: deltaY === 0 ? 0 : -deltaY,
       });
     }, scope);
-    this.host.record(session, "scroll", `Agent scrolled ${deltaY > 0 ? "down" : "up"}`);
-    return this.#stateResult(session, { scrolled: deltaY });
+    this.host.record(session, "scroll", `Agent scrolled ${scrollDirections(deltaX, deltaY)}`);
+    // A vertical scroll keeps its original numeric result.
+    return this.#stateResult(session, {
+      scrolled: target.deltaX === undefined ? deltaY : { deltaX, ...(target.deltaY === undefined ? {} : { deltaY }) },
+    });
   }
 
   async #locateInView(contents: PreviewContents, ref: string, scope: AgentOperationScope): Promise<PreviewAgentTarget> {
@@ -800,6 +852,15 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       "invalid",
       "Inertia Browser only opens local development addresses: http or https on localhost, 127.0.0.1 or [::1], with a port if needed. Remote sites are not available to this tool.",
     );
+  }
+
+  async #pollRef(contents: PreviewContents, ref: string, scope: AgentOperationScope): Promise<boolean | null> {
+    try {
+      return await this.rendererOperation(contents, () => agentPageRefRendered(contents, ref), { scope, phase: "element-lookup" });
+    } catch (error) {
+      if (scope.signal.aborted || error instanceof AgentBrowserRefusal) throw error;
+      return null;
+    }
   }
 
   async #pollPage(
@@ -988,7 +1049,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     contents: PreviewContents,
     dispatch: () => void | Promise<void>,
     scope: AgentOperationScope,
-    expectedClickRef?: string,
+    expected: AgentInputExpectation = {},
     dialog?: PreviewAgentDialogAnswer,
   ): Promise<Awaited<ReturnType<typeof agentPageInputRefusal>>> {
     stopForAbort(scope.signal);
@@ -1000,7 +1061,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     try {
       await this.rendererOperation(
         contents,
-        () => setAgentPageInputGuard(contents, true, expectedClickRef),
+        () => setAgentPageInputGuard(contents, true, expected.pressRef, expected.drag === true, expected.dropRef),
         { scope, phase: "input-guard" },
       );
       beginAgentPageInputRefusalCapture(contents);
@@ -1056,7 +1117,8 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     contents: PreviewContents,
     dispatch: () => Promise<void>,
     scope: AgentOperationScope,
+    expected?: AgentInputExpectation,
   ): Promise<Awaited<ReturnType<typeof agentPageInputRefusal>>> {
-    return await this.#sendInputAndWait(contents, dispatch, scope);
+    return await this.#sendInputAndWait(contents, dispatch, scope, expected);
   }
 }

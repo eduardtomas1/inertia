@@ -37,6 +37,21 @@ The useful changes in each Inertia release, in plain language.
   and on any high advisory in build tools unless it has a reviewed,
   expiring exception.
 
+### Browser agent
+
+- Agents can double- and triple-click, hold Shift, Control, Alt or Meta while
+  clicking or pressing a key, scroll sideways, and drag one control onto
+  another, including on pages that use native HTML drag and drop. A drag
+  never carries a file, needs both controls in view, and its approval names
+  both. Clicks at a screen position are not offered, because an approval
+  could not say what they would hit.
+- Agents can wait for the page to reach a path such as `/orders/*`, or for a
+  control to disappear. They still only see a page's origin: a wait compares
+  the whole path and answers only whether it matched.
+- Scrolling by pixels went the wrong way: scrolling down scrolled up. The
+  arrow keys reached pages as an unidentified key and stopped the agent as if
+  the user had typed. Both work now.
+
 ### Dependencies
 
 - Updated the Claude Agent SDK to 0.3.323. If a wrapper script keeps Claude

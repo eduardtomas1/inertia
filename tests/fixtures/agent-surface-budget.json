@@ -182,11 +182,17 @@
       "cursorKimi": 933,
       "opencode": 933
     },
+    "inertia_list_models": {
+      "claude": 536,
+      "codex": 432,
+      "cursorKimi": 536,
+      "opencode": 536
+    },
     "inertia_create_conversation": {
-      "claude": 1409,
-      "codex": 1303,
-      "cursorKimi": 1409,
-      "opencode": 1409
+      "claude": 1454,
+      "codex": 1348,
+      "cursorKimi": 1454,
+      "opencode": 1454
     },
     "inertia_send_message": {
       "claude": 546,
@@ -225,7 +231,7 @@
       "opencode": 484
     },
     "inertia_request_secret": {
-      "claude": 1178,
+      "claude": 1216,
       "codex": 1073,
       "cursorKimi": 1178,
       "opencode": 1178
@@ -271,36 +277,42 @@
       "codex": 365,
       "cursorKimi": 469,
       "opencode": 469
+    },
+    "inertia_pull_request_status": {
+      "claude": 474,
+      "codex": 370,
+      "cursorKimi": 474,
+      "opencode": 474
     }
   },
   "instructions": {
     "inertia-cad": 433,
     "inertia-frontend-workbench": 541,
     "inertia-orchestration": 623,
-    "inertia-workspace": 482,
+    "inertia-workspace": 509,
     "mcp-initialize:claude": 0,
     "mcp-initialize:http": 0
   },
   "totals": {
     "claude": {
-      "withBrowser": 24589,
-      "withoutBrowser": 13168,
-      "withCad": 43244
+      "withBrowser": 25709,
+      "withoutBrowser": 14288,
+      "withCad": 44364
     },
     "codex": {
-      "withBrowser": 21028,
-      "withoutBrowser": 11284,
-      "withCad": 38534
+      "withBrowser": 21902,
+      "withoutBrowser": 12158,
+      "withCad": 39408
     },
     "cursorKimi": {
-      "withBrowser": 24598,
-      "withoutBrowser": 13168,
-      "withCad": 43254
+      "withBrowser": 25680,
+      "withoutBrowser": 14250,
+      "withCad": 44336
     },
     "opencode": {
-      "withBrowser": 24589,
-      "withoutBrowser": 13168,
-      "withCad": 43244
+      "withBrowser": 25671,
+      "withoutBrowser": 14250,
+      "withCad": 44326
     }
   }
 }

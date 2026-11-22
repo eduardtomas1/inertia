@@ -11,9 +11,7 @@ import {
   providerIdForHarness,
   type ModelSelection,
 } from "../../shared/model-routing";
-import {
-  modelSelectionForBackendProfile,
-} from "../../shared/backend-profile-settings";
+import type { ModelBackendProfileDetail } from "../../shared/backend-profile-settings";
 import type { RuntimeStore } from "../database";
 import {
   AGENT_THREAD_MAX_DEPTH,
@@ -41,6 +39,13 @@ import {
   type AgentContextWatcherPolicy,
 } from "./agent-context-tool";
 import { hostToolDigest as digest } from "./host-tool-digest";
+import {
+  MODEL_LIST_TOOL_DEFINITION,
+  MODEL_LIST_TOOL_NAME,
+  listModelRoutes,
+  resolveRouteSelection,
+  type ModelRouteCandidate,
+} from "./agent-model-routes";
 import { invalidHostToolArguments } from "./host-tool-argument-errors";
 import type { TurnController } from "./turns/turn-controller";
 import {
@@ -173,9 +178,10 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
     readOnly: true,
   },
   AGENT_CONTEXT_TOOL_DEFINITION,
+  MODEL_LIST_TOOL_DEFINITION,
   {
     name: "inertia_create_conversation",
-    description: `Start a top-level chat with \`prompt\`; Inertia asks the user first. \`workspace.kind\`: project (default), reuse-current (this chat's worktree), isolated (new).`,
+    description: `Start a top-level chat with \`prompt\`; Inertia asks the user first. Get \`route\` values from ${MODEL_LIST_TOOL_NAME}. \`workspace.kind\`: project (default), reuse-current (this chat's worktree), isolated (new).`,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -505,6 +511,8 @@ export class AgentThreadManager {
           }, call.arguments, call.signal);
         case "inertia_get_latest_result":
           return this.latestResult(current, call.arguments);
+        case MODEL_LIST_TOOL_NAME:
+          return await this.listModels(current, call.arguments, call.signal);
         case AGENT_CONTEXT_TOOL_NAME:
           return await this.contextTool.invoke(source, call);
         case "inertia_create_conversation":
@@ -899,33 +907,45 @@ export class AgentThreadManager {
     };
   }
 
+  private async listModels(source: Conversation, args: unknown, signal: AbortSignal): Promise<ProviderHostToolResult> {
+    const controller = this.dependencies.backendProfileController;
+    const providerInfo = this.dependencies.providerInfo();
+    // One read per backend instead of one per model and reasoning effort.
+    const details = new Map<string, ModelBackendProfileDetail>();
+    const detail = (profileId: string): ModelBackendProfileDetail => {
+      const known = details.get(profileId) ?? controller.detail(profileId);
+      details.set(profileId, known);
+      return known;
+    };
+    return listModelRoutes(source, args, {
+      profiles: () => controller.profiles(providerInfo),
+      providerInfo: () => providerInfo,
+      accepts: (route) => this.routeAccepted(source, route, detail),
+    }, signal);
+  }
+
+  /** Whether `inertia_create_conversation` would accept `route` exactly as given. */
+  private routeAccepted(
+    source: Conversation,
+    route: ModelRouteCandidate,
+    detail: (profileId: string) => ModelBackendProfileDetail,
+  ): boolean {
+    const parsed = routeSchema.safeParse(route);
+    const fields = Object.keys(route) as (keyof ModelRouteCandidate)[];
+    if (!parsed.success || fields.some((field) => parsed.data[field] !== route[field])) return false;
+    try {
+      resolveRouteSelection(this.dependencies.backendProfileController, source, parsed.data, detail);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private resolveSelection(
     source: Conversation,
     input: z.infer<typeof routeSchema> | undefined,
   ): ModelSelection {
-    if (!input) return this.dependencies.backendProfileController
-      .validateSelection(source.modelSelection);
-    const profileId = input.backendProfileId
-      ?? source.modelSelection.backendProfileId;
-    const profile = this.dependencies.backendProfileController.detail(profileId);
-    const modelId = input.modelId
-      ?? (profileId === source.modelSelection.backendProfileId
-        ? source.modelSelection.modelId
-        : profile.routing.primaryModelId);
-    const reasoningEffort = input.reasoningEffort !== undefined
-      ? input.reasoningEffort
-      : profileId === source.modelSelection.backendProfileId
-        && modelId === source.modelSelection.modelId
-        ? source.modelSelection.reasoningEffort
-        : null;
-    const selection = this.dependencies.backendProfileController.validateSelection(
-      modelSelectionForBackendProfile(profile, modelId, reasoningEffort),
-    );
-    const providerId = providerIdForHarness(selection.harnessId);
-    if (!providerId || (input.providerId && input.providerId !== providerId)) {
-      throw new Error("The requested provider does not match the verified backend route.");
-    }
-    return selection;
+    return resolveRouteSelection(this.dependencies.backendProfileController, source, input);
   }
 
   private async assertRouteReady(selection: ModelSelection): Promise<void> {

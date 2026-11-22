@@ -976,6 +976,18 @@ export function modelSelectionForBackendProfile(
   const profile = persistedModelBackendProfileSchema.parse(profileInput);
   const model = profile.models.find((candidate) => candidate.id === modelId);
   if (!model) throw new Error("The selected model is unavailable on this backend.");
+  return modelSelectionForBackendModel(profile, model, reasoningEffort);
+}
+
+/**
+ * The selection for one model of a backend, from the fields a stored profile
+ * and the controller's profile view share.
+ */
+export function modelSelectionForBackendModel(
+  profile: Pick<PersistedModelBackendProfile, "harnessId" | "id" | "displayName" | "configurationRevision">,
+  model: Pick<BackendModelDefinition, "id" | "displayName" | "contextWindowTokens" | "capabilities">,
+  reasoningEffort: string | null = null,
+): ModelSelection {
   return modelSelectionSchema.parse({
     harnessId: profile.harnessId,
     backendProfileId: profile.id,

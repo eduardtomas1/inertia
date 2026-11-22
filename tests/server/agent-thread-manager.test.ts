@@ -308,6 +308,7 @@ describe("AgentThreadManager", () => {
         expect(bridge.instructions?.map(({ label }) => label)).toEqual(["inertia-orchestration", "inertia-workspace"]);
         expect(bridge.definitions.map(({ name }) => name)).toEqual(expect.arrayContaining([
           "inertia_git_status", "inertia_turn_diff", "inertia_read_plan", "inertia_read_goal", "inertia_list_tasks", "inertia_project_actions",
+          "inertia_pull_request_status",
         ]));
         // A Codex thread that registered Browser tools before the setting
         // changed still reaches a truthful refusal instead of a protocol error.
@@ -408,8 +409,11 @@ describe("AgentThreadManager", () => {
           expect.objectContaining({ id: "inertia.visual-replies", revision: 2, toolNames: ["inertia_render_html"] }),
           expect.objectContaining({
             id: "inertia.workspace",
-            revision: 2,
-            toolNames: ["inertia_git_status", "inertia_turn_diff", "inertia_read_plan", "inertia_read_goal", "inertia_list_tasks", "inertia_project_actions"],
+            revision: 3,
+            toolNames: [
+              "inertia_git_status", "inertia_turn_diff", "inertia_read_plan", "inertia_read_goal", "inertia_list_tasks", "inertia_project_actions",
+              "inertia_pull_request_status",
+            ],
           }),
         ],
       });
@@ -1449,7 +1453,7 @@ describe("inertia_wait_for_conversation", () => {
       expect(definition.description).toMatch(/after a timeout, call again, which doesn't use the allowance/u);
       expect(definition.description).toMatch(/remainingToolCalls/u);
       expect(definition.description.length).toBeLessThanOrEqual(300);
-      expect(env.manager.capabilityManifest().packs.find(({ id }) => id === "inertia.orchestration")?.revision).toBe(4);
+      expect(env.manager.capabilityManifest().packs.find(({ id }) => id === "inertia.orchestration")?.revision).toBe(5);
     } finally { env.store.close(); }
   });
 

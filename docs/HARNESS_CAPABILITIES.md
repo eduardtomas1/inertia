@@ -105,6 +105,48 @@ does not use the allowance. Arguments that fail validation return
 tools. A Codex thread registers it from its next new provider
 thread.
 
+### Choosing a route
+
+`inertia_list_models` (pack revision 5) tells an agent which `route` values
+`inertia_create_conversation` accepts, so it does not have to guess them; the
+create tool's description points to it. It takes an optional
+`backendProfileId` and returns the chat's current route (`current`) and the
+backend profiles the user has: native accounts, API-key presets, the Kimi
+preset and custom backends. Each backend has its `backendProfileId`, `name`,
+`providerId`, `routeKind` (`account` or `api-key`), `primaryModelId` (the model
+a route that names only the backend gets), `usable`, and its models with their
+labels and `reasoningEfforts`; the chat's current model is marked
+`current: true`. `providerId` is the provider of the backend's harness, which is
+what `route.providerId` accepts: the Kimi key route runs on the Claude harness,
+so it is `claude`. Every listed backend, model and reasoning effort has passed
+the create call's own route validation, so a model that a backend shows but
+cannot route to now, such as Grok's built-in catalog while Grok has not
+reported its models, is left out.
+
+`usable: false` comes with a `reason` from a fixed set (not signed in, agent
+CLI missing or needing an update, turned off in Settings, API key missing, last
+connection test failed, not compatible with its harness), worked out from state
+Inertia already holds: the tool never probes a backend. A custom backend's
+model that still needs a connection test reads as usable, because the create
+call tests it before the chat starts. The result never carries base URLs,
+endpoint hosts, keys, provider status messages or account details. Without a
+filter each backend lists at most 40 models; the result stays within 31 KiB
+with usable backends first, a cut sets `truncated` or `modelsTruncated` with
+`totalModels`, and `next` then says to call again with a `backendProfileId`.
+The tool is read-only and needs no approval. Arguments that fail validation,
+including an unknown `backendProfileId`, return `invalid_arguments` in the same
+`<field>: <problem>` form as the other chat tools.
+
+Before this tool, every `route` that named a backend or a model failed: the
+create call parsed the profile controller's view as a stored profile, and that
+schema refuses the view's status fields. The selection is now built from the
+view's model, and the controller's validation makes it canonical as before. A
+wrong route field fails with a line that names it (`route.backendProfileId: no
+such backend`, `route.modelId: not a model of this backend`,
+`route.providerId: does not match the backend's provider`) and points to
+`inertia_list_models`. A Codex thread registers the tool from its next new
+provider thread.
+
 ### Reading chat context
 
 `inertia.orchestration` also carries `inertia_request_context`, which lets an
@@ -250,9 +292,9 @@ tools for each turn and see it from their next turn.
 
 ### inertia.workspace
 
-`inertia.workspace` (revision 2) lets an agent read what the user sees in
+`inertia.workspace` (revision 3) lets an agent read what the user sees in
 Inertia's surfaces for its own chat. It is offered to every provider that has
-Inertia host tools, whatever the project's Browser setting. Its six tools are
+Inertia host tools, whatever the project's Browser setting. Its seven tools are
 read-only and non-destructive, take flat argument objects with no required
 fields, and never ask for approval:
 
@@ -264,6 +306,7 @@ fields, and never ask for approval:
 | `inertia_read_goal` | none | The chat's current goal as the Goal panel shows it: `source` (`codex-native` or `inertia-local`), objective (at most 4 KiB), status, token budget, tokens used, time used, and times; or `goal: null`. |
 | `inertia_list_tasks` | `includeDone?` | Up to 200 open (or, with `includeDone`, all) tasks, newest first: tasks assigned to this project, and tasks with no project (from before tasks had one) that are unlinked or linked to a chat in this project, with `id`, `title`, `note` (at most 1 KiB), `priority`, `dueDate`, `done`, `linkedConversationId`, and `linkedStatus`. |
 | `inertia_project_actions` | none | The project's Run actions for the chat's workspace (configured actions and package scripts) with `id`, `label`, `command`, `preview`, whether each is running (and running in this chat), and `previewUrl` when a local port was detected. Starting and stopping are not offered. |
+| `inertia_pull_request_status` | none | The GitHub pull request of the chat's branch: `number`, `url`, `title`, `state` (`OPEN`, `CLOSED` or `MERGED`), `draft`, `baseBranch`, `headBranch`, `headMatchesLocal`, `mergeable`, `mergeState`, `reviewDecision`, `updatedAt`, `checkCounts` by state, `totalChecks`, and up to 50 `checks` (failed, cancelled and pending first) with `checksTruncated`; or `pullRequest: null` with a `next` step. |
 
 Git status reuses the Changes view's status scan, and turn diffs reuse the
 stored turn artifacts. A settled turn returns its stored patch, or only its
@@ -288,6 +331,25 @@ it returned. A live turn's file list can change between calls; when it has,
 the next result starts again from the first file with `restarted: true`
 instead of skipping or repeating files. Passing a cursor back with another
 turn, or a cursor the tool did not return, is `invalid_arguments`.
+
+Pull request status reads GitHub through the user's own GitHub CLI, found and
+run as for the Pre-merge view: through the restricted runner, without a shell,
+with only the operating-system and proxy variables of its environment
+allowlist, so `gh` uses its own sign-in and never a token from the
+environment. It reads the branch checked out in the chat's workspace (the
+folder `inertia_git_status` reads) and the GitHub repository of that branch's
+push remote, then runs `gh pr list --head <branch> --state all`: the newest
+open pull request from that repository wins, else the newest closed or merged
+one. When the repository has none, `gh repo view --json parent` tells whether
+it is a fork, and the parent is searched for a pull request from the fork's
+owner. One `gh pr view` then reads that pull request. A workspace that is not a
+repository, a detached HEAD, a push remote that is not on github.com and a
+branch without a pull request each return `pullRequest: null` with a `next`
+step, not an error. `headMatchesLocal` says whether the local commit is the
+pull request's head, so unpushed commits show. At most 100 checks are parsed,
+and a check's details link is kept only for failed and cancelled checks and
+only inside the pull request's repository. Git and GitHub CLI share one
+20-second deadline, and cancelling the call stops `gh` and its process tree.
 
 Every result is checked against the 32 KiB host-tool result cap, and lists
 stop early with `truncated` when the next entry would not fit. Text in results
@@ -319,7 +381,10 @@ chat tools), `turn_not_found` (a
 turn of another chat, or no such turn), `workspace_unavailable` (no readable
 workspace folder, or turn diffs in a workspace that is not a Git repository),
 `call_cancelled`, and `host_tool_failed` (including a call from a turn that is
-no longer active).
+no longer active). Pull request status adds `github_cli_unavailable` (GitHub
+CLI missing), `github_cli_unauthenticated` (not signed in), `github_timeout`,
+and `github_unavailable` (offline, rate limited, no access to the repository,
+or malformed data).
 
 Codex App Server registers dynamic tools only when a thread starts, so Codex
 chats see this pack from their next new provider thread. Claude, Cursor, Kimi,
@@ -429,6 +494,16 @@ The MCP server keeps the identifier `inertia-chat-manager`, because provider
 tool names and permission rules are derived from it. Its `initialize` result
 carries no instructions: the hidden instruction block and the tool
 descriptions say what the tools do.
+
+Claude Code defers MCP tools behind its tool search. A tool definition can set
+`alwaysLoad`, which Claude's tools/list sends as
+`_meta: { "anthropic/alwaysLoad": true }`, so Claude Code always loads that
+tool. Only `inertia_request_secret` sets it: a model that cannot see that tool
+asks for the secret in chat, which the tool exists to prevent. The key is
+Anthropic's, so the tool lists Codex, Cursor, Kimi and OpenCode receive do not
+carry it.
+`alwaysLoad` enters a pack's definition digest only when it is set, so other
+tools keep their digests.
 
 ## Hidden instruction delivery
 

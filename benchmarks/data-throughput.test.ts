@@ -11,7 +11,7 @@ import Database from "better-sqlite3";
 import { afterAll, describe, expect, it } from "vitest";
 
 import type { ChatAttachment } from "../src/shared/contracts";
-import { documentAttachmentContexts } from "../src/server/runtime/attachments/document-attachment-context";
+import { prepareDocumentAttachments } from "../src/server/runtime/attachments/document-attachment-context";
 import { DocumentExtractionScheduler } from "../src/server/runtime/attachments/document-extraction-scheduler";
 
 interface Metric {
@@ -202,10 +202,10 @@ async function pdfCase(mode: "unbounded-8" | "bounded-2"): Promise<Metric> {
       ? 20 * 1024 * 1024
       : 12 * 1024 * 1024,
   });
-  const measured = await measureAsync(() => documentAttachmentContexts(
+  const measured = await measureAsync(() => prepareDocumentAttachments(
     payloads,
     { scheduler, groupId: mode },
-  ));
+  ).then(({ contexts }) => contexts));
   expect(measured.result).toHaveLength(8);
   return {
     case: "8 × 32-page PDF pressure",
@@ -222,7 +222,7 @@ describe("data throughput benchmark", () => {
   it("records full-copy versus bounded append/extraction pressure", async () => {
     // Warm native PDF.js/canvas module loading outside the compared runs.
     const warmBytes = pdfWithPages(1);
-    await documentAttachmentContexts([{
+    await prepareDocumentAttachments([{
       attachment: {
         id: "99999999-1111-4111-8111-111111111111",
         name: "warm.pdf",

@@ -9,9 +9,7 @@ import type { ChatAttachment } from "../../src/shared/contracts";
 import {
   awaitPdfModuleInitialization,
   createCachedPdfModuleLoader,
-  documentAttachmentContexts,
   PDF_MODULE_INITIALIZATION_TIMEOUT_MS,
-  pdfTextItemsToText,
   prepareDocumentAttachments,
 } from "../../src/server/runtime/attachments/document-attachment-context";
 import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
@@ -184,28 +182,6 @@ describe("document attachment execution context", () => {
       rm(directory, { recursive: true, force: true })));
   });
 
-  it("preserves PDF.js text-item spacing and punctuation", () => {
-    expect(pdfTextItemsToText([
-      { str: "exam", hasEOL: false },
-      { str: "ple", hasEOL: false },
-      { str: " ", hasEOL: false },
-      { str: "word", hasEOL: false },
-      { str: ",", hasEOL: true },
-      { str: "next line", hasEOL: false },
-    ])).toBe("example word,\nnext line");
-  });
-
-  it("stops converting PDF text items at the per-document boundary", () => {
-    const text = pdfTextItemsToText(Array.from(
-      { length: 100_000 },
-      (_, index) => ({ str: `token-${index} `, hasEOL: false }),
-    ));
-
-    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(64 * 1024);
-    expect(text).toContain("token-0");
-    expect(text).not.toContain("token-99999");
-  });
-
   // Hosted Windows can spend the complete product cold-start deadline loading
   // the native PDF stack while the full unit suite is contending for two
   // workers. The later packaged-app smoke is the authoritative Windows proof:
@@ -215,7 +191,7 @@ describe("document attachment execution context", () => {
     "extracts bounded PDF text without exposing the private source path",
     async () => {
       const pdf = attachment({});
-      const contexts = await documentAttachmentContexts([{
+      const { contexts } = await prepareDocumentAttachments([{
         attachment: pdf,
         bytes: pdfWithText("Inertia PDF context with enough readable words"),
       }]);
@@ -340,7 +316,7 @@ describe("document attachment execution context", () => {
     ["Dockerfile", Buffer.from("FROM scratch"), "FROM scratch"],
   ])("delivers decoded %s in the shared provider prompt", async (name, bytes, content) => {
     const document = attachment({ name, mimeType: "text/plain", size: bytes.length });
-    const contexts = await documentAttachmentContexts([{ attachment: document, bytes }]);
+    const { contexts } = await prepareDocumentAttachments([{ attachment: document, bytes }]);
     expect(contexts[0]).toMatchObject({ content, truncated: false });
     const assembled = assembleTurnRequest({
       cwd: process.cwd(), visibleContent: "Inspect.", attachments: [document], documentContexts: contexts,
@@ -360,10 +336,10 @@ describe("document attachment execution context", () => {
       mimeType: "image/png",
     });
 
-    await expect(documentAttachmentContexts([
+    await expect(prepareDocumentAttachments([
       { attachment: image, bytes: new Uint8Array([1, 2, 3]) },
       { attachment: text, bytes: Buffer.from("# Brief\nUse this context.") },
-    ])).resolves.toEqual([{
+    ]).then(({ contexts }) => contexts)).resolves.toEqual([{
       attachmentId: text.id,
       label: "Document · brief.md",
       content: "# Brief\nUse this context.",
@@ -382,7 +358,7 @@ describe("document attachment execution context", () => {
     content,
   ) => {
     const document = attachment({ name, mimeType });
-    const contexts = await documentAttachmentContexts([{
+    const { contexts } = await prepareDocumentAttachments([{
       attachment: document,
       bytes: Buffer.from(content, "utf8"),
     }]);
@@ -423,9 +399,9 @@ describe("document attachment execution context", () => {
       size: bytes.byteLength,
     });
 
-    await expect(documentAttachmentContexts([
+    await expect(prepareDocumentAttachments([
       { attachment: workbook, bytes },
-    ])).resolves.toEqual([{
+    ]).then(({ contexts }) => contexts)).resolves.toEqual([{
       attachmentId: workbook.id,
       label: `Spreadsheet · forecast.${extension}`,
       content: expect.stringMatching(
@@ -445,7 +421,7 @@ describe("document attachment execution context", () => {
       bytes: Buffer.from(`Document ${index + 1}\n${"a".repeat(64 * 1024)}`),
     }));
 
-    const contexts = await documentAttachmentContexts(documents);
+    const { contexts } = await prepareDocumentAttachments(documents);
 
     expect(contexts).toHaveLength(4);
     expect(contexts.every(({ truncated }) => truncated)).toBe(true);
@@ -583,7 +559,7 @@ describe("document attachment execution context", () => {
   );
 
   it.skipIf(hostedWindowsCi)(
-    "uses the image-aware pipeline for a fake blank scan and rejects the text-only wrapper",
+    "uses the image-aware pipeline for a fake blank scan",
     async () => {
       const directory = await mkdtemp(join(tmpdir(), "inertia-blank-pdf-"));
       temporaryDirectories.push(directory);
@@ -601,9 +577,6 @@ describe("document attachment execution context", () => {
       expect(prepared.generatedImagePaths).toHaveLength(1);
       expect(prepared.contexts[0]?.content).toMatch(/provider image 1/u);
       await store.release(prepared.generatedImagePaths);
-
-      await expect(documentAttachmentContexts([{ attachment: pdf, bytes }]))
-        .rejects.toThrow(/image-aware turn pipeline/u);
     },
     PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000,
   );
@@ -896,7 +869,7 @@ describe("document attachment execution context", () => {
       bytes: new Uint8Array([index === 1 ? 2 : 1]),
     }));
 
-    await expect(documentAttachmentContexts(documents, {
+    await expect(prepareDocumentAttachments(documents, {
       pdfModuleLoader: async () => pdfModule as never,
     })).rejects.toThrow("2.pdf could not be read as a PDF.");
     expect(started).toBe(2);

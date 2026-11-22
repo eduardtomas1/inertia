@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 
 import { AttachmentRegistry } from "../../src/main/attachment-registry";
 import { mergeComposerAttachments } from "../../src/renderer/src/utils/composerAttachments";
-import { documentAttachmentContexts } from "../../src/server/runtime/attachments/document-attachment-context";
+import { prepareDocumentAttachments } from "../../src/server/runtime/attachments/document-attachment-context";
 import { assembleTurnRequest } from "../../src/server/runtime/turns/request-context";
 
 it("preserves equally named native reports through composer adoption and provider prompt assembly", async () => {
@@ -31,7 +31,7 @@ it("preserves equally named native reports through composer adoption and provide
       return { attachment, bytes: await readFile(trusted!.path) };
     }));
     expect(documents.map(({ bytes }) => bytes.toString())).toEqual(contents);
-    const documentContexts = await documentAttachmentContexts(documents);
+    const { contexts: documentContexts } = await prepareDocumentAttachments(documents);
     const assembled = assembleTurnRequest({
       cwd: directory, visibleContent: "Compare both reports.", attachments, documentContexts,
     });

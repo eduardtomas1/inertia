@@ -69,11 +69,16 @@ const cadChangeSchema = z.object({
 });
 export type CadChange = z.infer<typeof cadChangeSchema>;
 
+const cadBoxSchema = z.object({ min: z.array(z.number()), max: z.array(z.number()) });
+export type CadBox = z.infer<typeof cadBoxSchema>;
+
 const hostPreviewSchema = z.object({
   documentId: z.string(),
   changes: z.array(cadChangeSchema),
   fingerprints: z.record(z.string(), z.string()),
   warnings: z.array(z.string()),
+  /** What the change touches, before and after, to frame a capture. */
+  bbox: cadBoxSchema.optional(),
 });
 
 const hostApplySchema = z.object({
@@ -127,6 +132,8 @@ export interface CadPreview {
   changes: CadChange[];
   warnings: string[];
   expiresAt: string | null;
+  /** The area the change touches, before and after; AutoCAD only. */
+  bbox?: CadBox;
 }
 
 export interface CadStatus {
@@ -394,6 +401,7 @@ export class CadService {
       changes: result.changes,
       warnings: result.warnings,
       expiresAt: new Date(proposal.expiresAt).toISOString(),
+      ...(result.bbox === undefined ? {} : { bbox: result.bbox }),
     };
   }
 

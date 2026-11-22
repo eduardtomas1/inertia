@@ -180,11 +180,13 @@ function TurnTimelineComponent({
     defaultCodeWrap: props.defaultCodeWrap,
     onOpenProjectFile: props.onOpenTurnFile,
     onStopSubagent: props.onStopSubagent,
+    onOpenSurface: props.onOpenSurface,
     memory: transcriptSubagentCallMemory,
   }), [
     props.autoCollapseWorkLog,
     props.conversationId,
     props.defaultCodeWrap,
+    props.onOpenSurface,
     props.onOpenTurnFile,
     props.onStopSubagent,
     props.projectId,

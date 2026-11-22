@@ -191,7 +191,9 @@ const budgets = {
   // Custom agents: the called-agent block and its children load with the
   // transcript, 2,515 bytes over its cap (616,915 measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  transcriptJavaScript: 600 * kibibyte + 2_515 + 26_419 + 7_839 + 186 + 204 + 9 + 457 + 3 + 308,
+  // Placing each subagent group where it started (subagentGroups.ts and the
+  // group block) adds 1,466 bytes (653,806 measured on Linux x64); keep 64.
+  transcriptJavaScript: 600 * kibibyte + 2_515 + 26_419 + 7_839 + 186 + 204 + 9 + 457 + 3 + 308 + 1_466 + 64,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
@@ -290,7 +292,8 @@ const budgets = {
   // called-agent renderer wiring add 31,710 bytes over main's cap (2,600,295
   // measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 1_855 + 38 + 824 + 466 + 31_710 + 29_167 + 16_704 + 407 + 204 + 293 + 26_069 + 194 + 371 + 2_549 + 712 + 256 + 139,
+  // In-place subagent groups add 1,554 bytes (2,678,914 measured on Linux x64); keep 64.
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 1_855 + 38 + 824 + 466 + 31_710 + 29_167 + 16_704 + 407 + 204 + 293 + 26_069 + 194 + 371 + 2_549 + 712 + 256 + 139 + 1_554 + 64,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

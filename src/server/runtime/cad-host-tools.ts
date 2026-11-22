@@ -34,7 +34,8 @@ const point = z.array(z.number()).min(2).max(3);
 const point2 = z.array(z.number()).min(2).max(2);
 const vector3 = z.array(z.number()).min(3).max(3);
 const positive = z.number().gt(0);
-const handles = z.array(z.string().min(1).max(32)).min(1).max(500).describe("AutoCAD entity handles from a read.");
+const handle = z.string().min(1).max(32);
+const handles = z.array(handle).min(1).max(500).describe("AutoCAD entity handles from a read.");
 const ids = z.array(z.string().regex(/^\d{1,20}$/u)).min(1).max(500).describe("SketchUp ids from a read.");
 const limit = z.number().int().min(1).max(500).optional();
 
@@ -54,6 +55,17 @@ const cadOperation = z.discriminatedUnion("op", [
   operation("acad.set_rotation", { handles, rotationDeg: z.number() }),
   operation("acad.rotate", { handles, basePoint: point, angleDeg: z.number() }),
   operation("acad.erase", { handles }),
+  operation("acad.copy", { handles, vector: point, count: z.number().int().min(1).max(50).optional() }),
+  operation("acad.mirror", { handles, p1: point, p2: point, keepSource: z.boolean().optional() }),
+  operation("acad.scale", { handles, basePoint: point, factor: positive }),
+  operation("acad.offset", { handle, distance: z.number() }),
+  operation("acad.insert_block", {
+    name,
+    position: point,
+    rotationDeg: z.number().optional(),
+    scale: positive.optional(),
+    layer: name.optional(),
+  }),
   operation("acad.add_line", { start: point, end: point, layer: name.optional() }),
   operation("acad.add_polyline", {
     points: z.array(point).min(2).max(1000),
@@ -65,6 +77,23 @@ const cadOperation = z.discriminatedUnion("op", [
     position: point,
     height: positive,
     text: z.string().min(1).max(2000),
+    rotationDeg: z.number().optional(),
+    layer: name.optional(),
+  }),
+  operation("acad.add_arc", { center: point, radius: positive, startDeg: z.number(), endDeg: z.number(), layer: name.optional() }),
+  operation("acad.add_hatch", {
+    // Points or handles; the bridge checks the counts and the pattern name.
+    boundary: z.union([z.array(point).max(1000), z.array(handle).max(500)]),
+    pattern: z.string().max(64).optional(),
+    scale: positive.optional(),
+    angleDeg: z.number().optional(),
+    layer: name.optional(),
+  }),
+  operation("acad.add_dimension", {
+    kind: z.enum(["aligned", "linear"]),
+    p1: point,
+    p2: point,
+    textPosition: point,
     rotationDeg: z.number().optional(),
     layer: name.optional(),
   }),
@@ -206,7 +235,7 @@ export const CAD_TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
   ),
   definition(
     CAD_PREVIEW_TOOL_NAME,
-    "Check an edit without changing anything; returns a short-lived proposalId with every before/after value. Targets come from reads; only top-level or unshared objects can be edited. A proposal covers exactly these operations; if the request changes, preview again and apply the new proposalId. AutoCAD ops use drawing units (see inertia_cad_document_info), SketchUp ops always mm; acad.set_rotation sets INSERT, TEXT and MTEXT rotation about their insertion point, acad.rotate turns any object about basePoint. Tell the user what will change, then call inertia_cad_apply_changes.",
+    "Check an edit without changing anything; returns a short-lived proposalId with every before/after value. Targets come from reads; only top-level or unshared objects can be edited. A proposal covers exactly these operations; if the request changes, preview again and apply the new proposalId. AutoCAD ops use drawing units (see inertia_cad_document_info), SketchUp ops always mm; acad.set_rotation sets INSERT, TEXT and MTEXT rotation about their insertion point, acad.rotate turns any object about basePoint; acad.insert_block places a block already defined in the drawing; acad.add_hatch takes boundary points or closed-curve handles. bbox is the area the change touches, before and after: capture it before and after applying. Tell the user what will change, then call inertia_cad_apply_changes.",
     previewSchema,
     READ,
   ),

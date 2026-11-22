@@ -18,7 +18,10 @@ Research date: **2026-10-29**. The research phase is complete. The user subseque
 | [T3 delta to 2026-10-31](t3code-delta-2026-10-31.md) | Upstream changes from `32ecd717` to `15fe2832` against Inertia, with anchors, Inertia status and phase-3 polish decisions. |
 | [T3 delta to 2026-11-14](t3code-delta-2026-11-14.md) | Re-baseline from `15fe2832` to `b05c505b`: per-area status against Inertia, the consolidated adopt list and the deliberate differences. |
 | [T3 delta to 2026-11-17](t3code-delta-2026-11-17.md) | Addendum from `b05c505b` to `b387e3a17`: changed decisions (queue delivery order, delegated waits) and additions to the adopt list. |
-| [Phase 5 queue design](phase5-queue-design.md) | Durable queue design and its decisions, checked against T3's current orchestrator. |
+| [Phase 5 queue design](phase5-queue-design.md) | Durable queue design and its decisions, pinned to T3 v0.1.11 (`de0466fd8`). |
+| [Phase 5 failure matrix, package 1](phase5-failure-matrix-pkg1.md) | Expected outcome of each core queue step under crash, Stop, rollback, route change, duplicate command and restart. |
+| [Phase 5 failure matrix, package 2](phase5-failure-matrix-pkg2.md) | The same for the queue runtime: claim, admission, steer, settlement, Stop, Stop and send, Resume and boot. |
+| [Phase 5 acceptance, packages 1 and 2](phase5-acceptance-pkg1-2.md) | T3 test cases at the pin that serve as acceptance lists, and the cases skipped, with reasons. |
 | [Announcement coverage](announcement-coverage.md) | Where each visible feature category from the supplied posts/screenshots was investigated, with evidence levels. |
 | [T3 source map](t3code-source-map.md) | 28 source groups and concrete implementation landmarks, pinned to the audited commit. |
 | [Verification](verification.md) | Executed checks, results and behavior not exercised. |

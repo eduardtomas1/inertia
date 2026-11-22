@@ -103,8 +103,8 @@ Inertia today:
   (`src/server/runtime/queued-message-runtime.ts:105-108`).
 
 **Not satisfied (adopt). This invalidates phase5-queue-design 4.2, the
-"delegated results first" clause of 2.6, and migration 124's planned
-index.**
+"delegated results first" clause of 2.6, and the ordering index planned for
+the first Phase 5 migration (numbered 124 then, 127 after the main sync).**
 
 Follow T3:
 
@@ -407,7 +407,7 @@ unchanged upstream and stay the package 2 prerequisite.
 
 | Section | Change |
 | --- | --- |
-| 4.2 Watcher order | Keep FIFO for watcher notes and user items, but delegated results no longer "stay first". Delegated deliveries merge with the other items by request time, as T3 `4c8cb0445` does. Migration 124's ordering index and package 1's order function change accordingly |
+| 4.2 Watcher order | Keep FIFO for watcher notes and user items, but delegated results no longer "stay first". Delegated deliveries merge with the other items by request time, as T3 `4c8cb0445` does. The ordering index of migration 127 (planned as 124 before the main sync) and package 1's order function change accordingly |
 | 2.6 Automatic-result priority | Remove "then delegated results, then every other item by position" and use the merge above. The Phase 4 rule "any manual Send of a user item dispatches a waiting delegated delivery first" is **not T3's** (`queued-run.start` starts the selected item, `O:15295-15318`, unchanged since `b05c505b`). Either follow T3 or record it as a deliberate difference with a reason. No AGENTS.md invariant was found that forces it |
 | 2.5 step 2 | A restart forced only by an instance switch, on a harness without interrupt-restart (Claude, Pi), queues behind the turn instead of stop-and-send, and is labelled as queued (`0597532f1`) |
 | 4.6 Stop and send | Unchanged. `81fd06998` touches only T3's same-run restart, which Inertia never writes. Add the handoff test |

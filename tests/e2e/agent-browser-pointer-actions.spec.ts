@@ -136,8 +136,11 @@ test("an agent drags precisely on a desktop viewport scaled into a narrower pane
     await expect.poll(() => pageValue<number>("innerWidth")).toBe(1_280);
     const ref = await refs();
     await pageValue("window.__drops = []");
-    expect(await browser({ action: "drag", ref: ref("Pointer card"), targetRef: ref("Done column") })).toMatchObject({ ok: true });
-    expect(await browser({ action: "drag", ref: ref("Native card"), targetRef: ref("Native zone") })).toMatchObject({ ok: true });
+    // Name the refusal when a drag fails, so a CI failure says why.
+    const pointerDrag = await browser({ action: "drag", ref: ref("Pointer card"), targetRef: ref("Done column") });
+    expect(pointerDrag, JSON.stringify(pointerDrag)).toMatchObject({ ok: true });
+    const nativeDrag = await browser({ action: "drag", ref: ref("Native card"), targetRef: ref("Native zone") });
+    expect(nativeDrag, JSON.stringify(nativeDrag)).toMatchObject({ ok: true });
     await expect.poll(() => pageValue<string[]>("window.__drops"))
       .toEqual(["pointer:column:true", "native:card-7", "dragend"]);
   } finally {

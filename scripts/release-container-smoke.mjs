@@ -169,7 +169,6 @@ async function requireNativeFiles(paths, platform) {
 
 function nativeModulePaths(resources, platform, productName, app) {
   const unpacked = join(resources, "app.asar.unpacked", "node_modules");
-  const claudePlatform = platform === "darwin" ? "darwin" : "linux";
   const canvasPlatform = platform === "darwin" ? "darwin" : "linux";
   const platformPaths = platform === "darwin"
     ? [
@@ -223,7 +222,6 @@ function nativeModulePaths(resources, platform, productName, app) {
       ];
   return [
     ...platformPaths,
-    join(unpacked, `@anthropic-ai/claude-agent-sdk-${claudePlatform}-${process.arch}/claude`),
     join(
       unpacked,
       platform === "darwin"

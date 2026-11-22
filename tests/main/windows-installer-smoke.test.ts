@@ -397,8 +397,8 @@ test("gates the exact runtime-selected and fallback node-pty binaries per Window
     const releaseRoot = join(nodePtyRoot, "build", "Release");
     const prebuildRoot = join(nodePtyRoot, "prebuilds", `win32-${architecture}`);
 
-    expect(paths).toHaveLength(23);
-    expect(new Set(paths).size).toBe(23);
+    expect(paths).toHaveLength(22);
+    expect(new Set(paths).size).toBe(22);
     expect(paths.filter((path) => path.includes(releaseRoot))).toEqual(
       expect.arrayContaining([
         expect.stringContaining(join(releaseRoot, "pty.node")),

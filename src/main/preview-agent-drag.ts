@@ -59,6 +59,12 @@ const DRAG_STARTED = `(() => {
   return Boolean(event) && event.defaultPrevented !== true;
 })()`;
 const STOP_DRAG_WATCH = "globalThis.__inertiaAgentBrowser?.agentDragWatchStop?.(), true";
+const CANCEL_DRAG = `(() => {
+  const state = globalThis.__inertiaAgentBrowser;
+  if (state?.privacyGuardInstalled !== true) return false;
+  state.agentDragCancelled = true;
+  return true;
+})()`;
 
 async function execute(contents: WebContents, code: string): Promise<unknown> {
   if (agentPageIsFrozen(contents)) return await evaluateInFrozenAgentPage(contents, code);
@@ -164,6 +170,10 @@ export async function performAgentPageDrag(
     pressed = false;
     sendAgentPageInput(contents, { type: "mouseUp", x: point.x, y: point.y, button: "left", clickCount: 1 }, map);
   };
+  const abandon = async (point: Point): Promise<void> => {
+    await execute(contents, CANCEL_DRAG).catch(() => undefined);
+    release(point);
+  };
   try {
     await contents.debugger.sendCommand("Input.setInterceptDrags", { enabled: true });
     if (await execute(contents, WATCH_DRAG_START) !== true) throw new Error("The Browser privacy guard is unavailable.");
@@ -209,7 +219,7 @@ export async function performAgentPageDrag(
     }
     if (!drop) {
       // Give the element back where it came from rather than drop it elsewhere.
-      release(from);
+      await abandon(from);
       return "retargeted";
     }
     if (moved) {
@@ -227,7 +237,7 @@ export async function performAgentPageDrag(
       if (data) await dragEvent("dragCancel", last).catch(() => undefined);
       else if (pressed) {
         try {
-          release(last);
+          await abandon(last);
         } catch {
           // The page is gone or the point left the view; nothing is held.
         }

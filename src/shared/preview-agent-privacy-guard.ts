@@ -17,6 +17,7 @@ interface AgentBrowserPrivacyState {
   blockedAgentActivationKey?: "Enter" | "Space";
   expectedAgentClickRef?: string;
   agentDragActive?: boolean;
+  agentDragCancelled?: boolean;
   /** During a drag, the ref a native drop must land on. */
   expectedAgentDropRef?: string;
   agentInputRefused?: "disabled" | "file" | "nested" | "retargeted";
@@ -1017,8 +1018,13 @@ export function installPreviewAgentPrivacyGuard(
         // has moved the pointer, often onto the dragged element itself.
         // The release is never matched, so a drag cannot get stuck; the
         // click a browser then sends to the common ancestor is stopped only
-        // for a file input or a target Inertia cannot inspect.
+        // for a file input, a target Inertia cannot inspect, or a drag that
+        // was given back.
         if (eventName === "mouseup") return;
+        if (state.agentDragCancelled === true) {
+          stopActivationEvent(event);
+          return;
+        }
         const refusal = activationEventRefusal(event);
         const blocked = refusal === "file" || refusal === "nested";
         if (!blocked && !state.agentInputRefused) return;

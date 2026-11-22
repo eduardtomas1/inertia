@@ -799,6 +799,7 @@ export async function setAgentPageInputGuard(
     state.blockedAgentActivationKey = undefined;
     state.expectedAgentClickRef = ${active && expectedClickRef ? JSON.stringify(expectedClickRef) : "undefined"};
     state.agentDragActive = ${active && drag ? "true" : "false"};
+    state.agentDragCancelled = undefined;
     state.expectedAgentDropRef = ${active && drag && expectedDropRef ? JSON.stringify(expectedDropRef) : "undefined"};
     state.agentInputRefused = undefined;
     state.agentInputActive = ${active ? "true" : "false"};

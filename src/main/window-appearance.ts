@@ -43,10 +43,6 @@ export function resolveWindowTheme(theme: WindowThemePreference, systemDark: boo
   return theme === "system" ? (systemDark ? "dark" : "light") : theme;
 }
 
-export function resolveWindowBackground(theme: WindowThemePreference, systemDark: boolean): string {
-  return WINDOW_BACKGROUND[resolveWindowTheme(theme, systemDark)];
-}
-
 export function windowTitleBarOverlay(theme: ResolvedWindowTheme, platform: NodeJS.Platform): TitleBarOverlayOptions {
   return { color: platform === "linux" ? "#01000000" : "#00000000", symbolColor: WINDOW_TITLE_BAR_SYMBOL[theme], height: WINDOW_HEADER_HEIGHT };
 }

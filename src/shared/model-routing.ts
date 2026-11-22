@@ -890,21 +890,3 @@ export function versionedContinuationIdentityForSelection(
     ...(providerCompatibilityToken ? { providerCompatibilityToken } : {}),
   });
 }
-
-export function sameContinuationIdentity(
-  left: ContinuationIdentity | null,
-  right: ContinuationIdentity | null,
-): boolean {
-  return left !== null
-    && right !== null
-    && typeof left.providerCompatibilityToken === "string"
-    && typeof right.providerCompatibilityToken === "string"
-    && left.harnessId === right.harnessId
-    && left.backendProfileId === right.backendProfileId
-    && left.backendConfigurationRevision === right.backendConfigurationRevision
-    && left.modelIdentity === right.modelIdentity
-    && left.endpointIdentity === right.endpointIdentity
-    && left.providerCompatibilityToken === right.providerCompatibilityToken
-    && (left.performanceModeIdentity ?? null)
-      === (right.performanceModeIdentity ?? null);
-}

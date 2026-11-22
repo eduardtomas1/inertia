@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { Conversation } from "../../shared/contracts";
+import type { AgentInputRequest, Conversation } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import type {
   ProviderHostToolDefinition,
@@ -8,6 +8,7 @@ import type {
 } from "../provider/contracts";
 import { withHostToolAllowance } from "../provider/host-tool-runtime";
 import type { TurnController } from "./turns/turn-controller";
+import { pendingQuestionStatus } from "./managed-child-questions";
 
 export const AGENT_THREAD_WAIT_TOOL_NAME = "inertia_wait_for_conversation";
 
@@ -59,9 +60,14 @@ export const AGENT_THREAD_WAIT_TOOL_DEFINITION: ProviderHostToolDefinition = {
 export interface ManagedConversationStatusDependencies {
   store: Pick<RuntimeStore, "latestAgentTurnForConversation">;
   turns: Pick<TurnController, "isActive">;
+  /** The provider questions awaiting an answer, keyed like the turn controller's map. */
+  pendingInputs?: ReadonlyMap<string, AgentInputRequest>;
 }
 
-/** The persisted lifecycle projection both the status and wait tools return. */
+/**
+ * The persisted lifecycle projection both the status and wait tools return,
+ * plus the chat's pending questions another agent may answer.
+ */
 export function managedConversationStatus(
   dependencies: ManagedConversationStatusDependencies,
   target: Conversation,
@@ -80,6 +86,7 @@ export function managedConversationStatus(
       startedAt: latest.startedAt,
       completedAt: latest.completedAt,
     } : null,
+    ...pendingQuestionStatus(dependencies.pendingInputs, target.id, target.status === "needs-input"),
   };
 }
 

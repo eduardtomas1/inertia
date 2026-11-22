@@ -49,7 +49,7 @@ it("appends messages to the user as schema 118, a system-only flag on existing m
   const notice = store117.createMessage(conversation.id, "Provider reconnected.", "system", [], turn.id);
   store117.close();
   const legacy = new Database(path);
-  legacy.exec("DELETE FROM schema_migrations WHERE version = 118");
+  legacy.exec("DELETE FROM schema_migrations WHERE version >= 118");
   legacy.exec("ALTER TABLE messages DROP COLUMN sent_to_user");
   expect((legacy.pragma("table_info(messages)") as Array<{ name: string }>).map(({ name }) => name)).not.toContain("sent_to_user");
   legacy.close();

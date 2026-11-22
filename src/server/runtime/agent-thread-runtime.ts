@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import type {
+  AgentApprovalRequest,
   AgentInputRequest,
   ProviderInfo,
   RuntimeMutationEvent,
@@ -13,6 +14,7 @@ import { createCadHosts } from "../cad/cad-hosts";
 import { environmentValue } from "../environment";
 import { CadService } from "../cad/cad-service";
 import { AgentThreadManager } from "./agent-thread-manager";
+import type { ManagedMessageQueue } from "./managed-send-modes";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
 import {
   ConversationCreationService,
@@ -42,6 +44,9 @@ interface AgentThreadRuntimeDependencies {
   turns: TurnController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   pendingInputs: Map<string, AgentInputRequest>;
+  pendingApprovals: ReadonlyMap<string, AgentApprovalRequest>;
+  /** The queue runtime, which starts after the manager. */
+  messageQueue(): ManagedMessageQueue | undefined;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   agentBrowser?: RuntimeAgentBrowserBroker;
   watcherPolicy?: AgentContextWatcherPolicy;

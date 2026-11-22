@@ -245,7 +245,7 @@ describe("inertia_list_models", () => {
     expect(MODEL_LIST_TOOL_DEFINITION.description.length).toBeLessThanOrEqual(300);
     const env = await runtime();
     const pack = env.manager.capabilityManifest().packs.find(({ id }) => id === "inertia.orchestration");
-    expect(pack).toMatchObject({ revision: 5 });
+    expect(pack).toMatchObject({ revision: 6 });
     expect(pack?.toolNames).toContain("inertia_list_models");
     const create = env.manager.bridgeFor({ conversation: env.source, turn: env.beginTurn() }).definitions
       .find(({ name }) => name === "inertia_create_conversation");

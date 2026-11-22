@@ -67,6 +67,15 @@ The useful changes in each Inertia release, in plain language.
   when the turn folds, and survives a restart. It is never taken for the
   agent's reply. Message search, Private Connect and chats that read this one
   see its text.
+- A chat that started another chat can see the questions that chat is
+  waiting on and answer them, after you approve the answer on a card that
+  shows each question and the proposed answer. Approvals, secret requests,
+  plan approvals and the chat picker stay yours: the agent never sees them
+  and is told to ask you instead.
+- An agent sending to a chat it started can now choose how: join the running
+  turn, add the message to that chat's queue to run next (up to three, which
+  you can see and remove), or stop the running turn and start again with the
+  message. The approval card says which.
 
 ### Look
 

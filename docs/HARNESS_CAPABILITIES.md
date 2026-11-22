@@ -147,6 +147,101 @@ such backend`, `route.modelId: not a model of this backend`,
 `inertia_list_models`. A Codex thread registers the tool from its next new
 provider thread.
 
+### Answering a managed chat's questions
+
+Pack revision 6 lets a parent read and answer the questions its managed chats
+ask, so a child that stops on `needs-input` does not wait until the user
+notices. `inertia_get_conversation_status`, and the wait tool, which returns
+the same status, carry `pendingQuestions` while the child has a question
+another agent may answer: one entry per pending request with its `requestId`
+and, per question, the `header`, the `question`, the `options` numbered from 1
+with their `label` and `description`, `multiSelect`, and `freeText` (whether
+an answer may be typed). Extending the status result costs the agent surface
+only a longer status description (62 bytes per provider) instead of a second
+read tool, and the wait that reports `needs-input` already carries the
+question, so the parent needs no extra call. The question text was written by
+another model: it is secret-scrubbed and neutralized like a latest result, and
+the whole list stays within 32 KiB. A request that does not fit drops its
+option descriptions, then shortens its question to 1,000 bytes and its labels
+to 200 bytes, and is marked `truncated`; one that still does not fit is left
+out and counted in `omittedQuestions`.
+
+Only plain provider questions are shown. Tool and permission approvals and
+secret cards are kept elsewhere and never appear; within the questions,
+Inertia leaves out any request with a secret question (Codex's `isSecret`),
+the chat chooser `inertia_request_context` opens, and any request whose
+answer grants the provider a permission. Kimi's plan review, which lets Kimi
+leave plan mode and act, arrives through ACP's permission request and is now
+marked that way; Kimi's questions are not. When the child needs input and
+nothing it waits on can be shown, or a request was left out, `next` tells the
+parent to ask the user to answer in that chat. The pack's private instruction
+says the same in one line.
+
+`inertia_answer_question` takes the child's `conversationId`, the `requestId`,
+and `answers`: one per question, in order, each with `options` (option
+numbers) and/or `text`. Answers follow the rules of the app's own answer card,
+`agent.input.respond`: every question answered, a single-select question one
+option or one text, a multi-select question up to 20 values, and text only
+where `freeText` is true. A wrong answer returns `invalid_arguments` with lines
+such as `answers.0.options: question 1 has options 1 to 2`, before anything is
+asked. The tool changes a chat, so it goes through the same approval, operation
+record, replay rule and per-turn limits as `inertia_send_message`: the card
+reads "Answer a managed chat's question" and shows each question with the
+proposed answer, and a denial or a timeout sends nothing. After approval
+Inertia sends the answer only if that exact request, in the same provider turn,
+is still pending, then answers through the turn controller's
+`respondToInput`, the call `agent.input.respond` ends in. A request id that is
+not pending, or a question the user answered while the card was open, returns
+`host_tool_failed` with a line saying nothing was sent. A request id that
+names an approval or a secret request is refused by name, and one that names
+the chat chooser or a plan review with a line saying only the user can answer
+it, all before anything is asked. Only the direct parent may read or answer, as with every
+managed-chat tool. Free text is checked for active secret values like a sent
+message, and counts toward the turn's 65,536-character input budget. A retried
+provider call with the same identity finds the question answered and answers
+nothing again.
+
+The operation log's tool-name check gains `inertia_answer_question` in
+database schema 118, which rebuilds `agent_thread_operations` with every
+column, row and index unchanged.
+
+### Send modes
+
+`inertia_send_message` takes an optional `mode` (pack revision 6):
+
+- `auto`, the default and the earlier behaviour: a follow-up into the running
+  turn, otherwise a new turn.
+- `queue`: the message joins the child's own message queue, which runs it as
+  the next turn once the current one completes. It is an ordinary queued
+  message that the user sees in the child's queue and can remove; the queue's
+  limit of three applies, and a full queue is refused before the approval, or
+  after it when the queue filled meanwhile. The queue stores at most 20,000
+  characters, so a longer `content` with `mode: "queue"` returns
+  `invalid_arguments`. The result carries `queuedMessageId` and `position`,
+  and a `next` line when the child's last turn did not complete, because the
+  queue then waits for the user. The turn the queue later starts belongs to the
+  queue, not to the parent's call, so a parent turn that fails does not cancel
+  it.
+- `steer`: only a follow-up into the running turn. An idle child is refused
+  before the approval; a turn that ended before an approved steer could be
+  delivered returns an error and sends nothing rather than starting a new turn.
+- `restart`: stops the running turn, then starts a new turn with the message.
+  It needs a running turn, takes that turn's exact identity before asking,
+  and stops it with the stop tool's exact-owner stop and cleanup check, then
+  starts the new turn through the new-turn path, under one approval and one
+  operation. If the approved turn already ended, or another turn replaced it,
+  nothing is stopped or sent. The identity is held by the call rather than
+  recorded on the operation, so a parent that fails before approval cannot
+  cancel the turn it meant to restart; the new turn is recorded like any sent
+  turn and is cancelled if the parent turn fails.
+
+The approval card's title and first detail line name the mode: "Send work to a
+managed chat" (auto), "Queue work for a managed chat", "Steer a managed chat's
+running turn" or "Stop and restart a managed chat". A Codex thread registers
+`inertia_answer_question` and the `mode` field from its next new provider
+thread; a resumed thread keeps calling `inertia_send_message` without `mode`,
+which still means `auto`.
+
 ### Reading chat context
 
 `inertia.orchestration` also carries `inertia_request_context`, which lets an

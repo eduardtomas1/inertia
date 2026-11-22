@@ -44,7 +44,6 @@ import {
 } from "./contracts";
 import type {
   AgentApprovalDecision,
-  AgentInputRequest,
 } from "./interactions";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
@@ -95,13 +94,15 @@ import {
 import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED, acpFileMutation, acpReadOnlyWatcher } from "./acp-watcher";
 import { KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON } from "../../shared/provider";
 import {
+  KIMI_INPUT_QUESTION_ID,
   kimiInputOptions,
+  kimiInputRequest,
   kimiPermissionContentText,
   kimiPlanReviseOptionId,
   type KimiInputOptions,
 } from "./kimi-input-options";
 
-export { kimiInputOptions };
+export { kimiInputOptions, kimiInputRequest };
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -871,23 +872,7 @@ async function kimiInputPermission(
   inputs: Map<string, PendingInput>,
 ): Promise<RequestPermissionResponse> {
   const requestId = randomUUID();
-  const questionId = "selection";
-  const request: AgentInputRequest = {
-    requestId,
-    autoResolutionMs: null,
-    questions: [{
-      id: questionId,
-      header: "Kimi permission",
-      question: input.prompt,
-      isOther: false,
-      isSecret: false,
-      allowMultiple: false,
-      options: input.options.map((option) => ({
-        ...option,
-        description: "Selecting this option authorizes the Kimi request.",
-      })),
-    }],
-  };
+  const request = kimiInputRequest(requestId, input);
   const answers = await new Promise<Record<string, string[]>>((resolve) => {
     if (inputs.size >= MAX_PENDING_INTERACTIONS) {
       throw new Error("Kimi Code exceeded the bounded input budget.");
@@ -904,7 +889,7 @@ async function kimiInputPermission(
     emit({ type: "input", request });
   });
   if (signal.aborted) return { outcome: { outcome: "cancelled" } };
-  const answer = answers[questionId]?.[0];
+  const answer = answers[KIMI_INPUT_QUESTION_ID]?.[0];
   const selected = input.options.find((option) =>
     option.id === answer || option.label === answer,
   );

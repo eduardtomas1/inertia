@@ -22,6 +22,7 @@ import {
   createKimiAcpHarness,
   kimiAcpProcessInvocation,
   kimiInputOptions,
+  kimiInputRequest,
 } from "../../src/server/provider/kimi-acp-harness";
 import { BoundedKimiJsonLineTransform } from "../../src/server/provider/kimi-acp-support";
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
@@ -213,6 +214,25 @@ setInterval(() => {}, 1000);
       { optionId: "approve_once", name: "Approve once", kind: "allow_once" },
       { optionId: "reject", name: "Reject", kind: "reject_once" },
     ]))).toBeNull();
+  });
+
+  it("marks a plan review, never a question, as granting Kimi a permission", () => {
+    const question = kimiInputRequest("question-request", {
+      kind: "question", prompt: "Which implementation?", options: [{ id: "q0_opt_0", label: "Focused" }],
+    });
+    expect(question).toEqual({
+      requestId: "question-request",
+      autoResolutionMs: null,
+      questions: [{
+        id: "selection", header: "Kimi permission", question: "Which implementation?",
+        isOther: false, isSecret: false, allowMultiple: false,
+        options: [{ id: "q0_opt_0", label: "Focused", description: "Selecting this option authorizes the Kimi request." }],
+      }],
+    });
+    expect("grantsPermission" in question).toBe(false);
+    expect(kimiInputRequest("plan-request", {
+      kind: "plan", prompt: "Approve this plan?", options: [{ id: "plan_approve", label: "Approve" }],
+    })).toMatchObject({ requestId: "plan-request", grantsPermission: true, questions: [{ id: "selection" }] });
   });
 
   it("rejects adversarial Kimi input lookalikes before they reach the input UI", () => {

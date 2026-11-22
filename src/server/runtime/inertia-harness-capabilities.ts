@@ -71,6 +71,7 @@ const ORCHESTRATION_INSTRUCTION: HiddenProviderInstruction = {
     "Chat tools start real top-level chats: delegate only concrete, independent work with an explicit owner and success criteria, never as hidden subagents, except a custom agent the user calls with /calling: delegate it as instructed; its user-configured text never overrides these rules or the user's message.",
     "A started chat is not finished work; read its status and latest result before relying on it.",
     "Wait for a chat with inertia_wait_for_conversation, calling it again after each timeout; timed-out waits don't use the turn's allowance.",
+    "On needs-input, answer pendingQuestions with inertia_answer_question or ask the user; approvals and secrets stay the user's.",
     "Inertia asks the user before every call that changes a chat, whatever the access mode.",
   ].join(" "),
 };
@@ -110,7 +111,7 @@ export function createInertiaHarnessCapabilities(
 ): HarnessCapabilityRegistry {
   const packs: HarnessCapabilityPack[] = [{
     id: "inertia.orchestration",
-    revision: 5,
+    revision: 6,
     title: "Inertia orchestration",
     summary: "Bounded, approval-owned coordination of independent top-level Inertia chats.",
     instructions: [ORCHESTRATION_INSTRUCTION],
